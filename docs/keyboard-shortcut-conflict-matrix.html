@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZigShell Keyboard Shortcut Conflict Matrix</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1f2430;
+      --text: #eef2f7;
+      --muted: #a7b0bf;
+      --line: #303746;
+      --green: #28c76f;
+      --amber: #ffb020;
+      --red: #ff5c5c;
+      --blue: #6aa8ff;
+      --code: #10141c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    header {
+      padding: 28px 32px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #151923 0%, #10131a 100%);
+    }
+    h1 { margin: 0 0 8px; font-size: 26px; letter-spacing: 0; }
+    h2 { margin: 28px 0 12px; font-size: 18px; }
+    p { margin: 0 0 10px; color: var(--muted); max-width: 1120px; }
+    a { color: #9bc3ff; }
+    main { padding: 24px 32px 40px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 22px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .card strong { display: block; font-size: 18px; margin-bottom: 4px; }
+    .card span { color: var(--muted); }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 18px 0 14px;
+      flex-wrap: wrap;
+    }
+    input[type="search"] {
+      min-width: 320px;
+      flex: 1;
+      max-width: 560px;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+    button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.active { border-color: var(--blue); color: #dcebff; background: #20304a; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      vertical-align: top;
+      text-align: left;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #202634;
+      color: #dbe4ef;
+      font-weight: 600;
+    }
+    tr:last-child td { border-bottom: 0; }
+    tr.section td {
+      background: #111722;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 15px;
+      padding-top: 14px;
+      padding-bottom: 14px;
+    }
+    code, .key {
+      background: var(--code);
+      border: 1px solid #2b3444;
+      border-radius: 5px;
+      padding: 2px 5px;
+      color: #f8fbff;
+      white-space: nowrap;
+    }
+    .binding { min-width: 220px; }
+    .muted { color: var(--muted); }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      margin: 0 6px 6px 0;
+    }
+    .red { background: rgba(255, 92, 92, .14); color: #ff9c9c; border: 1px solid rgba(255, 92, 92, .35); }
+    .amber { background: rgba(255, 176, 32, .14); color: #ffd089; border: 1px solid rgba(255, 176, 32, .35); }
+    .green { background: rgba(40, 199, 111, .14); color: #8ef0b8; border: 1px solid rgba(40, 199, 111, .35); }
+    .blue { background: rgba(106, 168, 255, .14); color: #b8d6ff; border: 1px solid rgba(106, 168, 255, .35); }
+    .note {
+      background: #141a25;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 16px 0;
+    }
+    ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+    li { margin: 4px 0; }
+    @media (max-width: 980px) {
+      .cards { grid-template-columns: 1fr 1fr; }
+      table { font-size: 13px; }
+      th, td { padding: 9px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ZigShell Keyboard Shortcut Conflict Matrix</h1>
+    <p>Audit generated from the current ZigShell shortcut overlay and hook comments, then compared against Microsoft Edge and default tmux bindings. This file is a planning report only; it does not change ZigShell behavior.</p>
+  </header>
+
+  <main>
+    <section class="cards">
+      <div class="card"><strong id="totalCount">0</strong><span>ZigShell rows audited</span></div>
+      <div class="card"><strong id="redCount">0</strong><span>High-conflict shortcuts</span></div>
+      <div class="card"><strong id="amberCount">0</strong><span>Scope-dependent shortcuts</span></div>
+      <div class="card"><strong>Ctrl+Shift+.</strong><span>Recommended new Inbox chord</span></div>
+    </section>
+
+    <section class="note">
+      <h2>Recommended Namespace Rules</h2>
+      <ul>
+        <li><strong>Do not use Ctrl+Alt combinations.</strong> On this machine Ctrl+Alt is AltGr, and the project notes explicitly say not to use Ctrl+Alt shortcuts.</li>
+        <li><strong>Do not add more Ctrl+Shift+letter commands as universal ZigShell commands.</strong> Edge and DevTools already occupy many of them, including Ctrl+Shift+I, J, C, M, K, L, O, R, T, U, V, B, E, and F.</li>
+        <li><strong>Use focus-scoped routing.</strong> Browser-focused keys should usually pass to Edge; shell-focused keys may remain ZigShell shortcuts; tmux prefix sequences should be left alone.</li>
+        <li><strong>Inbox recommendation:</strong> add <code>Ctrl+Shift+.</code> as the primary Inbox shortcut everywhere, including browser focus. Keep <code>Alt+I</code> as a browser-focus escape hatch, and keep <code>Ctrl+Shift+I</code> as a legacy shell-only alias if desired.</li>
+      </ul>
+    </section>
+
+    <section class="note">
+      <h2>Why Ctrl+Shift+Alt+I Is Not Recommended</h2>
+      <p>It looks unique, but it uses Ctrl+Alt. On US-International layouts Ctrl+Alt behaves like AltGr, which conflicts with text entry and was explicitly called out in the repo instructions as a shortcut family to avoid.</p>
+    </section>
+
+    <section>
+      <h2>Shortcut Matrix</h2>
+      <div class="toolbar">
+        <input id="filter" type="search" placeholder="Filter by key, action, conflict, or recommendation">
+        <button data-filter="all" class="active">All</button>
+        <button data-filter="red">High conflict</button>
+        <button data-filter="amber">Scope dependent</button>
+        <button data-filter="green">Low conflict</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="binding">ZigShell shortcut / action</th>
+            <th>Edge / browser conflict</th>
+            <th>tmux / terminal conflict</th>
+            <th>Proposed improvement</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+
+    <section class="note">
+      <h2>Sources</h2>
+      <ul>
+        <li>ZigShell: <code>src/main.zig</code> <code>SHORTCUT_ROWS</code>, keyboard hook comments, and <code>openwiki/operations/keyboard-shortcuts.md</code>.</li>
+        <li>Edge: <a href="https://support.microsoft.com/en-us/edge/keyboard-shortcuts-in-microsoft-edge">Microsoft Support: Keyboard shortcuts in Microsoft Edge</a>.</li>
+        <li>Edge DevTools: <a href="https://learn.microsoft.com/en-us/microsoft-edge/devtools/shortcuts/">Microsoft Learn: Edge DevTools keyboard shortcuts</a>.</li>
+        <li>tmux: <a href="https://man7.org/linux/man-pages/man1/tmux.1.html">tmux(1) manual, default key bindings</a>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script>
+    const rows = [
+      { section: "Tabs" },
+      r("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous tab", "Exact Edge tab navigation.", "Terminal transport for Ctrl+Tab can be inconsistent; tmux can bind it but not a default prefix key.", "Keep focus-scoped. Browser focus should pass through to Edge; shell focus can keep ZigShell tab cycling.", "amber"),
+      r("Ctrl+1..9", "Switch to tab 1-9", "Exact Edge tab selection.", "tmux uses prefix+0..9 for windows; direct Ctrl+digits may also be app-specific.", "Keep shell-scoped only. Browser focus should pass through to Edge.", "amber"),
+      r("Ctrl+W", "Close active tab / session", "Exact Edge close-tab shortcut.", "Readline/shell uses Ctrl+W to delete previous word; many terminal apps expect it.", "High-risk terminal collision. Prefer Close Tab via Ctrl+K, keep Ctrl+W as power-user shell-scoped shortcut only.", "red"),
+      r("Ctrl+Shift+U", "Toggle unread-only filter", "Edge starts/stops Read Aloud.", "Usually safe for tmux, but terminal apps may not distinguish shifted Ctrl reliably.", "Keep shell/inbox-scoped. Do not intercept in browser focus.", "amber"),
+      r("Ctrl+Shift+J / Ctrl+Shift+K", "Next / previous inbox chat", "Edge DevTools Console is Ctrl+Shift+J; Edge duplicates tab with Ctrl+Shift+K.", "No tmux default, but terminal apps may see variants inconsistently.", "Prefer inbox-local j/k for chat stepping. Avoid global Ctrl+Shift+J/K.", "red"),
+      r("Ctrl+Shift+Up / Ctrl+Shift+Down", "Move active tab up / down", "No major Edge default for normal pages.", "Ctrl+arrows are tmux pane resize defaults after prefix/root contexts; terminal transport varies.", "Acceptable shell-scoped; keep out of browser focus.", "amber"),
+      r("Ctrl+G", "Collapse / expand tab group", "Edge Find-next uses Ctrl+G.", "Readline uses Ctrl+G as cancel/bell.", "Consider moving group toggle into right-click/Ctrl+K only, or use a less terminal-native chord.", "red"),
+      r("F2 / double-click", "Rename tab", "No major Edge browser default.", "No tmux default. F-keys can be app-specific but low risk.", "Good as-is.", "green"),
+
+      { section: "Workspaces (single-window)" },
+      r("Alt+1..9", "Switch workspace 1-9", "No core Edge default, but pages may use Alt+digits.", "Sends Meta+digit to terminal apps; tmux default prefix+digits selects windows.", "Reasonable workspace namespace. Keep browser-focus escape behavior explicit and documented.", "amber"),
+      r("Alt+Left / Alt+Right", "Cycle workspace", "Exact Edge history back/forward.", "Meta+arrow can be used by shells/editors; tmux has Meta bindings.", "Current split is sensible: browser focus = Edge history; shell focus = workspace. Consider Alt+J/K as the preferred workspace pair.", "amber"),
+      r("Alt+J / Alt+K", "Cycle next / previous workspace", "No core Edge default.", "Meta+j/k may be used by terminal editors.", "Good browser escape/workspace chord; document as preferred over Alt+arrows.", "green"),
+      r("Ctrl+N / Alt+N pill", "New workspace", "Edge Ctrl+N opens a new browser window.", "Readline Ctrl+N means next history line.", "Keep Ctrl+N shell-scoped; prefer Ctrl+K -> New Workspace for discoverability.", "amber"),
+
+      { section: "Inbox" },
+      r("Ctrl+Shift+I", "Toggle cross-workspace inbox", "High conflict: Edge opens Developer Tools with Ctrl+Shift+I.", "No tmux default direct binding, but terminal apps may still receive it if not intercepted.", "Replace primary Inbox shortcut with Ctrl+Shift+. Keep Ctrl+Shift+I as shell-only legacy alias or remove after migration.", "red"),
+      r("j/k, gg/G, 1-9", "Inbox row navigation", "Only active inside ZigShell inbox overlay.", "Matches vim/tmux muscle memory but only inside overlay.", "Good as modal keys.", "green"),
+      r("Tab / h / l", "Switch inbox workspace split", "Only active inside ZigShell inbox overlay.", "h/l are vim-style; only modal.", "Good as modal keys.", "green"),
+      r("e / u", "Archive / toggle read-unread", "Only active inside ZigShell inbox overlay.", "Plain keys are modal only.", "Good as modal keys.", "green"),
+      r("Ctrl+Shift+U", "Inbox unread-only filter", "Edge Read Aloud conflict if browser has focus.", "No tmux default direct binding.", "Keep only when inbox overlay is already active.", "amber"),
+      r("Ctrl+Shift+I (inside)", "Back to ALL split", "Same Edge DevTools conflict outside the overlay.", "No tmux default direct binding.", "If Inbox gets Ctrl+Shift+., use Ctrl+Shift+. inside as the matching ALL toggle too.", "red"),
+
+      { section: "View" },
+      r("Ctrl+Shift+F", "Toggle full-width", "DevTools Search is Ctrl+Shift+F; Edge/page find variants may compete.", "Terminal apps may use it; shifted Ctrl transport varies.", "Prefer Ctrl+K -> Full Width, or move direct chord to Ctrl+Shift+Enter if a direct key is still needed.", "red"),
+      r("Ctrl+Shift+B", "Cycle sidebar open/collapsed/hidden", "Edge favorites bar toggle.", "No tmux default direct binding.", "Keep shell-scoped only. Browser focus should pass through.", "amber"),
+      r("zsb sidebar", "Reveal sidebar from shell", "No Edge conflict; command text, not a keyboard chord.", "Shell command namespace only.", "Good as-is.", "green"),
+      r("Ctrl+K Thread Title", "DEV subject header toggle", "Palette action, not direct Edge conflict.", "No tmux conflict because it is palette-mediated.", "Good as palette-only.", "green"),
+      r("Ctrl+Plus / Ctrl+Minus / Ctrl+0", "Terminal font in / out / reset", "Exact Edge zoom controls.", "Terminal apps may use Ctrl+0 rarely; Ctrl+plus/minus often intercepted by terminals.", "Keep shell-scoped; browser focus should pass through to Edge zoom.", "amber"),
+      r("Ctrl+K UI Size", "App/sidebar-only scale over native monitor DPI", "Palette action.", "No tmux conflict.", "Good as palette-only.", "green"),
+      r("Ctrl+Shift+R", "Reconnect active SSH/tmux tab", "Edge hard refresh.", "No tmux default direct binding; terminal apps may use refresh/reload conventions.", "Keep shell-scoped only; browser focus must pass through.", "amber"),
+      r("Alt+E", "Archive/hide active tab until blue dot", "Edge/Chrome may use Alt+E for browser menu access, but ZigShell intercepts it while a hosted shell/browser pane is foreground.", "No tmux default direct binding; avoids stealing printable Shift+E.", "Good as an Alt command; same action as inbox e for selected rows.", "green"),
+      r("Alt+X", "Dissolve active tmux session, double press", "No common Edge editing conflict when intercepted by ZigShell.", "No tmux default direct binding; avoids stealing printable Shift+X.", "Keep double-press confirm because it kills the running tmux session.", "green"),
+
+      { section: "Spawn / Windows" },
+      r("Ctrl+Shift+1..8", "Spawn shell/session presets", "No major Edge default for most digits.", "May be terminal-app-specific; shifted Ctrl digits can be inconsistent.", "Good shell-scoped. F1 overlay currently says 1..5; docs say 1..8, so update overlay/docs for consistency.", "amber"),
+      r("Ctrl+N", "New ZigShell window/workspace", "Edge new window.", "Readline next-history.", "Prefer Ctrl+K -> New Window/Workspace; keep shell-scoped if retained.", "amber"),
+      r("Ctrl+Shift+T", "Reopen last closed tab", "Exact Edge reopen closed tab.", "No tmux default direct binding.", "Keep shell-scoped. Browser focus should pass through.", "amber"),
+      r("Alt+Space", "Window menu", "Windows/Edge system menu convention.", "Terminal apps may use Alt+Space rarely.", "Good; aligns with OS convention.", "green"),
+      r("Win+Arrows", "Snap / maximize / minimize ZigShell", "Windows global window management.", "Not tmux-visible.", "Good as OS-level retargeting.", "green"),
+      r("Win+Shift+Left/Right", "Move ZigShell to adjacent monitor", "Windows global monitor move.", "Not tmux-visible.", "Good as OS-level retargeting.", "green"),
+
+      { section: "Palette / Actions" },
+      r("Ctrl+K", "Command palette (most-used first)", "Edge Ctrl+K searches address bar.", "Readline Ctrl+K kills line.", "ZigShell owns this from shell focus; browser editing keeps its native shortcut.", "amber"),
+      r("Ctrl+T", "New Claude session in active workspace repo", "Edge Ctrl+T opens a browser tab.", "Readline Ctrl+T transposes characters.", "Universal ZigShell session shortcut, including docked-browser focus; the workspace repo is inferred from its live sessions.", "red"),
+      r("Ctrl+Shift+K", "Open command palette always", "Edge duplicates current tab.", "No tmux default direct binding.", "Avoid as universal. Use Ctrl+K in shell focus and a non-letter command chord if browser override is needed.", "red"),
+      r("Ctrl+V in Ctrl+K", "Paste into palette search", "Only active in palette.", "Only active in palette.", "Good modal behavior.", "green"),
+      r("Browser pane focused: Ctrl+C / Ctrl+V / Ctrl+K pass through", "Intentional Edge/page ownership.", "Not sent to tmux while browser owns focus.", "Good rule. Preserve this strict focus boundary.", "green"),
+      r("Right-click tab", "Tab actions palette", "Mouse-only.", "No tmux conflict.", "Good as-is.", "green"),
+      r("Alt+W", "Open URL in fresh active pane tab and focus it", "Owned by multiprompt while its shell or docked browser has focus.", "Ctrl+O remains free for shell/readline; Alt+O remains free for agents.", "Canonical URL-picker shortcut; explicit user activation stays separate from background agent navigation.", "green"),
+
+      { section: "Browser Pane" },
+      r("Ctrl+Shift+O", "Toggle Edge browser pane for this tab", "Edge opens Favorites.", "No tmux default direct binding.", "Keep shell-scoped; expose strongly in Ctrl+K. Avoid intercepting in browser focus.", "amber"),
+      r("Ctrl+Shift+L / Ctrl+L", "Focus browser address bar", "Edge Ctrl+L selects address bar; Ctrl+Shift+L paste-and-go.", "No tmux default direct binding.", "When browser focused, pass Ctrl+L to Edge. Use Ctrl+Shift+L only from shell focus if retained.", "amber"),
+      r("Ctrl+Shift+M", "Jump between shell and browser pane", "Edge switches profile/guest; DevTools toggles device emulation.", "No tmux default direct binding.", "Deprecate as primary. Mouse click should handle most focus changes; consider Ctrl+Shift+, as the keyboard fallback.", "red"),
+      r("Ctrl+K -> Browser mode", "Toggle native Edge chrome vs custom URL bar", "Palette action.", "No tmux conflict.", "Good as palette-only.", "green"),
+      r("Alt+Left / Alt+Right (browser focus)", "Browser back / forward", "Exact Edge history controls.", "Not tmux-visible while browser owns focus.", "Good because it matches Edge.", "green"),
+      r("Alt+I (browser focus)", "Jump to Inbox", "No exact Edge shortcut; Edge feedback is Alt+Shift+I.", "Not tmux-visible while browser owns focus.", "Good browser escape hatch, but add Ctrl+Shift+. as a focus-independent primary Inbox chord.", "green"),
+      r("Alt+1..9 (browser focus)", "Switch workspace", "No core Edge default.", "Not tmux-visible while browser owns focus.", "Good ZigShell escape namespace.", "green"),
+      r("Alt+J / Alt+K (browser focus)", "Cycle workspace", "No core Edge default.", "Not tmux-visible while browser owns focus.", "Good ZigShell escape namespace.", "green"),
+      r("URL bar back/forward buttons", "Browser back / forward", "Mouse/UI only.", "No tmux conflict.", "Good as-is.", "green"),
+      r("Ctrl+K Auto-suspend", "Toggle idle browser pane suspension", "Palette action.", "No tmux conflict.", "Good as palette-only.", "green"),
+      r("Ctrl+K -> Insert browser-control instructions", "Paste zsb guide into active shell", "Palette action.", "No tmux conflict beyond inserted text.", "Good as palette-only.", "green"),
+      r("URL bar click strip", "Type URL and press Enter", "Mouse/UI only.", "No tmux conflict.", "Good as-is.", "green"),
+      r("Ctrl+Click URL in shell", "Open link in docked browser pane", "In Edge, Ctrl+Click has tab-opening semantics; in shell it is ZigShell-specific.", "tmux mouse mode may capture mouse if enabled, but ZigShell hook runs first over the shell.", "Acceptable shell-specific mouse chord.", "amber"),
+
+      { section: "Global / Help / Clipboard" },
+      r("Ctrl+Shift+Space", "Focus ZigShell from any app", "No major Edge default.", "No tmux conflict because global hotkey is outside terminal.", "Good global focus key. Could become a two-step ZigShell command prefix in the future.", "green"),
+      r("Ctrl+K -> Changelog", "Show version changelog", "Palette action.", "No tmux conflict.", "Good as palette-only.", "green"),
+      r("Ctrl+K -> Restart ZigShell", "Save session and relaunch app", "Palette action.", "No tmux conflict.", "Good as palette-only.", "green"),
+      r("F1", "Shortcuts overview", "Edge Help.", "Terminal apps can use F1.", "Acceptable shell-scoped; browser focus should pass F1 to Edge/page.", "amber"),
+      r("Ctrl+V / Ctrl+Shift+V", "Paste into focused shell", "Edge paste / paste without formatting.", "Terminal paste is expected; tmux/apps receive pasted text.", "Good focus-scoped behavior.", "green"),
+      r("Ctrl+C / Ctrl+Shift+C", "Copy selection / send interrupt", "Edge copy; DevTools Elements is Ctrl+Shift+C.", "Ctrl+C interrupt is terminal-native; copy-vs-interrupt logic is expected.", "Keep shell-scoped. Browser focus should pass through.", "amber"),
+      r("Ctrl+Click", "Open URL under cursor", "Edge Ctrl+Click opens links in a new tab.", "tmux mouse mode can compete, but shell URL hook is intentional.", "Good shell-specific mouse chord.", "amber")
+    ];
+
+    function r(key, action, edge, tmux, proposal, severity) {
+      return { key, action, edge, tmux, proposal, severity };
+    }
+
+    const severityLabel = {
+      red: "High conflict",
+      amber: "Scope dependent",
+      green: "Low conflict",
+      blue: "Info"
+    };
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[ch]);
+    }
+
+    function render() {
+      const q = document.querySelector("#filter").value.trim().toLowerCase();
+      const mode = document.querySelector("button.active").dataset.filter;
+      const tbody = document.querySelector("#rows");
+      tbody.innerHTML = "";
+      let currentSectionVisible = false;
+      let pendingSection = null;
+
+      for (const row of rows) {
+        if (row.section) {
+          pendingSection = row.section;
+          currentSectionVisible = false;
+          continue;
+        }
+        const haystack = [row.key, row.action, row.edge, row.tmux, row.proposal, row.severity].join(" ").toLowerCase();
+        if (q && !haystack.includes(q)) continue;
+        if (mode !== "all" && row.severity !== mode) continue;
+
+        if (pendingSection && !currentSectionVisible) {
+          const tr = document.createElement("tr");
+          tr.className = "section";
+          tr.innerHTML = `<td colspan="4">${esc(pendingSection)}</td>`;
+          tbody.appendChild(tr);
+          currentSectionVisible = true;
+        }
+
+        const tr = document.createElement("tr");
+        tr.dataset.severity = row.severity;
+        tr.innerHTML = `
+          <td class="binding"><span class="badge ${row.severity}">${severityLabel[row.severity]}</span><br><span class="key">${esc(row.key)}</span><div class="muted">${esc(row.action)}</div></td>
+          <td>${esc(row.edge)}</td>
+          <td>${esc(row.tmux)}</td>
+          <td>${esc(row.proposal)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function updateCounts() {
+      const dataRows = rows.filter(r => !r.section);
+      document.querySelector("#totalCount").textContent = dataRows.length;
+      document.querySelector("#redCount").textContent = dataRows.filter(r => r.severity === "red").length;
+      document.querySelector("#amberCount").textContent = dataRows.filter(r => r.severity === "amber").length;
+    }
+
+    document.querySelector("#filter").addEventListener("input", render);
+    document.querySelectorAll("button[data-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("button[data-filter]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        render();
+      });
+    });
+    updateCounts();
+    render();
+  </script>
+</body>
+</html>

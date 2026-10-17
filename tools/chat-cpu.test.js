@@ -1,0 +1,367 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const source = require('./app-source').readAppSource();
+function body(text, name) {
+  const start = text.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, name);
+  return text.slice(start, text.indexOf('\n}', start) + 2);
+}
+function run(code) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
+  try {
+    for (const file of ['chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, code);
+    return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+const scheduling = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
+var g_chat_fetch_mutex: HANDLE = null;
+var g_chat_priority_reservation: HANDLE = null;
+var g_chat_fetch_busy = false;
+var g_usage_launch_mutex: HANDLE = null;
+var selected: usize = 0;
+var foreground: usize = 0;
+var owner: ?usize = null;
+var priority_refs: usize = 0;
+var launch_refs: usize = 0;
+var spawned: usize = 0;
+var last_error: u32 = 0;
+var collector_running = false;
+const usage_telemetry_mode = struct { fn isRunning() bool { return collector_running; } };
+const Slot = struct { worker: HANDLE = null, priority: HANDLE = null, busy: bool = false, launch: HANDLE = null };
+var slots: [6]Slot = @splat(.{});
+fn select(i: usize) void {
+    slots[selected] = .{ .worker = g_chat_fetch_mutex, .priority = g_chat_priority_reservation, .busy = g_chat_fetch_busy, .launch = g_usage_launch_mutex };
+    selected = i;
+    const slot = slots[i];
+    g_chat_fetch_mutex = slot.worker; g_chat_priority_reservation = slot.priority;
+    g_chat_fetch_busy = slot.busy; g_usage_launch_mutex = slot.launch;
+}
+fn foregroundIsOurs() bool { return selected == foreground; }
+fn CreateMutexW(_: ?*anyopaque, _: i32, name: [*:0]const u16) HANDLE {
+    const text = std.mem.span(name);
+    if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Priority"))) { priority_refs += 1; return @ptrFromInt(2); }
+    if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Launch"))) {
+        last_error = if (launch_refs > 0) 183 else 0;
+        launch_refs += 1; return @ptrFromInt(3);
+    }
+    std.debug.assert(std.mem.eql(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Local\\\\MultipromptChatTranscriptWorker")));
+    return @ptrFromInt(1);
+}
+fn OpenMutexW(_: u32, _: i32, _: [*:0]const u16) HANDLE {
+    if (priority_refs == 0) return null;
+    priority_refs += 1; return @ptrFromInt(2);
+}
+fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
+    std.debug.assert(timeout == 0); // UI scheduling must never wait for another window.
+    if (owner) |id| return if (id == selected) 0 else 258;
+    owner = selected; return 0;
+}
+fn ReleaseMutex(_: HANDLE) i32 { std.debug.assert(owner.? == selected); owner = null; return 1; }
+fn CloseHandle(h: HANDLE) i32 {
+    if (h == @as(HANDLE, @ptrFromInt(2))) priority_refs -= 1;
+    if (h == @as(HANDLE, @ptrFromInt(3))) launch_refs -= 1;
+    return 1;
+}
+fn GetLastError() u32 { return last_error; }
+fn GetModuleFileNameW(_: HANDLE, out: []u16, _: usize) u32 { out[0] = 'm'; out[1] = 0; return 1; }
+const SW_HIDE = 0;
+fn ShellExecuteW(_: HANDLE, _: [*:0]const u16, _: [*:0]const u16, flag: [*:0]const u16, _: HANDLE, _: i32) HANDLE {
+    std.debug.assert(std.mem.eql(u16, std.mem.span(flag), std.unicode.utf8ToUtf16LeStringLiteral("--usage-telemetry")));
+    spawned += 1; return @ptrFromInt(64);
+}
+`;
+const scheduleChecks = `
+test "one worker across six windows, queued foreground precedes idle background, no recursive UI mutex acquisition" {
+    select(0);
+    try std.testing.expect(chatFetchAcquire());
+    for (1..6) |i| { select(i); try std.testing.expect(!chatFetchAcquire()); }
+    foreground = 2;
+    select(2); try std.testing.expect(!chatFetchAcquire());
+    try std.testing.expect(priority_refs > 0);
+    select(0); chatFetchRelease();
+    select(3); try std.testing.expect(!chatFetchAcquire()); // foreground is queued
+    select(2); try std.testing.expect(chatFetchAcquire());
+    try std.testing.expect(!chatFetchAcquire()); // another tab in this process cannot recurse
+    chatFetchRelease();
+    foreground = 5;
+    select(2); try std.testing.expect(chatFetchAcquire()); // idle work once the reservation is released
+    chatFetchRelease();
+    try std.testing.expect(owner == null);
+}
+test "simultaneous window startup launches just one child before its collector mutex exists" {
+    for (0..6) |i| { select(i); ensureUsageTelemetryCollector(); }
+    try std.testing.expectEqual(@as(usize, 1), spawned);
+    for (0..6) |i| { select(i); ensureUsageTelemetryCollector(); }
+    try std.testing.expectEqual(@as(usize, 1), spawned);
+}
+`;
+
+test('production cross-window scheduling and telemetry launch reservation execute with nonblocking Win32 ownership', () => {
+  const code = scheduling + ['chatFetchAcquire', 'chatFetchRelease', 'ensureUsageTelemetryCollector'].map(n => body(source, n)).join('\n') + scheduleChecks;
+  const result = run(code);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('singleton startup oracle rejects the actual 706 check-then-spawn race', () => {
+  const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
+  assert.equal(old.status, 0);
+  const code = scheduling + ['chatFetchAcquire', 'chatFetchRelease'].map(n => body(source, n)).join('\n') + body(old.stdout, 'ensureUsageTelemetryCollector') + scheduleChecks;
+  const result = run(code);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected 1, found 6/);
+});
+
+const layout = `
+const std = @import("std");
+const chat_markdown = @import("chat_markdown.zig");
+const chat_style = @import("chat_style.zig");
+const HANDLE = ?*anyopaque;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const ChatBlock = chat_markdown.Block;
+const ChatImgLayout = struct {};
+var blocks: [1001]ChatBlock = undefined;
+var g_chat_blocks: []ChatBlock = &blocks;
+var g_chat_block_count: usize = 1000;
+var g_chat_layout_rects: [1001]RECT = undefined;
+var g_chat_bubble_pos: [1001]chat_style.BubblePos = undefined;
+var g_chat_capture: [1]u16 = .{'x'};
+var g_chat_last_len: usize = 1;
+var g_chat_layout_dirty = true;
+var g_chat_layout_width: i32 = 0;
+var g_chat_layout_scale: i32 = 0;
+var g_chat_layout_font_pt: i32 = 0;
+var fake_ui_scale: i32 = 100;
+var g_chat_layout_reuse: usize = 0;
+var g_chat_font_pt: i32 = 13;
+var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);
+var g_chat_content_h: i32 = 0;
+var g_chat_echo_layout_count: usize = 0;
+var g_chat_content_left: i32 = 0;
+var g_chat_img_pass: u64 = 0;
+var g_chat_img_first_block: usize = 0;
+var g_chat_img_count: [1001]u8 = @splat(0);
+var g_chat_img_items: [1001][4]struct { key: u64 = 0 } = undefined;
+var g_chat_img_cache: [1]struct { key: u64 = 0, pass: u64 = 0 } = @splat(.{});
+var g_chat_img_mutex = struct { fn tryLock(_: *@This()) bool { return true; } fn unlock(_: *@This()) void {} }{};
+var g_chat_blocks_from_file = true;
+var active_shell: u32 = 0;
+var shell_count: u32 = 1;
+const CHAT_OUTBOX_KEY_CAP = 8;
+var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64 } = &.{} }{};
+var g_chat_echo_layout: [20]RECT = undefined;
+var g_chat_echo_layout_ids: [20]u64 = undefined;
+var measured: usize = 0;
+fn uiScaled(n: i32) i32 { return @divTrunc(n * fake_ui_scale, 100); }
+fn GetDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
+fn ReleaseDC(_: HANDLE, _: HANDLE) i32 { return 1; }
+fn Sleep(_: u32) void {}
+fn chatContentRectInset(w: i32) struct { left: i32, right: i32 } { return .{ .left = 0, .right = w }; }
+fn chatImgFirstBlock(_: []const u16) usize { return 0; }
+fn chatBlockGapBefore(_: bool, _: chat_markdown.Role, _: bool, _: chat_style.BubblePos) i32 { return 0; }
+fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.BubblePos, w: i32, y: i32, _: ?*ChatImgLayout) RECT {
+    measured += 1; return .{ .left = 0, .top = y, .right = w, .bottom = y + 20 };
+}
+fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
+fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
+fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32) RECT { unreachable; }
+`;
+const layoutChecks = `
+test "prefix rectangles survive repeated layout and suffix updates; resize and font changes invalidate" {
+    for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 1000), measured);
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 1000), measured);
+    g_chat_layout_reuse = 999; g_chat_block_count = 1001;
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 1002), measured);
+    try std.testing.expectEqual(@as(i32, 20020), g_chat_content_h);
+    chatRelayout(401);
+    try std.testing.expectEqual(@as(usize, 2003), measured);
+    g_chat_font_pt += 1;
+    chatRelayout(401);
+    try std.testing.expectEqual(@as(usize, 3004), measured);
+    const old_font_pixels = uiScaled(g_chat_font_pt);
+    fake_ui_scale = 101;
+    try std.testing.expectEqual(old_font_pixels, uiScaled(g_chat_font_pt));
+    chatRelayout(401);
+    try std.testing.expectEqual(@as(usize, 4005), measured);
+}
+`;
+test('production layout measures only changed suffixes and caches unchanged geometry', () => {
+  const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('layout oracle rejects actual 706 full-history remeasurement', () => {
+  const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
+  assert.equal(old.status, 0);
+  const result = run(layout + body(old.stdout, 'chatRelayout') + layoutChecks);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected 1000, found 2000/);
+});
+test('UI completion never parses; polling/paint use revisions, cached tables and visible rectangles only', () => {
+  assert.doesNotMatch(body(source, 'chatFileOnReady'), /\.apply\(|\.decode\(|\.render\(|Sleep\(/);
+  assert.doesNotMatch(body(source, 'refreshChatBlockCache'), /for \(entry\.\?\.history\.blocks/);
+  assert.match(body(source, 'refreshChatBlockCache'), /history\.revision/);
+  assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
+  assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
+  assert.match(body(source, 'chatFlowBlock'), /g_chat_tables\.formatTable/);
+  assert.match(body(source, 'chatTranscriptWndProc'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
+  assert.match(body(source, 'chatFileRequest'), /GetLastInputInfo[^]*< 5000\) return/);
+  assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
+});
+
+const flow = `
+const std = @import("std");
+const chat_code = @import("chat_code.zig");
+const link_detect = @import("link_detect.zig");
+const HANDLE = usize;
+const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
+const SIZE = struct { cx: i32, cy: i32 };
+const ChatHit = struct { x: i32, y: i32, char: ?*usize = null };
+const DT_CALCRECT = 1;
+const DT_SINGLELINE = 2;
+const DT_NOPREFIX = 4;
+var g_chat_sel_active = false;
+var g_chat_sel_transcript_focus = false;
+var g_chat_hover_link: ?link_detect.Range = null;
+var g_light_theme = false;
+var character_widths: usize = 0;
+var selection_runs: usize = 0;
+fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
+fn ensureChatCodeFont() HANDLE { return 1; }
+fn ensureChatFont() HANDLE { return 1; }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return 1; }
+fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }
+fn chatLineIndentPx(_: HANDLE, _: []const u16, _: usize) i32 { return 0; }
+fn chatTextWidth(_: HANDLE, text: []const u16) i32 { if (text.len == 1) character_widths += 1; return @intCast(text.len * 8); }
+fn GetTextExtentExPointW(_: HANDLE, _: [*]const u16, len: i32, _: i32, fit: *i32, _: ?*anyopaque, size: *SIZE) i32 { fit.* = len; size.* = .{ .cx = len * 8, .cy = 20 }; return 1; }
+fn pointInRect(_: RECT, _: i32, _: i32) bool { return false; }
+fn chatCharAtX(_: HANDLE, _: []const u16, _: i32) usize { return 0; }
+fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
+fn customColorOr(_: []const u8, value: u32) u32 { return value; }
+fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
+fn chatLinkFont(_: bool) HANDLE { return 1; }
+fn chatCodeTokenColor(_: chat_code.Kind) u32 { return 0; }
+fn chatPaintSelectionRun(_: HANDLE, _: []const u16, _: usize, _: i32, _: i32, _: i32) void { selection_runs += 1; }
+`;
+const flowChecks = `
+test "table paint without selection makes no per-character GDI calls; real selection remains mapped" {
+    const text: [1000]u16 = @splat('x');
+    var map: [1000]usize = undefined;
+    for (&map, 0..) |*value, i| value.* = i;
+    _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
+    try std.testing.expectEqual(@as(usize, 0), character_widths);
+    try std.testing.expectEqual(@as(usize, 0), selection_runs);
+    g_chat_sel_active = true; g_chat_sel_transcript_focus = true;
+    _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
+    try std.testing.expectEqual(@as(usize, 1000), character_widths);
+    try std.testing.expectEqual(@as(usize, 1000), selection_runs);
+}
+`;
+test('production table paint avoids per-character selection measurement when nothing is selected', () => {
+  const result = run(flow + body(source, 'chatFlowText') + flowChecks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('selection measurement oracle rejects the actual 706 unconditional per-character loop', () => {
+  const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
+  assert.equal(old.status, 0);
+  const result = run(flow + body(old.stdout, 'chatFlowText') + flowChecks);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected 0, found 1000/);
+});
+
+const rich = flow
+  .replace('const link_detect = @import("link_detect.zig");', `const real_links = @import("link_detect.zig");
+var scanned: usize = 0;
+const link_detect = struct {
+    const Range = real_links.Range;
+    fn next(text: []const u16, from: usize) ?Range {
+        scanned += text.len - from; // Exact visit count for the URL-free performance fixture.
+        return real_links.next(text, from);
+    }
+};`)
+  .replace('fn chatTextWidth(_: HANDLE, text: []const u16) i32 {', 'fn chatTextWidth(_: HANDLE, text: []const u16) i32 { width_calls += 1;')
+  .replace('fn pointInRect(_: RECT, _: i32, _: i32) bool { return false; }', 'fn pointInRect(r: RECT, x: i32, y: i32) bool { return x >= r.left and x < r.right and y >= r.top and y < r.bottom; }')
+  .replace('fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }', `fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rect: *RECT, _: u32) i32 {
+    for ([_]i32{ rect.left, rect.top, rect.right, rect.bottom, len }) |v| draw_hash = draw_hash *% 31 +% @as(u32, @bitCast(v));
+    for (text[0..@intCast(len)]) |c| draw_hash = draw_hash *% 31 +% c;
+    return 20;
+}`)
+  .replace('fn GetTextExtentExPointW(_: HANDLE, _: [*]const u16, len: i32, _: i32, fit: *i32, _: ?*anyopaque, size: *SIZE) i32 { fit.* = len;', 'fn GetTextExtentExPointW(_: HANDLE, _: [*]const u16, len: i32, available: i32, fit: *i32, _: ?*anyopaque, size: *SIZE) i32 { fit.* = @min(len, @divTrunc(available, 8));');
+const richPrelude = `
+const chat_markdown = @import("chat_markdown.zig");
+var width_calls: usize = 0;
+var draw_hash: u64 = 0;
+fn chatRichFont(_: chat_markdown.Style, _: u3) HANDLE { return 1; }
+fn CreateSolidBrush(_: u32) HANDLE { return 1; }
+fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
+fn DeleteObject(_: HANDLE) i32 { return 1; }
+fn chatCodePanelColor() u32 { return 0; }
+fn themeConsoleFg() u32 { return 0; }
+`;
+const richChecks = `
+test "rich layout: URL-free scans and GDI width calls grow linearly" {
+    var data: [5120]u16 = undefined;
+    const word = std.unicode.utf8ToUtf16LeStringLiteral("word ");
+    for ([_]usize{ 256, 512, 1024 }) |words| {
+        for (0..words) |i| @memcpy(data[i * 5 ..][0..5], word);
+        scanned = 0; width_calls = 0;
+        _ = chatRichText(0, data[0 .. words * 5], .{ .right = 100000 }, 0, false, null, 0, null);
+        try std.testing.expectEqual(words * 5, scanned);
+        try std.testing.expect(width_calls <= words + 1);
+    }
+}
+test "rich layout: cached widths and URLs preserve narrow wrapping, styled runs and hit targets" {
+    for ([_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("ordinary words with **bold**, *italic* and code"),
+        std.unicode.utf8ToUtf16LeStringLiteral("A (https://example.com/one) and https://example.org/two after a word."),
+        std.unicode.utf8ToUtf16LeStringLiteral("[safe link](https://example.com/md) and https://example.org/bare"),
+        std.unicode.utf8ToUtf16LeStringLiteral("averylongwordwithoutspaces 世界 and more words"),
+    }) |text| {
+        for ([_]i32{ 32, 80, 200 }) |width| {
+            const area = RECT{ .right = width };
+            var old_height: i32 = 0; var height: i32 = 0;
+            draw_hash = 0;
+            _ = oldRichText(0, text, area, 0, true, null, 17, &old_height);
+            const old_hash = draw_hash;
+            draw_hash = 0;
+            _ = chatRichText(0, text, area, 0, true, null, 17, &height);
+            try std.testing.expectEqual(old_height, height);
+            try std.testing.expectEqual(old_hash, draw_hash);
+            var y: i32 = 0;
+            while (y < height) : (y += 20) {
+                var x: i32 = 0;
+                while (x < width) : (x += 8) {
+                    const hit = ChatHit{ .x = x, .y = y };
+                    try std.testing.expect(std.meta.eql(oldRichText(0, text, area, 0, false, hit, 17, null), chatRichText(0, text, area, 0, false, hit, 17, null)));
+                }
+            }
+        }
+    }
+}
+`;
+function runRich(control = false) {
+  const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-9a4a7d7.zig', 'utf8') });
+  assert.equal(old.status, 0);
+  return run(rich + richPrelude + body(source, 'chatFlowText') +
+    body(control ? old.stdout : source, 'chatRichText') +
+    body(old.stdout, 'chatRichText').replace('fn chatRichText(', 'fn oldRichText(') + richChecks);
+}
+test('correctness rich: production layout scans URLs linearly and preserves wrapping and link targets', () => {
+  const result = runRich();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('correctness rich: unchanged pre-fix code fails the oracle', () => {
+  const result = runRich(true);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /FAIL \(TestExpectedEqual\)/);
+});

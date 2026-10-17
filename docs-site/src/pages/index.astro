@@ -1,0 +1,195 @@
+---
+import '../styles/landing.css';
+
+const X_URL = 'https://x.com/valentinyeo';
+
+const features = [
+  {
+    number: '01',
+    title: 'Vertical tabs for every agent',
+    copy: 'Claude Code, Codex and Pi each get a tab in one sidebar, with a live spinner while they work and a blue dot when they need you.',
+  },
+  {
+    number: '02',
+    title: 'Real shells, tiny footprint',
+    copy: 'multiprompt hosts native Windows console windows instead of drawing its own terminal, so ten agents cost a few dozen MB, not hundreds.',
+  },
+  {
+    number: '03',
+    title: 'Chat View for any session',
+    copy: 'Read a Claude session as a conversation: message bubbles, formatted text, code blocks and slash-command autocomplete.',
+  },
+  {
+    number: '04',
+    title: 'A browser beside every task',
+    copy: 'Dock Chrome next to a session. Agents drive it with multiprompt-browser, and Ctrl+Shift+S sends a screenshot link straight to the shell.',
+  },
+  {
+    number: '05',
+    title: 'Talk, snooze, check your limits',
+    copy: 'Dictate prompts with Ctrl+Shift+Space, snooze whole workspaces until you need them, and watch your Claude and Codex usage in one panel.',
+  },
+  {
+    number: '06',
+    title: 'Ctrl+K runs everything',
+    copy: 'One command center for every action. If multiprompt crashes, it saves a report and reopens with your tabs.',
+  },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content="Run Claude Code, Codex and Pi side by side on Windows. Vertical tabs, a unified inbox, Chat View and a built-in browser, in a harness that uses about 1 MB." />
+    <meta name="theme-color" content="#08090a" />
+    <meta property="og:title" content="multiprompt: run many AI coding agents on Windows" />
+    <meta property="og:description" content="Vertical tabs, one inbox, Chat View and a built-in browser for Claude Code, Codex and Pi. Real native shells at a fraction of the RAM." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="multiprompt" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="multiprompt: run many AI coding agents on Windows" />
+    <meta name="twitter:description" content="Vertical tabs, one inbox, Chat View and a built-in browser for Claude Code, Codex and Pi." />
+    <meta property="og:url" content="https://multiprompt.dev/" />
+    <title>multiprompt: run many AI coding agents on Windows</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="multiprompt home">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>multiprompt</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="/docs/install/">Download</a>
+        <a href="/docs/">Docs</a>
+      </nav>
+      <a class="header-cta" href={X_URL}>Follow on X <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> for people running many AI coding agents · windows</p>
+          <h1>Run more agents.<br /><em>Keep the work coherent.</em></h1>
+          <p class="hero-intro">multiprompt puts Claude Code, Codex and Pi in one window of vertical tabs, tells you which agent needs you, and stays small because every shell is a real native one.</p>
+          <div class="hero-actions">
+            <a class="button primary" href={X_URL}>Follow on X <span aria-hidden="true">↗</span></a>
+            <a class="button secondary" href="/docs/install/">Download <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+
+        <div class="product-stage" aria-label="A stylized multiprompt workspace showing several AI agent sessions">
+          <div class="window-halo" aria-hidden="true"></div>
+          <div class="app-window">
+            <div class="titlebar">
+              <div class="titlebar-name"><span class="mark tiny" aria-hidden="true"><i></i><i></i><i></i></span> multiprompt</div>
+              <div class="workspace-name">project <span>1 / 2</span></div>
+              <div class="window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
+            </div>
+            <div class="app-body">
+              <aside class="session-list">
+                <div class="sidebar-head"><span>sessions</span><kbd>Ctrl K</kbd></div>
+                <div class="session active"><span class="status violet"></span><div><strong>multiprompt rename</strong><small>codex · working</small></div><b>1</b></div>
+                <div class="session"><span class="status blue"></span><div><strong>browser focus</strong><small>claude · needs input</small></div><b>•</b></div>
+                <div class="session"><span class="status spin"></span><div><strong>cloudflare deploy</strong><small>codex · thinking</small></div></div>
+                <div class="session muted"><span class="status"></span><div><strong>release audit</strong><small>tmux · attached</small></div></div>
+                <div class="sidebar-spacer"></div>
+                <div class="sidebar-foot"><span>inbox</span><b>2</b><kbd>Alt I</kbd></div>
+              </aside>
+              <section class="terminal-pane">
+                <div class="pane-head"><span>multiprompt rename</span><div><span class="live-dot"></span> codex</div></div>
+                <div class="terminal-content">
+                  <p><span class="prompt">›</span> Rename the product across the app and CLI.</p>
+                  <p class="dim">• Inspecting user-facing legacy name references</p>
+                  <p class="dim">• Preserving compatibility paths and bridge protocol</p>
+                  <p><span class="ok">✓</span> Renamed binaries to multiprompt.exe</p>
+                  <p><span class="ok">✓</span> Added multiprompt-browser command</p>
+                  <p><span class="ok">✓</span> Existing sessions preserved</p>
+                  <div class="agent-answer"><span></span><p>The product is now lowercase <strong>multiprompt</strong>. Existing sessions and compatibility paths remain intact.</p></div>
+                  <p class="cursor-line"><span class="prompt">›</span><i></i></p>
+                </div>
+              </section>
+              <section class="browser-pane">
+                <div class="browser-tabs"><span class="browser-tab"><i></i> multiprompt.dev</span><b>＋</b></div>
+                <div class="address-bar"><span>⌕</span> multiprompt.dev <b>⋯</b></div>
+                <div class="browser-content">
+                  <span class="mini-label">MULTI-AGENT WORKSPACE</span>
+                  <h2>Prompt in parallel.<br />Focus in sequence.</h2>
+                  <div class="mini-line"></div><div class="mini-line short"></div>
+                  <div class="mini-command"><span>›</span> multiprompt-browser navigate</div>
+                </div>
+              </section>
+            </div>
+            <div class="statusbar"><span><i></i> 4 sessions</span><span>v0.28.700 · STABLE</span><span>1.1 MB harness</span></div>
+          </div>
+        </div>
+        <p class="stage-caption"><span>01</span> Native shells. A browser per session. One inbox.</p>
+      </section>
+
+      <section class="manifesto" id="workflow">
+        <p class="section-index">01 / THE WORKFLOW</p>
+        <div class="manifesto-grid">
+          <h2>Parallel work<br />shouldn’t create<br /><em>parallel chaos.</em></h2>
+          <div class="manifesto-copy">
+            <p>Opening ten agents is easy. Knowing which one needs you, keeping each browser on the right task, and picking up tomorrow where you left off is the real work.</p>
+            <p>multiprompt treats every agent as a durable session with a place, a state, and a next action.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-list" aria-label="Product features">
+        {features.map((feature) => (
+          <article class="feature-row">
+            <span class="feature-number">{feature.number}</span>
+            <h3>{feature.title}</h3>
+            <p>{feature.copy}</p>
+            <span class="feature-arrow" aria-hidden="true">↗</span>
+          </article>
+        ))}
+      </section>
+
+      <section class="attention-section">
+        <div class="attention-visual">
+          <div class="inbox-window">
+            <div class="inbox-top"><span>Inbox</span><small>2 need attention</small><kbd>Alt I</kbd></div>
+            <div class="inbox-tabs"><b>ALL</b><span>PROJECT</span><span>MULTIPROMPT</span></div>
+            <div class="inbox-row selected"><i class="blue-dot"></i><strong>browser focus</strong><span>Claude finished · 1m</span><kbd>Enter</kbd></div>
+            <div class="inbox-row"><i class="spinner"></i><strong>cloudflare deploy</strong><span>Codex working · now</span></div>
+            <div class="inbox-row"><i></i><strong>release audit</strong><span>tmux attached · 12m</span></div>
+            <div class="inbox-help"><span>J/K move</span><span>Enter open</span><span>1-9 jump</span></div>
+          </div>
+        </div>
+        <div class="attention-copy">
+          <p class="section-index">02 / ATTENTION, NOT NOISE</p>
+          <h2>Your agents can work in parallel. <em>You don’t have to.</em></h2>
+          <p>The Inbox turns every agent in every workspace into one review queue, unread first. A spinner says work is moving. A blue dot says it is your turn.</p>
+          <ul>
+            <li><span></span> Snooze a session until it needs you again</li>
+            <li><span></span> Move through work without touching the mouse</li>
+            <li><span></span> Jump to any session with Enter or a number key</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="cta-grid" aria-hidden="true"></div>
+        <p class="section-index">MULTIPROMPT / FOR WINDOWS</p>
+        <h2>More agents.<br /><em>One clear workspace.</em></h2>
+        <p>multiprompt is in private preview and built by one person. Follow along on X for releases and early access.</p>
+        <div class="hero-actions"><a class="button primary" href={X_URL}>Follow on X <span aria-hidden="true">↗</span></a><a class="button secondary" href="/docs/install/">Download <span aria-hidden="true">↗</span></a></div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="wordmark" href="/"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>multiprompt</span></a>
+      <p>Built for multi-agent work on Windows.</p>
+      <div><a href="/docs/install/">Download</a><a href="/docs/">Docs</a><a href="https://github.com/valentinyeo/multiprompt/issues/new/choose">Report a problem</a><a href={X_URL}>X</a><span>© 2026</span></div>
+    </footer>
+  </body>
+</html>

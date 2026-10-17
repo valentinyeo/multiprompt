@@ -1,0 +1,135 @@
+---
+title: Browser Pane & multiprompt-browser
+description: Native Edge/Chrome pane behavior and command-line browser control.
+---
+
+## Browser Pane Model
+
+multiprompt docks a native Microsoft Edge or Google Chrome window beside the shell. The selected browser stays native: profile, tabs, extensions, cookies, password managers, and page behavior are not reimplemented by multiprompt.
+
+Use `Ctrl+K → Browser Engine` to switch every pane globally. Edge uses
+`%LOCALAPPDATA%\ZigShell\EdgeUserData`; Chrome uses the separate
+`%LOCALAPPDATA%\ZigShell\ChromeUserData`. Logins and browser state therefore do
+not leak between engines. The switch closes all old-engine pane windows before
+the active pane relaunches, and future focus, navigation, screenshots, and theme
+commands follow the selected engine.
+
+multiprompt owns:
+
+- pane visibility
+- pane geometry
+- border masks
+- focus routing
+- multiprompt-browser binding files
+- URL state persistence
+- isolated-profile Chromium theme selection
+
+multiprompt does not own Chromium internals.
+
+## Theme Synchronization
+
+The selected isolated Edge or Chrome profile follows the active multiprompt theme. Dark, Mid,
+Light, AMOLED, Edge Grey, multiprompt, and Dev Blue each have a matching browser
+theme for the browser frame, tab strip, toolbar, bookmarks, and new-tab surface.
+
+Choose **System** in `Ctrl+K → Themes…` to follow the Windows app appearance.
+The preference remains System across restarts, while multiprompt resolves it to
+Light or Dark whenever Windows changes and updates the app, native consoles,
+browser masks, and selected isolated profile together. Choosing a named theme keeps
+that palette fixed instead. Windows can omit the appearance broadcast, so
+System also performs a lightweight one-second check and repairs a missed
+change; named themes skip that check.
+
+This synchronization is deliberately profile-scoped. It does not change normal
+Edge or Chrome profiles, Windows appearance settings, or force arbitrary websites into light or
+dark mode. Site content continues to use its own settings and CSS.
+
+The selected theme package is loaded when the isolated Chromium process starts.
+Changing the app theme closes only that dedicated profile's normal windows;
+multiprompt's pane self-heal immediately reopens the selected browser with the
+new package. Ordinary browser profiles remain running and untouched.
+
+## Border Masks
+
+Chromium draws non-client frame areas that can appear as grey borders. multiprompt covers those areas with narrow mask windows that match the active multiprompt theme.
+
+Rules:
+
+- Masks must stay inside multiprompt’s window.
+- Masks must hide when overlays are open.
+- Masks must not cover changelog, inbox, Ctrl+K, or URL picker overlays.
+- AMOLED theme should use black masks.
+- Light theme masks inherit the neutral app background, never the retired peach
+  browser surround.
+- The active browser focus border must not expose grey Chromium frame strips.
+
+## Opening And Reconnecting
+
+Use `Ctrl+Shift+O` to open or reconnect the active shell’s browser pane.
+
+Use Ctrl+K actions when available:
+
+- Open browser URL
+- Insert multiprompt-browser instructions
+- Force-refresh the multiprompt-browser pane binding
+
+## multiprompt-browser
+
+`Alt+E` hides a session and its docked browser window but does not close the pane or remove its browser binding. The normal browser auto-suspend policy may close an inactive pane after 20 minutes. Any later `multiprompt-browser` command, including `status` or `doctor`, relaunches and rebinds a configured missing pane and waits for selected-browser adoption before reporting the result.
+
+`multiprompt-browser` is the browser-control CLI available inside multiprompt-spawned shells. The former `zsb` command remains as a compatibility alias.
+
+Common commands:
+
+- `multiprompt-browser navigate <url>` always opens a fresh tab in the session's bound browser pane. Existing tabs are never overwritten; `--new-tab` remains accepted only for compatibility.
+- A physical Ctrl+click on a URL in Bash or another hosted console opens its fresh tab active and moves focus into the docked browser. This explicit-user behavior does not apply to agent navigation.
+- `multiprompt-browser tabs` lists the bound pane's tabs, and `multiprompt-browser activate <tabId>` brings one of those same-pane tabs forward.
+- `multiprompt-browser close-tab <id|match>`, `tab close <id|match>`, and `tabs --close <id|match>` close one tab in the bound pane. Text matches must identify one title or URL; the CLI refuses ambiguous matches and refuses to close the final tab.
+- `multiprompt-browser url` reports the exact targeted tab URL. Read, screenshot, find, and click commands accept `--tab <id|url-substring>` so a background tab can be inspected without activation. `multiprompt-browser console [-n N]` returns recent page console and browser log entries; add `--clear` to clear the captured buffer.
+- `multiprompt-browser click <selector>`, `key <combo>`, and both `type <text>` and `type <selector> <text>` use trusted CDP input. Selector-based type clicks and replaces the target; one-argument type inserts at the focused editable.
+- Text, links, find, snapshots, and selector lookup traverse same-origin and cross-origin frames. Snapshot controls include visible menu items, options, list rows, tab controls, and icon-only controls with accessible labels.
+- A page scripting failure returns top-level `ok:false` with `error:"page_error"`. Ordinary actions time out after 15 seconds, so a stuck page or debugger operation cannot hold the native bridge forever.
+- Screenshots validate PNG bytes and retry with a fresh debugger session up to three times before returning the real capture error.
+- `multiprompt-browser open` preserves signed URLs up to 8 KiB, and the remote transport accepts decoded requests up to 48 KiB within Windows' command-line limit.
+- `multiprompt-browser theme <name>` is the internal profile-wide theme command used by the app; when the selected browser does not already have that one package, the command restarts only the isolated profile. System is resolved by the app before this boundary, so valid bridge names remain `dark`, `mid`, `light`, `amoled`, `edgegray`, `multiprompt`, and `devblue`.
+- Background driven tabs automatically receive CDP focus emulation so SPAs continue rendering while another tab is visible.
+
+```bash
+multiprompt-browser navigate "https://example.com"
+multiprompt-browser text
+multiprompt-browser snapshot
+multiprompt-browser snapshot --tab "example.com"
+multiprompt-browser click "button" --tab "example.com"
+multiprompt-browser type "query at the focused cursor"
+multiprompt-browser type "input[name=q]" "query"
+multiprompt-browser key "Ctrl+K"
+multiprompt-browser screenshot --tab "example.com" -o out.png
+multiprompt-browser url --tab "example.com"
+multiprompt-browser close-tab "example.com"
+multiprompt-browser console -n 50
+multiprompt-browser status
+multiprompt-browser doctor
+multiprompt-browser sidebar
+```
+
+## Routing Rule
+
+multiprompt-browser must target the browser pane owned by the current shell’s exact session.
+
+It must never steal a pane from another active agent just because a browser exists elsewhere. If no matching pane is bound, multiprompt-browser should return a useful status/error or trigger a rebind flow.
+
+## Binding Files
+
+multiprompt publishes local binding files under the compatibility path `%APPDATA%\ZigShell`, including:
+
+- `panewin-<tmux-session>.txt`
+- `panewin-zss-<shell-id>.txt`
+- `browserwin-<shell-id>.txt`
+
+The remote VPS shim uses these identities to route browser commands back to the owning multiprompt tab.
+
+`End tmux session` removes the owning tab's browser binding files as part of teardown. A plain tab close does not kill the remote tmux session; use `End tmux session` when the remote session and its browser routing should both be destroyed.
+
+## Tunnel Failures
+
+When a remote multiprompt-browser command fails because the tunnel is down, the error should say so directly. Agents should not keep retrying blind browser commands for minutes.

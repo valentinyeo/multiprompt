@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "multiprompt browser bridge",
+  "version": "1.0.65",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "256": "icons/icon256.png"
+  },
+  "permissions": ["nativeMessaging", "tabs", "scripting", "activeTab", "debugger", "webNavigation", "alarms", "storage", "contextMenus", "management"],
+  "host_permissions": ["<all_urls>", "https://screencast2.com/*"],
+  "background": {
+    "service_worker": "bridge.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["notification-click-main.js"],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["pane-click-guard.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Take screenshot and paste link into shell",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "commands": {
+    "take-tab-screenshot-ctrl": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Take tab screenshot and annotate in Chat View or shell"
+    },
+    "take-tab-screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Take tab screenshot and paste link into shell"
+    }
+  }
+}

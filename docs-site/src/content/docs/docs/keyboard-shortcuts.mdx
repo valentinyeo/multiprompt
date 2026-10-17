@@ -1,0 +1,130 @@
+---
+title: Keyboard Shortcuts
+description: Primary multiprompt shortcuts and focus-routing rules.
+---
+
+## Global
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Shift+Space` | Start or stop dictation and paste the transcript into the active shell or browser |
+| `Enter` while dictation is recording | Stop dictation without submitting shell/browser input; never starts recording |
+| `Ctrl+N` | New multiprompt window |
+| `Ctrl+K` | Open quick switcher, including while the Chat View composer has focus |
+| `Alt+C` | Toggle Chat View for the active terminal; Enter sends, Shift+Enter adds a line |
+| `Ctrl+K` -> `Open Chat View` / `Return to Terminal` | Switch between the live transcript and unchanged terminal |
+| `Ctrl+K` -> `Stop Agent` | Send Ctrl+C to the active agent from Chat View |
+| `Ctrl+K` -> `Move to Group...` | Choose an existing group, create and name a new group, or move the active session to `No group`; Ctrl-selected sessions move together |
+| `Ctrl+K` → **Browser Engine** | Switch every pane between the dedicated Edge and dedicated Chrome profiles; future focus, navigation, screenshots, and themes follow the selected engine |
+| `Ctrl+K` -> `Reconnect AI Usage Accounts` | Log in only stale Claude telemetry emails, one isolated account at a time, then refresh usage |
+| `Ctrl+Shift+G` | Cycle Combined, VPS, and Today's AI telemetry cards |
+| `Alt+T` | Create a plain tmux shell in the active workspace's configured or inferred VPS folder; choose the agent yourself |
+
+While Ctrl+K is open, moving the pointer across visible results moves the
+highlighted selection. Arrow keys and Enter continue to operate on that same
+selection.
+
+## Shells
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Shift+1` | New CMD tab |
+| `Ctrl+Shift+2` | Attach tmux on Remote host 1 |
+| `Ctrl+Shift+3` | Attach tmux on Remote host 2 |
+| `Ctrl+Shift+4` | New Remote host 1 shell |
+| `Ctrl+Shift+5` | New Remote host 2 shell |
+| `Ctrl+Shift+6` | New PowerShell tab |
+| `Ctrl+Shift+7` | New Bash tab |
+| `Ctrl+Shift+8` | New Git Bash tab |
+| `Alt+X` | Archive active tmux session, or close a non-tmux tab (press twice) |
+| `Alt+H` | Remind Me: detach the active tab while its tmux session keeps running, then reattach when due (`Ctrl+Shift+H` remains an alias) |
+| `Ctrl+K` -> `End tmux session` | Kill the active remote tmux session, remove its browser binding, and close the local tab |
+| Right-click tab -> `End tmux session` | Same teardown for that tmux-backed tab |
+
+## Navigation
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+1` through `Ctrl+9` | Switch to tab number |
+| `Ctrl+Shift+Up` | Move active tab up |
+| `Ctrl+Shift+Down` | Move active tab down |
+| `Ctrl+Shift+U` | Jump to next unread tab |
+| `Alt+U` | Mark active session unread / restore blue dot |
+| `Alt+;` | Open saved snippets from shell or docked-browser focus (`Ctrl+;` remains an alias) |
+| `Delete`, `Delete` | Delete the selected saved snippet after confirmation |
+| `Alt+J` / `Alt+K` | Open the next / previous session in the active Inbox split |
+| `Alt+E` | Move the active tab to Waiting until a new blue dot; after opening from Inbox, continue to the next session in that split |
+| `Alt+Z` | Undo the most recent successful move to Waiting and restore that session's previous blue-dot state |
+| `Ctrl+K` -> `Pin to Top` | Keep the active session at the top of its workspace sidebar |
+| Right-click tab -> `Pin to Top` | Pin or unpin that specific sidebar session |
+| `Ctrl+K` -> `Lock Session` | Protect the active session from close, archive, end-tmux, group-close, and workspace-close actions |
+| Right-click tab -> `Lock Session` | Lock or unlock that specific session |
+| Click a locked row's padlock | Unlock the session; a subsequent close remains a separate action |
+| Drag a custom group header | Reorder workspace groups; the order persists in automatic and manual session sorting |
+| Drag session onto a custom group | Move it into that workspace-local group without changing its pin or lock state |
+| Drag session into `PINNED` / `RECENTS` | Change its pin state inside the current group or ungrouped list; locking remains independent |
+| Click `PINNED` / `RECENTS` | Collapse or expand the ungrouped section; the state persists |
+| `Ctrl+W` | Close active tab |
+| `Ctrl+Shift+T` | Reopen last closed tab |
+
+## Editing
+
+| Shortcut | Action |
+| --- | --- |
+| `F2` | Rename the logical session and sync its multiprompt, tmux-window, and coding-agent display names; works on the selected Inbox session too |
+| Double-click tab | Rename the logical session across the same display surfaces |
+| `Ctrl+K` → **Rename Session** | Open the in-app rename modal with the proposed name preselected; `Ctrl+A` selects all, Enter saves, and Esc cancels |
+| `Ctrl+V` / `Ctrl+Shift+V` | Paste into focused shell |
+| `Ctrl+Shift+C` | Copy console selection if present |
+
+## Inbox
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+I` | Open Inbox; inside Inbox, return to the ALL split |
+| `Ctrl+F` or `/` | Live reduction search across session name, workspace, path, agent, and preview text |
+| `j` / `k` or `Alt+J` / `Alt+K` | Move down / up the current Inbox split |
+| `e` or `Alt+E` | Move the selected row to Waiting across restarts; a blue dot reveals it, opening that blue-dot row restores it, and spinner activity alone keeps it waiting |
+| `z` or `Alt+Z` | Undo the most recent move to Waiting and restore its previous read/unread state |
+| `Alt+H` | Remind Me for the selected Inbox row; its tmux session keeps running (`Ctrl+Shift+H` remains an alias) |
+| `Alt+X` | Archive selected tmux session, or close a non-tmux tab (press twice) |
+| `q` / `Esc` | Close Inbox |
+
+Waiting lasts until a blue dot, `Alt+Z`, manual mark-unread, or explicit reactivation from **All Sessions** (`Ctrl+K` → **Show All Sessions**). Undo remembers one successful move at a time; destructive `Alt+X` archive actions are not undoable. Opening a waiting row from All Sessions restores it to the Inbox and workspace sidebar. Archived sessions are separate stopped records and restore individually.
+
+After opening a session, returning to Inbox restores focus to that same session by identity even if activity changed its sorted position.
+The Windows title/taskbar label shows `Inbox` while this view is open, then follows the workspace of every session opened with Enter, `Alt+J/K`, or `Alt+E`.
+Sessions opened from Inbox always land with keyboard focus in the shell, never the docked browser pane.
+
+## All Sessions
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+K` → **Show All Sessions** | Open All Sessions |
+| `Ctrl+F` | Start a live reduction search across session name, tmux name, workspace, context, host, and status |
+| `w` | Open the dedicated Waiting destination |
+| `a` | Open the dedicated Archived destination |
+| `h` / `l` or `Tab` | Move between All, Waiting, Archived, workspace, and Other tabs |
+| `u` | Toggle unattached-only filtering in All/workspace tabs |
+| `Backspace` | Edit the active search query |
+| `Up` / `Down`, `Enter` | Select and open a matching session |
+| `Esc` | Clear an active search; outside search, close All Sessions |
+
+## Browser Pane
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+A` | Open or reconnect browser pane |
+| `Alt+W` | Open a URL from the shell buffer in a fresh pane tab and focus it |
+| `Alt+Q` | Switch keyboard focus between shell and browser pane, including while the selected browser's address bar is focused |
+| `Ctrl+T` | Open a new browser tab while the browser pane is focused |
+| `Ctrl+Shift+S` | Screenshot the browser tab, paste its uploaded link into the owning shell, then focus that shell for annotation |
+| `Ctrl+K` -> Browser commands | Open URL, insert multiprompt-browser instructions, force a pane rebind |
+
+## Focus Rule
+
+Browser-focused keyboard shortcuts should usually pass through to the selected Edge or Chrome pane. Shell-focused shortcuts may be handled by multiprompt. tmux prefix sequences must remain tmux-owned.
+
+Do not add `Ctrl+Alt` shortcuts. On the user keyboard, `Ctrl+Alt` is AltGr.

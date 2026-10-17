@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ZSB frame parent</title>
+<h1>Top frame marker</h1>
+<iframe id="cross-origin-frame" title="Cross-origin controls"></iframe>
+<script>
+  const child = new URL("/tools/fixtures/zsb-frame-child.html", location.href);
+  child.port = String(Number(location.port) + 1);
+  document.querySelector("#cross-origin-frame").src = child.href;
+</script>

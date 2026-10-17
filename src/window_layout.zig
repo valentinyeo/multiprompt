@@ -1,0 +1,299 @@
+const app_state = @import("app_state.zig");
+const std = @import("std");
+const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
+const DWORD = @import("win32.zig").DWORD;
+const HANDLE = @import("win32.zig").HANDLE;
+const WS_VSCROLL = @import("win32.zig").WS_VSCROLL;
+const WS_HSCROLL = @import("win32.zig").WS_HSCROLL;
+const GWL_STYLE = @import("win32.zig").GWL_STYLE;
+const SWP_FRAMECHANGED = @import("win32.zig").SWP_FRAMECHANGED;
+const SWP_NOZORDER = @import("win32.zig").SWP_NOZORDER;
+const SW_HIDE = @import("win32.zig").SW_HIDE;
+const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
+const DT_VCENTER = @import("win32.zig").DT_VCENTER;
+const DT_CENTER = @import("win32.zig").DT_CENTER;
+const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
+const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
+const TRANSPARENT = @import("win32.zig").TRANSPARENT;
+const RECT = @import("win32.zig").RECT;
+const IsIconic = @import("win32.zig").IsIconic;
+const IsWindowVisible = @import("win32.zig").IsWindowVisible;
+const GetClientRect = @import("win32.zig").GetClientRect;
+const MoveWindow = @import("win32.zig").MoveWindow;
+const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
+const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
+const InvalidateRect = @import("win32.zig").InvalidateRect;
+const DrawTextW = @import("win32.zig").DrawTextW;
+const GetWindowTextLengthW = @import("win32.zig").GetWindowTextLengthW;
+const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
+const DeleteObject = @import("win32.zig").DeleteObject;
+const SetBkMode = @import("win32.zig").SetBkMode;
+const SetTextColor = @import("win32.zig").SetTextColor;
+const SelectObject = @import("win32.zig").SelectObject;
+const CreateFontW = @import("win32.zig").CreateFontW;
+const RoundRect = @import("win32.zig").RoundRect;
+const CreateRoundRectRgn = @import("win32.zig").CreateRoundRectRgn;
+const SetWindowRgn = @import("win32.zig").SetWindowRgn;
+const CreatePen = @import("win32.zig").CreatePen;
+const L = @import("startup.zig").L;
+const RGB = @import("startup.zig").RGB;
+const ensureDevThemeInitialized = @import("themes.zig").ensureDevThemeInitialized;
+const customColorOr = @import("themes.zig").customColorOr;
+const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
+const SHELL_PAD = @import("app_state.zig").SHELL_PAD;
+const tabRowH = @import("browser_pane.zig").tabRowH;
+const DEV_TOP_PAD = @import("app_state.zig").DEV_TOP_PAD;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
+const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
+const tabRowY = @import("sidebar.zig").tabRowY;
+const ShowWindow = @import("focus.zig").ShowWindow;
+const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
+const SetWindowPos = @import("focus.zig").SetWindowPos;
+const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
+const debugLog = @import("diagnostics.zig").debugLog;
+const fontGenStale = @import("console.zig").fontGenStale;
+const fontSyncShell = @import("console.zig").fontSyncShell;
+const verifyShellWindowSize = @import("focus.zig").verifyShellWindowSize;
+const consoleEdgePad = @import("browser_pane.zig").consoleEdgePad;
+const consoleCellW = @import("browser_pane.zig").consoleCellW;
+const centeredConsoleColumn = @import("browser_pane.zig").centeredConsoleColumn;
+const browserSlotReserved = @import("browser_pane.zig").browserSlotReserved;
+const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
+const positionActiveBrowser = @import("browser_pane.zig").positionActiveBrowser;
+const hideAllBrowserChrome = @import("browser_pane.zig").hideAllBrowserChrome;
+const paneFocusInset = @import("browser_pane.zig").paneFocusInset;
+const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
+const positionWebView2 = @import("browser_pane.zig").positionWebView2;
+const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
+const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
+const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
+const refreshChatBrushes = @import("chat_composer.zig").refreshChatBrushes;
+const CHAT_BUBBLE_RADIUS = @import("app_state.zig").CHAT_BUBBLE_RADIUS;
+const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+const paintChatAttachButton = @import("chat_render.zig").paintChatAttachButton;
+const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
+const shellConsoleShouldBeVisible = @import("chat_composer.zig").shellConsoleShouldBeVisible;
+const CHAT_WORKING_GENERIC = @import("app_state.zig").CHAT_WORKING_GENERIC;
+const uiScaled = @import("drawing.zig").uiScaled;
+
+pub fn repositionActive() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].hwnd == null or app_state.g_main_hwnd == null) return;
+    if (!shellConsoleShouldBeVisible(app_state.active_shell) and IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0) _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+    if (IsIconic(app_state.g_main_hwnd) != 0) return;
+    if (app_state.g_webview2_active) {
+        if (app_state.g_webview2_set_visible) |set_visible|
+            set_visible(if (webView2OwnsActiveShell()) 1 else 0);
+    }
+    if (app_state.g_all_sessions_active) {
+        _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        hideAllBrowserChrome();
+        return;
+    }
+    if (app_state.g_chat_active) {
+        if (app_state.g_chat_browser_swap.shell_id == 0 and IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0) _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        if (app_state.g_chat_browser_swap.shell_id == 0) {
+            if (browserSlotReserved()) {
+                if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+            } else {
+                hideAllBrowserChrome();
+            }
+        }
+        layoutChatControls();
+        return;
+    }
+    if (!shellConsoleShouldBeVisible(app_state.active_shell)) return;
+    if (fontGenStale(app_state.shells[app_state.active_shell].font_gen, app_state.g_font_gen)) _ = fontSyncShell(app_state.active_shell);
+    const nudge = app_state.g_nudge_repaint;
+    app_state.g_nudge_repaint = false;
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    if (verboseLoggingEnabled()) {
+        var lbuf: [128]u8 = undefined;
+        const ls = std.fmt.bufPrint(&lbuf, "[reposition] client={d}x{d} sidebar={d}", .{ rc.right, rc.bottom, SIDEBAR_W() }) catch "";
+        debugLog(ls);
+    }
+    if (LOOK_UNIFIED) {
+        ensureDevThemeInitialized();
+        if (browserSlotReserved()) {
+            const layout = calcBrowserLayout() orelse return;
+            const shb = app_state.shells[app_state.active_shell].hwnd;
+            var stb = GetWindowLongPtrW(shb, GWL_STYLE);
+            stb &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
+            _ = SetWindowLongPtrW(shb, GWL_STYLE, stb);
+            _ = SetWindowRgn(shb, null, 1);
+            const inset: i32 = if (app_state.shells[app_state.active_shell].browser_native) paneFocusInset() else 0;
+            const cx = layout.console_x + inset;
+            const cy = layout.console_y + inset;
+            const cw = layout.console_w - 2 * inset;
+            const ch = layout.console_h - 2 * inset;
+            if (nudge) _ = SetWindowPos(shb, null, cx, cy, cw, ch - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
+            _ = SetWindowPos(shb, null, cx, cy, cw, ch, SWP_FRAMECHANGED | SWP_NOZORDER);
+            verifyShellWindowSize(shb, cx, cy, cw, ch);
+            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+            return;
+        }
+        if (app_state.shells[app_state.active_shell].full_width) {
+            const sh0 = app_state.shells[app_state.active_shell].hwnd;
+            var st0 = GetWindowLongPtrW(sh0, GWL_STYLE);
+            st0 &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
+            _ = SetWindowLongPtrW(sh0, GWL_STYLE, st0);
+            _ = SetWindowRgn(sh0, null, 1);
+            const fw_w = rc.right - SIDEBAR_W();
+            const fw_top = DEV_TOP_PAD + threadTitleHeight();
+            const fw_h = rc.bottom - DEV_TOP_PAD - fw_top;
+            if (nudge) _ = SetWindowPos(sh0, null, SIDEBAR_W(), fw_top, fw_w, fw_h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
+            _ = SetWindowPos(sh0, null, SIDEBAR_W(), fw_top, fw_w, fw_h, SWP_FRAMECHANGED | SWP_NOZORDER);
+            verifyShellWindowSize(sh0, SIDEBAR_W(), fw_top, fw_w, fw_h);
+            return;
+        }
+        const con_top = DEV_TOP_PAD + threadTitleHeight();
+        const h = rc.bottom - DEV_TOP_PAD - con_top;
+        const sh = app_state.shells[app_state.active_shell].hwnd;
+        var st = GetWindowLongPtrW(sh, GWL_STYLE);
+        st &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
+        _ = SetWindowLongPtrW(sh, GWL_STYLE, st);
+        const edge_pad: i32 = if (SIDEBAR_W() == 0) consoleEdgePad() else 0;
+        const col = centeredConsoleColumn(rc.right, SIDEBAR_W(), edge_pad, consoleCellW());
+        const w = col.width;
+        const left = col.left;
+        _ = SetWindowRgn(sh, null, 1);
+        if (nudge) _ = SetWindowPos(sh, null, left, con_top, w, h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
+        _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
+        verifyShellWindowSize(sh, left, con_top, w, h);
+        return;
+    }
+    const pad: i32 = SHELL_PAD;
+    const w = rc.right - SIDEBAR_W() - pad * 2;
+    const h = rc.bottom - pad * 2;
+    _ = MoveWindow(app_state.shells[app_state.active_shell].hwnd, SIDEBAR_W() + pad, pad, w, h, 1);
+    const corner: i32 = 12;
+    const rgn = CreateRoundRectRgn(0, 0, w, h, corner, corner);
+    if (rgn != null) _ = SetWindowRgn(app_state.shells[app_state.active_shell].hwnd, rgn, 1);
+}
+
+pub fn invalidateSidebar() void {
+    if (threadTitleHeight() > 0) {
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
+    var rc = RECT{ .left = 0, .top = 0, .right = SIDEBAR_W(), .bottom = 2000 };
+    _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+}
+
+fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
+    const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
+    const bg = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
+    const brush = CreateSolidBrush(bg);
+    const pen = CreatePen(0, 1, bg);
+    const old_brush = SelectObject(hdc, brush);
+    const old_pen = SelectObject(hdc, pen);
+    const radius = uiScaled(8);
+    _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+    _ = SelectObject(hdc, old_brush);
+    _ = SelectObject(hdc, old_pen);
+    _ = DeleteObject(brush);
+    _ = DeleteObject(pen);
+    const glyph_h = @max(uiScaled(10), @divTrunc((rc.bottom - rc.top) * 42, 100));
+    const glyph_font = CreateFontW(-glyph_h, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Segoe UI Symbol"));
+    const old_font = SelectObject(hdc, glyph_font);
+    _ = SetTextColor(hdc, if (enabled)
+        (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(8, 20, 28))
+    else
+        customColorOr("subtitle", if (app_state.g_light_theme) RGB(150, 155, 165) else RGB(110, 116, 128)));
+    var text_rc = rc;
+    _ = DrawTextW(hdc, L("\u{25B6}"), -1, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = SelectObject(hdc, old_font);
+    _ = DeleteObject(glyph_font);
+}
+
+fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
+    const edge = @max(1, uiScaled(1));
+    fillRoundRectAA(hdc, rc, radius, border_color);
+    fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
+}
+
+pub fn chatWorkingIndicatorH() i32 {
+    return uiScaled(18);
+}
+
+pub fn chatWorkingIndicatorText() []const u16 {
+    if (app_state.g_chat_screen_status_len > 0) return app_state.g_chat_working_text[0..app_state.g_chat_screen_status_len];
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) return &CHAT_WORKING_GENERIC;
+    return &.{};
+}
+
+fn chatWorkingIndicatorInvalidate() void {
+    if (app_state.g_main_hwnd == null or !app_state.g_chat_active) return;
+    const layout = chatViewLayout();
+    var rc = RECT{
+        .left = layout.transcript.left,
+        .top = layout.transcript.bottom,
+        .right = layout.transcript.right,
+        .bottom = layout.composer_card.top,
+    };
+    _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+}
+
+pub fn chatWorkingIndicatorSync() void {
+    const text = chatWorkingIndicatorText();
+    if (text.len == app_state.g_chat_working_applied_len and std.mem.eql(u16, text, app_state.g_chat_working_applied[0..text.len])) return;
+    app_state.g_chat_working_applied_len = text.len;
+    @memcpy(app_state.g_chat_working_applied[0..text.len], text);
+    chatWorkingIndicatorInvalidate();
+}
+
+pub fn paintChatView(hdc: HANDLE) void {
+    if (!chatViewOwnsInput()) return;
+    const layout = chatViewLayout();
+    refreshChatBrushes();
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const card_border = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
+    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, uiScaled(CHAT_BUBBLE_RADIUS));
+    const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
+    paintChatButton(hdc, layout.send_btn, has_text);
+    paintChatAttachButton(hdc, layout.attach_btn);
+    if (app_state.g_chat_working_applied_len == 0) return;
+    const old_font = SelectObject(hdc, ensureChatFont());
+    defer _ = SelectObject(hdc, old_font);
+    var line = RECT{
+        .left = layout.transcript.left,
+        .top = layout.transcript.bottom,
+        .right = layout.transcript.right,
+        .bottom = layout.composer_card.top,
+    };
+    _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(135, 139, 147)));
+    _ = DrawTextW(hdc, &app_state.g_chat_working_applied, @intCast(app_state.g_chat_working_applied_len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+pub fn invalidateSpinnerRects() void {
+    if (app_state.g_main_hwnd == null) return;
+    if (app_state.g_inbox_active) {
+        var inbox_rc = RECT{ .left = 0, .top = uiScaled(48), .right = SIDEBAR_W(), .bottom = 2000 };
+        _ = InvalidateRect(app_state.g_main_hwnd, &inbox_rc, 0);
+        return;
+    }
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].muted) continue;
+        if (app_state.shells[i].activity != .active) continue;
+        const top = tabRowY(@intCast(i)) orelse continue;
+        const y: i32 = top - app_state.g_sidebar_scroll;
+        var rc = RECT{
+            .left = 0,
+            .top = y,
+            .right = SIDEBAR_W(),
+            .bottom = y + tabRowH(),
+        };
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+    }
+    if (threadTitleHeight() > 0 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) {
+        const title_left = if (app_state.g_chat_active) chatViewLayout().transcript.left else SIDEBAR_W();
+        var title_rc = RECT{
+            .left = title_left,
+            .top = threadTitleTop(),
+            .right = title_left + 56,
+            .bottom = threadTitleTop() + threadTitleHeight(),
+        };
+        _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
+    }
+}

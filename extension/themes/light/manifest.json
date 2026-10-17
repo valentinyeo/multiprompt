@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "multiprompt browser theme - Light",
+  "version": "1.0.0",
+  "theme": {
+    "colors": {
+      "bookmark_text": [28, 28, 28],
+      "button_background": [243, 243, 243, 1],
+      "frame": [243, 243, 243],
+      "frame_inactive": [232, 232, 232],
+      "ntp_background": [243, 243, 243],
+      "ntp_link": [30, 90, 180],
+      "ntp_text": [28, 28, 28],
+      "tab_background_text": [70, 70, 70],
+      "tab_text": [28, 28, 28],
+      "toolbar": [243, 243, 243]
+    },
+    "tints": { "buttons": [0, 0, 0.16] }
+  }
+}

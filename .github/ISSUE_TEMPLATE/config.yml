@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Android companion
+    url: https://github.com/valentinyeo/multiprompt-android/issues/new
+    about: Report Android companion issues in its repository
+  - name: Releases
+    url: https://github.com/valentinyeo/multiprompt/releases
+    about: Download the latest Windows app and browser bridge

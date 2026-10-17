@@ -1,0 +1,1738 @@
+const app_state = @import("app_state.zig");
+const std = @import("std");
+const json_reader = @import("json_reader.zig");
+const skill_model = @import("skills.zig");
+const chat_complete = @import("chat_complete.zig");
+const chat_echo = @import("chat_echo.zig");
+const DWORD = @import("win32.zig").DWORD;
+const SW_SHOW = @import("win32.zig").SW_SHOW;
+const TIMER_CHAT_REFRESH = @import("win32.zig").TIMER_CHAT_REFRESH;
+const TIMER_CHAT_SEND_VERIFY = @import("win32.zig").TIMER_CHAT_SEND_VERIFY;
+const TIMER_SSH_RECONNECT = @import("win32.zig").TIMER_SSH_RECONNECT;
+const TIMER_CHAT_OUTBOX = @import("win32.zig").TIMER_CHAT_OUTBOX;
+const RECT = @import("win32.zig").RECT;
+const GetClientRect = @import("win32.zig").GetClientRect;
+const InvalidateRect = @import("win32.zig").InvalidateRect;
+const GetWindowTextW = @import("win32.zig").GetWindowTextW;
+const SetWindowTextW = @import("win32.zig").SetWindowTextW;
+const Sleep = @import("win32.zig").Sleep;
+const CloseHandle = @import("win32.zig").CloseHandle;
+const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const AttachConsole = @import("win32.zig").AttachConsole;
+const FreeConsole = @import("win32.zig").FreeConsole;
+const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
+const WriteConsoleInputW = @import("win32.zig").WriteConsoleInputW;
+const OpenClipboard = @import("win32.zig").OpenClipboard;
+const CloseClipboard = @import("win32.zig").CloseClipboard;
+const EmptyClipboard = @import("win32.zig").EmptyClipboard;
+const DeleteFileW = @import("win32.zig").DeleteFileW;
+const KEY_EVENT = @import("win32.zig").KEY_EVENT;
+const INPUT_RECORD = @import("win32.zig").INPUT_RECORD;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const CONSOLE_SCREEN_BUFFER_INFO = @import("win32.zig").CONSOLE_SCREEN_BUFFER_INFO;
+const L = @import("startup.zig").L;
+const ShellKind = @import("app_state.zig").ShellKind;
+const ChatBlock = @import("app_state.zig").ChatBlock;
+const win32WidePath = @import("file_io.zig").win32WidePath;
+const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
+const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
+const appendJsonEscaped = @import("workspaces.zig").appendJsonEscaped;
+const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
+const saveSession = @import("session.zig").saveSession;
+const appendJsonEscapedWide = @import("snippets.zig").appendJsonEscapedWide;
+const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
+const respawnShellInPlace = @import("console.zig").respawnShellInPlace;
+const markSshTabDisconnected = @import("console.zig").markSshTabDisconnected;
+const fetchTmuxSessions = @import("vps.zig").fetchTmuxSessions;
+const keybd_event = @import("win32.zig").keybd_event;
+const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
+const focusActiveShell = @import("focus.zig").focusActiveShell;
+const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
+const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
+const chatTrimRawConsoleRow = @import("chat_capture.zig").chatTrimRawConsoleRow;
+const chatFileIdentityForShell = @import("chat_session.zig").chatFileIdentityForShell;
+const chatPerf = @import("chat_session.zig").chatPerf;
+const chatHistoryPath = @import("chat_session.zig").chatHistoryPath;
+const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
+const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
+const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
+const refreshChatTranscript = @import("chat_session.zig").refreshChatTranscript;
+const chatRelayout = @import("chat_render.zig").chatRelayout;
+const chatMaxScroll = @import("chat_render.zig").chatMaxScroll;
+const chatMinScroll = @import("chat_render.zig").chatMinScroll;
+const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
+const chatAcAgent = @import("chat_composer.zig").chatAcAgent;
+const chatAcClose = @import("chat_composer.zig").chatAcClose;
+const CHAT_SEND_VERIFY_DELAYS_MS = @import("app_state.zig").CHAT_SEND_VERIFY_DELAYS_MS;
+const ShellSendResult = @import("app_state.zig").ShellSendResult;
+const CHAT_OUTBOX_MAX_PER_KEY = @import("app_state.zig").CHAT_OUTBOX_MAX_PER_KEY;
+const CHAT_OUTBOX_TOTAL_MAX = @import("app_state.zig").CHAT_OUTBOX_TOTAL_MAX;
+const CHAT_OUTBOX_MSG_CAP = @import("app_state.zig").CHAT_OUTBOX_MSG_CAP;
+const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
+const CHAT_OUTBOX_LOAD_LIMIT = @import("app_state.zig").CHAT_OUTBOX_LOAD_LIMIT;
+const CHAT_ECHO_PREFIX_CAP = @import("app_state.zig").CHAT_ECHO_PREFIX_CAP;
+const CHAT_CONFIRMED_MAX_PER_KEY = @import("app_state.zig").CHAT_CONFIRMED_MAX_PER_KEY;
+const ChatEchoState = @import("app_state.zig").ChatEchoState;
+const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
+const ChatConfirmedEcho = @import("app_state.zig").ChatConfirmedEcho;
+const InternetGetConnectedState = @import("win32.zig").InternetGetConnectedState;
+const ChatEchoAssignment = @import("app_state.zig").ChatEchoAssignment;
+const SSH_AUTO_RECONNECT_ENABLED = @import("app_state.zig").SSH_AUTO_RECONNECT_ENABLED;
+const shellConsoleShouldBeVisible = @import("chat_composer.zig").shellConsoleShouldBeVisible;
+const showShellConsole = @import("chat_composer.zig").showShellConsole;
+const chatDraftFlush = @import("chat_composer.zig").chatDraftFlush;
+const repositionActive = @import("window_layout.zig").repositionActive;
+const ReadConsoleOutputCharacterW = @import("win32.zig").ReadConsoleOutputCharacterW;
+const setUnicodeClipboardTextWithRetry = @import("clipboard.zig").setUnicodeClipboardTextWithRetry;
+const readClipboardTextWithRetry = @import("clipboard.zig").readClipboardTextWithRetry;
+const chatSendForceBracketed = @import("clipboard.zig").chatSendForceBracketed;
+const chatShouldUseDirectInput = @import("clipboard.zig").chatShouldUseDirectInput;
+const nativePasteToShell = @import("clipboard.zig").nativePasteToShell;
+const pasteTextToShellDirect = @import("clipboard.zig").pasteTextToShellDirect;
+const pasteTextToShellDirectEx = @import("clipboard.zig").pasteTextToShellDirectEx;
+const openAttachedConsoleInput = @import("clipboard.zig").openAttachedConsoleInput;
+const openAttachedConsoleOutput = @import("clipboard.zig").openAttachedConsoleOutput;
+const sendClaudeSendQueuedNowToShell = @import("clipboard.zig").sendClaudeSendQueuedNowToShell;
+const SetTimer = @import("win32.zig").SetTimer;
+const KillTimer = @import("win32.zig").KillTimer;
+const nowFileTime = @import("inbox.zig").nowFileTime;
+const shellProcessAliveForRead = @import("shell_poll.zig").shellProcessAliveForRead;
+
+fn sendEnterToShell(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count or app_state.shells[shell_index].pid == 0) return false;
+    _ = FreeConsole();
+    if (AttachConsole(app_state.shells[shell_index].pid) == 0) return false;
+    defer _ = FreeConsole();
+    const handle = openAttachedConsoleInput() orelse return false;
+    defer _ = CloseHandle(handle);
+    var records: [2]INPUT_RECORD = undefined;
+    records[0] = .{ .EventType = KEY_EVENT, .Event = .{ .KeyEvent = .{
+        .bKeyDown = 1,
+        .wRepeatCount = 1,
+        .wVirtualKeyCode = 0x0D,
+        .wVirtualScanCode = 0x1C,
+        .UnicodeChar = '\r',
+        .dwControlKeyState = 0,
+    } } };
+    records[1] = records[0];
+    records[1].Event.KeyEvent.bKeyDown = 0;
+    var written: DWORD = 0;
+    return WriteConsoleInputW(handle, &records, 2, &written) != 0 and written == 2;
+}
+
+fn chatSendVerifyDelayMs(after_check: u8) ?u32 {
+    if (after_check >= CHAT_SEND_VERIFY_DELAYS_MS.len) return null;
+    return CHAT_SEND_VERIFY_DELAYS_MS[after_check];
+}
+
+fn chatSendEnterDelayMs(kind: ShellKind) u32 {
+    return switch (kind) {
+        .tmux, .vps, .vps2 => 250,
+        else => 120,
+    };
+}
+
+fn chatInputRowHoldsPrompt(row: []const u16, prefix: []const u16) bool {
+    if (prefix.len == 0 or row.len < 2) return false;
+    if (row[0] != 0x276F and row[0] != 0x203A) return false;
+    var i: usize = 1;
+    while (i < row.len and (row[i] == ' ' or row[i] == 0xA0)) : (i += 1) {}
+    const rest = row[i..];
+    return rest.len >= prefix.len and std.mem.eql(u16, rest[0..prefix.len], prefix);
+}
+
+fn chatInputBoxShowsUnsentPrompt(rows: []const []const u16, prefix: []const u16) bool {
+    var idx: ?usize = null;
+    var i = rows.len;
+    while (i > 0) {
+        i -= 1;
+        const row = rows[i];
+        if (row.len > 0 and (row[0] == 0x276F or row[0] == 0x203A)) {
+            idx = i;
+            break;
+        }
+    }
+    const start = idx orelse return false;
+    return chatInputRowHoldsPrompt(rows[start], prefix);
+}
+
+test "Chat View send check: the agent input row still holding the prompt" {
+    const held = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} i am in voice mode but agent");
+    const empty = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F}");
+    const other = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} something else entirely");
+    const prefix = std.unicode.utf8ToUtf16LeStringLiteral("i am in voice");
+    try std.testing.expect(chatInputRowHoldsPrompt(held, prefix));
+    try std.testing.expect(!chatInputRowHoldsPrompt(empty, prefix));
+    try std.testing.expect(!chatInputRowHoldsPrompt(other, prefix));
+    try std.testing.expect(!chatInputRowHoldsPrompt(held, prefix[0..0]));
+}
+
+test "Chat View send check: prefix row and empty continuation row are unsent" {
+    const prefix = std.unicode.utf8ToUtf16LeStringLiteral("hello there");
+    const previous = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} previous prompt");
+    const newline_rows = [_][]const u16{ previous, std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello there"), std.unicode.utf8ToUtf16LeStringLiteral("") };
+    try std.testing.expect(chatInputBoxShowsUnsentPrompt(&newline_rows, prefix));
+    const wrapped_rows = [_][]const u16{ std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello there and more"), std.unicode.utf8ToUtf16LeStringLiteral("wrapped tail") };
+    try std.testing.expect(chatInputBoxShowsUnsentPrompt(&wrapped_rows, prefix));
+    const sent_rows = [_][]const u16{ previous, std.unicode.utf8ToUtf16LeStringLiteral("\u{276F}") };
+    try std.testing.expect(!chatInputBoxShowsUnsentPrompt(&sent_rows, prefix));
+    const draft_rows = [_][]const u16{ std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} my own draft"), std.unicode.utf8ToUtf16LeStringLiteral("") };
+    try std.testing.expect(!chatInputBoxShowsUnsentPrompt(&draft_rows, prefix));
+}
+
+test "Chat View send: verify delay schedule grows then ends" {
+    try std.testing.expectEqual(@as(?u32, 700), chatSendVerifyDelayMs(0));
+    try std.testing.expectEqual(@as(?u32, 1200), chatSendVerifyDelayMs(1));
+    try std.testing.expectEqual(@as(?u32, 5000), chatSendVerifyDelayMs(5));
+    try std.testing.expectEqual(@as(?u32, null), chatSendVerifyDelayMs(6));
+}
+
+test "Chat View send: ssh/tmux waits longer for the paste marker" {
+    try std.testing.expectEqual(@as(u32, 120), chatSendEnterDelayMs(.cmd));
+    try std.testing.expectEqual(@as(u32, 120), chatSendEnterDelayMs(.pwsh));
+    try std.testing.expectEqual(@as(u32, 250), chatSendEnterDelayMs(.tmux));
+    try std.testing.expectEqual(@as(u32, 250), chatSendEnterDelayMs(.vps));
+    try std.testing.expectEqual(@as(u32, 250), chatSendEnterDelayMs(.vps2));
+}
+
+fn chatArmSendVerify(shell_index: u32, text: []const u16, echo_id: u64) bool {
+    if (shell_index >= app_state.shell_count or app_state.g_main_hwnd == null) return false;
+    var start: usize = 0;
+    while (start < text.len and (text[start] == ' ' or text[start] == '\t')) : (start += 1) {}
+    var n: usize = 0;
+    while (start + n < text.len and n < app_state.g_chat_verify_prefix.len) : (n += 1) {
+        const c = text[start + n];
+        if (c == '\r' or c == '\n') break;
+        app_state.g_chat_verify_prefix[n] = c;
+    }
+    app_state.g_chat_verify_prefix_len = n;
+    app_state.g_chat_verify_shell_id = app_state.shells[shell_index].shell_id;
+    app_state.g_chat_verify_checks = 0;
+    app_state.g_chat_verify_echo_id = echo_id;
+    if (SetTimer(app_state.g_main_hwnd, TIMER_CHAT_SEND_VERIFY, CHAT_SEND_VERIFY_DELAYS_MS[0], null) != 0) return true;
+    chatVerifyClear();
+    return false;
+}
+
+fn chatVerifyClear() void {
+    app_state.g_chat_verify_echo_id = 0;
+    app_state.g_chat_verify_prefix_len = 0;
+    app_state.g_chat_verify_checks = 0;
+    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_SEND_VERIFY);
+}
+
+fn chatPromptStillInInputBox(shell_index: u32, prefix: []const u16) ?bool {
+    const pid = app_state.shells[shell_index].pid;
+    if (pid == 0) return null;
+    _ = FreeConsole();
+    if (AttachConsole(pid) == 0) return null;
+    defer _ = FreeConsole();
+    const handle = openAttachedConsoleOutput() orelse return null;
+    defer _ = CloseHandle(handle);
+    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (GetConsoleScreenBufferInfo(handle, &info) == 0 or info.dwSize.x <= 0) return null;
+    const width: usize = @intCast(info.dwSize.x);
+    const bottom: i32 = @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom));
+    if (bottom < 0) return null;
+    const rows: usize = @intCast(@min(@as(i32, 40), bottom + 1));
+    if (rows == 0 or rows * width > app_state.g_chat_raw.len) return null;
+    const start_row: i16 = @intCast(bottom - @as(i32, @intCast(rows)) + 1);
+    var chars_read: DWORD = 0;
+    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, @intCast(rows * width), .{ .x = 0, .y = start_row }, &chars_read) == 0 or chars_read != rows * width) return null;
+    var row_slices: [40][]const u16 = undefined;
+    for (0..rows) |r| row_slices[r] = chatTrimRawConsoleRow(width, chars_read, r);
+    for (row_slices[0..rows]) |row| {
+        if (row.len > 0 and (row[0] == 0x276F or row[0] == 0x203A)) return chatInputBoxShowsUnsentPrompt(row_slices[0..rows], prefix);
+    }
+    return null;
+}
+
+pub fn chatSendVerifyTick() void {
+    var found: ?u32 = null;
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].shell_id == app_state.g_chat_verify_shell_id) {
+            found = @intCast(i);
+            break;
+        }
+    }
+    const echo_index: ?usize = if (app_state.g_chat_verify_echo_id != 0) chatOutboxIndexById(app_state.g_chat_verify_echo_id) else null;
+    if (echo_index) |ei| {
+        if (chatEchoTryMatchEntry(ei)) {
+            chatVerifyClear();
+            chatOutboxTick();
+            return;
+        }
+    }
+    app_state.g_chat_verify_checks += 1;
+    if (found) |si| {
+        const held = if (app_state.g_chat_verify_prefix_len > 0) chatPromptStillInInputBox(si, app_state.g_chat_verify_prefix[0..app_state.g_chat_verify_prefix_len]) else null;
+        if (held != null and !held.?) {
+            if (echo_index) |ei| {
+                app_state.g_chat_outbox.items[ei].state = .delivered;
+                app_state.g_chat_outbox.items[ei].left_box_ms = GetTickCount64();
+                _ = saveChatOutbox();
+                chatOutboxChanged();
+            }
+            chatVerifyClear();
+            chatOutboxTick();
+            return;
+        }
+        if (chatSendVerifyDelayMs(app_state.g_chat_verify_checks)) |delay| {
+            const retry_ok = if (held == true) sendEnterToShell(si) else true;
+            if (retry_ok and app_state.g_main_hwnd != null and SetTimer(app_state.g_main_hwnd, TIMER_CHAT_SEND_VERIFY, delay, null) != 0) return;
+        }
+    }
+    if (echo_index) |ei| chatEchoMarkNotSent(ei);
+    showHeaderNoticeAscii("Delivery unconfirmed - check the terminal before sending again", 8000, true);
+    chatVerifyClear();
+    chatOutboxTick();
+}
+
+fn sendLocalChatPrompt(shell_index: u32, text: []const u16) bool {
+    return sendLocalChatPromptEx(shell_index, text, true);
+}
+
+fn sendLocalChatPromptEx(shell_index: u32, text: []const u16, press_enter: bool) bool {
+    if (!shellConsoleShouldBeVisible(shell_index)) {
+        if (!pasteTextToShellDirect(shell_index, text)) return false;
+        return !press_enter or sendEnterToShell(shell_index);
+    }
+    var previous_clipboard: [16384]u16 = undefined;
+    const previous_len = readClipboardTextWithRetry(&previous_clipboard);
+    if (!setUnicodeClipboardTextWithRetry(text)) return false;
+    defer {
+        if (previous_len > 0) {
+            _ = setUnicodeClipboardTextWithRetry(previous_clipboard[0..previous_len]);
+        } else if (OpenClipboard(app_state.g_main_hwnd) != 0) {
+            _ = EmptyClipboard();
+            _ = CloseClipboard();
+        }
+    }
+
+    _ = showShellConsole(shell_index, SW_SHOW, "sendLocalChatPromptEx");
+    repositionActive();
+    const pasted = nativePasteToShell(shell_index);
+    if (pasted and press_enter) {
+        Sleep(25);
+        keybd_event(0x0D, 0x1C, 0, 0);
+        keybd_event(0x0D, 0x1C, KEYEVENTF_KEYUP, 0);
+    }
+    focusActiveShell();
+    return pasted;
+}
+
+fn sendTextToActiveShellVerified(send_text: []const u16, echo_id: u64) ShellSendResult {
+    return sendTextToShellVerifiedAt(app_state.active_shell, send_text, echo_id);
+}
+
+pub fn voiceSendTranscriptToShell(transcript: []const u16) bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    switch (sendTextToActiveShellVerified(transcript, 0)) {
+        .ok => {
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+            return true;
+        },
+        .write_failed => {
+            showHeaderNoticeAscii("Voice Mode could not write to this terminal", 3500, true);
+            return false;
+        },
+        .enter_failed => {
+            showHeaderNoticeAscii("Voice Mode sent the reply but could not press Enter", 3500, true);
+            return false;
+        },
+    }
+}
+
+pub fn voicePasteTranscriptToShellNoEnter(transcript: []const u16) bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    return if (chatShouldUseDirectInput(app_state.active_shell))
+        pasteTextToShellDirect(app_state.active_shell, transcript)
+    else
+        sendLocalChatPromptEx(app_state.active_shell, transcript, false);
+}
+
+pub fn sendChatPrompt() void {
+    chatAcClose();
+    if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
+    var text_buf: [16384]u16 = undefined;
+    const text_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text_buf, @intCast(text_buf.len));
+    if (text_len_i <= 0) return;
+    const text_len: usize = @intCast(text_len_i);
+    var has_text = false;
+    for (text_buf[0..text_len]) |c| {
+        if (c != ' ' and c != '\t' and c != '\r' and c != '\n') {
+            has_text = true;
+            break;
+        }
+    }
+    if (!has_text) return;
+    var send_text: []const u16 = text_buf[0..text_len];
+    var composed_utf8: ?[]u8 = null;
+    defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
+    if (app_state.g_chat_skill_name_len > 0) {
+        const prompt_utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text_buf[0..text_len]) catch {
+            showHeaderNoticeAscii("The skill prompt contains invalid text", 3500, true);
+            return;
+        };
+        defer std.heap.page_allocator.free(prompt_utf8);
+        const selected = skill_model.Skill{
+            .name = app_state.g_chat_skill_name[0..app_state.g_chat_skill_name_len],
+            .description = @constCast(""),
+            .body = app_state.g_chat_skill_body[0..app_state.g_chat_skill_body_len],
+            .source = .multiprompt,
+        };
+        const composed = skill_model.composeMessage(std.heap.page_allocator, prompt_utf8, selected) catch {
+            showHeaderNoticeAscii("Chat View could not compose the skill prompt", 3500, true);
+            return;
+        };
+        composed_utf8 = composed;
+        const composed_len = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0 .. app_state.g_chat_message_wide.len - 1], composed) catch {
+            showHeaderNoticeAscii("The selected skill contains invalid text", 3500, true);
+            return;
+        };
+        send_text = app_state.g_chat_message_wide[0..composed_len];
+    }
+    if (chat_complete.endsInTriggerToken(send_text, chatAcAgent()) and send_text.len + 1 < text_buf.len and composed_utf8 == null) {
+        text_buf[send_text.len] = ' ';
+        send_text = text_buf[0 .. send_text.len + 1];
+    }
+    if (app_state.g_voice_mode_active and !app_state.g_voice_auto_sending) {
+        app_state.g_voice_last_activity_tick = GetTickCount64();
+        for (&app_state.g_voice_utt_open) |*slot| if (slot.id != 0) {
+            slot.consumed = true;
+        };
+    }
+    const direct = chatShouldUseDirectInput(app_state.active_shell);
+    const link_down = chatLinkLooksDown(app_state.active_shell);
+    const busy = chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_verify_prefix_len != 0;
+    if (link_down or busy) {
+        if (chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued) == null) {
+            showHeaderNoticeAscii("Offline queue is full", 3500, true);
+            return;
+        }
+        showHeaderNoticeAscii(if (link_down) "Message queued until the connection returns" else "Message queued behind the one still sending", 4000, false);
+    } else {
+        const echo_index = chatEchoEnqueueForShell(app_state.active_shell, send_text, .sending) orelse {
+            showHeaderNoticeAscii("Offline queue is full", 3500, true);
+            return;
+        };
+        const echo_id = app_state.g_chat_outbox.items[echo_index].id;
+        switch (sendTextToActiveShellVerified(send_text, echo_id)) {
+            .write_failed, .enter_failed => |r| {
+                app_state.g_chat_outbox.items[echo_index].state = if (r == .enter_failed or app_state.g_chat_outbox.items[echo_index].write_started) .not_sent else .queued;
+                _ = saveChatOutbox();
+                chatOutboxChanged();
+                showHeaderNoticeAscii("Message queued until the connection returns", 4000, false);
+            },
+            .ok => if (!direct) chatEchoConfirm(echo_index),
+        }
+    }
+    app_state.g_chat_scroll_bottom_pending = true;
+    if (app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, send_text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) {
+        showHeaderNoticeAscii("Opened in the terminal, press Alt+C to see it", 4000, false);
+    }
+    app_state.g_chat_ac_dialog_len = 0;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+    app_state.g_chat_draft_dirty = true;
+    chatDraftFlush();
+    app_state.g_chat_skill_name_len = 0;
+    app_state.g_chat_skill_body_len = 0;
+    _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+}
+
+fn chatNetworkReportsConnected() bool {
+    var flags: DWORD = 0;
+    return InternetGetConnectedState(&flags, 0) != 0;
+}
+
+fn chatLinkDownDecision(disconnected: bool, pid: u32, process_alive: bool, net_connected: bool, host_unreachable: bool) bool {
+    if (disconnected) return true;
+    if (pid == 0) return true;
+    if (!process_alive) return true;
+    if (!net_connected) return true;
+    if (host_unreachable) return true;
+    return false;
+}
+
+test "Chat View link health treats any down signal as down" {
+    try std.testing.expect(chatLinkDownDecision(false, 123, true, true, false) == false);
+    try std.testing.expect(chatLinkDownDecision(true, 123, true, true, false));
+    try std.testing.expect(chatLinkDownDecision(false, 0, true, true, false));
+    try std.testing.expect(chatLinkDownDecision(false, 123, false, true, false));
+    try std.testing.expect(chatLinkDownDecision(false, 123, true, false, false));
+    try std.testing.expect(chatLinkDownDecision(false, 123, true, true, true));
+}
+
+fn chatLinkLooksDown(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count) return true;
+    const sh = &app_state.shells[shell_index];
+    const alive = if (sh.process != null) shellProcessAliveForRead(@intCast(shell_index)) else true;
+    return chatLinkDownDecision(
+        sh.disconnected,
+        sh.pid,
+        alive,
+        chatNetworkReportsConnected(),
+        false,
+    );
+}
+
+pub fn chatOutboxKeyForShell(idx: u32, buf: []u8) []const u8 {
+    if (idx >= app_state.shell_count) return buf[0..0];
+    const sh = &app_state.shells[idx];
+    if (sh.tmux_session_len > 0) {
+        return std.fmt.bufPrint(buf, "tmux:{d}:{s}", .{ sh.tmux_host, sh.tmux_session[0..@as(usize, sh.tmux_session_len)] }) catch buf[0..0];
+    }
+    var name_buf: [128]u8 = undefined;
+    var ni: usize = 0;
+    const nlen: usize = @as(usize, sh.name_len);
+    while (ni < nlen and ni < name_buf.len) : (ni += 1) {
+        const c = sh.name[ni];
+        name_buf[ni] = if (c >= 0x20 and c < 0x7F) @intCast(c) else '?';
+    }
+    return std.fmt.bufPrint(buf, "{s}:{s}", .{ @tagName(sh.kind), name_buf[0..ni] }) catch buf[0..0];
+}
+
+fn chatOutboxShellForKey(key: []const u8) ?u32 {
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    var i: u32 = 0;
+    while (i < app_state.shell_count) : (i += 1) {
+        const k = chatOutboxKeyForShell(i, &buf);
+        if (k.len > 0 and std.mem.eql(u8, k, key)) return i;
+    }
+    return null;
+}
+
+fn chatOutboxCountIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) usize {
+    var n: usize = 0;
+    for (list.items) |e| {
+        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+    }
+    return n;
+}
+
+fn chatOutboxFirstIndexIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) ?usize {
+    for (list.items, 0..) |e, i| {
+        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) return i;
+    }
+    return null;
+}
+
+fn chatOutboxAutoSendable(state: ChatEchoState) bool {
+    return state == .queued;
+}
+
+fn chatOutboxFirstSendableIndexIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) ?usize {
+    for (list.items, 0..) |e, i| {
+        if (!chat_echo.mayType(e.state, e.write_started, false, false)) continue;
+        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) return i;
+    }
+    return null;
+}
+
+fn chatOutboxFindSending(list: *const std.ArrayList(ChatOutboxEntry)) ?usize {
+    for (list.items, 0..) |e, i| {
+        if (e.state == .sending) return i;
+    }
+    return null;
+}
+
+pub fn chatOutboxIndexById(id: u64) ?usize {
+    if (id == 0) return null;
+    for (app_state.g_chat_outbox.items, 0..) |e, i| {
+        if (e.id == id) return i;
+    }
+    return null;
+}
+
+fn chatOutboxRemoveAtIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, index: usize) void {
+    if (index >= list.items.len) return;
+    if (list.items[index].text.len > 0) allocator.free(list.items[index].text);
+    _ = list.orderedRemove(index);
+}
+
+fn chatOutboxClearIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8) u32 {
+    var dropped: u32 = 0;
+    var i: usize = 0;
+    while (i < list.items.len) {
+        if (std.mem.eql(u8, list.items[i].key[0..@as(usize, list.items[i].key_len)], key)) {
+            chatOutboxRemoveAtIn(list, allocator, i);
+            dropped += 1;
+        } else {
+            i += 1;
+        }
+    }
+    return dropped;
+}
+
+fn chatOutboxEnqueueIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, text: []const u16) bool {
+    return chatOutboxEnqueueInState(list, allocator, key, text, .queued);
+}
+
+fn chatOutboxEnqueueInState(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, text: []const u16, state: ChatEchoState) bool {
+    if (key.len == 0 or text.len == 0 or text.len > CHAT_OUTBOX_MSG_CAP) return false;
+    if (list.items.len >= CHAT_OUTBOX_TOTAL_MAX) return false;
+    while (chatOutboxCountIn(list, key) >= CHAT_OUTBOX_MAX_PER_KEY) {
+        var victim: ?usize = null;
+        for (list.items, 0..) |e, i| {
+            if (e.state == .sending) continue;
+            if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+                victim = i;
+                break;
+            }
+        }
+        const first = victim orelse chatOutboxFirstIndexIn(list, key) orelse break;
+        chatOutboxRemoveAtIn(list, allocator, first);
+    }
+    const owned = allocator.dupe(u16, text) catch return false;
+    var entry = ChatOutboxEntry{};
+    const klen = @min(key.len, entry.key.len);
+    @memcpy(entry.key[0..klen], key[0..klen]);
+    entry.key_len = @intCast(klen);
+    entry.text = owned;
+    entry.state = state;
+    entry.id = app_state.g_chat_echo_next_id;
+    app_state.g_chat_echo_next_id +%= 1;
+    if (entry.id == 0) entry.id = app_state.g_chat_echo_next_id;
+    list.append(allocator, entry) catch {
+        allocator.free(owned);
+        return false;
+    };
+    return true;
+}
+
+fn chatEchoAnchorNow(idx: u32) chat_echo.Anchor {
+    var anchor = chat_echo.Anchor{ .sent_ms = chat_echo.fileTimeToUnixMs(nowFileTime()) };
+    if (idx != app_state.active_shell) return anchor;
+    anchor.counted = app_state.g_chat_block_count > 0;
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count]) |b| {
+        if (b.role == .user) anchor.user_count +|= 1;
+        if (b.stamp_ms > anchor.after_ms) anchor.after_ms = b.stamp_ms;
+    }
+    for (app_state.g_chat_histories.items) |history| {
+        if (history.retired or history.key.shell_id != app_state.shells[idx].shell_id) continue;
+        const facts = history.history.deliveryEvidence(std.heap.page_allocator, .{ .text = &.{}, .prefix = &.{}, .anchor = .{} }) catch continue;
+        anchor.after_ms = @max(anchor.after_ms, facts.latest_ms);
+    }
+    return anchor;
+}
+
+fn chatEchoStateOnLoad(saved: u8) ChatEchoState {
+    return chat_echo.stateOnLoad(saved, saved != 0);
+}
+
+fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, out_len: *usize) ?[]u8 {
+    var total: usize = 128;
+    for (list.items) |e| total += e.text.len * 6 + CHAT_OUTBOX_KEY_CAP + 160;
+    const out = allocator.alloc(u8, total) catch return null;
+    var pos: usize = 0;
+    const head = "{\"version\":2,\"queues\":[";
+    @memcpy(out[pos .. pos + head.len], head);
+    pos += head.len;
+    var first_queue = true;
+    for (list.items, 0..) |e, i| {
+        const key = e.key[0..@as(usize, e.key_len)];
+        const first = chatOutboxFirstIndexIn(list, key) orelse continue;
+        if (first != i) continue;
+        if (!first_queue) {
+            out[pos] = ',';
+            pos += 1;
+        }
+        first_queue = false;
+        const q1 = "{\"key\":\"";
+        @memcpy(out[pos .. pos + q1.len], q1);
+        pos += q1.len;
+        appendJsonEscaped(out, &pos, key);
+        const q2 = "\",\"messages\":[";
+        @memcpy(out[pos .. pos + q2.len], q2);
+        pos += q2.len;
+        var first_msg = true;
+        for (list.items) |m| {
+            if (!std.mem.eql(u8, m.key[0..@as(usize, m.key_len)], key)) continue;
+            if (!first_msg) {
+                out[pos] = ',';
+                pos += 1;
+            }
+            first_msg = false;
+            const m1 = "{\"t\":\"";
+            @memcpy(out[pos .. pos + m1.len], m1);
+            pos += m1.len;
+            appendJsonEscapedWide(out, &pos, m.text);
+            const m2 = "\",\"s\":";
+            @memcpy(out[pos .. pos + m2.len], m2);
+            pos += m2.len;
+            out[pos] = '0' + @as(u8, @intFromEnum(m.state));
+            pos += 1;
+            const anchor_text = std.fmt.bufPrint(out[pos..], ",\"a\":{d},\"w\":{d},\"c\":{d},\"n\":{d},\"x\":{d},\"r\":{d}", .{ @max(m.anchor.after_ms, 0), @max(m.anchor.sent_ms, 0), m.anchor.user_count, @intFromBool(m.anchor.counted), @intFromBool(m.write_started), @intFromBool(m.retryable) }) catch "";
+            pos += anchor_text.len;
+            out[pos] = '}';
+            pos += 1;
+        }
+        const qend = "]}";
+        @memcpy(out[pos .. pos + qend.len], qend);
+        pos += qend.len;
+    }
+    const end = "]}";
+    @memcpy(out[pos .. pos + end.len], end);
+    pos += end.len;
+    out_len.* = pos;
+    return out;
+}
+
+fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, json: []const u8) void {
+    var parsed = json_reader.parse(allocator, json) catch return;
+    defer parsed.deinit();
+    const version = json_reader.uintDefault(parsed.value, "version", 0);
+    if (version != 1 and version != 2) return;
+    for (json_reader.array(json_reader.field(parsed.value, "queues"))) |obj| {
+        var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = std.mem.zeroes([CHAT_OUTBOX_KEY_CAP]u8);
+        const klen = json_reader.copyString(obj, "key", &key_buf);
+        if (klen > 0) {
+            const key = key_buf[0..klen];
+            for (json_reader.array(json_reader.field(obj, "messages"))) |mobj| {
+                var text_buf: [CHAT_OUTBOX_MSG_CAP + 1]u16 = undefined;
+                const tlen = json_reader.copyWide(mobj, "t", &text_buf);
+                if (tlen > 0) {
+                    const saved: u8 = @intCast(@min(json_reader.uintDefault(mobj, "s", 0), 3));
+                    if (chatOutboxEnqueueInState(list, allocator, key, text_buf[0..tlen], chat_echo.stateOnLoad(saved, json_reader.uintDefault(mobj, "x", @intFromBool(saved != 0)) != 0))) {
+                        list.items[list.items.len - 1].retryable = json_reader.uintDefault(mobj, "r", 0) != 0;
+                        list.items[list.items.len - 1].write_started = json_reader.uintDefault(mobj, "x", @intFromBool(saved != 0)) != 0;
+                        const max_ms: u64 = std.math.maxInt(i64);
+                        list.items[list.items.len - 1].anchor = .{
+                            .after_ms = @intCast(@min(json_reader.uintDefault(mobj, "a", 0), max_ms)),
+                            .sent_ms = @intCast(@min(json_reader.uintDefault(mobj, "w", 0), max_ms)),
+                            .user_count = @intCast(@min(json_reader.uintDefault(mobj, "c", 0), std.math.maxInt(u32))),
+                            .counted = json_reader.uintDefault(mobj, "n", 0) != 0,
+                        };
+                        const entry = &list.items[list.items.len - 1];
+                        const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+                        if (entry.state == .delivered and (entry.anchor.sent_ms == 0 or chat_echo.expiredSent(entry.state, entry.anchor.sent_ms, now_ms))) {
+                            entry.state = .not_sent;
+                            entry.write_started = false;
+                            entry.retryable = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn getChatOutboxPath(buf: *[512]u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 478) return null;
+    const rest = "\\ZigShell\\chat-outbox.json";
+    @memcpy(buf[appdata_len .. appdata_len + rest.len], rest);
+    return buf[0 .. appdata_len + rest.len];
+}
+
+fn chatOutboxFreeAll(allocator: std.mem.Allocator) void {
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.text.len > 0) allocator.free(e.text);
+    }
+    app_state.g_chat_outbox.clearRetainingCapacity();
+}
+
+pub fn saveChatOutbox() bool {
+    var path_buf: [512]u8 = undefined;
+    const path = getChatOutboxPath(&path_buf) orelse return false;
+    if (app_state.g_chat_outbox.items.len == 0) {
+        return writeFileAtomicW(path, "{\"version\":2,\"queues\":[]}");
+    }
+    var out_len: usize = 0;
+    const bytes = chatOutboxSerialize(&app_state.g_chat_outbox, std.heap.page_allocator, &out_len) orelse return false;
+    defer std.heap.page_allocator.free(bytes);
+    return writeFileAtomicW(path, bytes[0..out_len]);
+}
+
+pub fn loadChatOutbox() void {
+    chatOutboxFreeAll(std.heap.page_allocator);
+    var path_buf: [512]u8 = undefined;
+    const path = getChatOutboxPath(&path_buf) orelse return;
+    const json = readFileAllocWin32(path, CHAT_OUTBOX_LOAD_LIMIT) orelse return;
+    defer std.heap.page_allocator.free(json);
+    chatOutboxParseJson(&app_state.g_chat_outbox, std.heap.page_allocator, json);
+    var parsed = json_reader.parse(std.heap.page_allocator, json) catch return;
+    defer parsed.deinit();
+    var legacy = json_reader.uintDefault(parsed.value, "version", 0) != 2;
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (entry.retryable) legacy = true;
+    }
+    if (chatOutboxPurgeOrphans() or legacy) _ = saveChatOutbox();
+    armChatOutboxTimerIfNeeded();
+}
+
+fn armChatOutboxTimerIfNeeded() void {
+    if (app_state.g_main_hwnd == null) return;
+    if (app_state.g_chat_outbox.items.len > 0) {
+        if (!app_state.g_chat_outbox_timer_on) {
+            app_state.g_chat_outbox_timer_on = true;
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX, 1500, null);
+        }
+    } else if (app_state.g_chat_outbox_timer_on) {
+        app_state.g_chat_outbox_timer_on = false;
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX);
+    }
+}
+
+pub fn chatOutboxChanged() void {
+    app_state.g_chat_outbox_revision +%= 1;
+    if (app_state.g_main_hwnd == null) return;
+    layoutChatControls();
+    if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
+        chatRelayout(rc.right - rc.left);
+        app_state.g_chat_scroll_y = if (app_state.g_chat_scrolled_up) std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll()) else app_state.g_chat_content_h - (rc.bottom - rc.top);
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    armChatOutboxTimerIfNeeded();
+}
+
+fn chatOutboxEnqueueForShell(idx: u32, text: []const u16) bool {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return false;
+    if (!chatOutboxEnqueueIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, text)) return false;
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    return true;
+}
+
+pub fn chatOutboxCountForShell(idx: u32) usize {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
+    return chatOutboxCountIn(&app_state.g_chat_outbox, key);
+}
+
+pub fn chatEchoCountNotSentForShell(idx: u32) usize {
+    if (idx >= app_state.shell_count) return 0;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
+    var n: usize = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state != .not_sent) continue;
+        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+    }
+    return n;
+}
+
+fn chatOutboxDropForKey(key: []const u8) void {
+    if (key.len == 0) return;
+    chatConfirmedDropKey(key);
+    const dropped = chatOutboxClearIn(&app_state.g_chat_outbox, std.heap.page_allocator, key);
+    if (dropped == 0) return;
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+}
+
+pub fn chatResetForShell(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const outbox_key = chatOutboxKeyForShell(idx, &key_buf);
+    if (app_state.g_chat_verify_shell_id == app_state.shells[idx].shell_id) chatVerifyClear();
+    chatOutboxDropForKey(outbox_key);
+    const shell_id = app_state.shells[idx].shell_id;
+    const key = chatFileIdentityForShell(idx);
+    while (!app_state.g_chat_cache_write_mutex.tryLock()) Sleep(1);
+    for (app_state.g_chat_histories.items) |entry| {
+        if (entry.key.shell_id == shell_id) entry.cache_cancelled.store(true, .release);
+    }
+    chatHistoryForget(shell_id);
+    var path_buf: [560]u8 = undefined;
+    if (key.shell_id != 0) {
+        if (chatHistoryPath(key, &path_buf)) |path| {
+            var wide: [600]u16 = undefined;
+            if (win32WidePath(&wide, path)) |w| _ = DeleteFileW(w.ptr);
+        }
+        if (chatHistoryEntry(key)) |entry| entry.disk_loaded = true;
+    }
+    app_state.g_chat_cache_write_mutex.unlock();
+    if (idx == app_state.active_shell) {
+        chatDeferTranscriptLoad();
+        if (app_state.g_chat_active) refreshChatTranscript(true);
+    }
+}
+
+pub fn chatOutboxDropForShell(idx: u32) void {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    chatOutboxDropForKey(key);
+}
+
+fn chatOutboxPurgeOrphans() bool {
+    var removed = false;
+    var i: usize = 0;
+    while (i < app_state.g_chat_outbox.items.len) {
+        const key = app_state.g_chat_outbox.items[i].key[0..@as(usize, app_state.g_chat_outbox.items[i].key_len)];
+        if (chatOutboxShellForKey(key) == null) {
+            chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+            removed = true;
+        } else {
+            i += 1;
+        }
+    }
+    return removed;
+}
+
+fn chatEchoNormalizePrefix(text: []const u16, out: []u16) []const u16 {
+    var n: usize = 0;
+    var pending_space = false;
+    for (text) |c| {
+        const is_ws = c == ' ' or c == '\t' or c == '\r' or c == '\n' or c == 0xA0;
+        if (is_ws) {
+            if (n > 0) pending_space = true;
+            continue;
+        }
+        if (pending_space) {
+            if (n >= out.len) break;
+            out[n] = ' ';
+            n += 1;
+            pending_space = false;
+        }
+        if (n >= out.len) break;
+        out[n] = c;
+        n += 1;
+    }
+    return out[0..n];
+}
+
+fn chatEchoPrefixMatches(block_norm: []const u16, prefix: []const u16) bool {
+    if (prefix.len == 0 or block_norm.len < prefix.len) return false;
+    return std.mem.eql(u16, block_norm[0..prefix.len], prefix);
+}
+
+fn chatEchoWindowFull() bool {
+    return app_state.g_chat_window_full and app_state.g_chat_blocks_from_file;
+}
+
+fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const u16, window_full: bool, result: *ChatEchoAssignment) void {
+    result.* = .{};
+    var prefixes: [CHAT_OUTBOX_MAX_PER_KEY][CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+    var pending: [CHAT_OUTBOX_MAX_PER_KEY]chat_echo.Pending = undefined;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (result.count >= pending.len) break;
+        if ((!e.write_started and !e.retryable) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        pending[result.count] = .{
+            .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
+            .text = e.text,
+            .anchor = e.anchor,
+            .unanchored_delivery = (e.write_started or e.retryable) and e.anchor.after_ms == 0 and e.anchor.sent_ms == 0 and !e.anchor.counted,
+        };
+        result.id[result.count] = e.id;
+        result.count += 1;
+    }
+    if (result.count == 0) return;
+    const allocator = std.heap.page_allocator;
+    const users = allocator.alloc(chat_echo.UserBlock, blocks.len) catch return;
+    defer allocator.free(users);
+    const user_at = allocator.alloc(usize, blocks.len) catch return;
+    defer allocator.free(user_at);
+    var user_count: usize = 0;
+    for (blocks, 0..) |b, bi| {
+        if (b.role != .user or user_count >= users.len) continue;
+        const disp = chatBlockDisplayRange(buf, b);
+        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms };
+        user_at[user_count] = bi;
+        user_count += 1;
+    }
+    var claimed: [CHAT_CONFIRMED_MAX_PER_KEY]i64 = undefined;
+    var claimed_count: usize = 0;
+    for (app_state.g_chat_confirmed.items) |c| {
+        if (claimed_count >= claimed.len) break;
+        if (c.stamp_ms == 0 or !std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) continue;
+        claimed[claimed_count] = c.stamp_ms;
+        claimed_count += 1;
+    }
+    var picked: [CHAT_OUTBOX_MAX_PER_KEY]?usize = undefined;
+    chat_echo.assign(pending[0..result.count], users[0..user_count], window_full, claimed[0..claimed_count], picked[0..result.count]);
+    for (0..result.count) |k| {
+        result.block[k] = if (picked[k]) |ui| user_at[ui] else null;
+        result.anchor[k] = pending[k].anchor;
+    }
+}
+
+fn chatEchoStoreAnchors(a: *const ChatEchoAssignment) void {
+    for (0..a.count) |k| {
+        const ei = chatOutboxIndexById(a.id[k]) orelse continue;
+        app_state.g_chat_outbox.items[ei].anchor = a.anchor[k];
+    }
+}
+
+fn chatEchoAssignedBlock(a: *const ChatEchoAssignment, id: u64) ?usize {
+    for (0..a.count) |k| {
+        if (a.id[k] == id) return a.block[k];
+    }
+    return null;
+}
+
+fn chatConfirmedCountIn(key: []const u8) usize {
+    var n: usize = 0;
+    for (app_state.g_chat_confirmed.items) |c| {
+        if (std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) n += 1;
+    }
+    return n;
+}
+
+fn chatConfirmedFirstIndexIn(key: []const u8) ?usize {
+    for (app_state.g_chat_confirmed.items, 0..) |c, i| {
+        if (std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) return i;
+    }
+    return null;
+}
+
+fn chatConfirmedDropKey(key: []const u8) void {
+    if (key.len == 0) return;
+    var i: usize = 0;
+    while (i < app_state.g_chat_confirmed.items.len) {
+        if (std.mem.eql(u8, app_state.g_chat_confirmed.items[i].key[0..@as(usize, app_state.g_chat_confirmed.items[i].key_len)], key)) {
+            _ = app_state.g_chat_confirmed.orderedRemove(i);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn chatConfirmedAdd(key: []const u8, prefix: []const u16, block_start: usize, block_len: usize, stamp_ms: i64) void {
+    if (key.len == 0 or prefix.len == 0) return;
+    while (chatConfirmedCountIn(key) >= CHAT_CONFIRMED_MAX_PER_KEY) {
+        const victim = chatConfirmedFirstIndexIn(key) orelse break;
+        _ = app_state.g_chat_confirmed.orderedRemove(victim);
+    }
+    var c = ChatConfirmedEcho{};
+    const klen = @min(key.len, c.key.len);
+    @memcpy(c.key[0..klen], key[0..klen]);
+    c.key_len = @intCast(klen);
+    const plen = @min(prefix.len, c.prefix.len);
+    @memcpy(c.prefix[0..plen], prefix[0..plen]);
+    c.prefix_len = @intCast(plen);
+    c.block_start = block_start;
+    c.block_len = block_len;
+    c.stamp_ms = stamp_ms;
+    app_state.g_chat_confirmed.append(std.heap.page_allocator, c) catch {};
+}
+
+fn chatConfirmedHas(key: []const u8, block_norm: []const u16, stamp_ms: i64) bool {
+    if (key.len == 0 or block_norm.len == 0) return false;
+    for (app_state.g_chat_confirmed.items) |c| {
+        if (!std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) continue;
+        if (c.stamp_ms != 0 and stamp_ms != 0) {
+            if (c.stamp_ms == stamp_ms) return true;
+            continue;
+        }
+        const p = c.prefix[0..@as(usize, c.prefix_len)];
+        if (p.len > 0 and chatEchoPrefixMatches(block_norm, p)) return true;
+    }
+    return false;
+}
+
+pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
+    if (app_state.active_shell >= app_state.shell_count or app_state.g_chat_confirmed.items.len == 0) return false;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return false;
+    const disp = chatBlockDisplayRange(buf, block);
+    if (disp.len == 0) return false;
+    var norm: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+    const p = chatEchoNormalizePrefix(buf[disp.start .. disp.start + disp.len], &norm);
+    return chatConfirmedHas(key, p, block.stamp_ms);
+}
+
+fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?usize {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return null;
+    const anchor = chatEchoAnchorNow(idx);
+    if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
+    const added = app_state.g_chat_outbox.items.len - 1;
+    app_state.g_chat_outbox.items[added].anchor = anchor;
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    return added;
+}
+
+fn chatEchoMarkNotSent(ei: usize) void {
+    if (ei >= app_state.g_chat_outbox.items.len) return;
+    if (app_state.g_chat_outbox.items[ei].state != .sending) return;
+    app_state.g_chat_outbox.items[ei].state = .not_sent;
+    app_state.g_chat_outbox.items[ei].left_box_ms = 0;
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+}
+
+fn chatEchoConfirmWithBlock(ei: usize, block_start: usize, block_len: usize, stamp_ms: i64) void {
+    if (ei >= app_state.g_chat_outbox.items.len) return;
+    const e = app_state.g_chat_outbox.items[ei];
+    var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const klen: usize = e.key_len;
+    @memcpy(key_copy[0..klen], e.key[0..klen]);
+    var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+    const p = chatEchoNormalizePrefix(e.text, &prefix);
+    if (p.len > 0) chatConfirmedAdd(key_copy[0..klen], p, block_start, block_len, stamp_ms);
+    chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, ei);
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+}
+
+fn chatEchoConfirm(ei: usize) void {
+    chatEchoConfirmWithBlock(ei, 0, 0, 0);
+}
+
+fn chatEchoTryMatchEntry(ei: usize) bool {
+    if (ei >= app_state.g_chat_outbox.items.len or app_state.active_shell >= app_state.shell_count) return false;
+    const id = app_state.g_chat_outbox.items[ei].id;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0 or !std.mem.eql(u8, key, app_state.g_chat_outbox.items[ei].key[0..@as(usize, app_state.g_chat_outbox.items[ei].key_len)])) return false;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey(key, app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_capture[0..app_state.g_chat_last_len], chatEchoWindowFull(), &assignment);
+    const bi = chatEchoAssignedBlock(&assignment, id) orelse return false;
+    chatEchoStoreAnchors(&assignment);
+    const ci = chatOutboxIndexById(id) orelse return false;
+    chatEchoConfirmWithBlock(ci, app_state.g_chat_blocks[bi].start, app_state.g_chat_blocks[bi].len, app_state.g_chat_blocks[bi].stamp_ms);
+    return true;
+}
+
+fn chatEchoLoadedMs() i64 {
+    if (app_state.active_shell >= app_state.shell_count) return 0;
+    for (app_state.g_chat_histories.items) |entry| {
+        if (!entry.retired and entry.key.shell_id == app_state.shells[app_state.active_shell].shell_id) return entry.loaded_ms;
+    }
+    return 0;
+}
+
+fn chatEchoDeliveryEvidence(entry: ChatOutboxEntry) chat_echo.DeliveryEvidence {
+    if (app_state.active_shell >= app_state.shell_count) return .{};
+    for (app_state.g_chat_histories.items) |history| {
+        if (history.retired or history.key.shell_id != app_state.shells[app_state.active_shell].shell_id) continue;
+        return history.history.deliveryEvidence(std.heap.page_allocator, .{ .text = entry.text, .prefix = &.{}, .anchor = entry.anchor }) catch .{};
+    }
+    return .{};
+}
+
+pub fn chatEchoMatchActive() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return;
+    var expired = false;
+    const loaded_ms = chatEchoLoadedMs();
+    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    const busy = app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working;
+    for (app_state.g_chat_outbox.items) |*e| {
+        if (e.state != .delivered or !std.mem.eql(u8, e.key[0..e.key_len], key)) continue;
+        e.delivery_watch.observe(busy, now_ms);
+        if (!busy and (chat_echo.expiredSent(e.state, e.anchor.sent_ms, now_ms) or e.delivery_watch.due(now_ms, loaded_ms))) {
+            expired = true;
+            break;
+        }
+    }
+    if (!expired and app_state.g_chat_reconcile_shell == shell_id and app_state.g_chat_reconcile_hash == app_state.g_chat_last_hash and
+        app_state.g_chat_reconcile_outbox == app_state.g_chat_outbox_revision and app_state.g_chat_reconcile_generation == app_state.g_chat_cache_generation) return;
+    const reconcile_start = GetTickCount64();
+    defer {
+        app_state.g_chat_reconcile_shell = shell_id;
+        app_state.g_chat_reconcile_hash = app_state.g_chat_last_hash;
+        app_state.g_chat_reconcile_outbox = app_state.g_chat_outbox_revision;
+        app_state.g_chat_reconcile_generation = app_state.g_chat_cache_generation;
+        chatPerf("reconcile", reconcile_start, app_state.g_chat_block_count);
+    }
+    var changed = false;
+    var i: usize = 0;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey(key, app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_capture[0..app_state.g_chat_last_len], chatEchoWindowFull(), &assignment);
+    chatEchoStoreAnchors(&assignment);
+    while (i < app_state.g_chat_outbox.items.len) {
+        const e = app_state.g_chat_outbox.items[i];
+        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+            i += 1;
+            continue;
+        }
+        if (chatEchoAssignedBlock(&assignment, e.id)) |mi| {
+            var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+            const p = chatEchoNormalizePrefix(e.text, &prefix);
+            var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
+            chatConfirmedAdd(key_copy[0..e.key_len], p, app_state.g_chat_blocks[mi].start, app_state.g_chat_blocks[mi].len, app_state.g_chat_blocks[mi].stamp_ms);
+            if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
+            chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+            changed = true;
+            continue;
+        }
+        var refused = false;
+        if (e.state == .delivered) {
+            const facts = chatEchoDeliveryEvidence(e);
+            refused = facts.refused;
+            app_state.g_chat_outbox.items[i].delivery_watch.evidence(facts, now_ms);
+        }
+        if (e.state == .delivered and (refused or (!busy and (app_state.g_chat_outbox.items[i].delivery_watch.due(now_ms, loaded_ms) or chat_echo.expiredSent(e.state, e.anchor.sent_ms, now_ms))))) {
+            app_state.g_chat_outbox.items[i].state = .not_sent;
+            app_state.g_chat_outbox.items[i].write_started = false;
+            app_state.g_chat_outbox.items[i].retryable = true;
+            app_state.g_chat_outbox.items[i].left_box_ms = 0;
+            changed = true;
+        }
+        i += 1;
+    }
+    if (changed) {
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+    }
+}
+
+pub fn chatEchoCountDeliveredForShell(idx: u32) usize {
+    if (idx >= app_state.shell_count) return 0;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
+    var n: usize = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state == .delivered and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+    }
+    return n;
+}
+
+pub fn chatEchoPushQueuedNow() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    if (chatEchoCountDeliveredForShell(app_state.active_shell) == 0) {
+        showHeaderNoticeAscii("No message is queued in Claude for this tab", 3000, false);
+        return;
+    }
+    if (!chatShouldUseDirectInput(app_state.active_shell) or !sendClaudeSendQueuedNowToShell(app_state.active_shell)) {
+        showHeaderNoticeAscii("Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal", 4000, true);
+        return;
+    }
+    app_state.g_chat_scroll_bottom_pending = true;
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+    showHeaderNoticeAscii("Asked Claude to take the queued message now", 2500, false);
+}
+
+pub fn chatEchoRetryAllForActive() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return;
+    var retried: u32 = 0;
+    for (app_state.g_chat_outbox.items) |*e| {
+        if (e.state != .not_sent or e.write_started or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        e.state = .queued;
+        e.retryable = false;
+        e.delivery_watch = .{};
+        e.left_box_ms = 0;
+        retried += 1;
+    }
+    if (retried == 0) {
+        showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
+        return;
+    }
+    _ = saveChatOutbox();
+    app_state.g_chat_scroll_bottom_pending = true;
+    chatOutboxChanged();
+    chatOutboxTick();
+    var buf: [64]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "Retrying {d} unsent message{s}", .{ retried, if (retried == 1) "" else "s" }) catch "Retrying unsent messages";
+    showHeaderNoticeAscii(msg, 3000, false);
+}
+
+pub fn chatEchoDiscardUnsentForActive() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return;
+    var dropped: u32 = 0;
+    var i: usize = 0;
+    while (i < app_state.g_chat_outbox.items.len) {
+        const e = app_state.g_chat_outbox.items[i];
+        if (e.state == .not_sent and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+            chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+            dropped += 1;
+        } else {
+            i += 1;
+        }
+    }
+    if (dropped == 0) {
+        showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
+        return;
+    }
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    var buf: [64]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "Discarded {d} unsent message{s}", .{ dropped, if (dropped == 1) "" else "s" }) catch "Discarded unsent messages";
+    showHeaderNoticeAscii(msg, 3000, false);
+}
+
+fn chatOutboxPrefixOf(text: []const u16, out: *[20]u16) []const u16 {
+    var start: usize = 0;
+    while (start < text.len and (text[start] == ' ' or text[start] == '\t')) : (start += 1) {}
+    var n: usize = 0;
+    while (start + n < text.len and n < out.len) : (n += 1) {
+        const c = text[start + n];
+        if (c == '\r' or c == '\n') break;
+        out[n] = c;
+    }
+    return out[0..n];
+}
+
+fn chatInputRowIsIdle(row: []const u16) bool {
+    if (row.len == 0) return false;
+    if (row[0] != 0x276F and row[0] != 0x203A) return false;
+    for (row[1..]) |c| {
+        if (c != ' ' and c != 0xA0) return false;
+    }
+    return true;
+}
+
+test "Chat View idle input row detection" {
+    const idle = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F}");
+    const idle_gt = std.unicode.utf8ToUtf16LeStringLiteral("\u{203A}   ");
+    const typed = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello");
+    const not_prompt = std.unicode.utf8ToUtf16LeStringLiteral("$ hello");
+    try std.testing.expect(chatInputRowIsIdle(idle));
+    try std.testing.expect(chatInputRowIsIdle(idle_gt));
+    try std.testing.expect(!chatInputRowIsIdle(typed));
+    try std.testing.expect(!chatInputRowIsIdle(not_prompt));
+    try std.testing.expect(!chatInputRowIsIdle(idle[0..0]));
+}
+
+fn chatOutboxInputRowIdle(shell_index: u32) bool {
+    const pid = app_state.shells[shell_index].pid;
+    if (pid == 0) return false;
+    _ = FreeConsole();
+    if (AttachConsole(pid) == 0) return false;
+    defer _ = FreeConsole();
+    const handle = openAttachedConsoleOutput() orelse return false;
+    defer _ = CloseHandle(handle);
+    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (GetConsoleScreenBufferInfo(handle, &info) == 0 or info.dwSize.x <= 0) return false;
+    const width: usize = @intCast(info.dwSize.x);
+    const bottom: i32 = @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom));
+    if (bottom < 0) return false;
+    const rows: usize = @intCast(@min(@as(i32, 40), bottom + 1));
+    if (rows == 0 or rows * width > app_state.g_chat_raw.len) return false;
+    const start_row: i16 = @intCast(bottom - @as(i32, @intCast(rows)) + 1);
+    var chars_read: DWORD = 0;
+    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, @intCast(rows * width), .{ .x = 0, .y = start_row }, &chars_read) == 0) return false;
+    var r = rows;
+    while (r > 0) {
+        r -= 1;
+        const line = chatTrimRawConsoleRow(width, chars_read, r);
+        if (line.len > 0 and (line[0] == 0x276F or line[0] == 0x203A)) return chatInputRowIsIdle(line);
+    }
+    return false;
+}
+
+fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
+    if (shell_index >= app_state.shell_count) return .write_failed;
+    if (chatOutboxIndexById(echo_id)) |ei| {
+        const entry = &app_state.g_chat_outbox.items[ei];
+        if (entry.write_started) return .write_failed;
+        entry.state = .sending;
+        entry.anchor = chatEchoAnchorNow(shell_index);
+        entry.write_started = true;
+        if (!saveChatOutbox()) {
+            entry.write_started = false;
+            entry.state = .queued;
+            return .write_failed;
+        }
+    }
+    const direct_input = chatShouldUseDirectInput(shell_index);
+    const sent = if (direct_input)
+        pasteTextToShellDirectEx(shell_index, send_text, chatSendForceBracketed(shell_index))
+    else
+        sendLocalChatPrompt(shell_index, send_text);
+    if (!sent) return .write_failed;
+    if (direct_input) {
+        Sleep(chatSendEnterDelayMs(app_state.shells[shell_index].kind));
+        if (!sendEnterToShell(shell_index)) return .enter_failed;
+        if (!chatArmSendVerify(shell_index, send_text, echo_id)) return .enter_failed;
+    }
+    return .ok;
+}
+
+fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
+    if (e >= app_state.g_chat_outbox.items.len) return false;
+    if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
+    if (chatOutboxFindSending(&app_state.g_chat_outbox) != null) return false;
+    const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
+    const first = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key) orelse return false;
+    if (first != e) return false;
+    if (app_state.shells[shell_index].activity == .active) return false;
+    if (shell_index == app_state.active_shell and app_state.g_chat_screen_working) return false;
+    if (!chatOutboxInputRowIdle(shell_index)) return false;
+    const direct = chatShouldUseDirectInput(shell_index);
+    if (!direct and shell_index != app_state.active_shell) return false;
+    const echo_id = app_state.g_chat_outbox.items[e].id;
+    switch (sendTextToShellVerifiedAt(shell_index, app_state.g_chat_outbox.items[e].text, echo_id)) {
+        .ok => {},
+        .write_failed, .enter_failed => {
+            app_state.g_chat_outbox.items[e].state = if (app_state.g_chat_outbox.items[e].write_started) .not_sent else .queued;
+            _ = saveChatOutbox();
+            if (app_state.g_chat_active) chatOutboxChanged();
+            return false;
+        },
+    }
+    app_state.g_chat_outbox.items[e].state = if (direct) .sending else .delivered;
+    app_state.g_chat_outbox.items[e].left_box_ms = 0;
+    _ = saveChatOutbox();
+    if (app_state.g_chat_active) chatOutboxChanged();
+    return true;
+}
+
+pub fn chatOutboxTick() void {
+    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    for (app_state.g_chat_outbox.items) |*entry| {
+        if (entry.state != .delivered and entry.state != .sending) continue;
+        const idx = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
+        const busy = app_state.shells[idx].activity == .active or (idx == app_state.active_shell and app_state.g_chat_screen_working);
+        entry.delivery_watch.observe(busy, now_ms);
+    }
+    if (app_state.g_chat_active) chatEchoMatchActive();
+    if (chatOutboxFindSending(&app_state.g_chat_outbox) == null) {
+        for (0..app_state.g_chat_outbox.items.len) |e| {
+            const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
+            const idx = chatOutboxShellForKey(key) orelse continue;
+            if (chatLinkLooksDown(idx)) continue;
+            if (chatOutboxTrySendEntry(idx, e)) break;
+        }
+    }
+    armChatOutboxTimerIfNeeded();
+}
+
+pub fn chatOutboxFlushActiveNow() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    if (chatOutboxCountForShell(app_state.active_shell) == 0) {
+        showHeaderNoticeAscii("No queued messages for this tab", 3000, false);
+        return;
+    }
+    if (chatOutboxFindSending(&app_state.g_chat_outbox) != null) {
+        showHeaderNoticeAscii("A queued message is already sending", 3000, false);
+        return;
+    }
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    const e = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key) orelse {
+        showHeaderNoticeAscii("No queued messages for this tab", 3000, false);
+        return;
+    };
+    if (chatOutboxTrySendEntry(app_state.active_shell, e)) {
+        showHeaderNoticeAscii("Sending queued message...", 2500, false);
+    } else {
+        showHeaderNoticeAscii("Waiting for the agent's input prompt", 3500, true);
+    }
+}
+
+pub fn chatOutboxClearActive() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return;
+    const dropped = chatOutboxClearIn(&app_state.g_chat_outbox, std.heap.page_allocator, key);
+    if (dropped == 0) {
+        showHeaderNoticeAscii("No queued messages for this tab", 3000, false);
+        return;
+    }
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    var buf: [80]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "Dropped {d} queued message{s}", .{ dropped, if (dropped == 1) "" else "s" }) catch "Dropped queued messages";
+    showHeaderNoticeAscii(msg, 3500, false);
+}
+
+fn chatReconnectBackoffMs(attempt: u8) u64 {
+    return switch (attempt) {
+        0 => 5000,
+        1 => 10000,
+        2 => 20000,
+        else => 30000,
+    };
+}
+
+test "Chat View reconnect backoff schedule" {
+    try std.testing.expectEqual(@as(u64, 5000), chatReconnectBackoffMs(0));
+    try std.testing.expectEqual(@as(u64, 10000), chatReconnectBackoffMs(1));
+    try std.testing.expectEqual(@as(u64, 20000), chatReconnectBackoffMs(2));
+    try std.testing.expectEqual(@as(u64, 30000), chatReconnectBackoffMs(3));
+    try std.testing.expectEqual(@as(u64, 30000), chatReconnectBackoffMs(99));
+}
+
+pub fn armSshReconnectTimerIfNeeded() void {
+    if (app_state.g_main_hwnd == null) return;
+    if (!SSH_AUTO_RECONNECT_ENABLED) {
+        if (app_state.g_ssh_reconnect_timer_on) {
+            app_state.g_ssh_reconnect_timer_on = false;
+            _ = KillTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT);
+        }
+        return;
+    }
+    var any = false;
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].kind == .tmux and app_state.shells[i].disconnected) {
+            any = true;
+            break;
+        }
+    }
+    if (any) {
+        if (!app_state.g_ssh_reconnect_timer_on) {
+            app_state.g_ssh_reconnect_timer_on = true;
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT, 1000, null);
+        }
+    } else if (app_state.g_ssh_reconnect_timer_on) {
+        app_state.g_ssh_reconnect_timer_on = false;
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT);
+    }
+}
+
+pub fn sshAutoReconnectTick() void {
+    if (!chatNetworkReportsConnected()) return;
+    const now = GetTickCount64();
+    var reconnected: u32 = 0;
+    var i: u32 = 0;
+    while (i < app_state.shell_count) : (i += 1) {
+        if (app_state.shells[i].kind != .tmux) continue;
+        if (!app_state.shells[i].disconnected) {
+            if (app_state.shells[i].ssh_reconnect_attempts > 0 and now >= app_state.shells[i].ssh_reconnect_next_tick + 60_000) {
+                app_state.shells[i].ssh_reconnect_attempts = 0;
+                app_state.shells[i].ssh_reconnect_next_tick = 0;
+            }
+            continue;
+        }
+        if (app_state.shells[i].ssh_reconnect_next_tick != 0 and now < app_state.shells[i].ssh_reconnect_next_tick) continue;
+        if (app_state.shells[i].ssh_reconnect_attempts > 0 and now >= app_state.shells[i].ssh_reconnect_next_tick + 60_000) app_state.shells[i].ssh_reconnect_attempts = 0;
+        const attempts = app_state.shells[i].ssh_reconnect_attempts;
+        app_state.shells[i].ssh_reconnect_attempts = attempts +| 1;
+        app_state.shells[i].ssh_reconnect_next_tick = now + chatReconnectBackoffMs(attempts);
+        if (respawnShellInPlace(i, true)) {
+            logSessionAuditAlways("chat-outbox-ssh-reconnected");
+            if (attempts == 0) reconnected += 1;
+        } else {
+            markSshTabDisconnected(i);
+        }
+    }
+    if (reconnected > 0) {
+        app_state.g_tmux_fetch_tick = 0;
+        fetchTmuxSessions();
+        saveSession();
+        repositionActive();
+        showHeaderNoticeAscii(if (reconnected == 1) "Reconnected" else "Reconnected sessions", 4000, false);
+    }
+    armSshReconnectTimerIfNeeded();
+}
+
+test "Chat View outbox is FIFO and capped per key" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        list.deinit(allocator);
+    }
+    const key_a = "tmux:0:alpha";
+    const key_b = "tmux:1:beta";
+    for (0..25) |i| {
+        var buf: [8]u16 = undefined;
+        for (0..8) |j| buf[j] = @intCast('a' + ((i + j) % 26));
+        try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, key_a, &buf));
+    }
+    try std.testing.expectEqual(@as(usize, CHAT_OUTBOX_MAX_PER_KEY), chatOutboxCountIn(&list, key_a));
+    var first_buf: [8]u16 = undefined;
+    for (0..8) |j| first_buf[j] = @intCast('a' + ((5 + j) % 26));
+    const first = chatOutboxFirstIndexIn(&list, key_a) orelse return error.Missing;
+    try std.testing.expect(std.mem.eql(u16, list.items[first].text, &first_buf));
+    const msg_b = std.unicode.utf8ToUtf16LeStringLiteral("beta");
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, key_b, msg_b));
+    try std.testing.expectEqual(@as(usize, 1), chatOutboxCountIn(&list, key_b));
+    try std.testing.expect((chatOutboxFirstIndexIn(&list, key_a) orelse 999) < (chatOutboxFirstIndexIn(&list, key_b) orelse 0));
+    try std.testing.expectEqual(@as(u32, 20), chatOutboxClearIn(&list, allocator, key_a));
+    try std.testing.expectEqual(@as(usize, 0), chatOutboxCountIn(&list, key_a));
+    try std.testing.expectEqual(@as(usize, 1), chatOutboxCountIn(&list, key_b));
+}
+
+test "Chat View outbox JSON round-trips quotes, newlines and unicode" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        list.deinit(allocator);
+    }
+    const msg1 = std.unicode.utf8ToUtf16LeStringLiteral("line one\nline \"two\"\tend");
+    const msg2 = std.unicode.utf8ToUtf16LeStringLiteral("\u{00E9}\u{4E2D}\u{1F600} unicode");
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, "tmux:2:gamma", msg1));
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, "tmux:2:gamma", msg2));
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, "cmd:Local", msg1));
+    var jlen: usize = 0;
+    const json = chatOutboxSerialize(&list, allocator, &jlen) orelse return error.SerializeFailed;
+    defer allocator.free(json);
+
+    var parsed: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (parsed.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        parsed.deinit(allocator);
+    }
+    chatOutboxParseJson(&parsed, allocator, json[0..jlen]);
+    try std.testing.expectEqual(@as(usize, 3), parsed.items.len);
+    try std.testing.expectEqual(@as(usize, 2), chatOutboxCountIn(&parsed, "tmux:2:gamma"));
+    try std.testing.expectEqual(@as(usize, 1), chatOutboxCountIn(&parsed, "cmd:Local"));
+    const g0 = chatOutboxFirstIndexIn(&parsed, "tmux:2:gamma") orelse return error.Missing;
+    try std.testing.expect(std.mem.eql(u16, parsed.items[g0].text, msg1));
+    try std.testing.expect(std.mem.eql(u16, parsed.items[g0 + 1].text, msg2));
+}
+
+test "outbox reordered queues and raw Unicode use the old-version state fallbacks" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    const json = "{\"queues\":[{\"messages\":[{\"extra\":{\"t\":\"wrong\"},\"t\":\"Raw 日🚀 \\\"key\\\":\\\"fake\\\" } ]\",\"s\":1},{\"t\":\"queued\"}],\"key\":\"tmux:2:real\"}],\"version\":1,\"extra\":true}";
+    chatOutboxParseJson(&list, allocator, json);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqual(ChatEchoState.not_sent, list.items[0].state);
+    try std.testing.expect(list.items[0].write_started);
+    try std.testing.expectEqual(ChatEchoState.queued, list.items[1].state);
+    try std.testing.expect(!list.items[1].write_started);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Raw 日🚀 \"key\":\"fake\" } ]"), list.items[0].text);
+}
+
+test "Chat View outbox prefix matches the Enter-retry prefix" {
+    var out: [20]u16 = undefined;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("   hello world");
+    const prefix = chatOutboxPrefixOf(text, &out);
+    const expected = std.unicode.utf8ToUtf16LeStringLiteral("hello world");
+    try std.testing.expect(std.mem.eql(u16, prefix, expected));
+}
+
+test "Chat View echo state on load never retries a possibly typed send" {
+    try std.testing.expectEqual(ChatEchoState.queued, chatEchoStateOnLoad(0));
+    try std.testing.expectEqual(ChatEchoState.not_sent, chatEchoStateOnLoad(1));
+    try std.testing.expectEqual(ChatEchoState.not_sent, chatEchoStateOnLoad(2));
+    try std.testing.expectEqual(ChatEchoState.delivered, chatEchoStateOnLoad(3));
+}
+
+test "Chat View echo prefix collapses whitespace" {
+    var out: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("  hello\n   wrapped\tworld  ");
+    const p = chatEchoNormalizePrefix(text, &out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello wrapped world"), p);
+    const long = std.unicode.utf8ToUtf16LeStringLiteral("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    try std.testing.expectEqual(@as(usize, CHAT_ECHO_PREFIX_CAP), chatEchoNormalizePrefix(long, &out).len);
+}
+
+fn chatEchoTestAssign(blocks: []const ChatBlock, buf: []const u16, anchor: chat_echo.Anchor, window_full: bool, text: []const u16) !?usize {
+    const allocator = std.testing.allocator;
+    const saved = app_state.g_chat_outbox;
+    app_state.g_chat_outbox = .empty;
+    defer {
+        for (app_state.g_chat_outbox.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        app_state.g_chat_outbox.deinit(allocator);
+        app_state.g_chat_outbox = saved;
+    }
+    if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, "tmux:7:echo-test", text, .sending)) return error.EnqueueFailed;
+    app_state.g_chat_outbox.items[0].write_started = true;
+    app_state.g_chat_outbox.items[0].anchor = anchor;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey("tmux:7:echo-test", blocks, buf, window_full, &assignment);
+    return chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id);
+}
+
+test "Chat View echo matches only user blocks after the baseline" {
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral(
+        "\u{276f} old message\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} hello wrapped\r\n",
+    );
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hello   wrapped");
+    try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 1, .counted = true }, false, text));
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text)) == null);
+    const other = std.unicode.utf8ToUtf16LeStringLiteral("totally other");
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .counted = true }, false, other)) == null);
+}
+
+test "Chat View echo in a full transcript window confirms only from newer entries" {
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral(
+        "\u{276f} hello wrapped\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} hello wrapped\r\n",
+    );
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hello wrapped");
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .user_count = 1, .counted = true }, true, text)) == null);
+    blocks[0].stamp_ms = 1_000;
+    blocks[2].stamp_ms = 3_000;
+    try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssign(blocks[0..n], buf, .{ .after_ms = 2_000 }, true, text));
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .after_ms = 3_000 }, true, text)) == null);
+}
+
+test "Chat View echo persistence retains a reserved send without retyping" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        list.deinit(allocator);
+    }
+    const msg = std.unicode.utf8ToUtf16LeStringLiteral("unconfirmed hello");
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:0:alpha", msg, .sending));
+    const queued = std.unicode.utf8ToUtf16LeStringLiteral("waiting hello");
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:0:alpha", queued, .queued));
+    list.items[0].anchor = .{ .after_ms = 1_760_170_353_456, .sent_ms = 1_760_170_354_000 };
+    list.items[0].write_started = true;
+    var jlen: usize = 0;
+    const json = chatOutboxSerialize(&list, allocator, &jlen) orelse return error.SerializeFailed;
+    defer allocator.free(json);
+    var parsed: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (parsed.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        parsed.deinit(allocator);
+    }
+    chatOutboxParseJson(&parsed, allocator, json[0..jlen]);
+    try std.testing.expectEqual(@as(usize, 2), parsed.items.len);
+    try std.testing.expectEqual(ChatEchoState.not_sent, parsed.items[0].state);
+    try std.testing.expectEqual(ChatEchoState.queued, parsed.items[1].state);
+    try std.testing.expect(parsed.items[0].id != 0 and parsed.items[0].id != parsed.items[1].id);
+    try std.testing.expectEqual(@as(i64, 1_760_170_353_456), parsed.items[0].anchor.after_ms);
+    try std.testing.expectEqual(@as(i64, 1_760_170_354_000), parsed.items[0].anchor.sent_ms);
+    try std.testing.expectEqual(@as(i64, 0), parsed.items[1].anchor.after_ms);
+}
+
+test "Chat View outbox never auto-sends an already-delivered message" {
+    try std.testing.expect(chatOutboxAutoSendable(.queued));
+    try std.testing.expect(!chatOutboxAutoSendable(.sending));
+    try std.testing.expect(!chatOutboxAutoSendable(.not_sent));
+    try std.testing.expect(!chatOutboxAutoSendable(.delivered));
+}
+
+test "Chat View outbox flush skips unconfirmed entries and keeps FIFO order" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        list.deinit(allocator);
+    }
+    const one = std.unicode.utf8ToUtf16LeStringLiteral("first");
+    const two = std.unicode.utf8ToUtf16LeStringLiteral("second");
+    const three = std.unicode.utf8ToUtf16LeStringLiteral("third");
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", one, .delivered));
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", two, .not_sent));
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", three, .queued));
+    try std.testing.expectEqual(@as(?usize, 2), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2"));
+    try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstIndexIn(&list, "tmux:1:zigshell-2"));
+    const four = std.unicode.utf8ToUtf16LeStringLiteral("fourth");
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:3:delta", four, .delivered));
+    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:3:delta") == null);
+    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:9:absent") == null);
+}
+
+test "Chat View echo confirmation survives CRLF, wrapping and a slash command" {
+    const typed = std.unicode.utf8ToUtf16LeStringLiteral("\r\n  explain to me /pospeak simply what the\r\ndifferences are and the legality\r\n");
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral(
+        "\u{276f} explain to me /pospeak simply what the\r\ndifferences are and the legality\r\n\r\n\u{25cf} reply\r\n",
+    );
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
+    const p = chatEchoNormalizePrefix(typed, &prefix);
+    try std.testing.expectEqual(@as(usize, CHAT_ECHO_PREFIX_CAP), p.len);
+    try std.testing.expect(std.mem.startsWith(u16, p, std.unicode.utf8ToUtf16LeStringLiteral("explain to me /pospeak simply")));
+    try std.testing.expect((try chatEchoTestAssign(blocks[0..n], buf, .{ .counted = true }, false, typed)) != null);
+}

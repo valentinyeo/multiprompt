@@ -1,0 +1,15 @@
+:root {
+  --sl-color-accent-low: #242447;
+  --sl-color-accent: #828fff;
+  --sl-color-accent-high: #e4e5ff;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e9eaff;
+  --sl-color-accent: #5e6ad2;
+  --sl-color-accent-high: #202044;
+}
+
+.hero img {
+  filter: drop-shadow(0 8px 20px rgb(0 0 0 / 0.28));
+}

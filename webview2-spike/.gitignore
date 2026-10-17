@@ -1,0 +1,11 @@
+# Large SDK download — run build.ps1 to fetch + extract
+webview2.nupkg
+webview2-sdk/
+
+# Build outputs
+webview2-spike.exe
+webview2-spike.exe.WebView2/
+webview2-spike.pdb
+
+# Misc fetched headers
+webview.h

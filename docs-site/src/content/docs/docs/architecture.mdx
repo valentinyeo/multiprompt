@@ -1,0 +1,69 @@
+---
+title: Architecture
+description: The main moving parts in multiprompt.
+---
+
+## Process Model
+
+multiprompt keeps the permanent Windows AppUserModelID `ValentinYeo.ZigShell` across the product rename and stamps it directly on every main HWND. The process, windows, jump list, and installed or pinned taskbar shortcut must retain that same identity so Explorer cannot merge multiprompt's frequently rebuilt executable with Edge PWAs or unrelated desktop applications.
+
+multiprompt is a native Win32 app written in Zig. It hosts real Windows console windows instead of rendering terminal text itself.
+
+```text
+multiprompt.exe
+  ├─ custom Win32 sidebar and overlays
+  ├─ reparented cmd.exe / powershell / ssh windows
+  ├─ optional owned Edge windows
+  └─ notification and multiprompt-browser bridge listeners
+```
+
+## Shell Hosting
+
+Each shell is a real console process. multiprompt finds or spawns the console window, strips unwanted window styles, reparents it into the right pane, and moves it during layout changes.
+
+This keeps memory low and avoids terminal rendering complexity.
+
+## Native Browser Pane
+
+Browser panes are native Edge windows owned and positioned by multiprompt. They are not WebViews. This preserves full browser features but requires careful geometry, focus, and mask handling.
+
+## Notifications
+
+multiprompt listens on local notification ports and receives messages such as:
+
+```text
+ACTIVE:<session>
+DONE:<session>
+TITLE:<session>:<subject>
+SESSION:<session>:<claude-session-id>:<cwd>
+AGENT:<session>:<kind>
+OPENBROWSER:<shell-id>:<url>
+SIDEBAR:<shell-id>
+```
+
+Remote VPS sessions reach the local listener through SSH reverse tunnels.
+
+## Workspace Persistence
+
+Session state remains stored in JSON files under the legacy `%APPDATA%\ZigShell` compatibility path. Workspace display names live in `windows.json`; shell state lives in session files.
+
+Runtime-only state should not be persisted:
+
+- spinner activity
+- transient focus state
+- temporary browser launch/adopt state
+
+Persisted state should include:
+
+- shell kind
+- visible name and naming source
+- tmux session id
+- workspace id
+- browser URL and enabled state
+- last active ordering metadata
+- pending blue-dot attention, because it is an unread user obligation rather
+  than transient process activity
+
+## DEV vs Stable
+
+Stable and DEV are separate binaries and use separate session files. DEV should be used for risky UI and geometry changes until screenshots and state checks prove the behavior.

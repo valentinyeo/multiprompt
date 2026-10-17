@@ -1,0 +1,12 @@
+[Unit]
+Description=multiprompt notification relay
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/zigshell/mp_notify_relay.py
+Restart=always
+RestartPreventExitStatus=78
+RestartSec=5
+
+[Install]
+WantedBy=default.target

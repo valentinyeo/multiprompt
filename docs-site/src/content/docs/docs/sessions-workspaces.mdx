@@ -1,0 +1,87 @@
+---
+title: Sessions & Workspaces
+description: How multiprompt names, restores, and groups agent shells.
+---
+
+## Session Identity
+
+Each tab has a visible title and, for tmux-backed tabs, a tmux session id. Use the visible title when talking to humans. Use the tmux id when debugging routing.
+
+Example:
+
+```text
+Visible title: fix the big bad query
+tmux id:       project-50
+```
+
+## Naming Hierarchy
+
+multiprompt should prefer the highest-confidence name:
+
+1. Manual multiprompt rename with `F2` or double-click.
+2. Explicit agent/session rename when the underlying Claude Code session changes its name.
+3. Dynamic Claude/tmux title.
+4. Current working directory or fallback shell title.
+
+Manual multiprompt renames are sticky. Clearing the name should allow automatic naming again.
+
+Cursor CLI sessions use their own nested-diamond sidebar icon. For remote tmux
+sessions, multiprompt recognizes Cursor from the live `cursor-agent` child even
+when the pane command is only `agent` or the session retains old Claude resume
+metadata.
+
+## Workspaces
+
+Workspaces are persistent top-level multiprompt windows or in-process workspace slots. User-facing workspace names are stored separately from stable workspace ids.
+
+In single-window mode, **Other** is the permanent catch-all for sessions that do not belong to a product workspace. It remains available even when empty, cannot be closed, deleted, or renamed, and is restored automatically if an older session file omitted it.
+
+Use `Ctrl+K` and search for `Single-Window Mode` to change the window model. When
+you turn the mode off, the active workspace keeps its name and becomes the
+current top-level window. Every other open workspace is saved as a standalone
+workspace and remains listed under `Ctrl+K` → `Workspaces`. Opening one creates
+its own window. The switch aborts before detaching any sessions if one of those
+workspace files cannot be written.
+
+Turning single-window mode back on converts the current window into a workspace
+slot and absorbs other live multiprompt windows. Remembered workspaces that are
+not open remain available from `Ctrl+K` → `Workspaces` and are absorbed when
+opened.
+
+Important files:
+
+- `%APPDATA%\ZigShell\windows.json`
+- `%APPDATA%\ZigShell\session.json`
+- `%APPDATA%\ZigShell\session-{workspace-id}.json`
+
+Closing a workspace should not delete its sessions. It should mark that window as not restoring on next startup while keeping it available from the workspace history.
+
+## Closing vs Ending tmux
+
+Closing a tmux-backed tab with the tab X, `Ctrl+W`, or `Close Tab` closes only the local multiprompt tab. The remote tmux session stays alive and can be reattached.
+
+Lock a long-running session from Ctrl+K or its right-click menu when even a local close would be disruptive. Locked sessions keep an inline padlock in their current custom group or ungrouped section and reject close, dissolve, end-tmux, group-close, and workspace deletion until explicitly unlocked. Close Workspace may still hibernate them because it preserves the remote tmux session and saved lock bit. The lock survives restart, reconnect, and workspace/tab moves.
+
+Use `End tmux session` from Ctrl+K or the tab right-click actions when the intent is destructive teardown. That command kills the remote tmux session, removes the browser binding files for the tab, closes any docked browser pane, closes the local tab, and skips reopen history because there is no remote session left to reopen.
+
+## Moving Shells
+
+Shells can be moved into open or remembered closed workspaces. Moving a shell should preserve:
+
+- visible title
+- tmux session id
+- browser pane URL state
+- multiprompt-browser binding, or enough metadata to rebuild it
+- last activity ordering metadata
+- lock and pinned state
+- custom groups and their order, color, and collapsed state
+
+## Sidebar groups and sort order
+
+Custom groups are stable top-level blocks inside the active workspace. Creating a group from the tab actions palette assigns the chosen tab or selection and immediately opens the group name editor. Moving one tab to another workspace removes its group membership, while moving the whole group preserves it in the destination.
+
+Inside each group, pinned sessions come first. Each pin tier then sorts by attention, active spinner state, and activity recency. Locking is a close guard and does not move the session.
+
+Ungrouped sessions retain the **PINNED** and **RECENTS** sections. Both headings can be clicked to collapse or expand their section, and that state persists with the workspace. There is no separate LOCKED section.
+
+Muted tabs sink below unmuted tabs inside the same pin tier.

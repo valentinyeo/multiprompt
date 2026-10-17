@@ -1,0 +1,823 @@
+const app_state = @import("app_state.zig");
+const std = @import("std");
+const DWORD = @import("win32.zig").DWORD;
+const HANDLE = @import("win32.zig").HANDLE;
+const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
+const DT_VCENTER = @import("win32.zig").DT_VCENTER;
+const DT_CENTER = @import("win32.zig").DT_CENTER;
+const DT_RIGHT = @import("win32.zig").DT_RIGHT;
+const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
+const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
+const TRANSPARENT = @import("win32.zig").TRANSPARENT;
+const DEFAULT_GUI_FONT = @import("win32.zig").DEFAULT_GUI_FONT;
+const NULL_BRUSH = @import("win32.zig").NULL_BRUSH;
+const RECT = @import("win32.zig").RECT;
+const IsWindow = @import("win32.zig").IsWindow;
+const GetClientRect = @import("win32.zig").GetClientRect;
+const InvalidateRect = @import("win32.zig").InvalidateRect;
+const FillRect = @import("win32.zig").FillRect;
+const DrawTextW = @import("win32.zig").DrawTextW;
+const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
+const DeleteObject = @import("win32.zig").DeleteObject;
+const SetBkMode = @import("win32.zig").SetBkMode;
+const SetTextColor = @import("win32.zig").SetTextColor;
+const SelectObject = @import("win32.zig").SelectObject;
+const GetStockObject = @import("win32.zig").GetStockObject;
+const CreateFontW = @import("win32.zig").CreateFontW;
+const Ellipse = @import("win32.zig").Ellipse;
+const RoundRect = @import("win32.zig").RoundRect;
+const CreatePen = @import("win32.zig").CreatePen;
+const MoveToEx = @import("win32.zig").MoveToEx;
+const LineTo = @import("win32.zig").LineTo;
+const CreateCompatibleDC = @import("win32.zig").CreateCompatibleDC;
+const CreateCompatibleBitmap = @import("win32.zig").CreateCompatibleBitmap;
+const DeleteDC = @import("win32.zig").DeleteDC;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const SendMessageW = @import("win32.zig").SendMessageW;
+const L = @import("startup.zig").L;
+const RGB = @import("startup.zig").RGB;
+const Shell = @import("app_state.zig").Shell;
+const customColorOr = @import("themes.zig").customColorOr;
+const themeTitleFontFace = @import("themes.zig").themeTitleFontFace;
+const themeSubtitleFontFace = @import("themes.zig").themeSubtitleFontFace;
+const themeCloseFontFace = @import("themes.zig").themeCloseFontFace;
+const themeTitleFontHeight = @import("themes.zig").themeTitleFontHeight;
+const themeSubtitleFontHeight = @import("themes.zig").themeSubtitleFontHeight;
+const themeCloseFontHeight = @import("themes.zig").themeCloseFontHeight;
+const themeTitleFontWeight = @import("themes.zig").themeTitleFontWeight;
+const themeSubtitleFontWeight = @import("themes.zig").themeSubtitleFontWeight;
+const themeCloseFontWeight = @import("themes.zig").themeCloseFontWeight;
+const themeSidebarBg = @import("themes.zig").themeSidebarBg;
+const themeConsoleBg = @import("themes.zig").themeConsoleBg;
+const themeConsoleFg = @import("themes.zig").themeConsoleFg;
+const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
+const MAX_LWS = @import("app_state.zig").MAX_LWS;
+const WS_STRIP_H = @import("app_state.zig").WS_STRIP_H;
+const WS_PILL_TOP = @import("app_state.zig").WS_PILL_TOP;
+const WS_PILL_H = @import("app_state.zig").WS_PILL_H;
+const WS_PILL_W = @import("app_state.zig").WS_PILL_W;
+const WS_PILL_GAP = @import("app_state.zig").WS_PILL_GAP;
+const WS_STRIP_LEFT = @import("app_state.zig").WS_STRIP_LEFT;
+const inboxButtonRect = @import("browser_pane.zig").inboxButtonRect;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
+const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
+const tintColor = @import("sidebar.zig").tintColor;
+const CapacityState = @import("app_state.zig").CapacityState;
+const activeCapacityStatus = @import("capacity.zig").activeCapacityStatus;
+const workspaceCapacityState = @import("capacity.zig").workspaceCapacityState;
+const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
+const mainWindowDpi = @import("console.zig").mainWindowDpi;
+const drawAttentionDot = @import("archive.zig").drawAttentionDot;
+const contentHeaderLeft = @import("browser_pane.zig").contentHeaderLeft;
+const browserSlotReserved = @import("browser_pane.zig").browserSlotReserved;
+const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
+const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchoredBesideBrowser;
+const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
+const chatRelayout = @import("chat_render.zig").chatRelayout;
+const voiceStatusLabel = @import("voice.zig").voiceStatusLabel;
+const etaHeaderLabel = @import("notifications.zig").etaHeaderLabel;
+const asciiToU16 = @import("inbox.zig").asciiToU16;
+const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
+const inboxRelTime = @import("inbox.zig").inboxRelTime;
+
+pub fn drawAscii(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
+    var buf: [128]u16 = undefined;
+    var n: usize = 0;
+    for (text) |c| {
+        if (n >= buf.len) break;
+        buf[n] = @intCast(c);
+        n += 1;
+    }
+    _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), rc, flags);
+}
+
+pub fn drawAsciiLong(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
+    var buf: [1024]u16 = undefined;
+    var n: usize = 0;
+    for (text) |c| {
+        if (n >= buf.len) break;
+        buf[n] = @intCast(c);
+        n += 1;
+    }
+    _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), rc, flags);
+}
+
+pub fn drawModalShadow(hdc: HANDLE, x: i32, y: i32, w: i32, h: i32, radius: i32) void {
+    if (w <= 0 or h <= 0) return;
+
+    const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    defer _ = SelectObject(hdc, old_brush);
+
+    const ShadowSpec = struct { offset: i32, width: i32, color: DWORD };
+    const specs = if (app_state.g_light_theme)
+        [_]ShadowSpec{
+            .{ .offset = 11, .width = 6, .color = RGB(215, 215, 215) },
+            .{ .offset = 7, .width = 4, .color = RGB(190, 190, 190) },
+            .{ .offset = 4, .width = 2, .color = RGB(165, 165, 165) },
+        }
+    else
+        [_]ShadowSpec{
+            .{ .offset = 11, .width = 6, .color = customColorOr("shadow_outer", RGB(20, 20, 20)) },
+            .{ .offset = 7, .width = 4, .color = customColorOr("shadow_mid", RGB(12, 12, 12)) },
+            .{ .offset = 4, .width = 2, .color = customColorOr("shadow_inner", RGB(4, 4, 4)) },
+        };
+
+    for (specs) |spec| {
+        const pen = CreatePen(0, spec.width, spec.color);
+        if (pen == null) continue;
+        const old_pen = SelectObject(hdc, pen);
+        _ = RoundRect(hdc, x + spec.offset, y + spec.offset, x + w + spec.offset, y + h + spec.offset, radius, radius);
+        _ = SelectObject(hdc, old_pen);
+        _ = DeleteObject(pen);
+    }
+}
+
+pub fn resetPaintBackbuffer() void {
+    if (app_state.g_paint_mem_dc) |dc| {
+        if (app_state.g_paint_old_bmp != null) _ = SelectObject(dc, app_state.g_paint_old_bmp);
+    }
+    if (app_state.g_paint_bmp != null) _ = DeleteObject(app_state.g_paint_bmp);
+    if (app_state.g_paint_mem_dc != null) _ = DeleteDC(app_state.g_paint_mem_dc);
+    app_state.g_paint_mem_dc = null;
+    app_state.g_paint_bmp = null;
+    app_state.g_paint_old_bmp = null;
+    app_state.g_paint_w = 0;
+    app_state.g_paint_h = 0;
+}
+
+pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
+    if (w <= 0 or h <= 0) return null;
+    if (app_state.g_paint_mem_dc != null and app_state.g_paint_bmp != null and app_state.g_paint_w == w and app_state.g_paint_h == h) return app_state.g_paint_mem_dc;
+
+    resetPaintBackbuffer();
+    const mem_dc = CreateCompatibleDC(hdc);
+    if (mem_dc == null) return null;
+    const bmp = CreateCompatibleBitmap(hdc, w, h);
+    if (bmp == null) {
+        _ = DeleteDC(mem_dc);
+        return null;
+    }
+    app_state.g_paint_old_bmp = SelectObject(mem_dc, bmp);
+    app_state.g_paint_mem_dc = mem_dc;
+    app_state.g_paint_bmp = bmp;
+    app_state.g_paint_w = w;
+    app_state.g_paint_h = h;
+    return mem_dc;
+}
+
+pub fn resetFontCache() void {
+    if (app_state.g_font_title != null) _ = DeleteObject(app_state.g_font_title);
+    if (app_state.g_font_shell_tab_title != null) _ = DeleteObject(app_state.g_font_shell_tab_title);
+    if (app_state.g_font_subtitle != null) _ = DeleteObject(app_state.g_font_subtitle);
+    if (app_state.g_font_status_card != null) _ = DeleteObject(app_state.g_font_status_card);
+    if (app_state.g_font_close != null) _ = DeleteObject(app_state.g_font_close);
+    if (app_state.g_font_inbox_title != null) _ = DeleteObject(app_state.g_font_inbox_title);
+    if (app_state.g_font_inbox_sub != null) _ = DeleteObject(app_state.g_font_inbox_sub);
+    if (app_state.g_font_thread_title != null) _ = DeleteObject(app_state.g_font_thread_title);
+    for (&app_state.g_chat_rich_fonts) |*font| {
+        if (font.* != null) _ = DeleteObject(font.*);
+        font.* = null;
+    }
+    if (app_state.g_chat_link_font != null) {
+        _ = DeleteObject(app_state.g_chat_link_font);
+        app_state.g_chat_link_font = null;
+    }
+    if (app_state.g_chat_code_link_font != null) {
+        _ = DeleteObject(app_state.g_chat_code_link_font);
+        app_state.g_chat_code_link_font = null;
+    }
+    if (app_state.g_chat_font != null) {
+        const fallback = GetStockObject(DEFAULT_GUI_FONT);
+        if (app_state.g_chat_composer_hwnd != null) _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(fallback), 0);
+        _ = DeleteObject(app_state.g_chat_font);
+        app_state.g_chat_font = null;
+    }
+    if (app_state.g_chat_code_font != null) {
+        _ = DeleteObject(app_state.g_chat_code_font);
+        app_state.g_chat_code_font = null;
+    }
+    if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null and app_state.g_chat_layout_width > 0) {
+        chatRelayout(app_state.g_chat_layout_width);
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    }
+    app_state.g_font_title = null;
+    app_state.g_font_shell_tab_title = null;
+    app_state.g_font_subtitle = null;
+    app_state.g_font_status_card = null;
+    app_state.g_font_close = null;
+    app_state.g_font_inbox_title = null;
+    app_state.g_font_inbox_sub = null;
+    app_state.g_font_thread_title = null;
+    app_state.g_chat_font = null;
+}
+
+pub fn resetGdiCache() void {
+    resetFontCache();
+    resetPaintBackbuffer();
+}
+
+pub fn uiScaled(px: i32) i32 {
+    const numerator = @as(i64, px) *
+        @as(i64, @intCast(app_state.g_ui_scale)) *
+        @as(i64, @intCast(mainWindowDpi()));
+    return @intCast(@divTrunc(numerator, 100 * 96));
+}
+
+pub fn uiUnscaled(px: i32) i32 {
+    const scale = @as(i64, @intCast(app_state.g_ui_scale)) *
+        @as(i64, @intCast(mainWindowDpi()));
+    if (scale <= 0) return px;
+    return @intCast(@divTrunc(@as(i64, px) * 100 * 96, scale));
+}
+
+pub fn searchRowH() i32 {
+    return uiScaled(32);
+}
+pub fn searchInputH() i32 {
+    return uiScaled(36);
+}
+pub fn searchOverlayW() i32 {
+    return uiScaled(430);
+}
+
+pub fn searchOverlayOx(win_w: i32, overlay_w: i32) i32 {
+    if (paletteAnchoredBesideBrowser()) {
+        const layout = calcBrowserLayout().?;
+        const console_right = layout.splitter_left;
+        var ox = SIDEBAR_W() + @divFloor((console_right - SIDEBAR_W()) - overlay_w, 2);
+        if (ox < SIDEBAR_W() + 8) ox = SIDEBAR_W() + 8;
+        if (ox + overlay_w > console_right - 8) ox = console_right - 8 - overlay_w;
+        return ox;
+    }
+    return @divFloor(win_w - overlay_w, 2);
+}
+
+pub fn searchResultRowAtClientPoint(mx: i32, my: i32) ?u32 {
+    if (!app_state.g_search_active or app_state.g_search_result_count == 0 or app_state.g_search_rename_input_mode or app_state.g_browser_url_mode) return null;
+
+    var win_rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &win_rc);
+    const win_w = win_rc.right - win_rc.left;
+    const win_h = win_rc.bottom - win_rc.top;
+    const overlay_w = searchOverlayW();
+    const row_h = searchRowH();
+    const input_h = searchInputH();
+    const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_rows: u32 = @min(app_state.g_search_result_count -| app_state.g_search_scroll, visible_capacity);
+    const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h;
+    const ox = searchOverlayOx(win_w, overlay_w);
+    const oy = @divFloor(win_h - overlay_h, 3);
+
+    if (mx < ox or mx >= ox + overlay_w or my < oy + input_h or my >= oy + overlay_h) return null;
+    const visual_row: u32 = @intCast(@divFloor(my - (oy + input_h), row_h));
+    if (visual_row >= visible_rows) return null;
+    return app_state.g_search_scroll + visual_row;
+}
+
+pub fn uiFontTitle() HANDLE {
+    if (app_state.g_font_title == null) {
+        app_state.g_font_title = CreateFontW(uiScaled(themeTitleFontHeight()), 0, 0, 0, themeTitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
+    }
+    return app_state.g_font_title orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+pub fn uiFontShellTabTitle() HANDLE {
+    if (!app_state.g_multiprompt_theme) return uiFontTitle();
+    if (app_state.g_font_shell_tab_title == null) {
+        const base = themeTitleFontHeight();
+        const smaller = if (base < 0) @min(base + 1, -1) else @max(base - 1, 1);
+        app_state.g_font_shell_tab_title = CreateFontW(uiScaled(smaller), 0, 0, 0, themeTitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
+    }
+    return app_state.g_font_shell_tab_title orelse uiFontTitle();
+}
+
+pub fn uiFontSubtitle() HANDLE {
+    if (app_state.g_font_subtitle == null) {
+        app_state.g_font_subtitle = CreateFontW(uiScaled(themeSubtitleFontHeight()), 0, 0, 0, themeSubtitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
+    }
+    return app_state.g_font_subtitle orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+pub fn uiFontStatusCard() HANDLE {
+    if (app_state.g_font_status_card == null) {
+        const base = themeSubtitleFontHeight();
+        const smaller = if (base < 0) @min(base + 1, -1) else @max(base - 1, 1);
+        app_state.g_font_status_card = CreateFontW(uiScaled(smaller), 0, 0, 0, themeSubtitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
+    }
+    return app_state.g_font_status_card orelse uiFontSubtitle();
+}
+
+pub fn uiFontInboxTitle() HANDLE {
+    if (app_state.g_font_inbox_title == null) {
+        const h = themeTitleFontHeight();
+        const derived = if (app_state.g_multiprompt_theme) h else if (h < 0) h - 2 else h + 2;
+        const weight: i32 = if (app_state.g_multiprompt_theme) 500 else 700;
+        app_state.g_font_inbox_title = CreateFontW(uiScaled(derived), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
+    }
+    return app_state.g_font_inbox_title orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+pub fn uiFontInboxSub() HANDLE {
+    if (app_state.g_font_inbox_sub == null) {
+        const h = themeSubtitleFontHeight();
+        const derived = if (app_state.g_multiprompt_theme) h else if (h < 0) h - 2 else h + 2;
+        const weight: i32 = if (app_state.g_multiprompt_theme) 400 else 700;
+        app_state.g_font_inbox_sub = CreateFontW(uiScaled(derived), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
+    }
+    return app_state.g_font_inbox_sub orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+fn uiFontThreadTitle() HANDLE {
+    if (app_state.g_font_thread_title == null) {
+        app_state.g_font_thread_title = CreateFontW(uiScaled(@as(i32, @intCast(@abs(themeTitleFontHeight()))) + 8), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
+    }
+    return app_state.g_font_thread_title orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+pub fn uiFontClose() HANDLE {
+    if (app_state.g_font_close == null) {
+        app_state.g_font_close = CreateFontW(uiScaled(themeCloseFontHeight()), 0, 0, 0, themeCloseFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeCloseFontFace());
+    }
+    return app_state.g_font_close orelse GetStockObject(DEFAULT_GUI_FONT);
+}
+
+fn browserPaneLive(shell: *const Shell) bool {
+    if (!shell.browser_enabled) return false;
+    if (shell.browser_hwnd) |bh| return IsWindow(bh) != 0;
+    return false;
+}
+
+pub fn browserInboxState(shell: *const Shell) u8 {
+    if (!shell.browser_enabled) return 0;
+    return if (browserPaneLive(shell)) 2 else 1;
+}
+
+fn drawNativeLine(hdc: HANDLE, pen: HANDLE, x1: i32, y1: i32, x2: i32, y2: i32) void {
+    const old_pen = SelectObject(hdc, pen);
+    _ = MoveToEx(hdc, x1, y1, null);
+    _ = LineTo(hdc, x2, y2);
+    _ = SelectObject(hdc, old_pen);
+}
+
+pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
+    const cx = @divTrunc(rc.left + rc.right, 2);
+    const cy = @divTrunc(rc.top + rc.bottom, 2);
+    const pulse = if (active) app_state.g_spinner_frame % 4 else 0;
+    if (agent == 7) {
+        const cursor_ink: DWORD = if (!active)
+            (if (app_state.g_light_theme) RGB(40, 43, 50) else RGB(225, 229, 236))
+        else switch (pulse) {
+            0 => RGB(118, 124, 138),
+            1, 3 => RGB(224, 228, 238),
+            else => RGB(255, 255, 255),
+        };
+        const cursor_core: DWORD = if (!active)
+            (if (app_state.g_light_theme) RGB(104, 108, 119) else RGB(153, 160, 176))
+        else switch (pulse) {
+            0 => RGB(91, 98, 114),
+            1, 3 => RGB(174, 181, 198),
+            else => RGB(207, 214, 230),
+        };
+        const outer_pen = CreatePen(0, uiScaled(1), cursor_ink);
+        drawNativeLine(hdc, outer_pen, cx, cy - 7, cx + 7, cy);
+        drawNativeLine(hdc, outer_pen, cx + 7, cy, cx, cy + 7);
+        drawNativeLine(hdc, outer_pen, cx, cy + 7, cx - 7, cy);
+        drawNativeLine(hdc, outer_pen, cx - 7, cy, cx, cy - 7);
+        drawNativeLine(hdc, outer_pen, cx, cy - 7, cx, cy - 3);
+        drawNativeLine(hdc, outer_pen, cx + 7, cy, cx + 3, cy);
+        drawNativeLine(hdc, outer_pen, cx, cy + 7, cx, cy + 3);
+        drawNativeLine(hdc, outer_pen, cx - 7, cy, cx - 3, cy);
+        _ = DeleteObject(outer_pen);
+
+        const core_pen = CreatePen(0, uiScaled(1), cursor_core);
+        drawNativeLine(hdc, core_pen, cx, cy - 3, cx + 3, cy);
+        drawNativeLine(hdc, core_pen, cx + 3, cy, cx, cy + 3);
+        drawNativeLine(hdc, core_pen, cx, cy + 3, cx - 3, cy);
+        drawNativeLine(hdc, core_pen, cx - 3, cy, cx, cy - 3);
+        _ = DeleteObject(core_pen);
+        return;
+    }
+    if (agent == 6) {
+        const grok_ink: DWORD = if (!active)
+            (if (app_state.g_light_theme) RGB(44, 48, 58) else RGB(226, 230, 238))
+        else switch (pulse) {
+            0 => RGB(130, 142, 160),
+            1, 3 => RGB(219, 228, 242),
+            else => RGB(255, 255, 255),
+        };
+        const grok_blue: DWORD = if (!active)
+            RGB(64, 142, 255)
+        else switch (pulse) {
+            0 => RGB(45, 112, 220),
+            1, 3 => RGB(85, 164, 255),
+            else => RGB(135, 197, 255),
+        };
+        _ = SelectObject(hdc, uiFontTitle());
+        _ = SetTextColor(hdc, grok_ink);
+        _ = DrawTextW(hdc, L("G"), -1, rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        const orbit_pen = CreatePen(0, uiScaled(1), grok_blue);
+        drawNativeLine(hdc, orbit_pen, cx + 1, cy - 6, cx + 6, cy - 2);
+        _ = DeleteObject(orbit_pen);
+        return;
+    }
+    if (agent == 5) {
+        const hax_orange: DWORD = if (!active)
+            RGB(215, 135, 95)
+        else switch (pulse) {
+            0 => RGB(191, 111, 74),
+            1, 3 => RGB(231, 151, 111),
+            else => RGB(245, 174, 137),
+        };
+        const hax_cyan: DWORD = if (!active)
+            RGB(0, 175, 175)
+        else switch (pulse) {
+            0 => RGB(0, 142, 142),
+            1, 3 => RGB(20, 196, 196),
+            else => RGB(69, 221, 221),
+        };
+        const chevron_pen = CreatePen(0, uiScaled(2), hax_orange);
+        drawNativeLine(hdc, chevron_pen, cx - 6, cy - 5, cx - 1, cy);
+        drawNativeLine(hdc, chevron_pen, cx - 1, cy, cx - 6, cy + 5);
+        _ = DeleteObject(chevron_pen);
+
+        const cursor_brush = CreateSolidBrush(hax_cyan);
+        var cursor_rc = RECT{ .left = cx + 1, .top = cy + 3, .right = cx + 7, .bottom = cy + 5 };
+        _ = FillRect(hdc, &cursor_rc, cursor_brush);
+        _ = DeleteObject(cursor_brush);
+        return;
+    }
+    if (agent == 4) {
+        const kimi_ink = themeConsoleFg();
+        const kimi_blue: DWORD = if (!active)
+            RGB(49, 120, 255)
+        else switch (pulse) {
+            0 => RGB(36, 96, 220),
+            1, 3 => RGB(70, 145, 255),
+            else => RGB(115, 178, 255),
+        };
+        const mark_pen = CreatePen(0, uiScaled(2), kimi_ink);
+        drawNativeLine(hdc, mark_pen, cx - 4, cy - 5, cx - 4, cy + 5);
+        drawNativeLine(hdc, mark_pen, cx - 4, cy, cx + 3, cy - 5);
+        drawNativeLine(hdc, mark_pen, cx - 4, cy, cx + 3, cy + 5);
+        _ = DeleteObject(mark_pen);
+
+        const dot_brush = CreateSolidBrush(kimi_blue);
+        const dot_pen = CreatePen(0, 1, kimi_blue);
+        const old_brush = SelectObject(hdc, dot_brush);
+        const old_pen = SelectObject(hdc, dot_pen);
+        _ = Ellipse(hdc, cx + 3, cy - 7, cx + 7, cy - 3);
+        _ = SelectObject(hdc, old_pen);
+        _ = SelectObject(hdc, old_brush);
+        _ = DeleteObject(dot_pen);
+        _ = DeleteObject(dot_brush);
+        return;
+    }
+    if (agent == 3) {
+        _ = SelectObject(hdc, uiFontTitle());
+        const pi_color: DWORD = if (!active)
+            RGB(167, 139, 250)
+        else switch (pulse) {
+            0 => RGB(167, 139, 250),
+            1, 3 => RGB(190, 170, 255),
+            else => RGB(216, 204, 255),
+        };
+        _ = SetTextColor(hdc, pi_color);
+        _ = DrawTextW(hdc, L("\u{03C0}"), -1, rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        return;
+    }
+    if (agent == 2) {
+        _ = SelectObject(hdc, uiFontTitle());
+        const codex_green: DWORD = if (!active)
+            RGB(16, 163, 127)
+        else switch (pulse) {
+            0 => RGB(12, 132, 103),
+            1, 3 => RGB(24, 190, 148),
+            else => RGB(70, 225, 181),
+        };
+        _ = SetTextColor(hdc, codex_green);
+        _ = DrawTextW(hdc, L("\u{2B21}"), -1, rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        return;
+    }
+    if (agent == 1) {
+        const orange: DWORD = if (!active)
+            RGB(217, 119, 87)
+        else switch (pulse) {
+            0 => RGB(194, 91, 62),
+            1, 3 => RGB(238, 139, 101),
+            else => RGB(248, 165, 128),
+        };
+        const ray: i32 = if (!active) 5 else switch (pulse) {
+            0 => 4,
+            1, 3 => 6,
+            else => 7,
+        };
+        const diagonal: i32 = if (!active) 4 else switch (pulse) {
+            0 => 3,
+            1, 3 => 5,
+            else => 5,
+        };
+        const pen = CreatePen(0, uiScaled(2), orange);
+        drawNativeLine(hdc, pen, cx - ray, cy, cx + ray, cy);
+        drawNativeLine(hdc, pen, cx, cy - ray, cx, cy + ray);
+        drawNativeLine(hdc, pen, cx - diagonal, cy - diagonal, cx + diagonal, cy + diagonal);
+        drawNativeLine(hdc, pen, cx - diagonal, cy + diagonal, cx + diagonal, cy - diagonal);
+        _ = DeleteObject(pen);
+        const br = CreateSolidBrush(orange);
+        const dot_pen = CreatePen(0, 1, orange);
+        const old_br = SelectObject(hdc, br);
+        const old_pen = SelectObject(hdc, dot_pen);
+        _ = Ellipse(hdc, cx - 2, cy - 2, cx + 2, cy + 2);
+        _ = SelectObject(hdc, old_pen);
+        _ = SelectObject(hdc, old_br);
+        _ = DeleteObject(dot_pen);
+        _ = DeleteObject(br);
+    }
+}
+
+fn threadTitleBandRightFor(win_w: i32) i32 {
+    if (app_state.g_chat_active) return chatViewLayout().transcript.right;
+    if (browserSlotReserved()) {
+        if (calcBrowserLayout()) |layout| {
+            return @min(win_w, layout.splitter_left);
+        }
+    }
+    return win_w;
+}
+
+pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
+    const th = threadTitleHeight();
+    if (th == 0 or shell_idx >= app_state.shell_count) return null;
+    const title_top = threadTitleTop();
+    const sw = SIDEBAR_W();
+    const band_right = threadTitleBandRightFor(win_w);
+    const band_w = band_right - sw;
+    if (band_w <= 0) return null;
+
+    var text_left: i32 = if (app_state.g_chat_active) chatViewLayout().transcript.left else contentHeaderLeft();
+    if (app_state.shells[shell_idx].ai_agent != 0) text_left += 30;
+
+    const now = GetTickCount64();
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    const voice_status = !cap_msg and app_state.g_chat_active and app_state.g_voice_mode_active;
+    const base_right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (browserSlotReserved()) 16 else 120;
+    const eta_header_shown = !cap_msg and app_state.g_chat_active and app_state.g_eta_numbers_on and app_state.shells[shell_idx].eta_total_ms > 0;
+    const eta_reserve: i32 = if (eta_header_shown) uiScaled(160) else 0;
+    const right_margin: i32 = base_right_margin + eta_reserve;
+    const title_right = band_right - right_margin - 8;
+    if (title_right <= text_left + 20) return null;
+
+    return RECT{ .left = text_left, .top = title_top, .right = title_right, .bottom = title_top + th };
+}
+
+pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
+    const th = threadTitleHeight();
+    if (th == 0) return;
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const title_top = threadTitleTop();
+    const title_bottom = title_top + th;
+    const sw = SIDEBAR_W();
+    const band_right = threadTitleBandRightFor(win_w);
+    const band_w = band_right - sw;
+    if (band_w <= 0) return;
+
+    _ = SetBkMode(hdc, TRANSPARENT);
+
+    var text_left: i32 = if (app_state.g_chat_active) chatViewLayout().transcript.left else contentHeaderLeft();
+    const ag = app_state.shells[app_state.active_shell].ai_agent;
+    const attention = app_state.shells[app_state.active_shell].needs_attention;
+    if (attention or ag != 0) {
+        var ag_rc = RECT{ .left = text_left, .top = title_top, .right = text_left + 24, .bottom = title_bottom };
+        if (attention) {
+            drawAttentionDot(hdc, @divTrunc(ag_rc.left + ag_rc.right, 2), @divTrunc(ag_rc.top + ag_rc.bottom, 2), 4, customColorOr("attention", RGB(80, 140, 255)));
+        } else {
+            drawAgentIcon(hdc, &ag_rc, ag, app_state.shells[app_state.active_shell].activity == .active);
+        }
+        text_left += 30;
+    }
+
+    const now = GetTickCount64();
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    const voice_status = !cap_msg and app_state.g_chat_active and app_state.g_voice_mode_active;
+    const show_meta = !browserSlotReserved();
+    const right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (show_meta) 120 else 16;
+    const right_x: i32 = band_right - right_margin;
+    const dim_col: DWORD = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120);
+    const eta_header_shown = !cap_msg and app_state.g_chat_active and app_state.g_eta_numbers_on and app_state.shells[app_state.active_shell].eta_total_ms > 0;
+    if (eta_header_shown) {
+        var eta_buf: [64]u8 = undefined;
+        const eta_txt = etaHeaderLabel(app_state.active_shell, &eta_buf);
+        if (eta_txt.len > 0) {
+            _ = SelectObject(hdc, uiFontSubtitle());
+            _ = SetTextColor(hdc, dim_col);
+            var eta_wbuf: [64]u16 = undefined;
+            const eta_wlen = asciiToU16(eta_txt, &eta_wbuf);
+            var eta_hdr_rc = RECT{ .left = right_x - uiScaled(160), .top = title_top, .right = right_x - 8, .bottom = title_bottom };
+            _ = DrawTextW(hdc, @ptrCast(&eta_wbuf), @intCast(eta_wlen), &eta_hdr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+        }
+    }
+    if (cap_msg) {
+        _ = SelectObject(hdc, uiFontSubtitle());
+        const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
+        _ = SetTextColor(hdc, warn_col);
+        var cap_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
+        if (app_state.g_account_reauth) {
+            _ = DrawTextW(hdc, L("Sign in again: Ctrl+K > Sign in to multiprompt"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        } else if (app_state.g_cap_msg_len > 0) {
+            _ = DrawTextW(hdc, @ptrCast(&app_state.g_cap_msg_text), @intCast(app_state.g_cap_msg_len), &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        } else {
+            _ = DrawTextW(hdc, L("Tab limit reached (256) - close a tab"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+    } else if (voice_status) {
+        _ = SelectObject(hdc, uiFontSubtitle());
+        _ = SetTextColor(hdc, dim_col);
+        var vs_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
+        _ = DrawTextW(hdc, voiceStatusLabel(), -1, &vs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+    }
+
+    var capacity_buf: [48]u16 = undefined;
+    var capacity_state: CapacityState = .unknown;
+    const capacity_len = if (!cap_msg and !voice_status and show_meta) activeCapacityStatus(&capacity_buf, &capacity_state) else 0;
+    if (capacity_len > 0) {
+        _ = SelectObject(hdc, uiFontSubtitle());
+        const capacity_col: DWORD = switch (capacity_state) {
+            .green => if (app_state.g_light_theme) RGB(30, 125, 70) else RGB(85, 190, 115),
+            .amber => if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70),
+            .red, .critical => RGB(235, 80, 75),
+            .unknown => dim_col,
+        };
+        _ = SetTextColor(hdc, capacity_col);
+        var capacity_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
+        _ = DrawTextW(hdc, @ptrCast(&capacity_buf), @intCast(capacity_len), &capacity_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+    }
+
+    if (!cap_msg and !voice_status and show_meta) {
+        if (capacity_len == 0) {
+            var time_buf: [24]u16 = undefined;
+            const time_len = inboxRelTime(app_state.shells[app_state.active_shell].last_active, &time_buf);
+            if (time_len > 0) {
+                _ = SelectObject(hdc, uiFontSubtitle());
+                _ = SetTextColor(hdc, dim_col);
+                var t_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
+                _ = DrawTextW(hdc, @ptrCast(&time_buf), @intCast(time_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            }
+        }
+    }
+
+    if (threadTitleNameRectFor(win_w, app_state.active_shell)) |title_rc| {
+        if (app_state.shells[app_state.active_shell].name_len > 0) {
+            const title_col: DWORD = if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(255, 255, 255);
+            _ = SelectObject(hdc, uiFontThreadTitle());
+            _ = SetTextColor(hdc, title_col);
+            var t_rc = title_rc;
+            _ = DrawTextW(hdc, @ptrCast(&app_state.shells[app_state.active_shell].name), @intCast(app_state.shells[app_state.active_shell].name_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+    }
+}
+
+pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
+    if (!app_state.g_inbox_button_hover) return;
+    const r = inboxButtonRect(in_overlay);
+    const tip_w = uiScaled(156);
+    const x = @max(uiScaled(4), r.right - tip_w);
+    const y = if (in_overlay) uiScaled(46) else WS_STRIP_H + uiScaled(2);
+    var tip = RECT{ .left = x, .top = y, .right = x + tip_w, .bottom = y + uiScaled(24) };
+    const brush = CreateSolidBrush(themeSidebarBg());
+    _ = FillRect(hdc, &tip, brush);
+    _ = DeleteObject(brush);
+    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SetBkMode(hdc, TRANSPARENT);
+    _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    tip.left += uiScaled(5);
+    drawAscii(hdc, "Inbox (Alt+I)", &tip, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+}
+
+pub fn paintInboxButton(hdc: HANDLE, in_overlay: bool) void {
+    const r = inboxButtonRect(in_overlay);
+    const bg = if (in_overlay) themeConsoleBg() else themeSidebarBg();
+    const button_bg = tintColor(bg, customColorOr("accent", RGB(80, 150, 255)), if (app_state.g_inbox_button_hover) 2 else 1, if (app_state.g_inbox_button_hover) 8 else 16);
+    const brush = CreateSolidBrush(button_bg);
+    const pen = CreatePen(0, 1, button_bg);
+    const old_brush = SelectObject(hdc, brush);
+    const old_pen = SelectObject(hdc, pen);
+    _ = RoundRect(hdc, r.left, r.top, r.right, r.bottom, uiScaled(7), uiScaled(7));
+    _ = SelectObject(hdc, old_brush);
+    _ = SelectObject(hdc, old_pen);
+    _ = DeleteObject(brush);
+    _ = DeleteObject(pen);
+
+    const glyph = CreatePen(0, @max(1, uiScaled(2)), customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    const cx = @divTrunc(r.left + r.right, 2);
+    const cy = @divTrunc(r.top + r.bottom, 2);
+    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy - uiScaled(4), cx + uiScaled(7), cy - uiScaled(4));
+    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy - uiScaled(4), cx - uiScaled(7), cy + uiScaled(5));
+    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy + uiScaled(5), cx + uiScaled(7), cy + uiScaled(5));
+    _ = drawNativeLine(hdc, glyph, cx + uiScaled(7), cy + uiScaled(5), cx + uiScaled(7), cy - uiScaled(4));
+    _ = drawNativeLine(hdc, glyph, cx - uiScaled(4), cy + uiScaled(1), cx - uiScaled(2), cy + uiScaled(3));
+    _ = drawNativeLine(hdc, glyph, cx - uiScaled(2), cy + uiScaled(3), cx + uiScaled(2), cy + uiScaled(3));
+    _ = drawNativeLine(hdc, glyph, cx + uiScaled(2), cy + uiScaled(3), cx + uiScaled(4), cy + uiScaled(1));
+    _ = DeleteObject(glyph);
+
+    var count: u32 = 0;
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].needs_attention and !app_state.shells[i].muted and inboxPublishesShell(&app_state.shells[i]) and
+            (!app_state.g_single_window or !app_state.g_ws_snoozed[app_state.shells[i].workspace])) count += 1;
+    }
+    if (count > 0) {
+        const blue = customColorOr("attention", RGB(60, 120, 220));
+        const radius = uiScaled(if (count < 10) @as(i32, 7) else 9);
+        const bx = r.right - uiScaled(2);
+        const by = r.top + uiScaled(2);
+        drawAttentionDot(hdc, bx, by, radius, blue);
+        var buf: [12]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "{d}", .{count}) catch "";
+        _ = SelectObject(hdc, uiFontSubtitle());
+        _ = SetTextColor(hdc, RGB(255, 255, 255));
+        var badge_rc = RECT{ .left = bx - radius, .top = by - radius, .right = bx + radius, .bottom = by + radius };
+        drawAscii(hdc, label, &badge_rc, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+    }
+}
+
+pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
+    if (!app_state.g_single_window or app_state.g_hide_sidebar or app_state.g_hide_pills) return;
+    const sw = SIDEBAR_W();
+
+    const band_brush = CreateSolidBrush(sidebar_bg);
+    var band_rc = RECT{ .left = 0, .top = 0, .right = sw, .bottom = WS_STRIP_H };
+    _ = FillRect(hdc, &band_rc, band_brush);
+    _ = DeleteObject(band_brush);
+
+    const font = uiFontSubtitle();
+    _ = SelectObject(hdc, font);
+
+    if (app_state.g_sidebar_collapsed) {
+        _ = SetTextColor(hdc, customColorOr("accent", RGB(120, 170, 255)));
+        var nbuf = [_]u16{ '0' + @as(u16, app_state.g_active_workspace) + 1, 0 };
+        var nrc = RECT{ .left = 0, .top = WS_PILL_TOP, .right = sw, .bottom = WS_PILL_TOP + WS_PILL_H };
+        _ = DrawTextW(hdc, @ptrCast(&nbuf), 1, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        const state = workspaceCapacityState(app_state.g_active_workspace);
+        if (state == .amber or state == .red or state == .critical) {
+            drawAttentionDot(hdc, sw - 5, WS_PILL_TOP + 4, 3, if (state == .amber) RGB(245, 170, 70) else RGB(235, 80, 75));
+        }
+        return;
+    }
+
+    const accent = customColorOr("accent", RGB(80, 150, 255));
+    const inactive_bg = tintColor(sidebar_bg, RGB(160, 160, 170), 1, 8);
+    const text_active: DWORD = RGB(255, 255, 255);
+    const text_inactive: DWORD = if (app_state.g_light_theme) RGB(90, 90, 90) else RGB(185, 185, 195);
+    const pill_right = inboxButtonRect(false).left - 4;
+
+    var x: i32 = WS_STRIP_LEFT;
+    var ws: u8 = 0;
+    while (ws < app_state.g_lws_count) : (ws += 1) {
+        if (app_state.g_ws_snoozed[ws]) continue;
+        if (x + WS_PILL_W > pill_right) break;
+        const is_active = ws == app_state.g_active_workspace;
+        const pill_bg = if (is_active) accent else inactive_bg;
+        const br = CreateSolidBrush(pill_bg);
+        const pen = CreatePen(0, 1, pill_bg);
+        const ob = SelectObject(hdc, br);
+        const op = SelectObject(hdc, pen);
+        _ = RoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
+        _ = SelectObject(hdc, ob);
+        _ = SelectObject(hdc, op);
+        _ = DeleteObject(br);
+        _ = DeleteObject(pen);
+        _ = SetTextColor(hdc, if (is_active) text_active else text_inactive);
+        var nbuf = [_]u16{ '0' + @as(u16, ws) + 1, 0 };
+        var nrc = RECT{ .left = x, .top = WS_PILL_TOP, .right = x + WS_PILL_W, .bottom = WS_PILL_TOP + WS_PILL_H };
+        _ = DrawTextW(hdc, @ptrCast(&nbuf), 1, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        const state = workspaceCapacityState(ws);
+        if (state == .amber or state == .red or state == .critical) {
+            drawAttentionDot(hdc, x + WS_PILL_W - 4, WS_PILL_TOP + 4, 3, if (state == .amber) RGB(245, 170, 70) else RGB(235, 80, 75));
+        }
+        x += WS_PILL_W + WS_PILL_GAP;
+    }
+
+    if (app_state.g_lws_count < MAX_LWS and x + WS_PILL_W <= pill_right) {
+        const add_bg = tintColor(sidebar_bg, RGB(120, 120, 130), 1, 12);
+        const br = CreateSolidBrush(add_bg);
+        const pen = CreatePen(0, 1, add_bg);
+        const ob = SelectObject(hdc, br);
+        const op = SelectObject(hdc, pen);
+        _ = RoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
+        _ = SelectObject(hdc, ob);
+        _ = SelectObject(hdc, op);
+        _ = DeleteObject(br);
+        _ = DeleteObject(pen);
+        _ = SetTextColor(hdc, text_inactive);
+        var pbuf = [_]u16{ '+', 0 };
+        var prc = RECT{ .left = x, .top = WS_PILL_TOP, .right = x + WS_PILL_W, .bottom = WS_PILL_TOP + WS_PILL_H };
+        _ = DrawTextW(hdc, @ptrCast(&pbuf), 1, &prc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        x += WS_PILL_W + WS_PILL_GAP;
+    }
+
+    paintInboxButton(hdc, false);
+
+    const line_col: DWORD = customColorOr("overlay_divider", if (app_state.g_light_theme) RGB(228, 228, 228) else RGB(52, 52, 52));
+    const line_br = CreateSolidBrush(line_col);
+    var line_rc = RECT{ .left = 4, .top = WS_STRIP_H - 1, .right = sw - 4, .bottom = WS_STRIP_H };
+    _ = FillRect(hdc, &line_rc, line_br);
+    _ = DeleteObject(line_br);
+    paintInboxButtonTooltip(hdc, false);
+}

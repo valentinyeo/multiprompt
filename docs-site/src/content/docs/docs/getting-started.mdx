@@ -1,0 +1,47 @@
+---
+title: Getting Started
+description: Build, run, and use multiprompt locally.
+---
+
+## Run Locally
+
+Use Zig 0.16 on Windows. For offline local development without the optional account service, set `$env:MULTIPROMPT_NO_LOGIN="1"` before launching. Configure remote host slots using the SSH aliases documented in CONTRIBUTING.md.
+
+Build the stable binary:
+
+```powershell
+zig build
+.\zig-out\bin\multiprompt.exe
+```
+
+Build the DEV binary:
+
+```powershell
+zig build dev
+.\zig-out\bin\multiprompt-dev.exe
+```
+
+Stable and DEV use separate session files so experiments can be tested without damaging the normal workspace.
+
+## First Workflow
+
+1. Start multiprompt.
+2. Use `Ctrl+Shift+1` for a local CMD tab or `Ctrl+Shift+3` for a remote tmux tab.
+3. Use `Ctrl+K` to switch sessions, open workspace actions, or run multiprompt commands.
+4. Use `Ctrl+Shift+O` to open or reconnect the browser pane for the current shell.
+5. Use `multiprompt-browser navigate "https://example.com"` to drive the docked browser pane (`zsb` remains a compatibility alias).
+
+## Files multiprompt Uses
+
+multiprompt deliberately continues storing runtime state under the legacy `%APPDATA%\ZigShell` path so the rename preserves every existing session and browser binding.
+
+| File | Purpose |
+| --- | --- |
+| `session.json` | Stable default workspace sessions |
+| `session-dev.json` | DEV sessions |
+| `session-{id}.json` | Named workspace sessions |
+| `windows.json` | Stable workspace registry |
+| `windows-dev.json` | DEV workspace registry |
+| `inbox-*.json` | Live cross-window inbox snapshots |
+| `panewin-*.txt` | Browser pane binding for multiprompt-browser |
+| `browserwin-*.txt` | Edge window id binding |

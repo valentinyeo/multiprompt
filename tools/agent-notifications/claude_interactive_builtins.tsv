@@ -1,0 +1,57 @@
+/add-dir	Add a new working directory
+/artifact-capabilities	Runtime capabilities a published Artifact
+/artifact-diagramming	Diagramming know-how for Artifacts - when a
+/artifacts	Browse your published and shared artifacts
+/autofix-pr	Monitor and autofix any issues with the
+/background	Send this session to the background and
+/branch	Create a branch of the current conversation
+/btw	Ask a quick side question without
+/bug	Report a bug or share your conversation
+/cd	Move this session to a new working
+/chrome	Open Claude in Chrome settings
+/copy	Copy Claude's last response to clipboard
+/design-login	Authorize design-system access for
+/diff	Toggle the diff panel showing uncommitted
+/exit	Exit the CLI
+/export	Export the current conversation to a file
+/feedback	Send feedback to Anthropic or report a bug
+/fork	Copy this conversation into a new
+/help	Show help and available commands
+/hooks	View hook configurations for tool events
+/ide	Manage IDE integrations and show status
+/install-github-app	Set up Claude GitHub Actions for a
+/install-slack-app	Install the Claude Slack app
+/keybindings	Open your keyboard shortcuts file
+/login	Sign in with your Anthropic account
+/logout	Sign out from your Anthropic account
+/memory	Edit CLAUDE.md files and memory settings
+/mobile	Show QR code to download the Claude mobile
+/passes	Share a free week of Claude Code with
+/permissions	Manage allow and deny tool permission rules
+/plan	Enable plan mode or view the current
+/plugin	Manage Claude Code plugins
+/powerup	Discover Claude Code features through quick
+/privacy-settings	View and update your privacy settings
+/radio	Listen to Claude FM lo-fi radio
+/release-notes	View release notes
+/remote-control	Disconnect Remote Control
+/remote-env	Choose the default environment for cloud
+/resume	Resume a previous conversation
+/rewind	Restore the code and/or conversation to a
+/sandbox	◯ sandbox disabled (⏎ to configure)
+/scroll-speed	Adjust mouse wheel scroll speed
+/skills	List available skills
+/slides	Make a new Slides deck artifact from a
+/status	Show Claude Code status including version,
+/statusline	Set up Claude Code's status line UI
+/stickers	Order Claude Code stickers
+/subtask	Send a subagent off with your full context;
+/tasks	View and manage everything running in the
+/teleport	Send this session to the cloud, or resume
+/terminal-setup	Install Shift+Enter key binding for
+/theme	Change the theme
+/tui	Set the terminal UI renderer (default |
+/upgrade	Upgrade to Max for higher rate limits and
+/voice	Toggle voice mode
+/web-setup	Set up cloud sessions with your GitHub
+/workflows	Browse running and completed workflows

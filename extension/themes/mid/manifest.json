@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "multiprompt browser theme - Mid",
+  "version": "1.0.0",
+  "theme": {
+    "colors": {
+      "bookmark_text": [255, 255, 255],
+      "button_background": [60, 60, 60, 1],
+      "frame": [60, 60, 60],
+      "frame_inactive": [60, 60, 60],
+      "ntp_background": [60, 60, 60],
+      "ntp_link": [155, 190, 255],
+      "ntp_text": [255, 255, 255],
+      "tab_background_text": [225, 225, 225],
+      "tab_text": [255, 255, 255],
+      "toolbar": [60, 60, 60]
+    },
+    "tints": { "buttons": [0, 0, 0.9] }
+  }
+}
