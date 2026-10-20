@@ -3268,7 +3268,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_ATTACH_FAILED => {
-            showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
+            if (lp != 0) @import("chat_render.zig").chatFileNotice(lp) else showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
             return 0;
         },
         WM_APP_CHAT_COPY_SELECTION => {

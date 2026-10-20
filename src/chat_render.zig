@@ -1549,6 +1549,120 @@ fn chatAttachStartFiles(paths: []const []const u16, delete_after: bool) void {
     showHeaderNoticeAscii("Uploading image...", 2500, false);
 }
 
+const ChatFileJob = struct {
+    path: [:0]const u16,
+    shell_id: u32,
+    host: u8,
+    session_dir: [80]u8,
+    session_dir_len: usize,
+};
+
+fn chatSendFileRun(job: ChatFileJob) enum { sent, failed, too_big } {
+    const win32 = @import("win32.zig");
+    const input = win32.CreateFileW(job.path.ptr, 0x80000000, 1, null, 3, 0x08000000, null);
+    if (input == win32.INVALID_HANDLE_VALUE_PTR or input == null) return .failed;
+    defer _ = CloseHandle(input);
+    var size: i64 = 0;
+    if (win32.GetFileSizeEx(input, &size) == 0 or size < 0) return .failed;
+    if (size > 200 * 1024 * 1024) return .too_big;
+    var name_buf: [80]u8 = undefined;
+    const name = chat_drop.remoteName(job.path, &name_buf);
+    var remote_buf: [2048]u8 = undefined;
+    const remote = chat_drop.uploadCommand(job.session_dir[0..job.session_dir_len], name, @intCast(size), &remote_buf);
+    if (remote.len == 0) return .failed;
+    var cmd_buf: [4096]u8 = undefined;
+    var pos: usize = 0;
+    if (!@import("console.zig").appendSshExe(&cmd_buf, &pos)) return .failed;
+    const tail = std.fmt.bufPrint(cmd_buf[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s}", .{ @import("console.zig").tmuxSshTarget(job.host), remote }) catch return .failed;
+    var output: [8192]u8 = undefined;
+    const timeout: DWORD = @intCast(20000 + @divTrunc(size + 512 * 1024 - 1, 512 * 1024) * 1000);
+    const result = @import("vps.zig").sshOneShotCaptureInput(cmd_buf[0 .. pos + tail.len], &output, input, timeout);
+    if (!result.success) return .failed;
+    var lines = std.mem.splitScalar(u8, output[0..result.len], '\n');
+    var path: []const u8 = "";
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, "\r");
+        if (trimmed.len > 0) path = trimmed;
+    }
+    if (path.len <= name.len or path[0] != '/' or !std.mem.endsWith(u8, path, name)) return .failed;
+    const separator = path[path.len - name.len - 1];
+    if (separator != '/' and separator != '-') return .failed;
+    queueShotPaste(job.shell_id, path, true);
+    return .sent;
+}
+
+fn chatSendFilesThread(jobs: []ChatFileJob) void {
+    defer std.heap.page_allocator.free(jobs);
+    for (jobs) |job| {
+        defer std.heap.page_allocator.free(job.path);
+        const result = chatSendFileRun(job);
+        if (result == .sent) continue;
+        const name_start = if (std.mem.lastIndexOfAny(u16, job.path, &.{ '/', '\\' })) |i| i + 1 else 0;
+        const filename = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, job.path[name_start..]) catch null;
+        defer if (filename) |name| std.heap.page_allocator.free(name);
+        const notice = if (result == .too_big)
+            std.fmt.allocPrintSentinel(std.heap.page_allocator, "Could not send {s} to the server: file is bigger than 200 MB", .{filename orelse "file"}, 0) catch continue
+        else
+            std.fmt.allocPrintSentinel(std.heap.page_allocator, "Could not send {s} to the server", .{filename orelse "file"}, 0) catch continue;
+        if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) std.heap.page_allocator.free(notice);
+    }
+}
+
+pub fn chatFileNotice(lp: LPARAM) void {
+    const text = std.mem.span(@as([*:0]const u8, @ptrFromInt(@as(usize, @bitCast(lp)))));
+    defer std.heap.page_allocator.free(text[0..text.len :0]);
+    const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch {
+        showHeaderNoticeAscii("Could not send that file to the server", 4000, true);
+        return;
+    };
+    defer std.heap.page_allocator.free(wide);
+    showHeaderNoticeAscii("", 4000, true);
+    var len = @min(wide.len, app_state.g_cap_msg_text.len - 1);
+    if (len > 0 and std.unicode.utf16IsHighSurrogate(wide[len - 1])) len -= 1;
+    @memcpy(app_state.g_cap_msg_text[0..len], wide[0..len]);
+    app_state.g_cap_msg_len = len;
+    app_state.g_cap_msg_text[len] = 0;
+}
+
+fn chatSendStartFiles(paths: []const []const u16) bool {
+    if (paths.len == 0) return true;
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell = &app_state.shells[app_state.active_shell];
+    const host = @import("vps.zig").tmuxHostForShell(shell) orelse {
+        showHeaderNoticeAscii("Files can be sent only to server sessions", 4000, true);
+        return false;
+    };
+    const allocator = std.heap.page_allocator;
+    const jobs = allocator.alloc(ChatFileJob, paths.len) catch {
+        showHeaderNoticeAscii("Could not start sending files", 3000, true);
+        return false;
+    };
+    var copied: usize = 0;
+    var started = false;
+    defer if (!started) {
+        for (jobs[0..copied]) |job| allocator.free(job.path);
+        allocator.free(jobs);
+    };
+    var dir_buf: [80]u8 = undefined;
+    const dir = chat_drop.remoteSessionDir(shell.tmux_session[0..shell.tmux_session_len], &dir_buf);
+    for (paths, jobs) |path, *job| {
+        const owned = allocator.dupeZ(u16, path) catch {
+            showHeaderNoticeAscii("Could not start sending files", 3000, true);
+            return false;
+        };
+        job.* = .{ .path = owned, .shell_id = shell.shell_id, .host = host, .session_dir = dir_buf, .session_dir_len = dir.len };
+        copied += 1;
+    }
+    const thread = std.Thread.spawn(.{}, chatSendFilesThread, .{jobs}) catch {
+        showHeaderNoticeAscii("Could not start sending files", 3000, true);
+        return false;
+    };
+    started = true;
+    thread.detach();
+    showHeaderNoticeAscii("Sending file...", 2500, false);
+    return true;
+}
+
 fn chatReadDropPaths(drop: HANDLE, paths: *std.ArrayList([]const u16)) !void {
     const allocator = std.heap.page_allocator;
     const count = DragQueryFileW(drop, 0xFFFFFFFF, null, 0);
@@ -1571,19 +1685,9 @@ fn chatFreeDropPaths(paths: *std.ArrayList([]const u16)) void {
 fn chatAttachPaths(paths: []const []const u16) void {
     const selected = chat_drop.select(paths);
     chatAttachStartFiles(selected.attached[0..selected.count], false);
-    if (selected.first_refused) |path| {
-        const start = if (std.mem.lastIndexOfAny(u16, path, &.{ '/', '\\' })) |i| i + 1 else 0;
-        const prefix = "Only images can be attached for now: ";
-        const suffix: []const u16 = if (selected.refused_too_many > 0) std.unicode.utf8ToUtf16LeStringLiteral(". Attached the first 10 images") else &.{};
-        var name_len = @min(path.len - start, app_state.g_cap_msg_text.len - 1 - prefix.len - suffix.len);
-        if (name_len > 0 and std.unicode.utf16IsHighSurrogate(path[start + name_len - 1])) name_len -= 1;
-        showHeaderNoticeAscii(prefix, 5000, true);
-        @memcpy(app_state.g_cap_msg_text[prefix.len..][0..name_len], path[start..][0..name_len]);
-        @memcpy(app_state.g_cap_msg_text[prefix.len + name_len ..][0..suffix.len], suffix);
-        app_state.g_cap_msg_len = prefix.len + name_len + suffix.len;
-        app_state.g_cap_msg_text[app_state.g_cap_msg_len] = 0;
-    } else if (selected.refused_too_many > 0) {
-        showHeaderNoticeAscii("Attached the first 10 images", 5000, false);
+    const sending = chatSendStartFiles(selected.files[0..selected.file_count]);
+    if (selected.refused_too_many > 0 and sending) {
+        showHeaderNoticeAscii(if (selected.file_count == 0) "Attached the first 10 images" else "Attached up to 10 images and sent up to 10 files", 5000, false);
     }
 }
 
@@ -1608,13 +1712,13 @@ pub fn chatAttachPick() void {
     ofn.nFilterIndex = 1;
     ofn.lpstrFile = &file_buf;
     ofn.nMaxFile = file_buf.len;
-    ofn.lpstrTitle = L("Attach image");
+    ofn.lpstrTitle = L("Attach file");
     ofn.Flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000004 | 0x00000008;
     if (GetOpenFileNameW(&ofn) == 0) {
         if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
         return;
     }
-    chatAttachStart(file_buf, false);
+    chatAttachPaths(&.{std.mem.sliceTo(&file_buf, 0)});
 }
 
 fn chatClipboardHasImageOnly() bool {
@@ -1625,7 +1729,8 @@ fn chatClipboardHasImageOnly() bool {
         defer chatFreeDropPaths(&paths);
         const drop = GetClipboardData(15) orelse return false;
         chatReadDropPaths(drop, &paths) catch return false;
-        return chat_drop.select(paths.items).count > 0;
+        const selected = chat_drop.select(paths.items);
+        return selected.count > 0 or selected.file_count > 0;
     }
     if (IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 or IsClipboardFormatAvailable(CF_TEXT) != 0) return false;
     return IsClipboardFormatAvailable(2) != 0 or IsClipboardFormatAvailable(8) != 0 or IsClipboardFormatAvailable(17) != 0;
