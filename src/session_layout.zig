@@ -8,6 +8,10 @@ pub const Tab = struct {
     kind: []const u8 = "tmux",
     name: []const u8,
     manual: bool = false,
+    favorite: ?bool = null,
+    used: ?u64 = null,
+    input: ?u64 = null,
+    visits: ?[]const u64 = null,
     tmux_session: []const u8,
     tmux_host: u8,
     workspace: []const u8,
@@ -21,6 +25,17 @@ pub const Layout = struct {
 
 pub fn sameTab(a: Tab, b: Tab) bool {
     return tmux_identity.same(a.tmux_host, a.tmux_session, b.tmux_host, b.tmux_session);
+}
+
+pub fn maxUsed(a: ?u64, b: ?u64) ?u64 {
+    if (a == null) return b;
+    if (b == null) return a;
+    return @max(a.?, b.?);
+}
+
+pub fn mergeVisits(a: Allocator, left: ?[]const u64, right: ?[]const u64) !?[]const u64 {
+    const merged = @import("frequent.zig").Visits.merge(left, right);
+    return if (merged.optional()) |values| try a.dupe(u64, values) else null;
 }
 
 fn validText(text: []const u8, max_units: usize) bool {
@@ -40,6 +55,12 @@ pub fn validate(layout: Layout) !void {
     for (layout.tabs, 0..) |tab, i| {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
+        if (tab.used) |used| if (used > 9_007_199_254_740_991) return error.InvalidLayout;
+        if (tab.input) |input| if (input > 9_007_199_254_740_991) return error.InvalidLayout;
+        if (tab.visits) |visits| {
+            if (visits.len > 8) return error.InvalidLayout;
+            for (visits, 0..) |v, j| if (v > 9_007_199_254_740_991 or (j > 0 and v <= visits[j - 1])) return error.InvalidLayout;
+        }
         for (tab.tmux_session) |c| {
             if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-') return error.InvalidLayout;
         }
@@ -62,7 +83,7 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
 
 pub fn encode(a: Allocator, layout: Layout) ![]u8 {
     try validate(layout);
-    const json = try std.json.Stringify.valueAlloc(a, layout, .{});
+    const json = try std.json.Stringify.valueAlloc(a, layout, .{ .emit_null_optional_fields = false });
     if (json.len >= max_bytes) {
         a.free(json);
         return error.InvalidLayout;
@@ -89,7 +110,15 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     for (server.tabs) |tab| {
         var found = false;
         for (tabs.items) |*old| if (sameTab(old.*, tab)) {
+            const favorite = old.favorite;
+            const used = old.used;
+            const input = old.input;
+            const visits = old.visits;
             old.* = tab;
+            if (tab.favorite == null) old.favorite = favorite;
+            old.used = maxUsed(used, tab.used);
+            old.input = maxUsed(input, tab.input);
+            old.visits = try mergeVisits(a, visits, tab.visits);
             found = true;
             break;
         };
@@ -233,4 +262,161 @@ test "case variants identify the same tmux session but hosts remain distinct" {
     try std.testing.expectError(error.InvalidLayout, validate(.{ .workspaces = &test_ws, .tabs = &.{ test_tab, upper } }));
     upper.tmux_host = 1;
     try std.testing.expect(!sameTab(test_tab, upper));
+}
+
+test "favorite merge preserves unknown and applies explicit true and false" {
+    var local = test_tab;
+    local.favorite = true;
+    for ([_]?bool{ null, true, false }) |favorite| {
+        var remote = test_tab;
+        remote.tmux_session = "SESSION-1";
+        remote.favorite = favorite;
+        const result = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+        defer freeMerge(std.testing.allocator, result);
+        try std.testing.expectEqual(favorite orelse true, result.tabs[0].favorite.?);
+    }
+    local.favorite = false;
+    var remote = test_tab;
+    remote.favorite = true;
+    const starred = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+    defer freeMerge(std.testing.allocator, starred);
+    try std.testing.expectEqual(true, starred.tabs[0].favorite.?);
+}
+
+test "favorite encoding omits unknown and round trips explicit booleans" {
+    for ([_]?bool{ null, true, false }) |favorite| {
+        var tab = test_tab;
+        tab.favorite = favorite;
+        const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{tab} });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(favorite != null, std.mem.indexOf(u8, json, "\"favorite\"") != null);
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(favorite, parsed.value.tabs[0].favorite);
+    }
+    const legacy = try parse(std.testing.allocator, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"One\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\"}]}");
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(?bool, null), legacy.value.tabs[0].favorite);
+}
+
+test "used merge never loses or lowers known time" {
+    for ([_]?u64{ null, 0, 1000, 3000 }) |local_used| for ([_]?u64{ null, 0, 2000, 4000 }) |remote_used| {
+        var local = test_tab;
+        local.used = local_used;
+        var remote = test_tab;
+        remote.tmux_session = "SESSION-1";
+        remote.used = remote_used;
+        const result = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+        defer freeMerge(std.testing.allocator, result);
+        try std.testing.expectEqual(if (local_used == null and remote_used == null) @as(?u64, null) else @as(?u64, @max(local_used orelse 0, remote_used orelse 0)), result.tabs[0].used);
+    };
+}
+
+test "used encoding omits unknown and round trips safe integers" {
+    for ([_]?u64{ null, 0, 1, 9_007_199_254_740_991 }) |used| {
+        var tab = test_tab;
+        tab.used = used;
+        const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{tab} });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(used != null, std.mem.indexOf(u8, json, "\"used\"") != null);
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(used, parsed.value.tabs[0].used);
+    }
+    var invalid = test_tab;
+    invalid.used = 9_007_199_254_740_992;
+    try std.testing.expectError(error.InvalidLayout, encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{invalid} }));
+}
+
+test "visits merge union dedupe cap eight never drops and encoding round trip" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]?[]const u64{ null, &.{}, &.{ 0, 1, 3 }, &.{ 1, 2, 3, 4, 5, 6, 7, 8 } }) |left| {
+        for ([_]?[]const u64{ null, &.{}, &.{ 2, 3, 9 }, &.{ 3, 4, 5, 6, 7, 8, 9, 10 } }) |right| {
+            var local = test_tab;
+            local.visits = left;
+            var remote = test_tab;
+            remote.tmux_session = "SESSION-1";
+            remote.visits = right;
+            const merged = try merge(a, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+            var union_values: std.ArrayList(u64) = .empty;
+            for (left orelse &.{}) |v| try union_values.append(a, v);
+            for (right orelse &.{}) |v| {
+                if (std.mem.indexOfScalar(u64, union_values.items, v) == null) try union_values.append(a, v);
+            }
+            std.mem.sort(u64, union_values.items, {}, std.sort.asc(u64));
+            const expected = union_values.items[union_values.items.len -| 8..];
+            try std.testing.expectEqualSlices(u64, expected, merged.tabs[0].visits orelse &.{});
+            try std.testing.expectEqual(left != null or right != null, merged.tabs[0].visits != null);
+            const json = try encode(a, merged);
+            const parsed = try parse(a, json);
+            defer parsed.deinit();
+            try std.testing.expectEqualSlices(u64, expected, parsed.value.tabs[0].visits orelse &.{});
+            const again = try merge(a, merged, .{ .workspaces = &test_ws, .tabs = &.{test_tab} }, 9, 256);
+            try std.testing.expectEqualSlices(u64, expected, again.tabs[0].visits orelse &.{});
+        }
+    }
+    for ([_][]const u64{ &.{ 2, 1 }, &.{ 1, 1 }, &.{9_007_199_254_740_992}, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8 } }) |invalid| {
+        var tab = test_tab;
+        tab.visits = invalid;
+        try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &test_ws, .tabs = &.{tab} }));
+    }
+}
+
+test "v2 shared fixture input and watch-only order beta alpha gamma" {
+    const frequent = @import("frequent.zig");
+    const Fixture = struct { now: u64, layout: Layout, expected: []const []const u8 };
+    const parsed = try std.json.parseFromSlice(Fixture, std.testing.allocator, @embedFile("fixtures/issue-415-frequent.json"), .{});
+    defer parsed.deinit();
+    const fixture = parsed.value;
+    try validate(fixture.layout);
+    var rows: [6]Tab = undefined;
+    var count: usize = 0;
+    for (fixture.layout.tabs) |tab| {
+        if (!frequent.inFrequent(tab.visits orelse &.{}, fixture.now, tab.input)) continue;
+        rows[count] = tab;
+        count += 1;
+    }
+    std.mem.sort(Tab, rows[0..count], {}, struct {
+        fn less(_: void, a: Tab, b: Tab) bool {
+            return frequent.bottomOrder(frequent.orderKey(a.visits orelse &.{}, 1_800_000_000_000, a.input), frequent.orderKey(b.visits orelse &.{}, 1_800_000_000_000, b.input));
+        }
+    }.less);
+    try std.testing.expectEqual(fixture.expected.len, count);
+    var bottom: []const u8 = "";
+    for (rows[0..count], fixture.expected) |row, name| {
+        try std.testing.expectEqualStrings(name, row.name);
+        bottom = row.name;
+    }
+    try std.testing.expectEqualStrings("gamma", bottom);
+}
+
+test "input merge never loses or lowers known time" {
+    for ([_]?u64{ null, 0, 1000, 3000 }) |local_input| for ([_]?u64{ null, 0, 2000, 4000 }) |remote_input| {
+        var local = test_tab;
+        local.input = local_input;
+        var remote = test_tab;
+        remote.tmux_session = "SESSION-1";
+        remote.input = remote_input;
+        const result = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+        defer freeMerge(std.testing.allocator, result);
+        try std.testing.expectEqual(if (local_input == null and remote_input == null) @as(?u64, null) else @as(?u64, @max(local_input orelse 0, remote_input orelse 0)), result.tabs[0].input);
+    };
+}
+
+test "input encoding omits unknown and round trips safe integers" {
+    for ([_]?u64{ null, 0, 1, 9_007_199_254_740_991 }) |input| {
+        var tab = test_tab;
+        tab.input = input;
+        const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{tab} });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(input != null, std.mem.indexOf(u8, json, "\"input\"") != null);
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(input, parsed.value.tabs[0].input);
+    }
+    var invalid = test_tab;
+    invalid.input = 9_007_199_254_740_992;
+    try std.testing.expectError(error.InvalidLayout, encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{invalid} }));
 }

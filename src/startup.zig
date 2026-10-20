@@ -230,6 +230,32 @@ pub fn parseAdoptArgs() void {
                 while (cur < len and haystack[cur] == ' ') cur += 1;
             }
 
+            const used_start = cur;
+            while (cur < len and haystack[cur] >= '0' and haystack[cur] <= '9') cur += 1;
+            app_state.g_adopt_last_used = std.fmt.parseInt(u64, haystack[used_start..cur], 10) catch 0;
+            while (cur < len and haystack[cur] == ' ') cur += 1;
+
+            if (cur < len and haystack[cur] == 'i') {
+                cur += 1;
+                const start = cur;
+                while (cur < len and haystack[cur] >= '0' and haystack[cur] <= '9') cur += 1;
+                app_state.g_adopt_input = std.fmt.parseInt(u64, haystack[start..cur], 10) catch 0;
+                while (cur < len and haystack[cur] == ' ') cur += 1;
+            }
+
+            if (cur + 1 < len and haystack[cur] == 'v') {
+                app_state.g_adopt_visits.known = if (haystack[cur + 1] == '1') 1 else 0;
+                cur += 2;
+                while (cur < len and haystack[cur] == '/') {
+                    cur += 1;
+                    const start = cur;
+                    while (cur < len and haystack[cur] >= '0' and haystack[cur] <= '9') cur += 1;
+                    const value = std.fmt.parseInt(u64, haystack[start..cur], 10) catch break;
+                    if (value <= 9_007_199_254_740_991) app_state.g_adopt_visits.add(value);
+                }
+                while (cur < len and haystack[cur] == ' ') cur += 1;
+            }
+
             if (cur < len and haystack[cur] == '"') {
                 cur += 1;
                 const name_start = cur;

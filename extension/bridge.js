@@ -2516,6 +2516,7 @@ function withCdpSession(tabId, operation) {
     await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
     debuggedTabs.add(tabId);
     try {
+      await chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true });
       return await withTimeout(operation(debuggee), 15000, "CDP operation timed out");
     } finally {
       try { await chrome.debugger.detach(debuggee); } catch (_) {}

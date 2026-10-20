@@ -692,6 +692,7 @@ pub fn hideShellsForOverlay() void {
             _ = ShowWindow(app_state.shells[i].hwnd, SW_HIDE);
         }
     }
+    if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
     hideAllBrowserChrome();

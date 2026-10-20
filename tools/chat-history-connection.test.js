@@ -162,8 +162,23 @@ test "unreachable host and short writes fall back; oversized frame closes the ch
     try std.testing.expect(fetch(0, &out));
     try std.testing.expectEqual(@as(usize, 1), terminations);
     reset();
-    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7}", 1, &out));
+    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7}", 1, &out, null));
     try std.testing.expectEqual(@as(usize, 1), terminations);
+}
+test "send write reservation distinguishes prewrite failure from lost acknowledgement" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(std.heap.page_allocator);
+    var request_written = false;
+    reset(); fail_start = true;
+    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(!request_written);
+    reset(); partial_write = true;
+    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(!request_written);
+    reset(); mode = .hang;
+    try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7,\"op\":\"send\"}", 4096, &out, &request_written));
+    try std.testing.expect(request_written);
+    try std.testing.expectEqual(@as(u64, 15_000), now);
 }
 test "shutdown during a fetch blocks new spawns and fallback and defers handle closure to lock owner" {
     reset();
@@ -191,7 +206,7 @@ test('persistent history production transport: reuse, framing, timeout, fallback
     fs.writeFileSync(file, prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryFetch'].map(body).join('\n') + checks);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stderr, /All 4 tests passed/);
+    assert.match(result.stderr, /All 5 tests passed/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

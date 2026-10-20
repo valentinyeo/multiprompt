@@ -1,0 +1,36 @@
+{
+ "source": "ht-marketing outbox entry from the PC and its two delivered command turns in the previous transcript of that session, copied 2026-10-17",
+ "outbox": {
+  "key": "tmux:1:ht-marketing",
+  "messages": [
+   {
+    "t": "/book-board /deeper i want to crack new customer actiostion for project. eveyrhting you kjnow about hypertsk what would i ask the book-board skill to help me with first? ",
+    "s": 2,
+    "a": 1792245652225,
+    "w": 1792249459448,
+    "c": 7,
+    "n": 1,
+    "x": 1,
+    "r": 0
+   }
+  ]
+ },
+ "previous_transcript": [
+  {
+   "type": "user",
+   "timestamp": "2026-10-17T15:04:20.969Z",
+   "message": {
+    "role": "user",
+    "content": "<command-message>book-board</command-message>\n<command-name>/book-board</command-name>\n<command-args>i want to crack new customer actiostion for project. eveyrhting you kjnow about hypertsk what would i ask the book-board skill to help me with first?</command-args>"
+   }
+  },
+  {
+   "type": "user",
+   "timestamp": "2026-10-17T15:04:21.068Z",
+   "message": {
+    "role": "user",
+    "content": "<command-message>deeper</command-message>\n<command-name>/deeper</command-name>\n<command-args>i want to crack new customer actiostion for project. eveyrhting you kjnow about hypertsk what would i ask the book-board skill to help me with first?</command-args>"
+   }
+  }
+ ]
+}

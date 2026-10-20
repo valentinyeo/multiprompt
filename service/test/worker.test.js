@@ -2,22 +2,23 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { hash, validateLayout, identity } from '../worker.js';
+import { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
 
-let mf, db, jwt, badJwt, invalidClaims;
+let mf, db;
+const mail = [], usageToken = 'u'.repeat(43);
 const base = 'http://localhost';
-const team = 'test.cloudflareaccess.com', aud = 'test-audience';
 const encode = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
 const layout = { schema: 1, revision: 1, workspaces: [{ name: 'Other' }], tabs: [{ kind: 'tmux', name: 'One', tmux_session: 'one', tmux_host: 0, workspace: 'Other' }] };
 const request = (path, options) => mf.dispatchFetch(base + path, options);
 const post = b => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
 const verifier = 'x'.repeat(64), state = 's'.repeat(43);
-async function login(token = jwt, redirect = 'http://127.0.0.1:43210/callback') {
+async function login(redirect = 'http://127.0.0.1:43210/callback') {
+  const cookie = await emailSignIn();
   const url = '/login?' + new URLSearchParams({ redirect_uri: redirect, state, code_challenge: await hash(verifier), code_challenge_method: 'S256', device_name: 'Test device' });
-  return request(url, { headers: { 'Cf-Access-Jwt-Assertion': token }, redirect: 'manual' });
+  return request(url, { method: 'POST', headers: { Cookie: cookie, ...origin }, redirect: 'manual' });
 }
 async function enroll() {
-  const r = await login(); assert.equal(r.status, 302);
+  const r = await login(); assert.equal(r.status, 303);
   const target = new URL(r.headers.get('Location')); assert.equal(target.searchParams.get('state'), state);
   const grant = { grant_type: 'authorization_code', code: target.searchParams.get('code'), code_verifier: verifier, redirect_uri: 'http://127.0.0.1:43210/callback' };
   const response = await request('/oauth/token', post(grant)); assert.equal(response.status, 200);
@@ -25,34 +26,30 @@ async function enroll() {
 }
 const auth = token => ({ Authorization: 'Bearer ' + token.access_token });
 before(async () => {
-  const pair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
-  const jwk = { ...await crypto.subtle.exportKey('jwk', pair.publicKey), kid: 'test-key' };
-  async function sign(email, overrides = {}) {
-    const hp = encode({ alg: 'RS256', kid: jwk.kid }) + '.' + encode({ iss: `https://${team}`, aud: [aud], exp: Math.floor(Date.now() / 1000) + 600, email, ...overrides });
-    return hp + '.' + Buffer.from(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', pair.privateKey, new TextEncoder().encode(hp))).toString('base64url');
-  }
-  jwt = await sign('owner@example.com'); badJwt = await sign('intruder@example.com');
-  invalidClaims = await Promise.all([{ aud: ['wrong-audience'] }, { iss: 'https://wrong.cloudflareaccess.com' }, { exp: 0 }, { nbf: Math.floor(Date.now() / 1000) + 600 }].map(claims => sign('owner@example.com', claims)));
-  mf = new Miniflare(convertV4MiniflareOptions({ outboundService: async req => { assert.equal(req.url, `https://${team}/cdn-cgi/access/certs`); return new Response(JSON.stringify({ keys: [jwk] })); }, modules: true, scriptPath: new URL('../worker.js', import.meta.url).pathname, compatibilityDate: '2026-07-30', d1Databases: ['DB'], bindings: { ACCESS_TEAM: team, ACCESS_AUD: aud, ACCOUNT_EMAIL: 'owner@example.com' } }));
+  mf = new Miniflare(convertV4MiniflareOptions({ outboundService: async req => {
+    if (req.url === 'https://api.resend.com/emails') { mail.push(await req.json()); return new Response('{"id":"test"}'); }
+    assert.fail('Unexpected outbound request: ' + req.url);
+  }, modules: true, scriptPath: new URL('../.build/worker.js', import.meta.url).pathname, compatibilityDate: '2026-10-09', compatibilityFlags: ['nodejs_compat'], d1Databases: ['DB'],
+  bindings: { ACCOUNT_EMAIL: 'owner@example.com', ALLOWED_EMAILS: 'owner@example.com', AUTH_ORIGINS: base, RP_ID: 'localhost', BETTER_AUTH_SECRET: 'test-only-value-'.repeat(3), RESEND_API_KEY: 'test-only-key', USAGE_PUSH_TOKEN: usageToken } }));
   db = await mf.getD1Database('DB');
   for (const sql of readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').split(';').filter(s => s.trim())) await db.prepare(sql).run();
   await db.prepare('INSERT INTO layouts VALUES (?,?,?)').bind('owner@example.com', 1, JSON.stringify(layout)).run();
 });
 after(async () => { await mf?.dispose(); });
 
-test('missing deployment identity configuration fails closed', async () => {
-  for (const env of [{}, { ACCESS_TEAM: team, ACCESS_AUD: aud }, { ACCOUNT_EMAIL: 'owner@example.com' }]) {
-    await assert.rejects(identity(new Request(base + '/login'), env), { status: 401 });
+test('legacy assertion headers are ignored and cannot sign in', async () => {
+  const jwt = encode({ alg: 'RS256', kid: 'test-key' }) + '.' + encode({ email: 'owner@example.com', exp: Math.floor(Date.now() / 1000) + 600 }) + '.' + 's'.repeat(43);
+  const query = await authorizeQuery();
+  for (const token of ['forged', jwt]) {
+    const response = await request('/login?' + query, { headers: { 'Cf-Access-Jwt-Assertion': token }, redirect: 'manual' });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('Location'), '/signin?next=' + encodeURIComponent('/login?' + query));
   }
 });
 
-test('missing, forged, wrong identity/audience/issuer and expired/future Access assertions cannot sign in', async () => {
-  for (const token of ['', 'forged', badJwt, jwt.replace(/(?<=\.)[^.](?=[^.]+$)/, c => c === 'a' ? 'b' : 'a'), ...invalidClaims]) assert.equal((await login(token)).status, 401);
-  assert.equal((await login(jwt)).status, 302);
-});
 test('only exact loopback callback is accepted; state and S256 are required', async () => {
-  for (const uri of ['https://evil.example/callback', 'http://localhost:1234/callback', 'http://127.0.0.1:70000/callback', 'http://127.0.0.1:1234/evil', 'http://127.0.0.1:1234/callback?evil=1']) assert.equal((await login(jwt, uri)).status, 400);
-  assert.equal((await request('/login?redirect_uri=http://127.0.0.1:1234/callback', { headers: { 'Cf-Access-Jwt-Assertion': jwt } })).status, 400);
+  for (const uri of ['https://evil.example/callback', 'http://localhost:1234/callback', 'http://127.0.0.1:70000/callback', 'http://127.0.0.1:1234/evil', 'http://127.0.0.1:1234/callback?evil=1']) assert.equal((await login(uri)).status, 400);
+  assert.equal((await request('/login?redirect_uri=http://127.0.0.1:1234/callback', { method: 'POST', headers: { Cookie: await emailSignIn(), ...origin }, redirect: 'manual' })).status, 400);
 });
 test('PKCE wrong verifier and redirect rejected; code is single use even concurrently', async () => {
   const { token, grant } = await enroll();
@@ -129,6 +126,114 @@ test('manual naming is optional for legacy rows, typed on new rows, and case var
   assert.throws(() => validateLayout({ ...layout, tabs: [layout.tabs[0], { ...layout.tabs[0], tmux_session: 'ONE' }] }));
 });
 
+test('favorite and manual accept every optional boolean combination and reject other values', () => {
+  for (const manual of [undefined, false, true]) for (const favorite of [undefined, false, true]) {
+    const tab = { ...layout.tabs[0], ...(manual === undefined ? {} : { manual }), ...(favorite === undefined ? {} : { favorite }) };
+    assert.equal(validateLayout({ ...layout, tabs: [tab] }).tabs[0], tab);
+  }
+  for (const favorite of [null, 0, 1, 'true', [], {}]) assert.throws(() => validateLayout({ ...layout, tabs: [{ ...layout.tabs[0], favorite }] }), { status: 400, message: 'invalid_tab' });
+});
+
+test('legacy layout GET strips favorites without changing stored stars; declaring GET returns them', async () => {
+  const { token } = await enroll();
+  const starred = { ...layout, tabs: [{ ...layout.tabs[0], favorite: true }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(starred)).run();
+  for (const features of [undefined, 'manual', 'favorite-other', 'favorite', 'manual, favorite']) {
+    const response = await request('/v1/layout', { headers: { ...auth(token), ...(features === undefined ? {} : { 'X-Layout-Features': features }) } });
+    assert.equal(response.status, 200); assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    const reply = await response.json();
+    assert.deepEqual(reply.layout.tabs[0], features === 'favorite' || features === 'manual, favorite' ? starred.tabs[0] : layout.tabs[0]);
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout), starred);
+});
+
+test('legacy layout PUT preserves stars by case-insensitive host/session identity only', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [{ ...layout.tabs[0], favorite: true }] })).run();
+  const tabs = [{ ...layout.tabs[0], tmux_session: 'ONE', name: 'Renamed', favorite: false }, { ...layout.tabs[0], tmux_host: 1, favorite: true }, { ...layout.tabs[0], tmux_session: 'new', favorite: true }];
+  const response = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs } }) });
+  assert.equal(response.status, 200); assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+  const reply = await response.json();
+  assert.ok(reply.layout.tabs.every(tab => !Object.hasOwn(tab, 'favorite')));
+  const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+  assert.deepEqual(stored.tabs[0], { ...tabs[0], favorite: true });
+  assert.ok(stored.tabs.slice(1).every(tab => !Object.hasOwn(tab, 'favorite')));
+  const again = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: reply.revision, layout: reply.layout }) });
+  assert.equal(again.status, 200);
+  assert.equal(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs[0].favorite, true);
+});
+
+test('declaring layout PUT stores and returns stars alongside manual naming', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(layout)).run();
+  const tabs = [{ ...layout.tabs[0], manual: true, favorite: true }, { ...layout.tabs[0], tmux_session: 'two', manual: false, favorite: false }];
+  const headers = { ...auth(token), 'X-Layout-Features': 'favorite' };
+  const response = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs } }) });
+  assert.equal(response.status, 200); assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+  const reply = await response.json();
+  assert.deepEqual(reply.layout.tabs, tabs);
+  const stored = await db.prepare('SELECT revision,layout FROM layouts').first();
+  assert.equal(stored.revision, reply.revision); assert.deepEqual(JSON.parse(stored.layout), reply.layout);
+  const get = await request('/v1/layout', { headers });
+  assert.equal(get.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings'); assert.deepEqual(await get.json(), reply);
+});
+
+test('declaring layout PUT preserves absence and explicit false', async () => {
+  const { token } = await enroll();
+  for (const favorite of [undefined, false]) {
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [{ ...layout.tabs[0], favorite: true }] })).run();
+    const tab = { ...layout.tabs[0], ...(favorite === undefined ? {} : { favorite }) };
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [tab] } }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).layout.tabs, [tab]);
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs, [tab]);
+  }
+});
+
+test('declaring unstar reaches other clients and survives a legacy PUT', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [{ ...layout.tabs[0], favorite: true }] })).run();
+  const headers = { ...auth(token), 'X-Layout-Features': 'favorite' };
+  const tab = { ...layout.tabs[0], favorite: false };
+  const put = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [tab] } }) });
+  assert.equal(put.status, 200); assert.deepEqual((await put.json()).layout.tabs, [tab]);
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs, [tab]);
+  const get = await request('/v1/layout', { headers });
+  assert.equal(get.status, 200); assert.equal(get.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+  const saved = await get.json(); assert.deepEqual(saved.layout.tabs, [tab]);
+  const legacy = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: saved.revision, layout: { ...saved.layout, tabs: [{ ...tab, tmux_session: 'ONE', favorite: true }, { ...tab, tmux_host: 1 }, { ...tab, tmux_session: 'new' }] } }) });
+  assert.equal(legacy.status, 200); assert.equal(legacy.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+  assert.ok((await legacy.json()).layout.tabs.every(tab => !Object.hasOwn(tab, 'favorite')));
+  const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+  assert.deepEqual(stored.tabs[0], { ...tab, tmux_session: 'ONE' });
+  assert.ok(stored.tabs.slice(1).every(tab => !Object.hasOwn(tab, 'favorite')));
+  const again = await request('/v1/layout', { headers });
+  assert.equal(again.status, 200); assert.deepEqual((await again.json()).layout, stored);
+});
+
+test('layout conflicts advertise features and hide winner stars only from legacy clients', async () => {
+  const { token } = await enroll();
+  const starred = { ...layout, tabs: [{ ...layout.tabs[0], favorite: true }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(starred)).run();
+  for (const features of [undefined, 'favorite']) {
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), ...(features ? { 'X-Layout-Features': features } : {}) }, body: JSON.stringify({ base_revision: 0, layout }) });
+    assert.equal(response.status, 409); assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { revision: 1, layout: features ? starred : layout });
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout), starred);
+});
+
+test('layout validation and authentication errors advertise features; non-boolean favorite is invalid_tab', async () => {
+  const unauthorized = await request('/v1/layout');
+  assert.equal(unauthorized.status, 401); assert.equal(unauthorized.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+  const { token } = await enroll();
+  for (const favorite of [null, 0, 1, 'true', [], {}]) {
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [{ ...layout.tabs[0], favorite }] } }) });
+    assert.equal(response.status, 400); assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { error: 'invalid_tab' });
+  }
+});
+
 test('non-string and null synced identities fail as invalid layout, not service errors', async () => {
   const { token } = await enroll();
   for (const tab of [null, { ...layout.tabs[0], tmux_session: 123 }]) {
@@ -138,8 +243,11 @@ test('non-string and null synced identities fail as invalid layout, not service 
 });
 
 test('Android callbacks preserve state and require matching PKCE and exact redirect; desktop is unchanged', async () => {
-  for (const redirect of ['dev.multiprompt.companion://auth/callback', 'dev.multiprompt.companion.debug://auth/callback', 'http://127.0.0.1:65535/callback']) {
-    const r = await login(jwt, redirect); assert.equal(r.status, 302);
+  for (const redirect of ['dev.multiprompt.companion://auth/callback', 'dev.multiprompt.companion.debug://auth/callback', 'dev.multiprompt.companion.m3://auth/callback', 'http://127.0.0.1:65535/callback']) {
+    const page = await request('/login?' + await authorizeQuery(redirect), { headers: { Cookie: await emailSignIn() }, redirect: 'manual' });
+    assert.equal(page.status, 200);
+    if (redirect.startsWith('dev.multiprompt.companion.m3:')) assert.ok(page.headers.get('Content-Security-Policy').split(';').find(directive => directive.trim().startsWith('form-action ')).trim().split(/\s+/).includes('dev.multiprompt.companion.m3:'));
+    const r = await login(redirect); assert.equal(r.status, 303);
     const callback = new URL(r.headers.get('Location'));
     assert.equal(callback.searchParams.get('state'), state);
     assert.deepEqual([...callback.searchParams.keys()].sort(), ['code', 'state']);
@@ -150,7 +258,494 @@ test('Android callbacks preserve state and require matching PKCE and exact redir
     const token = await exchange.json(); assert.equal((await request('/v1/layout', { headers: auth(token) })).status, 200);
     assert.equal((await request('/oauth/token', post(grant))).status, 400);
   }
-  for (const uri of ['dev.multiprompt.companion://auth/callback/evil', 'dev.multiprompt.companion://auth/callback?evil=1', 'dev.multiprompt.companion://auth/callback#evil', 'dev.multiprompt.companion://evil/callback', 'dev.multiprompt.companion://user@auth/callback', 'https://account.multiprompt.dev/callback', 'http://127.0.0.1:0/callback']) assert.equal((await login(jwt, uri)).status, 400);
+  for (const uri of ['dev.multiprompt.companion.m3x://auth/callback', 'dev.multiprompt.companion.m3://auth/callbackx', 'dev.multiprompt.companion://auth/callback/evil', 'dev.multiprompt.companion://auth/callback?evil=1', 'dev.multiprompt.companion://auth/callback#evil', 'dev.multiprompt.companion://evil/callback', 'dev.multiprompt.companion://user@auth/callback', 'https://account.example.com/callback', 'http://127.0.0.1:0/callback']) assert.equal((await login(uri)).status, 400);
   const params = { redirect_uri: 'dev.multiprompt.companion://auth/callback', state, code_challenge: await hash(verifier), code_challenge_method: 'S256' };
-  for (const bad of [{ state: 'wrong' }, { code_challenge_method: 'plain' }, { code_challenge: '' }]) assert.equal((await request('/login?' + new URLSearchParams({ ...params, ...bad }), { headers: { 'Cf-Access-Jwt-Assertion': jwt } })).status, 400);
+  for (const bad of [{ state: 'wrong' }, { code_challenge_method: 'plain' }, { code_challenge: '' }]) assert.equal((await request('/login?' + new URLSearchParams({ ...params, ...bad }), { method: 'POST', headers: { Cookie: await emailSignIn(), ...origin }, redirect: 'manual' })).status, 400);
+});
+
+const origin = { Origin: base };
+const cookieOf = r => r.headers.getSetCookie().map(c => c.split(';')[0]).filter(c => !/=$/.test(c)).join('; ');
+const json = (b, headers = {}) => ({ method: 'POST', headers: { 'Content-Type': 'application/json', ...origin, ...headers }, body: JSON.stringify(b) });
+async function emailSignIn(email = 'owner@example.com', cookie = '') {
+  mail.length = 0;
+  assert.equal((await request('/api/auth/email-otp/send-verification-otp', json({ email, type: 'sign-in' }, { Cookie: cookie }))).status, 200);
+  assert.equal(mail.length, 1); assert.deepEqual(mail[0].to, [email]);
+  const otp = mail[0].subject.match(/^(\d{6}) /)[1];
+  assert.ok((await request('/api/auth/sign-in/email-otp', json({ email, otp: otp === '000000' ? '111111' : '000000' }))).status >= 400);
+  const r = await request('/api/auth/sign-in/email-otp', json({ email, otp }, { Cookie: cookie }));
+  assert.equal(r.status, 200); const signedIn = cookieOf(r); assert.match(signedIn, /session_token=/);
+  return signedIn;
+}
+const authorizeQuery = async (redirect = 'http://127.0.0.1:43210/callback') => new URLSearchParams({ redirect_uri: redirect, state, code_challenge: await hash(verifier), code_challenge_method: 'S256', device_name: 'Better Auth device' });
+
+test('better auth: unauthenticated /login goes to the sign-in page; dashboard root shows sign-in', async () => {
+  const q = await authorizeQuery();
+  for (const path of ['/login?', '/authorize?']) {
+    const r = await request(path + q, { redirect: 'manual' }); assert.equal(r.status, 302);
+    assert.equal(r.headers.get('Location'), '/signin?next=' + encodeURIComponent(path + q));
+  }
+  const page = await request('/'); assert.equal(page.status, 200);
+  const text = await page.text(); assert.match(text, /data-page="signin"/); assert.match(text, /passkey/i); assert.doesNotMatch(text, /id="no-mail"/);
+  assert.equal((await request('/authorize?redirect_uri=https://evil.example/cb', { redirect: 'manual' })).status, 400);
+});
+
+test('better auth: email code is sent only to allowlisted addresses and is never stored in plain text', async () => {
+  mail.length = 0;
+  assert.equal((await request('/api/auth/email-otp/send-verification-otp', json({ email: 'intruder@example.com', type: 'sign-in' }))).status, 200);
+  assert.equal(mail.length, 0);
+  mail.length = 0;
+  assert.equal((await request('/api/auth/email-otp/send-verification-otp', json({ email: 'owner@example.com', type: 'sign-in' }))).status, 200);
+  const otp = mail[0].subject.slice(0, 6); assert.match(otp, /^\d{6}$/);
+  const rows = (await db.prepare('SELECT value FROM verification').all()).results;
+  assert.ok(rows.length > 0);
+  for (const row of rows) assert.equal(row.value.includes(otp), false);
+  await emailSignIn();
+});
+
+test('better auth: signed-in browser approves a device and the unchanged PKCE grant issues device tokens', async () => {
+  const cookie = await emailSignIn(); const q = await authorizeQuery();
+  const confirm = await request('/authorize?' + q, { headers: { Cookie: cookie } });
+  assert.equal(confirm.status, 200); assert.match(await confirm.text(), /Better Auth device/);
+  assert.equal((await request('/authorize?' + q, { method: 'POST', headers: { Cookie: cookie }, redirect: 'manual' })).status, 403);
+  assert.equal((await request('/authorize?' + q, { method: 'POST', headers: { Cookie: cookie, Origin: 'https://evil.example' }, redirect: 'manual' })).status, 403);
+  assert.equal((await request('/authorize?' + q, { method: 'POST', headers: origin, redirect: 'manual' })).status, 401);
+  for (const path of ['/authorize?', '/login?']) {
+    const r = await request(path + q, { method: 'POST', headers: { Cookie: cookie, ...origin }, redirect: 'manual' });
+    assert.equal(r.status, 303); const callback = new URL(r.headers.get('Location'));
+    assert.equal(callback.origin + callback.pathname, 'http://127.0.0.1:43210/callback'); assert.equal(callback.searchParams.get('state'), state);
+    const grant = { grant_type: 'authorization_code', code: callback.searchParams.get('code'), code_verifier: verifier, redirect_uri: 'http://127.0.0.1:43210/callback' };
+    const exchange = await request('/oauth/token', post(grant)); assert.equal(exchange.status, 200);
+    const token = await exchange.json(); assert.equal(token.account_id, 'owner@example.com'); assert.equal(token.expires_in, 600);
+    assert.equal((await request('/v1/layout', { headers: auth(token) })).status, 200);
+    assert.equal((await request('/oauth/token', post({ grant_type: 'refresh_token', refresh_token: token.refresh_token }))).status, 200);
+  }
+  const signedIn = await request('/signin?next=' + encodeURIComponent('/authorize?' + q), { headers: { Cookie: cookie }, redirect: 'manual' });
+  assert.equal(signedIn.status, 302); assert.equal(signedIn.headers.get('Location'), '/authorize?' + q);
+});
+
+test('better auth: dashboard session reads devices/layout, revokes only with same-origin header, never writes layout', async () => {
+  const cookie = await emailSignIn(); const { token } = await enroll();
+  const page = await (await request('/', { headers: { Cookie: cookie } })).text(); assert.match(page, /data-page="dash"/);
+  const me = await (await request('/v1/me', { headers: { Cookie: cookie } })).json(); assert.deepEqual(me, { account: 'owner@example.com', device_id: null });
+  const list = await (await request('/v1/devices', { headers: { Cookie: cookie } })).json(); assert.ok(list.devices.some(d => d.id === token.device_id));
+  assert.equal((await request('/v1/layout', { headers: { Cookie: cookie } })).status, 200);
+  assert.equal((await request('/v1/devices/' + token.device_id, { method: 'DELETE', headers: { Cookie: cookie, ...origin } })).status, 403);
+  assert.equal((await request('/v1/devices/' + token.device_id, { method: 'DELETE', headers: { Cookie: cookie, Origin: 'https://evil.example', 'X-Multiprompt': 'dash' } })).status, 403);
+  assert.equal((await request('/v1/layout', { method: 'PUT', headers: { Cookie: cookie, ...origin, 'X-Multiprompt': 'dash' }, body: '{}' })).status, 403);
+  assert.equal((await request('/v1/devices/' + token.device_id, { method: 'DELETE', headers: { Cookie: cookie, ...origin, 'X-Multiprompt': 'dash' } })).status, 200);
+  assert.equal((await request('/v1/layout', { headers: auth(token) })).status, 401);
+  assert.equal((await request('/v1/devices', { headers: { Cookie: 'better-auth.session_token=forged.value' } })).status, 401);
+});
+
+test('better auth: a fresh session can start passkey registration; passkey sign-in options are public', async () => {
+  const cookie = await emailSignIn();
+  const reg = await request('/api/auth/passkey/generate-register-options', { headers: { Cookie: cookie, ...origin } });
+  assert.equal(reg.status, 200); const options = await reg.json();
+  assert.equal(options.rp.id, 'localhost'); assert.equal(typeof options.challenge, 'string');
+  assert.ok((await request('/api/auth/passkey/generate-register-options', { headers: origin })).status >= 400);
+  const signin = await request('/api/auth/passkey/generate-authenticate-options', { headers: origin });
+  assert.equal(signin.status, 200); assert.equal(typeof (await signin.json()).challenge, 'string');
+});
+
+test('better auth: fresh sign-in displays the form with an existing session and renews stale passkey eligibility', async () => {
+  const cookie = await emailSignIn();
+  await db.prepare('UPDATE session SET createdAt=?').bind(new Date(Date.now() - 16 * 60 * 1000).toISOString()).run();
+  const stale = await request('/api/auth/passkey/generate-register-options', { headers: { Cookie: cookie, ...origin } });
+  assert.equal(stale.status, 403); assert.match((await stale.json()).message, /fresh/i);
+  const next = '/?passkey=add';
+  const fresh = await request('/signin?fresh=1&next=' + encodeURIComponent(next), { headers: { Cookie: cookie }, redirect: 'manual' });
+  assert.equal(fresh.status, 200); const page = await fresh.text();
+  assert.match(page, /data-page="signin"/); assert.ok(page.includes('const next = ' + JSON.stringify(next)));
+  const normal = await request('/signin?next=' + encodeURIComponent(next), { headers: { Cookie: cookie }, redirect: 'manual' });
+  assert.equal(normal.status, 302); assert.equal(normal.headers.get('Location'), next);
+  const renewed = await emailSignIn('owner@example.com', cookie);
+  assert.notEqual(renewed, cookie);
+  const registration = await request('/api/auth/passkey/generate-register-options', { headers: { Cookie: renewed, ...origin } });
+  assert.equal(registration.status, 200); assert.equal(typeof (await registration.json()).challenge, 'string');
+  const dash = await (await request(next, { headers: { Cookie: renewed } })).text();
+  assert.match(dash, /data-page="dash"/);
+  const reauth = dash.match(/const REAUTH = [^\n]+/)[0];
+  assert.equal(new Function(reauth + '; return REAUTH;')(), '/signin?fresh=1&next=' + encodeURIComponent(next));
+});
+
+test('removed bridge routes return normal 404 responses with or without a session', async () => {
+  for (const cookie of ['', await emailSignIn()]) {
+    for (const path of ['/login/bridge', '/api/auth/access-bridge']) {
+      const response = await request(path, { headers: { Cookie: cookie }, redirect: 'manual' });
+      assert.equal(response.status, 404);
+      assert.doesNotMatch(cookieOf(response), /session_token=/);
+    }
+  }
+});
+
+test('usage: PUT needs the service token and a valid body; GET serves the signed-in owner and devices only', async () => {
+  const status = { ts: '2026-10-10T08:00:00Z', mode: 'claude', override: null, why: 'test', advice: 'burn claude', dashboard: 'x',
+    accounts: [{ id: 'claude-1', label: 'Claude Max', provider: 'claude', email: 'a@b.c', host: 'vps', in_ladder: true, stale: false, error: null, note: '', week: { used: 42, resets_at: '2026-10-12T00:00:00Z', hours_left: 40, time_gone: 0.7 }, five_hour: { used: 10 } }] };
+  const put = (token, b = status) => request('/v1/usage', { method: 'PUT', headers: token ? { Authorization: 'Bearer ' + token } : {}, body: JSON.stringify(b) });
+  assert.equal((await put(null)).status, 401); assert.equal((await put('w'.repeat(43))).status, 401);
+  assert.equal((await put(usageToken, { ...status, accounts: 'nope' })).status, 400);
+  assert.equal((await put(usageToken)).status, 200);
+  assert.equal((await request('/v1/usage')).status, 401);
+  const cookie = await emailSignIn(); const viaSession = await (await request('/v1/usage', { headers: { Cookie: cookie } })).json();
+  assert.deepEqual(viaSession.status, status); assert.ok(viaSession.updated > 0);
+  const { token } = await enroll(); assert.deepEqual((await (await request('/v1/usage', { headers: auth(token) })).json()).status, status);
+  assert.throws(() => validateUsage({ ts: 1, accounts: [{ id: 5 }] })); assert.equal(validateUsage(status), status);
+});
+
+test('sign-in return target allows only device authorization and passkey enrolment', () => {
+  for (const ok of ['/login?state=x', '/authorize?a=b', '/?passkey=add']) assert.equal(safeNext(ok), ok);
+  for (const bad of ['https://evil.example', 'https://evil.example/', '//evil.example', '//evil.example/login?x', '/?passkey=add&next=https://evil.example/', '/?passkey=other', '/login', '/v1/layout', '/authorize?x#y', '/login?x\\y', null]) assert.equal(safeNext(bad), null);
+});
+
+test('better auth: magic link signs in once, is sent only to allowlisted addresses, and the sign-in page lists configured methods', async () => {
+  mail.length = 0;
+  assert.equal((await request('/api/auth/sign-in/magic-link', json({ email: 'intruder@example.com', callbackURL: '/' }))).status, 200);
+  assert.equal(mail.length, 0);
+  assert.equal((await request('/api/auth/sign-in/magic-link', json({ email: 'owner@example.com', callbackURL: '/' }))).status, 200);
+  assert.equal(mail.length, 1); assert.deepEqual(mail[0].to, ['owner@example.com']);
+  const link = new URL(mail[0].text.match(/https?:\/\/\S+/)[0]); const path = link.pathname + link.search;
+  const used = await request(path, { redirect: 'manual' }); assert.equal(used.status, 302);
+  const jar = cookieOf(used); assert.match(jar, /session_token=/);
+  const page = await (await request('/', { headers: { Cookie: jar } })).text();
+  assert.match(page, /Signed in as <b>owner@example\.com<\/b>/); assert.doesNotMatch(page, />false</);
+  const again = await request(path, { redirect: 'manual' }); assert.doesNotMatch(cookieOf(again), /session_token=/);
+  const signin = await (await request('/signin')).text();
+  assert.match(signin, /data-methods="passkey,email"/); assert.match(signin, /id="send-link"/); assert.doesNotMatch(signin, /id="google"/);
+});
+
+test('dashboard helpers: usage is a 0-100 percentage and reset times are Unix seconds shown as relative time', async () => {
+  const jar = await emailSignIn();
+  const script = (await (await request('/', { headers: { Cookie: jar } })).text()).match(/const pct = [^\n]*\nconst when = [\s\S]*?toLocaleTimeString[^\n]*\n/)[0];
+  const { pct, when } = new Function(script + '; return { pct, when };')();
+  assert.equal(pct(1.0), 1); assert.equal(pct(77), 77); assert.equal(pct(null), null);
+  const now = Date.now() / 1000;
+  assert.equal(when(now + 6 * 3600 + 60), 'resets in 6 h'); assert.equal(when(now + 40 * 60), 'resets in 40 min');
+  assert.match(when(now + 4 * 86400), /^resets [A-Z][a-z]{2} \d\d:\d\d$/); assert.equal(when(now - 5), 'just reset');
+  assert.doesNotMatch(when(1791738000.345), /1970/);
+});
+
+test('pages let their own Allow form send its Origin; a null Origin is still refused', async () => {
+  const page = await request('/login?' + await authorizeQuery(), { headers: { Cookie: await emailSignIn() }, redirect: 'manual' });
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('Referrer-Policy'), 'same-origin');
+  const blank = await request('/login?' + await authorizeQuery(), { method: 'POST', headers: { Cookie: await emailSignIn(), Origin: 'null' }, redirect: 'manual' });
+  assert.equal(blank.status, 403);
+});
+
+test('used accepts only optional non-negative safe integers independently of favorite', () => {
+  for (const used of [undefined, 0, 1, Number.MAX_SAFE_INTEGER]) for (const favorite of [undefined, false, true]) {
+    const tab = { ...layout.tabs[0], ...(used === undefined ? {} : { used }), ...(favorite === undefined ? {} : { favorite }) };
+    assert.equal(validateLayout({ ...layout, tabs: [tab] }).tabs[0], tab);
+  }
+  for (const used of [null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, '1', true, [], {}]) {
+    assert.throws(() => validateLayout({ ...layout, tabs: [{ ...layout.tabs[0], used }] }), { status: 400, message: 'invalid_tab' });
+  }
+});
+
+test('used response negotiation is independent, token-exact, trimmed and covers GET and conflict winners', async () => {
+  const { token } = await enroll();
+  const tab = { ...layout.tabs[0], used: 1234, favorite: false };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+  for (const features of ['', 'used-other', 'favorite', 'used', ' favorite , used ']) {
+    const headers = { ...auth(token), 'X-Layout-Features': features };
+    const expected = { ...layout.tabs[0], ...(features.includes('favorite') ? { favorite: false } : {}), ...(['used', ' favorite , used '].includes(features) ? { used: 1234 } : {}) };
+    for (const options of [{ headers }, { method: 'PUT', headers, body: JSON.stringify({ base_revision: 0, layout }) }]) {
+      const response = await request('/v1/layout', options);
+      assert.equal(response.status, options.method ? 409 : 200);
+      assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+      assert.deepEqual((await response.json()).layout.tabs, [expected]);
+    }
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs, [tab]);
+});
+
+test('used old-app saves preserve stored zero and positive stamps by host and case-insensitive session only', async () => {
+  const { token } = await enroll();
+  for (const used of [0, 1234]) for (const features of ['', 'favorite', 'used-other']) {
+    const tab = { ...layout.tabs[0], used, favorite: true };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+    const tabs = [{ ...tab, tmux_session: 'ONE', used: 9999, favorite: false }, { ...tab, tmux_host: 1 }, { ...tab, tmux_session: 'new' }];
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': features }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs } }) });
+    assert.equal(response.status, 200);
+    assert.ok((await response.json()).layout.tabs.every(t => !Object.hasOwn(t, 'used')));
+    const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+    assert.equal(stored.tabs[0].used, used);
+    assert.equal(stored.tabs[0].favorite, features === 'favorite' ? false : true);
+    assert.ok(stored.tabs.slice(1).every(t => !Object.hasOwn(t, 'used')));
+    const hidden = await request('/v1/layout', { headers: auth(token) });
+    const legacy = await hidden.json();
+    const again = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: legacy.revision, layout: legacy.layout }) });
+    assert.equal(again.status, 200);
+    assert.equal(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs[0].used, used);
+  }
+});
+
+test('used declaring saves merge max, keep absent stored values and leave unknown absent', async () => {
+  const { token } = await enroll();
+  for (const storedUsed of [undefined, 0, 2000]) for (const incoming of [undefined, 0, 1000, 3000, Number.MAX_SAFE_INTEGER]) {
+    const previous = { ...layout.tabs[0], favorite: true, ...(storedUsed === undefined ? {} : { used: storedUsed }) };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [previous] })).run();
+    const tab = { ...layout.tabs[0], tmux_session: 'ONE', ...(incoming === undefined ? {} : { used: incoming }) };
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': ' used ' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [tab] } }) });
+    assert.equal(response.status, 200);
+    const reply = await response.json();
+    const expected = storedUsed === undefined ? incoming : Math.max(storedUsed, incoming ?? storedUsed);
+    assert.equal(reply.layout.tabs[0].used, expected);
+    assert.equal(Object.hasOwn(reply.layout.tabs[0], 'used'), expected !== undefined);
+    assert.ok(!Object.hasOwn(reply.layout.tabs[0], 'favorite'));
+    const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+    assert.equal(stored.tabs[0].used, expected);
+    assert.equal(stored.tabs[0].favorite, true);
+  }
+});
+
+test('used invalid PUTs reject before saving and advertise layout features', async () => {
+  const { token } = await enroll();
+  for (const used of [null, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '123', false, [], {}]) {
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite,used' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [{ ...layout.tabs[0], used }] } }) });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { error: 'invalid_tab' });
+  }
+});
+
+test('visits hidden without exact feature on GET and 409 winners; headers advertise all features', async () => {
+  const { token } = await enroll();
+  const tab = { ...layout.tabs[0], favorite: false, used: 1234, visits: [0, 1000] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+  for (const features of ['', 'visits-other', 'favorite,used', 'visits', ' favorite , used , visits ']) {
+    const declared = features.split(',').map(s => s.trim());
+    const expected = { ...layout.tabs[0] };
+    for (const key of ['favorite', 'used', 'visits']) if (declared.includes(key)) expected[key] = tab[key];
+    const headers = { ...auth(token), 'X-Layout-Features': features };
+    for (const options of [{ headers }, { method: 'PUT', headers, body: JSON.stringify({ base_revision: 0, layout }) }]) {
+      const response = await request('/v1/layout', options);
+      assert.equal(response.status, options.method ? 409 : 200);
+      assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+      assert.deepEqual((await response.json()).layout.tabs, [expected]);
+    }
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs, [tab]);
+});
+
+test('visits kept on old-app save only by host and case-insensitive session identity', async () => {
+  const { token } = await enroll();
+  for (const features of ['', 'favorite,used', 'visits-other']) for (const visits of [[], [0, 1000]]) {
+    const tab = { ...layout.tabs[0], visits };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+    const tabs = [{ ...tab, tmux_session: 'ONE', visits: [9999] }, { ...tab, tmux_host: 1, visits: [9999] }, { ...tab, tmux_session: 'new', visits: [9999] }];
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': features }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs } }) });
+    assert.equal(response.status, 200);
+    assert.ok((await response.json()).layout.tabs.every(t => !Object.hasOwn(t, 'visits')));
+    const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+    assert.deepEqual(stored.tabs[0].visits, visits);
+    assert.ok(stored.tabs.slice(1).every(t => !Object.hasOwn(t, 'visits')));
+  }
+});
+
+test('visits declaring PUT unions dedupes keeps omissions and leaves unknown absent', async () => {
+  const { token } = await enroll();
+  for (const storedVisits of [undefined, [], [0, 2, 4]]) for (const incoming of [undefined, [], [0, 1, 4], [Number.MAX_SAFE_INTEGER]]) {
+    const previous = { ...layout.tabs[0], ...(storedVisits === undefined ? {} : { visits: storedVisits }) };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [previous] })).run();
+    const tab = { ...layout.tabs[0], tmux_session: 'ONE', ...(incoming === undefined ? {} : { visits: incoming }) };
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': ' visits ' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [tab] } }) });
+    assert.equal(response.status, 200);
+    const expected = storedVisits === undefined && incoming === undefined ? undefined : [...new Set([...(storedVisits ?? []), ...(incoming ?? [])])].sort((a, b) => a - b);
+    assert.deepEqual((await response.json()).layout.tabs[0].visits, expected);
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs[0].visits, expected);
+  }
+});
+
+test('visits cap retains newest eight and a later omission never drops them', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [{ ...layout.tabs[0], visits: [0, 2, 4, 6, 8, 10, 12, 14] }] })).run();
+  const send = (revision, tab) => request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite,used,visits,input' }, body: JSON.stringify({ base_revision: revision, layout: { ...layout, tabs: [tab] } }) });
+  const response = await send(1, { ...layout.tabs[0], visits: [1, 3, 5, 7, 9, 11, 13, 15] });
+  assert.equal(response.status, 200);
+  const expected = [8, 9, 10, 11, 12, 13, 14, 15];
+  assert.deepEqual((await response.json()).layout.tabs[0].visits, expected);
+  const omitted = await send(2, layout.tabs[0]);
+  assert.equal(omitted.status, 200);
+  assert.deepEqual((await omitted.json()).layout.tabs[0].visits, expected);
+});
+
+test('visits bad values return 400 invalid_tab without changing stored layout', async () => {
+  const { token } = await enroll();
+  const before = await db.prepare('SELECT revision,layout FROM layouts').first();
+  for (const visits of [null, 1, '1', true, {}, [-1], [1.5], [Number.MAX_SAFE_INTEGER + 1], ['1'], [null], [true], [2, 1], [1, 1], Array.from({ length: 9 }, (_, i) => i)]) {
+    assert.throws(() => validateLayout({ ...layout, tabs: [{ ...layout.tabs[0], visits }] }), { status: 400, message: 'invalid_tab' });
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite,used,visits,input' }, body: JSON.stringify({ base_revision: before.revision, layout: { ...layout, tabs: [{ ...layout.tabs[0], visits }] } }) });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { error: 'invalid_tab' });
+  }
+  assert.deepEqual(await db.prepare('SELECT revision,layout FROM layouts').first(), before);
+});
+
+test('visits shared desktop Android fixture survives a declaring layout round trip', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../tools/fixtures/issue-415-frequent.json', import.meta.url), 'utf8'));
+  validateLayout(fixture.layout);
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(layout)).run();
+  const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite,used,visits,input' }, body: JSON.stringify({ base_revision: 1, layout: fixture.layout }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).layout.tabs, fixture.layout.tabs);
+});
+
+test('input accepts only optional non-negative safe integers independently of favorite', () => {
+  for (const input of [undefined, 0, 1, Number.MAX_SAFE_INTEGER]) for (const favorite of [undefined, false, true]) {
+    const tab = { ...layout.tabs[0], ...(input === undefined ? {} : { input }), ...(favorite === undefined ? {} : { favorite }) };
+    assert.equal(validateLayout({ ...layout, tabs: [tab] }).tabs[0], tab);
+  }
+  for (const input of [null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, '1', true, [], {}]) {
+    assert.throws(() => validateLayout({ ...layout, tabs: [{ ...layout.tabs[0], input }] }), { status: 400, message: 'invalid_tab' });
+  }
+});
+
+test('input response negotiation is independent, token-exact, trimmed and covers GET and conflict winners', async () => {
+  const { token } = await enroll();
+  const tab = { ...layout.tabs[0], input: 1234, favorite: false };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+  for (const features of ['', 'input-other', 'favorite', 'input', ' favorite , input ']) {
+    const headers = { ...auth(token), 'X-Layout-Features': features };
+    const expected = { ...layout.tabs[0], ...(features.includes('favorite') ? { favorite: false } : {}), ...(['input', ' favorite , input '].includes(features) ? { input: 1234 } : {}) };
+    for (const options of [{ headers }, { method: 'PUT', headers, body: JSON.stringify({ base_revision: 0, layout }) }]) {
+      const response = await request('/v1/layout', options);
+      assert.equal(response.status, options.method ? 409 : 200);
+      assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+      assert.deepEqual((await response.json()).layout.tabs, [expected]);
+    }
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs, [tab]);
+});
+
+test('input old-app saves preserve stored zero and positive stamps by host and case-insensitive session only', async () => {
+  const { token } = await enroll();
+  for (const input of [0, 1234]) for (const features of ['', 'favorite', 'input-other']) {
+    const tab = { ...layout.tabs[0], input, favorite: true };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [tab] })).run();
+    const tabs = [{ ...tab, tmux_session: 'ONE', input: 9999, favorite: false }, { ...tab, tmux_host: 1 }, { ...tab, tmux_session: 'new' }];
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': features }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs } }) });
+    assert.equal(response.status, 200);
+    assert.ok((await response.json()).layout.tabs.every(t => !Object.hasOwn(t, 'input')));
+    const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+    assert.equal(stored.tabs[0].input, input);
+    assert.equal(stored.tabs[0].favorite, features === 'favorite' ? false : true);
+    assert.ok(stored.tabs.slice(1).every(t => !Object.hasOwn(t, 'input')));
+    const hidden = await request('/v1/layout', { headers: auth(token) });
+    const legacy = await hidden.json();
+    const again = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: legacy.revision, layout: legacy.layout }) });
+    assert.equal(again.status, 200);
+    assert.equal(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).tabs[0].input, input);
+  }
+});
+
+test('input declaring saves merge max, keep absent stored values and leave unknown absent', async () => {
+  const { token } = await enroll();
+  for (const storedInput of [undefined, 0, 2000]) for (const incoming of [undefined, 0, 1000, 3000, Number.MAX_SAFE_INTEGER]) {
+    const previous = { ...layout.tabs[0], favorite: true, ...(storedInput === undefined ? {} : { input: storedInput }) };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs: [previous] })).run();
+    const tab = { ...layout.tabs[0], tmux_session: 'ONE', ...(incoming === undefined ? {} : { input: incoming }) };
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': ' input ' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [tab] } }) });
+    assert.equal(response.status, 200);
+    const reply = await response.json();
+    const expected = storedInput === undefined ? incoming : Math.max(storedInput, incoming ?? storedInput);
+    assert.equal(reply.layout.tabs[0].input, expected);
+    assert.equal(Object.hasOwn(reply.layout.tabs[0], 'input'), expected !== undefined);
+    assert.ok(!Object.hasOwn(reply.layout.tabs[0], 'favorite'));
+    const stored = JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout);
+    assert.equal(stored.tabs[0].input, expected);
+    assert.equal(stored.tabs[0].favorite, true);
+  }
+});
+
+test('input invalid PUTs reject before saving and advertise layout features', async () => {
+  const { token } = await enroll();
+  for (const input of [null, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '123', false, [], {}]) {
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'favorite,input' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: [{ ...layout.tabs[0], input }] } }) });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { error: 'invalid_tab' });
+  }
+});
+
+test('settings accepts empty and optional boolean keys without materializing defaults', () => {
+  for (const frequent of [undefined, false, true]) for (const favorites of [undefined, false, true]) for (const all of [undefined, false, true]) for (const frequent_first of [undefined, false, true]) {
+    const settings = Object.fromEntries(Object.entries({ frequent, favorites, all, frequent_first }).filter(([, value]) => value !== undefined));
+    const candidate = { ...layout, settings };
+    assert.equal(validateLayout(candidate), candidate);
+    assert.deepEqual(candidate.settings, settings);
+  }
+  assert.ok(!Object.hasOwn(validateLayout(layout), 'settings'));
+  for (const settings of [null, false, 0, 'true', [], { unknown: true }, { frequent: true, extra: false }, ...['frequent', 'favorites', 'all', 'frequent_first'].flatMap(key => [null, 0, 1, 'true', [], {}].map(value => ({ [key]: value })))]) {
+    assert.throws(() => validateLayout({ ...layout, settings }), { status: 400, message: 'invalid_layout' });
+  }
+});
+
+test('settings feature round trips explicit values, empty objects and omission', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(layout)).run();
+  const headers = { ...auth(token), 'X-Layout-Features': 'favorite,used,visits,input, settings ' };
+  let revision = 1;
+  for (const settings of [{ frequent: false, favorites: true, all: false, frequent_first: false }, {}, undefined]) {
+    const candidate = { ...layout, ...(settings === undefined ? {} : { settings }) };
+    const response = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: revision, layout: candidate }) });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    const reply = await response.json();
+    assert.deepEqual(reply, { revision: ++revision, layout: { ...candidate, revision } });
+    const get = await request('/v1/layout', { headers });
+    assert.deepEqual(await get.json(), reply);
+    const stored = await db.prepare('SELECT revision,layout FROM layouts').first();
+    assert.equal(stored.revision, revision);
+    assert.deepEqual(JSON.parse(stored.layout), reply.layout);
+  }
+});
+
+test('settings GET and 409 negotiation strips undeclared settings without changing storage', async () => {
+  const { token } = await enroll();
+  const saved = { ...layout, settings: { favorites: false, frequent_first: false }, tabs: [{ ...layout.tabs[0], favorite: true }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(saved)).run();
+  for (const features of [undefined, 'settings-other', 'favorite', 'settings', ' favorite , settings ']) {
+    const headers = { ...auth(token), ...(features === undefined ? {} : { 'X-Layout-Features': features }) };
+    const expected = { ...layout, ...(['settings', ' favorite , settings '].includes(features) ? { settings: saved.settings } : {}), tabs: [{ ...layout.tabs[0], ...(['favorite', ' favorite , settings '].includes(features) ? { favorite: true } : {}) }] };
+    for (const options of [{ headers }, { method: 'PUT', headers, body: JSON.stringify({ base_revision: 0, layout }) }]) {
+      const response = await request('/v1/layout', options);
+      assert.equal(response.status, options.method ? 409 : 200);
+      assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+      assert.deepEqual(await response.json(), { revision: 1, layout: expected });
+    }
+  }
+  assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout), saved);
+});
+
+test('settings legacy PUT preserves stored settings and cannot introduce or overwrite them', async () => {
+  const { token } = await enroll();
+  for (const settings of [undefined, {}, { frequent: false, favorites: false, all: false, frequent_first: false }]) for (const features of [undefined, 'favorite', 'settings-other']) for (const incoming of [undefined, { frequent: true, all: true }]) {
+    const saved = { ...layout, ...(settings === undefined ? {} : { settings }) };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(saved)).run();
+    const headers = { ...auth(token), ...(features === undefined ? {} : { 'X-Layout-Features': features }) };
+    const tabs = [{ ...layout.tabs[0], name: 'Renamed' }];
+    const response = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs, ...(incoming === undefined ? {} : { settings: incoming }) } }) });
+    assert.equal(response.status, 200);
+    const reply = await response.json();
+    assert.ok(!Object.hasOwn(reply.layout, 'settings'));
+    assert.deepEqual(reply.layout.tabs, tabs);
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout), { ...saved, revision: 2, tabs });
+  }
+});
+
+test('settings invalid PUTs reject unknown keys and non-boolean values without saving', async () => {
+  const { token } = await enroll();
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(layout)).run();
+  for (const settings of [{ other: true }, { frequent: 'false' }, { favorites: 0 }, { all: null }, { frequent_first: [] }, null, []]) {
+    const response = await request('/v1/layout', { method: 'PUT', headers: { ...auth(token), 'X-Layout-Features': 'settings' }, body: JSON.stringify({ base_revision: 1, layout: { ...layout, settings } }) });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('X-Layout-Features'), 'favorite,used,visits,input,settings');
+    assert.deepEqual(await response.json(), { error: 'invalid_layout' });
+  }
+  const stored = await db.prepare('SELECT revision,layout FROM layouts').first();
+  assert.equal(stored.revision, 1);
+  assert.deepEqual(JSON.parse(stored.layout), layout);
 });

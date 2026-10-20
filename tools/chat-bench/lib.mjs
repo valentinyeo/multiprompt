@@ -8,6 +8,16 @@ export const atomic = (file, data) => { fs.writeFileSync(`${file}.tmp`, data); f
 export const winPath = file => `Z:${path.resolve(file).replaceAll('/', '\\')}`;
 export const percentile = (values, p) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
 
+export function capacity(loadavgText, meminfoText, cores, config) {
+  const load = Number(loadavgText.trim().split(/\s+/)[0]);
+  const memAvailableMiB = Number(meminfoText.match(/^MemAvailable:\s+(\d+)\s+kB$/m)?.[1]) / 1024;
+  const reasons = [];
+  if (!(load < cores * config.capacity.maxLoadPerCore)) reasons.push(`load ${load} >= ${cores * config.capacity.maxLoadPerCore}`);
+  if (!(memAvailableMiB >= config.capacity.minMemAvailableMiB)) reasons.push(`memory ${memAvailableMiB} MiB < ${config.capacity.minMemAvailableMiB} MiB`);
+  return { ok: !reasons.length, load, cores, memAvailableMiB, reason: reasons.join('; ') };
+}
+export const isOutsideKill = signal => signal === 'SIGKILL';
+
 const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
 export function records(provider, sid, turn, live = false) {
   const timestamp = new Date(Date.UTC(2026, 0, 1, 0, 0, turn)).toISOString();
@@ -131,7 +141,8 @@ export function geometryInside(geometry) {
 }
 
 export function evaluate(run, config) {
-  const failures = [...run.errors];
+  const infra = (run.infra || []).filter(f => !(run.oomKills > 0 && f.includes('killed by SIGKILL from outside the bench')));
+  const failures = [...run.errors.filter(f => !(run.oomKills > 0 && f.includes('killed by SIGKILL from outside the bench'))), ...infra];
   const samples = run.samples.filter(s => s.measured);
   const idle = samples.filter(s => s.idle);
   const weighted = rows => rows.length ? rows.reduce((n, s) => n + s.cpu * s.elapsedMs, 0) / rows.reduce((n, s) => n + s.elapsedMs, 0) : null;
@@ -163,6 +174,9 @@ export function evaluate(run, config) {
     warmContentP95Ms: percentile(run.switches.filter(s => s.phase === 'warm' && run.fixtures.tabs.find(t => t.index === s.index)?.file).map(s => s.contentPaintMs).filter(Number.isFinite), .95),
     idleSamples: idle.length, samples: samples.length };
   const rules = config.rules;
+  const memoryExceeded = run.oomKills > 0 || metrics.peakRssMiB > rules.maxRssMiB;
+  if (run.oomKills > 0) failures.push(`memory cap ${rules.maxRssMiB} MiB exceeded (${run.oomKills} process(es) killed by the bench's own memory limit)`);
+  else if (memoryExceeded) failures.push(`memory cap ${rules.maxRssMiB} MiB exceeded (peak RSS ${metrics.peakRssMiB} MiB)`);
   if (idle.length < rules.minimumIdleSamples || metrics.idleAverageCpu === null) failures.push('insufficient idle CPU evidence');
   else if (metrics.idleAverageCpu >= rules.idleAverageCpuPercent) failures.push('idle average CPU');
   if (thirtySecondPeakCpu === null) failures.push('insufficient thirty-second CPU evidence');
@@ -177,6 +191,8 @@ export function evaluate(run, config) {
     }
     for (const shot of run.switches) {
       if (run.fixtures.tabs.find(t => t.index === shot.index)?.browser === 'docked' && (!shot.geometry?.browser_foreign || !shot.geometry?.browser_live)) failures.push(`${shot.phase} tab ${shot.index}: missing foreign docked browser HWND`);
+      if (Number.isFinite(shot.foreignBrowsersOnScreen) && shot.foreignBrowsersOnScreen > rules.maxForeignBrowsersOnScreen) failures.push(`${shot.phase} tab ${shot.index}: ${shot.foreignBrowsersOnScreen} browser panes on screen`);
+      if (!Number.isFinite(shot.foreignBrowsersOnScreen)) failures.push(`${shot.phase} tab ${shot.index}: browser panes on screen not counted`);
       if (!shot.geometryInside || !shot.headerInk || !shot.composerInk) failures.push(`${shot.phase} tab ${shot.index}: header/composer outside chat pane or missing screenshot ink`);
       if (shot.phase === 'warm' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && (!Number.isFinite(shot.contentPaintMs) || shot.contentPaintMs >= rules.cachedPaintP95Ms || !shot.earlyContent)) failures.push(`warm tab ${shot.index}: cached rows delayed behind remote fetch`);
       if (shot.phase === 'cold' && run.fixtures.tabs.find(t => t.index === shot.index)?.file && !shot.earlyContent && !shot.loadingInk) failures.push(`cold tab ${shot.index}: blank loading state`);
@@ -188,5 +204,5 @@ export function evaluate(run, config) {
   for (const tab of run.fixtures.tabs.filter(t => t.file)) {
     if (!run.readerResponses.some(r => r.sid === tab.sid && r.ok)) failures.push(`transcript ${tab.sid} never parsed by production reader`);
   }
-  return { pass: failures.length === 0, failures: [...new Set(failures)], metrics };
+  return { pass: failures.length === 0, status: failures.length === 0 ? 'PASS' : !memoryExceeded && infra.length ? 'INFRA' : 'FAIL', failures: [...new Set(failures)], metrics };
 }

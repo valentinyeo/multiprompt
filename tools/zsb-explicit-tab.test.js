@@ -61,30 +61,30 @@ function nativeHarness(dir) {
 const std = @import("std");
 ${section(bridge, 'const version =', 'const max_native_message')}
 const browser_request_attempts: u32 = 4;
+var g_profile_token: []const u8 = "";
 var g_window_id: ?i64 = 1813400851;
 var calls: usize = 0;
 var replies: []const []const u8 = &.{};
 fn bridgeExePath() []const u8 { return "zigshell-bridge.exe"; }
 fn Sleep(_: u32) void {}
-fn usage() !void { return error.InvalidArguments; }
-fn usageExit(_: u8) noreturn { @panic("unexpected usage"); }
+fn GetTickCount64() u64 { return 0; }
+fn badArgs(_: []const u8) noreturn { @panic("unexpected bad arguments"); }
+fn runProfileClone(_: std.mem.Allocator, _: anytype, _: []const u8) !void { unreachable; }
 fn limitUsageExit(_: []const u8, _: usize) noreturn { @panic("unexpected help"); }
-fn requestBrowser(allocator: std.mem.Allocator, _: []const u8, _: []const u8) ![]u8 {
+fn requestBrowser(allocator: std.mem.Allocator, _: []const u8, _: []const u8, _: ?u64) ![]u8 {
     const reply = replies[@min(calls, replies.len - 1)];
     calls += 1;
     return allocator.dupe(u8, reply);
 }
-fn sendBrowserRequest(_: std.mem.Allocator, method: []const u8, fields_json: []const u8, _: ?[]const u8) !void {
-    var request = std.array_list.Managed(u8).init(std.heap.page_allocator);
-    defer request.deinit();
-    const id = "fixture";
-    const reply_pipe_text = "fixture-pipe";
-` + section(bridge, '    try request.appendSlice("{\\"id\\":");', '    const command_pipe = CreateFileA(') + String.raw`
-    std.debug.print("{s}\n", .{request.items});
+fn sendBrowserRequest(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, _: ?[]const u8) !void {
+    const request = try buildBrowserRequest(allocator, "fixture", method, "fixture-pipe", g_window_id, fields_json);
+    defer allocator.free(request);
+    std.debug.print("{s}\n", .{request});
 }
 ` + section(app, 'fn zsbBuildBridgeCmd(', 'const ZsbBridgeRun = struct') +
     section(bridge, 'const LimitTabArgs = struct', 'fn joinRemainingArgs(') +
     section(bridge, 'fn appendJsonString(', 'fn readExact(') +
+    section(bridge, 'fn getBool(', 'fn getI64(') +
     section(bridge, 'fn requestBrowserWithRetry(', 'fn requestBrowser(') + String.raw`
 pub fn main(init: std.process.Init.Minimal) !void {
     const allocator = std.heap.page_allocator;
@@ -118,7 +118,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next() orelse return error.InvalidArguments;
-` + section(bridge, '    if (std.mem.eql(u8, command, "--window")) {', '    if (std.mem.eql(u8, command, "native")) {') +
+` + section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n' +
     '    if (' + section(bridge, 'std.mem.eql(u8, command, "text") or', '    } else if (std.mem.eql(u8, command, "links"))') +
     '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "eval") or', '    } else if (std.mem.eql(u8, command, "key"))') +
     '    } else return error.InvalidArguments;\n}\n');

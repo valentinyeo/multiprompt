@@ -1568,31 +1568,10 @@ pub fn drawAttentionDot(hdc: HANDLE, cx: i32, cy: i32, radius: i32, color: DWORD
     _ = DeleteObject(dot_pen);
 }
 
-pub fn drawFavoriteStar(hdc: HANDLE, rc: *const RECT) void {
-    const cx = @divTrunc(rc.left + rc.right, 2);
-    const cy = @divTrunc(rc.top + rc.bottom, 2);
-    const points = [_]POINT{
-        .{ .x = cx, .y = cy - 6 },
-        .{ .x = cx + 2, .y = cy - 2 },
-        .{ .x = cx + 6, .y = cy - 2 },
-        .{ .x = cx + 3, .y = cy + 1 },
-        .{ .x = cx + 4, .y = cy + 6 },
-        .{ .x = cx, .y = cy + 3 },
-        .{ .x = cx - 4, .y = cy + 6 },
-        .{ .x = cx - 3, .y = cy + 1 },
-        .{ .x = cx - 6, .y = cy - 2 },
-        .{ .x = cx - 2, .y = cy - 2 },
-    };
-    const color = RGB(240, 196, 75);
-    const brush = CreateSolidBrush(color);
-    const pen = CreatePen(0, 1, color);
-    const old_brush = SelectObject(hdc, brush);
-    const old_pen = SelectObject(hdc, pen);
-    _ = Polygon(hdc, &points, points.len);
-    _ = SelectObject(hdc, old_pen);
-    _ = SelectObject(hdc, old_brush);
-    _ = DeleteObject(pen);
-    _ = DeleteObject(brush);
+pub const FAVORITE_DOT_D: i32 = 6;
+
+pub fn drawFavoriteDot(hdc: HANDLE, cx: i32, cy: i32) void {
+    drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));
 }
 
 pub fn drawSessionLockIcon(hdc: HANDLE, cx: i32, cy: i32, color: DWORD) void {
@@ -2212,7 +2191,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                     app_state.g_ws_switch_focus_grace = GetTickCount64() + 2000;
                     switchToWorkspace(app_state.shells[idx].workspace);
                 }
-                switchToShell(idx);
+                @import("console.zig").switchToShellByUser(idx);
                 if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
                     _ = showShellConsole(app_state.active_shell, SW_SHOW, "activateSessionOverviewRow");
                     repositionActive();
@@ -2240,12 +2219,12 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                     for (0..app_state.shell_count) |si| {
                         if (app_state.shells[si].workspace != slot) continue;
                         if (app_state.shells[si].wake_id != 0 and app_state.shells[si].wake_id == row.snapshot_order.? + 1) {
-                            switchToShell(@intCast(si));
+                            @import("console.zig").switchToShellByUser(@intCast(si));
                             return true;
                         }
                         if (app_state.shells[si].tmux_session_len != row.session_len) continue;
                         if (row.session_len > 0 and std.mem.eql(u8, app_state.shells[si].tmux_session[0..row.session_len], row.session[0..row.session_len])) {
-                            switchToShell(@intCast(si));
+                            @import("console.zig").switchToShellByUser(@intCast(si));
                             return true;
                         }
                         if (row.session_len == 0 and app_state.shells[si].name_len == row.name_len) {
@@ -2255,7 +2234,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                                 break;
                             };
                             if (same) {
-                                switchToShell(@intCast(si));
+                                @import("console.zig").switchToShellByUser(@intCast(si));
                                 return true;
                             }
                         }
@@ -2266,7 +2245,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                 return false;
             }
             if (restoreReminderByIndex(row.ref_idx)) {
-                if (app_state.shell_count > 0) switchToShell(app_state.shell_count - 1);
+                if (app_state.shell_count > 0) @import("console.zig").switchToShellByUser(app_state.shell_count - 1);
                 app_state.g_tmux_fetch_tick = 0;
                 return true;
             }
@@ -2288,7 +2267,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                 }
             }
             if (findLocalTmuxTab(row.host, row.session[0..row.session_len])) |existing| {
-                switchToShell(existing);
+                @import("console.zig").switchToShellByUser(existing);
                 return true;
             }
             app_state.g_pending_tmux_host = row.host;
@@ -2300,6 +2279,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                 showHeaderNoticeAscii("Could not attach tmux session", 4000, true);
                 return false;
             }
+            @import("main.zig").sessionFrontSelected();
             return true;
         },
         .archived => {
@@ -2320,6 +2300,7 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
                 if (!capacityBlockNoticeActive()) showHeaderNoticeAscii("Archived session restore failed", 4000, true);
                 return false;
             }
+            @import("main.zig").sessionFrontSelected();
             return true;
         },
     }

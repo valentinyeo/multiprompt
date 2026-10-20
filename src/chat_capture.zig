@@ -4,6 +4,7 @@ const link_detect = @import("link_detect.zig");
 const voice_filter = @import("voice_filter.zig");
 const attention_rules = @import("attention_rules.zig");
 const chat_markdown = @import("chat_markdown.zig");
+const chat_history = @import("chat_history.zig");
 const DWORD = @import("win32.zig").DWORD;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const AttachConsole = @import("win32.zig").AttachConsole;
@@ -129,6 +130,7 @@ test "Chat View recognizes the session-name composer border" {
 }
 
 fn chatLineLooksLikeComposerRule(line: []const u16) bool {
+    if (chat_markdown.consoleTableLine(line)) return false;
     if (line.len < 3) return false;
     if (chatLineLooksLikeTitledRule(line)) return true;
     var rule_chars: usize = 0;
@@ -272,7 +274,7 @@ fn chatLineHasActivityMarker(line: []const u16) bool {
 }
 
 fn chatLineIsToolDetail(line: []const u16) bool {
-    if (line.len == 0 or chat_markdown.consoleTableRow(line)) return false;
+    if (line.len == 0 or chat_markdown.consoleTableLine(line)) return false;
     return switch (line[0]) {
         0x2514,
         0x251C,
@@ -300,10 +302,11 @@ fn chatLineIsFence(line: []const u16) bool {
             (line[0] == '~' and line[1] == '~' and line[2] == '~'));
 }
 
-fn chatLineStartsStructuredBlock(line: []const u16) bool {
+fn chatLineStartsStructuredBlock(raw: []const u16) bool {
+    const line = std.mem.trimStart(u16, raw, &.{ ' ', '\t' });
     if (line.len == 0 or chatLineIsDivider(line) or chatLineLooksLikeComposerRule(line) or chatLineIsFence(line)) return true;
     if (chatLineHasActivityMarker(line) or line[0] == 0x276F or line[0] == 0x203A) return true;
-    if (line[0] == '#' or line[0] == '>' or line[0] == '|' or line[0] == 0x2502 or line[0] == 0x250C or line[0] == 0x2514) return true;
+    if (line[0] == '#' or line[0] == '>' or line[0] == '|' or line[0] == 0x2502 or line[0] == 0x250C or line[0] == 0x251C or line[0] == 0x2514) return true;
     if (chatListMarkerLen(line) > 0) return true;
 
     var digit_end: usize = 0;
@@ -379,6 +382,7 @@ fn chatReflowTranscript(buf: []u16, line_starts: []const usize, line_lens: []con
         }
         var line = buf[read_start .. read_start + read_len];
         const is_divider = chatLineIsDivider(line) or chatLineLooksLikeComposerRule(line);
+        const table_line = chat_markdown.consoleTableLine(line);
         const is_fence = chatLineIsFence(line);
 
         const join_url = have_line and pending_empty_rows == 0 and !inside_fence and
@@ -411,7 +415,7 @@ fn chatReflowTranscript(buf: []u16, line_starts: []const usize, line_lens: []con
         previous_start = destination_start;
         previous_len = line.len;
         continuing_url = join_url or link_detect.endsWithUrl(line);
-        previous_was_divider = is_divider;
+        previous_was_divider = is_divider or table_line;
         pending_empty_rows = 0;
         have_line = true;
         if (is_fence) inside_fence = !inside_fence;
@@ -705,10 +709,24 @@ pub fn chatClassifyBlocks(buf: []const u16, out: []ChatBlock) usize {
     var inside_fence = false;
     var user_open = false;
 
+    var table_end: usize = 0;
     for (0..row_count) |ri| {
         const rstart = row_starts[ri];
         const rlen = row_lens[ri];
         const row = buf[rstart .. rstart + rlen];
+        if (rstart < table_end) continue;
+        if (!inside_fence and !user_open) {
+            if (chat_markdown.boxTableLength(buf[rstart..])) |len| {
+                chatFlushBlock(&open, block_start, block_end, block_role, out, &count);
+                var table_open = true;
+                chatFlushBlock(&table_open, rstart, rstart + len, .code, out, &count);
+                out[count - 1].kind = .table;
+                out[count - 1].columns = @intCast(chat_markdown.boxBorder(row, 0x250C, 0x252C, 0x2510));
+                out[count - 1].markdown = true;
+                table_end = rstart + len;
+                continue;
+            }
+        }
 
         if (chatLineIsFence(row)) {
             chatFlushBlock(&open, block_start, block_end, block_role, out, &count);
@@ -766,7 +784,7 @@ pub fn chatBlockDisplayRange(buf: []const u16, block: ChatBlock) struct { start:
     const is_marker = switch (block.role) {
         .user, .injected => c0 == 0x276F or c0 == 0x203A,
         .prose => c0 == 0x2022 or c0 == 0x25CF,
-        .code => false,
+        .code, .tool => false,
     };
     if (!is_marker) return .{ .start = block.start, .len = block.len };
     var s = block.start + 1;
@@ -938,6 +956,68 @@ pub fn chatTrimRawConsoleRow(width: usize, chars_read: DWORD, row_idx: usize) []
     return app_state.g_chat_raw[raw_start + first .. raw_start + last];
 }
 
+fn chatPermissionSendFailedApply() void {
+    const shell_id = app_state.g_chat_permission_send_failed.swap(0, .acq_rel);
+    if (shell_id == 0) return;
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        if (shell.shell_id != shell_id) continue;
+        shell.permission_answered = false;
+        @import("window_layout.zig").chatWorkingIndicatorInvalidate();
+        break;
+    }
+}
+
+pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
+    chatPermissionSendFailedApply();
+    if (shell_index != app_state.active_shell) return;
+    var lines: [70][]const u16 = undefined;
+    const count = @min(rows, lines.len);
+    for (0..count) |i| {
+        const start = (rows - count + i) * width;
+        lines[i] = if (start < chars_read) app_state.g_chat_raw[start..@min(start + width, chars_read)] else &.{};
+    }
+    const menu = @import("chat_permission.zig").parse(lines[0..count]);
+    const changed = app_state.g_chat_permission_sid != app_state.shells[shell_index].shell_id or
+        app_state.g_chat_permission.count != (if (menu) |m| m.count else @as(usize, 0)) or
+        app_state.g_chat_permission.allow != (if (menu) |m| m.allow else null) or
+        app_state.g_chat_permission.always != (if (menu) |m| m.always else null) or
+        app_state.g_chat_permission.deny != (if (menu) |m| m.deny else null);
+    app_state.g_chat_permission = menu orelse .{};
+    app_state.g_chat_permission_sid = app_state.shells[shell_index].shell_id;
+    if (menu == null) app_state.shells[shell_index].permission_answered = false;
+    if (changed and app_state.g_chat_active) {
+        if (menu == null) @import("diagnostics.zig").debugLog("[chat] permission cleared");
+        @import("window_layout.zig").chatWorkingIndicatorInvalidate();
+    }
+}
+
+pub fn captureScreenText(shell_index: u32, out: []u16) ?usize {
+    if (shell_index >= app_state.shell_count) return null;
+    const pid = app_state.shells[shell_index].pid;
+    if (pid == 0) return null;
+
+    _ = FreeConsole();
+    if (AttachConsole(pid) == 0) return null;
+    defer _ = FreeConsole();
+    const handle = openAttachedConsoleOutput() orelse return null;
+    defer _ = CloseHandle(handle);
+
+    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
+    if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
+    const width: usize = @intCast(info.dwSize.x);
+    if (width > app_state.g_chat_raw.len) return null;
+    const top = @max(0, info.srWindow.top);
+    const bottom = @min(info.dwSize.y - 1, info.srWindow.bottom);
+    if (bottom < top) return null;
+    const rows = @min(@as(usize, @intCast(bottom - top + 1)), app_state.g_chat_raw.len / width);
+    const cells: DWORD = @intCast(rows * width);
+    var chars_read: DWORD = 0;
+    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = top }, &chars_read) == 0) return null;
+    chatPermissionCaptureRows(shell_index, width, chars_read, rows);
+    return chat_history.screenText(app_state.g_chat_raw[0..chars_read], width, rows, out);
+}
+
 pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?usize {
     if (shell_index >= app_state.shell_count or out.len < 2) return null;
     const pid = app_state.shells[shell_index].pid;
@@ -965,6 +1045,7 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     var chars_read: DWORD = 0;
     if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
 
+    chatPermissionCaptureRows(shell_index, width, chars_read, rows);
     {
         var prompt_row: ?usize = null;
         var pr = rows;
@@ -987,7 +1068,13 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
         while (wr < scan_end) : (wr += 1) {
             const wline = chatTrimRawConsoleRow(width, chars_read, wr);
             if (status_len == 0) {
-                if (attention_rules.workingStatusText(wline, &app_state.g_chat_working_text)) |n| status_len = n;
+                if (attention_rules.workingStatusText(wline, &app_state.g_chat_working_text)) |n| {
+                    status_len = n;
+                    if (app_state.ISSUE_265_WORKING_BAR) {
+                        status_len = @min(wline.len, app_state.g_chat_working_text.len);
+                        @memcpy(app_state.g_chat_working_text[0..status_len], wline[0..status_len]);
+                    }
+                }
             }
             if (!working_visible and (lineLooksLikeAiWorking(wline) or chatLineLooksLikeLiveSpinner(wline))) {
                 working_visible = true;
@@ -999,6 +1086,7 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
         }
         app_state.g_chat_screen_working = working_visible;
         app_state.g_chat_screen_status_len = status_len;
+        @import("window_layout.zig").chatWorkingTimesPoll();
     }
     if (status_only) return 0;
 
@@ -1046,7 +1134,9 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
                 continue;
             }
         }
-        const tool_header = chatLineIsToolActivity(line) or chatLineIsGenericToolHeader(line);
+        const table_line = chat_markdown.consoleTableLine(line);
+        if (table_line) hiding_tool_block = false;
+        const tool_header = !table_line and (chatLineIsToolActivity(line) or chatLineIsGenericToolHeader(line));
         if (chatLineIsAgentStatusNoise(line) or chatLineIsCollapsedToolSummary(line) or
             (row +| 20 >= rows and chatLineLooksLikeTitledRule(line)) or
             (!tool_header and voice_filter.isClaudeChrome(line)))

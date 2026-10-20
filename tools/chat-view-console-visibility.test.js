@@ -31,9 +31,9 @@ function audit(text) {
   const outside = text.replace(helper, '');
   for (const call of outside.matchAll(/(?<![.\w])ShowWindow\(([^,\n]+), (SW_\w+)\)/g)) {
     if (call[2] === 'SW_HIDE') continue;
-    assert.ok(['g_urlbar_hwnd', 'hw', 'g_chat_transcript_hwnd', 'g_chat_composer_hwnd', 'target', 'hwnd'].includes(call[1]), `unguarded reveal: ${call[0]}`);
+    assert.ok(['g_urlbar_hwnd', 'hw', 'g_chat_transcript_hwnd', 'g_chat_composer_hwnd', 'target', 'hwnd', 'owner_hwnd'].includes(call[1]), `unguarded reveal: ${call[0]}`);
     if (call[1] === 'hw') assert.ok(fn(text, 'moveBrowserEdgeMask').includes(call[0]), 'hw must be a browser mask');
-    if (call[1] === 'target' || call[1] === 'hwnd') assert.equal(call[2] === 'SW_SHOW' || call[2] === 'SW_SHOWNOACTIVATE', false, 'generic handles cannot reveal consoles');
+    if (['target', 'hwnd', 'owner_hwnd'].includes(call[1])) assert.equal(call[2] === 'SW_SHOW' || call[2] === 'SW_SHOWNOACTIVATE', false, 'generic handles cannot reveal consoles');
   }
   const flags = [...text.matchAll(/SetWindowPos\([^;]+SWP_SHOWWINDOW[^;]+;/g)];
   assert.equal(flags.length, 1);
@@ -79,8 +79,9 @@ const SW_HIDE = 0;
 const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
+const ISSUE_373_SHELL_OVERRIDE = true;
 const ChatViewMode = enum { per_session, everywhere, nowhere };
-const Shell = struct { hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false };
+const Shell = struct { hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_shell_override: bool = false };
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;

@@ -81,6 +81,23 @@ const WinHttpReadData = @import("win32.zig").WinHttpReadData;
 const WinHttpSetTimeouts = @import("win32.zig").WinHttpSetTimeouts;
 const WinHttpCloseHandle = @import("win32.zig").WinHttpCloseHandle;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
+const OpenProcess = @import("win32.zig").OpenProcess;
+const PROCESS_QUERY_LIMITED_INFORMATION = @import("win32.zig").PROCESS_QUERY_LIMITED_INFORMATION;
+const PROCESS_SYNCHRONIZE = @import("win32.zig").PROCESS_SYNCHRONIZE;
+const PROCESS_TERMINATE = @import("win32.zig").PROCESS_TERMINATE;
+const QueryFullProcessImageNameW = @import("win32.zig").QueryFullProcessImageNameW;
+const TerminateProcess = @import("win32.zig").TerminateProcess;
+const GetCurrentProcessId = @import("win32.zig").GetCurrentProcessId;
+const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
+const IsWindow = @import("win32.zig").IsWindow;
+const SendMessageTimeoutW = @import("win32.zig").SendMessageTimeoutW;
+const SMTO_ABORTIFHUNG = @import("win32.zig").SMTO_ABORTIFHUNG;
+const SMTO_BLOCK = @import("win32.zig").SMTO_BLOCK;
+const SW_RESTORE = @import("win32.zig").SW_RESTORE;
+const WM_APP_FOCUS = @import("win32.zig").WM_APP_FOCUS;
+const keybd_event = @import("win32.zig").keybd_event;
+const VK_MENU = @import("app_state.zig").VK_MENU;
+const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const MessageBoxW = @import("win32.zig").MessageBoxW;
 const ShellExecuteW = @import("win32.zig").ShellExecuteW;
@@ -109,6 +126,7 @@ const ensureWorkspaceSlotId = @import("workspaces.zig").ensureWorkspaceSlotId;
 const syncInProcessWorkspacesToRegistry = @import("workspaces.zig").syncInProcessWorkspacesToRegistry;
 const debugLog = @import("diagnostics.zig").debugLog;
 const debugLog2 = @import("diagnostics.zig").debugLog2;
+const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
 const saveSession = @import("session.zig").saveSession;
 const TIMER_ACCOUNT = @import("app_state.zig").TIMER_ACCOUNT;
 const TIMER_ACCOUNT_SAVE = @import("app_state.zig").TIMER_ACCOUNT_SAVE;
@@ -174,6 +192,10 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
+            .favorite = shell.favorite,
+            .used = if (shell.last_used != 0) shell.last_used else null,
+            .input = if (shell.input != 0) shell.input else null,
+            .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
             .tmux_session = try a.dupe(u8, shell.tmux_session[0..shell.tmux_session_len]),
             .tmux_host = shell.tmux_host,
             .workspace = workspaces.items[ws].name,
@@ -231,13 +253,15 @@ pub fn publishSessionLayout() void {
     const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
     defer base.deinit();
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
-    if (account_layout.equal(local, base.value)) {
+    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
+    defer synced.deinit();
+    if (!account_layout.publishNeeded(local, base.value, synced.value)) {
         app_state.g_account_dirty_at = 0;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
         accountDeletePending();
         return;
     }
-    const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local }, .{}) catch return;
+    const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local }, .{ .emit_null_optional_fields = false }) catch return;
     var path_buf: [512]u8 = undefined;
     if (syncAuthPath(&path_buf, "account-layout-pending.json")) |path| {
         if (!writeFileAtomicW(path, pending)) {
@@ -379,7 +403,7 @@ fn accountReadLayout(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     if (p.value != .object) return error.InvalidLayout;
     const value = p.value.object.get("layout") orelse return error.InvalidLayout;
     const revision = p.value.object.get("revision") orelse return error.InvalidLayout;
-    const json = try std.json.Stringify.valueAlloc(a, value, .{});
+    const json = try std.json.Stringify.valueAlloc(a, value, .{ .emit_null_optional_fields = false });
     const parsed = try session_layout.parse(a, json);
     defer parsed.deinit();
     if (revision != .integer or revision.integer < 0 or parsed.value.revision != revision.integer) return error.InvalidLayout;
@@ -458,7 +482,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer server.deinit();
             const rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
             if (account_layout.equal(server.value, rebased)) break;
-            const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{});
+            const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
             const put = try account_client.request("PUT", "/v1/layout", access, body);
             remote.deinit();
             remote = put;
@@ -541,6 +565,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         i -= 1;
         if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null) {
             debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
+            logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
             closeShellRemember(i, false);
         }
     }
@@ -621,6 +646,10 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            if (tab.favorite) |favorite| shell.favorite = favorite;
+            if (tab.used) |used| shell.last_used = @max(shell.last_used, used);
+            if (tab.input) |input| shell.input = @max(shell.input, input);
+            shell.visits = @import("frequent.zig").Visits.merge(shell.visits.optional(), tab.visits);
         }
         for (desired.workspaces, 0..) |ws, wi| if (std.mem.eql(u8, ws.name, tab.workspace)) {
             shell.workspace = @intCast(wi);
@@ -644,6 +673,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     app_state.g_restoring = old_restoring;
     saveSession();
     syncInProcessWorkspacesToRegistry();
+    @import("inbox.zig").publishInboxStateNow();
+    @import("inbox.zig").loadInboxModel();
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
@@ -774,6 +805,12 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        shell.synced_input = 0;
+        shell.input_publish_pending = false;
+        const probe = session_layout.Tab{ .name = "", .tmux_session = shell.tmux_session[0..shell.tmux_session_len], .tmux_host = shell.tmux_host, .workspace = "" };
+        if (account_layout.find(server.value.tabs, probe)) |i| shell.synced_input = server.value.tabs[i].input orelse 0;
+    }
     app_state.g_account_dirty_at = 0;
     app_state.g_account_locked = false;
     if (app_state.g_account_local_base) |old| a.free(old);
@@ -828,6 +865,23 @@ pub fn accountButtonRect(hwnd: HANDLE) RECT {
     const y = @divTrunc(rc.bottom, 2) + uiScaled(40);
     return .{ .left = x - uiScaled(90), .right = x + uiScaled(90), .top = y, .bottom = y + uiScaled(48) };
 }
+pub const SecondLaunchAction = enum { focus, replace, refuse };
+
+pub fn secondLaunchAction(owner_alive: bool, owner_is_app: bool, has_window: bool, responsive: bool) SecondLaunchAction {
+    if (!owner_alive or !owner_is_app) return .refuse;
+    if (has_window and responsive) return .focus;
+    return .replace;
+}
+
+test "second launch refuses stale or foreign owners, focuses live owners and replaces missing or hung windows" {
+    try std.testing.expectEqual(SecondLaunchAction.refuse, secondLaunchAction(false, true, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.refuse, secondLaunchAction(true, false, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.focus, secondLaunchAction(true, true, true, true));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, true, false));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, false, false));
+    try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, false, true));
+}
+
 pub fn accountBootstrap(hwnd: HANDLE) bool {
     var dir: [512]u8 = undefined;
     if (getSessionDir(&dir)) |path| win32MakeDir(path);
@@ -846,13 +900,79 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     var mutex_name_wide: [96]u16 = @splat(0);
     for (mutex_name, 0..) |c, i| mutex_name_wide[i] = c;
     const mutex = CreateMutexW(null, 0, @ptrCast(&mutex_name_wide)) orelse return false;
-    const result = WaitForSingleObject(mutex, 0);
+    var result = WaitForSingleObject(mutex, 0);
+    var instance_path_buf: [512]u8 = undefined;
+    const instance_path = syncAuthPath(&instance_path_buf, "account-instance.pid") orelse {
+        _ = CloseHandle(mutex);
+        return false;
+    };
+    if (result != 0 and result != 0x80) {
+        var pid: DWORD = 0;
+        var owner_hwnd: HANDLE = null;
+        if (readFileAllocWin32(instance_path, 128)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            var fields = std.mem.tokenizeAny(u8, bytes, " \r\n\t");
+            pid = std.fmt.parseInt(DWORD, fields.next() orelse "", 10) catch 0;
+            const hwnd_value = std.fmt.parseInt(usize, fields.next() orelse "", 10) catch 0;
+            if (hwnd_value != 0) owner_hwnd = @ptrFromInt(hwnd_value);
+        }
+        const owner = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid);
+        defer if (owner != null) {
+            _ = CloseHandle(owner);
+        };
+        const alive = owner != null and WaitForSingleObject(owner, 0) == 0x102;
+        var image: [1024]u16 = undefined;
+        var image_len: DWORD = image.len;
+        var is_app = false;
+        if (alive and QueryFullProcessImageNameW(owner, 0, &image, &image_len) != 0) {
+            var basename: usize = 0;
+            for (image[0..image_len], 0..) |*c, i| {
+                if (c.* == '\\' or c.* == '/') basename = i + 1;
+                if (c.* >= 'A' and c.* <= 'Z') c.* += 'a' - 'A';
+            }
+            const name = image[basename..image_len];
+            is_app = std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multiprompt")) or
+                std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("zigshell"));
+        }
+        var window_pid: DWORD = 0;
+        const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
+        const responsive = alive and is_app and has_window and SendMessageTimeoutW(owner_hwnd, 0, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 8000, null) != 0;
+        const action = secondLaunchAction(alive, is_app, has_window, responsive);
+        var log_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log_buf, "second-launch: {s} pid={d} reason={s}", .{ @tagName(action), pid, if (!alive) "not_alive" else if (!is_app) "not_app" else if (!has_window) "no_window" else if (!responsive) "hung" else "responsive" }) catch "second-launch");
+        switch (action) {
+            .focus => {
+                app_state.g_focus_authorized_hwnd = owner_hwnd;
+                app_state.g_focus_authorized_until = GetTickCount64() + 1500;
+                _ = ShowWindow(owner_hwnd, SW_RESTORE);
+                keybd_event(VK_MENU, 0, 0, 0);
+                _ = SetForegroundWindow(owner_hwnd);
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+                _ = PostMessageW(owner_hwnd, WM_APP_FOCUS, 0, 0);
+                _ = CloseHandle(mutex);
+                return false;
+            },
+            .replace => {
+                const process = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+                if (process != null) {
+                    defer _ = CloseHandle(process);
+                    if (TerminateProcess(process, 1) != 0 and WaitForSingleObject(process, 5000) == 0) {
+                        result = WaitForSingleObject(mutex, 5000);
+                    }
+                }
+            },
+            .refuse => result = WaitForSingleObject(mutex, 3000),
+        }
+    }
     if (result != 0 and result != 0x80) {
         _ = CloseHandle(mutex);
         _ = MessageBoxW(hwnd, L("multiprompt is already open for this account on this device."), L("multiprompt"), 0x40);
         return false;
     }
     app_state.g_account_instance_mutex = mutex;
+    var instance_buf: [96]u8 = undefined;
+    const instance = std.fmt.bufPrint(&instance_buf, "{d} {d}\n", .{ GetCurrentProcessId(), @intFromPtr(hwnd) }) catch return false;
+    if (!writeFileAtomicW(instance_path, instance)) debugLog("second-launch: owner record write failed");
     if (readDpapiFile("account-device.dat", 16384)) |token| {
         app_state.g_account_has_token = true;
         freeSecret(token);

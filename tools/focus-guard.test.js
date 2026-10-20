@@ -67,9 +67,9 @@ test('asynchronous screenshot focus authority is granted only after applying a u
 });
 
 test('versions, screenshot and user focus shortcuts remain wired without new palette actions', () => {
-  const version = source.match(/const APP_VERSION = "([^"]+)"/)[1];
-  const escaped = version.replace(/\./g, '\\.');
-  assert.match(source, new RegExp(`L\\("multiprompt v${escaped} \\[DEV\\]"\\) else L\\("multiprompt v${escaped}"\\)`));
+  assert.match(source, /const APP_VERSION = "\d+\.\d+\.\d+"/);
+  assert.match(source, /L\("multiprompt v" \+\+ APP_VERSION \+\+ " \[DEV\]"\) else L\("multiprompt v" \+\+ APP_VERSION\)/);
+  assert.doesNotMatch(source, /L\("multiprompt v\d/);
   assert.match(source, /kb\.vkCode == 0x53[^]*?WM_APP_BROWSER_SHOTURL/);
   assert.match(source, /fn requestNativeBrowserFocus[^]*?g_focus_browser_shell_id = shells\[active_shell\]\.shell_id/);
   const bridge = fs.readFileSync(path.join(root, 'src/bridge.zig'), 'utf8');
@@ -105,6 +105,21 @@ function auditAgentWake(text) {
   assert.match(worker, /PostMessageW\(g_main_hwnd, WM_APP_BROWSER_RESOLVED/);
   assert.match(functionSlice(text, 'zsbWorkerThread', 'zsbBuildBridgeCmd'), /argc = zsbStripAgentActivation\(argv\[0\.\.\], argc\);/);
 }
+
+function auditForeignTitleReads(text) {
+  for (const name of ['fn enumBrowserAdopt(', 'fn enumCloseStrayZspane(', 'fn browserTransientPopupDisposition(', 'fn findAndFocusWorkspaceWindowEnum(']) {
+    const begin = text.indexOf(name);
+    assert.ok(begin >= 0, name);
+    const body = text.slice(begin, text.indexOf('\n}\n', begin));
+    assert.doesNotMatch(body, /GetWindowTextW\(/, `${name} reads another app's window title with a call that waits on that app`);
+    assert.match(body, /InternalGetWindowText\(/);
+  }
+}
+
+test('issue: title reads of browser and other app windows never wait on that app; a waiting title read fails', () => {
+  auditForeignTitleReads(source);
+  assert.throws(() => auditForeignTitleReads(source.replaceAll('InternalGetWindowText(', 'GetWindowTextW(')));
+});
 
 test('issue: agent wakes never foreground, never refocus, never block the UI thread; foreground mutations fail', () => {
   auditAgentWake(source);

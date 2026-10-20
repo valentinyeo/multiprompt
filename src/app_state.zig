@@ -9,6 +9,7 @@ const chat_complete = @import("chat_complete.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const chat_switch = @import("chat_switch.zig");
+const browser_onscreen = @import("browser_onscreen.zig");
 const chat_history = @import("chat_history.zig");
 const chat_echo = @import("chat_echo.zig");
 const chat_style = @import("chat_style.zig");
@@ -202,6 +203,9 @@ pub const TabTransfer = extern struct {
     pinned_top: u8,
     locked: u8,
     favorite: u8,
+    last_used: u64,
+    input: u64 = 0,
+    visits: @import("frequent.zig").Visits,
     inbox_excluded: u8,
 };
 
@@ -221,6 +225,8 @@ pub const Shell = struct {
     name_source: NameSource,
     notified: bool,
     activity: ShellActivity,
+    working_since_ms: u64 = 0,
+    permission_answered: bool = false,
     needs_attention: bool,
     hook_capable: bool = false,
     turn_pending: bool = false,
@@ -244,12 +250,20 @@ pub const Shell = struct {
     tmux_session_len: u32,
     muted: bool,
     sync_owned: bool = false,
+    synced_input: u64 = 0,
+    input_publish_pending: bool = false,
     keep_alive: bool,
     pinned_top: bool = false,
     favorite: bool = false,
+    last_used: u64 = 0,
+    input: u64 = 0,
+    visits: @import("frequent.zig").Visits = .{},
     locked: bool = false,
     disconnected: bool = false,
     chat_view_on: bool = false,
+    chat_shell_override: bool = false,
+    chat_todo_open: bool = false,
+    chat_todo_scroll: i32 = 0,
     cached_cwd: [512]u8,
     cached_cwd_len: u32,
     ram_mb: u32,
@@ -258,12 +272,14 @@ pub const Shell = struct {
     wait_handle: HANDLE,
     wake_id: u32 = 0,
     shell_id: u32,
+    chat_id: u64 = 0,
     favicon_hicon: ?HANDLE,
     favicon_path: [512]u8,
     favicon_path_len: u32,
     group_id: u32,
     selected: bool,
     tmux_host: u8,
+    spawn_tick: u64 = 0,
     full_width: bool,
     last_active: u64,
     last_active_event: u64 = 0,
@@ -333,6 +349,7 @@ pub const empty_shell = Shell{
     .name_source = .default,
     .notified = false,
     .activity = .idle,
+    .working_since_ms = 0,
     .needs_attention = false,
     .last_title = std.mem.zeroes([256]u16),
     .last_title_len = 0,
@@ -351,12 +368,14 @@ pub const empty_shell = Shell{
     .claude_session = false,
     .wait_handle = null,
     .shell_id = 0,
+    .chat_id = 0,
     .favicon_hicon = null,
     .favicon_path = std.mem.zeroes([512]u8),
     .favicon_path_len = 0,
     .group_id = 0,
     .selected = false,
     .tmux_host = 0,
+    .spawn_tick = 0,
     .full_width = false,
     .browser_split_permille = BROWSER_SPLIT_DEFAULT_PERMILLE,
     .last_active = 0,
@@ -981,6 +1000,7 @@ pub const ChatViewMode = enum { per_session, everywhere, nowhere };
 pub var g_chat_view_mode: ChatViewMode = .per_session;
 pub var g_chat_view_restore_on: bool = false;
 pub var g_chat_transcript_hwnd: HANDLE = null;
+pub var g_chat_status_hwnd: HANDLE = null;
 pub var g_chat_hover_link: ?link_detect.Range = null;
 pub var g_chat_hover_copy: ?usize = null;
 pub var g_chat_link_font: HANDLE = null;
@@ -1051,6 +1071,8 @@ pub var g_chat_last_len: usize = 0;
 pub var g_chat_cache_shell_id: u32 = 0;
 pub var g_chat_hidden_tool_rows: u32 = 0;
 pub var g_chat_screen_working: bool = false;
+pub var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
+pub var g_chat_permission_sid: u32 = 0;
 pub var g_chat_working_text: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_screen_status_len: usize = 0;
 pub var g_chat_working_applied: [128]u16 = std.mem.zeroes([128]u16);
@@ -1061,6 +1083,11 @@ pub var g_chat_capture: []u16 = &g_chat_capture_storage;
 pub var g_chat_sel_text: [262144]u16 = undefined;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
 pub var g_chat_line_lens: [1400]usize = std.mem.zeroes([1400]usize);
+pub var g_chat_reply: [131072]u8 = @splat(0);
+pub var g_chat_reply_len: usize = 0;
+pub var g_chat_reply_preview: [1024]u16 = @splat(0);
+pub var g_chat_reply_preview_len: usize = 0;
+pub const SEARCH_CHAT_REPLY_OFFSET: usize = 6399;
 pub var g_chat_skill_name: [128]u8 = std.mem.zeroes([128]u8);
 pub var g_chat_skill_name_len: usize = 0;
 pub var g_chat_skill_body: [131072]u8 = std.mem.zeroes([131072]u8);
@@ -1073,9 +1100,10 @@ pub const CHAT_MAX_BLOCKS = 256;
 pub var g_chat_blocks_storage: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
 pub var g_chat_blocks: []ChatBlock = &g_chat_blocks_storage;
 pub var g_chat_block_count: usize = 0;
-pub var g_chat_rich_fonts: [11]HANDLE = @splat(null);
+pub var g_chat_rich_fonts: [12]HANDLE = @splat(null);
 pub var g_chat_screen: [262144]u16 = undefined;
 pub var g_chat_browser_swap: chat_switch.Pending = .{};
+pub var g_browser_onscreen: browser_onscreen.OnScreen = .{};
 pub var g_chat_switch_preparing = false;
 pub var g_chat_switch_started: u64 = 0;
 pub var g_chat_switch_painted_ms: u64 = 0;
@@ -1221,6 +1249,9 @@ pub const SEARCH_GROUPMOVE_NEW_OFFSET: usize = 6303;
 pub const SEARCH_GROUPMOVE_NONE_OFFSET: usize = 6304;
 pub const SEARCH_CHAT_VIEW_OFFSET: usize = 6305;
 pub const SEARCH_CHAT_STOP_OFFSET: usize = 6306;
+pub const SEARCH_CHAT_ALLOW_OFFSET: usize = 6373;
+pub const SEARCH_CHAT_ALWAYS_OFFSET: usize = 6374;
+pub const SEARCH_CHAT_DENY_OFFSET: usize = 6375;
 pub const SEARCH_MULTIPROMPT_LOGIN_OFFSET: usize = 6307;
 pub const SEARCH_SYNC_SIGNOUT_OFFSET: usize = 9100;
 pub const SEARCH_LAYOUT_PULL_OFFSET: usize = 9102;
@@ -1238,6 +1269,7 @@ pub const SEARCH_POWER_AUTO_OFFSET: usize = 6337;
 pub const SEARCH_POWER_ALWAYS_OFFSET: usize = 6338;
 pub const SEARCH_POWER_OFF_OFFSET: usize = 6339;
 pub const SEARCH_FAVORITE_OFFSET: usize = 6389;
+pub const SEARCH_INBOX_FREQUENT_OFFSET: usize = 6396;
 pub const SEARCH_LADDER_AUTO_OFFSET: usize = 6390;
 pub const SEARCH_LADDER_CLAUDE_OFFSET: usize = 6391;
 pub const SEARCH_LADDER_CODEX_OFFSET: usize = 6392;
@@ -1259,6 +1291,8 @@ pub const SEARCH_VOICE_SPEED_140_OFFSET: usize = 6353;
 pub const SEARCH_VOICE_SPEED_150_OFFSET: usize = 6354;
 pub const SEARCH_VOICE_PREVIOUS_OFFSET: usize = 6360;
 pub const SEARCH_VOICE_NEXT_OFFSET: usize = 6361;
+pub const SEARCH_CHAT_TODO_OFFSET: usize = 6398;
+pub const SEARCH_CHAT_TOOL_STEPS_OFFSET: usize = 6395;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;
 pub const SEARCH_CHAT_COPY_SELECTION_OFFSET: usize = 6363;
 pub const SEARCH_CHAT_SELECT_ALL_OFFSET: usize = 6364;
@@ -1320,6 +1354,10 @@ pub const SEARCH_TABCTX_KEEPAWAKE: usize = 7115;
 pub const SEARCH_TABCTX_INBOX_EXCLUDE: usize = 7116;
 pub const SEARCH_TABCTX_CHAT_RESET: usize = 7117;
 pub const SEARCH_TABCTX_FAVORITE: usize = 7118;
+pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;
+pub const SEARCH_TABCTX_CHAT_ALLOW: usize = 7180;
+pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
+pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -1565,6 +1603,9 @@ pub var g_adopt_muted: bool = false;
 pub var g_adopt_pinned_top: bool = false;
 pub var g_adopt_locked: bool = false;
 pub var g_adopt_favorite: bool = false;
+pub var g_adopt_last_used: u64 = 0;
+pub var g_adopt_input: u64 = 0;
+pub var g_adopt_visits: @import("frequent.zig").Visits = .{};
 
 pub var g_job: HANDLE = null;
 pub var g_tunnel_job: HANDLE = null;
@@ -1797,6 +1838,7 @@ pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
 
 pub const SavedTab = struct {
+    chat_id: u64 = 0,
     sync_owned: bool = false,
     kind: ShellKind,
     name: [64]u16,
@@ -1815,6 +1857,9 @@ pub const SavedTab = struct {
     pinned_top: bool = false,
     inbox_excluded: bool = false,
     favorite: bool = false,
+    last_used: u64 = 0,
+    input: u64 = 0,
+    visits: @import("frequent.zig").Visits = .{},
     locked: bool = false,
     favicon_path: [512]u8,
     favicon_path_len: u32,
@@ -1843,7 +1888,13 @@ pub const SavedTab = struct {
     bsplit_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
     kaw: bool = false,
     cv: bool = false,
+    cso: bool = false,
+    fw: bool = false,
 };
+
+pub const ISSUE_347_KEEP_FULL_WIDTH = true;
+pub const ISSUE_373_SHELL_OVERRIDE = true;
+pub const ISSUE_274_DOT_ON_SELECTED_TAB = true;
 
 pub var g_restored_valid_session = false;
 
@@ -1985,6 +2036,9 @@ pub const ReminderEntry = struct {
     group_collapsed: bool = false,
     pinned_top: bool = false,
     favorite: bool = false,
+    last_used: u64 = 0,
+    input: u64 = 0,
+    visits: @import("frequent.zig").Visits = .{},
     locked: bool = false,
 };
 pub var g_reminders: [MAX_REMINDERS]ReminderEntry = std.mem.zeroes([MAX_REMINDERS]ReminderEntry);
@@ -2239,6 +2293,7 @@ pub const ChatViewLayout = struct {
     composer: RECT,
     send_btn: RECT,
     attach_btn: RECT,
+    stop_btn: RECT,
 };
 
 pub const chat_font_bytes = @embedFile("fonts/IBMPlexSans-Regular.ttf");
@@ -2336,6 +2391,7 @@ pub const ChatHistoryChannel = struct {
 pub var g_chat_history_channels: [3]ChatHistoryChannel = @splat(.{});
 pub var g_chat_history_channel_mutex: SpinMutex = .{};
 pub var g_chat_history_channels_closing: std.atomic.Value(bool) = .init(false);
+pub var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
 
 pub var g_chat_switch_loading: bool = false;
 pub var g_chat_prepend_pending = false;
@@ -2442,7 +2498,7 @@ pub const ChatImgThumb = struct { thumb: HANDLE, w: i32, h: i32 };
 pub const ChatAttachError = enum(u8) { no_config = 1, not_image, too_big, read_failed, upload_failed };
 pub const ChatAttachJob = struct {
     shell_id: u32,
-    path: [520]u16,
+    path: [:0]const u16,
     delete_after: bool,
 };
 
@@ -2482,6 +2538,7 @@ const ShotFocus = struct {
     foreground: HANDLE = null,
 };
 pub var g_shot_focus: ShotFocus = .{};
+pub var g_igsh354_paste_focus: bool = true;
 
 pub const CHAT_COMPOSER_MAX_LINES = 8;
 
@@ -2524,6 +2581,13 @@ pub const ChatOutboxEntry = struct {
     left_box_ms: u64 = 0,
     retryable: bool = false,
     delivery_watch: chat_echo.DeliveryWatch = .{},
+    channel_sent: bool = false,
+    channel_pending: bool = false,
+    channel_sent_ms: i64 = 0,
+    channel_retries: u8 = 0,
+    channel_history_revision: u64 = std.math.maxInt(u64),
+    channel_history_generation: u64 = 0,
+    transcript_queued: bool = false,
     anchor: chat_echo.Anchor = .{},
     from_disk: bool = false,
 };
@@ -2565,7 +2629,8 @@ pub var g_chat_reconcile_hash: u64 = 0;
 pub var g_chat_reconcile_outbox: u64 = 0;
 pub var g_chat_reconcile_generation: u64 = 0;
 
-pub const SSH_AUTO_RECONNECT_ENABLED = false;
+pub const SSH_AUTO_RECONNECT_ENABLED = true;
+pub const ISSUE_350_KEEP_TMUX_TABS = true;
 
 pub var g_chat_draft_owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
 pub var g_chat_draft_owner_len: usize = 0;
@@ -2890,6 +2955,9 @@ pub const VoiceFrame = struct {
     }
 };
 
+pub const ISSUE_265_WORKING_BAR = true;
+pub var g_chat_working_timer_running: bool = false;
+
 pub const CHAT_WORKING_GENERIC = [_]u16{ 'W', 'o', 'r', 'k', 'i', 'n', 'g', 0x2026 };
 
 pub const ChangelogLayout = struct {
@@ -3186,6 +3254,9 @@ pub const InboxRow = struct {
     act: u8 = 0,
     att: bool = false,
     favorite: bool = false,
+    last_used: u64 = 0,
+    input: u64 = 0,
+    visits: @import("frequent.zig").Visits = .{},
     la: u64 = 0,
     lv: u64 = 0,
     name: [64]u8 = std.mem.zeroes([64]u8),
@@ -3200,13 +3271,16 @@ pub const InboxRow = struct {
     br: u8 = 0,
 };
 
+pub var g_session_save_pending: bool = false;
 pub var g_inbox_active: bool = false;
 pub var g_inbox_ws: [INBOX_MAX_WS]InboxWs = undefined;
 pub var g_inbox_ws_count: u32 = 0;
 pub var g_inbox_rows: [INBOX_MAX_ROWS]InboxRow = undefined;
 pub var g_inbox_row_count: u32 = 0;
 pub var g_inbox_sel: u32 = 0;
-pub var g_inbox_tab: u32 = 0;
+pub var g_inbox_tab: u32 = @import("frequent.zig").all_split;
+pub var g_front_period: @import("frequent.zig").FrontPeriod = .{};
+pub const TIMER_VISIT_DWELL: usize = 173;
 pub var g_inbox_filter_active: bool = false;
 pub var g_inbox_filter_buf: [64]u16 = std.mem.zeroes([64]u16);
 pub var g_inbox_filter_len: u32 = 0;
@@ -3226,7 +3300,7 @@ pub var g_inbox_pending_archives: [INBOX_MAX_ROWS]PendingInboxArchive = [_]Pendi
 pub var g_unread_only: bool = false;
 pub var g_console_font_override: i16 = 0;
 pub var g_inbox_g_tick: u64 = 0;
-pub const INBOX_MAX_SPLIT_TABS: usize = INBOX_MAX_WS + 2;
+pub const INBOX_MAX_SPLIT_TABS: usize = INBOX_MAX_WS + @import("frequent.zig").first_ws_split;
 pub var g_inbox_split_xs: [INBOX_MAX_SPLIT_TABS]i32 = [_]i32{0} ** INBOX_MAX_SPLIT_TABS;
 pub var g_inbox_split_xe: [INBOX_MAX_SPLIT_TABS]i32 = [_]i32{0} ** INBOX_MAX_SPLIT_TABS;
 pub var g_inbox_split_ids: [INBOX_MAX_SPLIT_TABS]u32 = [_]u32{0} ** INBOX_MAX_SPLIT_TABS;
@@ -3235,3 +3309,67 @@ pub var g_inbox_split_tab_count: u32 = 0;
 pub const AgentName = enum { none, claude, codex, pi, kimi, hax, grok, cursor };
 
 pub const HIDDEN_IDLE_WATCHDOG_POLLS: u8 = 2;
+
+pub const ChatTmuxSendJob = struct {
+    key: chat_transcript.Identity,
+    echo_id: u64,
+    text: []u16,
+    retry: bool,
+    written: bool = false,
+    rejected: bool = false,
+    finished: std.atomic.Value(bool) = .init(false),
+};
+pub var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
+
+pub const ChatFullSettleJob = struct {
+    key: chat_transcript.Identity,
+    outbox_key: [CHAT_OUTBOX_KEY_CAP]u8,
+    key_len: u32,
+    entries: [16]struct { id: u64 = 0, sent_ms: i64 = 0, text: []u16 = &.{} } = @splat(.{}),
+    count: usize = 0,
+    after_ms: i64 = std.math.maxInt(i64),
+    delivered_ms: [16]i64 = @splat(0),
+    finished: std.atomic.Value(bool) = .init(false),
+};
+pub const ChatFullSettleAttempt = struct {
+    key: [CHAT_OUTBOX_KEY_CAP]u8 = @splat(0),
+    key_len: u32 = 0,
+    at: u64 = 0,
+    last_id: u64 = 0,
+};
+pub var g_chat_full_settle_job: ?*ChatFullSettleJob = null;
+pub var g_chat_full_settle_attempts: [CHAT_OUTBOX_TOTAL_MAX]ChatFullSettleAttempt = @splat(.{});
+
+pub const ISSUE_268_CHAT_FIND = @import("chat_find.zig").ISSUE_268_CHAT_FIND;
+pub const SEARCH_CHAT_FIND_OFFSET: usize = 6397;
+pub const WM_APP_CHAT_FIND: u32 = WM_APP + 202;
+pub const TIMER_CHAT_FIND: usize = 107;
+pub const CHAT_FIND_TOP_H: i32 = 52;
+pub const ChatFindJob = struct {
+    key: chat_transcript.Identity,
+    id: u32,
+    query: [801]u8 = @splat(0),
+    result: ?@import("chat_find.zig").Result = null,
+    ready: std.atomic.Value(bool) = .init(false),
+};
+pub var g_chat_find_open = false;
+pub var g_chat_find_query: [401]u16 = @splat(0);
+pub var g_chat_find_len: usize = 0;
+pub var g_chat_find_id: u32 = 0;
+pub var g_chat_find_due: u64 = 0;
+pub var g_chat_find_key: chat_transcript.Identity = .{};
+pub var g_chat_find_job: ?*ChatFindJob = null;
+pub var g_chat_find_result: ?@import("chat_find.zig").Result = null;
+pub var g_chat_find_selected: usize = 0;
+pub var g_chat_find_jump = false;
+pub var g_chat_find_error = false;
+
+pub var g_chat_find_ranges: [500]?chat_markdown.Range = @splat(null);
+pub var g_chat_find_ranges_hash: u64 = 0;
+pub var g_chat_find_high_surrogate: u16 = 0;
+pub var g_chat_find_consumed: [256]bool = @splat(false);
+pub var g_chat_find_layout_open = false;
+
+pub const ShellDoubleClick = struct { time: u32, point: POINT, shell_id: u32 };
+pub var g_shell_double_click_first: ?ShellDoubleClick = null;
+pub var g_shell_double_click_pending: ?ShellDoubleClick = null;

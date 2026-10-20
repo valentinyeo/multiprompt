@@ -14,9 +14,28 @@ fn workspaceIndex(workspaces: []const layout.Workspace, name: []const u8) ?usize
     return null;
 }
 pub fn equal(a: Layout, b: Layout) bool {
+    return equalWithin(a, b, 0);
+}
+
+pub fn publishNeeded(local: Layout, base: Layout, synced: Layout) bool {
+    if (!equalWithin(local, base, std.math.maxInt(u64))) return true;
+    for (local.tabs) |tab| {
+        const known = if (find(synced.tabs, tab)) |i| synced.tabs[i].visits else null;
+        if (!eq(u64, tab.visits orelse &.{}, known orelse &.{})) return true;
+        const input = tab.input orelse 0;
+        const synced_input = if (find(synced.tabs, tab)) |i| synced.tabs[i].input orelse 0 else 0;
+        if (input > synced_input and (synced_input == 0 or input - synced_input > 60 * 1000)) return true;
+        const used = tab.used orelse 0;
+        const previous = if (find(synced.tabs, tab)) |i| synced.tabs[i].used orelse 0 else 0;
+        if (used > previous and used - previous > 10 * 60 * 1000) return true;
+    }
+    return false;
+}
+
+fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
-    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -27,6 +46,14 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     var tabs: std.ArrayList(Tab) = .empty;
     try ws.appendSlice(a, remote.workspaces);
     try tabs.appendSlice(a, remote.tabs);
+    for (tabs.items) |*tab| {
+        if (find(local.tabs, tab.*)) |i| {
+            if (tab.favorite == null) tab.favorite = local.tabs[i].favorite;
+            tab.used = layout.maxUsed(tab.used, local.tabs[i].used);
+            tab.input = layout.maxUsed(tab.input, local.tabs[i].input);
+            tab.visits = try layout.mergeVisits(a, tab.visits, local.tabs[i].visits);
+        }
+    }
     for (local.tabs, owned) |tab, synced| {
         if (find(remote.tabs, tab) != null or (synced and tab.tmux_session.len > 0)) continue;
         if (workspaceIndex(ws.items, tab.workspace) == null) try ws.append(a, .{ .name = tab.workspace });
@@ -39,6 +66,14 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
     var tabs: std.ArrayList(Tab) = .empty;
     try tabs.appendSlice(a, edited.tabs);
+    for (tabs.items) |*tab| {
+        if (find(base.tabs, tab.*)) |i| {
+            if (tab.favorite == null) tab.favorite = base.tabs[i].favorite;
+            tab.used = layout.maxUsed(tab.used, base.tabs[i].used);
+            tab.input = layout.maxUsed(tab.input, base.tabs[i].input);
+            tab.visits = try layout.mergeVisits(a, tab.visits, base.tabs[i].visits);
+        }
+    }
     var ws: std.ArrayList(layout.Workspace) = .empty;
     try ws.appendSlice(a, edited.workspaces);
     for (base.tabs, 0..) |t, i| {
@@ -64,8 +99,23 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
     }
     for (remote.tabs) |r| {
         var t = r;
+        if (find(edited.tabs, r)) |ei| {
+            t.used = layout.maxUsed(t.used, edited.tabs[ei].used);
+            t.input = layout.maxUsed(t.input, edited.tabs[ei].input);
+            t.visits = try layout.mergeVisits(a, t.visits, edited.tabs[ei].visits);
+        }
+        if (t.favorite == null) {
+            if (find(edited.tabs, r)) |ei| t.favorite = edited.tabs[ei].favorite;
+        }
         if (find(base.tabs, r)) |bi| {
             const ei = find(edited.tabs, r) orelse continue;
+            t.used = layout.maxUsed(t.used, base.tabs[bi].used);
+            t.input = layout.maxUsed(t.input, base.tabs[bi].input);
+            t.visits = try layout.mergeVisits(a, t.visits, base.tabs[bi].visits);
+            if (r.favorite == null and t.favorite == null) t.favorite = base.tabs[bi].favorite;
+            if (edited.tabs[ei].favorite) |favorite| {
+                if (favorite != (base.tabs[bi].favorite orelse false)) t.favorite = favorite;
+            }
             if (!eq(u8, edited.tabs[ei].name, base.tabs[bi].name) or edited.tabs[ei].manual != base.tabs[bi].manual) {
                 t.name = edited.tabs[ei].name;
                 t.manual = edited.tabs[ei].manual;
@@ -147,6 +197,21 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         try normalized.object.put(a, "tmux_host", .{ .integer = t.tmux_host });
         try normalized.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, t.workspace).?) });
         try normalized.object.put(a, "manual", .{ .bool = t.manual });
+        if (t.favorite) |favorite| try normalized.object.put(a, "favorite", .{ .bool = favorite });
+        const cached_used = record.object.get("used");
+        const used = layout.maxUsed(t.used, if (cached_used != null and cached_used.? == .integer and cached_used.?.integer >= 0) @import("json_reader.zig").uint(record, "used") else null);
+        if (used) |value| {
+            try normalized.object.put(a, "used", .{ .integer = @intCast(value) });
+            try normalized.object.put(a, "used_unix", .{ .bool = true });
+        }
+        const cached_input = record.object.get("input");
+        if (layout.maxUsed(t.input, if (cached_input != null and cached_input.? == .integer and cached_input.?.integer >= 0) @as(u64, @intCast(cached_input.?.integer)) else null)) |value| try normalized.object.put(a, "input", .{ .integer = @intCast(value) });
+        const cached_visits = @import("json_reader.zig").visits(record);
+        if (try layout.mergeVisits(a, t.visits, cached_visits.optional())) |values| {
+            var list: std.json.Array = .init(a);
+            for (values) |v| try list.append(.{ .integer = @intCast(v) });
+            try normalized.object.put(a, "visits", .{ .array = list });
+        }
         try normalized.object.put(a, "sync_owned", .{ .bool = true });
         try records.append(normalized);
     }
@@ -391,4 +456,302 @@ test "issue: secondary tab on host 0 that this device never closed survives a pu
     var other_host = secondary;
     other_host.tmux_host = 2;
     try std.testing.expect(find(base.tabs, other_host) == null);
+}
+
+test "favorite apply and held edits preserve unknown and accept explicit booleans" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]bool{ false, true }) |favorite| {
+        var local = one;
+        local.favorite = favorite;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{local} };
+        for ([_]?bool{ null, true, false }) |incoming| {
+            var remote = one;
+            remote.tmux_session = "ONE";
+            remote.favorite = incoming;
+            const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+            const applied = try apply(a, base, &.{true}, server, 9, 256);
+            try std.testing.expectEqual(incoming orelse favorite, applied.tabs[0].favorite.?);
+            const held = try keepHeld(a, base, server, &.{});
+            try std.testing.expectEqual(incoming orelse favorite, held.tabs[0].favorite.?);
+        }
+    }
+}
+
+test "favorite rebase preserves unknown server fields and applies remote changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]bool{ false, true }) |favorite| {
+        var local = one;
+        local.favorite = favorite;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{local} };
+        for ([_]?bool{ null, true, false }) |incoming| {
+            var remote = one;
+            remote.favorite = incoming;
+            const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+            const result = try rebase(a, base, base, server);
+            try std.testing.expectEqual(incoming orelse favorite, result.tabs[0].favorite.?);
+            const unknown_edit = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
+            const unchanged = try rebase(a, base, unknown_edit, server);
+            try std.testing.expectEqual(incoming orelse favorite, unchanged.tabs[0].favorite.?);
+        }
+        var edited = local;
+        edited.favorite = !favorite;
+        var remote = one;
+        remote.name = "Remote rename";
+        const rebased = try rebase(a, base, .{ .workspaces = &test_ws, .tabs = &.{edited} }, .{ .workspaces = &test_ws, .tabs = &.{remote} });
+        try std.testing.expectEqual(!favorite, rebased.tabs[0].favorite.?);
+        try std.testing.expectEqualStrings(remote.name, rebased.tabs[0].name);
+        const both_added = try rebase(a, .{ .workspaces = &test_ws, .tabs = &.{} }, base, .{ .workspaces = &test_ws, .tabs = &.{one} });
+        try std.testing.expectEqual(favorite, both_added.tabs[0].favorite.?);
+    }
+}
+
+test "favorite two laptop unstar applies rebases and pushes explicit false" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var starred = one;
+    starred.favorite = true;
+    const laptop_b = Layout{ .workspaces = &test_ws, .tabs = &.{starred} };
+    var unstarred = one;
+    unstarred.tmux_session = "ONE";
+    unstarred.favorite = false;
+    const server = Layout{ .workspaces = &test_ws, .tabs = &.{unstarred} };
+    const applied = try apply(a, laptop_b, &.{true}, server, 9, 256);
+    try std.testing.expectEqual(false, applied.tabs[0].favorite.?);
+    const rebased = try rebase(a, laptop_b, laptop_b, server);
+    try std.testing.expectEqual(false, rebased.tabs[0].favorite.?);
+    const push = try layout.encode(a, rebased);
+    try std.testing.expect(std.mem.indexOf(u8, push, "\"favorite\":false") != null);
+    const parsed = try layout.parse(a, push);
+    defer parsed.deinit();
+    try std.testing.expectEqual(false, parsed.value.tabs[0].favorite.?);
+}
+
+test "favorite cache restore preserves legacy stars and applies explicit values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cache = "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"kind\":\"tmux\",\"name\":\"One\",\"tmux_session\":\"ONE\",\"tmux_host\":0,\"workspace\":0,\"pid\":42,\"favorite\":true}]}";
+    for ([_]?bool{ null, true, false }) |favorite| {
+        var remote = one;
+        remote.favorite = favorite;
+        const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+        const prepared = try prepareCache(a, cache, server);
+        const restored = (try restoreCache(a, cache, server)).?;
+        for ([_][]const u8{ prepared, restored }) |json| {
+            const parsed = try std.json.parseFromSlice(std.json.Value, a, json, .{});
+            defer parsed.deinit();
+            const tab = parsed.value.object.get("tabs").?.array.items[0];
+            try std.testing.expectEqual(favorite orelse true, tab.object.get("favorite").?.bool);
+            try std.testing.expectEqual(@as(i64, 42), tab.object.get("pid").?.integer);
+        }
+        const fresh = (try restoreCache(a, null, server)).?;
+        const parsed = try std.json.parseFromSlice(std.json.Value, a, fresh, .{});
+        defer parsed.deinit();
+        const field = parsed.value.object.get("tabs").?.array.items[0].object.get("favorite");
+        if (favorite) |value| {
+            try std.testing.expectEqual(value, field.?.bool);
+        } else try std.testing.expect(field == null);
+    }
+}
+
+test "favorite equality detects toggles without looping on canonical absent false" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var unstarred = one;
+    unstarred.favorite = false;
+    var starred = one;
+    starred.favorite = true;
+    const unknown = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
+    const off = Layout{ .workspaces = &test_ws, .tabs = &.{unstarred} };
+    const on = Layout{ .workspaces = &test_ws, .tabs = &.{starred} };
+    try std.testing.expect(equal(unknown, off));
+    try std.testing.expect(equal(off, unknown));
+    try std.testing.expect(!equal(on, off));
+    try std.testing.expect(!equal(off, on));
+    try std.testing.expect(!equal(unknown, on));
+    const pushed = try rebase(a, on, off, on);
+    try std.testing.expectEqual(false, pushed.tabs[0].favorite.?);
+    try std.testing.expect(equal(pushed, unknown));
+    const acknowledged = try apply(a, pushed, &.{true}, unknown, 9, 256);
+    try std.testing.expect(equal(acknowledged, off));
+    const repeated = try rebase(a, off, acknowledged, unknown);
+    try std.testing.expect(equal(repeated, unknown));
+}
+
+test "used apply held and rebase merge all known times by maximum" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]?u64{ null, 0, 1000, 4000 }) |old| for ([_]?u64{ null, 0, 2000, 5000 }) |edit| for ([_]?u64{ null, 0, 3000, 6000 }) |incoming| {
+        var b = one;
+        b.used = old;
+        var e = one;
+        e.used = edit;
+        var r = one;
+        r.tmux_session = "ONE";
+        r.used = incoming;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{b} };
+        const edited = Layout{ .workspaces = &test_ws, .tabs = &.{e} };
+        const remote = Layout{ .workspaces = &test_ws, .tabs = &.{r} };
+        const applied = try apply(a, edited, &.{true}, remote, 9, 256);
+        try std.testing.expectEqual(if (edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(edit orelse 0, incoming orelse 0)), applied.tabs[0].used);
+        const held = try keepHeld(a, base, edited, &.{});
+        try std.testing.expectEqual(if (old == null and edit == null) @as(?u64, null) else @as(?u64, @max(old orelse 0, edit orelse 0)), held.tabs[0].used);
+        const rebased = try rebase(a, base, edited, remote);
+        try std.testing.expectEqual(if (old == null and edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(old orelse 0, edit orelse 0, incoming orelse 0)), rebased.tabs[0].used);
+        const added = try rebase(a, .{ .workspaces = &test_ws, .tabs = &.{} }, edited, remote);
+        try std.testing.expectEqual(if (edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(edit orelse 0, incoming orelse 0)), added.tabs[0].used);
+    };
+}
+
+test "used equality canonicalizes absent zero and detects newer or older times" {
+    for ([_]?u64{ null, 0, 1000, 2000 }) |left| for ([_]?u64{ null, 0, 1000, 2000 }) |right| {
+        var x = one;
+        x.used = left;
+        var y = one;
+        y.used = right;
+        try std.testing.expectEqual((left orelse 0) == (right orelse 0), equal(.{ .workspaces = &test_ws, .tabs = &.{x} }, .{ .workspaces = &test_ws, .tabs = &.{y} }));
+    };
+}
+
+test "used cache restore keeps maximum and migrates Windows epoch without changing known Unix future times" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]?u64{ null, 0, 1000, 3000, 9_007_199_254_740_991 }) |incoming| {
+        var remote = one;
+        remote.used = incoming;
+        const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+        for ([_][]const u8{
+            "{\"tabs\":[{\"tmux_session\":\"ONE\",\"tmux_host\":0,\"pid\":42,\"used\":2000}]}",
+            "{\"tabs\":[{\"tmux_session\":\"ONE\",\"tmux_host\":0,\"pid\":42,\"used\":11644473602000}]}",
+        }) |cache| {
+            const prepared = try prepareCache(a, cache, server);
+            const restored = (try restoreCache(a, cache, server)).?;
+            for ([_][]const u8{ prepared, restored, (try restoreCache(a, prepared, server)).? }) |json| {
+                const parsed = try std.json.parseFromSlice(std.json.Value, a, json, .{});
+                defer parsed.deinit();
+                const tab = parsed.value.object.get("tabs").?.array.items[0];
+                try std.testing.expectEqual(@max(@as(u64, 2000), incoming orelse 0), @import("json_reader.zig").uint(tab, "used"));
+                try std.testing.expectEqual(@as(i64, 42), tab.object.get("pid").?.integer);
+            }
+        }
+        const fresh = (try restoreCache(a, null, server)).?;
+        const parsed = try std.json.parseFromSlice(std.json.Value, a, fresh, .{});
+        defer parsed.deinit();
+        const field = parsed.value.object.get("tabs").?.array.items[0].object.get("used");
+        if (incoming) |used| try std.testing.expectEqual(used, @as(u64, @intCast(field.?.integer))) else try std.testing.expect(field == null);
+    }
+}
+
+test "used publish throttle is strictly over ten minutes since synced not last local stamp" {
+    var synced = one;
+    synced.used = 1000;
+    var base = one;
+    base.used = 500_000;
+    for ([_]u64{ 0, 999, 1000, 600_999, 601_000, 601_001, 602_000 }) |used| {
+        var local = one;
+        local.used = used;
+        const current = Layout{ .workspaces = &test_ws, .tabs = &.{local} };
+        const held = Layout{ .workspaces = &test_ws, .tabs = &.{base} };
+        const server = Layout{ .workspaces = &test_ws, .tabs = &.{synced} };
+        try std.testing.expectEqual(used > 601_000, publishNeeded(current, held, server));
+        local.favorite = true;
+        try std.testing.expect(publishNeeded(.{ .workspaces = &test_ws, .tabs = &.{local} }, held, server));
+    }
+    const empty = Layout{ .workspaces = &test_ws, .tabs = &.{} };
+    try std.testing.expect(publishNeeded(initial, empty, empty));
+    synced.used = null;
+    base.used = 600_001;
+    const unknown = Layout{ .workspaces = &test_ws, .tabs = &.{synced} };
+    const first = Layout{ .workspaces = &test_ws, .tabs = &.{base} };
+    try std.testing.expect(publishNeeded(first, first, unknown));
+}
+
+test "visits apply held rebase cache union and publish bypass used throttle" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var b = one;
+    b.visits = &.{ 1, 2 };
+    b.used = 1000;
+    var e = b;
+    e.visits = &.{ 2, 3 };
+    e.used = 1001;
+    var r = b;
+    r.visits = &.{ 2, 4 };
+    const base = Layout{ .workspaces = &test_ws, .tabs = &.{b} };
+    const edit = Layout{ .workspaces = &test_ws, .tabs = &.{e} };
+    const remote = Layout{ .workspaces = &test_ws, .tabs = &.{r} };
+    const applied = try apply(a, edit, &.{true}, remote, 9, 256);
+    try std.testing.expectEqualSlices(u64, &.{ 2, 3, 4 }, applied.tabs[0].visits.?);
+    const held = try keepHeld(a, base, edit, &.{});
+    try std.testing.expectEqualSlices(u64, &.{ 1, 2, 3 }, held.tabs[0].visits.?);
+    const rebased = try rebase(a, base, edit, remote);
+    try std.testing.expectEqualSlices(u64, &.{ 1, 2, 3, 4 }, rebased.tabs[0].visits.?);
+    try std.testing.expect(!equal(base, edit));
+    try std.testing.expect(publishNeeded(edit, base, base));
+    try std.testing.expect(publishNeeded(edit, edit, base));
+    try std.testing.expect(!publishNeeded(edit, edit, edit));
+    const cached = try prepareCache(a, "{\"tabs\":[{\"tmux_session\":\"one\",\"tmux_host\":0,\"visits\":[1,3]}]}", remote);
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, cached, .{});
+    defer parsed.deinit();
+    const visits = @import("json_reader.zig").visits(parsed.value.object.get("tabs").?.array.items[0]);
+    try std.testing.expectEqualSlices(u64, &.{ 1, 2, 3, 4 }, visits.optional().?);
+}
+
+test "input apply held and rebase merge all known times by maximum" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]?u64{ null, 0, 1000, 4000 }) |old| for ([_]?u64{ null, 0, 2000, 5000 }) |edit| for ([_]?u64{ null, 0, 3000, 6000 }) |incoming| {
+        var b = one;
+        b.input = old;
+        var e = one;
+        e.input = edit;
+        var r = one;
+        r.tmux_session = "ONE";
+        r.input = incoming;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{b} };
+        const edited = Layout{ .workspaces = &test_ws, .tabs = &.{e} };
+        const remote = Layout{ .workspaces = &test_ws, .tabs = &.{r} };
+        const applied = try apply(a, edited, &.{true}, remote, 9, 256);
+        try std.testing.expectEqual(if (edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(edit orelse 0, incoming orelse 0)), applied.tabs[0].input);
+        const held = try keepHeld(a, base, edited, &.{});
+        try std.testing.expectEqual(if (old == null and edit == null) @as(?u64, null) else @as(?u64, @max(old orelse 0, edit orelse 0)), held.tabs[0].input);
+        const rebased = try rebase(a, base, edited, remote);
+        try std.testing.expectEqual(if (old == null and edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(old orelse 0, edit orelse 0, incoming orelse 0)), rebased.tabs[0].input);
+        const added = try rebase(a, .{ .workspaces = &test_ws, .tabs = &.{} }, edited, remote);
+        try std.testing.expectEqual(if (edit == null and incoming == null) @as(?u64, null) else @as(?u64, @max(edit orelse 0, incoming orelse 0)), added.tabs[0].input);
+    };
+}
+
+test "input publish first input and strictly after sixty seconds since synced" {
+    var remote = one;
+    remote.input = 1_800_000_000_000;
+    const synced = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+    for ([_]u64{ 0, 1, 59_999, 60_000, 60_001 }) |delta| {
+        var tab = remote;
+        tab.input = remote.input.? + delta;
+        const local = Layout{ .workspaces = &test_ws, .tabs = &.{tab} };
+        try std.testing.expectEqual(delta > 60_000, publishNeeded(local, local, synced));
+        try std.testing.expect(publishNeeded(local, local, initial));
+    }
+}
+
+test "input cache keeps maximum without using Windows epoch or used history" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var remote = one;
+    remote.input = 2000;
+    const prepared = try prepareCache(a, "{\"tabs\":[{\"tmux_session\":\"one\",\"tmux_host\":0,\"input\":3000,\"used\":9999}]}", .{ .workspaces = &test_ws, .tabs = &.{remote} });
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, prepared, .{});
+    try std.testing.expectEqual(@as(u64, 3000), @import("json_reader.zig").uint(parsed.value.object.get("tabs").?.array.items[0], "input"));
 }

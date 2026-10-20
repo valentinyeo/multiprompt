@@ -31,7 +31,9 @@ pub fn unsigned(value: std.json.Value, fallback: u64) u64 {
 }
 
 pub fn uint(value: std.json.Value, key: []const u8) u64 {
-    return unsigned(field(value, key), 0);
+    const result = unsigned(field(value, key), 0);
+    const windows_epoch_ms = 11_644_473_600_000;
+    return if (std.mem.eql(u8, key, "used") and !boolTrue(value, "used_unix") and result >= windows_epoch_ms) result - windows_epoch_ms else result;
 }
 
 pub fn uintDefault(value: std.json.Value, key: []const u8, fallback: u64) u64 {
@@ -91,6 +93,20 @@ pub fn archiveContent(value: std.json.Value, key: []const u8) archive_rules.Cont
     return result;
 }
 
+pub fn visits(obj: std.json.Value) @import("frequent.zig").Visits {
+    const value = field(obj, "visits");
+    if (value != .array or value.array.items.len > 8) return .{};
+    var result: @import("frequent.zig").Visits = .{ .known = 1 };
+    for (value.array.items) |v| {
+        if (v != .integer and v != .number_string) return .{};
+        const stamp = unsigned(v, std.math.maxInt(u64));
+        if (stamp > 9_007_199_254_740_991) return .{};
+        if (result.len > 0 and stamp <= result.values[result.len - 1]) return .{};
+        result.add(stamp);
+    }
+    return result;
+}
+
 pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 {
     const Tab = @TypeOf(tabs[0]);
     var count: u32 = 0;
@@ -108,18 +124,22 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
         tab.claude_cwd_len = copyString(obj, "ccwd", &tab.claude_cwd);
         tab.burl_len = copyString(obj, "burl", &tab.burl);
-        inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "inbox_excluded", "favorite", "locked", "bon", "kaw", "cv" }) |key| {
+        inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "inbox_excluded", "favorite", "locked", "bon", "kaw", "cv", "cso", "fw" }) |key| {
             @field(tab, key) = boolTrue(obj, key);
         }
         tab.inbox_archived = boolTrue(obj, "iah");
         tab.needs_attention = boolTrue(obj, "att");
         tab.bnat = !boolFalse(obj, "bnat");
+        tab.chat_id = uint(obj, "chat_id");
         tab.wake_id = @intCast(@min(uint(obj, "wake_id"), std.math.maxInt(u32)));
         tab.pid = @truncate(uint(obj, "pid"));
         tab.group_id = @truncate(uint(obj, "group_id"));
         tab.tmux_host = @truncate(uint(obj, "tmux_host"));
         const workspace = uint(obj, "workspace");
         tab.workspace = if (workspace < max_workspaces) @intCast(workspace) else 0;
+        tab.last_used = uint(obj, "used");
+        tab.input = uint(obj, "input");
+        tab.visits = visits(obj);
         tab.last_active = uint(obj, "la");
         tab.last_viewed = uint(obj, "lv");
         tab.archive_time = uint(obj, "archive_time");
@@ -166,4 +186,34 @@ test "UTF16 truncation keeps surrogate pairs intact and handles raw and escaped 
     try std.testing.expectEqualSlices(u16, a[0..n], b[0..n]);
     var short: [3]u16 = undefined;
     try std.testing.expectEqual(@as(u32, 1), copyWide(parsed.value, "a", &short));
+}
+
+test "used legacy Windows stamps migrate but marked Unix stamps never change" {
+    for ([_][]const u8{
+        "{\"used\":13444473600000}",
+        "{\"used\":1800000000000,\"used_unix\":true}",
+    }) |json| {
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(u64, 1_800_000_000_000), uint(parsed.value, "used"));
+    }
+    const parsed = try parse(std.testing.allocator, "{\"used\":9007199254740991,\"used_unix\":true,\"la\":13444473600000}");
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u64, 9_007_199_254_740_991), uint(parsed.value, "used"));
+    try std.testing.expectEqual(@as(u64, 13_444_473_600_000), uint(parsed.value, "la"));
+}
+
+test "visits cache distinguishes unknown and empty and rejects invalid arrays" {
+    for ([_][]const u8{ "{}", "{\"visits\":null}", "{\"visits\":[-1]}", "{\"visits\":[1.5]}", "{\"visits\":[2,1]}", "{\"visits\":[1,1]}", "{\"visits\":[9007199254740992]}", "{\"visits\":[0,1,2,3,4,5,6,7,8]}" }) |json| {
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(u8, 0), visits(parsed.value).known);
+    }
+    const parsed = try parse(std.testing.allocator, "{\"visits\":[0,9007199254740991]}");
+    defer parsed.deinit();
+    const result = visits(parsed.value);
+    try std.testing.expectEqualSlices(u64, &.{ 0, 9_007_199_254_740_991 }, result.optional().?);
+    const empty = try parse(std.testing.allocator, "{\"visits\":[]}");
+    defer empty.deinit();
+    try std.testing.expectEqual(@as(u8, 1), visits(empty.value).known);
 }

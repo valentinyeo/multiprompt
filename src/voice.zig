@@ -1927,6 +1927,7 @@ pub fn handleDictationReady() void {
             return;
         }
         const paste_result = pasteDictationToShellVerified(app_state.active_shell, transcript);
+        if (paste_result != .delivery_failed) @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
         preserveClipboardTextAfterPaste(transcript);
         switch (paste_result) {
             .verified => {

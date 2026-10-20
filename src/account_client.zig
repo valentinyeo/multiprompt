@@ -56,7 +56,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,used,visits,input\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);

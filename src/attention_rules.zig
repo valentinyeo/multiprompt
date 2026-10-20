@@ -7,10 +7,13 @@ pub const State = struct {
     turn_active: bool = false,
     done_after_activity: bool = false,
     console_working: bool = false,
+    selected_tab: bool = false,
+    user_present: bool = false,
 };
 
 pub fn allow(source: Source, state: State) bool {
     if (source == .manual) return !state.turn_active and !state.console_working;
+    if (state.selected_tab and state.user_present) return false;
     if (source == .notification) return true;
     if (state.console_working) return false;
     return switch (source) {
@@ -126,6 +129,16 @@ test "only first DONE after activity creates completion dot" {
     try std.testing.expect(!allow(.hook_done, .{ .hook_capable = true }));
     try std.testing.expect(!allow(.hook_done, .{ .turn_active = true, .done_after_activity = true }));
     try std.testing.expect(!allow(.hook_done, .{ .done_after_activity = true, .console_working = true }));
+}
+
+test "selected tab gets a dot only while away" {
+    try std.testing.expect(!allow(.hook_done, .{ .done_after_activity = true, .selected_tab = true, .user_present = true }));
+    try std.testing.expect(allow(.hook_done, .{ .done_after_activity = true, .selected_tab = true, .user_present = false }));
+    try std.testing.expect(!allow(.notification, .{ .selected_tab = true, .user_present = true }));
+    try std.testing.expect(allow(.notification, .{ .selected_tab = true, .user_present = false }));
+    try std.testing.expect(allow(.heuristic, .{ .selected_tab = true, .user_present = false }));
+    try std.testing.expect(allow(.manual, .{ .selected_tab = true, .user_present = true }));
+    try std.testing.expect(allow(.hook_done, .{ .done_after_activity = true, .selected_tab = false, .user_present = true }));
 }
 
 test "plain shell quiet still gets dot, permission during turn allowed" {

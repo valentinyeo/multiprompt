@@ -86,6 +86,22 @@ test('equal, absent and malformed native versions never auto-reload', async () =
   }
 });
 
+test('CLI-shaped requests schedule exactly one reload only for a different bridge version', async () => {
+  const request = { id: 'cli-7-9', method: 'ping', replyPipe: 'fixture-pipe', windowId: 42, bridgeVersion: version };
+  const equal = worker();
+  await equal.burst([request, request]);
+  assert.deepEqual(equal.timers, []);
+  assert.equal(equal.replies.length, 2);
+  const older = worker({ running: '1.0.65' });
+  await older.burst([request, request]);
+  assert.equal(older.timers.length, 1);
+  assert.equal(older.timers[0].ms, 200);
+  assert.equal(older.events.filter(event => event === 'persist').length, 1);
+  assert.equal(older.replies.length, 2);
+  older.fireReload();
+  assert.equal(older.events.filter(event => event === 'reload').length, 1);
+});
+
 test('mismatch persists before delayed reload, and unchanged disk code reports outdated after worker restart', async () => {
   const storage = {};
   const h = worker({ running: '1.0.55', storage });
@@ -172,7 +188,8 @@ function nativeHarness(dir) {
 ${section(bridge, 'const version =', 'const max_native_message')}
 var g_window_id: ?i64 = null;
 fn bridgeExePath() []const u8 { return "zigshell-bridge.exe"; }
-fn usage() !void { return error.InvalidArguments; }
+fn badArgs(_: []const u8) noreturn { @panic("unexpected bad arguments"); }
+fn runProfileClone(_: std.mem.Allocator, _: anytype, _: []const u8) !void { unreachable; }
 fn sendBrowserRequest(_: std.mem.Allocator, method: []const u8, _: []const u8, _: ?[]const u8) !void {
     std.debug.print("{{\\"method\\":\\"{s}\\",\\"windowId\\":{d}}}\\n", .{method, g_window_id.?});
 }
@@ -184,7 +201,7 @@ fn runPipeServer(_: std.mem.Allocator, _: *HostContext, _: [*:0]const u8) void {
 fn routeReplyPipe(_: std.mem.Allocator, _: []const u8) !bool { return false; }
 fn handleJsonMessage(_: std.mem.Allocator, _: []const u8) ![]u8 { unreachable; }
 fn makeErrorResponse(_: std.mem.Allocator, _: ?std.json.Value, _: []const u8) ![]u8 { unreachable; }
-${section(bridge, 'fn runNativeHost(', 'fn sendBrowserRequest(')}
+${'fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {\n' + section(bridge, '    const stdin = std.Io.File.stdin().handle;', 'fn sendBrowserRequest(')}
 fn makeResultResponse(allocator: std.mem.Allocator, _: ?std.json.Value, result: []const u8) ![]u8 { return allocator.dupe(u8, result); }
 fn nativePing(allocator: std.mem.Allocator) ![]u8 {
     const method = "ping";
@@ -221,7 +238,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next().?;
-${section(bridge, '    if (std.mem.eql(u8, command, "--window")) {', '    if (std.mem.eql(u8, command, "native")) {')}
+${section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n'}
     if (${section(bridge, 'std.mem.eql(u8, command, "extension-reload")) {', '    } else if (std.mem.eql(u8, command, "shoturl"))')}
     } else return error.InvalidArguments;
 }

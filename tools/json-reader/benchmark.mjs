@@ -35,10 +35,15 @@ fn sameOldFields(json: []const u8) !void {
     try std.testing.expectEqual(count, reader.sessionTabs(parsed.value, tabs[0..], 9));
     for (old[0..count], tabs[0..count]) |before, after| {
         inline for (@typeInfo(CurrentSavedTab).@"struct".fields) |field| {
-            if (comptime std.mem.eql(u8, field.name, "name")) {
-                for (before.name[0..before.name_len], after.name[0..after.name_len]) |a, b| try std.testing.expectEqual(@as(u16, a), b);
+            if (@hasField(legacy.SavedTab, field.name)) {
+                if (comptime std.mem.eql(u8, field.name, "name")) {
+                    for (before.name[0..before.name_len], after.name[0..after.name_len]) |a, b| try std.testing.expectEqual(@as(u16, a), b);
+                } else {
+                    try std.testing.expectEqualDeep(@field(before, field.name), @field(after, field.name));
+                }
             } else {
-                try std.testing.expectEqualDeep(@field(before, field.name), @field(after, field.name));
+                const default = comptime field.defaultValue() orelse @compileError("CurrentSavedTab." ++ field.name ++ " is absent from legacy.SavedTab and has no default");
+                try std.testing.expectEqualDeep(default, @field(after, field.name));
             }
         }
     }

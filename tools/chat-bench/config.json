@@ -12,13 +12,16 @@
   "sampleMs": 1000,
   "hangSeconds": 5,
   "startupSeconds": 180,
+  "capacity": { "maxLoadPerCore": 1, "minMemAvailableMiB": 4096, "waitMinutes": 30, "pollSeconds": 15 },
   "rules": {
+    "maxRssMiB": 12000,
     "idleAverageCpuPercent": 10,
     "maxThirtySecondCpuPercent": 200,
     "switchPaintP95Ms": 300,
     "minimumIdleSamples": 10,
     "minimumChatInkPixels": 200,
-    "cachedPaintP95Ms": 1000
+    "cachedPaintP95Ms": 1000,
+    "maxForeignBrowsersOnScreen": 1
   },
   "browserTabs": true,
   "remoteDelayMs": 5000

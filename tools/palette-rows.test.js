@@ -114,3 +114,44 @@ test('bounded comparisons and switch ranges cover intermediate row offsets', () 
   assert.ok(comparisons('switch (target) {\nSEARCH_A_OFFSET ... SEARCH_C_OFFSET => {},\n}', 'target', sample).has('SEARCH_B_OFFSET'));
   assert.ok(!comparisons('target >= SEARCH_A_OFFSET', 'target', sample).has('SEARCH_B_OFFSET'));
 });
+
+
+test('ISSUE-265 Stop is painted, searchable and dispatched for the exact context tab', () => {
+  assert.match(state, /pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;/);
+  assert.match(palette, /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_CHAT_STOP/);
+  assert.match(palette, /target == SEARCH_TABCTX_CHAT_STOP\) return "chat view stop the agent interrupt escape"/);
+  assert.match(sidebar, /result_idx == SEARCH_TABCTX_CHAT_STOP\) L\("Chat View: Stop the agent"\)/);
+  assert.match(confirm, /target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE\) or target == SEARCH_TABCTX_CHAT_STOP or/);
+  assert.match(confirm, /target == SEARCH_TABCTX_CHAT_STOP\) \{\s*_ = @import\("chat_send.zig"\).chatStopAgent\(ti\)/);
+});
+
+
+test('ISSUE-266 permission actions have all three surfaces and exact context dispatch', () => {
+  const shortcuts = read('src/shortcuts.zig');
+  for (const [tag, label, key, action] of [
+    ['ALLOW', 'Allow', 'Y', 'allow'], ['ALWAYS', 'Always allow', 'O', 'always'], ['DENY', 'Deny', 'D', 'deny'],
+  ]) {
+    const offset = `SEARCH_CHAT_${tag}_OFFSET`;
+    const value = values.get(offset);
+    for (const [name, other] of values) {
+      if (name !== offset) assert.notEqual(value, other, `${offset} collides with ${name}`);
+    }
+    const workspaceDelete = values.get("SEARCH_WORKSPACE_DELETE_OFFSET");
+    const maxWorkspaces = Number(state.match(/pub const MAX_WORKSPACES: usize = (\d+);/)[1]);
+    assert.ok(value < workspaceDelete || value >= workspaceDelete + maxWorkspaces, "Permission commands must not use workspace deletion row IDs");
+    assert.match(palette, new RegExp(`g_search_results\\[app_state.g_search_result_count\\] = ${offset};`));
+    assert.match(palette, new RegExp(`g_search_results\\[app_state.g_search_result_count\\] = SEARCH_TABCTX_CHAT_${tag};`));
+    assert.ok(sidebar.includes(`L("Chat View: ${label}")`));
+    assert.match(confirm, new RegExp(`target == SEARCH_TABCTX_CHAT_${tag}\\) \\{\\s*_ = @import\\("chat_send.zig"\\).chatPermissionAnswer\\(ti, \\.${action}\\)`));
+    assert.ok(shortcuts.includes(`Alt+${key} in Chat View`));
+  }
+  assert.match(main, /WM_APP_CHAT_PERMISSION => \{\s*if \(wp < 3\) _ = @import\("chat_send.zig"\).chatPermissionAnswer/);
+  assert.match(shortcuts, /kb.vkCode == 0x59 or kb.vkCode == 0x4F or kb.vkCode == 0x44/);
+});
+
+test('ISSUE-266 permission button labels use the agent option text rather than fixed action labels', () => {
+  const layout = read('src/window_layout.zig');
+  const paint = layout.slice(layout.indexOf('fn paintChatPermission('), layout.indexOf('\npub fn paintChatView('));
+  assert.match(paint, /g_chat_permission\.optionText\(action\)/);
+  assert.match(paint, /DrawTextW\(hdc, text\.ptr, @intCast\(text\.len\)/);
+});

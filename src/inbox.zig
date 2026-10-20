@@ -1,3 +1,4 @@
+const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
@@ -90,7 +91,8 @@ const archiveArmOrCommit = @import("archive.zig").archiveArmOrCommit;
 const closeSnippetCreateForm = @import("snippets.zig").closeSnippetCreateForm;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
-const drawFavoriteStar = @import("archive.zig").drawFavoriteStar;
+const drawFavoriteDot = @import("archive.zig").drawFavoriteDot;
+const FAVORITE_DOT_D = @import("archive.zig").FAVORITE_DOT_D;
 const closeAllSessions = @import("archive.zig").closeAllSessions;
 const switchToShell = @import("console.zig").switchToShell;
 const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
@@ -205,6 +207,22 @@ pub fn publishInboxState() void {
     _ = SetTimer(app_state.g_main_hwnd, TIMER_INBOX_PUBLISH, 1000, null);
 }
 
+pub fn stampSessionUse(idx: u32, throttled: bool) void {
+    if (idx >= app_state.shell_count or app_state.g_restoring or app_state.g_startup_progress or app_state.g_account_applying) return;
+    const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+    if (frequent.shouldStamp(app_state.shells[idx].last_used, now_ms, throttled)) app_state.shells[idx].last_used = @max(app_state.shells[idx].last_used, now_ms);
+    app_state.shells[idx].input = @max(app_state.shells[idx].input, now_ms);
+    app_state.g_session_save_pending = true;
+    publishInboxState();
+    if (frequent.shouldStamp(app_state.shells[idx].synced_input, now_ms, true) and !app_state.shells[idx].input_publish_pending) {
+        @import("account_desktop.zig").publishSessionLayout();
+        if (app_state.g_account_dirty_at != 0) {
+            app_state.shells[idx].input_publish_pending = true;
+            @import("account_desktop.zig").accountPush();
+        }
+    }
+}
+
 pub fn inboxPublishesShell(shell: *const Shell) bool {
     return !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
 }
@@ -286,7 +304,7 @@ pub fn publishInboxStateNow() void {
 
     var first = true;
     for (0..app_state.shell_count) |i| {
-        if (pos >= json.len - 640) break;
+        if (pos >= json.len - 800) break;
         if (app_state.g_single_window and app_state.g_ws_snoozed[app_state.shells[i].workspace]) continue;
         if (!inboxPublishesShell(&app_state.shells[i])) continue;
         if (!first) {
@@ -326,6 +344,12 @@ pub fn publishInboxStateNow() void {
         const favorite = if (app_state.shells[i].favorite) ",\"favorite\":true" else ",\"favorite\":false";
         @memcpy(json[pos .. pos + favorite.len], favorite);
         pos += favorite.len;
+        const used = ",\"used_unix\":true,\"used\":";
+        @memcpy(json[pos .. pos + used.len], used);
+        pos += used.len;
+        pos += writeUintTo(json[pos..], app_state.shells[i].last_used);
+        pos += @import("frequent.zig").writeInput(json[pos..], app_state.shells[i].input);
+        pos += @import("frequent.zig").writeVisits(json[pos..], app_state.shells[i].visits);
         const o7 = ",\"la\":";
         @memcpy(json[pos .. pos + o7.len], o7);
         pos += o7.len;
@@ -511,6 +535,9 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         app_state.g_inbox_rows[ri].act = @truncate(act);
         app_state.g_inbox_rows[ri].att = (att != 0);
         app_state.g_inbox_rows[ri].favorite = json_reader.boolTrue(o, "favorite");
+        app_state.g_inbox_rows[ri].last_used = json_reader.uint(o, "used");
+        app_state.g_inbox_rows[ri].input = json_reader.uint(o, "input");
+        app_state.g_inbox_rows[ri].visits = json_reader.visits(o);
         app_state.g_inbox_rows[ri].la = la;
         app_state.g_inbox_rows[ri].lv = lv_val;
         app_state.g_inbox_rows[ri].ag = @truncate(sag);
@@ -538,7 +565,17 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
     }
 }
 
+fn inboxFrequent(row: InboxRow, now_ms: u64) bool {
+    return frequent.inFrequent(row.visits.optional() orelse &.{}, now_ms, if (row.input != 0) row.input else null);
+}
+
 fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
+    if (app_state.g_inbox_tab == frequent.frequent_split) {
+        const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+        const ka = frequent.orderKey(a.visits.optional() orelse &.{}, now_ms, if (a.input != 0) a.input else null);
+        const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
+        if (ka != kb) return frequent.bottomOrder(ka, kb);
+    }
     if (a.att != b.att) return a.att;
     const a_act = (a.act == 1);
     const b_act = (b.act == 1);
@@ -636,7 +673,11 @@ fn toggledFavorite(favorite: bool) bool {
 }
 
 fn favoriteSplitMatches(tab: u32, ws: u32, favorite: bool) bool {
-    return if (tab == 0) true else if (tab == 1) favorite else ws == tab - 2;
+    return switch (frequent.splitKind(tab)) {
+        .all, .frequent => true,
+        .favorites => favorite,
+        .workspace => |workspace| ws == workspace,
+    };
 }
 
 pub fn toggleFavorite(idx: u32) void {
@@ -657,11 +698,11 @@ test "favorite toggle and cross-workspace inbox filter" {
     try std.testing.expect(toggledFavorite(false));
     try std.testing.expect(!toggledFavorite(true));
     for (0..3) |ws| {
-        try std.testing.expect(favoriteSplitMatches(0, @intCast(ws), false));
-        try std.testing.expect(favoriteSplitMatches(1, @intCast(ws), true));
-        try std.testing.expect(!favoriteSplitMatches(1, @intCast(ws), false));
-        try std.testing.expect(favoriteSplitMatches(@intCast(ws + 2), @intCast(ws), false));
-        try std.testing.expect(!favoriteSplitMatches(@intCast(ws + 3), @intCast(ws), true));
+        try std.testing.expect(favoriteSplitMatches(frequent.all_split, @intCast(ws), false));
+        try std.testing.expect(favoriteSplitMatches(frequent.favorites_split, @intCast(ws), true));
+        try std.testing.expect(!favoriteSplitMatches(frequent.favorites_split, @intCast(ws), false));
+        try std.testing.expect(favoriteSplitMatches(frequent.workspaceSplit(@intCast(ws)), @intCast(ws), false));
+        try std.testing.expect(!favoriteSplitMatches(frequent.workspaceSplit(@intCast(ws + 1)), @intCast(ws), true));
     }
 }
 
@@ -674,6 +715,25 @@ test "favorite JSON field supports old and formatted session and inbox records" 
     }
 }
 
+test "used JSON field supports old and formatted session and inbox records" {
+    const cases = [_][]const u8{ "{\"kind\":\"cmd\",\"name\":\"old tab\"}", "{\"kind\":\"cmd\",\"name\":\"used\",\"used\":172800001}", "{\"kind\":\"cmd\",\"name\":\"used\",\"used\": \n 172800001}" };
+    for (cases, 0..) |json, i| {
+        var parsed = try json_reader.parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        const expected: u64 = if (i == 0) 0 else 172800001;
+        var restored: InboxRow = .{};
+        restored.last_used = json_reader.uint(parsed.value, "used");
+        try std.testing.expectEqual(expected, restored.last_used);
+        var buf: [256]u8 = undefined;
+        const session = try std.fmt.bufPrint(&buf, "{{\"tabs\":[{s}]}}", .{json});
+        var saved = try json_reader.parse(std.testing.allocator, session);
+        defer saved.deinit();
+        var tabs: [1]app_state.SavedTab = undefined;
+        try std.testing.expectEqual(@as(u32, 1), json_reader.sessionTabs(saved.value, tabs[0..], MAX_LWS));
+        try std.testing.expectEqual(expected, tabs[0].last_used);
+    }
+}
+
 pub fn inboxRowVisible(r: *const InboxRow) bool {
     if (r.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[r.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
         const idx = findShellById(r.sid) orelse return false;
@@ -681,6 +741,7 @@ pub fn inboxRowVisible(r: *const InboxRow) bool {
     }
     if (app_state.g_unread_only and !r.att) return false;
     if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
+    if (app_state.g_inbox_tab == frequent.frequent_split and !inboxFrequent(r.*, frequent.unixMs(nowFileTime() / 10_000))) return false;
     return inboxFilterMatches(r);
 }
 
@@ -710,7 +771,7 @@ test "cached inbox navigation skips excluded local rows" {
     app_state.g_inbox_ws_count = 1;
     app_state.g_inbox_ws[0] = .{ .hwnd = 1 };
     app_state.g_unread_only = false;
-    app_state.g_inbox_tab = 0;
+    app_state.g_inbox_tab = frequent.all_split;
     app_state.g_inbox_filter_active = false;
     const row = InboxRow{ .ws = 0, .sid = 42 };
     try std.testing.expect(inboxRowVisible(&row));
@@ -725,13 +786,14 @@ pub fn inboxListTop() i32 {
 }
 
 pub fn inboxSplitVisible(tab: u32) bool {
-    if (!app_state.g_unread_only or tab == 0) return true;
-    if (tab == 1) return true;
-    if (tab > app_state.g_inbox_ws_count + 1) return false;
-    return app_state.g_inbox_ws[tab - 2].attn > 0;
+    return switch (frequent.splitKind(tab)) {
+        .all, .favorites, .frequent => true,
+        .workspace => |ws| ws < app_state.g_inbox_ws_count and (!app_state.g_unread_only or app_state.g_inbox_ws[ws].attn > 0),
+    };
 }
 
 pub fn inboxVisibleCount() u32 {
+    sortInboxRows();
     var c: u32 = 0;
     for (0..app_state.g_inbox_row_count) |i| {
         if (inboxRowVisible(&app_state.g_inbox_rows[i])) c += 1;
@@ -740,6 +802,7 @@ pub fn inboxVisibleCount() u32 {
 }
 
 pub fn inboxNthVisible(want: u32) ?u32 {
+    sortInboxRows();
     var c: u32 = 0;
     for (0..app_state.g_inbox_row_count) |i| {
         if (inboxRowVisible(&app_state.g_inbox_rows[i])) {
@@ -763,6 +826,7 @@ fn rememberCurrentInboxSelection() void {
 }
 
 fn selectInboxRowByIdentity(owner: usize, sid: u32) bool {
+    sortInboxRows();
     if (owner == 0) return false;
     var visible_idx: u32 = 0;
     for (0..app_state.g_inbox_row_count) |i| {
@@ -811,7 +875,7 @@ pub fn inboxNextRowFromContext() ?u32 {
 
 fn inboxNeighborFromActiveSnapshot(dir: i32) ?u32 {
     if (!app_state.g_inbox_step_context_active or app_state.active_shell >= app_state.shell_count) return null;
-    if (app_state.g_inbox_step_context_tab > app_state.g_inbox_ws_count + 1 or !inboxSplitVisible(app_state.g_inbox_step_context_tab)) return null;
+    if (app_state.g_inbox_step_context_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1 or !inboxSplitVisible(app_state.g_inbox_step_context_tab)) return null;
     app_state.g_inbox_tab = app_state.g_inbox_step_context_tab;
 
     const owner = @intFromPtr(app_state.g_main_hwnd);
@@ -929,9 +993,8 @@ pub fn drawInboxTab(hdc: HANDLE, x: *i32, y: i32, label: []const u8, count: u32,
     }
 
     if (std.mem.eql(u8, label, "Favorites")) {
-        var star_rc = RECT{ .left = x.*, .top = y, .right = x.* + 14, .bottom = y + 24 };
-        drawFavoriteStar(hdc, &star_rc);
-        x.* += 18;
+        drawFavoriteDot(hdc, x.* + @divTrunc(FAVORITE_DOT_D, 2), y + 12);
+        x.* += FAVORITE_DOT_D + 6;
     }
     var buf: [96]u16 = undefined;
     var n: usize = 0;
@@ -1030,12 +1093,28 @@ pub fn paintInbox(hdc: HANDLE) void {
     const tab_y: i32 = 14;
     app_state.g_inbox_split_tab_count = 0;
     {
+        var total: u32 = 0;
+        var unread: u32 = 0;
+        const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+        for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
+            if (!inboxFrequent(row, now_ms)) continue;
+            total += 1;
+            if (row.att) unread += 1;
+        }
         const tx_before = tx;
-        drawInboxTab(hdc, &tx, tab_y, "All", if (app_state.g_unread_only) total_attn else app_state.g_inbox_row_count, null, app_state.g_inbox_tab == 0, fg_bright, fg_dim, any_attn, blue, 5, blue);
+        drawInboxTab(hdc, &tx, tab_y, "Frequent", if (app_state.g_unread_only) unread else total, null, app_state.g_inbox_tab == frequent.frequent_split, fg_bright, fg_dim, unread > 0, blue, 5, blue);
+        app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
+        app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
+        app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.frequent_split;
+        app_state.g_inbox_split_tab_count += 1;
+    }
+    {
+        const tx_before = tx;
+        drawInboxTab(hdc, &tx, tab_y, "All", if (app_state.g_unread_only) total_attn else app_state.g_inbox_row_count, null, app_state.g_inbox_tab == frequent.all_split, fg_bright, fg_dim, any_attn, blue, 5, blue);
         if (app_state.g_inbox_split_tab_count < INBOX_MAX_SPLIT_TABS) {
             app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
             app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-            app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = 0;
+            app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.all_split;
             app_state.g_inbox_split_tab_count += 1;
         }
     }
@@ -1048,21 +1127,21 @@ pub fn paintInbox(hdc: HANDLE) void {
             if (row.att) unread += 1;
         }
         const tx_before = tx;
-        drawInboxTab(hdc, &tx, tab_y, "Favorites", if (app_state.g_unread_only) unread else total, null, app_state.g_inbox_tab == 1, fg_bright, fg_dim, unread > 0, blue, 5, blue);
+        drawInboxTab(hdc, &tx, tab_y, "Favorites", if (app_state.g_unread_only) unread else total, null, app_state.g_inbox_tab == frequent.favorites_split, fg_bright, fg_dim, unread > 0, blue, 5, blue);
         app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
         app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-        app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = 1;
+        app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.favorites_split;
         app_state.g_inbox_split_tab_count += 1;
     }
     for (0..app_state.g_inbox_ws_count) |wi| {
-        if (!inboxSplitVisible(@intCast(wi + 2))) continue;
+        if (!inboxSplitVisible(frequent.workspaceSplit(@intCast(wi)))) continue;
         const ws = app_state.g_inbox_ws[wi];
         const tx_before2 = tx;
-        drawInboxTab(hdc, &tx, tab_y, ws.name[0..ws.name_len], if (app_state.g_unread_only) ws.attn else ws.total, null, app_state.g_inbox_tab == wi + 2, fg_bright, fg_dim, ws.attn > 0, blue, 5, blue);
+        drawInboxTab(hdc, &tx, tab_y, ws.name[0..ws.name_len], if (app_state.g_unread_only) ws.attn else ws.total, null, app_state.g_inbox_tab == frequent.workspaceSplit(@intCast(wi)), fg_bright, fg_dim, ws.attn > 0, blue, 5, blue);
         if (app_state.g_inbox_split_tab_count < INBOX_MAX_SPLIT_TABS) {
             app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before2;
             app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-            app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = @intCast(wi + 2);
+            app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.workspaceSplit(@intCast(wi));
             app_state.g_inbox_split_tab_count += 1;
         }
     }
@@ -1105,7 +1184,7 @@ pub fn paintInbox(hdc: HANDLE) void {
         _ = SelectObject(hdc, font_title);
         _ = SetTextColor(hdc, fg_dim);
         var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, if (app_state.g_inbox_filter_active and app_state.g_inbox_filter_len > 0) L("No Inbox sessions match this search.") else if (app_state.g_inbox_tab == 1) L("No favorites yet. Press Alt+S on a session to add it.") else L("No shells here. All caught up."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
+        _ = DrawTextW(hdc, if (app_state.g_inbox_filter_active and app_state.g_inbox_filter_len > 0) L("No Inbox sessions match this search.") else if (app_state.g_inbox_tab == frequent.favorites_split) L("No favorites yet. Press Alt+S on a session to add it.") else if (app_state.g_inbox_tab == frequent.frequent_split) L("No frequently visited sessions yet.") else L("No shells here. All caught up."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
     }
 
     var y: i32 = list_top;
@@ -1260,8 +1339,8 @@ pub fn openInbox(hwnd: HANDLE) void {
     app_state.g_inbox_filter_active = false;
     app_state.g_inbox_filter_len = 0;
     updateMainWindowTitle();
-    if (app_state.g_inbox_tab > app_state.g_inbox_ws_count + 1) app_state.g_inbox_tab = 0;
-    if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = 0;
+    if (app_state.g_inbox_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1) app_state.g_inbox_tab = frequent.all_split;
+    if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
     var restored = selectInboxRowByIdentity(app_state.g_inbox_resume_owner, app_state.g_inbox_resume_sid);
     if (!restored and app_state.active_shell < app_state.shell_count) {
         restored = selectInboxRowByIdentity(@intFromPtr(app_state.g_main_hwnd), app_state.shells[app_state.active_shell].shell_id);
@@ -1269,6 +1348,7 @@ pub fn openInbox(hwnd: HANDLE) void {
     if (!restored) app_state.g_inbox_sel = 0;
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
         _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+    if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
     hideActiveBrowser();
@@ -1331,6 +1411,10 @@ pub fn armInboxStepContext(tab: u32) void {
 }
 
 pub fn jumpToInboxRow(ri: u32) void {
+    jumpToInboxRowSelected(ri, false);
+}
+
+fn jumpToInboxRowSelected(ri: u32, user: bool) void {
     const prev_jump = app_state.g_inbox_step_jump_active;
     app_state.g_inbox_step_jump_active = true;
     defer app_state.g_inbox_step_jump_active = prev_jump;
@@ -1350,7 +1434,7 @@ pub fn jumpToInboxRow(ri: u32) void {
                 app_state.g_active_workspace = app_state.shells[idx].workspace;
                 updateMainWindowTitle();
             }
-            switchToShell(idx);
+            if (user) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
                 _ = showShellConsole(app_state.active_shell, SW_SHOW, "jumpToInboxRow");
                 repositionActive();
@@ -1366,7 +1450,7 @@ pub fn jumpToInboxRow(ri: u32) void {
             var tpid: DWORD = 0;
             _ = GetWindowThreadProcessId(target, &tpid);
             if (tpid != 0) _ = AllowSetForegroundWindow(tpid);
-            _ = PostMessageW(target, WM_APP_FOCUS_SHELL, row.sid, @intCast(app_state.g_inbox_step_context_tab + 1));
+            _ = PostMessageW(target, WM_APP_FOCUS_SHELL, row.sid, if (user) -1 else @intCast(app_state.g_inbox_step_context_tab + 1));
         }
     }
 }
@@ -1379,7 +1463,7 @@ pub fn inboxJump(hwnd: HANDLE) void {
     };
     armInboxStepContext(app_state.g_inbox_tab);
     closeInbox(hwnd);
-    jumpToInboxRow(ri);
+    jumpToInboxRowSelected(ri, true);
 }
 
 pub fn inboxStepJump(dir: i32) void {
@@ -1391,11 +1475,11 @@ pub fn inboxStepJump(dir: i32) void {
     }
     loadInboxModel();
     if (app_state.g_inbox_step_context_active) {
-        if (app_state.g_inbox_step_context_tab <= app_state.g_inbox_ws_count + 1 and inboxSplitVisible(app_state.g_inbox_step_context_tab)) {
+        if (app_state.g_inbox_step_context_tab <= frequent.splitCount(app_state.g_inbox_ws_count) - 1 and inboxSplitVisible(app_state.g_inbox_step_context_tab)) {
             app_state.g_inbox_tab = app_state.g_inbox_step_context_tab;
         } else {
-            app_state.g_inbox_tab = 0;
-            app_state.g_inbox_step_context_tab = 0;
+            app_state.g_inbox_tab = frequent.all_split;
+            app_state.g_inbox_step_context_tab = frequent.all_split;
         }
     }
     const vis = inboxVisibleCount();
@@ -1486,7 +1570,7 @@ fn inboxArchiveRow(ri: u32) void {
     var i: usize = ri;
     while (i + 1 < app_state.g_inbox_row_count) : (i += 1) app_state.g_inbox_rows[i] = app_state.g_inbox_rows[i + 1];
     if (app_state.g_inbox_row_count > 0) app_state.g_inbox_row_count -= 1;
-    if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = 0;
+    if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
 }
 
 pub fn inboxUndoLastArchive(hwnd: HANDLE) void {
@@ -1602,7 +1686,7 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
         },
         3 => {
             var t = app_state.g_inbox_tab;
-            while (t < app_state.g_inbox_ws_count + 1) {
+            while (t < frequent.splitCount(app_state.g_inbox_ws_count) - 1) {
                 t += 1;
                 if (inboxSplitVisible(t)) {
                     app_state.g_inbox_tab = t;
@@ -1621,7 +1705,7 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
             return;
         },
         6 => {
-            const splits = app_state.g_inbox_ws_count + 2;
+            const splits = frequent.splitCount(app_state.g_inbox_ws_count);
             var t = app_state.g_inbox_tab;
             var steps: u32 = 0;
             while (steps < splits) : (steps += 1) {
@@ -1632,7 +1716,7 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
             app_state.g_inbox_sel = 0;
         },
         7 => {
-            const splits = app_state.g_inbox_ws_count + 2;
+            const splits = frequent.splitCount(app_state.g_inbox_ws_count);
             var t = app_state.g_inbox_tab;
             var steps: u32 = 0;
             while (steps < splits) : (steps += 1) {
@@ -1655,12 +1739,12 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
             if (vis > 0) app_state.g_inbox_sel = vis - 1;
         },
         22 => {
-            app_state.g_inbox_tab = 0;
+            app_state.g_inbox_tab = frequent.all_split;
             app_state.g_inbox_sel = 0;
         },
         23 => {
             app_state.g_unread_only = !app_state.g_unread_only;
-            if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = 0;
+            if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
             app_state.g_inbox_sel = 0;
         },
         24 => {

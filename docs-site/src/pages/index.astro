@@ -1,5 +1,6 @@
 ---
 import '../styles/landing.css';
+import hero from '../assets/hero.png';
 
 const X_URL = 'https://x.com/valentinyeo';
 
@@ -53,6 +54,10 @@ const features = [
     <meta name="twitter:description" content="Vertical tabs, one inbox, Chat View and a built-in browser for Claude Code, Codex and Pi." />
     <meta property="og:url" content="https://multiprompt.dev/" />
     <title>multiprompt: run many AI coding agents on Windows</title>
+    <script is:inline>
+      window.AB_CONFIG = { base: "https://api.endlesstesting.ai", domainId: "b3508753-68db-46ba-92e0-6fd816681e3f" };
+    </script>
+    <script is:inline async data-cfasync="false" src="https://api.endlesstesting.ai/api/sdk.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -84,49 +89,10 @@ const features = [
           </div>
         </div>
 
-        <div class="product-stage" aria-label="A stylized multiprompt workspace showing several AI agent sessions">
+        <div class="product-stage">
           <div class="window-halo" aria-hidden="true"></div>
           <div class="app-window">
-            <div class="titlebar">
-              <div class="titlebar-name"><span class="mark tiny" aria-hidden="true"><i></i><i></i><i></i></span> multiprompt</div>
-              <div class="workspace-name">project <span>1 / 2</span></div>
-              <div class="window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
-            </div>
-            <div class="app-body">
-              <aside class="session-list">
-                <div class="sidebar-head"><span>sessions</span><kbd>Ctrl K</kbd></div>
-                <div class="session active"><span class="status violet"></span><div><strong>multiprompt rename</strong><small>codex · working</small></div><b>1</b></div>
-                <div class="session"><span class="status blue"></span><div><strong>browser focus</strong><small>claude · needs input</small></div><b>•</b></div>
-                <div class="session"><span class="status spin"></span><div><strong>cloudflare deploy</strong><small>codex · thinking</small></div></div>
-                <div class="session muted"><span class="status"></span><div><strong>release audit</strong><small>tmux · attached</small></div></div>
-                <div class="sidebar-spacer"></div>
-                <div class="sidebar-foot"><span>inbox</span><b>2</b><kbd>Alt I</kbd></div>
-              </aside>
-              <section class="terminal-pane">
-                <div class="pane-head"><span>multiprompt rename</span><div><span class="live-dot"></span> codex</div></div>
-                <div class="terminal-content">
-                  <p><span class="prompt">›</span> Rename the product across the app and CLI.</p>
-                  <p class="dim">• Inspecting user-facing legacy name references</p>
-                  <p class="dim">• Preserving compatibility paths and bridge protocol</p>
-                  <p><span class="ok">✓</span> Renamed binaries to multiprompt.exe</p>
-                  <p><span class="ok">✓</span> Added multiprompt-browser command</p>
-                  <p><span class="ok">✓</span> Existing sessions preserved</p>
-                  <div class="agent-answer"><span></span><p>The product is now lowercase <strong>multiprompt</strong>. Existing sessions and compatibility paths remain intact.</p></div>
-                  <p class="cursor-line"><span class="prompt">›</span><i></i></p>
-                </div>
-              </section>
-              <section class="browser-pane">
-                <div class="browser-tabs"><span class="browser-tab"><i></i> multiprompt.dev</span><b>＋</b></div>
-                <div class="address-bar"><span>⌕</span> multiprompt.dev <b>⋯</b></div>
-                <div class="browser-content">
-                  <span class="mini-label">MULTI-AGENT WORKSPACE</span>
-                  <h2>Prompt in parallel.<br />Focus in sequence.</h2>
-                  <div class="mini-line"></div><div class="mini-line short"></div>
-                  <div class="mini-command"><span>›</span> multiprompt-browser navigate</div>
-                </div>
-              </section>
-            </div>
-            <div class="statusbar"><span><i></i> 4 sessions</span><span>v0.28.700 · STABLE</span><span>1.1 MB harness</span></div>
+            <img class="hero-shot" src={hero.src} width={hero.width} height={hero.height} alt="multiprompt on Windows: a sidebar of agent sessions and a Claude Code session open in Chat View" />
           </div>
         </div>
         <p class="stage-caption"><span>01</span> Native shells. A browser per session. One inbox.</p>

@@ -7,7 +7,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro build && node check-links.mjs",
+    "check": "astro build && node check-links.mjs && node check-snippet.mjs",
     "deploy": "wrangler pages deploy dist --project-name multiprompt"
   },
   "dependencies": {

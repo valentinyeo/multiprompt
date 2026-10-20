@@ -48,6 +48,8 @@ const RECT = @import("win32.zig").RECT;
 const IsIconic = @import("win32.zig").IsIconic;
 const IsChild = @import("win32.zig").IsChild;
 const GetFocus = @import("win32.zig").GetFocus;
+const GUITHREADINFO = @import("win32.zig").GUITHREADINFO;
+const GetGUIThreadInfo = @import("win32.zig").GetGUIThreadInfo;
 const GetWindowRect = @import("win32.zig").GetWindowRect;
 const SW_MAXIMIZE = @import("win32.zig").SW_MAXIMIZE;
 const IsWindow = @import("win32.zig").IsWindow;
@@ -59,7 +61,7 @@ const SetParent = @import("win32.zig").SetParent;
 const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
 const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
-const GetWindowTextW = @import("win32.zig").GetWindowTextW;
+const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
 const SetWindowsHookExW = @import("win32.zig").SetWindowsHookExW;
@@ -101,6 +103,7 @@ const activeBrowserHasForegroundFocus = @import("browser_pane.zig").activeBrowse
 const activeBrowserTransientPopupHasForegroundFocus = @import("browser_pane.zig").activeBrowserTransientPopupHasForegroundFocus;
 const leftMouseButtonDown = @import("browser_pane.zig").leftMouseButtonDown;
 const syncPaneFocusModeFromForeground = @import("browser_pane.zig").syncPaneFocusModeFromForeground;
+const clearSelectedTabDotOnReturn = @import("sidebar.zig").clearSelectedTabDotOnReturn;
 const activePaneBorderOn = @import("browser_pane.zig").activePaneBorderOn;
 const invalidateBrowserBottomMask = @import("browser_pane.zig").invalidateBrowserBottomMask;
 const hideBrowserEdgeMasks = @import("browser_pane.zig").hideBrowserEdgeMasks;
@@ -219,7 +222,7 @@ pub fn focusGuard(target: HANDLE) bool {
         }
         return true;
     }
-    if (target != null and focusGuardActivationAllows(now, app_state.g_focus_activation_until, foregroundIsOurs(), target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, activeShellHwndForFocusGuard())) {
+    if (target != null and focusGuardActivationAllows(now, app_state.g_focus_activation_until, foregroundIsOurs(), target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, focusGuardActivationTarget())) {
         debugLog(if (target == app_state.g_main_hwnd) "focus guard: activation refocus to main window" else if (focusGuardConsole(target)) "focus guard: activation refocus to console" else "focus guard: activation refocus to composer or pane");
         return true;
     }
@@ -330,6 +333,9 @@ fn focusGuardConsole(hwnd: HANDLE) bool {
 pub fn activeShellHwndForFocusGuard() HANDLE {
     return if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].hwnd else null;
 }
+pub fn focusGuardActivationTarget() HANDLE {
+    return if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
+}
 pub fn installHook() void {
     if (app_state.g_hook == null) {
         var attempt: u8 = 0;
@@ -390,8 +396,10 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     _ = eventTime;
     if (event != EVENT_SYSTEM_FOREGROUND) return;
     if (idObject != OBJID_WINDOW or idChild != 0) return;
+    @import("main.zig").sessionFrontChanged();
     if (focusGuardReturnFromPane(hwnd)) return;
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
+    clearSelectedTabDotOnReturn();
     if (app_state.g_main_hwnd == null) return;
     if (foregroundHwndIsOurs(hwnd)) {
         const browser_popup_active = activeBrowserTransientPopupHasForegroundFocus();
@@ -568,7 +576,7 @@ pub fn browserTransientPopupDisposition(fg: HANDLE, pane: HANDLE) BrowserPopupDi
     const class_len = GetClassNameW(fg, &class_buf, @intCast(class_buf.len));
     if (class_len <= 0 or !u16ContainsU8Insensitive(class_buf[0..@intCast(class_len)], "chrome_widgetwin")) return .{};
     var title_buf: [2]u16 = undefined;
-    const title_len = GetWindowTextW(fg, &title_buf, @intCast(title_buf.len));
+    const title_len = InternalGetWindowText(fg, &title_buf, @intCast(title_buf.len));
     var popup_rect: RECT = std.mem.zeroes(RECT);
     var pane_rect: RECT = std.mem.zeroes(RECT);
     const have_rects = GetWindowRect(fg, &popup_rect) != 0 and GetWindowRect(pane, &pane_rect) != 0;
@@ -811,7 +819,7 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
     const our_thread = GetCurrentThreadId();
     const attached_target = target_thread != 0 and target_thread != our_thread and AttachThreadInput(our_thread, target_thread, 1) != 0;
     const attached_fg = fg_thread != 0 and fg_thread != our_thread and fg_thread != target_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-    _ = SetForegroundWindow(target_hwnd);
+    _ = activateConsoleForeground(target_hwnd);
     _ = SetFocus(target_hwnd);
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
@@ -824,11 +832,28 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+pub fn activateConsoleForeground(target: HANDLE) BOOL {
+    if (SetForegroundWindow(target) != 0 and GetForegroundWindow() == target) return 1;
+    if (!app_state.g_igsh354_paste_focus) return 0;
+    return SetForegroundWindow(GetAncestor(target, GA_ROOT));
+}
+
+pub fn pasteFocusLanded(target: HANDLE) bool {
+    if (target == null) return false;
+    const foreground_hwnd = GetForegroundWindow();
+    if (foreground_hwnd == target) return true;
+    if (foreground_hwnd != GetAncestor(target, GA_ROOT)) return false;
+    var info = std.mem.zeroes(GUITHREADINFO);
+    info.cbSize = @sizeOf(GUITHREADINFO);
+    if (GetGUIThreadInfo(GetWindowThreadProcessId(target, null), &info) == 0) return false;
+    return info.hwndFocus == target or (info.hwndFocus != null and IsChild(target, info.hwndFocus) != 0);
+}
+
 pub fn activeShellHasForegroundFocus() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     const target = app_state.shells[app_state.active_shell].hwnd;
     if (target == null) return false;
-    return GetForegroundWindow() == target;
+    return if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == target;
 }
 
 pub fn focusActiveBrowserPane() void {

@@ -119,6 +119,7 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
 const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
 const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
 const SEARCH_HIDESIDEBAR_OFFSET = @import("app_state.zig").SEARCH_HIDESIDEBAR_OFFSET;
@@ -172,6 +173,9 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
+const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
+const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
@@ -211,6 +215,10 @@ const SEARCH_VOICE_SPEED_140_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEE
 const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_150_OFFSET;
 const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
 const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
+const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
+const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
@@ -264,6 +272,10 @@ const SEARCH_TABCTX_LOCK = @import("app_state.zig").SEARCH_TABCTX_LOCK;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
+const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALLOW;
+const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
+const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
+const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -296,7 +308,8 @@ const activeRemoteContextForCodexTmux = @import("command_palette.zig").activeRem
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const sessionOverviewKindLabel = @import("archive.zig").sessionOverviewKindLabel;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
-const drawFavoriteStar = @import("archive.zig").drawFavoriteStar;
+const drawFavoriteDot = @import("archive.zig").drawFavoriteDot;
+const FAVORITE_DOT_D = @import("archive.zig").FAVORITE_DOT_D;
 const drawSessionLockIcon = @import("archive.zig").drawSessionLockIcon;
 const paintAllSessions = @import("archive.zig").paintAllSessions;
 const sidebarContentH = @import("console.zig").sidebarContentH;
@@ -305,6 +318,8 @@ const clampSidebarScroll = @import("console.zig").clampSidebarScroll;
 const switchToShell = @import("console.zig").switchToShell;
 const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
 const recordShellDiagEvent = @import("workspaces.zig").recordShellDiagEvent;
+const foregroundIsOurs = @import("focus.zig").foregroundIsOurs;
+const activeBrowserSurfaceHasForegroundFocus = @import("browser_pane.zig").activeBrowserSurfaceHasForegroundFocus;
 const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
 const wakeBrowserPaneFromFreeze = @import("browser_pane.zig").wakeBrowserPaneFromFreeze;
 const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchoredBesideBrowser;
@@ -635,6 +650,27 @@ pub fn hideActiveTabUntilAttention() void {
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+fn userPresentOnSelectedTab() bool {
+    return foregroundIsOurs() and !activeBrowserSurfaceHasForegroundFocus();
+}
+
+pub fn dotTargetsTab(i: usize) bool {
+    if (!app_state.ISSUE_274_DOT_ON_SELECTED_TAB) return i != app_state.active_shell;
+    return i != app_state.active_shell or !userPresentOnSelectedTab();
+}
+
+pub fn clearSelectedTabDotOnReturn() void {
+    if (!app_state.ISSUE_274_DOT_ON_SELECTED_TAB or app_state.active_shell >= app_state.shell_count) return;
+    const s = &app_state.shells[app_state.active_shell];
+    if (!s.needs_attention or !userPresentOnSelectedTab()) return;
+    if (s.last_blue_dot_source == .manual or s.last_blue_dot_source == .restore) return;
+    s.needs_attention = false;
+    recordShellDiagEvent(app_state.active_shell, "blue dot cleared", "returned");
+    invalidateSidebar();
+    publishInboxState();
+    if (!app_state.g_restoring) saveSession();
+}
+
 pub fn setBlueDot(i: usize, source: attention_rules.Source, done_after_activity: bool) bool {
     if (i >= app_state.shell_count or app_state.shells[i].needs_attention) return false;
     const s = &app_state.shells[i];
@@ -643,6 +679,8 @@ pub fn setBlueDot(i: usize, source: attention_rules.Source, done_after_activity:
         .turn_active = s.turn_pending,
         .done_after_activity = done_after_activity,
         .console_working = s.console_working,
+        .selected_tab = app_state.ISSUE_274_DOT_ON_SELECTED_TAB and i == app_state.active_shell,
+        .user_present = userPresentOnSelectedTab(),
     })) return false;
     s.needs_attention = true;
     s.last_blue_dot_source = source;
@@ -1736,8 +1774,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     _ = DrawTextW(hdc, L("\u{2022}"), -1, &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
                 }
                 if (app_state.shells[i].favorite) {
-                    var star_rc = RECT{ .left = 2, .top = y + 2, .right = 16, .bottom = y + 18 };
-                    drawFavoriteStar(hdc, &star_rc);
+                    drawFavoriteDot(hdc, 9, y + 10);
                 }
                 if (app_state.shells[i].locked) {
                     drawSessionLockIcon(hdc, sw - 8, y + 10, customColorOr("muted", if (app_state.g_light_theme) RGB(92, 101, 116) else RGB(164, 173, 188)));
@@ -1758,11 +1795,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     text_left = left_pad + fav_size + fav_gap;
                 }
                 const is_act = i == app_state.active_shell;
-                const reserve: i32 = (if (is_act or app_state.shells[i].locked) @as(i32, 30) else 12) + (if (app_state.shells[i].favorite) @as(i32, 18) else 0);
+                const reserve: i32 = (if (is_act or app_state.shells[i].locked) @as(i32, 30) else 12) + (if (app_state.shells[i].favorite) FAVORITE_DOT_D + 4 else 0);
                 var text_right = SIDEBAR_W() - reserve;
                 if (app_state.shells[i].favorite) {
-                    var star_rc = RECT{ .left = text_right, .top = y, .right = text_right + 14, .bottom = y + tabRowH() };
-                    drawFavoriteStar(hdc, &star_rc);
+                    drawFavoriteDot(hdc, text_right + 2 + @divTrunc(FAVORITE_DOT_D, 2), y + @divFloor(tabRowH(), 2));
                 }
                 var eta_num_buf: [16]u16 = undefined;
                 var eta_num_len: usize = 0;
@@ -1877,10 +1913,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawAttentionDot(hdc, text_left + 7, y + @divFloor(tabRowH(), 2), 4, customColorOr("attention", RGB(60, 120, 220)));
                     text_left += 18;
                 }
-                const text_right = SIDEBAR_W() - 32 - (if (app_state.shells[i].favorite) @as(i32, 18) else 0);
+                const text_right = SIDEBAR_W() - 32 - (if (app_state.shells[i].favorite) FAVORITE_DOT_D + 4 else 0);
                 if (app_state.shells[i].favorite) {
-                    var star_rc = RECT{ .left = text_right, .top = y + 6, .right = text_right + 14, .bottom = y + 26 };
-                    drawFavoriteStar(hdc, &star_rc);
+                    drawFavoriteDot(hdc, text_right + 2 + @divTrunc(FAVORITE_DOT_D, 2), y + 16);
                 }
                 _ = SelectObject(hdc, font_shell_tab_title);
                 const title_color: DWORD = if (i == app_state.active_shell) customColorOr("text", RGB(255, 255, 255)) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(255, 255, 255));
@@ -2152,6 +2187,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_skills_menu = result_idx == SEARCH_SKILLS_MENU_OFFSET;
                     const is_skills_back = result_idx == SEARCH_SKILLS_BACK_OFFSET;
                     const is_skill_row = result_idx >= SEARCH_SKILL_ROW_OFFSET and result_idx < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS;
+                    const is_chat_reply = result_idx == SEARCH_CHAT_REPLY_OFFSET;
+                    const is_chat_todo = result_idx == SEARCH_CHAT_TODO_OFFSET;
+                    const is_chat_find = result_idx == SEARCH_CHAT_FIND_OFFSET;
+                    const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -2163,7 +2202,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_retry_unsent = result_idx == SEARCH_CHAT_RETRY_UNSENT_OFFSET;
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
-                    const is_chat_action = is_chat_ac or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_select_all or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued;
+                    const is_chat_action = is_chat_reply or is_chat_ac or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_select_all or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -2254,6 +2293,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_pin_top = result_idx == SEARCH_PIN_TOP_OFFSET;
                     const is_lock_session = result_idx == SEARCH_LOCK_SESSION_OFFSET;
                     const is_chat_view = result_idx == SEARCH_CHAT_VIEW_OFFSET;
+                    const is_chat_allow = result_idx == SEARCH_CHAT_ALLOW_OFFSET;
+                    const is_chat_always = result_idx == SEARCH_CHAT_ALWAYS_OFFSET;
+                    const is_chat_deny = result_idx == SEARCH_CHAT_DENY_OFFSET;
                     const is_chat_stop = result_idx == SEARCH_CHAT_STOP_OFFSET;
                     const is_multiprompt_login = result_idx == SEARCH_MULTIPROMPT_LOGIN_OFFSET;
                     const is_browser_toggle = result_idx == SEARCH_BROWSER_TOGGLE_OFFSET;
@@ -2519,6 +2561,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ih_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("copy"), -1, &ih_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_INBOX_FREQUENT_OFFSET) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var frequent_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Inbox: Frequent"), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_goinbox) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
@@ -2995,6 +3042,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         else
                             L("Chat View: Discard Unsent Messages");
                         _ = DrawTextW(hdc, queue_label, -1, &queue_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_reply) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
+                        var reply_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Chat View: Reply to latest agent message"), -1, &reply_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_find) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
+                        var find_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_todo or is_chat_tools) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
+                        var tools_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, if (is_chat_todo) L("Chat View: Toggle todo list") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
@@ -3238,15 +3300,42 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var chat_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("Alt+C"), -1, &chat_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_allow) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Chat View: Allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, font_subtitle);
+                        permission_rc.left = ox + overlay_w - 100;
+                        permission_rc.right = ox + overlay_w - 8;
+                        _ = DrawTextW(hdc, L("Alt+Y"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_always) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Chat View: Always allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, font_subtitle);
+                        permission_rc.left = ox + overlay_w - 100;
+                        permission_rc.right = ox + overlay_w - 8;
+                        _ = DrawTextW(hdc, L("Alt+O"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_deny) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Chat View: Deny"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, font_subtitle);
+                        permission_rc.left = ox + overlay_w - 100;
+                        permission_rc.right = ox + overlay_w - 8;
+                        _ = DrawTextW(hdc, L("Alt+D"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_stop) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
                         var stop_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Stop Agent"), -1, &stop_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Chat View: Stop the agent") else L("Stop Agent")), -1, &stop_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var stop_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+C"), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Esc") else L("Ctrl+C")), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_toggle) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
@@ -3641,7 +3730,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Activity") else L("Mute Activity")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Don't Keep Alive") else L("Keep Alive on Exit")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_LOCK) (if (tc_locked) L("Unlock Session") else L("Lock Session")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Let Browser Pane Hibernate") else L("Keep Tab Awake")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move tab to new workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Hide Browser Pane") else L("Show Browser Pane")) else L("Tab action");
+                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Activity") else L("Mute Activity")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Don't Keep Alive") else L("Keep Alive on Exit")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_LOCK) (if (tc_locked) L("Unlock Session") else L("Lock Session")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Let Browser Pane Hibernate") else L("Keep Tab Awake")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move tab to new workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Hide Browser Pane") else L("Show Browser Pane")) else L("Tab action");
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {

@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -94,6 +95,8 @@ var disk_bytes: ?[]const u8 = null;
 var remote_pages: []const []const u8 = &.{};
 var remote_calls: usize = 0;
 var cache_writes: usize = 0;
+var status_layout_calls: usize = 0;
+fn layoutChatControls() void { status_layout_calls += 1; }
 const WM_APP_CHAT_FILE_READY = 1;
 var g_chat_cache_write_mutex: struct {
     fn tryLock(_: *@This()) bool { return true; }
@@ -126,6 +129,7 @@ fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { return 1; }
 fn chatSelectionClear() void {}
 fn chatEchoMatchActive() void {}
 fn chatFilePollInterval() u64 { return 2000; }
+fn chatDeliveryPending(_: u32) bool { return false; }
 fn chatFileRequest(key: chat_transcript.Identity) void {
     if (chatHistoryEntry(key)) |e| if (chat_history.retryDue(e.pending, GetTickCount64(), e.next)) { e.pending = true; request_count += 1; };
 }
@@ -133,6 +137,7 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     for (g_chat_histories.items) |e| if (chat_history.sameSession(key, e.key)) return e;
     return null;
 }
+fn captureScreenText(_: u32, _: []u16) ?usize { capture_count += 1; return capture_result; }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
 fn chatApplyDisplayGlyphs(_: []u16) void {}
@@ -355,6 +360,25 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(u64, 150), one.history.offset);
     try std.testing.expectEqual(@as(u64, 25), one.history.start);
     try std.testing.expectEqual(@as(u64, 0), one.before);
+    const status_text_ptr = one.history.text.items.ptr;
+    const status_blocks = g_chat_block_count;
+    const prior_layouts = status_layout_calls;
+    remote_pages = &.{ "@mp\\t11\\thistory\\tok\\tsid\\t150\\t150\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tdelta\\t25\\n{\\\"role\\\":\\\"status\\\",\\\"model\\\":\\\"Opus 5.5\\\",\\\"percent_left\\\":62}\\n@@MP_END@@\\n" };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 11, false);
+    try std.testing.expect(one.unchanged);
+    chatFileOnReady();
+    try std.testing.expectEqual(status_text_ptr, one.history.text.items.ptr);
+    try std.testing.expectEqual(status_blocks, g_chat_block_count);
+    try std.testing.expectEqual(@as(?u8, 62), one.history.status.percent_left);
+    try std.testing.expectEqual(prior_layouts + 1, status_layout_calls);
+    const known_layouts = status_layout_calls;
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 11, false);
+    chatFileOnReady();
+    try std.testing.expectEqual(known_layouts, status_layout_calls);
     fake_viewport_h = 800;
     shells[0].kind = .cmd;
     capture_result = 0;
@@ -365,7 +389,9 @@ test "cache-first switch-back, stale completion and failure preserve complete me
 function runHarness(deferSource, oldImage) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh301-'));
   try {
-    for (const file of ['chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
+    fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + functions.map(n => n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + acceptance);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -389,7 +415,7 @@ test('thumbnail anchor oracle rejects raw-offset relayout (positive control)', (
 test('background retries, local cache, complete dynamic layout and diagnostics are wired without browser-path changes', () => {
   assert.doesNotMatch(fn('chatHistoryEntry'), /chatHistoryRead|History.decode/);
   assert.match(fn('chatFileFetchThread'), /chatHistoryRead[\s\S]*History.decode/);
-  assert.match(fn('chatFileRequest'), /retryDue[\s\S]*std.Thread.spawn/);
+  assert.match(fn('chatFileRequestForDelivery'), /retryDue[\s\S]*std.Thread.spawn/);
   assert.match(fn('chatFileFetchThread'), /history.apply[\s\S]*writeFileAtomicW[\s\S]*transcript load shell=/);
   assert.match(fn('chatHistoryChannelStart'), /@embedFile\("chat_history_reader.py"\)/);
   assert.match(fn('chatHistoryFetchOnce'), /@embedFile\("chat_history_reader.py"\)/);
@@ -464,9 +490,11 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
 }
 `;
   try {
-    for (const file of ['chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
+    fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
-    const request = fn('chatFileRequest', text).replace('std.Thread.spawn', 'TestThread.spawn');
+    const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
     fs.writeFileSync(path.join(dir, 'main-test.zig'), fixturePrelude + entry +
       ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig')], { encoding: 'utf8', timeout: 60000 });

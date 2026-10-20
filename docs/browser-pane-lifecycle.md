@@ -278,3 +278,17 @@ arbitrary PWA/normal window and must not create one new window per link.
 
 These fixes cover different invariants. Do not remove one because another test
 passes.
+
+## Profile cloning
+
+`zigshell-bridge profile-clone <src> <dst>` copies `Local State` and direct
+profile folders containing `Preferences`, preserving bookmarks, cookies,
+passwords, extensions, history, storage, and session data without changing src.
+Other root data, cache directories at any depth, crash data, and lock files
+are skipped. An exclusively held source `lockfile` refuses with a running error.
+The destination must not exist; preflight requires copy bytes plus 1 GiB free.
+A stale `<dst>.partial` is removed first. Copying goes into that sibling,
+which is validated and marked `.multiprompt-clone-complete` before a rename
+without replacement publishes dst. A copy error removes the partial directory.
+Reparse points and overlapping source/destination paths are refused.
+Success prints one JSON line with destination, copied file count, and bytes.

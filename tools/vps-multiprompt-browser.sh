@@ -373,7 +373,10 @@ if raw.strip() == "ok" and args[0] in {"open", "sidebar", "navigate", "back", "f
 try:
     reply = json.loads(raw)
 except ValueError:
-    fail("invalid_reply", "multiprompt app/bridge returned an invalid reply (possibly interrupted by an update). " + fix)
+    first = raw.strip().splitlines()[0][:160]
+    if first.startswith(("multiprompt-browser [--window", "usage:")):
+        fail("bad_args", f"the bridge rejected the arguments of '{args[0]}' and printed its usage ({first}). Check the command and its flags; the app and pane are fine.")
+    fail("invalid_reply", f"multiprompt app/bridge returned an invalid reply (possibly interrupted by an update). Reply started with: {first}. " + fix)
 if not isinstance(reply, dict) or not isinstance(reply.get("ok"), bool):
     fail("invalid_reply", "multiprompt app/bridge returned an invalid reply (possibly incompatible versions). " + fix)
 loaded, bridge = reply.get("extensionVersion"), reply.get("bridgeVersion")

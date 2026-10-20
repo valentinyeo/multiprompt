@@ -123,6 +123,25 @@ class Relay(unittest.TestCase):
         self.assertTrue(live.exists())
         self.assertTrue(ordinary.exists())
 
+    def test_refused_connect_keeps_a_socket_that_is_still_listening(self):
+        live = self.directory / "live.sock"
+        server = socket.socket(socket.AF_UNIX)
+        self.addCleanup(server.close)
+        server.bind(str(live))
+        server.listen()
+
+        class Refusing(socket.socket):
+            def connect(self, address):
+                raise ConnectionRefusedError(111, "Connection refused")
+
+        real = relay.socket.socket
+        relay.socket.socket = Refusing
+        try:
+            relay.sweep(self.directory)
+        finally:
+            relay.socket.socket = real
+        self.assertTrue(live.exists())
+
     def test_periodic_sweep_removes_socket_without_notifications(self):
         stop = threading.Event()
         swept_twice = threading.Event()

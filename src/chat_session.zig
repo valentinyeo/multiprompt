@@ -1,3 +1,8 @@
+const chat_switch = @import("chat_switch.zig");
+const ShowWindow = @import("focus.zig").ShowWindow;
+const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
+const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
+const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const chat_transcript = @import("chat_transcript.zig");
@@ -97,6 +102,7 @@ const chatApplyDisplayGlyphs = @import("chat_capture.zig").chatApplyDisplayGlyph
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
 const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const captureChatTranscript = @import("chat_capture.zig").captureChatTranscript;
+const captureScreenText = @import("chat_capture.zig").captureScreenText;
 const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
@@ -127,7 +133,7 @@ fn chatBenchPath(buf: []u8, suffix: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}\\{s}", .{ app_state.g_chat_bench_dir[0..app_state.g_chat_bench_dir_len], suffix }) catch null;
 }
 
-fn chatBenchFetch(shell_id: u32, id: u32, request: []const u8, out: *std.ArrayList(u8)) bool {
+pub fn chatBenchFetch(shell_id: u32, id: u32, request: []const u8, out: *std.ArrayList(u8)) bool {
     var name_buf: [80]u8 = undefined;
     const name = std.fmt.bufPrint(&name_buf, "{d}-{d}", .{ shell_id, id }) catch return false;
     var req_buf: [512]u8 = undefined;
@@ -284,7 +290,7 @@ pub fn chatPerf(stage: []const u8, start: u64, amount: usize) void {
     debugLog(std.fmt.bufPrint(&buf, "PERF[chat]: {s} ms={d} size={d}", .{ stage, GetTickCount64() - start, amount }) catch return);
 }
 
-fn chatFetchAcquire() bool {
+pub fn chatFetchAcquire() bool {
     if (foregroundIsOurs()) {
         if (app_state.g_chat_priority_reservation == null) app_state.g_chat_priority_reservation = CreateMutexW(null, 0, L("Local\\MultipromptChatTranscriptPriority"));
     } else {
@@ -310,7 +316,7 @@ fn chatFetchAcquire() bool {
     return true;
 }
 
-fn chatFetchRelease() void {
+pub fn chatFetchRelease() void {
     if (!app_state.g_chat_fetch_busy) return;
     _ = ReleaseMutex(app_state.g_chat_fetch_mutex);
     app_state.g_chat_fetch_busy = false;
@@ -423,13 +429,17 @@ pub fn chatHistoryForget(shell_id: u32) void {
 }
 
 pub fn chatFileRequest(key: chat_transcript.Identity) void {
-    if (!app_state.g_chat_active or key.shell_id == 0) return;
-    if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0) return;
+    chatFileRequestForDelivery(key, false);
+}
+
+pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
+    if ((!delivery and !app_state.g_chat_active) or key.shell_id == 0) return;
+    if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
     if (!chat_history.retryDue(entry.pending, now, entry.next)) return;
     const load_disk = !entry.disk_loaded;
-    if (!load_disk and !foregroundIsOurs()) {
+    if (!delivery and !load_disk and !foregroundIsOurs()) {
         var input: LASTINPUTINFO = .{ .cbSize = @sizeOf(LASTINPUTINFO), .dwTime = 0 };
         if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
     }
@@ -519,9 +529,11 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     return WriteFile(ch.input, &encoded, encoded.len, &written, null) != 0 and written == encoded.len;
 }
 
-fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
+pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
     if (host >= app_state.g_chat_history_channels.len) return false;
+    const lock_deadline = GetTickCount64() + 15_000;
     while (!app_state.g_chat_history_channel_mutex.tryLock()) {
+        if (GetTickCount64() >= lock_deadline) return false;
         if (app_state.g_chat_history_channels_closing.load(.acquire)) return false;
         Sleep(1);
     }
@@ -541,10 +553,11 @@ fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize
     var written: DWORD = 0;
     if (WriteFile(ch.input, query.ptr, @intCast(query.len), &written, null) == 0 or written != query.len or
         WriteFile(ch.input, "\n", 1, &written, null) == 0 or written != 1) return false;
+    if (request_written) |written_request| written_request.* = true;
     const a = std.heap.page_allocator;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
-    const deadline = GetTickCount64() + 15_000;
+    const deadline = lock_deadline;
     var chunk: [65536]u8 = undefined;
     while (GetTickCount64() < deadline and !app_state.g_chat_history_channels_closing.load(.acquire)) {
         var avail: DWORD = 0;
@@ -583,6 +596,7 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
         .settlement = true,
+        .source_offsets = true,
         .cached_sid = std.mem.sliceTo(&history.sid, 0),
         .inode = history.inode,
         .offset = history.offset,
@@ -594,15 +608,15 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
     defer a.free(query);
     if (chatBenchEnabled()) return chatBenchFetch(key.shell_id, id, query, out);
     const wire_limit: usize = if (before > 0) 64 * 1024 * 1024 else 8 * chat_history.TAIL_BYTES;
-    if (chatHistoryPersistent(key.host, id, query, wire_limit, out)) return true;
+    if (chatHistoryPersistent(key.host, id, query, wire_limit, out, null)) return true;
     out.clearRetainingCapacity();
     if (app_state.g_chat_history_channels_closing.load(.acquire)) return false;
     return chatHistoryFetchOnce(key.host, query, wire_limit, out);
 }
 
-fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
+pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
     const a = std.heap.page_allocator;
-    var encoded: [1600]u8 = undefined;
+    var encoded: [4096]u8 = undefined;
     const size = std.base64.standard.Encoder.calcSize(query.len);
     if (size > encoded.len) return false;
     const b64 = std.base64.standard.Encoder.encode(&encoded, query);
@@ -706,19 +720,18 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     }
     if (ok) {
         const header_end = std.mem.indexOfScalar(u8, wire.items, '\n');
-        const no_rows = if (header_end) |n| std.mem.eql(u8, wire.items[n + 1 ..], "@@MP_END@@\n") else false;
+        const no_rows = chat_history.statusOnly(wire.items);
         const delta = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tdelta\t") != null else false;
         entry.incremental = delta and !no_rows and !entry.history.restore_full and entry.history.rows.items.len > 0;
         history = (if (delta and no_rows and !entry.history.restore_full) entry.history.cursor() else if (entry.incremental) entry.history.suffix(a) else entry.history.clone(a)) catch blk: {
             ok = false;
             break :blk chat_history.History{};
         };
-        const revision = history.revision;
         if (ok) history.apply(a, wire.items, id, key) catch {
             ok = false;
         };
         if (ok) {
-            entry.unchanged = no_rows and history.revision == revision;
+            entry.unchanged = delta and no_rows;
             const older = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tolder\t") != null else false;
             if (older and history.start < entry.history.start) entry.prepended = true;
         }
@@ -803,6 +816,7 @@ pub fn chatFileOnReady() void {
             const belongs_to_active = chat_history.sameSession(key, entry.key);
             if (entry.unchanged) {
                 entry.history.updateCursor(history);
+                entry.history.revision = history.revision;
             } else if (entry.incremental) {
                 var suffix = history;
                 entry.history.appendParsed(std.heap.page_allocator, &suffix) catch {
@@ -822,9 +836,9 @@ pub fn chatFileOnReady() void {
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk) @as(u64, 0) else if (history.more) @as(u64, 1000) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id)) @as(u64, 1000) else chatFilePollInterval());
             if (belongs_to_active) {
-                active_changed = !entry.unchanged;
+                active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
                 app_state.g_chat_switch_loading = history.more;
                 const idx = findShellById(key.shell_id) orelse continue;
@@ -851,6 +865,7 @@ pub fn chatFileOnReady() void {
         }
     }
     if (active_changed and app_state.g_chat_active) {
+        layoutChatControls();
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
@@ -917,13 +932,25 @@ fn refreshChatBlockCache(force: bool) bool {
     const entry = if (app_state.g_chat_active) chatHistoryEntry(key) else null;
     const from_file = if (entry) |e| e.history.blocks.items.len > 0 else false;
     app_state.g_chat_file_valid = from_file;
-    const screen_len = if (key.shell_id == 0 or !app_state.g_chat_active) captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, false) else blk: {
+    const file_missing = if (entry) |e| e.missing_message[0] != 0 else false;
+    const file_failures = if (entry) |e| e.failures else 0;
+    const file_blocks = if (entry) |e| e.history.blocks.items.len else 0;
+    const keyed = key.shell_id != 0 and app_state.g_chat_active;
+    const show_screen = chat_history.showScreen(keyed, file_blocks, file_missing, file_failures);
+    const screen_len = if (show_screen) (if (keyed) captureScreenText(app_state.active_shell, &app_state.g_chat_screen) else captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, false)) else blk: {
         if (!force) _ = captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, true);
         break :blk null;
     };
     if (!from_file and (screen_len == null or screen_len.? == 0) and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id) return false;
     const len = if (from_file) entry.?.history.text.items.len else screen_len orelse 0;
     const count = if (from_file) entry.?.history.blocks.items.len else CHAT_MAX_BLOCKS;
+    var open_tools = std.AutoHashMap(u64, void).init(std.heap.page_allocator);
+    defer open_tools.deinit();
+    if (from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id) {
+        for (app_state.g_chat_blocks[0..app_state.g_chat_block_count]) |block| {
+            if (block.role == .tool and block.tool_open) open_tools.put(block.tool_id, {}) catch {};
+        }
+    }
     if (!chatEnsureTranscriptCapacity(len, count)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
     const hash = if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source));
@@ -945,8 +972,14 @@ fn refreshChatBlockCache(force: bool) bool {
     if (from_file) {
         app_state.g_chat_block_count = count;
         @memcpy(app_state.g_chat_blocks[0..count], entry.?.history.blocks.items);
+        for (app_state.g_chat_blocks[0..count]) |*block| {
+            if (block.role == .tool) block.tool_open = open_tools.contains(block.tool_id);
+        }
         app_state.g_chat_switch_loading = false;
         app_state.g_chat_window_full = false;
+    } else if (keyed and show_screen) {
+        app_state.g_chat_block_count = if (len > 0) 1 else 0;
+        if (len > 0) app_state.g_chat_blocks[0] = .{ .start = 0, .len = len, .role = .code };
     } else {
         app_state.g_chat_block_count = chatClassifyBlocks(app_state.g_chat_capture[0..len], app_state.g_chat_blocks[0..CHAT_MAX_BLOCKS]);
         chat_style.markScreenMessages(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
@@ -974,7 +1007,7 @@ fn chatCacheIdentity() chat_transcript.Identity {
 }
 
 fn chatStoreTabCache(from_file: bool) void {
-    if (from_file) return;
+    if (from_file or chatFileIdentity().shell_id != 0) return;
     const entry = chatHistoryEntry(chatCacheIdentity()) orelse return;
     if (entry.pending or entry.history.rows.items.len > 0) return;
     const a = std.heap.page_allocator;
@@ -1013,6 +1046,7 @@ pub fn chatRefreshAfterFontChange() void {
 }
 
 pub fn chatDeferTranscriptLoad() void {
+    @import("chat_find_ui.zig").close(false);
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_layout_reuse = 0;
@@ -1071,8 +1105,29 @@ pub fn chatSwitchDidPaint() void {
 
 pub fn chatSwitchBrowserTick() void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
-    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or
-        !app_state.g_chat_browser_swap.take(app_state.shells[app_state.active_shell].shell_id)) return;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    if (app_state.g_chat_browser_swap.shell_id == 0 or app_state.g_chat_browser_swap.shell_id != shell_id) return;
+    if (app_state.g_chat_switch_preparing or !chatViewOwnsInput() or app_state.g_edit_hwnd != null or app_state.g_popup_menu_active) {
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, chat_switch.paint_deadline_ms, null);
+        return;
+    }
+    const now = GetTickCount64();
+    if (!app_state.g_chat_browser_swap.painted) {
+        if (!app_state.g_chat_browser_swap.overdue(shell_id, now)) {
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, @intCast(chat_switch.paint_deadline_ms -| (now -| app_state.g_chat_browser_swap.requested_at)), null);
+            return;
+        }
+        layoutChatControls();
+        _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOWNOACTIVATE);
+        _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOWNOACTIVATE);
+        _ = app_state.g_chat_browser_swap.didPaint(shell_id);
+        app_state.g_chat_switch_painted_ms = now -| app_state.g_chat_switch_started;
+        var buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&buf, "[switch] paint fallback after {d} ms (shell {d})", .{ now -| app_state.g_chat_browser_swap.requested_at, shell_id }) catch "[switch] paint fallback");
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    }
+    if (!app_state.g_chat_browser_swap.take(app_state.shells[app_state.active_shell].shell_id)) return;
     parkInactiveBrowserPanes();
     ecoqosReevaluateAll();
     if (app_state.shells[app_state.active_shell].browser_frozen) wakeBrowserPaneFromFreeze(app_state.active_shell);
@@ -1170,4 +1225,13 @@ test "chatLatestAgentReply returns only the reply after the last prompt" {
     var out: [256]u16 = undefined;
     const n = chatLatestAgentReply(&out);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second answer"), out[0..n]);
+}
+
+fn chatDeliveryPending(shell_id: u32) bool {
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (!entry.channel_sent or entry.state == .not_sent) continue;
+        const idx = @import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
+        if (app_state.shells[idx].shell_id == shell_id) return true;
+    }
+    return false;
 }

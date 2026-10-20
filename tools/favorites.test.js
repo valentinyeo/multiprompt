@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,10 +17,10 @@ function between(start, end) {
 test('favorite toggle, split filter and JSON parser execute as native Zig unit tests', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-favorite-test-'));
   try {
-    for (const name of ['json_reader.zig', 'archive_rules.zig', 'voice_filter.zig']) fs.copyFileSync(path.join(__dirname, '../src', name), path.join(tmp, name));
-    const pure = 'const std = @import("std");\nconst json_reader = @import("json_reader.zig");\n' +
+    copyZig(['json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig'], tmp);
+    const pure = 'const frequent = @import("frequent.zig");\nconst std = @import("std");\nconst json_reader = @import("json_reader.zig");\n' +
       between('fn toggledFavorite(', 'fn toggleFavorite(') +
-      between('test "favorite toggle', 'fn inboxRowVisible(');
+      between('test "favorite toggle', 'test "used JSON field');
     const file = path.join(tmp, 'favorites.zig');
     fs.writeFileSync(file, pure);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'favorite'], { encoding: 'utf8', timeout: 120000 });
@@ -56,16 +57,17 @@ test('favorite action saves and immediately publishes both true and false states
   assert.match(between('fn inboxRowVisible(', 'fn inboxListTop('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
 });
 
-test('Favorites split follows ALL and shares ALL ordering, rows and navigation', () => {
+test('Favorites split follows Frequent and ALL and shares ALL ordering, rows and navigation', () => {
   const paint = between('fn paintInbox(', 'fn openInbox(');
+  assert.ok(paint.indexOf('"Frequent"') < paint.indexOf('"All"'));
   assert.ok(paint.indexOf('"All"') < paint.indexOf('"Favorites"'));
   assert.ok(paint.indexOf('"Favorites"') < paint.indexOf('for (0..g_inbox_ws_count)'));
   assert.match(paint, /if \(g_unread_only\) unread else total/);
   assert.match(paint, /No favorites yet\. Press Alt\+S on a session to add it\./);
-  assert.match(between('fn handleInboxKey(', 'fn '), /while \(t < g_inbox_ws_count \+ 1\)/);
-  assert.equal((source.match(/const splits = g_inbox_ws_count \+ 2/g) || []).length, 2);
-  assert.match(source, /const INBOX_MAX_SPLIT_TABS: usize = INBOX_MAX_WS \+ 2/);
-  assert.match(source, /g_inbox_step_context_tab > g_inbox_ws_count \+ 1/);
+  assert.match(between('fn handleInboxKey(', 'fn '), /while \(t < frequent\.splitCount\(g_inbox_ws_count\) - 1\)/);
+  assert.equal((source.match(/const splits = frequent\.splitCount\(g_inbox_ws_count\)/g) || []).length, 2);
+  assert.match(source, /const INBOX_MAX_SPLIT_TABS: usize = INBOX_MAX_WS \+ @import\("frequent.zig"\)\.first_ws_split/);
+  assert.match(source, /g_inbox_step_context_tab > frequent\.splitCount\(g_inbox_ws_count\) - 1/);
 });
 
 test('keyboard, palette, context, F1 and wiki expose the same favorite action', () => {
@@ -80,9 +82,19 @@ test('keyboard, palette, context, F1 and wiki expose the same favorite action', 
 });
 
 
-test('favorite stars use native gold geometry rather than a font-dependent glyph', () => {
-  const draw = between('fn drawFavoriteStar(', 'fn drawSessionLockIcon(');
-  assert.match(draw, /RGB\(240, 196, 75\)/);
-  assert.match(draw, /Polygon\(hdc, &points, points.len\)/);
-  assert.equal((source.match(/drawFavoriteStar\(hdc, &star_rc\)/g) || []).length, 4);
+test('favorite marker is one small dot everywhere', async () => {
+  assert.doesNotMatch(source, /drawFavoriteStar/);
+  assert.match(source, /FAVORITE_DOT_D: i32 = 6/);
+  const draw = between('fn drawFavoriteDot(', 'fn drawSessionLockIcon(');
+  assert.ok(draw.includes('drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));'));
+  assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 4);
+  const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
+  assert.doesNotMatch(sidebar, /@as\(i32, 18\) else 0/);
+  const shot = fs.readFileSync(path.join(__dirname, 'chat-bench/demo-shot.mjs'), 'utf8');
+  const workspace = fs.readFileSync(path.join(__dirname, 'chat-bench/demo-workspace.mjs'), 'utf8');
+  assert.match(shot, /tabs: sessions\.map\(s => \(\{[^}]*favorite: !!s\.favorite/);
+  assert.equal((workspace.match(/favorite: true/g) || []).length, 1);
+  const { sessions } = await import('./chat-bench/demo-workspace.mjs');
+  assert.equal(sessions.filter(s => s.favorite).length, 1);
+  assert.ok(sessions.every(s => !s.hero || !s.favorite));
 });

@@ -58,7 +58,7 @@ test("ACTIVE clears any prior dot and a resumed DONE respects filing content", (
   assert.doesNotMatch(active, /last_blue_dot_source/);
   assert.match(apply, /archive_rules\.doneHasActivity\(/);
   assert.match(apply, /last_done_content_valid/);
-  assert.match(apply, /completed_turn and i != active_shell and \(!shells\[i\]\.inbox_archived or archiveHasNewContent\(i\)\)/);
+  assert.match(apply, /completed_turn and dotTargetsTab\(i\) and \(!shells\[i\]\.inbox_archived or archiveHasNewContent\(i\)\)/);
 });
 
 test("workspace exports retain blue dots too", () => {

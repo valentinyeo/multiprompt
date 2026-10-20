@@ -53,7 +53,8 @@ test('production screenshot handoff takes foreground from foreign Chrome, attach
   const start = app.indexOf('const ShotFocus = struct {');
   const end = app.indexOf("fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {", start);
   assert.ok(start >= 0 && end > start);
-  const production = app.slice(start, end);
+  const helper = app.slice(app.indexOf('fn activateConsoleForeground('), app.indexOf('fn activeShellHasForegroundFocus('));
+  const production = app.slice(start, end) + '\n' + helper;
   const fixture = fs.readFileSync(path.join(__dirname, 'screenshot-caret-fixture.zig'), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-caret-'));
   try {

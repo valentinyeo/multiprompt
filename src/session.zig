@@ -315,6 +315,12 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + ix.len], ix);
             pos += ix.len;
         }
+        const used = ",\"used_unix\":true,\"used\":";
+        @memcpy(json_buf[pos .. pos + used.len], used);
+        pos += used.len;
+        pos += writeUintTo(json_buf[pos..], app_state.shells[i].last_used);
+        pos += @import("frequent.zig").writeInput(json_buf[pos..], app_state.shells[i].input);
+        pos += @import("frequent.zig").writeVisits(json_buf[pos..], app_state.shells[i].visits);
         if (app_state.shells[i].favorite) {
             const ff = ",\"favorite\":true";
             @memcpy(json_buf[pos .. pos + ff.len], ff);
@@ -393,6 +399,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += lv_pre.len;
             pos += writeUintTo(json_buf[pos..], app_state.shells[i].last_viewed);
         }
+        const chat_id_pre = ",\"chat_id\":";
+        @memcpy(json_buf[pos .. pos + chat_id_pre.len], chat_id_pre);
+        pos += chat_id_pre.len;
+        pos += writeUintTo(json_buf[pos..], app_state.shells[i].chat_id);
         if (app_state.shells[i].claude_sid_len > 0 and pos < json_buf.len - 60) {
             const cs_pre = ",\"csid\":\"";
             @memcpy(json_buf[pos .. pos + cs_pre.len], cs_pre);
@@ -427,6 +437,16 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             const cv = ",\"cv\":true";
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
+        }
+        if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.shells[i].chat_shell_override and pos < json_buf.len - 540) {
+            const cso = ",\"cso\":true";
+            @memcpy(json_buf[pos .. pos + cso.len], cso);
+            pos += cso.len;
+        }
+        if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
+            const fw = ",\"fw\":true";
+            @memcpy(json_buf[pos .. pos + fw.len], fw);
+            pos += fw.len;
         }
         if (app_state.shells[i].inbox_archived and pos < json_buf.len - 540) {
             const iah = ",\"iah\":true";
@@ -584,6 +604,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + gca.len], gca);
         pos += gca.len;
     }
+    if (!app_state.g_igsh354_paste_focus and pos + 36 < json_buf.len) {
+        const setting = ",\"igsh354_paste_focus\":false";
+        @memcpy(json_buf[pos .. pos + setting.len], setting);
+        pos += setting.len;
+    }
     if (!app_state.g_voice_always_listen and pos + 36 < json_buf.len) {
         const setting = ",\"voice_always_listen\":false";
         @memcpy(json_buf[pos .. pos + setting.len], setting);
@@ -623,6 +648,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         pos += hpf.len;
     }
 
+    const split_state = std.fmt.bufPrint(json_buf[pos..], ",\"inbox_tab\":{d},\"inbox_visits_order\":true", .{app_state.g_inbox_tab}) catch return false;
+    pos += split_state.len;
     if (app_state.g_single_window and pos + 256 < json_buf.len) {
         var swbuf: [96]u8 = undefined;
         const sw = std.fmt.bufPrint(&swbuf, ",\"single_window\":true,\"active_workspace\":{d},\"workspace_count\":{d},\"workspaces\":[", .{ app_state.g_active_workspace, app_state.g_lws_count }) catch swbuf[0..0];
@@ -763,6 +790,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.kind = tab.kind;
     shell.shell_id = app_state.next_shell_id;
     shell.wake_id = tab.wake_id;
+    shell.chat_id = tab.chat_id;
     app_state.next_shell_id += 1;
     for (0..tab.name_len) |j| shell.name[j] = @intCast(tab.name[j]);
     shell.name_len = tab.name_len;
@@ -782,6 +810,9 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.inbox_excluded = tab.inbox_excluded;
     shell.locked = tab.locked;
     shell.favorite = tab.favorite;
+    shell.last_used = tab.last_used;
+    shell.input = tab.input;
+    shell.visits = tab.visits;
     shell.claude_session = tab.claude_session;
     shell.group_id = tab.group_id;
     shell.tmux_host = tab.tmux_host;
@@ -875,6 +906,8 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     restoreArchiveMarkers(&app_state.shells[idx], tab);
     app_state.shells[idx].keep_awake = tab.kaw;
     app_state.shells[idx].chat_view_on = tab.cv;
+    if (app_state.ISSUE_373_SHELL_OVERRIDE) app_state.shells[idx].chat_shell_override = tab.cso;
+    if (app_state.ISSUE_347_KEEP_FULL_WIDTH) app_state.shells[idx].full_width = tab.fw;
     if (tab.burl_len > 0) {
         @memcpy(app_state.shells[idx].browser_url[0..tab.burl_len], tab.burl[0..tab.burl_len]);
         app_state.shells[idx].browser_url_len = tab.burl_len;
@@ -965,6 +998,76 @@ test "favorite JSON flag is scoped to its own saved tab and defaults off" {
     try std.testing.expect(tabs[0].favorite);
     try std.testing.expect(!tabs[1].favorite);
     try std.testing.expect(!tabs[2].favorite);
+}
+
+test "ISSUE-373 shell override survives session write, parse and restore with legacy defaults" {
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(@embedFile("fixtures/json-reader/session-shell-override.json"), &tabs));
+    try std.testing.expect(tabs[0].cso);
+    try std.testing.expect(!tabs[1].cso);
+    try std.testing.expect(!tabs[2].cso);
+    const saved_count = app_state.shell_count;
+    const saved_shells = app_state.shells[0..3].*;
+    defer {
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_count;
+    }
+    app_state.shell_count = 3;
+    for (0..3) |i| {
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].kind = .tmux;
+        app_state.shells[i].chat_shell_override = true;
+        restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
+    }
+    try std.testing.expect(app_state.shells[0].chat_shell_override);
+    try std.testing.expect(app_state.shells[0].chat_view_on);
+    try std.testing.expect(!app_state.shells[1].chat_shell_override);
+    try std.testing.expect(!app_state.shells[2].chat_shell_override);
+    var temp: [512]u8 = undefined;
+    const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(temp_len > 0 and temp_len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-373-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(saveSessionTo(path, 0));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"cso\":true") != null);
+    try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(bytes, &tabs));
+    try std.testing.expect(tabs[0].cso);
+    try std.testing.expect(!tabs[1].cso);
+    try std.testing.expect(!tabs[2].cso);
+}
+
+test "full width JSON flag is scoped to its own saved tab, defaults off and restores onto the shell" {
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    const json = "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"btop\",\"fw\":true},{\"kind\":\"cmd\",\"name\":\"Old\"},{\"kind\":\"cmd\",\"name\":\"Narrow\",\"fw\":false}]}";
+    try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(json, &tabs));
+    try std.testing.expect(tabs[0].fw);
+    try std.testing.expect(!tabs[1].fw);
+    try std.testing.expect(!tabs[2].fw);
+    const saved_count = app_state.shell_count;
+    const saved_shells = app_state.shells[0..2].*;
+    defer {
+        app_state.shells[0..2].* = saved_shells;
+        app_state.shell_count = saved_count;
+    }
+    app_state.shells[0] = empty_shell;
+    app_state.shells[1] = empty_shell;
+    app_state.shells[1].full_width = true;
+    app_state.shell_count = 2;
+    restoreBrowserStateFromSavedTab(0, &tabs[0]);
+    restoreBrowserStateFromSavedTab(1, &tabs[1]);
+    try std.testing.expect(app_state.shells[0].full_width);
+    try std.testing.expect(!app_state.shells[1].full_width);
 }
 
 test "inbox exclusion parses only for its own saved tab and defaults off" {
@@ -1095,8 +1198,12 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
     app_state.shells[idx].locked = tabs[t].locked;
     app_state.shells[idx].favorite = tabs[t].favorite;
+    app_state.shells[idx].last_used = tabs[t].last_used;
+    app_state.shells[idx].input = tabs[t].input;
+    app_state.shells[idx].visits = tabs[t].visits;
     app_state.shells[idx].claude_session = tabs[t].claude_session;
     app_state.shells[idx].wake_id = tabs[t].wake_id;
+    app_state.shells[idx].chat_id = tabs[t].chat_id;
     app_state.shells[idx].group_id = tabs[t].group_id;
     app_state.shells[idx].workspace = tabs[t].workspace;
     app_state.shells[idx].last_active = if (tabs[t].last_active != 0) tabs[t].last_active else nowFileTime();
@@ -1243,6 +1350,7 @@ pub fn restoreSession() u32 {
             if (n > 0) chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], name[0..n]);
         }
     }
+    app_state.g_inbox_tab = @import("frequent.zig").migrateSplit(@intCast(@min(json_reader.uint(json, "inbox_tab"), std.math.maxInt(u32))), json_reader.boolTrue(json, "inbox_visits_order"));
     const chat_mode = json_reader.string(json_reader.field(json, "chat_view_mode")) orelse "";
     if (std.mem.eql(u8, chat_mode, "everywhere")) {
         app_state.g_chat_view_mode = .everywhere;
@@ -1250,6 +1358,7 @@ pub fn restoreSession() u32 {
         app_state.g_chat_view_mode = .nowhere;
     }
     if (app_state.g_chat_view_mode == .everywhere and json_reader.boolTrue(json, "chat_active")) app_state.g_chat_view_restore_on = true;
+    app_state.g_igsh354_paste_focus = !json_reader.boolFalse(json, "igsh354_paste_focus");
     app_state.g_voice_always_listen = !json_reader.boolFalse(json, "voice_always_listen");
     if (json_reader.boolFalse(json, "eta_numbers")) app_state.g_eta_numbers_on = false;
     if (json_reader.boolFalse(json, "eta_progress")) app_state.g_eta_progress_on = false;

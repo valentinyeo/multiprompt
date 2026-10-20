@@ -100,3 +100,33 @@ and remote IO substituted. Its acceptance assertions fail against the actual
 v0.28.704 blanking defer and v0.28.702 thumbnail relayout, then pass for the fix.
 The requested Windows cross-build and Node suites are the final gates.
 No live Windows GUI acceptance is claimed.
+
+## Sync audit
+
+On the VPS, run `/home/owner/zig/zig build chat-audit` then `python3 tools/chat-sync-audit.py` to compare every live Claude/Codex pane with a cold Chat View load. Use `--json` for JSON lines or `--file-tickets` to file one ticket per new drift kind (`--state PATH` overrides the deduplication state). The audit ignores terminal status, thinking, and protocol-only notifications, checks visible Markdown text, and reports older pane turns outside the cold tail with their transcript lines and timestamps; scroll-up can still load those turns.
+
+## Whole-conversation find
+
+Ctrl+F or Ctrl+K `Chat View: Find in conversation` opens the Chat View find bar.
+Typing waits 250 ms before a background request over the existing history reader
+channel. Enter/F3 moves oldest-to-newest and wraps; Shift reverses direction.
+The first selected match is the newest. Esc closes find and restores composer
+focus. The bar captures text and command keys before composer or shell routing;
+modifier transitions retain native keyboard state.
+
+The reader's `search` field accepts 1–200 characters and uses literal Unicode
+casefold matching over the entire source file, independently of paging cursors.
+Only conversation text and tool summaries/details participate. Replies identify
+the request, session, inode and source size, followed by source byte ranges,
+roles, timestamps and at-most-160-character snippets. Scanning stops at 500 hits
+or 1.5 seconds and marks partial results with `+` in the counter. Both reader
+and desktop behavior are guarded by `ISSUE_268_CHAT_FIND`.
+
+Find results are scoped to their request and session; late results cannot
+replace a newer query or appear after switching tabs. Older matches request the
+existing `older` pages with `before` set to the current oldest byte until the
+source record is available. File-backed blocks retain source ranges, including
+paired tool results, and grow beyond the old fixed block limit. Cached rows
+without those ranges are refreshed from the source before locating a match.
+Selected tool details open automatically. Matching text is highlighted in loaded
+blocks, with a distinct mark for the selected hit.

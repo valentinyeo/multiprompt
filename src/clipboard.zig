@@ -64,6 +64,8 @@ const L = @import("startup.zig").L;
 const ShellKind = @import("app_state.zig").ShellKind;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const SetFocus = @import("focus.zig").SetFocus;
+const pasteFocusLanded = @import("focus.zig").pasteFocusLanded;
+const foregroundIsOurs = @import("focus.zig").foregroundIsOurs;
 const ShowWindow = @import("focus.zig").ShowWindow;
 const isCtrlDown = @import("focus.zig").isCtrlDown;
 const ecoqosReevaluateAll = @import("power.zig").ecoqosReevaluateAll;
@@ -116,6 +118,69 @@ fn readBufferRow(handle: HANDLE, left: i16, width: u32, row: i16, out: []u16) us
     return n;
 }
 
+pub fn consoleCellAtScreenPoint(hwnd: HANDLE, screen_x: i32, screen_y: i32, info: CONSOLE_SCREEN_BUFFER_INFO) ?COORD {
+    var pt: POINT = .{ .x = screen_x, .y = screen_y };
+    if (ScreenToClient(hwnd, &pt) == 0) return null;
+    var client: RECT = undefined;
+    if (GetClientRect(hwnd, &client) == 0) return null;
+    const cw = client.right - client.left;
+    const ch = client.bottom - client.top;
+    if (cw <= 0 or ch <= 0 or pt.x < 0 or pt.y < 0 or pt.x >= cw or pt.y >= ch) return null;
+    const win = info.srWindow;
+    const cols: i32 = @as(i32, win.right) - @as(i32, win.left) + 1;
+    const rows: i32 = @as(i32, win.bottom) - @as(i32, win.top) + 1;
+    if (cols <= 0 or rows <= 0) return null;
+    const cell_w = @divTrunc(cw, cols);
+    const cell_h = @divTrunc(ch, rows);
+    if (cell_w <= 0 or cell_h <= 0) return null;
+    const col = @divTrunc(pt.x, cell_w);
+    const row = @divTrunc(pt.y, cell_h);
+    if (col >= cols or row >= rows) return null;
+    return .{ .x = @intCast(@as(i32, win.left) + col), .y = @intCast(@as(i32, win.top) + row) };
+}
+
+pub fn shellDoubleClickAtScreenPoint(shell_id: u32, screen_x: i32, screen_y: i32) void {
+    const toggle = @import("dblclick_toggle.zig");
+    if (!toggle.ISSUE_355_DOUBLE_CLICK_TOGGLE or app_state.g_chat_active or app_state.g_chat_view_mode == .nowhere or
+        app_state.active_shell >= app_state.shell_count) return;
+    const shell = app_state.shells[app_state.active_shell];
+    if (shell.shell_id != shell_id or shell.pid == 0 or shell.hwnd == null) return;
+    {
+        _ = FreeConsole();
+        if (AttachConsole(shell.pid) == 0) return;
+        defer _ = FreeConsole();
+        const handle = GetStdHandle(STD_OUTPUT_HANDLE) orelse return;
+        var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+        if (GetConsoleScreenBufferInfo(handle, &info) == 0) return;
+        const cell = consoleCellAtScreenPoint(shell.hwnd, screen_x, screen_y, info) orelse return;
+        var char: [1]u16 = undefined;
+        var read: DWORD = 0;
+        if (@import("win32.zig").ReadConsoleOutputCharacterW(handle, &char, 1, cell, &read) == 0 or read != 1 or !toggle.shellCellBlank(char[0])) return;
+        var selection: CONSOLE_SELECTION_INFO = undefined;
+        if (GetConsoleSelectionInfo(&selection) == 0) return;
+        if ((selection.dwFlags & 0x7) != 0) {
+            const rc = selection.srSelection;
+            if (rc.Left < 0 or rc.Top < 0 or rc.Right < rc.Left or rc.Bottom < rc.Top or rc.Right >= info.dwSize.x or rc.Bottom >= info.dwSize.y) return;
+            var row: i32 = rc.Top;
+            while (row <= rc.Bottom) : (row += 1) {
+                var col: i32 = rc.Left;
+                while (col <= rc.Right) {
+                    var chars: [1024]u16 = undefined;
+                    const len: DWORD = @intCast(@min(chars.len, @as(usize, @intCast(@as(i32, rc.Right) - col + 1))));
+                    read = 0;
+                    if (@import("win32.zig").ReadConsoleOutputCharacterW(handle, &chars, len, .{ .x = @intCast(col), .y = @intCast(row) }, &read) == 0 or read != len) return;
+                    for (chars[0..read]) |c| if (!toggle.shellCellBlank(c)) return;
+                    col += @intCast(len);
+                }
+            }
+            if (PostMessageW(shell.hwnd, @import("win32.zig").WM_KEYDOWN, 0x1B, 1) == 0) return;
+            if (PostMessageW(shell.hwnd, @import("win32.zig").WM_KEYUP, 0x1B, @bitCast(@as(usize, 0xC0000001))) == 0) return;
+        }
+    }
+    @import("chat_composer.zig").toggleChatView();
+    if (app_state.g_chat_active) debugLog("ISSUE-355 view=chat");
+}
+
 pub fn openUrlAtScreenPoint(screen_x: i32, screen_y: i32) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const si = app_state.active_shell;
@@ -123,14 +188,6 @@ pub fn openUrlAtScreenPoint(screen_x: i32, screen_y: i32) void {
     if (pid == 0) return;
 
     const hwnd = app_state.shells[si].hwnd;
-    var pt: POINT = .{ .x = screen_x, .y = screen_y };
-    _ = ScreenToClient(hwnd, &pt);
-    var client: RECT = undefined;
-    if (GetClientRect(hwnd, &client) == 0) return;
-    const cw = client.right - client.left;
-    const ch = client.bottom - client.top;
-    if (cw <= 0 or ch <= 0) return;
-
     _ = FreeConsole();
     if (AttachConsole(pid) == 0) return;
     defer _ = FreeConsole();
@@ -139,23 +196,11 @@ pub fn openUrlAtScreenPoint(screen_x: i32, screen_y: i32) void {
     if (handle == null) return;
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return;
-
+    const cell = consoleCellAtScreenPoint(hwnd, screen_x, screen_y, info) orelse return;
     const win = info.srWindow;
     const cols: i32 = @as(i32, win.right) - @as(i32, win.left) + 1;
-    const rows: i32 = @as(i32, win.bottom) - @as(i32, win.top) + 1;
-    if (cols <= 0 or rows <= 0) return;
-
-    const cell_w: i32 = @divTrunc(cw, cols);
-    const cell_h: i32 = @divTrunc(ch, rows);
-    if (cell_w <= 0 or cell_h <= 0) return;
-
-    const click_col_rel: i32 = @divTrunc(pt.x, cell_w);
-    const click_row_rel: i32 = @divTrunc(pt.y, cell_h);
-    if (click_col_rel < 0 or click_col_rel >= cols) return;
-    if (click_row_rel < 0 or click_row_rel >= rows) return;
-
-    const buffer_row: i16 = @intCast(@as(i32, win.top) + click_row_rel);
-    const click_col: usize = @intCast(click_col_rel);
+    const buffer_row = cell.y;
+    const click_col: usize = @intCast(cell.x - win.left);
 
     const visible_width: u32 = @intCast(cols);
 
@@ -886,11 +931,11 @@ pub fn nativePasteToShell(shell_index: u32) bool {
     focusActiveShell();
     const target_hwnd = app_state.shells[shell_index].hwnd;
     var focus_attempt: u8 = 0;
-    while (GetForegroundWindow() != target_hwnd and focus_attempt < 10) : (focus_attempt += 1) {
+    while (!(if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target_hwnd) else GetForegroundWindow() == target_hwnd) and focus_attempt < 10) : (focus_attempt += 1) {
         Sleep(20);
         focusActiveShell();
     }
-    if (GetForegroundWindow() != target_hwnd) {
+    if (!(if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target_hwnd) else GetForegroundWindow() == target_hwnd)) {
         debugLog("paste: native console paste cancelled because shell focus did not land");
         return false;
     }
@@ -918,6 +963,10 @@ pub fn nativePasteToShell(shell_index: u32) bool {
 }
 
 pub fn pasteClipboardToShell(shell_index: u32) void {
+    if (shell_index >= app_state.shell_count) return;
+    const restore_focus = app_state.g_igsh354_paste_focus and shell_index == app_state.active_shell and
+        !app_state.g_chat_active and foregroundIsOurs();
+    defer if (restore_focus) requestShotFocus(shell_index, null);
     if (shellNeedsDirectPaste(shell_index)) {
         debugLog("paste: using direct text injection for CMD/SSH/tmux tab");
         pasteClipboardToShellDirect(shell_index);
@@ -970,7 +1019,8 @@ pub fn pasteTextToShellDirectEx(shell_index: u32, text_buf: []const u16, force_b
     defer _ = CloseHandle(handle);
 
     var sel: CONSOLE_SELECTION_INFO = undefined;
-    const sel_ok = GetConsoleSelectionInfo(&sel) != 0;
+    const get_selection: ?*const @TypeOf(GetConsoleSelectionInfo) = @ptrCast(@alignCast(@import("win32.zig").GetProcAddress(@import("win32.zig").GetModuleHandleW(L("kernel32.dll")), "GetConsoleSelectionInfo")));
+    const sel_ok = if (get_selection) |get| get(&sel) != 0 else false;
     const sel_flags: DWORD = if (sel_ok) sel.dwFlags else 0;
     {
         var lbuf: [128]u8 = undefined;

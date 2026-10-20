@@ -172,7 +172,7 @@ fn IsWindow(_: HANDLE) i32 { return 1; }
 fn GetWindowThreadProcessId(hwnd: HANDLE, pid: *DWORD) DWORD { pid.* = if (@intFromPtr(hwnd) == 1) fake_fg_pid else 10; return 1; }
 fn GetClassNameW(_: HANDLE, out: [*]u16, _: i32) i32 { class_calls += 1; out[0] = 'x'; return 1; }
 fn u16ContainsU8Insensitive(_: []const u16, _: []const u8) bool { return class_ok; }
-fn GetWindowTextW(_: HANDLE, _: [*]u16, _: i32) i32 { metadata_calls += 1; return 0; }
+fn InternalGetWindowText(_: HANDLE, _: [*]u16, _: i32) i32 { metadata_calls += 1; return 0; }
 fn GetWindowRect(_: HANDLE, out: *RECT) i32 { metadata_calls += 1; out.* = .{}; return 1; }
 fn GetAncestor(_: HANDLE, _: u32) HANDLE { metadata_calls += 1; return @ptrFromInt(2); }
 fn GetWindowLongPtrW(_: HANDLE, _: i32) LONG_PTR { metadata_calls += 1; return 0; }

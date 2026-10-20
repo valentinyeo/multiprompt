@@ -1,6 +1,7 @@
 const std = @import("std");
 
-pub const Role = enum(u8) { user, prose, code, injected };
+pub const Role = enum(u8) { user, prose, code, injected, tool };
+pub const ToolStatus = enum { running, ok, @"error" };
 pub const Kind = enum { paragraph, heading, list, table };
 pub const Block = struct {
     start: usize,
@@ -8,7 +9,7 @@ pub const Block = struct {
     role: Role,
     markdown: bool = false,
     kind: Kind = .paragraph,
-    level: u3 = 0,
+    level: u8 = 0,
     prefix: usize = 0,
     columns: u5 = 0,
     first: bool = false,
@@ -17,6 +18,16 @@ pub const Block = struct {
     zone: [6]u16 = @splat(0),
     sender: [64]u16 = @splat(0),
     stamp_ms: i64 = 0,
+    tool_status: ToolStatus = .running,
+    tool_id: u64 = 0,
+    detail_start: usize = 0,
+    detail_len: usize = 0,
+    diff_start: usize = 0,
+    diff_len: usize = 0,
+    tool_open: bool = false,
+    source_offset: u64 = 0,
+    source_end: u64 = 0,
+    result_offset: ?u64 = null,
 };
 pub const Range = struct { start: usize, end: usize };
 pub const Style = struct { bold: bool = false, italic: bool = false, code: bool = false };
@@ -44,6 +55,7 @@ fn separator(s: []const u16) bool {
 }
 
 pub fn tableLength(text: []const u16) ?usize {
+    if (boxTableLength(text)) |len| return len;
     const header_end = std.mem.indexOfScalar(u16, text, '\n') orelse return null;
     const delimiter_end = std.mem.indexOfScalarPos(u16, text, header_end + 1, '\n') orelse text.len;
     var ranges: [16]Range = undefined;
@@ -69,6 +81,48 @@ pub fn consoleTableRow(raw: []const u16) bool {
     return std.mem.count(u16, line, line[0..1]) >= 2;
 }
 
+pub fn boxBorder(raw: []const u16, left: u16, joint: u16, right: u16) usize {
+    const line = trim(raw);
+    if (line.len < 3 or line[0] != left or line[line.len - 1] != right) return 0;
+    var columns: usize = 1;
+    var dashes: usize = 0;
+    for (line[1 .. line.len - 1]) |c| {
+        if (c == 0x2500) {
+            dashes += 1;
+        } else if (c == joint and dashes > 0) {
+            columns += 1;
+            dashes = 0;
+        } else return 0;
+    }
+    return if (dashes > 0 and columns <= 16) columns else 0;
+}
+
+pub fn consoleTableLine(raw: []const u16) bool {
+    return consoleTableRow(raw) or boxBorder(raw, 0x250C, 0x252C, 0x2510) > 0 or
+        boxBorder(raw, 0x251C, 0x253C, 0x2524) > 0 or boxBorder(raw, 0x2514, 0x2534, 0x2518) > 0;
+}
+
+pub fn boxTableLength(text: []const u16) ?usize {
+    const first = std.mem.indexOfScalar(u16, text, '\n') orelse return null;
+    const columns = boxBorder(text[0..first], 0x250C, 0x252C, 0x2510);
+    if (columns == 0) return null;
+    var pos = first + 1;
+    var group: usize = 0;
+    while (pos < text.len) {
+        const end = std.mem.indexOfScalarPos(u16, text, pos, '\n') orelse text.len;
+        const line = trim(text[pos..end]);
+        if (boxBorder(line, 0x2514, 0x2534, 0x2518) == columns) return if (group > 0) end else null;
+        if (boxBorder(line, 0x251C, 0x253C, 0x2524) == columns) {
+            if (group == 0) return null;
+            group = 0;
+        } else if (line.len > 1 and line[0] == 0x2502 and line[line.len - 1] == 0x2502 and std.mem.count(u16, line, &.{0x2502}) == columns + 1) {
+            group += 1;
+        } else return null;
+        pos = @min(end + 1, text.len);
+    }
+    return null;
+}
+
 fn append(out: []Block, n: *usize, block: Block) void {
     if (n.* == out.len) {
         std.mem.copyForwards(Block, out[0 .. out.len - 1], out[1..]);
@@ -80,7 +134,7 @@ fn append(out: []Block, n: *usize, block: Block) void {
 
 pub fn blocks(text: []const u16, offset: usize, role: Role, out: []Block) usize {
     if (text.len == 0 or out.len == 0) return 0;
-    if (role == .user or role == .injected) {
+    if (role == .user or role == .injected or role == .tool) {
         out[0] = .{ .start = offset, .len = text.len, .role = role, .markdown = true, .first = true };
         return 1;
     }
@@ -90,6 +144,8 @@ pub fn blocks(text: []const u16, offset: usize, role: Role, out: []Block) usize 
     var code_char: u16 = 0;
     var code_fence: usize = 0;
     var separated = true;
+    var indents: [256]usize = undefined;
+    var depth: usize = 0;
     while (pos < text.len) {
         const end = std.mem.indexOfScalarPos(u16, text, pos, '\n') orelse text.len;
         const line = trim(text[pos..end]);
@@ -109,7 +165,7 @@ pub fn blocks(text: []const u16, offset: usize, role: Role, out: []Block) usize 
             code_fence = f;
         } else if (tableLength(text[pos..])) |table_len| {
             var ranges: [16]Range = undefined;
-            append(out, &n, .{ .start = offset + pos, .len = table_len, .role = .code, .kind = .table, .columns = @intCast(cells(line, &ranges)), .markdown = true, .first = n == 0 });
+            append(out, &n, .{ .start = offset + pos, .len = table_len, .role = .code, .kind = .table, .columns = @intCast(if (boxBorder(line, 0x250C, 0x252C, 0x2510) > 0) boxBorder(line, 0x250C, 0x252C, 0x2510) else cells(line, &ranges)), .markdown = true, .first = n == 0 });
             pos = @min(pos + table_len + 1, text.len);
             separated = true;
             continue;
@@ -134,6 +190,18 @@ pub fn blocks(text: []const u16, offset: usize, role: Role, out: []Block) usize 
                     b.prefix = digits + 2;
                 }
             }
+            if (b.kind == .list) {
+                var indent: usize = 0;
+                for (text[pos..start]) |c| indent += if (c == '\t') @as(usize, 4) else 1;
+                while (depth > 0 and indent < indents[depth - 1]) depth -= 1;
+                if (depth == 0 or indent > indents[depth - 1]) {
+                    if (depth < indents.len) {
+                        indents[depth] = indent;
+                        depth += 1;
+                    }
+                }
+                b.level = @intCast(depth - 1);
+            } else if (b.kind == .paragraph) depth = 0;
             if (!separated and b.kind == .paragraph and n > 0 and out[n - 1].role == .prose and out[n - 1].kind == .paragraph and
                 out[n - 1].start + out[n - 1].len + 2 >= offset + pos)
             {
@@ -249,38 +317,152 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
     return n;
 }
 
-pub const TableText = struct {
-    text: std.ArrayList(u16) = .empty,
-    source: std.ArrayList(usize) = .empty,
+pub const Cell = struct {
+    fragments: std.ArrayList(Range) = .empty,
+};
+pub const Row = struct {
+    cells: []Cell,
+    start: usize,
+    end: usize,
+};
+pub const Table = struct {
+    columns: usize,
+    source: enum { pipe, box },
+    rows: std.ArrayList(Row) = .empty,
 
-    pub fn deinit(self: *TableText, a: std.mem.Allocator) void {
-        self.text.deinit(a);
-        self.source.deinit(a);
+    pub fn deinit(self: *Table, a: std.mem.Allocator) void {
+        for (self.rows.items) |row| {
+            for (row.cells) |*cell| cell.fragments.deinit(a);
+            a.free(row.cells);
+        }
+        self.rows.deinit(a);
     }
 
-    fn append(self: *TableText, a: std.mem.Allocator, c: u16, source: usize) !void {
-        try self.text.append(a, c);
-        try self.source.append(a, source);
+    fn addRow(self: *Table, a: std.mem.Allocator, start: usize) !void {
+        const row = try a.alloc(Cell, self.columns);
+        errdefer a.free(row);
+        @memset(row, .{});
+        try self.rows.append(a, .{ .cells = row, .start = start, .end = start });
+    }
+};
+
+pub fn parseTable(a: std.mem.Allocator, text: []const u16) !Table {
+    const len = tableLength(text) orelse return error.InvalidTable;
+    if (std.mem.trim(u16, text[len..], &.{ ' ', '\t', '\r', '\n' }).len != 0) return error.InvalidTable;
+    const first = std.mem.indexOfScalar(u16, text, '\n').?;
+    const box_columns = boxBorder(text[0..first], 0x250C, 0x252C, 0x2510);
+    var ranges: [16]Range = undefined;
+    var table = Table{ .columns = if (box_columns > 0) box_columns else cells(trim(text[0..first]), &ranges), .source = if (box_columns > 0) .box else .pipe };
+    errdefer table.deinit(a);
+    var separators: usize = 0;
+    if (box_columns > 0) {
+        var lines = std.mem.splitScalar(u16, text, '\n');
+        while (lines.next()) |line| if (boxBorder(line, 0x251C, 0x253C, 0x2524) > 0) {
+            separators += 1;
+        };
+    }
+    var pos: usize = 0;
+    var line_index: usize = 0;
+    var group: usize = 0;
+    var new_row = true;
+    while (pos < len) : (line_index += 1) {
+        const end = std.mem.indexOfScalarPos(u16, text, pos, '\n') orelse len;
+        const line = trim(text[pos..end]);
+        const base = @as(usize, @intCast((@intFromPtr(line.ptr) - @intFromPtr(text.ptr)) / 2));
+        defer pos = @min(end + 1, text.len);
+        if (table.source == .box) {
+            if (boxBorder(line, 0x250C, 0x252C, 0x2510) > 0 or boxBorder(line, 0x2514, 0x2534, 0x2518) > 0) continue;
+            if (boxBorder(line, 0x251C, 0x253C, 0x2524) > 0) {
+                group += 1;
+                new_row = true;
+                continue;
+            }
+            if (new_row or (separators <= 1 and group > 0)) try table.addRow(a, pos);
+            new_row = false;
+            var start: usize = 1;
+            for (table.rows.items[table.rows.items.len - 1].cells) |*cell| {
+                const stop = std.mem.indexOfScalarPos(u16, line, start, 0x2502) orelse return error.InvalidTable;
+                const part = trim(line[start..stop]);
+                const at = base + @as(usize, @intCast((@intFromPtr(part.ptr) - @intFromPtr(line.ptr)) / 2));
+                try cell.fragments.append(a, .{ .start = at, .end = at + part.len });
+                start = stop + 1;
+            }
+        } else {
+            if (line_index == 1) continue;
+            const n = @min(cells(line, &ranges), table.columns);
+            try table.addRow(a, pos);
+            for (table.rows.items[table.rows.items.len - 1].cells[0..n], ranges[0..n]) |*cell, range| {
+                try cell.fragments.append(a, .{ .start = base + range.start, .end = base + range.end });
+            }
+        }
+        table.rows.items[table.rows.items.len - 1].end = end;
+    }
+    return table;
+}
+
+pub fn tableScroll(offset: i32, delta: i32, step: i32, content_w: i32, view_w: i32) i32 {
+    const next = @as(i64, offset) + @divTrunc(@as(i64, delta) * step, 120);
+    return @intCast(std.math.clamp(next, 0, @as(i64, @max(0, content_w - view_w))));
+}
+
+pub const TableSize = struct { width: i32, height: i32 };
+pub const TableKey = struct { view_w: i32, font_pt: i32, scale: i32, pad_x: i32, pad_y: i32 };
+pub const TableLayout = struct {
+    table: Table,
+    widths: []i32,
+    heights: []i32,
+    lines: []i32,
+    content_w: i32,
+    view_w: i32,
+    scroll: i32 = 0,
+
+    fn deinit(self: *TableLayout, a: std.mem.Allocator) void {
+        self.table.deinit(a);
+        a.free(self.widths);
+        a.free(self.heights);
+        a.free(self.lines);
+    }
+
+    pub fn rowY(self: *const TableLayout, position: usize) i32 {
+        var y: i32 = 0;
+        for (self.table.rows.items, self.heights, 0..) |row, h, i| {
+            if (position < row.end or i + 1 == self.heights.len) return y;
+            y += h;
+        }
+        return y;
     }
 };
 
 pub const TableCache = struct {
-    const Entry = struct { columns: usize, len: usize, table: TableText };
+    const Entry = struct { hash: u64, key: TableKey, layout: TableLayout };
     entries: std.AutoHashMapUnmanaged(usize, Entry) = .empty,
     builds: usize = 0,
+    lists: std.AutoHashMapUnmanaged(usize, u8) = .empty,
 
     pub fn clear(self: *TableCache, a: std.mem.Allocator) void {
         var values = self.entries.valueIterator();
-        while (values.next()) |entry| entry.table.deinit(a);
+        while (values.next()) |entry| entry.layout.deinit(a);
         self.entries.clearRetainingCapacity();
+        self.lists.clearRetainingCapacity();
+    }
+
+    pub fn list(self: *TableCache, a: std.mem.Allocator, offset: usize, depth: u8) bool {
+        const slot = self.lists.getOrPut(a, offset) catch return false;
+        if (slot.found_existing and slot.value_ptr.* == depth) return false;
+        slot.value_ptr.* = depth;
+        return true;
     }
 
     pub fn clearFrom(self: *TableCache, a: std.mem.Allocator, offset: usize) void {
+        var lists = self.lists.iterator();
+        while (lists.next()) |entry| {
+            if (entry.key_ptr.* >= offset) _ = self.lists.remove(entry.key_ptr.*);
+        }
         var it = self.entries.iterator();
         while (it.next()) |entry| {
             if (entry.key_ptr.* < offset) continue;
             const key = entry.key_ptr.*;
-            entry.value_ptr.table.deinit(a);
+            entry.value_ptr.layout.deinit(a);
             _ = self.entries.remove(key);
         }
     }
@@ -288,119 +470,48 @@ pub const TableCache = struct {
     pub fn deinit(self: *TableCache, a: std.mem.Allocator) void {
         self.clear(a);
         self.entries.deinit(a);
+        self.lists.deinit(a);
     }
 
-    pub fn formatTable(self: *TableCache, a: std.mem.Allocator, text: []const u16, offset: usize, columns: usize) !*const TableText {
+    pub fn layout(self: *TableCache, a: std.mem.Allocator, text: []const u16, offset: usize, key: TableKey, context: anytype, comptime measure: fn (@TypeOf(context), []const u16, bool) TableSize) !*TableLayout {
+        const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+        var scroll: i32 = 0;
         if (self.entries.getPtr(offset)) |entry| {
-            if (entry.columns == columns and entry.len == text.len) return &entry.table;
+            if (entry.hash == hash and std.meta.eql(entry.key, key)) return &entry.layout;
+            scroll = entry.layout.scroll;
         }
-        var table = try @import("chat_markdown.zig").formatTable(a, text, columns);
+        var table = try parseTable(a, text);
         errdefer table.deinit(a);
+        const widths = try a.alloc(i32, table.columns);
+        errdefer a.free(widths);
+        @memset(widths, 2 * key.pad_x + 1);
+        const heights = try a.alloc(i32, table.rows.items.len);
+        errdefer a.free(heights);
+        const lines = try a.alloc(i32, table.rows.items.len);
+        errdefer a.free(lines);
+        for (table.rows.items, 0..) |row, ri| {
+            var line_h: i32 = 1;
+            var count: usize = 1;
+            for (row.cells, 0..) |cell, ci| {
+                count = @max(count, cell.fragments.items.len);
+                for (cell.fragments.items) |fragment| {
+                    const size = measure(context, text[fragment.start..fragment.end], ri == 0);
+                    widths[ci] = @max(widths[ci], size.width + 2 * key.pad_x + 1);
+                    line_h = @max(line_h, size.height);
+                }
+            }
+            lines[ri] = line_h;
+            heights[ri] = @as(i32, @intCast(count)) * line_h + 2 * key.pad_y + 1;
+        }
+        var content_w: i32 = 1;
+        for (widths) |w| content_w += w;
         const slot = try self.entries.getOrPut(a, offset);
-        if (slot.found_existing) slot.value_ptr.table.deinit(a);
-        slot.value_ptr.* = .{ .columns = columns, .len = text.len, .table = table };
+        if (slot.found_existing) slot.value_ptr.layout.deinit(a);
+        slot.value_ptr.* = .{ .hash = hash, .key = key, .layout = .{ .table = table, .widths = widths, .heights = heights, .lines = lines, .content_w = content_w, .view_w = key.view_w, .scroll = tableScroll(scroll, 0, 0, content_w, key.view_w) } };
         self.builds += 1;
-        return &slot.value_ptr.table;
+        return &slot.value_ptr.layout;
     }
 };
-
-fn charColumns(text: []const u16, pos: usize) usize {
-    const c = text[pos];
-    if ((c >= 0xDC00 and c <= 0xDFFF) or (c >= 0x0300 and c <= 0x036F) or (c >= 0xFE00 and c <= 0xFE0F)) return 0;
-    if ((c >= 0xD800 and c <= 0xDBFF) or (c >= 0x1100 and c <= 0x115F) or
-        (c >= 0x2E80 and c <= 0xA4CF) or (c >= 0xAC00 and c <= 0xD7A3) or
-        (c >= 0xF900 and c <= 0xFAFF) or (c >= 0xFF01 and c <= 0xFF60)) return 2;
-    return 1;
-}
-
-pub fn columnWidth(text: []const u16) usize {
-    var width: usize = 0;
-    for (0..text.len) |i| width += charColumns(text, i);
-    return width;
-}
-
-pub fn formatTable(a: std.mem.Allocator, text: []const u16, max_columns: usize) !TableText {
-    var plain = TableText{};
-    defer plain.deinit(a);
-    var rows: std.ArrayList([16]Range) = .empty;
-    defer rows.deinit(a);
-    var widths = [_]usize{2} ** 16;
-    var columns: usize = 0;
-    const delimiter_start = if (std.mem.indexOfScalar(u16, text, '\n')) |i| i + 1 else text.len;
-    var pos: usize = 0;
-    while (pos < text.len) {
-        const end = std.mem.indexOfScalarPos(u16, text, pos, '\n') orelse text.len;
-        const raw = text[pos..end];
-        const line = trim(raw);
-        const line_offset = pos + @as(usize, @intCast((@intFromPtr(line.ptr) - @intFromPtr(raw.ptr)) / 2));
-        if (pos != delimiter_start or !separator(line)) {
-            var ranges: [16]Range = undefined;
-            const n = cells(line, &ranges);
-            if (columns == 0) columns = n;
-            var row: [16]Range = @splat(.{ .start = plain.text.items.len, .end = plain.text.items.len });
-            for (ranges[0..@min(n, columns)], 0..) |r, ci| {
-                const cell = line[r.start..r.end];
-                const spans = try a.alloc(Span, cell.len + 1);
-                defer a.free(spans);
-                const count = inlineSpans(cell, spans);
-                row[ci].start = plain.text.items.len;
-                for (spans[0..count]) |span| for (span.text.start..span.text.end) |i| {
-                    try plain.append(a, cell[i], line_offset + r.start + i);
-                };
-                row[ci].end = plain.text.items.len;
-                widths[ci] = @max(widths[ci], @min(@max(2, max_columns), columnWidth(plain.text.items[row[ci].start..row[ci].end])));
-            }
-            try rows.append(a, row);
-        }
-        pos = @min(end + 1, text.len);
-    }
-    var total: usize = 3 * columns + 1;
-    for (widths[0..columns]) |width| total += width;
-    while (total > max_columns and columns > 0) {
-        const widest = std.mem.indexOfMax(usize, widths[0..columns]);
-        if (widths[widest] <= 2) break;
-        widths[widest] -= 1;
-        total -= 1;
-    }
-    var result = TableText{};
-    errdefer result.deinit(a);
-    for (rows.items, 0..) |row, ri| {
-        var at: [16]usize = undefined;
-        for (row[0..columns], 0..) |r, ci| at[ci] = r.start;
-        var more = true;
-        while (more) {
-            more = false;
-            if (result.text.items.len > 0) try result.append(a, '\n', row[0].start);
-            try result.append(a, '|', 0);
-            for (row[0..columns], 0..) |r, ci| {
-                const source = if (at[ci] < plain.source.items.len) plain.source.items[at[ci]] else text.len;
-                try result.append(a, ' ', source);
-                var used: usize = 0;
-                while (at[ci] < r.end) {
-                    const width = charColumns(plain.text.items, at[ci]);
-                    if (used + width > widths[ci]) break;
-                    const i = at[ci];
-                    try result.append(a, plain.text.items[i], plain.source.items[i]);
-                    used += width;
-                    at[ci] += 1;
-                }
-                more = more or at[ci] < r.end;
-                while (used < widths[ci]) : (used += 1) try result.append(a, ' ', source);
-                try result.append(a, ' ', source);
-                try result.append(a, '|', source);
-            }
-            if (!more and ri == 0) {
-                try result.append(a, '\n', 0);
-                try result.append(a, '|', 0);
-                for (widths[0..columns]) |width| {
-                    for (0..width + 2) |_| try result.append(a, '-', 0);
-                    try result.append(a, '|', 0);
-                }
-            }
-        }
-    }
-    return result;
-}
 
 test "headings lists tables and fenced code retain exact offsets" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("# Title\n\n- one\n2. two\n\n| A | B |\n| --- | --- |\n| x | y |\n\n```zig\nconst x = 1;\n\n// blank stays\n```\nDone");
@@ -477,43 +588,127 @@ test "table detection requires a matching delimiter and retains the complete tab
     try std.testing.expectEqualSlices(u16, lone, lone[out[0].start .. out[0].start + out[0].len]);
 }
 
-test "table column alignment strips inline code and link markup and counts unicode display columns" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Name | Value |\n|---|---|\n| `x|y` | [site](https://example.test) |\n| 中文😀 | café |");
-    var table = try formatTable(std.testing.allocator, text, 80);
-    defer table.deinit(std.testing.allocator);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("| Name   | Value |\n|--------|-------|\n| x|y    | site  |\n| 中文😀 | café  |"), table.text.items);
-    try std.testing.expectEqual(table.text.items.len, table.source.items.len);
-    const site = std.unicode.utf8ToUtf16LeStringLiteral("site");
-    const at = std.mem.indexOf(u16, table.text.items, site).?;
-    try std.testing.expectEqualSlices(u16, site, text[table.source.items[at] .. table.source.items[at] + site.len]);
-    var lines = std.mem.splitScalar(u16, table.text.items, '\n');
-    while (lines.next()) |line| try std.testing.expectEqual(@as(usize, 18), columnWidth(line));
-}
-
-test "table long cells wrap inside aligned columns without splitting unicode or dropping empty cells" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Name | Value |\n|---|---|\n| 中文😀 | abcdefghijklmnop |\n| x | |");
-    var table = try formatTable(std.testing.allocator, text, 14);
-    defer table.deinit(std.testing.allocator);
-    var lines = std.mem.splitScalar(u16, table.text.items, '\n');
-    var count: usize = 0;
-    while (lines.next()) |line| {
-        count += 1;
-        try std.testing.expectEqual(@as(usize, 14), columnWidth(line));
-        const utf8 = try std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, line);
-        std.testing.allocator.free(utf8);
-    }
-    try std.testing.expect(count > 4);
+test "table cells preserve code pipes and one-column console rows" {
     var ranges: [2]Range = undefined;
     try std.testing.expectEqual(@as(usize, 2), cells(std.unicode.utf8ToUtf16LeStringLiteral("| ``x|y`` | z |"), &ranges));
-    try std.testing.expectEqual(@as(usize, 2), cells(std.unicode.utf8ToUtf16LeStringLiteral("| a | b | c |"), &ranges));
-    try std.testing.expect(consoleTableRow(std.unicode.utf8ToUtf16LeStringLiteral("│ Event │ Status │")));
+    try std.testing.expect(consoleTableRow(std.unicode.utf8ToUtf16LeStringLiteral("│ one column │")));
     try std.testing.expect(!consoleTableRow(std.unicode.utf8ToUtf16LeStringLiteral("│ tool output")));
 }
 
-test "table formatting retains separator-like data rows and one-column console tables" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("| a | b |\n|---|---|\n|---|---|");
-    var table = try formatTable(std.testing.allocator, text, 80);
+test "ISSUE-421 shared pipe and terminal fixtures retain every cell and source fragment" {
+    const a = std.testing.allocator;
+    const expected = [_][]const u8{ "", "Flag on", "Flag off", "Desktop", "0.006 to 0.007 over 13 cold loads", "0.058 to 0.064 over 5 cold loads", "Phone, 4x CPU", "0 over 5 cold loads", "0 over 5 cold loads" };
+    inline for (.{ @embedFile("testdata/chat-table-fixture.md"), @embedFile("testdata/chat-table-fixture.terminal.txt") }, 0..) |fixture, fi| {
+        const text = try std.unicode.utf8ToUtf16LeAlloc(a, fixture);
+        defer a.free(text);
+        var out: [32]Block = undefined;
+        const n = blocks(text, 17, .prose, &out);
+        var found: usize = 0;
+        for (out[0..n]) |block| {
+            if (block.kind != .table) continue;
+            found += 1;
+            const source = text[block.start - 17 ..][0..block.len];
+            var table = try parseTable(a, source);
+            defer table.deinit(a);
+            try std.testing.expectEqual(@as(usize, 3), table.columns);
+            try std.testing.expectEqual(@as(usize, 3), table.rows.items.len);
+            try std.testing.expectEqualStrings(if (fi == 0) "pipe" else "box", @tagName(table.source));
+            for (table.rows.items, 0..) |row, ri| for (row.cells, 0..) |cell, ci| {
+                var joined: std.ArrayList(u16) = .empty;
+                defer joined.deinit(a);
+                for (cell.fragments.items) |fragment| {
+                    try std.testing.expect(fragment.start <= fragment.end and fragment.end <= source.len);
+                    if (fragment.start == fragment.end) continue;
+                    if (joined.items.len > 0) try joined.append(a, ' ');
+                    try joined.appendSlice(a, source[fragment.start..fragment.end]);
+                }
+                const utf8 = try std.unicode.utf16LeToUtf8Alloc(a, joined.items);
+                defer a.free(utf8);
+                try std.testing.expectEqualStrings(expected[ri * 3 + ci], utf8);
+                try std.testing.expectEqual(@as(usize, if (fi == 1 and ri == 2) 2 else 1), cell.fragments.items.len);
+            };
+        }
+        try std.testing.expectEqual(@as(usize, 1), found);
+    }
+}
+
+test "ISSUE-421 pipe rows with missing or extra cells stay in the table" {
+    const a = std.testing.allocator;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B | C |\n|---|---|---|\n| x |\n| 1 | 2 | 3 | 4 |\nafter");
+    var out: [8]Block = undefined;
+    const n = blocks(text, 0, .prose, &out);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqual(Kind.table, out[0].kind);
+    var table = try parseTable(a, text[out[0].start..][0..out[0].len]);
+    defer table.deinit(a);
+    try std.testing.expectEqual(@as(usize, 3), table.rows.items.len);
+    try std.testing.expectEqual(@as(usize, 0), table.rows.items[1].cells[1].fragments.items.len);
+    try std.testing.expectEqual(@as(usize, 3), table.rows.items[2].cells.len);
+}
+
+test "ISSUE-421 nested list depth follows the parent indent stack" {
+    const a = std.testing.allocator;
+    const text = try std.unicode.utf8ToUtf16LeAlloc(a, @embedFile("testdata/chat-table-fixture.md"));
+    defer a.free(text);
+    var out: [32]Block = undefined;
+    const n = blocks(text, 0, .prose, &out);
+    var depths: std.ArrayList(u8) = .empty;
+    defer depths.deinit(a);
+    for (out[0..n]) |block| if (block.kind == .list) {
+        try depths.append(a, block.level);
+    };
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 1, 1, 0, 1, 2, 2, 1 }, depths.items);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 1 }, depths.items[2..5]);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2, 2, 1 }, depths.items[5..]);
+}
+
+test "ISSUE-421 malformed grids are not tables and unseparated body lines are rows" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{
+        w("┌─┬─┐\n│ a │ b │\n└─┘"),
+        w("┌─┬─┐\n│ a │\n└─┴─┘"),
+        w("┌─┬─┐\n├─┼─┤\n│ a │ b │\n└─┴─┘"),
+        w("┌─┬─┐\n│ a │ b │"),
+        w("┌─┬─┐\n│ a │ b │\n├oops┤\n└─┴─┘"),
+    }) |text| {
+        try std.testing.expect(boxTableLength(text) == null);
+        var out: [8]Block = undefined;
+        const n = blocks(text, 0, .prose, &out);
+        for (out[0..n]) |block| try std.testing.expect(block.kind != .table);
+    }
+    const text = w("┌─┬─┐\n│ h │ h │\n├─┼─┤\n│ a │ b │\n│ c │ d │\n└─┴─┘");
+    var table = try parseTable(std.testing.allocator, text);
     defer table.deinit(std.testing.allocator);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("| a   | b   |\n|-----|-----|\n| --- | --- |"), table.text.items);
-    try std.testing.expect(consoleTableRow(std.unicode.utf8ToUtf16LeStringLiteral("│ one column │")));
+    try std.testing.expectEqual(@as(usize, 3), table.rows.items.len);
+    var spans: [8]Span = undefined;
+    const rich = w("| **head** | [site](https://example.test) |\n|---|---|\n| `x` | y |");
+    var pipe = try parseTable(std.testing.allocator, rich);
+    defer pipe.deinit(std.testing.allocator);
+    const fragment = pipe.rows.items[0].cells[1].fragments.items[0];
+    const count = inlineSpans(rich[fragment.start..fragment.end], &spans);
+    try std.testing.expectEqual(@as(usize, 1), count);
+    const target = spans[0].target.?;
+    try std.testing.expectEqualSlices(u16, w("https://example.test"), rich[fragment.start + target.start .. fragment.start + target.end]);
+}
+
+test "ISSUE-421 horizontal table scrolling clamps and steps in both directions" {
+    try std.testing.expectEqual(@as(i32, 54), tableScroll(0, 120, 54, 800, 320));
+    try std.testing.expectEqual(@as(i32, 27), tableScroll(0, 60, 54, 800, 320));
+    try std.testing.expectEqual(@as(i32, 0), tableScroll(27, -120, 54, 800, 320));
+    try std.testing.expectEqual(@as(i32, 480), tableScroll(470, 120, 54, 800, 320));
+    try std.testing.expectEqual(@as(i32, 0), tableScroll(100, 120, 54, 100, 320));
+    try std.testing.expectEqual(@as(i32, 0), tableScroll(100, 0, 54, 100, 320));
+    try std.testing.expectEqual(@as(i32, 480), tableScroll(0, std.math.maxInt(i32), std.math.maxInt(i32), 800, 320));
+}
+
+test "ISSUE-421 rich cells retain Unicode code pipes empty cells and separator-like data" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("| Name | Value |\n|---|---|\n| 中文😀 | café |\n| ``x|y`` | |\n|---|---|");
+    var table = try parseTable(std.testing.allocator, text);
+    defer table.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 4), table.rows.items.len);
+    for ([_][]const u16{ w("中文😀"), w("café"), w("``x|y``"), w(""), w("---"), w("---") }, 0..) |expected, i| {
+        const fragment = table.rows.items[1 + i / 2].cells[i % 2].fragments.items[0];
+        try std.testing.expectEqualSlices(u16, expected, text[fragment.start..fragment.end]);
+    }
 }
