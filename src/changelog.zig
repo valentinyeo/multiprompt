@@ -54,6 +54,172 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.765", .items = &.{
+        .{ .text = "If an Allow or Deny answer fails to reach the agent, the buttons stay so you can click again.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.764", .items = &.{
+        .{ .text = "Chat View displays tables with clear rows, bold headers, and sideways scrolling for wide content.", .ticket = "" },
+        .{ .text = "Nested lists keep their indentation in Chat View.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.763", .items = &.{
+        .{ .text = "Right-click a message in Chat View and pick Reply to answer that exact message; the agent gets it as a quote above your reply.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.762", .items = &.{
+        .{ .text = "When you Alt+Tab back into Multiprompt in Chat View, the cursor is back in the message box so you can keep typing.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.761", .items = &.{
+        .{ .text = "Frequent now comes first and shows the sessions you typed or spoke into in the last day, plus sessions you watched three times for ten seconds, with the newest at the bottom.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.760", .items = &.{
+        .{ .text = "Tabs to a server that was offline now reconnect on their own when it comes back.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.759", .items = &.{
+        .{ .text = "With Chat View set to everywhere, a session you switch to the shell view now stays in the shell view, also after a restart.", .ticket = "" },
+        .{ .text = "Switching that session back to Chat View makes it follow everywhere again.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.758", .items = &.{
+        .{ .text = "The browser helper can now make a clean copy of a browser profile, the first step toward a separate browser per workspace.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.757", .items = &.{
+        .{ .text = "When a server goes offline, Multiprompt no longer keeps reopening its tabs and pulling the typing focus away.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.756", .items = &.{
+        .{ .text = "Double click on empty space to switch between Chat View and the shell view.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.755", .items = &.{
+        .{ .text = "Messages and drafts typed in Chat View now stay with their own tab when two tabs have the same name.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.754", .items = &.{
+        .{ .text = "A skill you pick in one tab now stays with that tab and is no longer sent with a message in another tab.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.753", .items = &.{
+        .{ .text = "Chat View shows file edits as a small red and green card with the lines that changed.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.752", .items = &.{
+        .{ .text = "Chat View shows the agent's model, context left and completed task count.", .ticket = "" },
+        .{ .text = "Click the header or choose Toggle todo list from Ctrl+K to see the agent's tasks.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.751", .items = &.{
+        .{ .text = "The Frequent list now matches on your phone and your other laptop.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.750", .items = &.{
+        .{ .text = "- Answer agent permission prompts with Allow, Always allow, or Deny buttons above the Chat View composer.", .ticket = "" },
+        .{ .text = "- Use Alt+Y to allow, Alt+O to always allow, or Alt+D to deny the current permission request.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.749", .items = &.{
+        .{ .text = "Press Ctrl+F in Chat View to search the whole conversation, including older messages.", .ticket = "" },
+        .{ .text = "Use Enter or F3 to move between matches, and Esc to return to your message.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.748", .items = &.{
+        .{ .text = "Drop images into Chat View, or copy image files in Explorer and paste them with Ctrl+V, to attach up to 10 at once in order.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.747", .items = &.{
+        .{ .text = "The inbox has a new Frequent tab with the sessions you used in the last 48 hours, from every window.", .ticket = "" },
+        .{ .text = "Only sessions you switched to, typed in or sent a message to count; agents working on their own do not.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.746", .items = &.{
+        .{ .text = "Chat View no longer stays empty after you pick a session in Ctrl+K; the chat and its browser show right away.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.745", .items = &.{
+        .{ .text = "Agents keep using the browser right after an update is installed, without waiting for the extension to be reloaded.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.744", .items = &.{
+        .{ .text = "Stars you set with Alt+S now sync through your Multiprompt account, so your other laptop sees them.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.743", .items = &.{
+        .{ .text = "Starred sessions now show a small yellow dot instead of a star, so titles get more room.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.742", .items = &.{
+        .{ .text = "Chat View shows each tool step on one line with a green, red or running status; click it to see what it did.", .ticket = "" },
+        .{ .text = "Open or fold all tool steps from Ctrl+K.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.741", .items = &.{
+        .{ .text = "Chat View shows how long the agent has been working.", .ticket = "" },
+        .{ .text = "A Stop button, Esc or Ctrl+K \"Chat View: Stop the agent\" stops the agent's current run.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.740", .items = &.{
+        .{ .text = "Browser commands now reach only the browser profile they were sent to.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.739", .items = &.{
+        .{ .text = "The browser helper now answers wrong arguments with a short, clear error instead of a page of help text.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.738", .items = &.{
+        .{ .text = "Chat View now opens with your latest question on screen, even when the agent read a very long file or skill after it.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.737", .items = &.{
+        .{ .text = "Every line in the debug log now starts with the date and time, so problems are easier to match to the moment they happened.", .ticket = "" },
+        .{ .text = "The debug log no longer grows forever: above 20 MB it moves to debug.log.old and starts fresh.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.736", .items = &.{
+        .{ .text = "Version numbers are now given out once a change is merged, so fixes reach you sooner when several land at the same time.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.735", .items = &.{
+        .{ .text = "After you leave the chat view, the app stops pulling the keyboard back to the shell once the shell already has it.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.734", .items = &.{
+        .{ .text = "Chat View shows the full terminal screen, like btop, when a session's conversation can't be loaded.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.733", .items = &.{
+        .{ .text = "Switching a session from the chat view to the shell lets you type in the shell right away again.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.732", .items = &.{
+        .{ .text = "Two chat messages sent together into one turn both show as delivered.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.731", .items = &.{
+        .{ .text = "Starting multiprompt while it is already running brings the open copy back; a frozen or invisible copy is closed and a fresh one starts with your tabs.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.730", .items = &.{
+        .{ .text = "Chat View shows the terminal text instead of an empty pane when a session's conversation cannot be loaded.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.729", .items = &.{
+        .{ .text = "A chat message is never typed into the shell twice; if it was left unsent, it is sent once.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.728", .items = &.{
+        .{ .text = "After a session compacts, the chat view ends with the same last answer as the shell instead of the long summary.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.727", .items = &.{
+        .{ .text = "Messages that started with two commands, or were delivered before a session restarted, no longer show Delivery unconfirmed.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.726", .items = &.{
+        .{ .text = "Agents can type and click in their browser tab again while it stays in the background.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.725", .items = &.{
+        .{ .text = "Old messages that were delivered long ago no longer show Delivery unconfirmed.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.724", .items = &.{
+        .{ .text = "The tab you have open now gets a blue dot when its agent finishes while you are in another app or in the browser pane; it clears when you come back.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.723", .items = &.{
+        .{ .text = "The app no longer stalls for a moment when an agent opens a new browser window.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.722", .items = &.{
+        .{ .text = "Only the open session's browser shows; switching sessions or workspaces never leaves another browser on top.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.721", .items = &.{
+        .{ .text = "After pasting text, a link or a screenshot, you can keep typing in the same input without clicking back.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.720", .items = &.{
+        .{ .text = "Messages to a session in the background are now delivered even when its window is hidden.", .ticket = "" },
+        .{ .text = "A message waiting for a busy session now says Queued, session is busy.", .ticket = "" },
+        .{ .text = "Pasted text no longer shows raw tags in Chat View.", .ticket = "" },
+        .{ .text = "A message can no longer stay on Sending… forever.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.719", .items = &.{
+        .{ .text = "A new session's chat no longer shows another session's old messages; it stays empty until its first message.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.717", .items = &.{
+        .{ .text = "Terminal tabs stay in the sidebar when their connection ends; reconnect them with Ctrl+Shift+R.", .ticket = "" },
+        .{ .text = "The session history file no longer grows without limit.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.716", .items = &.{
+        .{ .text = "A session you made full width (Ctrl+Shift+F) now stays full width after switching workspaces or restarting the app.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.715", .items = &.{
+        .{ .text = "Agent browser links open even when the new-tab option comes before the link, and a mistyped browser command no longer asks you to restart.", .ticket = "" },
+    } },
+    .{ .ver = "0.28.714", .items = &.{
+        .{ .text = "Long chats you have not opened for a while now show their newest messages right away; scroll up to load older ones.", .ticket = "" },
+    } },
     .{ .ver = "0.28.713", .items = &.{
         .{ .text = "A chat message Claude refuses or drops now shows Not sent with a retry, instead of staying Queued forever.", .ticket = "" },
     } },
