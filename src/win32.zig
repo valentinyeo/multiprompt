@@ -594,6 +594,8 @@ pub extern "gdi32" fn GetStockObject(i32) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn GetTextExtentPoint32W(HANDLE, [*]const u16, i32, *SIZE) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn GetTextExtentExPointW(HANDLE, [*]const u16, i32, i32, *i32, ?[*]i32, *SIZE) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn CreateFontW(i32, i32, i32, i32, i32, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, ?LPCWSTR) callconv(WINAPI) HANDLE;
+pub extern "gdi32" fn AddFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) i32;
+pub extern "gdi32" fn RemoveFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn AddFontMemResourceEx(?*const anyopaque, DWORD, ?*anyopaque, *DWORD) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn Polygon(HANDLE, [*]const POINT, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn Ellipse(HANDLE, i32, i32, i32, i32) callconv(WINAPI) BOOL;

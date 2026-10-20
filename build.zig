@@ -350,6 +350,9 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
+    const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
+    test_step.dependOn(&console_font_tests.step);
+    vps_test_step.dependOn(&console_font_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
     test_step.dependOn(&palette_rows_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
