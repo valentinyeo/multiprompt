@@ -206,6 +206,7 @@ const writePaneSessionFileForShell = @import("browser_pane.zig").writePaneSessio
 const wakeBrowserPaneFromFreeze = @import("browser_pane.zig").wakeBrowserPaneFromFreeze;
 const enumCloseOrphanPane = @import("browser_pane.zig").enumCloseOrphanPane;
 const hideBrowserFloatingChrome = @import("browser_pane.zig").hideBrowserFloatingChrome;
+const parkStrayBrowserPanes = @import("browser_pane.zig").parkStrayBrowserPanes;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
 const hideActiveBrowser = @import("browser_pane.zig").hideActiveBrowser;
 const closeBrowserForShell = @import("browser_pane.zig").closeBrowserForShell;
@@ -1682,7 +1683,9 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     if (app_state.g_account_locked) return false;
     if (tmux_session) |session| {
         if (findLocalTmuxTab(app_state.g_pending_tmux_host, session)) |existing| {
-            if (!app_state.g_restoring) switchToShell(existing);
+            if (!app_state.g_restoring) {
+                if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(existing) else switchToShell(existing);
+            }
             return false;
         }
     }
@@ -1806,6 +1809,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .name_source = .default,
         .notified = false,
         .activity = .idle,
+        .working_since_ms = 0,
         .needs_attention = false,
         .last_title = std.mem.zeroes([256]u16),
         .last_title_len = 0,
@@ -1828,6 +1832,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .selected = false,
         .favicon_path_len = 0,
         .tmux_host = app_state.g_pending_tmux_host,
+        .spawn_tick = if (isRemoteShellKind(kind)) GetTickCount64() else 0,
         .full_width = false,
         .browser_split_permille = BROWSER_SPLIT_DEFAULT_PERMILLE,
         .last_active = 0,
@@ -1847,7 +1852,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     registerShellExitWait(idx);
 
     if (!app_state.g_restoring) {
-        switchToShell(idx);
+        if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
         requestShellRefocus(20, 12);
         saveSession();
     }
@@ -1856,6 +1861,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
 pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (app_state.g_account_locked) return false;
+    if (idx == app_state.active_shell) {
+        app_state.g_front_period.selected = null;
+        @import("main.zig").sessionFrontChanged();
+    }
     if (idx >= app_state.shell_count) return false;
     const kind = app_state.shells[idx].kind;
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
@@ -1870,6 +1879,9 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_pinned_top = app_state.shells[idx].pinned_top;
     const saved_locked = app_state.shells[idx].locked;
     const saved_favorite = app_state.shells[idx].favorite;
+    const saved_last_used = app_state.shells[idx].last_used;
+    const saved_visits = app_state.shells[idx].visits;
+    const saved_input = app_state.shells[idx].input;
     const saved_claude = app_state.shells[idx].claude_session;
     const saved_favicon = app_state.shells[idx].favicon_hicon;
     const saved_favicon_path = app_state.shells[idx].favicon_path;
@@ -1880,9 +1892,12 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_tmux_len = app_state.shells[idx].tmux_session_len;
     const saved_group_id = app_state.shells[idx].group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
+    const saved_ssh_reconnect_attempts = app_state.shells[idx].ssh_reconnect_attempts;
+    const saved_ssh_reconnect_next_tick = app_state.shells[idx].ssh_reconnect_next_tick;
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;
     const saved_chat_view_on = app_state.shells[idx].chat_view_on;
+    const saved_chat_shell_override = app_state.shells[idx].chat_shell_override;
     const saved_last_active = app_state.shells[idx].last_active;
     const saved_last_viewed = app_state.shells[idx].last_viewed;
     const saved_preview = app_state.shells[idx].preview;
@@ -2002,6 +2017,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .name_source = saved_name_source,
         .notified = false,
         .activity = .idle,
+        .working_since_ms = 0,
         .needs_attention = saved_needs_attention,
         .hook_capable = saved_hook_capable,
         .turn_pending = saved_turn_pending,
@@ -2027,6 +2043,9 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .pinned_top = saved_pinned_top,
         .locked = saved_locked,
         .favorite = saved_favorite,
+        .last_used = saved_last_used,
+        .visits = saved_visits,
+        .input = saved_input,
         .cached_cwd = saved_cwd,
         .cached_cwd_len = saved_cwd_len,
         .ram_mb = 0,
@@ -2040,8 +2059,12 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .group_id = saved_group_id,
         .selected = false,
         .tmux_host = saved_tmux_host,
+        .spawn_tick = GetTickCount64(),
+        .ssh_reconnect_attempts = saved_ssh_reconnect_attempts,
+        .ssh_reconnect_next_tick = saved_ssh_reconnect_next_tick,
         .full_width = saved_full_width,
         .chat_view_on = saved_chat_view_on,
+        .chat_shell_override = saved_chat_shell_override,
         .last_active = if (saved_last_active != 0) saved_last_active else nowFileTime(),
         .last_viewed = saved_last_viewed,
         .workspace = saved_workspace,
@@ -2394,10 +2417,15 @@ pub fn paneGuardKeepUser(requested: u32) void {
     debugLog(line);
 }
 
+pub fn switchToShellByUser(idx: u32) void {
+    switchToShell(idx);
+    if (app_state.active_shell == idx) @import("main.zig").sessionFrontSelected();
+}
+
 pub fn switchToShell(idx: u32) void {
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
-        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.g_chat_active, idx != app_state.active_shell);
+        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != app_state.active_shell);
     if (idx != app_state.active_shell) {
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
@@ -2414,14 +2442,14 @@ pub fn switchToShell(idx: u32) void {
     app_state.g_chat_switch_preparing = defer_browser;
     defer app_state.g_chat_switch_preparing = false;
     if (defer_browser) {
-        app_state.g_chat_browser_swap.request(app_state.shells[idx].shell_id);
+        app_state.g_chat_browser_swap.request(app_state.shells[idx].shell_id, switch_started);
         app_state.g_chat_switch_started = switch_started;
         app_state.g_chat_switch_browser_sid = 0;
         cancelBrowserVisibilitySettle();
         cancelPendingNativeBrowserFocus();
         cancelShellRefocus(app_state.g_main_hwnd);
         app_state.g_chat_browser_handoff_until = 0;
-        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, @import("chat_switch.zig").paint_deadline_ms, null);
     } else {
         app_state.g_chat_browser_swap.cancel();
         app_state.g_chat_switch_browser_sid = 0;
@@ -2436,7 +2464,11 @@ pub fn switchToShell(idx: u32) void {
     if (!app_state.g_chat_active and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
         _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     if (defer_browser) hideBrowserFloatingChrome() else if (app_state.active_shell < app_state.shell_count) hideActiveBrowser();
+    if (idx != prev) app_state.g_front_period.selected = null;
     app_state.active_shell = idx;
+    parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
+    @import("main.zig").sessionFrontChanged();
+
     if (idx != prev) {
         app_state.g_voice_cursor_shell_id = 0;
         app_state.g_voice_cursor_latest_hash = 0;
@@ -2470,7 +2502,7 @@ pub fn switchToShell(idx: u32) void {
             hideShellsForOverlay();
             updateBrowserVisibility();
         } else {
-            const want_chat = chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.g_chat_active, idx != prev);
+            const want_chat = chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != prev);
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {

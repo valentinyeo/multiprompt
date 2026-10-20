@@ -71,6 +71,11 @@ pub const Retry = struct {
     }
 };
 
+test "fresh install without a stored sign-in stays on Sign in" {
+    try std.testing.expectEqual(Failure.sign_in, failure(true, false, false));
+    try std.testing.expectEqual(Failure.sign_in, failure(false, false, false));
+}
+
 test "stored-token startup unlocks locally for network timeout and service failures" {
     try std.testing.expectEqual(Failure.unlock_local, failure(true, true, false));
     try std.testing.expectEqual(Failure.sign_in, failure(true, false, false));

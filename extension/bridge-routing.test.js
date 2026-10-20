@@ -65,7 +65,7 @@ function createHarness({
       onClicked: noopEvent("contextMenus.onClicked"),
     },
     debugger: {
-      attach: async () => {},
+      attach: async (debuggee) => { debuggerCommands.push({ tabId: debuggee.tabId, method: "attach" }); },
       detach: async () => {},
       sendCommand: async (debuggee, method, params) => {
         debuggerCommands.push({ tabId: debuggee.tabId, method, params });
@@ -241,6 +241,7 @@ function createHarness({
     clickAction,
     typeAction,
     keyAction,
+    insertAction,
     dispatch,
     resolveWindow,
     listTabs,
@@ -599,6 +600,32 @@ test("trusted click, type, and key operations reach the targeted tab through CDP
     harness.debuggerCommands.filter((item) => item.method === "Input.dispatchKeyEvent").slice(-2).map((item) => item.params.type),
     ["rawKeyDown", "keyUp"],
   );
+});
+
+test("trusted input into a background tab turns on focus emulation before any Input command", async () => {
+  const harness = createHarness();
+  harness.setTab({ id: 1, windowId: 10, url: "https://app.example/", active: false });
+  const actions = [
+    () => harness.api.clickAction({ windowId: 10, selector: "#save" }),
+    () => harness.api.typeAction({ windowId: 10, selector: "#name", text: "hello" }),
+    () => harness.api.insertAction({ windowId: 10, text: "hello" }),
+    () => harness.api.keyAction({ windowId: 10, combo: "Enter" }),
+  ];
+  for (const action of actions) {
+    harness.debuggerCommands.length = 0;
+    await action();
+    const sessions = [];
+    for (const command of harness.debuggerCommands) {
+      if (command.method === "attach") sessions.push([]);
+      else sessions.at(-1)?.push(command);
+    }
+    const inputSessions = sessions.filter((session) => session.some((command) => command.method.startsWith("Input.")));
+    assert.ok(inputSessions.length > 0);
+    for (const session of inputSessions) {
+      assert.equal(session[0].method, "Emulation.setFocusEmulationEnabled");
+      assert.equal(session[0].params.enabled, true);
+    }
+  }
 });
 
 test("concurrent pane registrations cannot be overwritten by the initial storage load", async () => {

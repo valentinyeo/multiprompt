@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -98,6 +99,9 @@ fn chatSendEnterDelayMs(_: ShellKind) u32 { return 0; }
 fn Sleep(_: u32) void {}
 fn pasteTextToShellDirectEx(_: u32, _: []const u16, _: bool) bool { writes += 1; return true; }
 fn sendLocalChatPrompt(_: u32, _: []const u16) bool { unreachable; }
+var g_chat_tmux_send_job: ?*anyopaque = null;
+fn chatTmuxSendEligible(_: u32) bool { return false; }
+fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool) bool { unreachable; }
 `;
 const acceptance = `
 test "correctness identity: first production allocation supports history, browser exchange and screenshot ownership" {
@@ -108,7 +112,7 @@ test "correctness identity: first production allocation supports history, browse
     const identity = chat_transcript.Identity.init(id, 0, false, "sid", "/repo");
     try std.testing.expect(identity.shell_id != 0);
     var pending = chat_switch.Pending{};
-    pending.request(id);
+    pending.request(id, 0);
     try std.testing.expect(pending.didPaint(id));
     try std.testing.expect(pending.take(id));
     // The screenshot queue rejects zero before accepting any owner.
@@ -181,11 +185,11 @@ test "correctness unreadable: readable held prompt retries only Enter, readable 
 function run(mode, control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-correctness-'));
   try {
-    for (const file of ['chat_echo.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    copyZig(['chat_echo.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig'], dir);
     const replaced = control && mode === 'newline' ? ['chatArmSendVerify', 'chatSendVerifyTick', 'sendTextToShellVerifiedAt', 'chatPromptStillInInputBox'] :
       control && mode === 'unreadable' ? ['chatSendVerifyTick', 'chatPromptStillInInputBox'] : [];
     const names = ['chatArmSendVerify', 'chatVerifyClear', 'chatPromptStillInInputBox', 'chatSendVerifyTick', 'chatSendVerifyDelayMs',
-      'chatInputRowHoldsPrompt', 'chatInputBoxShowsUnsentPrompt', 'chatOutboxIndexById', 'chatOutboxFindSending', 'chatEchoMarkNotSent', 'sendTextToShellVerifiedAt'];
+      'chatInputRowHoldsPrompt', 'chatInputBoxShowsUnsentPrompt', 'chatOutboxIndexById', 'chatOutboxFindSending', 'chatEchoMarkNotSent', 'sendTextToShellVerifiedAt', 'chatSendViaConsole'];
     const initial = (control && mode === 'identity' ? old : source).match(/^var next_shell_id: u32 = [^;]+;/m)[0];
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + initial + '\n' + names.map(n => body(replaced.includes(n) ? old : source, n)).join('\n') + acceptance);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', `correctness ${mode}:`], { encoding: 'utf8', timeout: 60000 });

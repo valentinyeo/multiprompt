@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,9 +14,10 @@ function body(text, name) {
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
-    for (const file of ['chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, code);
+    fs.writeFileSync(file, 'var g_chat_find_open = false;\n' + code);
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -61,7 +63,7 @@ fn OpenMutexW(_: u32, _: i32, _: [*:0]const u16) HANDLE {
     priority_refs += 1; return @ptrFromInt(2);
 }
 fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
-    std.debug.assert(timeout == 0); // UI scheduling must never wait for another window.
+    std.debug.assert(timeout == 0);
     if (owner) |id| return if (id == selected) 0 else 258;
     owner = selected; return 0;
 }
@@ -135,6 +137,8 @@ var g_chat_bubble_pos: [1001]chat_style.BubblePos = undefined;
 var g_chat_capture: [1]u16 = .{'x'};
 var g_chat_last_len: usize = 1;
 var g_chat_layout_dirty = true;
+var g_chat_find_layout_open = false;
+const CHAT_FIND_TOP_H: i32 = 52;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
@@ -200,6 +204,23 @@ test('production layout measures only changed suffixes and caches unchanged geom
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+test('ISSUE-268 oldest match has room below the find bar and closing removes that room', () => {
+  const check = `
+  test "ISSUE-268 first loaded message clears the sticky find bar" {
+      for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
+      g_chat_block_count = 1;
+      chatRelayout(400);
+      try std.testing.expectEqual(@as(i32, 0), g_chat_layout_rects[0].top);
+      g_chat_find_open = true;
+      chatRelayout(400);
+      try std.testing.expect(g_chat_layout_rects[0].top >= uiScaled(52));
+      g_chat_find_open = false;
+      chatRelayout(400);
+      try std.testing.expectEqual(@as(i32, 0), g_chat_layout_rects[0].top);
+  }`;
+  const result = run(layout + body(source, 'chatRelayout') + check);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
 test('layout oracle rejects actual 706 full-history remeasurement', () => {
   const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
   assert.equal(old.status, 0);
@@ -213,9 +234,9 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.match(body(source, 'refreshChatBlockCache'), /history\.revision/);
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
   assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
-  assert.match(body(source, 'chatFlowBlock'), /g_chat_tables\.formatTable/);
+  assert.match(body(source, 'chatTableLayout'), /g_chat_tables\.layout/);
   assert.match(body(source, 'chatTranscriptWndProc'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
-  assert.match(body(source, 'chatFileRequest'), /GetLastInputInfo[^]*< 5000\) return/);
+  assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
   assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
 });
 
@@ -315,7 +336,7 @@ test "rich layout: URL-free scans and GDI width calls grow linearly" {
     for ([_]usize{ 256, 512, 1024 }) |words| {
         for (0..words) |i| @memcpy(data[i * 5 ..][0..5], word);
         scanned = 0; width_calls = 0;
-        _ = chatRichText(0, data[0 .. words * 5], .{ .right = 100000 }, 0, false, null, 0, null);
+        _ = chatRichText(0, data[0 .. words * 5], .{ .right = 100000 }, 0, false, null, 0, null, false);
         try std.testing.expectEqual(words * 5, scanned);
         try std.testing.expect(width_calls <= words + 1);
     }
@@ -334,7 +355,7 @@ test "rich layout: cached widths and URLs preserve narrow wrapping, styled runs 
             _ = oldRichText(0, text, area, 0, true, null, 17, &old_height);
             const old_hash = draw_hash;
             draw_hash = 0;
-            _ = chatRichText(0, text, area, 0, true, null, 17, &height);
+            _ = chatRichText(0, text, area, 0, true, null, 17, &height, false);
             try std.testing.expectEqual(old_height, height);
             try std.testing.expectEqual(old_hash, draw_hash);
             var y: i32 = 0;
@@ -342,7 +363,7 @@ test "rich layout: cached widths and URLs preserve narrow wrapping, styled runs 
                 var x: i32 = 0;
                 while (x < width) : (x += 8) {
                     const hit = ChatHit{ .x = x, .y = y };
-                    try std.testing.expect(std.meta.eql(oldRichText(0, text, area, 0, false, hit, 17, null), chatRichText(0, text, area, 0, false, hit, 17, null)));
+                    try std.testing.expect(std.meta.eql(oldRichText(0, text, area, 0, false, hit, 17, null), chatRichText(0, text, area, 0, false, hit, 17, null, false)));
                 }
             }
         }
@@ -353,7 +374,7 @@ function runRich(control = false) {
   const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-9a4a7d7.zig', 'utf8') });
   assert.equal(old.status, 0);
   return run(rich + richPrelude + body(source, 'chatFlowText') +
-    body(control ? old.stdout : source, 'chatRichText') +
+    (control ? body(old.stdout, 'chatRichText').replace('height: ?*i32)', 'height: ?*i32, _: bool)') : body(source, 'chatRichText')) +
     body(old.stdout, 'chatRichText').replace('fn chatRichText(', 'fn oldRichText(') + richChecks);
 }
 test('correctness rich: production layout scans URLs linearly and preserves wrapping and link targets', () => {
@@ -364,4 +385,99 @@ test('correctness rich: unchanged pre-fix code fails the oracle', () => {
   const result = runRich(true);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /FAIL \(TestExpectedEqual\)/);
+});
+
+test('working bar production working timer is idle-free, row-only and preserves background start times', () => {
+  const functions = ['chatWorkingTimesPoll', 'chatWorkingBarVisible', 'chatWorkingBarTick', 'chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorSync']
+    .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '');
+  const prelude = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const TIMER_CHAT_WORKING: usize = 43;
+var g_main_hwnd: HANDLE = @ptrFromInt(1);
+var g_chat_active = true;
+var g_chat_screen_working = false;
+var g_chat_screen_status_len: usize = 0;
+var g_chat_working_text: [128]u16 = @splat(0);
+var g_chat_working_applied: [128]u16 = @splat(0);
+var g_chat_working_applied_len: usize = 0;
+var g_chat_working_timer_running = false;
+const shell_count = 2;
+var active_shell: usize = 0;
+var shells = [_]struct { activity: enum { idle, active } = .idle, console_working: bool = false, working_since_ms: u64 = 0 }{ .{}, .{} };
+var fake_tick: u64 = 100;
+var starts: usize = 0;
+var stops: usize = 0;
+var paints: usize = 0;
+fn GetTickCount64() u64 { return fake_tick; }
+fn SetTimer(_: HANDLE, id: usize, ms: u32, _: ?*anyopaque) usize { std.debug.assert(id == TIMER_CHAT_WORKING and ms == 1000); starts += 1; return id; }
+fn KillTimer(_: HANDLE, id: usize) i32 { std.debug.assert(id == TIMER_CHAT_WORKING); stops += 1; return 1; }
+fn debugLog(_: []const u8) void {}
+fn chatViewLayout() struct { transcript: RECT, composer_card: RECT } { return .{ .transcript = .{ .left = 10, .top = 0, .right = 100, .bottom = 50 }, .composer_card = .{ .left = 10, .top = 80, .right = 100, .bottom = 150 } }; }
+fn InvalidateRect(_: HANDLE, rc: *const RECT, erase: i32) i32 { std.debug.assert(rc.left == 10 and rc.right == 100 and rc.top == 50 and rc.bottom == 80 and erase == 0); paints += 1; return 1; }
+fn chatWorkingIndicatorText() []const u16 { return g_chat_working_text[0..g_chat_screen_status_len]; }
+`;
+  const checks = `
+test "idle, edges, background tab, elapsed update and close" {
+    chatWorkingTimesPoll(); chatWorkingIndicatorSync(); chatWorkingBarTick();
+    try std.testing.expectEqual(@as(usize, 0), starts + stops + paints);
+    shells[0].activity = .active;
+    chatWorkingTimesPoll(); chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(usize, 1), starts);
+    try std.testing.expectEqual(@as(usize, 1), paints);
+    fake_tick = 1100; chatWorkingBarTick();
+    try std.testing.expectEqual(@as(usize, 2), paints);
+    chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(usize, 2), paints);
+    chatWorkingBarTick();
+    try std.testing.expectEqual(@as(usize, 3), paints);
+    shells[1].activity = .active; fake_tick = 2100; chatWorkingTimesPoll();
+    active_shell = 1; chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(u64, 2100), shells[1].working_since_ms);
+    fake_tick = 12100; active_shell = 0; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Working… · 12s"), g_chat_working_applied[0..g_chat_working_applied_len]);
+    shells[0].activity = .idle; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(u64, 0), shells[0].working_since_ms);
+    try std.testing.expectEqual(@as(usize, 1), stops);
+    const before = paints; chatWorkingIndicatorSync(); chatWorkingBarTick();
+    try std.testing.expectEqual(before, paints);
+    active_shell = 1; chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(usize, 2), starts);
+    g_chat_active = false; chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(usize, 2), stops);
+    shells[1].activity = .idle; g_chat_screen_working = true;
+    chatWorkingTimesPoll();
+    try std.testing.expectEqual(@as(u64, 0), shells[1].working_since_ms);
+    g_chat_active = true; g_chat_screen_working = false;
+    g_chat_screen_status_len = 1; g_chat_working_text[0] = 'x';
+    fake_tick = 20000; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(u64, 20000), shells[1].working_since_ms);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("x · 0s"), g_chat_working_applied[0..g_chat_working_applied_len]);
+    g_chat_screen_status_len = 0; shells[0].console_working = true;
+    chatWorkingTimesPoll();
+    try std.testing.expectEqual(@as(u64, 20000), shells[0].working_since_ms);
+    fake_tick = 25000; chatWorkingTimesPoll();
+    try std.testing.expectEqual(@as(u64, 20000), shells[0].working_since_ms);
+}
+`;
+  const result = run('const ISSUE_265_WORKING_BAR = true;\n' + prelude + functions + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const disabled = run('const ISSUE_265_WORKING_BAR = false;\n' + prelude + functions + `
+test "disabled switch keeps old text and no new timer or per-session tracking" {
+    shells[0].activity = .active;
+    g_chat_working_text[0] = 'x'; g_chat_screen_status_len = 1;
+    chatWorkingTimesPoll(); chatWorkingIndicatorSync(); chatWorkingBarTick();
+    try std.testing.expectEqual(@as(u64, 0), shells[0].working_since_ms);
+    try std.testing.expectEqual(@as(usize, 0), starts + stops);
+    try std.testing.expectEqualSlices(u16, &.{'x'}, g_chat_working_applied[0..g_chat_working_applied_len]);
+}
+`);
+  assert.equal(disabled.status, 0, disabled.stdout + disabled.stderr);
+  const broken = run('const ISSUE_265_WORKING_BAR = true;\n' + prelude + functions.replace('const running = visible and g_main_hwnd != null;', 'const running = g_main_hwnd != null;') + checks);
+  assert.equal(broken.status, 1, broken.stdout + broken.stderr);
+  assert.match(broken.stderr, /FAIL \(TestExpectedEqual\)/);
+  const compileControl = run('const ISSUE_265_WORKING_BAR = true;\n' + prelude + functions.replace('const running = visible and g_main_hwnd != null;', '@compileError("working bar compile control");\n        const running = visible and g_main_hwnd != null;') + checks);
+  assert.notEqual(compileControl.status, 0);
+  assert.match(compileControl.stderr, /working bar compile control/);
 });

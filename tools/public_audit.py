@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED = {'.git', 'node_modules', '.zig-cache', 'zig-cache', 'zig-out', 'zig-out-arm', '__pycache__', '.astro', 'dist', '.wrangler'}
-PRIVATE = re.compile(r'(?i)yeo[u]x|hyperta[s]k\.ai|\b[\w.-]+\.ts\.net|gma[i]l|/home/va[l]entin|Users[\\/]+va[l]en\b|\bva[l]entin\b(?! Yeo)|\b(?:IGSH|HTPR|YPER4|HELL)-\d+')
+PRIVATE = re.compile(r'(?i)yeo[u]x|hyperta[s]k\.ai|\b[\w.-]+\.ts\.net|gma[i]l|/home/va[l]entin|Users[\\/]+va[l]en\b|\bva[l]entin\b(?! Yeo)|\b(?:IGSH|HTPR|YPER4|HELL)[-_]\d+|\bin[n]e\b|hetz[n]er|conta[b]o')
 PRIVATE_REPOSITORY = re.compile(r'(?i)github\.com/valentinyeo/zig[s]hell(?:\b|[/.])')
 IPV4 = re.compile(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])')
 EMAIL = re.compile(r'(?<![\\\w.+-])[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}')
@@ -48,6 +48,9 @@ def check():
     assert not findings('https://github.com/valentinyeo/multiprompt', 'fixture')
     assert findings('user@' + 'personal.invalid-domain.com', 'fixture')
     assert findings('198.18.' + '0.1', 'fixture')
+    assert findings('.tmux_session = "in' + 'ne-cro"', 'fixture')
+    assert findings('Attach Hetz' + 'ner tmux Session', 'fixture')
+    assert not findings('const command_in' + 'ne = 1; inner', 'fixture')
     assert findings('/home/va' + 'lentin/repo', 'fixture')
     assert not findings('user@example.com 127.0.0.1 192.0.2.10', 'fixture')
     errors = []
@@ -66,7 +69,7 @@ def check():
     cfg = json.loads((ROOT / 'service/wrangler.jsonc').read_text())
     assert cfg['account_id'] == 'YOUR_CLOUDFLARE_ACCOUNT_ID'
     assert cfg['d1_databases'][0]['database_id'] == 'YOUR_D1_DATABASE_ID'
-    assert cfg['vars']['ACCESS_AUD'] == 'YOUR_ACCESS_AUDIENCE'
+    assert not {'ACCESS_TEAM', 'ACCESS_AUD'} & cfg['vars'].keys()
     print('PUBLIC_AUDIT_OK')
 
 
@@ -80,7 +83,7 @@ def metadata():
     assert 'MIT License' in license_text and 'Copyright (c) 2026 Valentin Yeo' in license_text
     for path in ('zig-out/', 'zig-out-arm/', '.zig-cache/', 'zig-cache/'):
         assert path in (ROOT / '.gitignore').read_text().splitlines()
-    for text in ('ACCOUNT_EMAIL', 'ACCESS_TEAM', 'ACCESS_AUD', 'database_id', 'account_id'):
+    for text in ('ACCOUNT_EMAIL', 'ALLOWED_EMAILS', 'AUTH_ORIGINS', 'database_id', 'account_id'):
         assert text in (ROOT / 'service/README.md').read_text()
     assert 'env.ACCOUNT_EMAIL' in (ROOT / 'service/worker.js').read_text()
     assert (ROOT / 'src/fonts/OFL.txt').is_file()

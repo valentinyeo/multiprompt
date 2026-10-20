@@ -48,11 +48,17 @@ fn zsbRunBridgeOnce(_: []const u8, _: []u8) ?ZsbBridgeRun {
     reruns += 1;
     return .{ .out_len = 0 };
 }
+var g_profile_token: []const u8 = "";
 var g_window_id: ?i64 = 1813400106;
 var calls: usize = 0;
 var replies: []const []const u8 = &.{};
+var ticks: u64 = 0;
 fn Sleep(_: u32) void {}
-fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields: []const u8) ![]u8 {
+fn GetTickCount64() u64 {
+    ticks += 1000;
+    return ticks;
+}
+fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields: []const u8, _: ?u64) ![]u8 {
     std.debug.assert(std.mem.eql(u8, method, "tabs") or std.mem.eql(u8, method, "extensionReload"));
     std.debug.assert(std.mem.eql(u8, fields, ""));
     std.debug.assert(g_window_id == 1813400106);
@@ -65,7 +71,8 @@ fn appendJsonString(out: *std.array_list.Managed(u8), text: []const u8) !void {
     defer out.allocator.free(json);
     try out.appendSlice(json);
 }
-` + section(bridge, 'fn requestBrowserWithRetry(', 'fn requestBrowser(') +
+` + section(bridge, 'fn getBool(', 'fn getI64(') +
+      section(bridge, 'fn requestBrowserWithRetry(', 'fn requestBrowser(') +
       section(app, 'fn zsbLooksLikeStaleBindingError(', "fn zsbUrlIsBeacon(url: []const u8) bool {") +
       section(app, 'fn zsbRetryAfterStaleBinding(', "fn tunnelInboundThread(srv_usize: usize) void {") + String.raw`
 const empty = "{\"ok\":true,\"result\":{\"tabs\":[]}}";

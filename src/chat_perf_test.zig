@@ -93,18 +93,54 @@ test "CPU707 table layout is cached across paints and invalidated by width/conte
     var cache: md.TableCache = .{};
     defer cache.deinit(a);
     const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| x | y |");
-    const first = try cache.formatTable(a, text, 1, 80);
-    const ptr = first.text.items.ptr;
-    for (0..1000) |_| try std.testing.expectEqual(ptr, (try cache.formatTable(a, text, 1, 80)).text.items.ptr);
+    var key = md.TableKey{ .view_w = 80, .font_pt = 13, .scale = 1024, .pad_x = 8, .pad_y = 4 };
+    const Measure = struct {
+        fn cell(_: void, cell_text: []const u16, _: bool) md.TableSize {
+            return .{ .width = @intCast(cell_text.len * 8), .height = 20 };
+        }
+    };
+    const first = try cache.layout(a, text, 1, key, {}, Measure.cell);
+    const ptr = first.widths.ptr;
+    for (0..1000) |_| try std.testing.expectEqual(ptr, (try cache.layout(a, text, 1, key, {}, Measure.cell)).widths.ptr);
     try std.testing.expectEqual(@as(usize, 1), cache.builds);
-    _ = try cache.formatTable(a, text, 2, 80);
-    _ = try cache.formatTable(a, text, 1, 40);
+    _ = try cache.layout(a, text, 2, key, {}, Measure.cell);
+    key.view_w = 40;
+    _ = try cache.layout(a, text, 1, key, {}, Measure.cell);
     try std.testing.expectEqual(@as(usize, 3), cache.builds);
     cache.clearFrom(a, 2);
     try std.testing.expectEqual(@as(u32, 1), cache.entries.count());
-    _ = try cache.formatTable(a, text, 1, 40);
+    _ = try cache.layout(a, text, 1, key, {}, Measure.cell);
     try std.testing.expectEqual(@as(usize, 3), cache.builds);
     cache.clear(a);
-    _ = try cache.formatTable(a, text, 1, 40);
+    _ = try cache.layout(a, text, 1, key, {}, Measure.cell);
     try std.testing.expectEqual(@as(usize, 4), cache.builds);
+}
+
+test "ISSUE-421 layout cache invalidates same-length text font and scale and keeps row positions" {
+    const a = std.testing.allocator;
+    var cache: md.TableCache = .{};
+    defer cache.deinit(a);
+    const Measure = struct {
+        fn cell(_: void, text: []const u16, bold: bool) md.TableSize {
+            return .{ .width = @as(i32, @intCast(text.len)) * (if (bold) @as(i32, 9) else 8), .height = 20 };
+        }
+    };
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| x | y |");
+    const other = std.unicode.utf8ToUtf16LeStringLiteral("| W | B |\n|---|---|\n| x | y |");
+    var key = md.TableKey{ .view_w = 20, .font_pt = 13, .scale = 1024, .pad_x = 8, .pad_y = 4 };
+    const first = try cache.layout(a, text, 7, key, {}, Measure.cell);
+    try std.testing.expectEqual(@as(i32, 53), first.content_w);
+    try std.testing.expectEqual(@as(i32, 0), first.rowY(2));
+    try std.testing.expectEqual(@as(i32, 29), first.rowY(text.len - 3));
+    first.scroll = 30;
+    _ = try cache.layout(a, other, 7, key, {}, Measure.cell);
+    key.font_pt += 1;
+    _ = try cache.layout(a, other, 7, key, {}, Measure.cell);
+    key.scale += 1;
+    _ = try cache.layout(a, other, 7, key, {}, Measure.cell);
+    try std.testing.expectEqual(@as(usize, 4), cache.builds);
+    key.view_w = 100;
+    const last = try cache.layout(a, other, 7, key, {}, Measure.cell);
+    try std.testing.expectEqual(@as(i32, 0), last.scroll);
+    try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }

@@ -7,6 +7,8 @@ const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const start = source.indexOf('fn debugLog(');
 const logger = source.slice(start, source.indexOf('\n}', start) + 2);
+const lineStart = source.indexOf('fn buildDebugLine(');
+const lineBuilder = source.slice(lineStart, source.indexOf('\n}', lineStart) + 2);
 const mutexStart = source.indexOf('const SpinMutex = struct {');
 const mutex = source.slice(mutexStart, source.indexOf('\n};', mutexStart) + 3);
 
@@ -20,7 +22,16 @@ function contention(withLock) {
 ${mutex}
 var g_debug_log_mutex: SpinMutex = .{};
 ${body}
+${lineBuilder}
 const HANDLE = usize;
+const SYSTEMTIME = struct {};
+fn GetLocalTime(_: *SYSTEMTIME) void {}
+fn formatLogTimestamp(buf: []u8, _: SYSTEMTIME) ?[]const u8 {
+    const ts = "2026-10-18 03:04:05.067";
+    @memcpy(buf[0..ts.len], ts);
+    return buf[0..ts.len];
+}
+fn openAppendRotating(p: []const u8) ?HANDLE { return win32OpenAppend(p); }
 var opened: std.atomic.Value(bool) = .init(false);
 var attempts: std.atomic.Value(u32) = .init(0);
 var records: std.atomic.Value(u32) = .init(0);
@@ -35,7 +46,7 @@ fn win32OpenAppend(_: []const u8) ?HANDLE {
     return 1;
 }
 fn win32WriteAll(_: HANDLE, bytes: []const u8) void {
-    if (std.mem.eql(u8, bytes, "paint record")) _ = records.fetchAdd(1, .monotonic);
+    if (std.mem.eql(u8, bytes, "2026-10-18 03:04:05.067 paint record\\n")) _ = records.fetchAdd(1, .monotonic);
 }
 fn CloseHandle(_: HANDLE) bool { opened.store(false, .release); return true; }
 fn writer() void {

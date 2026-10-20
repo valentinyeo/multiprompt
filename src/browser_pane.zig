@@ -108,7 +108,7 @@ const EndPaint = @import("win32.zig").EndPaint;
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
 const DestroyWindow = @import("win32.zig").DestroyWindow;
-const GetWindowTextW = @import("win32.zig").GetWindowTextW;
+const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
@@ -241,6 +241,7 @@ const BrowserResolveInflight = @import("app_state.zig").BrowserResolveInflight;
 const BROWSER_RESOLVE_STALE_MS = @import("app_state.zig").BROWSER_RESOLVE_STALE_MS;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
 const BROWSER_PARK_X = @import("app_state.zig").BROWSER_PARK_X;
+const browser_onscreen = @import("browser_onscreen.zig");
 const BROWSER_PARK_Y = @import("app_state.zig").BROWSER_PARK_Y;
 const BROWSER_CRASH_RELAUNCH_DELAY_MS = @import("app_state.zig").BROWSER_CRASH_RELAUNCH_DELAY_MS;
 const BROWSER_HUNG_MISS_LIMIT = @import("app_state.zig").BROWSER_HUNG_MISS_LIMIT;
@@ -1377,7 +1378,7 @@ fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (wr.right <= wr.left or wr.bottom <= wr.top) return 1;
     if (app_state.g_browser_adopt_nonce_len == 0) return 1;
     var title: [64]u16 = undefined;
-    const tlen = GetWindowTextW(hwnd, &title, 64);
+    const tlen = InternalGetWindowText(hwnd, &title, 64);
     if (tlen <= 0) return 1;
     const nonce = app_state.g_browser_adopt_nonce[0..app_state.g_browser_adopt_nonce_len];
     const title_len: usize = @intCast(tlen);
@@ -2057,6 +2058,22 @@ fn showBrowserWindowAsync(hwnd: HANDLE, cmd: i32) void {
 fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32, h: i32, flags: UINT) void {
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = SetWindowPos(hwnd, after, x, y, w, h, flags | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
+    if (browser_onscreen.moveLeavesOnScreen(x, BROWSER_PARK_X, flags & SWP_NOMOVE != 0, flags & SWP_HIDEWINDOW != 0)) |on_screen| {
+        if (on_screen) app_state.g_browser_onscreen.mark(@intFromPtr(hwnd)) else app_state.g_browser_onscreen.unmark(@intFromPtr(hwnd));
+    }
+}
+
+pub fn parkStrayBrowserPanes(keep: HANDLE) void {
+    if (!browser_onscreen.enabled_igsh357) return;
+    var out: [browser_onscreen.capacity]usize = undefined;
+    for (app_state.g_browser_onscreen.takeAllExcept(@intFromPtr(keep), &out)) |stray| {
+        parkBrowserWindow(@ptrFromInt(stray));
+    }
+}
+
+fn activeBrowserPaneToKeep() HANDLE {
+    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].browser_enabled) return null;
+    return app_state.shells[app_state.active_shell].browser_hwnd;
 }
 
 fn browserClipWorker(hwnd: HANDLE, top: i32, width: i32, height: i32) void {
@@ -2293,7 +2310,7 @@ pub fn enumCloseStrayZspane(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
         }
     }
     var title: [64]u16 = undefined;
-    const tlen = GetWindowTextW(hwnd, &title, 64);
+    const tlen = InternalGetWindowText(hwnd, &title, 64);
     if (tlen < 6) return 1;
     const prefix = "ZSPANE";
     for (prefix, 0..) |c, i| {
@@ -2474,6 +2491,7 @@ pub fn positionActiveBrowser() void {
             setBrowserWindowPosAsync(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             browserTrace("posBrowser moved");
         } else {
+            app_state.g_browser_onscreen.mark(@intFromPtr(bh));
             browserTrace("posBrowser skip (noop)");
         }
         positionBrowserEdgeMasks(layout);
@@ -2725,6 +2743,7 @@ pub fn updateBrowserVisibility() void {
         if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL);
         return;
     }
+    parkStrayBrowserPanes(activeBrowserPaneToKeep());
     if (!foregroundIsOurs()) {
         return;
     }

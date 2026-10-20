@@ -12,7 +12,7 @@ function body(name) {
 }
 
 test('conversation IO is off the UI thread and independent of the autocomplete channel', () => {
-  assert.match(body('chatFileRequest'), /std\.Thread\.spawn\([^]*chatFileFetchThread/);
+  assert.match(body('chatFileRequestForDelivery'), /std\.Thread\.spawn\([^]*chatFileFetchThread/);
   assert.match(body('chatFileFetchThread'), /chatHistoryFetch\(key/);
   assert.match(body('chatFileFetchThread'), /ready\.store\(true, \.release\)/);
   assert.match(body('chatFileOnReady'), /ready\.swap\(false, \.acq_rel\)/);
@@ -32,7 +32,7 @@ test('markdown measurement paint and link hit test share the same layout', () =>
   for (const name of ['chatMeasureBlockRect', 'chatPaintBlock', 'chatTranscriptLinkAt']) {
     assert.match(body(name), /chatFlowBlock/);
   }
-  assert.match(body('chatFlowBlock'), /g_chat_tables\.formatTable/);
+  assert.match(body('chatTableLayout'), /g_chat_tables\.layout/);
   assert.match(body('chatFlowBlock'), /block\.kind == \.list/);
   assert.match(body('chatRichText'), /chat_markdown\.inlineSpans/);
   assert.match(body('chatRichFont'), /uiScaled\(g_chat_font_pt \+ extra\)/);
@@ -117,4 +117,16 @@ test('image attach and inline previews ship on every surface (issue)', () => {
   assert.match(body('chatMeasureBlockRect'), /chatImgMeasure/);
   assert.match(body('chatRelayout'), /chatImgFirstBlock/);
   assert.match(body('chatImgWorker'), /chatImgLoadThumb/);
+});
+
+
+test('tool lines toggle before links and selection and expose all palette surfaces', () => {
+  assert.match(body('chatTranscriptWndProc'), /WM_LBUTTONDOWN => \{\s*(?:if \((?:app_state\.)?g_chat_find_open and GET_Y\(lp\) < uiScaled\((?:app_state\.)?CHAT_FIND_TOP_H\)\) return 0;\s*)?if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  assert.match(body('chatToolAt'), /role != \.tool/);
+  assert.match(body('chatToggleAllTools'), /block\.role == \.tool[^]*?block\.tool_open = open/);
+  assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
+  assert.match(src, /SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps/);
+  assert.match(src, /target == SEARCH_CHAT_TOOL_STEPS_OFFSET/);
+  assert.match(src, /L\("Chat View: Open or fold all tool steps"\)/);
+  assert.match(docs, /Chat View: Open or fold all tool steps/);
 });

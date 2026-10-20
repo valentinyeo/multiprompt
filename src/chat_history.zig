@@ -3,13 +3,16 @@ const transcript = @import("chat_transcript.zig");
 const md = @import("chat_markdown.zig");
 const style = @import("chat_style.zig");
 const echo = @import("chat_echo.zig");
+const diff = @import("chat_diff.zig");
 
-const Message = struct { role: []const u8, timestamp: []const u8 = "", text: []const u8, id: []const u8 = "", settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 3, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 4, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", partial: bool = false };
 pub const History = struct {
+    status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
     text: std.ArrayList(u16) = .empty,
     blocks: std.ArrayList(md.Block) = .empty,
@@ -35,7 +38,7 @@ pub const History = struct {
     }
 
     pub fn clone(self: History, a: std.mem.Allocator) !History {
-        var result: History = .{ .sid = self.sid, .inode = self.inode, .offset = self.offset, .mtime = self.mtime, .probe = self.probe, .more = self.more, .restore_full = self.restore_full, .start = self.start, .revision = self.revision, .last_row = self.last_row, .last_text = self.last_text, .last_block = self.last_block, .changed_from = self.changed_from };
+        var result: History = .{ .status = self.status, .sid = self.sid, .inode = self.inode, .offset = self.offset, .mtime = self.mtime, .probe = self.probe, .more = self.more, .restore_full = self.restore_full, .start = self.start, .revision = self.revision, .last_row = self.last_row, .last_text = self.last_text, .last_block = self.last_block, .changed_from = self.changed_from };
         errdefer result.deinit(a);
         try result.rows.appendSlice(a, self.rows.items);
         try result.text.appendSlice(a, self.text.items);
@@ -43,7 +46,7 @@ pub const History = struct {
         return result;
     }
 
-    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8) !void {
+    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64) !void {
         const start = self.text.items.len;
         const first_block = self.blocks.items.len;
         const max_blocks = 1 + std.mem.count(u8, bytes, "\n");
@@ -55,6 +58,10 @@ pub const History = struct {
         self.blocks.items.len += message.count;
         const recorded = style.timestamp(stamp);
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
+        for (self.blocks.items[first_block..]) |*block| {
+            block.source_offset = source_offset;
+            block.source_end = source_end;
+        }
         const image = @import("chat_image.zig");
         for (self.blocks.items[first_block..]) |*block| {
             if (block.role == .code) continue;
@@ -72,47 +79,137 @@ pub const History = struct {
         var last_stamp: std.ArrayList(u8) = .empty;
         defer last_stamp.deinit(a);
         var last_role: md.Role = .prose;
+        var source_offset: u64 = 0;
+        var source_end: u64 = 0;
         var message: std.ArrayList(u8) = .empty;
         defer message.deinit(a);
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
+        var tools = std.StringHashMap(struct { index: usize, input_start: usize, input_len: usize, row: usize, text: usize }).init(a);
+        defer tools.deinit();
+        var tool_arena = std.heap.ArenaAllocator.init(a);
+        defer tool_arena.deinit();
         var row_at: usize = 0;
         while (lines.next()) |line| {
             defer row_at += line.len + 1;
             if (line.len == 0) continue;
             _ = arena.reset(.retain_capacity);
-            const parsed = try std.json.parseFromSlice(Message, arena.allocator(), line, .{ .allocate = .alloc_always });
+            const parsed = try std.json.parseFromSlice(Message, arena.allocator(), line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
             const m = parsed.value;
             if (m.settlement != null) continue;
-            const role: md.Role = if (std.mem.eql(u8, m.role, "user")) .user else if (std.mem.eql(u8, m.role, "assistant")) .prose else return error.InvalidHistory;
+            if (std.mem.eql(u8, m.role, "tool_result")) {
+                if (tools.get(m.id)) |tool| {
+                    var block = &self.blocks.items[tool.index];
+                    block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "ok") orelse .ok;
+                    block.result_offset = m.offset;
+                    var input_len = @min(tool.input_len, if (tool.input_len > 1800) @as(usize, 1799) else 1800);
+                    if (input_len < tool.input_len and input_len > 0 and std.unicode.utf16IsHighSurrogate(self.text.items[tool.input_start + input_len - 1])) input_len -= 1;
+                    const detail = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), m.detail orelse "");
+                    const start = self.text.items.len;
+                    try self.text.ensureUnusedCapacity(a, 4000);
+                    try self.text.appendSlice(a, self.text.items[tool.input_start..][0..input_len]);
+                    if (input_len < tool.input_len) try self.text.append(a, 0x2026);
+                    try self.text.appendSlice(a, &.{ '\n', '\n' });
+                    const available = 4000 - (self.text.items.len - start);
+                    var output_len = @min(detail.len, if (detail.len > available) available - 1 else available);
+                    if (output_len < detail.len and output_len > 0 and std.unicode.utf16IsHighSurrogate(detail[output_len - 1])) output_len -= 1;
+                    try self.text.appendSlice(a, detail[0..output_len]);
+                    if (output_len < detail.len) try self.text.append(a, 0x2026);
+                    block.detail_start = start;
+                    block.detail_len = self.text.items.len - start;
+                    if (m.diff) |patch| {
+                        const wide = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), patch);
+                        block.diff_start = self.text.items.len;
+                        block.diff_len = wide.len;
+                        try self.text.appendSlice(a, wide);
+                        const base = self.text.items[block.start..][0..diff.summaryLen(self.text.items[block.start..][0..block.len])];
+                        const counts = try std.fmt.allocPrint(arena.allocator(), " +{d} -{d}", .{ m.added, m.removed });
+                        const suffix_text = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), counts);
+                        const summary = try arena.allocator().dupe(u16, base);
+                        block.start = self.text.items.len;
+                        block.len = summary.len + suffix_text.len;
+                        try self.text.appendSlice(a, summary);
+                        try self.text.appendSlice(a, suffix_text);
+                    }
+                    self.last_text = self.text.items.len;
+                    if (message.items.len == 0) {
+                        self.last_row = row_at + line.len + 1;
+                        self.last_block = self.blocks.items.len;
+                    }
+                }
+                continue;
+            }
+            if (std.mem.eql(u8, m.role, "tool")) {
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end);
+                message.clearRetainingCapacity();
+                last_id.clearRetainingCapacity();
+                if (m.text.len == 0) continue;
+                const tool_text_start = self.text.items.len;
+                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end);
+                const index = self.blocks.items.len - 1;
+                var block = &self.blocks.items[index];
+                block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "running") orelse .running;
+                block.tool_id = std.hash.Wyhash.hash(0, m.id);
+                block.result_offset = m.result_offset;
+                const detail = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), m.detail orelse "");
+                block.detail_start = self.text.items.len;
+                block.detail_len = detail.len;
+                try self.text.appendSlice(a, detail);
+                const patch = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), m.diff orelse "");
+                block.diff_start = self.text.items.len;
+                block.diff_len = patch.len;
+                try self.text.appendSlice(a, patch);
+                if (m.id.len > 0) try tools.put(try tool_arena.allocator().dupe(u8, m.id), .{ .index = index, .input_start = block.detail_start, .input_len = block.detail_len, .row = row_at, .text = tool_text_start });
+                self.last_row = row_at + line.len + 1;
+                self.last_text = self.text.items.len;
+                self.last_block = self.blocks.items.len;
+                continue;
+            }
+            const role: md.Role = if (std.mem.eql(u8, m.role, "user")) .user else if (std.mem.eql(u8, m.role, "assistant")) .prose else continue;
             if (m.text.len == 0) return error.InvalidHistory;
             const merge = m.id.len > 0 and std.mem.eql(u8, m.id, last_id.items) and role == last_role;
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end);
                 message.clearRetainingCapacity();
+                source_offset = m.offset;
                 self.last_row = row_at;
                 self.last_text = self.text.items.len;
                 self.last_block = self.blocks.items.len;
                 last_stamp.clearRetainingCapacity();
                 try last_stamp.appendSlice(a, m.timestamp);
             }
+            source_end = m.end;
             try message.appendSlice(a, m.text);
             last_id.clearRetainingCapacity();
             try last_id.appendSlice(a, m.id);
             last_role = role;
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end);
+        var pending = tools.valueIterator();
+        while (pending.next()) |tool| {
+            if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {
+                self.last_row = tool.row;
+                self.last_text = tool.text;
+                self.last_block = tool.index;
+            }
+        }
+        for (self.blocks.items[0..self.last_block]) |block| {
+            if (block.role == .tool) {
+                self.last_text = @max(self.last_text, block.detail_start + block.detail_len);
+                self.last_text = @max(self.last_text, block.diff_start + block.diff_len);
+                self.last_text = @max(self.last_text, block.start + block.len);
+            }
+        }
     }
 
     pub fn deliveryEvidence(self: History, a: std.mem.Allocator, pending: echo.Pending) !echo.DeliveryEvidence {
         var result: echo.DeliveryEvidence = .{};
+        var complete = (self.start == 0 and !self.restore_full) or !ISSUE_349_STRICT_DEQUEUE;
         var queue: std.ArrayList(struct { hash: u64, matches: bool }) = .empty;
         defer queue.deinit(a);
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
-        var prefix_buf: [16384]u16 = undefined;
-        const prefix = echo.normalize(pending.text, &prefix_buf);
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             if (std.mem.indexOf(u8, line, "\"settlement\"") == null) continue;
@@ -132,19 +229,20 @@ pub const History = struct {
             var normalized: [32768]u16 = undefined;
             const norm = echo.normalize(content, &normalized);
             const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(norm));
-            const matches = fresh and echo.blockMatches(content, prefix);
+            const matches = fresh and echo.sameText(content, pending.text);
             if (std.mem.eql(u8, fact.operation, "enqueue")) {
                 try queue.append(a, .{ .hash = hash, .matches = matches });
                 if (matches) result.removed_ms = 0;
             } else if (std.mem.eql(u8, fact.operation, "popAll")) {
                 for (queue.items) |item| {
-                    if (fresh and item.matches) result.removed_ms = stamp;
+                    if (complete and fresh and item.matches) result.removed_ms = stamp;
                 }
                 queue.clearRetainingCapacity();
+                complete = true;
             } else if (std.mem.eql(u8, fact.operation, "remove") or std.mem.eql(u8, fact.operation, "dequeue")) {
                 var index: ?usize = null;
                 if (content.len == 0) {
-                    if (queue.items.len > 0) index = 0;
+                    if (complete and queue.items.len > 0) index = 0;
                 } else {
                     for (queue.items, 0..) |item, i| {
                         if (item.hash == hash) {
@@ -159,14 +257,18 @@ pub const History = struct {
                 } else if (matches) result.removed_ms = stamp;
             }
         }
+        for (queue.items) |item| {
+            if (item.matches) result.enqueued = true;
+        }
         return result;
     }
 
     pub fn cursor(self: History) History {
-        return .{ .sid = self.sid, .inode = self.inode, .offset = self.offset, .start = self.start, .mtime = self.mtime, .probe = self.probe, .more = self.more, .revision = self.revision };
+        return .{ .status = self.status, .sid = self.sid, .inode = self.inode, .offset = self.offset, .start = self.start, .mtime = self.mtime, .probe = self.probe, .more = self.more, .revision = self.revision };
     }
 
     pub fn updateCursor(self: *History, other: History) void {
+        self.status = other.status;
         self.offset = other.offset;
         self.more = other.more;
         self.mtime = other.mtime;
@@ -193,7 +295,13 @@ pub const History = struct {
         self.rows.appendSliceAssumeCapacity(added);
         self.text.items.len = self.last_text;
         self.blocks.items.len = self.last_block;
-        for (next.blocks.items) |*block| block.start += self.last_text;
+        for (next.blocks.items) |*block| {
+            block.start += self.last_text;
+            if (block.role == .tool) {
+                block.detail_start += self.last_text;
+                block.diff_start += self.last_text;
+            }
+        }
         self.text.appendSliceAssumeCapacity(next.text.items);
         self.blocks.appendSliceAssumeCapacity(next.blocks.items);
         self.last_row += next.last_row;
@@ -223,10 +331,10 @@ pub const History = struct {
         const parsed = try std.json.parseFromSlice(Header, a, bytes[0..end], .{});
         defer parsed.deinit();
         const h = parsed.value;
-        if ((h.version != 2 and h.version != 3) or h.sid.len == 0 or h.sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
+        if ((h.version < 2 or h.version > 4) or h.sid.len == 0 or h.sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
             (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
-        var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version == 2, .start = h.start, .revision = 1 };
+        var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 4, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
         @memcpy(result.sid[0..h.sid.len], h.sid);
         @memcpy(result.probe[0..h.probe.len], h.probe);
@@ -274,7 +382,7 @@ pub const History = struct {
         if ((append or prepend) and (inode != self.inode or !std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) or
             (if (prepend) end != self.start or oldest != base else base != self.offset or oldest != self.start))) return error.InvalidHistory;
         if (oldest > base) return error.InvalidHistory;
-        var next: History = .{ .inode = inode, .offset = end, .start = if (mode == null and !append) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
+        var next: History = .{ .status = if (append or prepend) self.status else .{}, .inode = inode, .offset = end, .start = if (mode == null and !append) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
         @memcpy(next.probe[0..probe.len], probe);
         errdefer next.deinit(a);
         @memcpy(next.sid[0..sid.len], sid);
@@ -285,6 +393,10 @@ pub const History = struct {
                 break;
             }
             if (line.len == 0) return error.InvalidHistory;
+            if (transcript.parseStatus(line)) |status| {
+                next.status = status.status;
+                continue;
+            }
             try next.rows.appendSlice(a, line);
             try next.rows.append(a, '\n');
         }
@@ -292,6 +404,7 @@ pub const History = struct {
         while (lines.next()) |line| if (line.len != 0) return error.InvalidHistory;
         if (!append and !prepend and next.rows.items.len == 0 and self.rows.items.len > 0) return error.EmptyReset;
         if (append and next.rows.items.len == 0) {
+            if (!std.meta.eql(self.status, next.status)) self.revision +%= 1;
             self.updateCursor(next);
             next.deinit(a);
             return;
@@ -313,6 +426,16 @@ pub const History = struct {
         self.* = next;
     }
 };
+
+pub fn statusOnly(wire: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, wire, '\n');
+    _ = lines.next() orelse return false;
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "@@MP_END@@")) return true;
+        if (transcript.parseStatus(line) == null) return false;
+    }
+    return false;
+}
 
 pub fn cacheKey(key: transcript.Identity) u64 {
     const name = if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else std.mem.sliceTo(&key.sid, 0);
@@ -377,6 +500,101 @@ pub fn retryDelay(failures: u8) u64 {
 
 pub fn retryDue(pending: bool, now: u64, next: u64) bool {
     return !pending and now >= next;
+}
+
+pub fn showScreen(keyed: bool, file_blocks: usize, missing: bool, failures: u8) bool {
+    return !keyed or (file_blocks == 0 and (missing or failures > 0));
+}
+
+pub fn screenText(raw: []const u16, width: usize, rows: usize, out: []u16) usize {
+    if (width == 0) return 0;
+    const available_rows = @min(rows, raw.len / width + @intFromBool(raw.len % width != 0));
+    var written: usize = 0;
+    var end: usize = 0;
+    for (0..available_rows) |row_index| {
+        const start = row_index * width;
+        const line = std.mem.trimEnd(u16, raw[start .. start + @min(width, raw.len - start)], &.{ ' ', '\t', 0 });
+        if (written == 0 and line.len == 0) continue;
+        const separator: usize = if (written == 0) 0 else 2;
+        if (separator > out.len - written or line.len > out.len - written - separator) break;
+        if (separator != 0) {
+            out[written] = '\r';
+            out[written + 1] = '\n';
+            written += 2;
+        }
+        @memcpy(out[written .. written + line.len], line);
+        written += line.len;
+        if (line.len != 0) end = written;
+    }
+    return end;
+}
+
+test "terminal fallback keeps every row of a real btop screen" {
+    const a = std.testing.allocator;
+    const fixtures = [_][]const u8{
+        @embedFile("testdata/btop-screen.txt"),
+        "owner@vps:~$ echo hi\nhi\nvalentin@vps:~$\n\n\n",
+    };
+    for (fixtures, 0..) |fixture, fixture_index| {
+        const text = try std.unicode.utf8ToUtf16LeAlloc(a, fixture);
+        defer a.free(text);
+        var lines: std.ArrayList([]const u16) = .empty;
+        defer lines.deinit(a);
+        var split = std.mem.splitScalar(u16, text, '\n');
+        var width: usize = 0;
+        while (split.next()) |line| {
+            width = @max(width, line.len);
+            try lines.append(a, line);
+        }
+        const raw = try a.alloc(u16, width * lines.items.len);
+        defer a.free(raw);
+        @memset(raw, ' ');
+        for (lines.items, 0..) |line, i| @memcpy(raw[i * width .. i * width + line.len], line);
+        const out = try a.alloc(u16, raw.len + 2 * lines.items.len);
+        defer a.free(out);
+        const len = screenText(raw, width, lines.items.len, out);
+        var first_row: usize = 0;
+        var last = lines.items.len;
+        while (first_row < last and std.mem.trimEnd(u16, lines.items[first_row], &.{ ' ', '\t', 0 }).len == 0) : (first_row += 1) {}
+        while (last > first_row and std.mem.trimEnd(u16, lines.items[last - 1], &.{ ' ', '\t', 0 }).len == 0) : (last -= 1) {}
+        var actual = std.mem.splitSequence(u16, out[0..len], &.{ '\r', '\n' });
+        var count: usize = 0;
+        while (actual.next()) |line| {
+            try std.testing.expect(first_row + count < last);
+            try std.testing.expectEqualSlices(u16, std.mem.trimEnd(u16, lines.items[first_row + count], &.{ ' ', '\t', 0 }), line);
+            count += 1;
+        }
+        try std.testing.expectEqual(last - first_row, count);
+        if (fixture_index == 0) {
+            try std.testing.expectEqual(@as(u16, 0x256D), out[0]);
+        } else {
+            try std.testing.expectEqual(@as(usize, 3), count);
+        }
+    }
+}
+
+test "terminal screen text trims empty edges and stops at whole rows" {
+    const raw = std.unicode.utf8ToUtf16LeStringLiteral("    " ++ " a\t\x00" ++ "    " ++ "bc  " ++ "    ");
+    var out: [32]u16 = @splat(0xFFFF);
+    const expected = std.unicode.utf8ToUtf16LeStringLiteral(" a\r\n\r\nbc");
+    const len = screenText(raw, 4, 5, &out);
+    try std.testing.expectEqualSlices(u16, expected, out[0..len]);
+    try std.testing.expectEqual(@as(usize, 2), screenText(raw, 4, 5, out[0..7]));
+    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 4, 5, out[0..1]));
+    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 0, 5, &out));
+    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 4, 0, &out));
+    try std.testing.expectEqual(@as(usize, 0), screenText(&.{}, 4, 5, &out));
+    try std.testing.expectEqual(@as(usize, 0), screenText(raw[0..4], 4, 5, &out));
+    const short_len = screenText(raw[0..14], 4, 9, &out);
+    try std.testing.expectEqualSlices(u16, expected, out[0..short_len]);
+}
+
+test "a keyed tab whose transcript is missing or failing shows the terminal instead of an empty chat" {
+    try std.testing.expect(showScreen(false, 0, false, 0));
+    try std.testing.expect(!showScreen(true, 0, false, 0));
+    try std.testing.expect(showScreen(true, 0, true, 0));
+    try std.testing.expect(showScreen(true, 0, false, 2));
+    try std.testing.expect(!showScreen(true, 12, true, 1));
 }
 
 pub const Rect = struct { left: i32, top: i32, right: i32, bottom: i32 };
@@ -667,4 +885,303 @@ test "settlement: remove dequeue and popAll track the matching queue entry, not 
     later.anchor.after_ms = echo.stampMs("2026-10-13T11:06:59.442Z");
     try std.testing.expect(!(try h.deliveryEvidence(a, later)).refused);
     try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, later)).removed_ms);
+}
+
+test "ISSUE-349 incomplete queue cannot blame A for C before A is delivered" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.init(1, 0, false, "sid", "");
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build A");
+    var h: History = .{};
+    defer h.deinit(a);
+    const wire = "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\t-\t1\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ttail\t100\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:22:08.000Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build A\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:22:31.000Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build B\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:23:23.429Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"\"}}\n{\"role\":\"user\",\"text\":\"please check the build C\",\"timestamp\":\"2026-10-17T15:23:23.843Z\"}\n@@MP_END@@\n";
+    try h.apply(a, wire, 1, key);
+    var pending = [_]echo.Pending{.{ .text = text, .prefix = text, .anchor = .{ .after_ms = echo.stampMs("2026-10-17T15:23:23.843Z"), .sent_ms = echo.stampMs("2026-10-17T15:22:08.000Z") } }};
+    try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, pending[0])).removed_ms);
+    pending[0].anchor.after_ms = echo.stampMs("2026-10-17T15:22:07.000Z");
+    try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, pending[0])).removed_ms);
+    pending[0].anchor.after_ms = echo.stampMs("2026-10-17T15:23:23.843Z");
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t200\t300\t9\t0\tclaude\t-\t1\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdelta\t100\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:24:01.000Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build D\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:24:31.000Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build E\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:25:01.000Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build F\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:25:59.000Z\",\"settlement\":{\"operation\":\"remove\",\"content\":\"please check the build E\"}}\n{\"role\":\"user\",\"text\":\"please check the build E\",\"timestamp\":\"2026-10-17T15:25:59.000Z\"}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:27:43.000Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"\"}}\n{\"role\":\"user\",\"text\":\"please check the build A\",\"timestamp\":\"2026-10-17T15:27:44.000Z\"}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, pending[0])).removed_ms);
+    var users: [3]echo.UserBlock = undefined;
+    for (h.blocks.items, 0..) |block, i| users[i] = .{ .text = h.text.items[block.start..][0..block.len], .stamp_ms = block.stamp_ms };
+    var picked: [1]?usize = undefined;
+    echo.assign(&pending, &users, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, 2), picked[0]);
+}
+
+test "ISSUE-349 popAll establishes an empty point but cannot remove an uncertain pending" {
+    const a = std.testing.allocator;
+    var h: History = .{ .start = 100 };
+    defer h.deinit(a);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build");
+    const pending: echo.Pending = .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 1 } };
+    const enqueue = "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:22:08Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build\"}}\n";
+    const pop = "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:23:23Z\",\"settlement\":{\"operation\":\"popAll\",\"content\":\"\"}}\n";
+    try h.rows.appendSlice(a, enqueue ++ pop);
+    try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, pending)).removed_ms);
+    try h.rows.appendSlice(a, enqueue ++ pop);
+    try std.testing.expect((try h.deliveryEvidence(a, pending)).removed_ms > 0);
+}
+
+test "ISSUE-349 a partial disk cache is not a complete queue even with zero start" {
+    const a = std.testing.allocator;
+    var h: History = .{ .restore_full = true };
+    defer h.deinit(a);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build");
+    const pending: echo.Pending = .{ .text = text, .prefix = text, .anchor = .{ .after_ms = 1 } };
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:22:08Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build\"}}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:23:23Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"\"}}\n");
+    try std.testing.expectEqual(@as(i64, 0), (try h.deliveryEvidence(a, pending)).removed_ms);
+    try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T15:25:59Z\",\"settlement\":{\"operation\":\"remove\",\"content\":\"please check the build\"}}\n");
+    try std.testing.expect((try h.deliveryEvidence(a, pending)).removed_ms > 0);
+}
+
+test "ISSUE-349 outstanding exact enqueue survives unrelated strict dequeue and never times out" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.init(1, 0, false, "sid", "");
+    const pending = echo.Pending{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build"), .anchor = .{ .after_ms = echo.stampMs("2026-10-17T12:00:00Z") } };
+    var h = History{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t500\t600\t9\t0\tclaude\t-\t1\t\ttail\t500\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:01Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build\"}}\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:02Z\",\"settlement\":{\"operation\":\"dequeue\",\"content\":\"\"}}\n@@MP_END@@\n", 1, key);
+    var facts = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(facts.enqueued);
+    try std.testing.expectEqual(@as(i64, 0), facts.removed_ms);
+    try std.testing.expectEqual(echo.TranscriptDecision.queued, echo.transcriptStatus(600_000, 1, if (facts.enqueued) .enqueued else .none));
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t600\t700\t9\t0\tclaude\t-\t2\t\tdelta\t500\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:03Z\",\"settlement\":{\"operation\":\"remove\",\"content\":\"please check the build\"}}\n@@MP_END@@\n", 2, key);
+    facts = try h.deliveryEvidence(a, pending);
+    try std.testing.expect(!facts.enqueued);
+    try std.testing.expect(facts.removed_ms > 0);
+}
+
+test "ISSUE-349 enqueue content must match the whole pending message" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.init(1, 0, false, "sid", "");
+    var h = History{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\t-\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:01Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build and tests\"}}\n@@MP_END@@\n", 1, key);
+    const facts = try h.deliveryEvidence(a, .{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build"), .anchor = .{ .after_ms = echo.stampMs("2026-10-17T12:00:00Z") } });
+    try std.testing.expect(!facts.enqueued);
+}
+
+test "ISSUE-263 tool row is one folded block and later result pairs across worker suffix and cache" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"user\",\"text\":\"please test\"}\n" ++
+        "{\"role\":\"tool\",\"id\":\"call-263\",\"text\":\"Ran tests\",\"status\":\"running\",\"detail\":\"zig build test\"}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"Waiting for tests\"}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    try std.testing.expectEqual(md.Role.tool, h.blocks.items[1].role);
+    try std.testing.expectEqual(md.ToolStatus.running, h.blocks.items[1].tool_status);
+    try std.testing.expect(!h.blocks.items[1].tool_open);
+    try std.testing.expectEqual(@as(i32, 0), style.headerHeight(h.blocks.items[1], 28));
+    var suffix_page = try h.suffix(a);
+    defer suffix_page.deinit(a);
+    try suffix_page.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"unmatched\",\"text\":\"\",\"status\":\"ok\",\"detail\":\"ignored\"}\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"call-263\",\"text\":\"\",\"status\":\"error\",\"detail\":\"Exit code: 1\"}\n@@MP_END@@\n", 2, key);
+    try h.appendParsed(a, &suffix_page);
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    const tool = h.blocks.items[1];
+    try std.testing.expectEqual(md.ToolStatus.@"error", tool.tool_status);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Ran tests"), h.text.items[tool.start..][0..tool.len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("zig build test\n\nExit code: 1"), h.text.items[tool.detail_start..][0..tool.detail_len]);
+    const disk = try h.encode(a, key);
+    defer a.free(disk);
+    var restored = try History.decode(a, disk, key);
+    defer restored.deinit(a);
+    try std.testing.expect(!restored.restore_full);
+    try std.testing.expectEqual(md.ToolStatus.@"error", restored.blocks.items[1].tool_status);
+    try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
+    try std.testing.expectEqual(@as(usize, 1), h.changed_from);
+}
+
+test "ISSUE-263 unknown roles are skipped and tool markdown stays one block" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.rows.appendSlice(a, "{\"role\":\"future_role\",\"future_field\":true}\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"orphan\",\"status\":\"ok\"}\n" ++
+        "{\"role\":\"tool\",\"id\":\"call\",\"text\":\"Edited main.zig\\n\\n```zig\\ncode\\n```\",\"status\":\"ok\",\"detail\":\"patch\"}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"still visible\"}\n");
+    try h.render(a);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(md.Role.tool, h.blocks.items[0].role);
+    try std.testing.expectEqual(md.ToolStatus.ok, h.blocks.items[0].tool_status);
+    try std.testing.expectEqual(md.Role.prose, h.blocks.items[1].role);
+}
+
+test "ISSUE-263 pre-tool cache versions require transcript rehydration" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    for ([_]u8{ '2', '3' }) |version| {
+        const bytes = try a.dupe(u8, "{\"version\":3,\"inode\":9,\"offset\":100,\"sid\":\"sid\",\"host\":0,\"codex\":false,\"tmux\":\"term-1\"}\n" ++ row);
+        defer a.free(bytes);
+        bytes[11] = version;
+        var restored = try History.decode(a, bytes, key);
+        defer restored.deinit(a);
+        try std.testing.expect(restored.restore_full);
+    }
+}
+
+test "ISSUE-263 replacement results retain input and bounded valid Unicode details" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    const input = "input " ** 400;
+    const output = "😀" ** 3000;
+    const call = try std.json.Stringify.valueAlloc(a, Message{ .role = "tool", .id = "call", .text = "Ran tests", .detail = input }, .{});
+    defer a.free(call);
+    const result = try std.json.Stringify.valueAlloc(a, Message{ .role = "tool_result", .id = "call", .status = "error", .detail = output }, .{});
+    defer a.free(result);
+    try h.rows.appendSlice(a, call);
+    try h.rows.append(a, '\n');
+    try h.rows.appendSlice(a, result);
+    try h.rows.append(a, '\n');
+    try h.render(a);
+    const block = h.blocks.items[0];
+    try std.testing.expect(block.detail_len <= 4000);
+    const detail = try std.unicode.utf16LeToUtf8Alloc(a, h.text.items[block.detail_start..][0..block.detail_len]);
+    defer a.free(detail);
+    try std.testing.expect(std.mem.endsWith(u8, detail, "…"));
+    h.text.clearRetainingCapacity();
+    h.blocks.clearRetainingCapacity();
+    try h.rows.appendSlice(a, "{\"role\":\"tool_result\",\"id\":\"call\",\"status\":\"ok\",\"detail\":\"passed\"}\n");
+    try h.render(a);
+    const updated = h.blocks.items[0];
+    try std.testing.expectEqual(md.ToolStatus.ok, updated.tool_status);
+    const final_detail = try std.unicode.utf16LeToUtf8Alloc(a, h.text.items[updated.detail_start..][0..updated.detail_len]);
+    defer a.free(final_detail);
+    try std.testing.expect(std.mem.endsWith(u8, final_detail, "…\n\npassed"));
+    try std.testing.expect(std.mem.indexOf(u8, final_detail, "😀") == null);
+}
+
+test "ISSUE-263 completed tools release the settled prefix while unresolved calls still pair" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    for ([_]bool{ false, true }) |paired| {
+        var h: History = .{};
+        defer h.deinit(a);
+        try h.rows.appendSlice(a, if (paired)
+            "{\"role\":\"tool\",\"id\":\"done\",\"text\":\"Ran tests\",\"status\":\"ok\",\"detail\":\"passed\"}\n"
+        else
+            "{\"role\":\"tool\",\"id\":\"done\",\"text\":\"Ran tests\",\"detail\":\"test\"}\n" ++
+                "{\"role\":\"tool_result\",\"id\":\"done\",\"status\":\"ok\",\"detail\":\"passed\"}\n");
+        for (0..10000) |_| try h.rows.appendSlice(a, "{\"role\":\"assistant\",\"text\":\"later\"}\n");
+        try h.render(a);
+        try std.testing.expectEqual(@as(usize, 10001), h.blocks.items.len);
+        try std.testing.expectEqual(@as(usize, 10000), h.last_block);
+        var suffix = try h.suffix(a);
+        defer suffix.deinit(a);
+        try std.testing.expectEqual(@as(usize, 1), suffix.blocks.items.len);
+    }
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"tool\",\"id\":\"first\",\"text\":\"First\",\"detail\":\"input\"}\n" ++
+        "{\"role\":\"tool\",\"id\":\"pending\",\"text\":\"Second\",\"detail\":\"input\"}\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"first\",\"status\":\"ok\",\"detail\":\"done\"}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"message\",\"text\":\"Waiting\"}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 1), h.last_block);
+    var suffix = try h.suffix(a);
+    defer suffix.deinit(a);
+    try suffix.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"pending\",\"status\":\"error\",\"detail\":\"failed\"}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"message\",\"text\":\"Finished\"}\n@@MP_END@@\n", 2, key);
+    try h.appendParsed(a, &suffix);
+    try std.testing.expectEqual(@as(usize, 2), h.last_block);
+    try std.testing.expectEqual(md.ToolStatus.@"error", h.blocks.items[1].tool_status);
+    const first_tool = h.blocks.items[0];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("input\n\ndone"), h.text.items[first_tool.detail_start..][0..first_tool.detail_len]);
+    const detail = h.blocks.items[1];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("input\n\nfailed"), h.text.items[detail.detail_start..][0..detail.detail_len]);
+    var settled = try h.suffix(a);
+    defer settled.deinit(a);
+    try std.testing.expectEqual(@as(usize, 1), settled.blocks.items.len);
+    try settled.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"text\":\"Next\"}\n@@MP_END@@\n", 3, key);
+    try h.appendParsed(a, &settled);
+    try std.testing.expectEqual(md.ToolStatus.@"error", h.blocks.items[1].tool_status);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("input\n\nfailed"), h.text.items[h.blocks.items[1].detail_start..][0..h.blocks.items[1].detail_len]);
+}
+
+test "status row metadata is independent of conversation rows across deltas and older pages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t1\t\ttail\t100\n{\"role\":\"user\",\"text\":\"hello\"}\n{\"role\":\"status\",\"model\":\"Opus 5.5\",\"percent_left\":62}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqual(@as(?u8, 62), h.status.percent_left);
+    const revision = h.revision;
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t200\t200\t9\t0\tclaude\tterm-1\t1\t\tdelta\t100\n{\"role\":\"status\",\"model\":\"Opus 5.5\",\"percent_left\":62}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(revision, h.revision);
+    try h.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\t2\t\tdelta\t100\n{\"role\":\"status\",\"percent_left\":50,\"todos\":[]}\n@@MP_END@@\n", 3, key);
+    try std.testing.expectEqual(revision + 1, h.revision);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqual(@as(?u8, 50), h.status.percent_left);
+    var copy = try h.clone(a);
+    defer copy.deinit(a);
+    try std.testing.expectEqualDeep(h.status, copy.status);
+    try h.apply(a, "@mp\t4\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t2\t\tolder\t0\n{\"role\":\"user\",\"text\":\"older\"}\n@@MP_END@@\n", 4, key);
+    try std.testing.expectEqual(@as(usize, 2), h.blocks.items.len);
+    try std.testing.expectEqual(@as(?u8, 50), h.status.percent_left);
+}
+
+test "ISSUE-268 older pages retain source-mapped hits past the old native block limit" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "/work");
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t400\t9\t0\tclaude\tterm-1\n");
+    for (0..350) |i| {
+        const line = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"text\":\"message {d}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, i + 1 });
+        defer a.free(line);
+        try wire.appendSlice(a, line);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    try h.apply(a, wire.items, 1, key);
+    try std.testing.expectEqual(@as(usize, 350), h.blocks.items.len);
+    try std.testing.expectEqual(@as(u64, 0), h.blocks.items[0].source_offset);
+    try std.testing.expectEqual(@as(u64, 1), h.blocks.items[0].source_end);
+    try std.testing.expectEqual(@as(u64, 349), h.blocks.items[349].source_offset);
+}
+
+test "ISSUE-270 diff survives result delta suffix clone cache and settled-prefix append" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"user\",\"text\":\"edit this\"}\n" ++
+        "{\"role\":\"tool\",\"id\":\"edit\",\"text\":\"Edited foo +1 -1\",\"status\":\"running\",\"detail\":\"input\",\"diff\":\"-old\\n+fallback\"}\n@@MP_END@@\n", 1, key);
+    const initial = h.blocks.items[1];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("-old\n+fallback"), h.text.items[initial.diff_start..][0..initial.diff_len]);
+    var next = try h.suffix(a);
+    defer next.deinit(a);
+    try next.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"tool_result\",\"id\":\"edit\",\"status\":\"ok\",\"detail\":\"done\",\"diff\":\"-old\\n+real\\n+extra\",\"added\":2,\"removed\":1}\n" ++
+        "{\"role\":\"assistant\",\"text\":\"finished\"}\n@@MP_END@@\n", 2, key);
+    try h.appendParsed(a, &next);
+    var cloned = try h.clone(a);
+    defer cloned.deinit(a);
+    const encoded = try cloned.encode(a, key);
+    defer a.free(encoded);
+    var cached = try History.decode(a, encoded, key);
+    defer cached.deinit(a);
+    try cached.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"tool\",\"id\":\"next\",\"text\":\"Wrote next +1 -0\",\"status\":\"ok\",\"diff\":\"+next\"}\n@@MP_END@@\n", 3, key);
+    for ([_]*History{ &h, &cloned, &cached }) |history| {
+        const block = history.blocks.items[1];
+        try std.testing.expect(!block.tool_open);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("-old\n+real\n+extra"), history.text.items[block.diff_start..][0..block.diff_len]);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Edited foo +2 -1"), history.text.items[block.start..][0..block.len]);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("input\n\ndone"), history.text.items[block.detail_start..][0..block.detail_len]);
+    }
+    const last = cached.blocks.items[cached.blocks.items.len - 1];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("+next"), cached.text.items[last.diff_start..][0..last.diff_len]);
 }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
+const browser_profile_clone = @import("browser_profile_clone.zig");
 
 const app_name = "com.zigshell.bridge";
 const version = @import("bridge_config").extension_version;
@@ -11,6 +12,7 @@ const isolated_extension_id = "fgclkhodglfogcckilgnihofmlpmiiao";
 const browser_request_attempts = 4;
 
 var g_window_id: ?i64 = null;
+var g_profile_token: []const u8 = "";
 
 const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
@@ -24,6 +26,7 @@ const PIPE_ACCESS_INBOUND: windows.DWORD = 0x00000001;
 const PIPE_TYPE_MESSAGE: windows.DWORD = 0x00000004;
 const PIPE_READMODE_MESSAGE: windows.DWORD = 0x00000002;
 const PIPE_WAIT: windows.DWORD = 0x00000000;
+const PIPE_NOWAIT: windows.DWORD = 0x00000001;
 const PIPE_UNLIMITED_INSTANCES: windows.DWORD = 255;
 const ERROR_PIPE_CONNECTED: windows.DWORD = 535;
 const SOCKET = usize;
@@ -87,6 +90,10 @@ extern "kernel32" fn CreateFileA(
 
 extern "kernel32" fn CloseHandle(hObject: windows.HANDLE) callconv(.winapi) BOOL;
 
+extern "kernel32" fn CreateMutexA(lpMutexAttributes: ?*anyopaque, bInitialOwner: BOOL, lpName: [*:0]const u8) callconv(.winapi) ?windows.HANDLE;
+extern "kernel32" fn WaitForSingleObject(hHandle: windows.HANDLE, dwMilliseconds: windows.DWORD) callconv(.winapi) windows.DWORD;
+extern "kernel32" fn ReleaseMutex(hMutex: windows.HANDLE) callconv(.winapi) BOOL;
+
 extern "kernel32" fn Sleep(dwMilliseconds: windows.DWORD) callconv(.winapi) void;
 
 extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) windows.DWORD;
@@ -136,41 +143,72 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     _ = args.next();
     g_window_id = resolveWindowFromEnv(allocator);
-    var command = args.next() orelse return runNativeHost(allocator, isolated_pipe_name);
-    if (std.mem.eql(u8, command, "--window")) {
-        const w = args.next() orelse return usage();
-        g_window_id = std.fmt.parseInt(i64, w, 10) catch return usage();
-        command = args.next() orelse return usage();
+    var command = args.next() orelse "native";
+    var profile_override: ?[]const u8 = null;
+    while (true) {
+        if (std.mem.eql(u8, command, "--window")) {
+            const w = args.next() orelse badArgs("--window");
+            g_window_id = std.fmt.parseInt(i64, w, 10) catch badArgs("--window");
+            if (g_window_id.? <= 0) badArgs("--window");
+        } else if (std.mem.eql(u8, command, "--profile")) {
+            profile_override = args.next() orelse badArgs("--profile");
+        } else {
+            break;
+        }
+        command = args.next() orelse badArgs(command);
     }
 
+    if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
+
+    const is_native_host = std.mem.eql(u8, command, "native") or std.mem.startsWith(u8, command, "chrome-extension://");
+    const is_legacy_host = std.mem.eql(u8, command, "chrome-extension://" ++ legacy_extension_id ++ "/");
+    const profile_env = if (is_legacy_host or profile_override != null) null else std.process.Environ.getAlloc(init.environ, allocator, "MULTIPROMPT_BROWSER_PROFILE") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => null,
+        else => return err,
+    };
+    defer if (profile_env) |token| allocator.free(token);
+    g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
+    var pipe_name_buf: [128]u8 = undefined;
+    const profile_pipe_name = isolatedPipeName(&pipe_name_buf, g_profile_token) catch {
+        if (!is_native_host) {
+            const message = try std.fmt.allocPrint(allocator, "invalid browser profile token '{s}': use 1 to 32 characters [a-z0-9-], not starting with '-' (empty selects default)", .{g_profile_token});
+            defer allocator.free(message);
+            const response = try makeBridgeCliErrorResponse(allocator, command, message, null);
+            defer allocator.free(response);
+            try writeStdout(response);
+            try writeStdout("\n");
+        }
+        std.process.exit(2);
+    };
+
     if (std.mem.eql(u8, command, "native")) {
-        try runNativeHost(allocator, isolated_pipe_name);
+        if (args.next() != null) badArgs(command);
+        try runNativeHost(allocator, profile_pipe_name.ptr);
     } else if (std.mem.startsWith(u8, command, "chrome-extension://")) {
-        const native_pipe = if (std.mem.eql(u8, command, "chrome-extension://" ++ legacy_extension_id ++ "/"))
+        const native_pipe = if (is_legacy_host)
             legacy_pipe_name
         else
-            isolated_pipe_name;
+            profile_pipe_name.ptr;
         try runNativeHost(allocator, native_pipe);
     } else if (std.mem.eql(u8, command, "open")) {
         const url = args.next() orelse "";
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendOpenBrowserNotify(url);
     } else if (std.mem.eql(u8, command, "sidebar")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendSidebarNotify();
     } else if (std.mem.eql(u8, command, "status") or std.mem.eql(u8, command, "doctor")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendLocalStatus(allocator);
     } else if (std.mem.eql(u8, command, "navigate")) {
-        const url = args.next() orelse return usage();
-        const fields = buildNavigateFields(allocator, url, &args) catch |err| switch (err) {
-            error.InvalidArguments => return usage(),
+        const fields = buildNavigateFields(allocator, &args) catch |err| switch (err) {
+            error.InvalidArguments => badArgs("navigate"),
             else => return err,
         };
         defer allocator.free(fields);
         try sendBrowserRequest(allocator, "navigate", fields, null);
     } else if (std.mem.eql(u8, command, "create-pane-window")) {
-        const url = args.next() orelse return usage();
+        const url = args.next() orelse badArgs(command);
         var app = false;
         var bounds: [4]i32 = .{ 0, 0, 0, 0 };
         var has_bounds = false;
@@ -179,11 +217,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
                 app = true;
             } else if (std.mem.eql(u8, arg, "--bounds")) {
                 for (&bounds) |*value| {
-                    value.* = std.fmt.parseInt(i32, args.next() orelse return usage(), 10) catch return usage();
+                    value.* = std.fmt.parseInt(i32, args.next() orelse badArgs(command), 10) catch badArgs(command);
                 }
                 has_bounds = true;
             } else {
-                return usage();
+                badArgs(command);
             }
         }
         g_window_id = null;
@@ -197,15 +235,15 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         try sendBrowserRequest(allocator, "createPaneWindow", fields.items, null);
     } else if (std.mem.eql(u8, command, "back") or std.mem.eql(u8, command, "forward")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, command, "", null);
     } else if (std.mem.eql(u8, command, "reload")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "reload", "", null);
     } else if (std.mem.eql(u8, command, "theme")) {
         g_window_id = null;
-        const theme = args.next() orelse return usage();
-        if (args.next() != null) return usage();
+        const theme = args.next() orelse badArgs(command);
+        if (args.next() != null) badArgs(command);
         const valid_theme = std.mem.eql(u8, theme, "dark") or
             std.mem.eql(u8, theme, "mid") or
             std.mem.eql(u8, theme, "light") or
@@ -213,7 +251,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             std.mem.eql(u8, theme, "edgegray") or
             std.mem.eql(u8, theme, "multiprompt") or
             std.mem.eql(u8, theme, "devblue");
-        if (!valid_theme) return usage();
+        if (!valid_theme) badArgs(command);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
         try fields.appendSlice("\"theme\":");
@@ -224,13 +262,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var owner_pid: ?u32 = null;
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "--shell-id")) {
-                const value = args.next() orelse return usage();
-                shell_id = std.fmt.parseInt(i64, value, 10) catch return usage();
-                if (shell_id.? < 0) return usage();
+                const value = args.next() orelse badArgs(command);
+                shell_id = std.fmt.parseInt(i64, value, 10) catch badArgs(command);
+                if (shell_id.? < 0) badArgs(command);
             } else if (std.mem.eql(u8, arg, "--owner-pid")) {
-                owner_pid = std.fmt.parseInt(u32, args.next() orelse return usage(), 10) catch return usage();
+                owner_pid = std.fmt.parseInt(u32, args.next() orelse badArgs(command), 10) catch badArgs(command);
             } else {
-                return usage();
+                badArgs(command);
             }
         }
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -242,7 +280,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         try sendRequiredBrowserRequest(allocator, "protectWindow", fields.items, 8);
     } else if (std.mem.eql(u8, command, "browser-drop-gesture")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendRequiredBrowserRequest(allocator, "browserDropGesture", "", 3);
     } else if (std.mem.eql(u8, command, "routing-audit")) {
         g_window_id = null;
@@ -253,9 +291,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "routingAudit", fields.items, null);
     } else if (std.mem.eql(u8, command, "tabs")) {
         if (args.next()) |arg| {
-            if (!std.mem.eql(u8, arg, "--close")) return usage();
-            const target = args.next() orelse return usage();
-            if (args.next() != null) return usage();
+            if (!std.mem.eql(u8, arg, "--close")) badArgs(command);
+            command = "tabs --close";
+            const target = args.next() orelse badArgs(command);
+            if (args.next() != null) badArgs(command);
             var fields = std.array_list.Managed(u8).init(allocator);
             defer fields.deinit();
             try appendTabTargetField(&fields, target);
@@ -264,39 +303,41 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try sendBrowserRequest(allocator, "tabs", "", null);
         }
     } else if (std.mem.eql(u8, command, "active-tab")) {
+        if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "activeTab", "", null);
     } else if (std.mem.eql(u8, command, "url")) {
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
-        const tab = try parseOnlyTabArg(&args);
+        const tab = parseOnlyTabArg(&args) catch badArgs(command);
         if (tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "url", fields.items, null);
     } else if (std.mem.eql(u8, command, "activate")) {
-        const tab_id_arg = args.next() orelse return usage();
+        const tab_id_arg = args.next() orelse badArgs(command);
         var target_only = false;
         if (args.next()) |flag| {
-            if (!std.mem.eql(u8, flag, "--target-only") or args.next() != null) return usage();
+            if (!std.mem.eql(u8, flag, "--target-only") or args.next() != null) badArgs(command);
             target_only = true;
         }
-        const tab_id = std.fmt.parseInt(i64, tab_id_arg, 10) catch return usage();
-        if (tab_id <= 0) return usage();
+        const tab_id = std.fmt.parseInt(i64, tab_id_arg, 10) catch badArgs(command);
+        if (tab_id <= 0) badArgs(command);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
         try fields.print("\"tabId\":{d}", .{tab_id});
         if (target_only) try fields.appendSlice(",\"targetOnly\":true");
         try sendBrowserRequest(allocator, "activate", fields.items, null);
     } else if (std.mem.eql(u8, command, "close-tab")) {
-        const target = args.next() orelse return usage();
-        if (args.next() != null) return usage();
+        const target = args.next() orelse badArgs(command);
+        if (args.next() != null) badArgs(command);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
         try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "closeTab", fields.items, null);
     } else if (std.mem.eql(u8, command, "tab")) {
-        const action = args.next() orelse return usage();
-        if (!std.mem.eql(u8, action, "close")) return usage();
-        const target = args.next() orelse return usage();
-        if (args.next() != null) return usage();
+        const action = args.next() orelse badArgs(command);
+        if (!std.mem.eql(u8, action, "close")) badArgs(command);
+        command = "tab close";
+        const target = args.next() orelse badArgs(command);
+        if (args.next() != null) badArgs(command);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
         try appendTabTargetField(&fields, target);
@@ -323,8 +364,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "snapshot", fields.items, null);
     } else if (std.mem.eql(u8, command, "find")) {
-        const first = args.next() orelse return usage();
-        const parsed = try collectTextAndTabArgs(allocator, &args, first);
+        const first = args.next() orelse badArgs(command);
+        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
         defer allocator.free(parsed.text);
 
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -334,8 +378,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "find", fields.items, null);
     } else if (std.mem.eql(u8, command, "click")) {
-        const first = args.next() orelse return usage();
-        const parsed = try collectTextAndTabArgs(allocator, &args, first);
+        const first = args.next() orelse badArgs(command);
+        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
         defer allocator.free(parsed.text);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
@@ -344,14 +391,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "click", fields.items, null);
     } else if (std.mem.eql(u8, command, "type")) {
-        var first = args.next() orelse return usage();
+        var first = args.next() orelse badArgs(command);
         var tab: ?[]const u8 = null;
         if (std.mem.eql(u8, first, "--tab")) {
-            tab = args.next() orelse return usage();
-            first = args.next() orelse return usage();
+            tab = args.next() orelse badArgs(command);
+            first = args.next() orelse badArgs(command);
         }
         const keys = std.mem.eql(u8, first, "--keys");
-        if (keys) first = args.next() orelse return usage();
+        if (keys) first = args.next() orelse badArgs(command);
         const second = args.next();
         const text = try joinRemainingArgs(allocator, &args, second orelse first);
         defer allocator.free(text);
@@ -369,7 +416,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (keys) try fields.appendSlice(",\"keys\":true");
         try sendBrowserRequest(allocator, "type", fields.items, null);
     } else if (std.mem.eql(u8, command, "insert")) {
-        const first = args.next() orelse return usage();
+        const first = args.next() orelse badArgs(command);
         const text = try joinRemainingArgs(allocator, &args, first);
         defer allocator.free(text);
 
@@ -380,21 +427,27 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "insert", fields.items, null);
     } else if (std.mem.eql(u8, command, "cursor")) {
         const action = args.next() orelse "on";
+        if (!std.mem.eql(u8, action, "on") and !std.mem.eql(u8, action, "off") and
+            !std.mem.eql(u8, action, "move") and !std.mem.eql(u8, action, "click")) badArgs(command);
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
         try fields.appendSlice("\"action\":");
         try appendJsonString(&fields, action);
         if (std.mem.eql(u8, action, "move") or std.mem.eql(u8, action, "click")) {
-            const x_arg = args.next() orelse return usage();
-            const y_arg = args.next() orelse return usage();
-            const x = std.fmt.parseInt(i64, x_arg, 10) catch return usage();
-            const y = std.fmt.parseInt(i64, y_arg, 10) catch return usage();
+            const x_arg = args.next() orelse badArgs(command);
+            const y_arg = args.next() orelse badArgs(command);
+            const x = std.fmt.parseInt(i64, x_arg, 10) catch badArgs(command);
+            const y = std.fmt.parseInt(i64, y_arg, 10) catch badArgs(command);
             try fields.print(",\"x\":{d},\"y\":{d}", .{ x, y });
         }
+        if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "cursor", fields.items, null);
     } else if (std.mem.eql(u8, command, "eval") or std.mem.eql(u8, command, "script")) {
-        const first = args.next() orelse return usage();
-        const parsed = try collectTextAndTabArgs(allocator, &args, first);
+        const first = args.next() orelse badArgs(command);
+        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
         defer allocator.free(parsed.text);
 
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -404,21 +457,22 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "eval", fields.items, null);
     } else if (std.mem.eql(u8, command, "key")) {
-        const first = args.next() orelse return usage();
+        const first = args.next() orelse badArgs(command);
         const combo = try joinRemainingArgs(allocator, &args, first);
         defer allocator.free(combo);
 
+        _ = parseKeyCombo(combo) catch badArgs(command);
         try sendKeyChord(allocator, combo);
     } else if (std.mem.eql(u8, command, "screenshot")) {
         var output_path: ?[]const u8 = null;
         var tab: ?[]const u8 = null;
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
-                output_path = args.next() orelse return usage();
+                output_path = args.next() orelse badArgs(command);
             } else if (std.mem.eql(u8, arg, "--tab")) {
-                tab = args.next() orelse return usage();
+                tab = args.next() orelse badArgs(command);
             } else {
-                return usage();
+                badArgs(command);
             }
         }
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -430,13 +484,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var clear = false;
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "--limit") or std.mem.eql(u8, arg, "-n")) {
-                const value = args.next() orelse return usage();
-                limit = std.fmt.parseInt(usize, value, 10) catch return usage();
-                if (limit == 0 or limit > 500) return usage();
+                const value = args.next() orelse badArgs(command);
+                limit = std.fmt.parseInt(usize, value, 10) catch badArgs(command);
+                if (limit == 0 or limit > 500) badArgs(command);
             } else if (std.mem.eql(u8, arg, "--clear")) {
                 clear = true;
             } else {
-                return usage();
+                badArgs(command);
             }
         }
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -444,18 +498,27 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try fields.print("\"limit\":{},\"clear\":{s}", .{ limit, if (clear) "true" else "false" });
         try sendBrowserRequest(allocator, "console", fields.items, null);
     } else if (std.mem.eql(u8, command, "extension-reload")) {
-        if (args.next() != null) return usage();
+        if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "extensionReload", "", null);
     } else if (std.mem.eql(u8, command, "shoturl")) {
         var user_initiated = false;
         if (args.next()) |flag| {
-            if (!std.mem.eql(u8, flag, "--user-initiated") or args.next() != null) return usage();
+            if (!std.mem.eql(u8, flag, "--user-initiated") or args.next() != null) badArgs(command);
             user_initiated = true;
         }
         try sendBrowserRequest(allocator, "shoturl", if (user_initiated) "\"userInitiated\":true" else "", null);
     } else if (std.mem.eql(u8, command, "cdp")) {
-        const cdp_method = args.next() orelse return usage();
+        const cdp_method = args.next() orelse badArgs(command);
         const params_json = args.next();
+        if (args.next() != null or cdp_method.len == 0) badArgs(command);
+        if (params_json) |params| {
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, params, .{}) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => badArgs(command),
+            };
+            defer parsed.deinit();
+            if (parsed.value != .object) badArgs(command);
+        }
 
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
@@ -473,15 +536,15 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var owner_pid: ?u32 = null;
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "--match")) {
-                match = args.next() orelse return usage();
+                match = args.next() orelse badArgs(command);
             } else if (std.mem.eql(u8, arg, "--focused")) {
                 focused = true;
             } else if (std.mem.eql(u8, arg, "--shell-id")) {
-                shell_id = std.fmt.parseInt(u32, args.next() orelse return usage(), 10) catch return usage();
+                shell_id = std.fmt.parseInt(u32, args.next() orelse badArgs(command), 10) catch badArgs(command);
             } else if (std.mem.eql(u8, arg, "--owner-pid")) {
-                owner_pid = std.fmt.parseInt(u32, args.next() orelse return usage(), 10) catch return usage();
+                owner_pid = std.fmt.parseInt(u32, args.next() orelse badArgs(command), 10) catch badArgs(command);
             } else {
-                return usage();
+                badArgs(command);
             }
         }
         g_window_id = null;
@@ -509,73 +572,81 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         try sendBrowserRequest(allocator, "resolveWindow", fields.items, null);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
-        try usage();
+        if (args.next() != null) badArgs(command);
+        return usage();
     } else if (std.mem.eql(u8, command, "manifest")) {
-        const exe_path = args.next() orelse return usage();
-        const extension_id = args.next() orelse return usage();
+        const exe_path = args.next() orelse badArgs(command);
+        const extension_id = args.next() orelse badArgs(command);
+        if (args.next() != null) badArgs(command);
         try printManifest(allocator, exe_path, extension_id);
     } else if (std.mem.eql(u8, command, "version")) {
+        if (args.next() != null) badArgs(command);
         try writeStdout(version ++ "\n");
     } else {
-        return usage();
+        badArgs(command);
     }
 }
 
+const usage_text =
+    \\multiprompt-browser [--window <id>] [--profile <token>] <command> [args]
+    \\
+    \\Global flags (before the command):
+    \\  --window <id>                  Target a specific Chrome windowId (overrides env)
+    \\  --profile <token>               Target an isolated browser profile (overrides env)
+    \\  MULTIPROMPT_BROWSER_PROFILE=<token>  Target profile via environment variable
+    \\  BROWSER_CLI_WINDOW=<id>        Target window via environment variable
+    \\  BROWSER_CLI_WINDOW_FILE=<path> Target window id read from a file
+    \\
+    \\Commands:
+    \\  profile-clone <src> <dst>  Copy a browser profile without caches into a new folder; refuses while that browser runs
+    \\  native                         Run as a Chrome Native Messaging host (default)
+    \\  navigate <url> [--new-tab] [--activate]  Reuse the target tab; --new-tab opens a background tab; --activate only for the app's own user actions (ignored from remote zsb)
+    \\  create-pane-window <url> [--app] [--bounds L T W H]  Internal: open a pane launch placeholder as an inactive window
+    \\  back                           Navigate active browser tab history back
+    \\  forward                        Navigate active browser tab history forward
+    \\  reload                         Reload the active browser tab
+    \\  extension-reload               Reload unpacked extension code without restarting the app
+    \\  theme <name>                   Match isolated Edge chrome to the multiprompt theme
+    \\  protect-window [--shell-id n]  Mark --window as a multiprompt pane; external links are moved out
+    \\  browser-drop-gesture           Internal: record a physical URL/bookmark drop into --window
+    \\  routing-audit [--limit n]      Show recent external-link routing and protection decisions
+    \\  open [url]                     Open this shell's docked multiprompt browser pane
+    \\  sidebar                        Reveal this shell's multiprompt sidebar
+    \\  status / doctor                Report local bridge/pane targeting state
+    \\  tabs                           List browser tabs
+    \\  active-tab                     Show the active tab
+    \\  url [--tab <id|match>]         Show a targeted tab URL
+    \\  activate <tabId> [--target-only] Activate a tab in this session's bound pane (remote agents: target only)
+    \\  close-tab <id|match>            Close a tab; aliases: tab close, tabs --close
+    \\  text [--limit n|--full] [--tab <id|match>]  Return visible text across frames
+    \\  links [--limit n|--full] [--tab <id|match>] Return links across frames
+    \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
+    \\  find <text> [--tab <id|match>] Find text snippets across frames
+    \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
+    \\  type <text>                    Type trusted text at the focused editable
+    \\  type <selector> <text>         Click a selector and replace it with trusted text
+    \\  type --keys [selector] <text>  Type individual keys for keyboard-driven typeaheads
+    \\  insert <text>                  Insert trusted text at the page cursor
+    \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
+    \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
+    \\  key <combo>                    Send a native key chord, e.g. "Alt+2" or "Ctrl+B"
+    \\  screenshot [-o file.png] [--tab <id|match>] Return a PNG or save it
+    \\  console [-n N|--clear]         Return recent console and page-log entries
+    \\  shoturl                        Upload active tab screenshot and paste its link into the owning shell
+    \\  cdp <method> [params-json]     Send a Chrome DevTools Protocol command
+    \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
+    \\  manifest <exe> <extension-id>  Print a Native Messaging manifest
+    \\  version                        Print version
+    \\  help                           Print help
+    \\
+    \\Remote recovery after SSH/WiFi drops: reconnect the multiprompt SSH/tmux
+    \\session first so the reverse tunnel exists, then open/rebind the pane,
+    \\then run `multiprompt-browser status`.
+    \\
+;
+
 fn usage() !void {
-    try writeStderr(
-        \\multiprompt-browser [--window <id>] <command> [args]
-        \\
-        \\Global flags (before the command):
-        \\  --window <id>                  Target a specific Chrome windowId (overrides env)
-        \\  BROWSER_CLI_WINDOW=<id>        Target window via environment variable
-        \\  BROWSER_CLI_WINDOW_FILE=<path> Target window id read from a file
-        \\
-        \\Commands:
-        \\  native                         Run as a Chrome Native Messaging host (default)
-        \\  navigate <url> [--new-tab] [--activate]  Reuse the target tab; --new-tab opens a background tab; --activate only for the app's own user actions (ignored from remote zsb)
-        \\  create-pane-window <url> [--app] [--bounds L T W H]  Internal: open a pane launch placeholder as an inactive window
-        \\  back                           Navigate active browser tab history back
-        \\  forward                        Navigate active browser tab history forward
-        \\  reload                         Reload the active browser tab
-        \\  extension-reload               Reload unpacked extension code without restarting the app
-        \\  theme <name>                   Match isolated Edge chrome to the multiprompt theme
-        \\  protect-window [--shell-id n]  Mark --window as a multiprompt pane; external links are moved out
-        \\  browser-drop-gesture           Internal: record a physical URL/bookmark drop into --window
-        \\  routing-audit [--limit n]      Show recent external-link routing and protection decisions
-        \\  open [url]                     Open this shell's docked multiprompt browser pane
-        \\  sidebar                        Reveal this shell's multiprompt sidebar
-        \\  status / doctor                Report local bridge/pane targeting state
-        \\  tabs                           List browser tabs
-        \\  active-tab                     Show the active tab
-        \\  url [--tab <id|match>]         Show a targeted tab URL
-        \\  activate <tabId> [--target-only] Activate a tab in this session's bound pane (remote agents: target only)
-        \\  close-tab <id|match>            Close a tab; aliases: tab close, tabs --close
-        \\  text [--limit n|--full] [--tab <id|match>]  Return visible text across frames
-        \\  links [--limit n|--full] [--tab <id|match>] Return links across frames
-        \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
-        \\  find <text> [--tab <id|match>] Find text snippets across frames
-        \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
-        \\  type <text>                    Type trusted text at the focused editable
-        \\  type <selector> <text>         Click a selector and replace it with trusted text
-        \\  type --keys [selector] <text>  Type individual keys for keyboard-driven typeaheads
-        \\  insert <text>                  Insert trusted text at the page cursor
-        \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
-        \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
-        \\  key <combo>                    Send a native key chord, e.g. "Alt+2" or "Ctrl+B"
-        \\  screenshot [-o file.png] [--tab <id|match>] Return a PNG or save it
-        \\  console [-n N|--clear]         Return recent console and page-log entries
-        \\  shoturl                        Upload active tab screenshot and paste its link into the owning shell
-        \\  cdp <method> [params-json]     Send a Chrome DevTools Protocol command
-        \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
-        \\  manifest <exe> <extension-id>  Print a Native Messaging manifest
-        \\  version                        Print version
-        \\  help                           Print help
-        \\
-        \\Remote recovery after SSH/WiFi drops: reconnect the multiprompt SSH/tmux
-        \\session first so the reverse tunnel exists, then open/rebind the pane,
-        \\then run `multiprompt-browser status`.
-        \\
-    );
+    try writeStderr(usage_text);
 }
 
 fn printManifest(allocator: std.mem.Allocator, exe_path: []const u8, extension_id: []const u8) !void {
@@ -606,6 +677,40 @@ fn printManifest(allocator: std.mem.Allocator, exe_path: []const u8, extension_i
     try manifest.appendSlice("\n  ]\n}\n");
 
     try writeStdout(manifest.items);
+}
+
+fn isolatedPipeName(buf: []u8, token: []const u8) ![:0]const u8 {
+    if (token.len == 0) return isolated_pipe_name;
+    if (token.len > 32 or token[0] == '-') return error.InvalidProfileToken;
+    for (token) |c| {
+        if (!(c >= 'a' and c <= 'z') and !(c >= '0' and c <= '9') and c != '-') return error.InvalidProfileToken;
+    }
+    return std.fmt.bufPrintZ(buf, "{s}-{s}", .{ isolated_pipe_name, token });
+}
+
+test "issue: absent and empty profiles preserve the exact default pipe" {
+    var buf: [128]u8 = undefined;
+    const name = try isolatedPipeName(&buf, "");
+    try std.testing.expectEqualStrings("\\\\.\\pipe\\multiprompt-browser-isolated", name);
+    try std.testing.expectEqual(@as(u8, 0), name[name.len]);
+}
+
+test "issue: valid profile tokens select only their suffixed pipe" {
+    var buf: [128]u8 = undefined;
+    for ([_][]const u8{ "a", "0", "profile-5", "abcdefghijklmnopqrstuvwxyz012345", "a-" }) |token| {
+        const name = try isolatedPipeName(&buf, token);
+        const expected = try std.fmt.allocPrint(std.testing.allocator, "{s}-{s}", .{ isolated_pipe_name, token });
+        defer std.testing.allocator.free(expected);
+        try std.testing.expectEqualStrings(expected, name);
+        try std.testing.expectEqual(@as(u8, 0), name[name.len]);
+    }
+}
+
+test "issue: invalid profile tokens cannot form pipe paths" {
+    var buf: [128]u8 = undefined;
+    for ([_][]const u8{ "abcdefghijklmnopqrstuvwxyz0123456", "Upper", "-leading", "..\\x", "a/b", "a b", "a_b", "a.b", "a\x00b" }) |token| {
+        try std.testing.expectError(error.InvalidProfileToken, isolatedPipeName(&buf, token));
+    }
 }
 
 fn getEnvVar(buf: []u8, name: [*:0]const u8) ?[]const u8 {
@@ -999,6 +1104,22 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
 }
 
 fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {
+    const profile_mutex = if (g_profile_token.len > 0) blk: {
+        var name_buf: [128]u8 = undefined;
+        const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
+        const mutex = CreateMutexA(null, 0, name.ptr) orelse return error.ProfileMutexUnavailable;
+        const wait = WaitForSingleObject(mutex, 0xFFFFFFFF);
+        if (wait != 0 and wait != 0x80) {
+            _ = CloseHandle(mutex);
+            return error.ProfileMutexUnavailable;
+        }
+        break :blk mutex;
+    } else null;
+    defer if (profile_mutex) |mutex| {
+        _ = ReleaseMutex(mutex);
+        _ = CloseHandle(mutex);
+    };
+
     const stdin = std.Io.File.stdin().handle;
     const stdout = std.Io.File.stdout().handle;
     var context = HostContext{ .stdout = stdout };
@@ -1365,38 +1486,53 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
     var last_mismatch: ?[]u8 = null;
     defer if (last_mismatch) |reply| allocator.free(reply);
 
+    var version_deadline: ?u64 = null;
+    var request_attempts: u32 = browser_request_attempts;
     var attempt: u32 = 0;
-    while (attempt < browser_request_attempts) : (attempt += 1) {
-        const raw_response = requestBrowser(allocator, method, fields_json) catch |err| {
-            if (attempt + 1 < browser_request_attempts and isRetryableBrowserRequestError(err)) {
+    while (attempt < request_attempts) : (attempt += 1) {
+        const raw_response = requestBrowser(allocator, method, fields_json, null) catch |err| {
+            if (attempt + 1 < request_attempts and isRetryableBrowserRequestError(err)) {
                 Sleep(75 * (attempt + 1));
                 continue;
             }
 
             var message_buf: [128]u8 = undefined;
-            const message = std.fmt.bufPrint(
-                &message_buf,
-                "browser bridge request failed: {s}",
-                .{@errorName(err)},
-            ) catch "browser bridge request failed";
+            const message = if (g_profile_token.len > 0)
+                std.fmt.bufPrint(&message_buf, "no browser bridge for profile {s}: {s}", .{ g_profile_token, @errorName(err) }) catch "no browser bridge for profile"
+            else
+                std.fmt.bufPrint(&message_buf, "browser bridge request failed: {s}", .{@errorName(err)}) catch "browser bridge request failed";
             return makeBridgeCliErrorResponse(allocator, method, message, null);
         };
 
         const response = blk: {
-            const parsed = std.json.parseFromSlice(std.json.Value, allocator, raw_response, .{}) catch null;
-            if (parsed) |reply| {
-                defer reply.deinit();
-                if (reply.value == .object and !std.mem.eql(u8, method, "extensionReload")) {
-                    if (reply.value.object.get("extensionVersion")) |loaded| {
-                        if (loaded == .string and !std.mem.eql(u8, loaded.string, version)) {
-                            defer allocator.free(raw_response);
-                            var message_buf: [384]u8 = undefined;
-                            const message = std.fmt.bufPrint(
-                                &message_buf,
-                                "extension version {s} does not match bridge {s}: reload the extension in chrome://extensions; if it persists, install matching bridge/extension versions",
-                                .{ loaded.string, version },
-                            ) catch "extension/bridge version mismatch: reload the extension in chrome://extensions";
-                            break :blk try makeBridgeCliErrorResponse(allocator, method, message, null);
+            version_check: {
+                const parsed = std.json.parseFromSlice(std.json.Value, allocator, raw_response, .{}) catch null;
+                if (parsed) |reply| {
+                    defer reply.deinit();
+                    if (reply.value == .object and !std.mem.eql(u8, method, "extensionReload")) {
+                        if (reply.value.object.get("extensionVersion")) |loaded| {
+                            if (loaded == .string and !std.mem.eql(u8, loaded.string, version)) {
+                                if (version_deadline == null) version_deadline = GetTickCount64() + 15_000;
+                                const healed = waitForExtensionVersion(allocator, version_deadline.?);
+                                switch (versionHealDecision(getBool(reply.value.object.get("ok")), healed)) {
+                                    .original => return raw_response,
+                                    .retry => if (request_attempts == browser_request_attempts) {
+                                        request_attempts += 1;
+                                        allocator.free(raw_response);
+                                        continue;
+                                    },
+                                    .mismatch => {},
+                                }
+                                if (healed) break :version_check;
+                                defer allocator.free(raw_response);
+                                var message_buf: [384]u8 = undefined;
+                                const message = std.fmt.bufPrint(
+                                    &message_buf,
+                                    "extension version {s} does not match bridge {s}: reload the extension in chrome://extensions; if it persists, install matching bridge/extension versions",
+                                    .{ loaded.string, version },
+                                ) catch "extension/bridge version mismatch: reload the extension in chrome://extensions";
+                                break :blk try makeBridgeCliErrorResponse(allocator, method, message, null);
+                            }
                         }
                     }
                 }
@@ -1408,7 +1544,7 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
             break :blk raw_response;
         };
         if (isJsonObjectResponse(allocator, response)) {
-            if (replyIsInstanceMismatch(response) and attempt + 1 < browser_request_attempts) {
+            if (replyIsInstanceMismatch(response) and attempt + 1 < request_attempts) {
                 if (last_mismatch) |previous| allocator.free(previous);
                 last_mismatch = response;
                 Sleep(75 * (attempt + 1));
@@ -1424,7 +1560,7 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
         if (last_bad) |bad| allocator.free(bad);
         last_bad = response;
 
-        if (attempt + 1 < browser_request_attempts) {
+        if (attempt + 1 < request_attempts) {
             Sleep(75 * (attempt + 1));
         }
     }
@@ -1440,6 +1576,35 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
         "browser bridge returned an empty or non-JSON reply after retries",
         last_bad,
     );
+}
+
+const VersionHealDecision = enum { original, retry, mismatch };
+
+fn versionHealDecision(ok: bool, healed: bool) VersionHealDecision {
+    if (!healed) return .mismatch;
+    return if (ok) .original else .retry;
+}
+
+fn waitForExtensionVersion(allocator: std.mem.Allocator, deadline: u64) bool {
+    while (GetTickCount64() < deadline) {
+        Sleep(@intCast(@min(500, deadline -| GetTickCount64())));
+        if (GetTickCount64() >= deadline) break;
+        const response = requestBrowser(allocator, "tabs", "", @min(deadline, GetTickCount64() + 500)) catch continue;
+        defer allocator.free(response);
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const loaded = parsed.value.object.get("extensionVersion") orelse continue;
+        if (loaded == .string and std.mem.eql(u8, loaded.string, version)) return true;
+    }
+    return false;
+}
+
+test "issue: version healing never replays a successful command" {
+    try std.testing.expectEqual(VersionHealDecision.original, versionHealDecision(true, true));
+    try std.testing.expectEqual(VersionHealDecision.retry, versionHealDecision(false, true));
+    try std.testing.expectEqual(VersionHealDecision.mismatch, versionHealDecision(true, false));
+    try std.testing.expectEqual(VersionHealDecision.mismatch, versionHealDecision(false, false));
 }
 
 fn tabsReplyProblem(allocator: std.mem.Allocator, method: []const u8, window_id: ?i64, reply: []const u8) ?[]const u8 {
@@ -1544,7 +1709,51 @@ fn makeBridgeCliErrorResponse(
     return response.toOwnedSlice();
 }
 
-fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8) ![]u8 {
+fn buildBrowserRequest(allocator: std.mem.Allocator, id: []const u8, method: []const u8, reply_pipe_text: []const u8, window_id: ?i64, fields_json: []const u8) ![]u8 {
+    var request = std.array_list.Managed(u8).init(allocator);
+    errdefer request.deinit();
+
+    try request.appendSlice("{\"id\":");
+    try appendJsonString(&request, id);
+    try request.appendSlice(",\"method\":");
+    try appendJsonString(&request, method);
+    try request.appendSlice(",\"bridgeVersion\":\"" ++ version ++ "\",\"replyPipe\":");
+    try appendJsonString(&request, reply_pipe_text);
+    if (window_id) |wid| {
+        try request.print(",\"windowId\":{d}", .{wid});
+    }
+    if (fields_json.len > 0) {
+        try request.append(',');
+        try request.appendSlice(fields_json);
+    }
+    try request.append('}');
+
+    return request.toOwnedSlice();
+}
+
+test "issue: CLI requests advertise the bridge version and preserve request fields" {
+    const allocator = std.testing.allocator;
+    const request = try buildBrowserRequest(allocator, "cli-7-9", "navigate", "pipe\\reply", 42, "\"url\":\"https://example.test/\",\"newTab\":true");
+    defer allocator.free(request);
+    try std.testing.expect(std.mem.indexOf(u8, request, "\"bridgeVersion\":\"" ++ version ++ "\"") != null);
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, request, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("cli-7-9", root.get("id").?.string);
+    try std.testing.expectEqualStrings("navigate", root.get("method").?.string);
+    try std.testing.expectEqualStrings("pipe\\reply", root.get("replyPipe").?.string);
+    try std.testing.expectEqual(@as(i64, 42), root.get("windowId").?.integer);
+    try std.testing.expectEqualStrings("https://example.test/", root.get("url").?.string);
+    try std.testing.expect(root.get("newTab").?.bool);
+    const unscoped = try buildBrowserRequest(allocator, "id", "tabs", "pipe", null, "");
+    defer allocator.free(unscoped);
+    const unscoped_parsed = try std.json.parseFromSlice(std.json.Value, allocator, unscoped, .{});
+    defer unscoped_parsed.deinit();
+    try std.testing.expect(unscoped_parsed.value.object.get("windowId") == null);
+    try std.testing.expectEqualStrings(version, unscoped_parsed.value.object.get("bridgeVersion").?.string);
+}
+
+fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
     const pid = GetCurrentProcessId();
     const tick = GetTickCount64();
 
@@ -1559,7 +1768,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     const reply_pipe = CreateNamedPipeA(
         reply_pipe_name.ptr,
         PIPE_ACCESS_INBOUND,
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | (if (deadline != null) PIPE_NOWAIT else PIPE_WAIT),
         1,
         max_native_message,
         max_native_message,
@@ -1571,26 +1780,13 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     }
     defer _ = CloseHandle(reply_pipe);
 
-    var request = std.array_list.Managed(u8).init(allocator);
-    defer request.deinit();
+    const request = try buildBrowserRequest(allocator, id, method, reply_pipe_text, g_window_id, fields_json);
+    defer allocator.free(request);
 
-    try request.appendSlice("{\"id\":");
-    try appendJsonString(&request, id);
-    try request.appendSlice(",\"method\":");
-    try appendJsonString(&request, method);
-    try request.appendSlice(",\"replyPipe\":");
-    try appendJsonString(&request, reply_pipe_text);
-    if (g_window_id) |wid| {
-        try request.print(",\"windowId\":{d}", .{wid});
-    }
-    if (fields_json.len > 0) {
-        try request.append(',');
-        try request.appendSlice(fields_json);
-    }
-    try request.append('}');
-
+    var pipe_name_buf: [128]u8 = undefined;
+    const command_pipe_name = try isolatedPipeName(&pipe_name_buf, g_profile_token);
     const command_pipe = CreateFileA(
-        isolated_pipe_name,
+        command_pipe_name.ptr,
         GENERIC_WRITE,
         0,
         null,
@@ -1603,7 +1799,20 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     }
     defer _ = CloseHandle(command_pipe);
 
-    try writeAll(command_pipe, request.items);
+    try writeAll(command_pipe, request);
+    if (deadline) |until| {
+        while (GetTickCount64() < until) {
+            _ = ConnectNamedPipe(reply_pipe, null);
+            const response = readPipeMessage(allocator, reply_pipe) catch {
+                Sleep(10);
+                continue;
+            };
+            if (response.len > 0) return response;
+            allocator.free(response);
+            Sleep(10);
+        }
+        return error.ExtensionReloadTimeout;
+    }
     try waitForPipeClient(reply_pipe);
 
     return readPipeMessage(allocator, reply_pipe);
@@ -1938,9 +2147,44 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     return makeErrorResponse(allocator, id, "unknown method");
 }
 
-fn usageExit(code: u8) noreturn {
-    usage() catch {};
-    std.process.exit(code);
+fn badArgs(command: []const u8) noreturn {
+    const lookup = if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+    var usage_line: ?[]const u8 = null;
+    var lines = std.mem.splitScalar(u8, usage_text, '\n');
+    var commands = false;
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "Commands:")) commands = true;
+        if (!commands and !std.mem.eql(u8, lookup, "--window") and !std.mem.eql(u8, lookup, "--profile")) continue;
+        if (!std.mem.startsWith(u8, line, "  ") or std.mem.indexOfScalar(u8, lookup, ' ') != null) continue;
+        const candidate = line[2..];
+        if (std.mem.startsWith(u8, candidate, lookup) and
+            (candidate.len == lookup.len or candidate[lookup.len] == ' '))
+        {
+            usage_line = candidate[0 .. std.mem.indexOf(u8, candidate, "  ") orelse candidate.len];
+            break;
+        }
+    }
+    const alias = usage_line != null and !std.mem.eql(u8, command, lookup);
+    const parts = if (usage_line) |line|
+        [_][]const u8{ "usage: ", line, if (alias) " (alias: " else "", if (alias) command else "", if (alias) ")" else "" }
+    else
+        [_][]const u8{ "unknown command: ", command, "; run help for the list", "", "" };
+    writeStdout("{\"ok\":false,\"error\":\"bad_args\",\"message\":\"") catch {};
+    var buffer: [4096]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&buffer);
+    for (parts) |part| {
+        var offset: usize = 0;
+        while (offset < part.len) {
+            fixed.reset();
+            var escaped = std.array_list.Managed(u8).init(fixed.allocator());
+            const end = @min(offset + 128, part.len);
+            appendJsonString(&escaped, part[offset..end]) catch unreachable;
+            writeStdout(escaped.items[1 .. escaped.items.len - 1]) catch {};
+            offset = end;
+        }
+    }
+    writeStdout("\",\"hint\":\"Check the arguments; the app and pane are fine.\"}\n") catch {};
+    std.process.exit(2);
 }
 
 fn limitUsageExit(command: []const u8, default_limit: usize) noreturn {
@@ -1954,7 +2198,8 @@ fn limitUsageExit(command: []const u8, default_limit: usize) noreturn {
     std.process.exit(0);
 }
 
-fn buildNavigateFields(allocator: std.mem.Allocator, url: []const u8, args: anytype) ![]u8 {
+fn buildNavigateFields(allocator: std.mem.Allocator, args: anytype) ![]u8 {
+    var url: ?[]const u8 = null;
     var new_tab = false;
     var activate = false;
     while (args.next()) |arg| {
@@ -1962,14 +2207,17 @@ fn buildNavigateFields(allocator: std.mem.Allocator, url: []const u8, args: anyt
             new_tab = true;
         } else if (std.mem.eql(u8, arg, "--activate")) {
             activate = true;
+        } else if (url == null and !std.mem.startsWith(u8, arg, "--")) {
+            url = arg;
         } else {
             return error.InvalidArguments;
         }
     }
+    if (url == null or url.?.len == 0) return error.InvalidArguments;
     var fields = std.array_list.Managed(u8).init(allocator);
     errdefer fields.deinit();
     try fields.appendSlice("\"url\":");
-    try appendJsonString(&fields, url);
+    try appendJsonString(&fields, url.?);
     try fields.appendSlice(",\"newTab\":");
     try fields.appendSlice(if (new_tab) "true" else "false");
     try fields.appendSlice(",\"activate\":");
@@ -1978,38 +2226,42 @@ fn buildNavigateFields(allocator: std.mem.Allocator, url: []const u8, args: anyt
 }
 
 test "issue: navigate creates a tab only with --new-tab" {
+    const url = "https://example.test/q";
     const cases = .{
-        .{ "", false, false },
-        .{ "--new-tab", true, false },
-        .{ "--activate", false, true },
-        .{ "--activate --new-tab", true, true },
+        .{ url, false, false },
+        .{ url ++ " --new-tab", true, false },
+        .{ "--new-tab " ++ url, true, false },
+        .{ url ++ " --activate", false, true },
+        .{ "--activate " ++ url ++ " --new-tab", true, true },
     };
     inline for (cases) |case| {
         var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, case[0]);
         defer args.deinit();
-        const fields = try buildNavigateFields(std.testing.allocator, "https://example.test/\"quoted", &args);
+        const fields = try buildNavigateFields(std.testing.allocator, &args);
         defer std.testing.allocator.free(fields);
-        const expected = "\"url\":\"https://example.test/\\\"quoted\",\"newTab\":" ++
+        const expected = "\"url\":\"https://example.test/q\",\"newTab\":" ++
             (if (case[1]) "true" else "false") ++ ",\"activate\":" ++ (if (case[2]) "true" else "false");
         try std.testing.expectEqualStrings(expected, fields);
     }
-    var invalid = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, "--unknown");
-    defer invalid.deinit();
-    try std.testing.expectError(error.InvalidArguments, buildNavigateFields(std.testing.allocator, "https://example.test/", &invalid));
+    inline for (.{ "https://example.test/ --unknown", "--new-tab", "", "https://a.test/ https://b.test/" }) |bad| {
+        var invalid = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, bad);
+        defer invalid.deinit();
+        try std.testing.expectError(error.InvalidArguments, buildNavigateFields(std.testing.allocator, &invalid));
+    }
 }
 
 fn parseLimitArgs(args: anytype, command: []const u8, default_limit: usize) !usize {
     var limit = default_limit;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--limit")) {
-            const value = args.next() orelse usageExit(2);
-            limit = std.fmt.parseInt(usize, value, 10) catch usageExit(2);
+            const value = args.next() orelse badArgs(command);
+            limit = std.fmt.parseInt(usize, value, 10) catch badArgs(command);
         } else if (std.mem.eql(u8, arg, "--full")) {
             limit = 10_000_000;
         } else if (std.mem.eql(u8, arg, "--help")) {
             limitUsageExit(command, default_limit);
         } else {
-            usageExit(2);
+            badArgs(command);
         }
     }
     return limit;
@@ -2024,16 +2276,16 @@ fn parseLimitTabArgs(args: anytype, command: []const u8, default_limit: usize) !
     var parsed = LimitTabArgs{ .limit = default_limit };
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--limit")) {
-            const value = args.next() orelse usageExit(2);
-            parsed.limit = std.fmt.parseInt(usize, value, 10) catch usageExit(2);
+            const value = args.next() orelse badArgs(command);
+            parsed.limit = std.fmt.parseInt(usize, value, 10) catch badArgs(command);
         } else if (std.mem.eql(u8, arg, "--full")) {
             parsed.limit = 10_000_000;
         } else if (std.mem.eql(u8, arg, "--tab")) {
-            parsed.tab = args.next() orelse usageExit(2);
+            parsed.tab = args.next() orelse badArgs(command);
         } else if (std.mem.eql(u8, arg, "--help")) {
             limitUsageExit(command, default_limit);
         } else {
-            usageExit(2);
+            badArgs(command);
         }
     }
     return parsed;
@@ -2217,10 +2469,258 @@ fn writeAll(handle: windows.HANDLE, bytes: []const u8) !void {
     }
 }
 
+fn runProfileClone(allocator: std.mem.Allocator, args: anytype, command: []const u8) !void {
+    const source = args.next() orelse badArgs(command);
+    const dest = args.next() orelse badArgs(command);
+    if (args.next() != null) badArgs(command);
+    const result = browser_profile_clone.clone(allocator, source, dest, .{}) catch |err| {
+        const reason = switch (err) {
+            error.Browser_running => "source browser is running",
+            error.Insufficient_disk_space => "not enough disk space for the copy plus 1 GiB",
+            error.DiskSpaceQueryFailed => "cannot query destination disk space",
+            else => @errorName(err),
+        };
+        const message = try std.fmt.allocPrint(allocator, "profile-clone: {s}\n", .{reason});
+        defer allocator.free(message);
+        try writeStderr(message);
+        std.process.exit(1);
+    };
+    var response = std.array_list.Managed(u8).init(allocator);
+    defer response.deinit();
+    try response.appendSlice("{\"ok\":true,\"dest\":");
+    try appendJsonString(&response, dest);
+    try response.print(",\"files\":{d},\"bytes\":{d}}}\n", .{ result.files, result.bytes });
+    try writeStdout(response.items);
+}
+
 fn writeStdout(bytes: []const u8) !void {
     try writeAll(std.Io.File.stdout().handle, bytes);
 }
 
 fn writeStderr(bytes: []const u8) !void {
     try writeAll(std.Io.File.stderr().handle, bytes);
+}
+
+const CloneFixture = struct {
+    tmp: std.testing.TmpDir,
+    base: [:0]const u8,
+    source: []const u8,
+    dest: []const u8,
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const durable = [_][]const u8{
+        "Local State",                       "Default/Preferences",        "Default/Bookmarks",     "Default/Network/Cookies",
+        "Default/Service Worker/Database/y", "Default/Secure Preferences", "Default/Login Data",    "Default/Extensions/extension/data",
+        "Default/Local Storage/data",        "Default/IndexedDB/data",     "Default/Sessions/data", "Default/History",
+        "Default/Web Data",                  "Profile 1/Preferences",
+    };
+    const skipped = [_][]const u8{
+        "lockfile",                          "Default/Cache/data_1", "Default/Service Worker/CacheStorage/x",
+        "OptGuideOnDeviceModel/weights.bin", "Crashpad/z",           "root-metrics",
+    };
+
+    fn init() !CloneFixture {
+        var tmp = std.testing.tmpDir(.{});
+        errdefer tmp.cleanup();
+        const base = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+        errdefer allocator.free(base);
+        const source = try std.fmt.allocPrint(allocator, "{s}\\seed", .{base});
+        errdefer allocator.free(source);
+        const dest = try std.fmt.allocPrint(allocator, "{s}\\clone", .{base});
+        var self = CloneFixture{ .tmp = tmp, .base = base, .source = source, .dest = dest };
+        errdefer allocator.free(dest);
+        for (durable) |path| try self.write("seed", path, path);
+        for (skipped) |path| try self.write("seed", path, path);
+        for (browser_profile_clone.excluded_directories) |name| {
+            const path = try std.fmt.allocPrint(allocator, "Default/nested/{s}/data", .{name});
+            defer allocator.free(path);
+            try self.write("seed", path, path);
+        }
+        for (browser_profile_clone.excluded_files) |name| {
+            const path = try std.fmt.allocPrint(allocator, "Default/nested/{s}", .{name});
+            defer allocator.free(path);
+            try self.write("seed", path, path);
+        }
+        return self;
+    }
+
+    fn deinit(self: *CloneFixture) void {
+        allocator.free(self.dest);
+        allocator.free(self.source);
+        allocator.free(self.base);
+        self.tmp.cleanup();
+    }
+
+    fn write(self: *CloneFixture, root: []const u8, path: []const u8, data: []const u8) !void {
+        const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, path });
+        defer allocator.free(full);
+        if (std.mem.lastIndexOfScalar(u8, full, '/')) |end| try self.tmp.dir.createDirPath(io, full[0..end]);
+        try self.tmp.dir.writeFile(io, .{ .sub_path = full, .data = data });
+    }
+
+    fn same(self: *CloneFixture, root: []const u8, path: []const u8, expected: []const u8) !void {
+        const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, path });
+        defer allocator.free(full);
+        const bytes = try self.tmp.dir.readFileAlloc(io, full, allocator, .limited(4096));
+        defer allocator.free(bytes);
+        try std.testing.expectEqualStrings(expected, bytes);
+    }
+
+    fn absent(self: *CloneFixture, path: []const u8) !void {
+        try std.testing.expectError(error.FileNotFound, self.tmp.dir.access(io, path, .{}));
+    }
+
+    fn noOutput(self: *CloneFixture) !void {
+        try self.absent("clone");
+        try self.absent("clone.partial");
+    }
+
+    fn unchanged(self: *CloneFixture) !void {
+        for (durable) |path| try self.same("seed", path, path);
+        for (skipped) |path| try self.same("seed", path, path);
+        for (browser_profile_clone.excluded_directories) |name| {
+            const path = try std.fmt.allocPrint(allocator, "Default/nested/{s}/data", .{name});
+            defer allocator.free(path);
+            try self.same("seed", path, path);
+        }
+        for (browser_profile_clone.excluded_files) |name| {
+            const path = try std.fmt.allocPrint(allocator, "Default/nested/{s}", .{name});
+            defer allocator.free(path);
+            try self.same("seed", path, path);
+        }
+    }
+
+    fn success(self: *CloneFixture) !void {
+        const result = try browser_profile_clone.clone(allocator, self.source, self.dest, .{});
+        try std.testing.expectEqual(durable.len, result.files);
+        var bytes: u64 = 0;
+        for (durable) |path| {
+            try self.same("clone", path, path);
+            bytes += path.len;
+        }
+        try std.testing.expectEqual(bytes, result.bytes);
+        for (skipped) |path| {
+            const full = try std.fmt.allocPrint(allocator, "clone/{s}", .{path});
+            defer allocator.free(full);
+            try self.absent(full);
+        }
+        for (browser_profile_clone.excluded_directories) |name| {
+            const path = try std.fmt.allocPrint(allocator, "clone/Default/nested/{s}", .{name});
+            defer allocator.free(path);
+            try self.absent(path);
+        }
+        for (browser_profile_clone.excluded_files) |name| {
+            const path = try std.fmt.allocPrint(allocator, "clone/Default/nested/{s}", .{name});
+            defer allocator.free(path);
+            try self.absent(path);
+        }
+        try self.same("clone", ".multiprompt-clone-complete", "");
+        try self.absent("clone.partial");
+        try self.unchanged();
+    }
+};
+
+test "ISSUE-410 successful clone preserves durable bytes and excludes disposable data" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.success();
+    std.debug.print("ISSUE-410 successful clone passed\n", .{});
+}
+
+extern "kernel32" fn CreateFileW([*:0]const u16, u32, u32, ?*anyopaque, u32, u32, ?windows.HANDLE) callconv(.winapi) windows.HANDLE;
+
+test "ISSUE-410 held lock refuses as running without output directories" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    const lock = try std.fmt.allocPrint(std.testing.allocator, "{s}\\lockfile", .{fixture.source});
+    defer std.testing.allocator.free(lock);
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(std.testing.allocator, lock);
+    defer std.testing.allocator.free(wide);
+    const handle = CreateFileW(wide, GENERIC_READ, 0, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+    try std.testing.expect(handle != INVALID_HANDLE_VALUE);
+    defer _ = CloseHandle(handle);
+    try std.testing.expectError(error.Browser_running, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{}));
+    try fixture.noOutput();
+    std.debug.print("ISSUE-410 held lock passed\n", .{});
+}
+
+test "ISSUE-410 existing destination is preserved" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("clone", "sentinel", "preserved");
+    try std.testing.expectError(error.DestinationExists, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{}));
+    try fixture.same("clone", "sentinel", "preserved");
+    try fixture.absent("clone.partial");
+    try fixture.unchanged();
+    std.debug.print("ISSUE-410 existing destination passed\n", .{});
+}
+
+test "ISSUE-410 mid-copy failure removes partial and leaves source unchanged" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try std.testing.expectError(error.InjectedCopyFailure, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{ .fail_after_files = 2 }));
+    try fixture.noOutput();
+    try fixture.unchanged();
+    std.debug.print("ISSUE-410 mid-copy failure passed\n", .{});
+}
+
+test "ISSUE-410 stale partial is cleared before successful clone" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("clone.partial", "stale/nested", "old");
+    try fixture.success();
+    try fixture.absent("clone/stale");
+    std.debug.print("ISSUE-410 stale partial passed\n", .{});
+}
+
+test "ISSUE-410 invalid seeds and insufficient disk space are rejected" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try std.testing.expectError(error.Insufficient_disk_space, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{ .available_bytes = 1024 * 1024 * 1024 }));
+    try fixture.noOutput();
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/Local State");
+    try std.testing.expectError(error.MissingLocalState, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{}));
+    try fixture.noOutput();
+    try fixture.write("seed", "Local State", "Local State");
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/Default/Preferences");
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/Profile 1/Preferences");
+    try std.testing.expectError(error.MissingProfile, browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{}));
+    try fixture.noOutput();
+    std.debug.print("ISSUE-410 invalid seeds and disk space passed\n", .{});
+}
+
+test "ISSUE-410 long Unicode paths and missing lockfile clone successfully" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/lockfile");
+    const path = "Default/日本語/" ++ "long-segment/" ** 24 ++ "Bookmarks";
+    try fixture.write("seed", path, "durable unicode");
+    _ = try browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{});
+    try fixture.same("clone", path, "durable unicode");
+    try fixture.absent("clone.partial");
+    std.debug.print("ISSUE-410 long Unicode paths passed\n", .{});
+}
+
+test "ISSUE-410 overlapping paths cannot delete source through stale partial cleanup" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    const nested = try std.fmt.allocPrint(std.testing.allocator, "{s}\\nested", .{fixture.source});
+    defer std.testing.allocator.free(nested);
+    try std.testing.expectError(error.OverlappingPaths, browser_profile_clone.clone(std.testing.allocator, fixture.source, nested, .{}));
+    try fixture.unchanged();
+    std.debug.print("ISSUE-410 overlapping paths passed\n", .{});
+}
+
+test "ISSUE-410 extended paths normalize before overlapping path protection" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    const extended_source = try std.fmt.allocPrint(std.testing.allocator, "\\\\?\\{s}", .{fixture.source});
+    defer std.testing.allocator.free(extended_source);
+    const nested = try std.fmt.allocPrint(std.testing.allocator, "\\\\?\\{s}\\Default\\..\\nested", .{fixture.source});
+    defer std.testing.allocator.free(nested);
+    try std.testing.expectError(error.OverlappingPaths, browser_profile_clone.clone(std.testing.allocator, extended_source, nested, .{}));
+    _ = try browser_profile_clone.clone(std.testing.allocator, extended_source, fixture.dest, .{});
+    try fixture.same("clone", ".multiprompt-clone-complete", "");
+    try fixture.unchanged();
+    std.debug.print("ISSUE-410 extended paths passed\n", .{});
 }

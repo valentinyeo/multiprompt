@@ -34,7 +34,7 @@ test("plain CMD bypasses synthetic Ctrl+V and uses direct console input", () => 
 
 test("remaining local-console native paste verifies focus before Ctrl+V", () => {
   const nativePaste = functionBody("nativePasteToShell", "pasteClipboardToShell");
-  assert.match(nativePaste, /GetForegroundWindow\(\) != target_hwnd/,
+  assert.match(nativePaste, /if \(g_igsh354_paste_focus\) pasteFocusLanded\(target_hwnd\) else GetForegroundWindow\(\) == target_hwnd/,
     "dictation must not report success when shell focus never landed");
   assert.match(nativePaste, /synthesizeCtrlVIntoForeground\(\)/);
   assert.doesNotMatch(nativePaste, /VK_INSERT_U8|VK_SHIFT_U8/,

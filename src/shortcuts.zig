@@ -253,6 +253,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+W", .b = "Close active session completely (tmux kill + tab close)", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
     .{ .a = "Alt+U", .b = "Mark active session unread / restore blue dot", .header = false },
+    .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest at the bottom", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Never Show This Session", .b = "Toggle permanent Inbox exclusion for this tab (also right-click tab)", .header = false },
     .{ .a = "Alt+J / Alt+K", .b = "Next / previous Inbox session", .header = false },
     .{ .a = "Ctrl+Shift+Up / Down", .b = "Move active tab up / down", .header = false },
@@ -319,8 +320,13 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag tab: PINNED / RECENTS", .b = "Change its order inside the group or ungrouped list", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped PINNED or RECENTS", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (lock / pin / reconnect / mute / close / move / group)", .header = false },
+    .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
+    .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
     .{ .a = "Alt+C", .b = "Toggle formatted Chat View for this tab; screen copy remains the fallback", .header = false },
-    .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach an image: pick a file or paste one; its link goes in at the caret (Ctrl+K Chat View: Attach Image)", .header = false },
+    .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach images: pick, drop, or paste copied image files; links go in at the caret (Ctrl+K Chat View: Attach Image)", .header = false },
+    .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message above your reply; click × or press Esc with an empty composer to cancel", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the model and context header; also click the header", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click also has Copy / Select All / Copy Message)", .header = false },
@@ -330,6 +336,10 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: ...\"", .b = "Chat View mode: On Everywhere (every tab opens in Chat View), Per Tab (Alt+C per tab, default), or Off Everywhere (Chat View never shows, Alt+C does nothing)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
+    .{ .a = "Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Answer the live permission prompt: allow", .header = false },
+    .{ .a = "Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Answer the live permission prompt: always allow", .header = false },
+    .{ .a = "Alt+D in Chat View / Ctrl+K \"Chat View: Deny\"", .b = "Answer the live permission prompt: deny", .header = false },
+    .{ .a = "Esc (Chat View, while working) / Stop button / Ctrl+K \"Chat View: Stop the agent\"", .b = "Send Esc to the agent to stop its current run", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Reset this chat\" / right-click tab", .b = "Clear local bubbles and cache; reload history, keep unsent composer text", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Clear Offline Queue\"", .b = "Drop this tab's queued offline Chat View messages", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Retry Unsent Messages\"", .b = "Re-send this tab's Not-sent Chat View messages in order", .header = false },
@@ -525,7 +535,7 @@ test "Alt chords are never Chat View composer text, in either key form" {
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x51, false, false, 0));
 }
 
-test "Chat View windows toggle the palette on plain Ctrl+K without the hook (issue)" {
+test "Chat View windows toggle the palette on plain Ctrl+K without the hook" {
     try std.testing.expect(chatPaletteToggleKey(0x4B, true, false, false));
     try std.testing.expect(!chatPaletteToggleKey(0x4B, true, true, false));
     try std.testing.expect(!chatPaletteToggleKey(0x4B, true, false, true));
@@ -572,6 +582,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (foregroundHwndIsOurs(fg)) app_state.g_focus_user_action_tick = app_state.g_focus_input_tick;
         }
 
+        const find_key_up = kb.vkCode < app_state.g_chat_find_consumed.len and app_state.g_chat_find_consumed[kb.vkCode] and (wp == WM_KEYUP or wp == WM_SYSKEYUP);
+        if (find_key_up) {
+            app_state.g_chat_find_consumed[kb.vkCode] = false;
+        } else if (kb.vkCode < app_state.g_chat_find_consumed.len and app_state.g_chat_find_consumed[kb.vkCode] and !app_state.g_chat_find_open) return 1;
+
         if (kb.vkCode == 0x1B and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and app_state.g_account_login_active) {
             accountCancelSignIn();
             return 1;
@@ -617,6 +632,25 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = claimBrowserFocusPress(false, &app_state.g_palette_chord_held);
             return 1;
         }
+        if (find_key_up) return 1;
+        const find_modifier = kb.vkCode == 0x10 or kb.vkCode == 0x11 or kb.vkCode == 0x12 or (kb.vkCode >= 0xA0 and kb.vkCode <= 0xA5);
+        if (@import("chat_find.zig").ownsKeys(app_state.g_chat_find_open, foregroundIsOurs()) and !find_modifier) {
+            if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {
+                if (kb.vkCode < app_state.g_chat_find_consumed.len) app_state.g_chat_find_consumed[kb.vkCode] = true;
+                @import("chat_find_ui.zig").routeKey(kb.vkCode, isCtrlDown(), (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0, (kb.flags & 0x20) != 0);
+            }
+            return 1;
+        }
+        if (app_state.ISSUE_268_CHAT_FIND and !app_state.g_win_held and wp == WM_KEYDOWN and kb.vkCode == 0x46 and isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and (kb.flags & 0x20) == 0 and
+            chatViewOwnsInput() and app_state.g_edit_hwnd == null and foregroundIsOurs() and !activeBrowserHasForegroundFocus())
+        {
+            app_state.g_chat_find_open = true;
+            app_state.g_chat_find_consumed[kb.vkCode] = true;
+            _ = PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_FIND, 0, 0);
+            return 1;
+        }
+
         if (shouldArmStaleAltBrowserClickRepair(
             kb.vkCode,
             wp,
@@ -729,6 +763,13 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
         if (app_state.g_snippet_create_active) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        if (wp == WM_SYSKEYDOWN and isAltDown(kb.flags) and !isCtrlDown() and (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and
+            (kb.vkCode == 0x59 or kb.vkCode == 0x4F or kb.vkCode == 0x44) and foregroundIsOurs() and chatViewOwnsInput() and app_state.g_edit_hwnd == null)
+        {
+            const action: WPARAM = if (kb.vkCode == 0x59) 0 else if (kb.vkCode == 0x4F) 1 else 2;
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_PERMISSION, action, 0);
+            return 1;
+        }
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x43 and foregroundIsOurs() and
             !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and app_state.g_edit_hwnd == null)
         {
@@ -1110,6 +1151,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (!app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null and app_state.active_shell < app_state.shell_count) {
                     postActiveArchivedSessionInteraction();
+                    if ((kb.flags & 0x10) == 0 and activeShellHasForegroundFocus() and !app_state.g_chat_active) @import("inbox.zig").stampSessionUse(app_state.active_shell, true);
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_PASTE, app_state.active_shell, 0);
                     return 1;
                 }
@@ -1707,6 +1749,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
         }
     }
+    if (nCode >= 0 and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
+        const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if ((kb.flags & 0x10) == 0 and activeShellHasForegroundFocus() and
+            !app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+            !app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
+            app_state.g_edit_hwnd == null and !app_state.g_snippet_create_active and
+            @import("frequent.zig").shellInputKey(kb.vkCode))
+            @import("inbox.zig").stampSessionUse(app_state.active_shell, true);
+    }
     return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
 }
 
@@ -1850,6 +1901,58 @@ fn keyboardRecoveryHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI)
 }
 
 fn staleAltMouseHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    const toggle = @import("dblclick_toggle.zig");
+    const win = @import("win32.zig");
+    if (toggle.ISSUE_355_DOUBLE_CLICK_TOGGLE and nCode == HC_ACTION and
+        (wp == WM_LBUTTONDOWN or wp == WM_LBUTTONUP or wp == win.WM_MOUSEMOVE))
+    double_click: {
+        if (wp != WM_LBUTTONDOWN and app_state.g_shell_double_click_first == null and
+            app_state.g_shell_double_click_pending == null) break :double_click;
+        const ms: *const MSLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (wp != WM_LBUTTONDOWN) {
+            for ([_]*?app_state.ShellDoubleClick{ &app_state.g_shell_double_click_first, &app_state.g_shell_double_click_pending }) |state| {
+                const within = if (state.*) |click|
+                    toggle.doubleClick(ms.time -% click.time, @as(i64, ms.pt.x) - click.point.x, @as(i64, ms.pt.y) - click.point.y, win.GetDoubleClickTime(), win.GetSystemMetrics(36), win.GetSystemMetrics(37))
+                else
+                    null;
+                if (toggle.trackedMouseAction(wp == win.WM_MOUSEMOVE, within) == .clear) state.* = null;
+            }
+            if (wp == win.WM_MOUSEMOVE or (app_state.g_shell_double_click_first == null and
+                app_state.g_shell_double_click_pending == null)) break :double_click;
+        }
+        const down: i16 = @bitCast(@as(u16, 0x8000));
+        const eligible = (ms.flags & LLMHF_INJECTED) == 0 and !app_state.g_chat_active and
+            app_state.g_chat_view_mode != .nowhere and !app_state.g_search_active and !app_state.g_inbox_active and
+            !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
+            pointOverActiveShell(ms.pt) and win.IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0 and
+            (GetAsyncKeyState(0x11) & down) == 0 and (GetAsyncKeyState(0x10) & down) == 0 and
+            (GetAsyncKeyState(@as(i32, VK_MENU)) & down) == 0;
+        if (wp == WM_LBUTTONDOWN) {
+            app_state.g_shell_double_click_pending = null;
+            if (eligible) {
+                const click: app_state.ShellDoubleClick = .{ .time = ms.time, .point = ms.pt, .shell_id = app_state.shells[app_state.active_shell].shell_id };
+                if (app_state.g_shell_double_click_first) |first| {
+                    if (first.shell_id == click.shell_id and toggle.doubleClick(ms.time -% first.time, @as(i64, ms.pt.x) - first.point.x, @as(i64, ms.pt.y) - first.point.y, win.GetDoubleClickTime(), win.GetSystemMetrics(36), win.GetSystemMetrics(37))) {
+                        app_state.g_shell_double_click_pending = click;
+                        app_state.g_shell_double_click_first = null;
+                    } else app_state.g_shell_double_click_first = click;
+                } else app_state.g_shell_double_click_first = click;
+            } else app_state.g_shell_double_click_first = null;
+        } else if (wp == WM_LBUTTONUP) {
+            if (app_state.g_shell_double_click_pending) |click| {
+                if (!eligible) {
+                    app_state.g_shell_double_click_pending = null;
+                } else {
+                    app_state.g_shell_double_click_pending = null;
+                    if (app_state.shells[app_state.active_shell].shell_id == click.shell_id) {
+                        const packed_point: usize = (@as(usize, @as(u32, @bitCast(click.point.y))) << 32) | @as(u32, @bitCast(click.point.x));
+                        _ = PostMessageW(app_state.g_main_hwnd, win.WM_APP_SHELL_DOUBLE_CLICK, packed_point, @intCast(click.shell_id));
+                    }
+                }
+            }
+            if (!eligible) app_state.g_shell_double_click_first = null;
+        }
+    }
     if (nCode == HC_ACTION and (wp == WM_LBUTTONDOWN or wp == WM_RBUTTONDOWN)) {
         const ms: *const MSLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         if ((ms.flags & LLMHF_INJECTED) == 0) {

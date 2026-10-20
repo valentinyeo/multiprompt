@@ -4,6 +4,9 @@ const HANDLE = @import("win32.zig").HANDLE;
 const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
+const GetFileSizeEx = @import("win32.zig").GetFileSizeEx;
+const MoveFileExW = @import("win32.zig").MoveFileExW;
+const MOVEFILE_REPLACE_EXISTING = @import("win32.zig").MOVEFILE_REPLACE_EXISTING;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const GetLocalTime = @import("win32.zig").GetLocalTime;
@@ -12,6 +15,7 @@ const remoteHostForShell = @import("capacity.zig").remoteHostForShell;
 const tmuxHostLongLabel = @import("capacity.zig").tmuxHostLongLabel;
 const getSessionDir = @import("session.zig").getSessionDir;
 const win32OpenAppend = @import("file_io.zig").win32OpenAppend;
+const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const win32MakeDir = @import("file_io.zig").win32MakeDir;
 
@@ -84,10 +88,65 @@ pub fn debugLog(msg: []const u8) void {
     defer app_state.g_debug_log_mutex.unlock();
     var path_buf: [512]u8 = undefined;
     const path = getLogPath(&path_buf) orelse return;
-    const h = win32OpenAppend(path) orelse return;
+    const h = openAppendRotating(path) orelse return;
     defer _ = CloseHandle(h);
-    win32WriteAll(h, msg);
-    win32WriteAll(h, "\n");
+    var st: SYSTEMTIME = undefined;
+    GetLocalTime(&st);
+    var timestamp_buf: [23]u8 = undefined;
+    const timestamp = formatLogTimestamp(&timestamp_buf, st) orelse return;
+    var buf: [4096]u8 = undefined;
+    if (buildDebugLine(&buf, timestamp, msg)) |line| {
+        win32WriteAll(h, line);
+    } else {
+        @memcpy(buf[0..timestamp.len], timestamp);
+        buf[timestamp.len] = ' ';
+        win32WriteAll(h, buf[0 .. timestamp.len + 1]);
+        var pos: usize = 0;
+        while (pos < msg.len) {
+            const len = @min(buf.len, msg.len - pos);
+            for (msg[pos .. pos + len], 0..) |c, i| {
+                buf[i] = if (c == '\r' or c == '\n') ' ' else c;
+            }
+            win32WriteAll(h, buf[0..len]);
+            pos += len;
+        }
+        win32WriteAll(h, "\n");
+    }
+}
+
+fn buildDebugLine(buf: []u8, timestamp: []const u8, msg: []const u8) ?[]const u8 {
+    if (timestamp.len > buf.len or buf.len - timestamp.len < 2 or
+        msg.len > buf.len - timestamp.len - 2) return null;
+    @memcpy(buf[0..timestamp.len], timestamp);
+    buf[timestamp.len] = ' ';
+    const start = timestamp.len + 1;
+    for (msg, 0..) |c, i| {
+        buf[start + i] = if (c == '\r' or c == '\n') ' ' else c;
+    }
+    const end = start + msg.len;
+    buf[end] = '\n';
+    return buf[0 .. end + 1];
+}
+
+test "debug line has a timestamp and only a final newline" {
+    var buf: [128]u8 = undefined;
+    const timestamp = "2026-10-18 03:04:05.067";
+    const line = buildDebugLine(&buf, timestamp, "first\r\nsecond\nthird\rlast") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.startsWith(u8, line, timestamp ++ " "));
+    try std.testing.expectEqualStrings(timestamp ++ " first  second third last\n", line);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, line, "\n"));
+    try std.testing.expectEqual(@as(u8, '\n'), line[line.len - 1]);
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, line, "\r"));
+}
+
+test "debug line requires room for the complete message and final newline" {
+    const timestamp = "2026-10-18 03:04:05.067";
+    var buf: [28]u8 = undefined;
+    try std.testing.expectEqualStrings(timestamp ++ " abc\n", buildDebugLine(&buf, timestamp, "abc").?);
+    try std.testing.expect(buildDebugLine(buf[0..27], timestamp, "abc") == null);
+    try std.testing.expect(buildDebugLine(buf[0..24], timestamp, "") == null);
+    try std.testing.expect(buildDebugLine(buf[0..0], timestamp, "") == null);
+    try std.testing.expectEqualStrings(timestamp ++ " \n", buildDebugLine(buf[0..25], timestamp, "").?);
 }
 
 pub fn browserTrace(reason: []const u8) void {
@@ -120,19 +179,38 @@ pub fn debugLog2(prefix: []const u8, value: []const u8) void {
     if (prefix.len + value.len + 2 > buf.len) return;
     @memcpy(buf[0..prefix.len], prefix);
     @memcpy(buf[prefix.len .. prefix.len + value.len], value);
-    buf[prefix.len + value.len] = '\n';
     debugLog(buf[0 .. prefix.len + value.len]);
+}
+
+pub fn formatLogTimestamp(buf: []u8, st: SYSTEMTIME) ?[]const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}",
+        .{ st.year, st.month, st.day, st.hour, st.minute, st.second, st.milliseconds },
+    ) catch null;
+}
+
+test "log timestamp formats local date and time with milliseconds" {
+    const st: SYSTEMTIME = .{
+        .year = 2026,
+        .month = 10,
+        .day_of_week = 0,
+        .day = 18,
+        .hour = 3,
+        .minute = 4,
+        .second = 5,
+        .milliseconds = 67,
+    };
+    var buf: [23]u8 = undefined;
+    try std.testing.expectEqualStrings("2026-10-18 03:04:05.067", formatLogTimestamp(&buf, st).?);
+    try std.testing.expect(formatLogTimestamp(buf[0..22], st) == null);
 }
 
 fn writeAuditTimestamp(h: HANDLE) void {
     var st: SYSTEMTIME = undefined;
     GetLocalTime(&st);
     var buf: [64]u8 = undefined;
-    const s = std.fmt.bufPrint(
-        &buf,
-        "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}",
-        .{ st.year, st.month, st.day, st.hour, st.minute, st.second, st.milliseconds },
-    ) catch return;
+    const s = formatLogTimestamp(&buf, st) orelse return;
     win32WriteAll(h, s);
 }
 
@@ -165,6 +243,17 @@ pub fn writeAuditU64(h: HANDLE, value: u64) void {
     win32WriteAll(h, buf[0..pos]);
 }
 
+pub fn logNeedsRotate(size: u64) bool {
+    return size > 20 * 1024 * 1024;
+}
+
+test "logs rotate only above twenty MiB" {
+    try std.testing.expect(!logNeedsRotate(0));
+    try std.testing.expect(!logNeedsRotate(20 * 1024 * 1024));
+    try std.testing.expect(logNeedsRotate(20 * 1024 * 1024 + 1));
+    try std.testing.expect(logNeedsRotate(std.math.maxInt(u64)));
+}
+
 pub fn openSessionAudit() ?HANDLE {
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| {
@@ -172,7 +261,24 @@ pub fn openSessionAudit() ?HANDLE {
     }
     var path_buf: [512]u8 = undefined;
     const path = getSessionAuditPath(&path_buf) orelse return null;
-    return win32OpenAppend(path);
+    return openAppendRotating(path);
+}
+
+fn openAppendRotating(path: []const u8) ?HANDLE {
+    const h = win32OpenAppend(path) orelse return null;
+    var size: i64 = 0;
+    if (GetFileSizeEx(h, &size) != 0 and size >= 0 and logNeedsRotate(@intCast(size))) {
+        _ = CloseHandle(h);
+        var old_path_buf: [516]u8 = undefined;
+        const old_path = std.fmt.bufPrint(&old_path_buf, "{s}.old", .{path}) catch return null;
+        var wide_buf: [520]u16 = undefined;
+        var old_wide_buf: [520]u16 = undefined;
+        const wide = win32WidePath(&wide_buf, path) orelse return null;
+        const old_wide = win32WidePath(&old_wide_buf, old_path) orelse return null;
+        _ = MoveFileExW(wide.ptr, old_wide.ptr, MOVEFILE_REPLACE_EXISTING);
+        return win32OpenAppend(path);
+    }
+    return h;
 }
 
 pub fn writeAuditHeader(h: HANDLE, reason: []const u8, count: u32) void {

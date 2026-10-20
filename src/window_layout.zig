@@ -214,7 +214,7 @@ fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, ra
 }
 
 pub fn chatWorkingIndicatorH() i32 {
-    return uiScaled(18);
+    return uiScaled(if (app_state.ISSUE_265_WORKING_BAR) @as(i32, 22) else @as(i32, 18));
 }
 
 pub fn chatWorkingIndicatorText() []const u16 {
@@ -223,7 +223,28 @@ pub fn chatWorkingIndicatorText() []const u16 {
     return &.{};
 }
 
-fn chatWorkingIndicatorInvalidate() void {
+pub fn chatWorkingTimesPoll() void {
+    if (!app_state.ISSUE_265_WORKING_BAR) return;
+    const now = @import("win32.zig").GetTickCount64();
+    for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
+        const working = shell.activity == .active or shell.console_working or (app_state.g_chat_active and i == app_state.active_shell and (app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0));
+        shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, now);
+    }
+}
+
+pub fn chatWorkingBarVisible() bool {
+    return app_state.ISSUE_265_WORKING_BAR and app_state.g_chat_active and app_state.active_shell < app_state.shell_count and
+        (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0);
+}
+
+pub fn chatWorkingBarTick() void {
+    const previous = app_state.g_chat_working_applied;
+    const previous_len = app_state.g_chat_working_applied_len;
+    chatWorkingIndicatorSync();
+    if (chatWorkingBarVisible() and previous_len == app_state.g_chat_working_applied_len and std.mem.eql(u16, previous[0..previous_len], app_state.g_chat_working_applied[0..previous_len])) chatWorkingIndicatorInvalidate();
+}
+
+pub fn chatWorkingIndicatorInvalidate() void {
     if (app_state.g_main_hwnd == null or !app_state.g_chat_active) return;
     const layout = chatViewLayout();
     var rc = RECT{
@@ -236,11 +257,72 @@ fn chatWorkingIndicatorInvalidate() void {
 }
 
 pub fn chatWorkingIndicatorSync() void {
-    const text = chatWorkingIndicatorText();
+    var formatted: [128]u16 = undefined;
+    const visible = chatWorkingBarVisible();
+    if (app_state.ISSUE_265_WORKING_BAR) {
+        const running = visible and app_state.g_main_hwnd != null;
+        if (running != app_state.g_chat_working_timer_running) {
+            if (running) {
+                app_state.g_chat_working_timer_running = @import("win32.zig").SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_WORKING, 1000, null) != 0;
+                if (app_state.g_chat_working_timer_running) debugLog("[chat] working timer started");
+            } else {
+                _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_WORKING);
+                app_state.g_chat_working_timer_running = false;
+                debugLog("[chat] working timer stopped");
+            }
+        }
+    }
+    const text = if (!app_state.ISSUE_265_WORKING_BAR) chatWorkingIndicatorText() else if (visible) @import("chat_working.zig").workingBarText(
+        app_state.g_chat_working_text[0..app_state.g_chat_screen_status_len],
+        if (app_state.shells[app_state.active_shell].working_since_ms == 0) 0 else @import("win32.zig").GetTickCount64() -| app_state.shells[app_state.active_shell].working_since_ms,
+        &formatted,
+    ) else &.{};
     if (text.len == app_state.g_chat_working_applied_len and std.mem.eql(u16, text, app_state.g_chat_working_applied[0..text.len])) return;
     app_state.g_chat_working_applied_len = text.len;
     @memcpy(app_state.g_chat_working_applied[0..text.len], text);
     chatWorkingIndicatorInvalidate();
+}
+
+pub fn chatPermissionVisible() bool {
+    return app_state.g_chat_active and app_state.active_shell < app_state.shell_count and
+        app_state.g_chat_permission_sid == app_state.shells[app_state.active_shell].shell_id and app_state.g_chat_permission.count > 0 and
+        !app_state.shells[app_state.active_shell].permission_answered;
+}
+
+pub fn chatPermissionRect(action: @import("chat_permission.zig").Action) ?RECT {
+    if (!chatPermissionVisible() or app_state.g_chat_permission.digit(action) == null) return null;
+    const layout = chatViewLayout();
+    var count: i32 = 0;
+    var index: i32 = 0;
+    for (std.meta.tags(@import("chat_permission.zig").Action)) |item| {
+        if (app_state.g_chat_permission.digit(item) != null) {
+            if (@intFromEnum(item) < @intFromEnum(action)) index += 1;
+            count += 1;
+        }
+    }
+    const gap = uiScaled(8);
+    const width = @divTrunc(layout.transcript.right - layout.transcript.left - gap * (count - 1), count);
+    const left = layout.transcript.left + index * (width + gap);
+    return .{ .left = left, .right = left + width, .top = layout.stop_btn.top, .bottom = layout.stop_btn.bottom };
+}
+
+fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
+    const old_font = SelectObject(hdc, ensureChatFont());
+    defer _ = SelectObject(hdc, old_font);
+    for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
+        const rc = chatPermissionRect(action) orelse continue;
+        const text = app_state.g_chat_permission.optionText(action) orelse continue;
+        paintChatSurface(hdc, rc, app_state.g_chat_input_color, border, uiScaled(6));
+        _ = SetTextColor(hdc, if (app_state.shells[app_state.active_shell].permission_answered) customColorOr("hint", RGB(135, 139, 147)) else customColorOr("text", if (app_state.g_light_theme) RGB(40, 44, 52) else RGB(220, 224, 232)));
+        var text_rc = rc;
+        text_rc.left += uiScaled(6);
+        text_rc.right -= uiScaled(6);
+        _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | @import("win32.zig").DT_END_ELLIPSIS);
+        if (verboseLoggingEnabled()) {
+            var log: [128]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[chat] permission rect {s} {d},{d},{d},{d}", .{ @import("chat_permission.zig").labels[i], rc.left, rc.top, rc.right, rc.bottom }) catch "");
+        }
+    }
 }
 
 pub fn paintChatView(hdc: HANDLE) void {
@@ -250,9 +332,26 @@ pub fn paintChatView(hdc: HANDLE) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const card_border = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
     paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, uiScaled(CHAT_BUBBLE_RADIUS));
+    if (app_state.g_chat_reply_len > 0) {
+        const old_font = SelectObject(hdc, ensureChatFont());
+        defer _ = SelectObject(hdc, old_font);
+        var preview = layout.composer_card;
+        preview.left += uiScaled(14);
+        preview.top += uiScaled(4);
+        preview.right -= uiScaled(40);
+        preview.bottom = layout.composer_card.top + @import("chat_composer.zig").chatReplyBarH();
+        _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+        _ = DrawTextW(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        var cancel = @import("chat_composer.zig").chatReplyCancelRect();
+        _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
     const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
     paintChatButton(hdc, layout.send_btn, has_text);
     paintChatAttachButton(hdc, layout.attach_btn);
+    if (chatPermissionVisible()) {
+        paintChatPermission(hdc, card_border);
+        return;
+    }
     if (app_state.g_chat_working_applied_len == 0) return;
     const old_font = SelectObject(hdc, ensureChatFont());
     defer _ = SelectObject(hdc, old_font);
@@ -262,6 +361,17 @@ pub fn paintChatView(hdc: HANDLE) void {
         .right = layout.transcript.right,
         .bottom = layout.composer_card.top,
     };
+    if (chatWorkingBarVisible()) {
+        paintChatSurface(hdc, layout.stop_btn, app_state.g_chat_input_color, card_border, uiScaled(6));
+        var stop_text = layout.stop_btn;
+        _ = SetTextColor(hdc, customColorOr("text", if (app_state.g_light_theme) RGB(40, 44, 52) else RGB(220, 224, 232)));
+        _ = DrawTextW(hdc, L("Stop"), -1, &stop_text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        line.right = layout.stop_btn.left - uiScaled(10);
+        if (verboseLoggingEnabled()) {
+            var log: [128]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ layout.stop_btn.left, layout.stop_btn.top, layout.stop_btn.right, layout.stop_btn.bottom }) catch "");
+        }
+    }
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(135, 139, 147)));
     _ = DrawTextW(hdc, &app_state.g_chat_working_applied, @intCast(app_state.g_chat_working_applied_len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }

@@ -131,3 +131,26 @@ test('healthy JSON, fragmented responses and documented app acknowledgements rem
   }
   failed(await run(['status'], 'ok\n'), /invalid reply/, /[Rr]econnect/);
 });
+
+test('issue: a bridge usage reply is a wrong-arguments error, not a reconnect request', async () => {
+  const usage = 'multiprompt-browser [--window <id>] <command> [args]\r\n\r\nGlobal flags (before the command):\r\n';
+  const result = await run(['navigate', '--new-tab', 'https://valentinyeo.com/'], usage);
+  assert.equal(result.code, 1);
+  const reply = JSON.parse(result.stdout);
+  assert.equal(reply.error, 'bad_args');
+  assert.match(result.stderr, /rejected the arguments of 'navigate'/);
+  assert.doesNotMatch(result.stderr, /[Rr]estart|[Rr]econnect|reload/);
+});
+
+test('issue: an invalid reply names what came back', async () => {
+  const result = await run(['tabs'], 'garbled text\n{"ok":true}');
+  failed(result, /Reply started with: garbled text/, /[Rr]estart/);
+});
+
+test('issue: the bridge bad_args reply keeps its own hint', async () => {
+  const reply = '{"ok":false,"error":"bad_args","message":"usage: navigate <url> [--new-tab] [--activate]","hint":"Check the URL and flags; the app and pane are fine."}\n';
+  const result = await run(['navigate', '--bogus'], reply);
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stdout).error, 'bad_args');
+  assert.doesNotMatch(result.stderr, /[Rr]estart|[Rr]econnect|[Rr]eload/);
+});

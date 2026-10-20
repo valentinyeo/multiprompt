@@ -283,7 +283,7 @@ test("the bridge CLI retries a request that reached the wrong bridge instance", 
     bridgeZig.indexOf("fn requestBrowserWithRetry("),
     bridgeZig.indexOf("const instance_mismatch_markers"),
   );
-  assert.match(retry, /if \(replyIsInstanceMismatch\(response\) and attempt \+ 1 < browser_request_attempts\)/,
+  assert.match(retry, /if \(replyIsInstanceMismatch\(response\) and attempt \+ 1 < request_attempts\)/,
     "an instance-ownership reply must be retried on the next pipe instance");
   const predicate = bridgeZig.slice(
     bridgeZig.indexOf("fn replyIsInstanceMismatch("),

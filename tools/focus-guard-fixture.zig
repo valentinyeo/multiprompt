@@ -24,6 +24,8 @@ fn win(id: usize) HANDLE {
     return @ptrFromInt(id);
 }
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
+var g_chat_active = false;
+var g_chat_composer_hwnd: HANDLE = @ptrFromInt(3);
 var shell_count: usize = 2;
 var active_shell: usize = 0;
 var shells = [_]struct { hwnd: HANDLE, browser_hwnd: HANDLE, shell_id: u32 }{
@@ -115,6 +117,8 @@ const FocusNative = struct {
     }
 };
 fn reset() void {
+    g_chat_active = false;
+    g_chat_composer_hwnd = win(3);
     clock = 10000;
     foreground = win(2);
     keyboard_focus = win(2);
@@ -278,6 +282,41 @@ test "activation with no typing history refocuses the active console, then expir
     try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(5)));
     clock += 1001;
     try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(2)));
+}
+
+test "ISSUE-372 Alt Tab restores the composer after foreign input without granting pane focus" {
+    for ([_]bool{ false, true }) |atomic_input| {
+        reset();
+        g_chat_active = true;
+        foreground = win(1);
+        keyboard_focus = win(3);
+        focusGuardNoteInput(win(3), clock, true);
+        clock += 1;
+        foreground = win(9);
+        if (atomic_input) {
+            g_focus_foreign_input_tick.store(clock, .release);
+        } else {
+            focusGuardNoteInput(null, clock, true);
+        }
+        foreground = win(1);
+        keyboard_focus = win(1);
+        focusGuardNoteActivation();
+        try std.testing.expectEqual(win(3), SetFocus(win(3)));
+        try std.testing.expectEqual(win(3), keyboard_focus);
+        try std.testing.expectEqual(@as(HANDLE, null), g_focus_return_hwnd);
+        try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(4)));
+        clock += 1001;
+        try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(3)));
+        g_chat_active = false;
+        focusGuardNoteActivation();
+        try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(3)));
+        try std.testing.expectEqual(win(2), SetFocus(win(2)));
+        g_chat_active = true;
+        g_chat_composer_hwnd = null;
+        focusGuardNoteActivation();
+        try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(3)));
+        try std.testing.expectEqual(win(2), SetFocus(win(2)));
+    }
 }
 
 test "activation with no known surface falls back to the active console" {

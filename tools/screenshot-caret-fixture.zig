@@ -6,6 +6,24 @@ const TIMER_CHAT_FOREGROUND_RETRY = 1;
 const TIMER_REFOCUS = 2;
 const TIMER_SHOT_FOCUS = 42;
 const SW_SHOW = 5;
+const GA_ROOT = 2;
+const BOOL = u32;
+const GUITHREADINFO = struct { cbSize: u32, hwndFocus: HANDLE };
+var reparented = false;
+var hosted_console = false;
+var local_focus_missing = false;
+var deny_gui_info = false;
+fn GetAncestor(hwnd: HANDLE, _: u32) HANDLE {
+    return if (hwnd == 20 or (hwnd == 40 and (reparented or hosted_console))) g_main_hwnd else hwnd;
+}
+fn IsChild(parent: HANDLE, hwnd: HANDLE) u32 {
+    return if ((parent == 10 and (hwnd == 20 or hwnd == 40)) or (parent == 40 and hwnd == 41)) 1 else 0;
+}
+fn GetGUIThreadInfo(_: u32, info: *GUITHREADINFO) u32 {
+    if (deny_gui_info) return 0;
+    info.hwndFocus = keyboard_focus;
+    return 1;
+}
 var active_shell: usize = 0;
 var shells = [_]struct { shell_id: u32, hwnd: HANDLE }{ .{ .shell_id = 123, .hwnd = 40 }, .{ .shell_id = 456, .hwnd = 50 } };
 var g_chat_composer_hwnd: HANDLE = 20;
@@ -67,7 +85,7 @@ fn GetForegroundWindow() HANDLE {
     return foreground;
 }
 fn GetFocus() HANDLE {
-    return keyboard_focus;
+    return if (local_focus_missing) null else keyboard_focus;
 }
 fn GetWindowThreadProcessId(hwnd: HANDLE, _: ?*u32) u32 {
     return if (hwnd == 30) 2 else if (hwnd == 40) 3 else 1;
@@ -97,12 +115,12 @@ fn SetForegroundWindow(hwnd: HANDLE) u32 {
     std.debug.assert(hwnd == g_focus_paste_target or hwnd == g_main_hwnd);
     foreground_calls += 1;
     if (deny_foreground or (foreground == 30 and (!attached[2] or alt_down == 0))) return 0;
-    if (hwnd == 40 and !attached[3]) return 0;
+    if (hwnd == 40 and (reparented or !attached[3])) return 0;
     foreground = hwnd;
     return 1;
 }
 fn SetFocus(hwnd: HANDLE) HANDLE {
-    if (foreground != (if (g_chat_active) g_main_hwnd else hwnd) or (hwnd == 40 and !attached[3])) return null;
+    if (foreground != (if (g_chat_active or reparented) g_main_hwnd else hwnd) or (hwnd == 40 and !attached[3])) return null;
     keyboard_focus = hwnd;
     focus_calls += 1;
     return hwnd;
@@ -131,6 +149,11 @@ fn altqPtr(hwnd: HANDLE) usize {
 
 fn reset() void {
     active_shell = 0;
+    reparented = false;
+    hosted_console = false;
+    local_focus_missing = false;
+    deny_gui_info = false;
+    g_igsh354_paste_focus = true;
     clock = 1000;
     g_chat_active = true;
     g_edit_hwnd = null;
@@ -251,4 +274,59 @@ test "foreground failure retries without losing caret, then cancels on new input
         try std.testing.expectEqual(@as(u32, 0), foreground_calls);
         try std.testing.expect(!timer_armed and g_focus_paste_target == null);
     }
+}
+
+test "reparented console uses its frame for activation and its own input queue for typing" {
+    reset();
+    reparented = true;
+    local_focus_missing = true;
+    g_chat_active = false;
+    requestShotFocus(0, null);
+    try std.testing.expectEqual(g_main_hwnd, foreground);
+    try std.testing.expectEqual(shells[0].hwnd, keyboard_focus);
+    try std.testing.expect(g_shell_focused and !timer_armed);
+    try std.testing.expect(!pasteFocusLanded(null));
+    deny_gui_info = true;
+    try std.testing.expect(!pasteFocusLanded(shells[0].hwnd));
+    deny_gui_info = false;
+    keyboard_focus = 10;
+    try std.testing.expect(!pasteFocusLanded(shells[0].hwnd));
+    keyboard_focus = 41;
+    try std.testing.expect(pasteFocusLanded(shells[0].hwnd));
+    foreground = 30;
+    try std.testing.expect(!pasteFocusLanded(shells[0].hwnd));
+}
+
+test "disabled paste repair retains the old child activation behavior" {
+    reset();
+    g_igsh354_paste_focus = false;
+    g_chat_active = false;
+    requestShotFocus(0, null);
+    try std.testing.expectEqual(shells[0].hwnd, foreground);
+    try std.testing.expect(g_shell_focused and !timer_armed);
+}
+
+test "a hosted console that can be foreground takes the keyboard itself with the paste repair on" {
+    reset();
+    hosted_console = true;
+    g_chat_active = false;
+    requestShotFocus(0, null);
+    try std.testing.expectEqual(shells[0].hwnd, foreground);
+    try std.testing.expectEqual(shells[0].hwnd, keyboard_focus);
+    try std.testing.expect(g_shell_focused and !timer_armed);
+}
+
+test "a foreground hosted console counts as landed without GUI thread focus" {
+    reset();
+    hosted_console = true;
+    g_chat_active = false;
+    requestShotFocus(0, null);
+    try std.testing.expectEqual(shells[0].hwnd, foreground);
+    deny_gui_info = true;
+    try std.testing.expect(pasteFocusLanded(shells[0].hwnd));
+    keyboard_focus = null;
+    deny_gui_info = false;
+    try std.testing.expect(pasteFocusLanded(shells[0].hwnd));
+    foreground = 30;
+    try std.testing.expect(!pasteFocusLanded(shells[0].hwnd));
 }

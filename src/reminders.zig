@@ -182,6 +182,9 @@ pub fn loadRemindersIfNeeded() void {
         e.pinned_top = json_reader.boolTrue(obj, "pinned_top");
         e.locked = json_reader.boolTrue(obj, "locked");
         e.favorite = json_reader.boolTrue(obj, "favorite");
+        e.last_used = json_reader.uint(obj, "used");
+        e.input = json_reader.uint(obj, "input");
+        e.visits = json_reader.visits(obj);
         e.created_at = json_reader.uint(obj, "created");
         e.tmux_persisted = json_reader.boolTrue(obj, "persisted");
         e.tmux_host = @intCast(@min(json_reader.uint(obj, "host"), 2));
@@ -326,6 +329,12 @@ fn saveReminders() bool {
             @memcpy(json_buf[pos .. pos + pinned.len], pinned);
             pos += pinned.len;
         }
+        const used = ",\"used_unix\":true,\"used\":";
+        @memcpy(json_buf[pos .. pos + used.len], used);
+        pos += used.len;
+        pos += writeUintTo(json_buf[pos..], e.last_used);
+        pos += @import("frequent.zig").writeInput(json_buf[pos..], e.input);
+        pos += @import("frequent.zig").writeVisits(json_buf[pos..], e.visits);
         if (e.favorite) {
             const favorite = ",\"favorite\":true";
             @memcpy(json_buf[pos .. pos + favorite.len], favorite);
@@ -380,6 +389,9 @@ fn reminderFromShell(idx: usize, due_at: u64) ?ReminderEntry {
     e.tmux_host = app_state.shells[idx].tmux_host;
     e.tmux_persisted = true;
     e.favorite = app_state.shells[idx].favorite;
+    e.last_used = app_state.shells[idx].last_used;
+    e.input = app_state.shells[idx].input;
+    e.visits = app_state.shells[idx].visits;
 
     e.name_len = @intCast(@min(app_state.shells[idx].name_len, @as(u32, 63)));
     for (0..e.name_len) |j| {
@@ -499,6 +511,9 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
             app_state.shells[si].name_source = .manual;
         }
         app_state.shells[si].favorite = e.favorite;
+        app_state.shells[si].last_used = e.last_used;
+        app_state.shells[si].input = e.input;
+        app_state.shells[si].visits = e.visits;
         if (e.batch_due != 0) {
             app_state.shells[si].pinned_top = e.pinned_top;
             app_state.shells[si].locked = e.locked;

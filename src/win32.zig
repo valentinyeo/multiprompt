@@ -269,10 +269,12 @@ pub const WM_APP_BROWSER_DOCKED: u32 = WM_APP + 152;
 pub const WM_APP_LAYOUT_READY: u32 = WM_APP + 150;
 pub const WM_APP_FAVORITE_TOGGLE: u32 = WM_APP + 200;
 pub const WM_APP_UPDATE_CHANGED: u32 = WM_APP + 201;
+pub const WM_APP_CHAT_PERMISSION: u32 = WM_APP + 203;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;
 pub const WM_MOUSEWHEEL: u32 = 0x020A;
+pub const WM_MOUSEHWHEEL: u32 = 0x020E;
 pub const WM_POWERBROADCAST: u32 = 0x0218;
 pub const PBT_APMSUSPEND: WPARAM = 0x0004;
 pub const PBT_APMRESUMESUSPEND: WPARAM = 0x0007;
@@ -305,6 +307,7 @@ pub const TIMER_AI_PACE: usize = 24;
 pub const TIMER_SYSTEM_THEME: usize = 25;
 pub const TIMER_BROWSER_ENGINE_SWITCH: usize = 26;
 pub const TIMER_CHAT_REFRESH: usize = 27;
+pub const TIMER_CHAT_WORKING: usize = 43;
 pub const TIMER_POWER_IDLE: usize = 28;
 pub const TIMER_INBOX_PUBLISH: usize = 29;
 pub const TIMER_VOICE_POLL: usize = 30;
@@ -556,6 +559,7 @@ pub extern "user32" fn SetCapture(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn ReleaseCapture() callconv(WINAPI) BOOL;
 pub extern "user32" fn DestroyWindow(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetWindowTextW(HANDLE, [*]u16, i32) callconv(WINAPI) i32;
+pub extern "user32" fn InternalGetWindowText(HANDLE, [*]u16, i32) callconv(WINAPI) i32;
 pub extern "user32" fn GetWindowTextLengthW(HANDLE) callconv(WINAPI) i32;
 pub extern "user32" fn SetWindowTextW(HANDLE, LPCWSTR) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetForegroundWindow() callconv(WINAPI) HANDLE;
@@ -618,6 +622,8 @@ pub extern "kernel32" fn GetFileAttributesW(LPCWSTR) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn SetErrorMode(DWORD) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn SearchPathW(?LPCWSTR, LPCWSTR, ?LPCWSTR, DWORD, [*]u16, ?*?[*]u16) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn GetLastError() callconv(WINAPI) DWORD;
+pub extern "kernel32" fn ExitProcess(UINT) callconv(WINAPI) noreturn;
+pub extern "kernel32" fn QueryFullProcessImageNameW(HANDLE, DWORD, [*]u16, *DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn TerminateProcess(HANDLE, UINT) callconv(WINAPI) BOOL;
 pub extern "dwmapi" fn DwmSetWindowAttribute(HANDLE, DWORD, *const anyopaque, DWORD) callconv(WINAPI) i32;
 pub extern "dwmapi" fn DwmGetWindowAttribute(HANDLE, DWORD, *anyopaque, DWORD) callconv(WINAPI) i32;
@@ -788,6 +794,7 @@ pub extern "kernel32" fn ReadFile(hFile: HANDLE, lpBuffer: [*]u8, nNumberOfBytes
 pub extern "kernel32" fn PeekNamedPipe(hNamedPipe: HANDLE, lpBuffer: ?*anyopaque, nBufferSize: DWORD, lpBytesRead: ?*DWORD, lpTotalBytesAvail: ?*DWORD, lpBytesLeftThisMessage: ?*DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn WriteFile(hFile: HANDLE, lpBuffer: [*]const u8, nNumberOfBytesToWrite: DWORD, lpNumberOfBytesWritten: ?*DWORD, lpOverlapped: ?*anyopaque) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn CreateFileW(lpFileName: LPCWSTR, dwDesiredAccess: DWORD, dwShareMode: DWORD, lpSecurityAttributes: ?*SECURITY_ATTRIBUTES, dwCreationDisposition: DWORD, dwFlagsAndAttributes: DWORD, hTemplateFile: HANDLE) callconv(WINAPI) HANDLE;
+pub extern "kernel32" fn GetFileSizeEx(hFile: HANDLE, lpFileSize: *i64) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn SetFilePointerEx(hFile: HANDLE, liDistanceToMove: i64, lpNewFilePointer: ?*i64, dwMoveMethod: DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn CreateDirectoryW(lpPathName: LPCWSTR, lpSecurityAttributes: ?*SECURITY_ATTRIBUTES) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn MoveFileW(lpExistingFileName: LPCWSTR, lpNewFileName: LPCWSTR) callconv(WINAPI) BOOL;
@@ -924,6 +931,18 @@ pub extern "user32" fn MessageBoxW(HANDLE, LPCWSTR, LPCWSTR, UINT) callconv(WINA
 pub extern "user32" fn ClientToScreen(HANDLE, *POINT) callconv(WINAPI) BOOL;
 pub extern "user32" fn WindowFromPoint(POINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetParent(HANDLE) callconv(WINAPI) HANDLE;
+pub const GUITHREADINFO = extern struct {
+    cbSize: DWORD,
+    flags: DWORD,
+    hwndActive: HANDLE,
+    hwndFocus: HANDLE,
+    hwndCapture: HANDLE,
+    hwndMenuOwner: HANDLE,
+    hwndMoveSize: HANDLE,
+    hwndCaret: HANDLE,
+    rcCaret: RECT,
+};
+pub extern "user32" fn GetGUIThreadInfo(DWORD, *GUITHREADINFO) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetAncestor(HANDLE, UINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn ScreenToClient(HANDLE, *POINT) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetCursorPos(*POINT) callconv(WINAPI) BOOL;
@@ -939,6 +958,7 @@ pub const WM_ENTERSIZEMOVE: u32 = 0x0231;
 pub const WM_EXITSIZEMOVE: u32 = 0x0232;
 pub const MF_STRING: UINT = 0x0000;
 const MF_SEPARATOR: UINT = 0x0800;
+pub const SMTO_BLOCK: UINT = 0x0001;
 pub const SMTO_ABORTIFHUNG: UINT = 0x0002;
 const MF_OWNERDRAW: UINT = 0x0100;
 pub const TPM_RETURNCMD: UINT = 0x0100;
@@ -1354,3 +1374,12 @@ pub extern "ws2_32" fn getsockname(SOCKET, *SOCKADDR_IN, *i32) callconv(WINAPI) 
 pub extern "credui" fn CredUIPromptForCredentialsW(?*const CREDUI_INFOW, LPCWSTR, ?*anyopaque, DWORD, [*]u16, u32, [*]u16, u32, ?*BOOL, DWORD) callconv(WINAPI) DWORD;
 
 pub extern "user32" fn RegisterClipboardFormatW(LPCWSTR) callconv(WINAPI) UINT;
+
+pub extern "shell32" fn DragAcceptFiles(HANDLE, BOOL) callconv(WINAPI) void;
+pub extern "shell32" fn DragQueryFileW(HANDLE, UINT, ?[*]u16, UINT) callconv(WINAPI) UINT;
+pub extern "shell32" fn DragFinish(HANDLE) callconv(WINAPI) void;
+pub extern "user32" fn ChangeWindowMessageFilterEx(HANDLE, UINT, DWORD, ?*anyopaque) callconv(WINAPI) BOOL;
+
+pub const WM_APP_SHELL_DOUBLE_CLICK: u32 = WM_APP + 204;
+pub extern "user32" fn GetDoubleClickTime() callconv(WINAPI) UINT;
+pub extern "user32" fn GetSystemMetrics(i32) callconv(WINAPI) i32;

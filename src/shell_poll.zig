@@ -45,6 +45,7 @@ const stickyRemove = @import("sidebar.zig").stickyRemove;
 const archiveHasNewContentSnapshot = @import("sidebar.zig").archiveHasNewContentSnapshot;
 const logUnarchive = @import("sidebar.zig").logUnarchive;
 const setBlueDot = @import("sidebar.zig").setBlueDot;
+const dotTargetsTab = @import("sidebar.zig").dotTargetsTab;
 const tmuxHostShortLabel = @import("capacity.zig").tmuxHostShortLabel;
 const KIND_PREFIXES = @import("app_state.zig").KIND_PREFIXES;
 const AiRenameTitle = @import("app_state.zig").AiRenameTitle;
@@ -1643,7 +1644,7 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
     }
     if (app_state.shells[i].deferred_done and !saw_ai_working) {
         app_state.shells[i].deferred_done = false;
-        if (i != app_state.active_shell and setBlueDot(i, .hook_done, true)) {
+        if (dotTargetsTab(i) and setBlueDot(i, .hook_done, true)) {
             if (app_state.shells[i].inbox_archived) logUnarchive(i, "deferred DONE");
             stickyRemove(app_state.shells[i].shell_id);
             missed_done_recovered.* = true;
@@ -1655,7 +1656,7 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
         app_state.shells[i].archive_content_valid = true;
         changed = true;
     }
-    if (app_state.shells[i].inbox_archived and archiveHasNewContentSnapshot(&app_state.shells[i], &content) and i != app_state.active_shell and setBlueDot(i, .heuristic, false)) {
+    if (app_state.shells[i].inbox_archived and archiveHasNewContentSnapshot(&app_state.shells[i], &content) and dotTargetsTab(i) and setBlueDot(i, .heuristic, false)) {
         logUnarchive(i, "new console output");
         recordShellDiagEvent(i, "UNARCHIVE new output", "");
         missed_done_recovered.* = true;
@@ -1711,6 +1712,7 @@ pub fn shellProcessAliveForRead(i: usize) bool {
 }
 
 pub fn pollShellNames() void {
+    defer @import("window_layout.zig").chatWorkingTimesPoll();
     if (chatBenchEnabled()) return;
     const _perf_start = GetTickCount64();
     logPollShellEnter();

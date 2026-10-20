@@ -59,6 +59,7 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
 const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
 const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
 const SEARCH_HIDESIDEBAR_OFFSET = @import("app_state.zig").SEARCH_HIDESIDEBAR_OFFSET;
@@ -112,6 +113,9 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
+const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
+const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
@@ -151,6 +155,10 @@ const SEARCH_VOICE_SPEED_140_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEE
 const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEED_150_OFFSET;
 const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
 const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
+const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
+const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
+const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
@@ -205,6 +213,10 @@ const SEARCH_TABCTX_LOCK = @import("app_state.zig").SEARCH_TABCTX_LOCK;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
+const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALLOW;
+const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
+const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
+const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -508,6 +520,10 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
+    if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
+    if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
+    if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -634,6 +650,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_GOINBOX_OFFSET => "go to inbox",
+        SEARCH_INBOX_FREQUENT_OFFSET => "inbox: frequent input today 24 hours watch-only six hours",
         SEARCH_WSSORT_MENU_OFFSET => "sort workspaces",
         SEARCH_WSMOVE_MENU_OFFSET => "move to workspace",
         SEARCH_GROUPMOVE_MENU_OFFSET => "move to group",
@@ -688,7 +705,10 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_INBOX_EXCLUDE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
         SEARCH_KEEPALIVE_OFFSET => "keep alive",
         SEARCH_CHAT_VIEW_OFFSET => "chat view",
-        SEARCH_CHAT_STOP_OFFSET => "stop agent",
+        SEARCH_CHAT_ALLOW_OFFSET => "chat view allow",
+        SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
+        SEARCH_CHAT_DENY_OFFSET => "chat view deny",
+        SEARCH_CHAT_STOP_OFFSET => if (app_state.ISSUE_265_WORKING_BAR) "chat view stop the agent interrupt" else "stop agent",
         SEARCH_CHAT_QUEUE_SEND_OFFSET => "chat view send queued messages now offline outbox",
         SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat clear bubbles cache",
         SEARCH_CHAT_QUEUE_CLEAR_OFFSET => "chat view clear offline queue discard queued messages",
@@ -700,8 +720,12 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
         SEARCH_LAYOUT_PULL_OFFSET => "sync: pull now",
         SEARCH_SKILLS_MENU_OFFSET => "skills",
+        SEARCH_CHAT_REPLY_OFFSET => "Chat View: Reply to latest agent message",
+        SEARCH_CHAT_TODO_OFFSET => "Chat View: Toggle todo list",
+        SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
+        SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
-        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach image upload picture photo screenshot ctrl v",
+        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach image upload picture photo screenshot ctrl v drop drag",
         SEARCH_CHAT_COPY_SELECTION_OFFSET => "chat view copy selection ctrl c",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
@@ -1841,6 +1865,30 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
             app_state.g_search_result_count += 1;
         }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALLOW;
+            app_state.g_search_result_count += 1;
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALWAYS;
+            app_state.g_search_result_count += 1;
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_DENY;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.ISSUE_265_WORKING_BAR and tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
+            app_state.g_search_result_count += 1;
+        }
         if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
                 if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move to Workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -2424,13 +2472,40 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Reply to latest agent message", "quote reply" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_REPLY_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.ISSUE_268_CHAT_FIND and app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Find in conversation", "ctrl f", "search whole conversation" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FIND_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TOOL_STEPS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TODO_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_CODE_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view attach image", "attach image", "upload image", "add image", "picture", "photo", "ctrl v" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "chat view attach image", "attach image", "upload image", "add image", "picture", "photo", "ctrl v", "drop", "drag" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ATTACH_OFFSET;
         app_state.g_search_result_count += 1;
@@ -2566,6 +2641,11 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GOINBOX_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "inbox: frequent", "frequent", "input today", "24 hours", "watch-only", "six hours" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_INBOX_FREQUENT_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "use snippets", "snippets", "snippet", "paste snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -3318,11 +3398,29 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
             app_state.g_search_result_count += 1;
         }
-        if (app_state.g_chat_active) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ALLOW_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ALWAYS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DENY_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (if (app_state.ISSUE_265_WORKING_BAR) app_state.active_shell < app_state.shell_count else app_state.g_chat_active) {
             var show_chat_stop = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const stop_labels = [_][]const u8{ "stop agent", "interrupt", "ctrl c", "cancel response" };
+                const stop_labels = [_][]const u8{ (if (app_state.ISSUE_265_WORKING_BAR) "Chat View: Stop the agent" else "stop agent"), "stop agent", "interrupt", "ctrl c", "cancel response" };
                 for (stop_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_chat_stop = true;

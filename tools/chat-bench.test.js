@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const lib = import('./chat-bench/lib.mjs');
+const fixture = import('./chat-bench/good-run.mjs');
 
 test('capture helpers are limited to one thread without changing the GUI workload', () => {
   const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
@@ -14,6 +15,83 @@ test('capture helpers are limited to one thread without changing the GUI workloa
   require('node:vm').runInNewContext(preamble, { process: { env } });
   assert.equal(env.MAGICK_THREAD_LIMIT, '1');
   assert.equal(env.WINEPREFIX, '/fixture');
+});
+
+test('outer launch inherits nice 15 and scopes Xvfb with the configured maxRssMiB', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  const launch = source.slice(source.indexOf("if (!process.env.CHAT_BENCH_XVFB) {") + "if (!process.env.CHAT_BENCH_XVFB) {".length, source.indexOf('} else {\n  await run();'));
+  assert.match(launch, /spawn\('systemd-run'/);
+  assert.match(launch, /MemoryMax=\$\{config\.rules\.maxRssMiB\}M/);
+  for (const priority of [0, 15, 19]) {
+    const changes = [], calls = [];
+    require('node:vm').runInNewContext(launch, {
+      os: { getPriority: () => priority, setPriority: value => changes.push(value) },
+      process: { env: {}, pid: 42, execPath: '/node', argv: ['node', 'run.mjs', '--exe', 'app.exe'], on: () => {} },
+      config: { width: 1280, height: 800, windows: 6, rules: { maxRssMiB: 4321 } },
+      path, out: '/bench', script: '/run.mjs',
+      spawn: (...args) => { calls.push(args); return { on: () => {} }; },
+    });
+    assert.deepEqual(changes, priority < 15 ? [15] : []);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'systemd-run');
+    assert.deepEqual(Array.from(calls[0][1].slice(0, 10)), ['--user', '--scope', '--quiet', '-p', 'MemoryMax=4321M', '-p', 'MemorySwapMax=0', '--', 'xvfb-run', '-a']);
+    assert.equal(calls[0][2].env.CHAT_BENCH_XVFB, '1');
+    assert.equal(calls[0][2].detached, true);
+  }
+});
+
+test('OOM evidence reads this process cgroup and defaults to zero for missing files', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  const collect = source.slice(source.indexOf('  run.oomKills = 0;'), source.indexOf('  const verdict = evaluate(run, config);'));
+  assert(collect.includes('/proc/self/cgroup'));
+  for (const events of ['low 0\nhigh 0\noom 3\noom_kill 2\noom_group_kill 0\n', 'oom 3\n', null]) {
+    const run = {}, reads = [];
+    require('node:vm').runInNewContext(collect, { run, fs: { readFileSync: file => {
+      reads.push(file);
+      if (file === '/proc/self/cgroup') return '1:name=systemd:/unrelated\n0::/user.slice/bench.scope\n';
+      assert.equal(file, '/sys/fs/cgroup/user.slice/bench.scope/memory.events');
+      if (events === null) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return events;
+    } } });
+    assert.equal(run.oomKills, events?.includes('oom_kill 2') ? 2 : 0);
+    assert.equal(reads.length, 2);
+  }
+});
+
+test('own-scope OOM kills are memory FAILs, not outside-SIGKILL INFRA', async () => {
+  const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
+  const run = goodRun();
+  const kill = 'app 0 killed by SIGKILL from outside the bench (server capacity)';
+  run.oomKills = 2; run.infra = [kill]; run.errors = [kill];
+  const result = evaluate(run, defaults);
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.pass, false);
+  assert.deepEqual(result.failures, [`memory cap ${defaults.rules.maxRssMiB} MiB exceeded (2 process(es) killed by the bench's own memory limit)`]);
+});
+
+test('peak RSS above maxRssMiB is a memory FAIL without an OOM kill', async () => {
+  const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
+  const run = goodRun();
+  run.samples[0].rssBytes = (defaults.rules.maxRssMiB + 1) * 1048576;
+  const result = evaluate(run, defaults);
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.pass, false);
+  assert(result.failures.some(f => f.startsWith(`memory cap ${defaults.rules.maxRssMiB} MiB exceeded`)));
+});
+
+test('unchanged good run and peak RSS at the memory cap remain PASS', async () => {
+  const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
+  const run = goodRun();
+  assert.equal(defaults.rules.maxRssMiB, 12000);
+  assert.equal(evaluate(run, defaults).status, 'PASS');
+  run.oomKills = 0;
+  run.samples[0].rssBytes = defaults.rules.maxRssMiB * 1048576;
+  assert.equal(evaluate(run, defaults).status, 'PASS');
+  run.infra = ['app 0 killed by SIGKILL from outside the bench (server capacity)'];
+  assert.equal(evaluate(run, defaults).status, 'INFRA');
 });
 
 test('slow captures cannot truncate the configured settling period and idle tail', async () => {
@@ -62,15 +140,9 @@ test('real-format synthetic Claude/Codex fixtures include tool, image, injected 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-function goodRun() {
-  const tabs = ['none', 'pending', 'docked'].map((browser, index) => ({ index, browser, sid: `claude-${index}`, file: '/fixture' }));
-  return { errors: [], fixtures: { tabs }, samples: Array.from({ length: 60 }, (_, i) => ({ measured: true, idle: true, phase: 'warm', timeMs: (i + 1) * 1000, elapsedMs: 1000, cpu: 2, rssBytes: 1048576 })),
-    switches: ['cold', 'warm'].flatMap(phase => tabs.map(tab => ({ phase, index: tab.index, firstPaintMs: 20, contentPaintMs: 20, screenshot: 'capture.png', nonEmpty: true, geometry: { browser_foreign: true, browser_live: true }, geometryInside: true, headerInk: true, composerInk: true, earlyContent: true }))),
-    restarted: true, appends: [{}], readerResponses: tabs.map(t => ({ sid: t.sid, ok: true, hasLive: true })) };
-}
-
 test('acceptance is fail-closed with positive controls for CPU, spikes, timing, empty chat, crash and hang', async () => {
   const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
   assert.equal(evaluate(goodRun(), defaults).pass, true);
   for (const [name, mutate] of [
     ['idle CPU', r => r.samples.forEach(s => { s.cpu = 12; })],
@@ -83,7 +155,9 @@ test('acceptance is fail-closed with positive controls for CPU, spikes, timing, 
     ['no CPU samples', r => { r.samples = []; }],
     ['no restart', r => { r.restarted = false; }],
     ['append never reaches reader', r => r.readerResponses.forEach(response => { response.hasLive = false; })],
-    ['transport missing', r => { r.readerResponses = []; }]
+    ['transport missing', r => { r.readerResponses = []; }],
+    ['two browser panes on screen', r => { r.switches[0].foreignBrowsersOnScreen = 2; }],
+    ['browser panes not counted', r => { delete r.switches[0].foreignBrowsersOnScreen; }]
   ]) {
     const run = goodRun(); mutate(run); assert.equal(evaluate(run, defaults).pass, false, name);
   }
@@ -91,6 +165,7 @@ test('acceptance is fail-closed with positive controls for CPU, spikes, timing, 
 
 test('missing switch paint cannot masquerade as a fast p95 from successful switches', async () => {
   const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
   const run = goodRun(); run.switches[0].firstPaintMs = null;
   const result = evaluate(run, defaults);
   assert.equal(result.metrics.switchPaintP95Ms, null);
@@ -100,6 +175,7 @@ test('missing switch paint cannot masquerade as a fast p95 from successful switc
 
 test('thirty-second CPU uses elapsed time, not thirty arbitrarily spaced samples', async () => {
   const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
   const run = goodRun();
   run.samples = run.samples.map((s, i) => ({ ...s, elapsedMs: 100, timeMs: (i + 1) * 100, cpu: 100 }));
   const result = evaluate(run, defaults);
@@ -169,6 +245,7 @@ test('proc discovery counts only Wine app/collector processes in this prefix, no
 
 test('a five-second cold burst is allowed, but a sustained multi-core loop is rejected', async () => {
   const { evaluate, defaults } = await lib;
+  const { goodRun } = await fixture;
   const burst = goodRun();
   burst.samples.slice(5, 10).forEach(s => { s.cpu = 400; s.idle = false; });
   assert.equal(evaluate(burst, defaults).pass, true);
@@ -183,6 +260,7 @@ test('a five-second cold burst is allowed, but a sustained multi-core loop is re
 
 test('browser regression oracle rejects clipped header, split composer, blank loading and remote-blocked cache', async () => {
   const { evaluate, defaults, geometryInside } = await lib;
+  const { goodRun } = await fixture;
   const rect = { left: 250, right: 790, top: 70, bottom: 900 };
   const good = { pane_left: 240, pane_right: 800, title: rect, transcript: rect, composer: rect, layout: { transcript: rect, composer: rect, composer_card: rect, attach_btn: rect, send_btn: rect } };
   assert.equal(geometryInside(good), true);

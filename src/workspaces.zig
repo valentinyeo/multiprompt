@@ -40,7 +40,7 @@ const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
 const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
 const DestroyWindow = @import("win32.zig").DestroyWindow;
-const GetWindowTextW = @import("win32.zig").GetWindowTextW;
+const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const SHGetPropertyStoreForWindow = @import("win32.zig").SHGetPropertyStoreForWindow;
 const SHGetPropertyStoreFromParsingName = @import("win32.zig").SHGetPropertyStoreFromParsingName;
@@ -190,6 +190,8 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const browserUrlSlice = @import("browser_pane.zig").browserUrlSlice;
+const hideBrowserFloatingChrome = @import("browser_pane.zig").hideBrowserFloatingChrome;
+const parkStrayBrowserPanes = @import("browser_pane.zig").parkStrayBrowserPanes;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
@@ -596,7 +598,7 @@ fn findAndFocusWorkspaceWindowEnum(candidate: HANDLE, lp: LPARAM) callconv(WINAP
     }
     if (!windowOwnerProcessStillActive(candidate)) return 1;
     var title: [256]u16 = std.mem.zeroes([256]u16);
-    const title_len = GetWindowTextW(candidate, &title, 256);
+    const title_len = InternalGetWindowText(candidate, &title, 256);
     if (title_len == 0) return 1;
     const t = title[0..@intCast(title_len)];
     const other_is_dev = titleHasDevMarker(t);
@@ -1932,6 +1934,25 @@ pub fn detachTabToNewWindow(idx: u32) void {
     pos += 1;
     cmd_buf[pos] = ' ';
     pos += 1;
+    writeNum(&cmd_buf, &pos, shell.last_used);
+    cmd_buf[pos] = ' ';
+    pos += 1;
+    cmd_buf[pos] = 'i';
+    pos += 1;
+    writeNum(&cmd_buf, &pos, shell.input);
+    cmd_buf[pos] = ' ';
+    pos += 1;
+    cmd_buf[pos] = 'v';
+    pos += 1;
+    cmd_buf[pos] = if (shell.visits.known != 0) '1' else '0';
+    pos += 1;
+    for (shell.visits.optional() orelse &.{}) |visit| {
+        cmd_buf[pos] = '/';
+        pos += 1;
+        writeNum(&cmd_buf, &pos, visit);
+    }
+    cmd_buf[pos] = ' ';
+    pos += 1;
 
     cmd_buf[pos] = '"';
     pos += 1;
@@ -2047,6 +2068,9 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     transfer.pinned_top = if (shell.pinned_top) 1 else 0;
     transfer.locked = if (shell.locked) 1 else 0;
     transfer.favorite = if (shell.favorite) 1 else 0;
+    transfer.last_used = shell.last_used;
+    transfer.input = shell.input;
+    transfer.visits = shell.visits;
     transfer.inbox_excluded = if (shell.inbox_excluded) 1 else 0;
     transfer.claude_session = if (shell.claude_session) 1 else 0;
     transfer.tmux_host = shell.tmux_host;
@@ -2255,9 +2279,12 @@ pub fn switchToWorkspace(ws_in: u32) void {
     }
 
     if (target) |idx| {
-        switchToShell(idx);
-    } else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
-        _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+    } else {
+        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
+            _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        hideBrowserFloatingChrome();
+        parkStrayBrowserPanes(null);
     }
     app_state.g_sidebar_scroll = 0;
     updateMainWindowTitle();
@@ -3140,6 +3167,12 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + ix.len], ix);
             pos += ix.len;
         }
+        const used = ",\"used_unix\":true,\"used\":";
+        @memcpy(json_buf[pos .. pos + used.len], used);
+        pos += used.len;
+        pos += writeUintTo(json_buf[pos..], app_state.shells[i].last_used);
+        pos += @import("frequent.zig").writeInput(json_buf[pos..], app_state.shells[i].input);
+        pos += @import("frequent.zig").writeVisits(json_buf[pos..], app_state.shells[i].visits);
         if (app_state.shells[i].favorite) {
             const ff = ",\"favorite\":true";
             @memcpy(json_buf[pos .. pos + ff.len], ff);
@@ -3210,6 +3243,16 @@ fn exportSlotSessionFile(slot: u8) bool {
             const cv = ",\"cv\":true";
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
+        }
+        if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.shells[i].chat_shell_override and pos < json_buf.len - 540) {
+            const cso = ",\"cso\":true";
+            @memcpy(json_buf[pos .. pos + cso.len], cso);
+            pos += cso.len;
+        }
+        if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
+            const fw = ",\"fw\":true";
+            @memcpy(json_buf[pos .. pos + fw.len], fw);
+            pos += fw.len;
         }
         if (app_state.shells[i].inbox_archived and pos < json_buf.len - 540) {
             const iah = ",\"iah\":true";
@@ -3681,6 +3724,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
             app_state.shells[idx].locked = tabs[t].locked;
             app_state.shells[idx].favorite = tabs[t].favorite;
+            app_state.shells[idx].last_used = tabs[t].last_used;
+            app_state.shells[idx].input = tabs[t].input;
+            app_state.shells[idx].visits = tabs[t].visits;
             app_state.shells[idx].claude_session = tabs[t].claude_session;
             app_state.shells[idx].wake_id = tabs[t].wake_id;
             app_state.shells[idx].group_id = tabs[t].group_id;
@@ -3730,7 +3776,11 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
 
     if (!was_restoring) {
         app_state.g_active_workspace = prev_active_ws;
-        if (prev_active_shell < app_state.shell_count) switchToShell(prev_active_shell);
+        if (prev_active_shell < app_state.shell_count) {
+            app_state.g_restoring = true;
+            switchToShell(prev_active_shell);
+            app_state.g_restoring = was_restoring;
+        }
         mergeDuplicateOtherWorkspaces();
         syncInProcessWorkspacesToRegistry();
         publishInboxState();

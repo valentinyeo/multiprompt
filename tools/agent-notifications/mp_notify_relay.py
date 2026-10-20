@@ -53,12 +53,20 @@ def connect(path, deadline):
         return conn
     except OSError as error:
         conn.close()
-        if error.errno in (errno.ECONNREFUSED, errno.ENOENT):
+        if error.errno in (errno.ECONNREFUSED, errno.ENOENT) and not listening(path):
             try:
                 path.unlink()
             except OSError:
                 pass
         return None
+
+
+def listening(path):
+    try:
+        with open("/proc/net/unix", encoding="utf-8", errors="replace") as table:
+            return any(len(row) > 7 and row[7] == str(path) and int(row[3], 16) & 0x10000 for row in (line.split() for line in table))
+    except OSError:
+        return False
 
 
 def read_message(conn):

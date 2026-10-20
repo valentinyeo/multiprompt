@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -116,7 +117,7 @@ test "reset: every local phase clears only the target, cancels verification and 
 test('executed production reset clears all phases only for its tab, preserves draft and session, retires workers and deletes cache', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-reset-'));
   try {
-    fs.copyFileSync('src/chat_echo.zig', path.join(dir, 'chat_echo.zig'));
+    copyZig(['chat_echo.zig'], dir);
     const names = ['chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxClearIn', 'chatOutboxEnqueueInState', 'chatOutboxDropForKey', 'chatResetForShell'];
     fs.writeFileSync(path.join(dir, 'test.zig'), harness + declaration('ChatOutboxEntry') + names.map(body).join('\n') + acceptance);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'reset:'], { encoding: 'utf8', timeout: 60000 });

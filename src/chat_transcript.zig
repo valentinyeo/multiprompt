@@ -31,7 +31,86 @@ pub fn matches(a: Identity, b: Identity) bool {
     return std.meta.eql(a, b) and a.shell_id != 0 and (a.sid[0] != 0 or a.tmux[0] != 0);
 }
 
+pub const TodoStatus = enum { pending, in_progress, completed };
+pub const Todo = struct {
+    text: [200]u16 = @splat(0),
+    len: usize = 0,
+    status: TodoStatus = .pending,
+};
+pub const Status = struct {
+    model: [128]u16 = @splat(0),
+    model_len: usize = 0,
+    percent_left: ?u8 = null,
+    todos: [50]Todo = @splat(.{}),
+    total: usize = 0,
+    done: usize = 0,
+    todos_known: bool = false,
+
+    pub fn known(self: *const Status) bool {
+        return self.model_len > 0 or self.percent_left != null or self.todos_known;
+    }
+
+    pub fn label(self: *const Status, out: []u16) usize {
+        var n: usize = 0;
+        if (self.model_len > 0) {
+            n = @min(out.len, self.model_len);
+            @memcpy(out[0..n], self.model[0..n]);
+        }
+        var bytes: [80]u8 = undefined;
+        if (self.percent_left) |left| {
+            const part = std.fmt.bufPrint(&bytes, "{s}{d}% context left", .{ if (n > 0) " · " else "", left }) catch unreachable;
+            n += std.unicode.utf8ToUtf16Le(out[n..], part) catch 0;
+        }
+        if (self.todos_known) {
+            const part = std.fmt.bufPrint(&bytes, "{s}{d} of {d} done", .{ if (n > 0) " · " else "", self.done, self.total }) catch unreachable;
+            n += std.unicode.utf8ToUtf16Le(out[n..], part) catch 0;
+        }
+        return n;
+    }
+};
+
+fn statusText(out: []u16, text: []const u8) usize {
+    var view = std.unicode.Utf8View.init(text) catch return 0;
+    var it = view.iterator();
+    var n: usize = 0;
+    while (it.nextCodepoint()) |cp| {
+        if (n + @as(usize, if (cp > 0xFFFF) 2 else 1) > out.len) break;
+        if (cp > 0xFFFF) {
+            out[n] = @intCast(0xD800 + ((cp - 0x10000) >> 10));
+            n += 1;
+            out[n] = @intCast(0xDC00 + ((cp - 0x10000) & 0x3FF));
+        } else out[n] = if (cp < 32) ' ' else @intCast(cp);
+        n += 1;
+    }
+    return n;
+}
+
+pub fn parseStatus(line: []const u8) ?Parsed {
+    if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
+    const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
+    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null };
+    const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const value = parsed.value;
+    if (!std.mem.eql(u8, value.role, "status")) return null;
+    var result: Status = .{};
+    result.model_len = statusText(&result.model, value.model);
+    result.percent_left = if (value.percent_left) |left| @min(left, 100) else null;
+    if (value.todos) |todos| {
+        result.todos_known = true;
+        for (todos[0..@min(todos.len, result.todos.len)]) |todo| {
+            var item = &result.todos[result.total];
+            item.len = statusText(&item.text, todo.text);
+            item.status = std.meta.stringToEnum(TodoStatus, todo.status) orelse .pending;
+            result.done += @intFromBool(item.status == .completed);
+            result.total += 1;
+        }
+    }
+    return .{ .len = 0, .count = 0, .status = result };
+}
+
 pub const Parsed = struct {
+    status: Status = .{},
     len: usize,
     count: usize,
     resolved_sid: [40]u8 = @splat(0),
@@ -236,7 +315,7 @@ pub fn parse(wire: []const u8, id: u32, key: Identity, wide: []u16, out: []md.Bl
         var row = std.mem.splitScalar(u8, line, '\t');
         if (!std.mem.eql(u8, row.next() orelse "", "M")) return null;
         const role_text = row.next() orelse return null;
-        const role: md.Role = if (std.mem.eql(u8, role_text, "user")) .user else if (std.mem.eql(u8, role_text, "assistant")) .prose else return null;
+        const role: md.Role = if (std.mem.eql(u8, role_text, "user")) .user else if (std.mem.eql(u8, role_text, "assistant")) .prose else if (std.mem.eql(u8, role_text, "tool")) .tool else continue;
         const stamp = row.next() orelse return null;
         const b64 = row.next() orelse return null;
         if (row.next() != null) return null;
@@ -432,4 +511,58 @@ test "legacy transcript wire applies injection classification and provider time"
     try std.testing.expectEqual(md.Role.injected, out[0].role);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("scope & tests"), text[0..parsed.len]);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("17:32"), &out[0].time);
+}
+
+test "ISSUE-263 legacy wire skips unknown roles and renders tools as one block" {
+    var text: [128]u16 = undefined;
+    var blocks: [4]md.Block = undefined;
+    const result = parse("@mp\t5\ttranscript\tok\tsid\t3\nM\tfuture\t-\taWdub3JlZA==\nM\ttool\t-\tUmFuIHRlc3Rz\nM\tassistant\t-\tZG9uZQ==\n@@MP_END@@\n", 5, Identity.init(5, 0, false, "sid", ""), &text, &blocks).?;
+    try std.testing.expectEqual(@as(usize, 2), result.count);
+    try std.testing.expectEqual(md.Role.tool, blocks[0].role);
+    try std.testing.expectEqual(md.Role.prose, blocks[1].role);
+}
+
+test "status row parses model context and bounded todos without treating free text as wire fields" {
+    const result = (parseStatus("{\"role\":\"status\",\"model\":\"Opus 5.5\",\"percent_left\":62,\"todos\":[{\"text\":\"one\\tline\\nnext\",\"status\":\"completed\"},{\"text\":\"two\",\"status\":\"completed\"},{\"text\":\"three\",\"status\":\"completed\"},{\"text\":\"four\",\"status\":\"in_progress\"},{\"text\":\"five\",\"status\":\"pending\"},{\"text\":\"six\",\"status\":\"pending\"},{\"text\":\"seven\",\"status\":\"pending\"}]}").?).status;
+    try std.testing.expectEqual(@as(?u8, 62), result.percent_left);
+    try std.testing.expectEqual(@as(usize, 3), result.done);
+    try std.testing.expectEqual(@as(usize, 7), result.total);
+    try std.testing.expectEqual(TodoStatus.in_progress, result.todos[3].status);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one line next"), result.todos[0].text[0..result.todos[0].len]);
+    var label: [256]u16 = undefined;
+    const len = result.label(&label);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5 · 62% context left · 3 of 7 done"), label[0..len]);
+}
+
+test "status row label omits missing parts and old responses parse identically" {
+    var text: [64]u16 = undefined;
+    var blocks: [4]md.Block = undefined;
+    const key = Identity.init(5, 0, false, "sid", "");
+    const old = parse("@mp\t5\ttranscript\tok\tsid\t1\nM\tuser\t-\tSGk=\n@@MP_END@@\n", 5, key, &text, &blocks).?;
+    try std.testing.expect(!old.status.known());
+    try std.testing.expectEqual(@as(usize, 1), old.count);
+    try std.testing.expectEqualSlices(u16, &.{ 'H', 'i' }, text[0..old.len]);
+    const partial = (parseStatus("{\"role\":\"status\",\"percent_left\":0}").?).status;
+    var label: [256]u16 = undefined;
+    const len = partial.label(&label);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("0% context left"), label[0..len]);
+    const empty = (parseStatus("{\"role\":\"status\",\"todos\":[]}").?).status;
+    try std.testing.expect(empty.known());
+    try std.testing.expectEqual(@as(usize, 0), empty.total);
+    try std.testing.expect(parseStatus("{\"role\":\"status\",\"percent_left\":\"bad\"}") == null);
+}
+
+test "status row caps todo arrays and keeps truncated Unicode valid" {
+    const a = std.testing.allocator;
+    const item = "{\"text\":\"" ++ "😀" ** 201 ++ "\",\"status\":\"completed\"}";
+    const wire = "{\"role\":\"status\",\"todos\":[" ++ (item ++ ",") ** 59 ++ item ++ "]}";
+    const parsed = parseStatus(wire).?;
+    try std.testing.expectEqual(@as(usize, 50), parsed.status.total);
+    try std.testing.expectEqual(@as(usize, 50), parsed.status.done);
+    for (parsed.status.todos[0..parsed.status.total]) |todo| {
+        try std.testing.expectEqual(@as(usize, 200), todo.len);
+        const text = try std.unicode.utf16LeToUtf8Alloc(a, todo.text[0..todo.len]);
+        defer a.free(text);
+        try std.testing.expectEqualStrings("😀" ** 100, text);
+    }
 }

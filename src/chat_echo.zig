@@ -202,8 +202,42 @@ pub fn sameText(a: []const u16, b: []const u16) bool {
 
 pub const OutboxState = enum(u8) { queued, sending, not_sent, delivered };
 
+pub const ISSUE_349_ORPHAN_SENDING_SETTLES = true;
+
+pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
+    return ISSUE_349_ORPHAN_SENDING_SETTLES and state == .sending and id != verify_id;
+}
+
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
     return state == .queued and !write_started and !busy and !link_down;
+}
+
+pub fn needsFullSettle(state: OutboxState, write_started: bool, transcript_queued: bool, sent_ms: i64, now_ms: i64) bool {
+    return ((state == .delivered and !transcript_queued) or (state == .not_sent and write_started)) and
+        now_ms >= sent_ms and now_ms - sent_ms >= 60_000;
+}
+
+test "ISSUE-349 full settle waits for old written entries needing transcript evidence" {
+    for (std.enums.values(OutboxState)) |state| {
+        for ([_]bool{ false, true }) |written| {
+            for ([_]bool{ false, true }) |queued| {
+                const qualifies = (state == .delivered and !queued) or (state == .not_sent and written);
+                try std.testing.expectEqual(qualifies, needsFullSettle(state, written, queued, 1000, 61_000));
+                try std.testing.expect(!needsFullSettle(state, written, queued, 1000, 60_999));
+                try std.testing.expect(!needsFullSettle(state, written, queued, 1000, 999));
+            }
+        }
+    }
+}
+
+test "ISSUE-349 three stuck entries load unconfirmed and qualify for full settle" {
+    const sent = [_]i64{ 1792250528437, 1792250551635, 1792250686932 };
+    const relaunch_ms: i64 = 1792260198783;
+    for (sent) |sent_ms| {
+        const state = stateOnLoad(2, true);
+        try std.testing.expectEqual(OutboxState.not_sent, state);
+        try std.testing.expect(needsFullSettle(state, true, false, sent_ms, relaunch_ms));
+    }
 }
 
 pub fn represented(text: []const u16, blocks: []const UserBlock) ?usize {
@@ -225,6 +259,7 @@ pub const DeliveryEvidence = struct {
     latest_ms: i64 = 0,
     refused: bool = false,
     removed_ms: i64 = 0,
+    enqueued: bool = false,
 };
 
 pub const DeliveryWatch = struct {
@@ -749,4 +784,47 @@ test "settlement: two different messages merged into one turn both match but rep
     try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
     try std.testing.expectEqual(@as(?usize, 0), assigned[1]);
     try std.testing.expectEqual(@as(?usize, null), assigned[2]);
+}
+
+test "ISSUE-349 orphaned sending settles without changing the active verification" {
+    try std.testing.expect(orphanedSending(.sending, 1, 2));
+    try std.testing.expect(orphanedSending(.sending, 1, 0));
+    try std.testing.expect(!orphanedSending(.sending, 1, 1));
+    for ([_]OutboxState{ .queued, .delivered, .not_sent }) |state| {
+        try std.testing.expect(!orphanedSending(state, 1, 0));
+    }
+}
+
+test "ISSUE-349 tagged pending matches the cleaned rendered user block" {
+    const text = w("<pasted_content id=\"5ebf\">\nplease check the build\n</pasted_content id=\"5ebf\">");
+    var normalized: [256]u16 = undefined;
+    var pending = [_]Pending{.{ .text = &text, .prefix = normalize(&text, &normalized), .anchor = .{ .after_ms = 100 } }};
+    var picked: [1]?usize = undefined;
+    assign(&pending, &.{ub("please check the build", 200)}, false, &.{}, &picked);
+    try std.testing.expectEqual(@as(?usize, 0), picked[0]);
+}
+
+pub const TranscriptEvidence = enum { none, enqueued, delivered };
+pub const TranscriptDecision = enum { wait, retry, queued, delivered, unconfirmed };
+
+pub fn transcriptStatus(elapsed_ms: i64, retries_done: u8, evidence: TranscriptEvidence) TranscriptDecision {
+    return switch (evidence) {
+        .delivered => .delivered,
+        .enqueued => .queued,
+        .none => if (elapsed_ms < 10_000) .wait else if (retries_done == 0) .retry else .unconfirmed,
+    };
+}
+
+test "transcript send decisions wait retry once and settle only from evidence" {
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(-1, 0, .none));
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(9_999, 0, .none));
+    try std.testing.expectEqual(TranscriptDecision.retry, transcriptStatus(10_000, 0, .none));
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(9_999, 1, .none));
+    try std.testing.expectEqual(TranscriptDecision.unconfirmed, transcriptStatus(10_000, 1, .none));
+    for ([_]u8{ 0, 1, 2 }) |retries| {
+        for ([_]i64{ 0, 10_000, 20_000, 600_000 }) |elapsed| {
+            try std.testing.expectEqual(TranscriptDecision.queued, transcriptStatus(elapsed, retries, .enqueued));
+            try std.testing.expectEqual(TranscriptDecision.delivered, transcriptStatus(elapsed, retries, .delivered));
+        }
+    }
 }

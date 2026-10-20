@@ -86,7 +86,8 @@ class AccountDesktop(unittest.TestCase):
 
     def test_debounce_poll_conflict_and_durable_diff(self):
         save = function(MAIN, 'publishSessionLayout')
-        self.assertIn('account_layout.equal(local, base.value)', save)
+        self.assertIn('account_layout.publishNeeded(local, base.value, synced.value)', save)
+        self.assertIn('session_layout.parse(arena.allocator(), g_account_base orelse return)', save)
         self.assertIn('TIMER_ACCOUNT_SAVE, 2000', save)
         self.assertIn('account-layout-pending.json', save)
         self.assertIn('writeFileAtomicW(path, pending)', save)
@@ -221,9 +222,20 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (reply.cancelled)', function(MAIN, 'handleLayoutReply'))
 
     def test_version_matches_window_titles(self):
-        version = re.search(r'const APP_VERSION = "([^"\n]+)"', MAIN)[1]
-        self.assertIn(f'L("multiprompt v{version} [DEV]")', MAIN)
-        self.assertIn(f'L("multiprompt v{version}")', MAIN)
+        self.assertRegex(MAIN, r'const APP_VERSION = "[^"\n]+"')
+        self.assertIn('L("multiprompt v" ++ APP_VERSION ++ " [DEV]")', MAIN)
+        self.assertIn('L("multiprompt v" ++ APP_VERSION)', MAIN)
+
+    def test_version_matches_latest_changelog(self):
+        def version(source):
+            match = re.search(r'const APP_VERSION = "(\d+\.\d+\.\d+)";', source)
+            return match[1] if match else None
+        current = version(MAIN)
+        self.assertIsNotNone(current)
+        changelog = (ROOT / 'src/changelog.zig').read_text(encoding='utf-8')
+        latest = re.search(r'\.ver = "([^"]+)"', changelog)[1]
+        self.assertEqual(current, latest)
+        self.assertNotEqual(version(MAIN.replace(current, 'changed')), latest)
 
 
 if __name__ == '__main__':

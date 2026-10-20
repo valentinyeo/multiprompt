@@ -48,6 +48,667 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_claude_status_header(self):
+        todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
+        old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))
+        latest = self.tool_call("TodoWrite", dict(todos=todos))
+        latest["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=2000, cache_read_input_tokens=70000, cache_creation_input_tokens=4000))
+        self.write(old, latest)
+        _, rows = self.read()
+        status = [row for row in rows if row["role"] == "status"]
+        self.assertEqual(len(status), 1)
+        self.assertEqual(status[0]["model"], "Opus 5.5")
+        self.assertEqual(status[0]["percent_left"], 62)
+        self.assertEqual(len(status[0]["todos"]), 7)
+        self.assertEqual(sum(t["status"] == "completed" for t in status[0]["todos"]), 3)
+        self.assertEqual(status[0]["todos"][0]["text"], todos[0]["content"])
+        _, rows = self.read()
+        self.assertEqual([row for row in rows if row["role"] == "status"], status)
+
+    def test_codex_status_header(self):
+        self.query["codex"] = True
+        self.path = self.home / ".codex/sessions/2026/10/20/rollout-2026-sid.jsonl"
+        self.path.parent.mkdir(parents=True)
+        plan = [dict(step=f"Step {i}", status="completed" if i < 3 else "pending") for i in range(7)]
+        self.write(dict(type="turn_context", payload=dict(model="gpt-5.6")),
+                   dict(type="response_item", payload=dict(type="function_call", name="update_plan", arguments=json.dumps(dict(plan=plan)))),
+                   dict(type="event_msg", payload=dict(type="token_count", info=dict(last_token_usage=dict(input_tokens=76000), model_context_window=200000))))
+        _, rows = self.read()
+        status = next(row for row in rows if row["role"] == "status")
+        self.assertEqual(status["model"], "gpt-5.6")
+        self.assertEqual(status["percent_left"], 62)
+        self.assertEqual(len(status["todos"]), 7)
+        self.assertEqual(sum(t["status"] == "completed" for t in status["todos"]), 3)
+
+    def test_status_todo_beyond_tail(self):
+        todo = self.tool_call("TodoWrite", dict(todos=[dict(content="still relevant", status="in_progress")]))
+        self.write(todo)
+        with self.path.open("a") as target:
+            for _ in range(7000):
+                target.write(json.dumps(dict(type="progress", padding="x" * 100)) + "\n")
+            target.write(json.dumps(self.event()) + "\n")
+        self.assertGreater(self.path.stat().st_size, reader.TAIL_BYTES)
+        _, rows = self.read()
+        self.assertEqual(next(row for row in rows if row["role"] == "status")["todos"], [dict(text="still relevant", status="in_progress")])
+
+    def test_status_cache_reads_only_new_bytes(self):
+        event = self.event("status " + "x" * 1000)
+        event["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        line = (json.dumps(event) + "\n").encode()
+        self.path.write_bytes(line * (2 * 1024 * 1024 // len(line) + 1))
+        _, rows = self.read()
+        self.assertEqual(next(row for row in rows if row["role"] == "status")["percent_left"], 62)
+        event = self.event("new usage")
+        event["message"]["usage"] = dict(input_tokens=100000)
+        delta = (json.dumps(event) + "\n").encode()
+        with self.path.open("ab") as target:
+            target.write(delta)
+        original_open = Path.open
+        read_bytes = 0
+
+        class Counted:
+            def __init__(self, source):
+                self.source = source
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.source.__exit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.source, name)
+
+            def read(self, *args):
+                nonlocal read_bytes
+                data = self.source.read(*args)
+                read_bytes += len(data)
+                return data
+
+        def counted_open(path, *args, **kwargs):
+            source = original_open(path, *args, **kwargs)
+            return Counted(source) if path == self.path and args == ("rb",) else source
+
+        with patch.object(Path, "open", counted_open):
+            fields, rows = self.read()
+        self.assertEqual(fields[13], "delta")
+        self.assertLess(read_bytes, len(delta) + 256 * 1024)
+        status = next(row for row in rows if row["role"] == "status")
+        self.assertEqual(status["model"], "Opus 5.5")
+        self.assertEqual(status["percent_left"], 50)
+        self.assertNotIn("todos", status)
+
+    def test_status_cache_resets_on_new_inode(self):
+        old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))
+        old["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        self.write(old)
+        self.assertIn("todos", next(row for row in self.read()[1] if row["role"] == "status"))
+        inode = self.path.stat().st_ino
+        new = self.event("new file " + "x" * 1000)
+        new["message"].update(model="claude-sonnet-5-5", usage=dict(input_tokens=100000))
+        replacement = self.path.with_suffix(".new")
+        replacement.write_text(json.dumps(new) + "\n")
+        replacement.replace(self.path)
+        self.assertNotEqual(inode, self.path.stat().st_ino)
+        status = next(row for row in self.read()[1] if row["role"] == "status")
+        self.assertEqual(status["model"], "Sonnet 5.5")
+        self.assertEqual(status["percent_left"], 50)
+        self.assertNotIn("todos", status)
+
+    def test_status_cache_new_todowrite_updates_count(self):
+        old = self.tool_call("TodoWrite", dict(todos=[dict(content="one", status="pending")]))
+        self.write(old)
+        status = next(row for row in self.read()[1] if row["role"] == "status")
+        self.assertEqual((sum(t["status"] == "completed" for t in status["todos"]), len(status["todos"])), (0, 1))
+        todos = [dict(content="one", status="completed"), dict(content="two", status="pending")]
+        with self.path.open("a") as target:
+            target.write(json.dumps(self.tool_call("TodoWrite", dict(todos=todos))) + "\n")
+        status = next(row for row in self.read()[1] if row["role"] == "status")
+        self.assertEqual((sum(t["status"] == "completed" for t in status["todos"]), len(status["todos"])), (1, 2))
+
+    def test_status_cache_absent_todos_become_present_then_empty(self):
+        event = self.event()
+        event["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        self.write(event)
+        self.assertNotIn("todos", next(row for row in self.read()[1] if row["role"] == "status"))
+        for todos in ([dict(content="new task", status="completed")], []):
+            with self.path.open("a") as target:
+                target.write(json.dumps(self.tool_call("TodoWrite", dict(todos=todos))) + "\n")
+            status = next(row for row in self.read()[1] if row["role"] == "status")
+            self.assertEqual(status["todos"], [dict(text=t["content"], status=t["status"]) for t in todos])
+            self.assertEqual((status["model"], status["percent_left"]), ("Opus 5.5", 62))
+
+    def test_status_cache_codex_updates_plan_and_usage(self):
+        self.query["codex"] = True
+        self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
+        self.path.parent.mkdir(parents=True)
+        self.write(dict(type="turn_context", payload=dict(model="gpt-5.6")),
+                   dict(type="event_msg", payload=dict(type="token_count", info=dict(last_token_usage=dict(input_tokens=76000), model_context_window=200000))))
+        self.assertNotIn("todos", next(row for row in self.read()[1] if row["role"] == "status"))
+        plan = [dict(step="new step", status="completed")]
+        with self.path.open("a") as target:
+            target.write(json.dumps(dict(type="response_item", payload=dict(type="function_call", name="update_plan", arguments=json.dumps(dict(plan=plan))))) + "\n")
+            target.write(json.dumps(dict(type="event_msg", payload=dict(type="token_count", info=dict(last_token_usage=dict(input_tokens=100000), model_context_window=400000)))) + "\n")
+        status = next(row for row in self.read()[1] if row["role"] == "status")
+        self.assertEqual((status["model"], status["percent_left"]), ("gpt-5.6", 75))
+        self.assertEqual(status["todos"], [dict(text="new step", status="completed")])
+
+    def test_status_cache_finishes_partial_line_and_resets_on_shrink(self):
+        event = self.event()
+        event["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        self.write(event)
+        self.read()
+        update = self.event("x" * (reader.TAIL_BYTES + 100))
+        update["message"].update(model="claude-sonnet-5-5", usage=dict(input_tokens=100000))
+        line = json.dumps(update).encode()
+        with self.path.open("ab") as target:
+            target.write(line)
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["model"], "Opus 5.5")
+        with self.path.open("ab") as target:
+            target.write(b"\n")
+        status = next(row for row in self.read()[1] if row["role"] == "status")
+        self.assertEqual((status["model"], status["percent_left"]), ("Sonnet 5.5", 50))
+        self.write(dict(type="progress"))
+        self.assertFalse(any(row["role"] == "status" for row in self.read()[1]))
+
+    def test_status_cache_skips_decoding_older_usage_and_bounds_entries(self):
+        event = self.event()
+        event["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        self.write(*(event for _ in range(1000)))
+        original_loads = json.loads
+        with self.path.open("rb") as source, patch.object(reader.json, "loads", wraps=original_loads) as loads:
+            reader.status_header(source, self.path.stat().st_size, "claude")
+        self.assertEqual(loads.call_count, 1)
+        self.assertLessEqual(len(reader.STATUS_CACHE), 256)
+        for i in range(257):
+            path = self.home / f"status-{i}.jsonl"
+            path.write_text(json.dumps(event) + "\n")
+            with path.open("rb") as source:
+                reader.status_header(source, path.stat().st_size, "claude")
+        self.assertEqual(len(reader.STATUS_CACHE), 256)
+        self.assertNotIn((str(self.path.resolve()), self.path.stat().st_ino), reader.STATUS_CACHE)
+
+    def test_status_bounds_models_and_context(self):
+        for model, display in (("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-fable-5-1", "Fable 5.1"), ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("claude-future", "future")):
+            self.query.update(cached_sid="", offset=0)
+            event = self.tool_call("TodoWrite", dict(todos=[dict(content="😀" * 250, status="completed")] * 60))
+            event["message"].update(model=model, usage=dict(input_tokens=380000))
+            event["context"] = "[1m]"
+            self.write(event)
+            _, rows = self.read()
+            status = next(row for row in rows if row["role"] == "status")
+            self.assertEqual(status["model"], display)
+            self.assertEqual(status["percent_left"], 62)
+            self.assertEqual(len(status["todos"]), 50)
+            self.assertEqual(len(status["todos"][0]["text"]), 200)
+        self.query.update(cached_sid="", offset=0)
+        self.write(dict(type="assistant", message=dict(content=[], usage=dict(input_tokens=300000))))
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["percent_left"], 0)
+
+    def test_status_ignores_partial_record_larger_than_chunk(self):
+        self.write(dict(type="assistant", message=dict(content=[], model="claude-opus-5-5", usage=dict(input_tokens=76000))))
+        with self.path.open("ab") as target:
+            target.write(b'{"type":"assistant","message":{"model":"wrong","padding":"' + b'x' * (reader.TAIL_BYTES + 100))
+        with self.path.open("rb") as source:
+            status = reader.status_header(source, self.path.stat().st_size, "claude")
+        self.assertEqual(status["model"], "Opus 5.5")
+        self.assertEqual(status["percent_left"], 62)
+
+    def search(self, text):
+        wire = reader.response(dict(self.query, search=text, offset='ignored', before=-1, probe=None))
+        lines = wire.splitlines()
+        self.assertEqual(lines[-1], reader.END)
+        fields = lines[0].split('\t')
+        self.assertEqual(fields[:5], ['@mp', '7', 'search', 'ok', 'sid'])
+        rows = [json.loads(line) for line in lines[1:-1]]
+        self.assertEqual(int(fields[7]), len(rows))
+        self.assertEqual(fields[9:], ['claude', 'term-1'])
+        return fields, rows
+
+    def test_igsh268_first_middle_offsets_and_casefold(self):
+        first = dict(type='user', message=dict(role='user', content='First Straße phrase'))
+        middle = self.event('Middle literal .* phrase')
+        self.write(first, self.event('x' * (reader.TAIL_BYTES + 100)), middle, self.event('last'))
+        raw = self.path.read_bytes().splitlines(keepends=True)
+        _, rows = self.search('STRASSE')
+        self.assertEqual([(r['offset'], r['end'], r['role']) for r in rows], [(0, len(raw[0]), 'user')])
+        self.assertIn('Straße', rows[0]['snippet'])
+        _, rows = self.search('LITERAL .*')
+        self.assertEqual(rows[0]['offset'], len(raw[0]) + len(raw[1]))
+        self.assertEqual(rows[0]['end'], sum(map(len, raw[:3])))
+        self.assertEqual(rows[0]['role'], 'assistant')
+
+    def test_igsh268_absent_sidechain_and_compaction(self):
+        self.write(self.event('visible'), self.event('hidden', isSidechain=True), self.event('hidden', isCompactSummary=True))
+        self.assertEqual(self.search('absent')[1], [])
+        self.assertEqual(self.search('hidden')[1], [])
+        self.assertEqual(len(self.search('visible')[1]), 1)
+
+    def test_igsh268_cap_and_snippet(self):
+        self.write(*(self.event('x' * 300 + 'needle' + 'y' * 300) for _ in range(510)))
+        fields, rows = self.search('needle')
+        self.assertEqual(len(rows), 500)
+        self.assertEqual(fields[8], '1')
+        self.assertEqual([r['offset'] for r in rows], sorted(r['offset'] for r in rows))
+        self.assertTrue(all(len(r['snippet']) <= 160 and 'needle' in r['snippet'] for r in rows))
+
+    def test_igsh268_tool_text_and_detail(self):
+        self.write(self.tool_call(value=dict(command='unique tool command')), self.tool_result('distinct result text'))
+        _, rows = self.search('unique tool')
+        self.assertEqual(rows[0]['role'], 'tool')
+        self.assertEqual(rows[0]['offset'], 0)
+        _, rows = self.search('distinct result')
+        self.assertEqual(rows[0]['role'], 'tool')
+        self.assertEqual(rows[0]['offset'], len(self.path.read_bytes().splitlines(keepends=True)[0]))
+
+    def test_igsh268_only_current_visible_tool_details_match(self):
+        self.write(self.tool_call(value=dict(command='x' * 2000 + 'hidden input')),
+                   self.tool_result('obsolete output'), self.tool_result('current output'))
+        self.assertEqual(self.search('hidden input')[1], [])
+        self.assertEqual(self.search('obsolete output')[1], [])
+        self.assertEqual(len(self.search('current output')[1]), 1)
+        self.write(self.tool_result('orphan output'))
+        self.assertEqual(self.search('orphan output')[1], [])
+
+    def test_igsh268_search_prefilter_preserves_tool_bookkeeping(self):
+        for agent, kinds in [('claude', ['tool_use']), ('codex', ['function_call', 'custom_tool_call', 'local_shell_call', 'tool_use'])]:
+            for kind in kinds:
+                with self.subTest(agent=agent, kind=kind):
+                    if agent == 'claude':
+                        call = self.tool_call(value=dict(command='unrelated input'))
+                        result = self.tool_result('distinctive needle output')
+                        replacement = self.tool_result('replacement without matching text')
+                    else:
+                        call = dict(type='response_item', payload=dict(type=kind, call_id='call-prefilter', name='exec_command', arguments='{"cmd":"unrelated input"}'))
+                        result_kind = 'tool_result' if kind == 'tool_use' else kind + '_output'
+                        result = dict(type='response_item', payload=dict(type=result_kind, call_id='call-prefilter', output='distinctive needle output'))
+                        replacement = dict(type='response_item', payload=dict(type=result_kind, call_id='call-prefilter', output='replacement without matching text'))
+                    self.write(call, result)
+                    fields = reader.search_response(dict(self.query, search='distinctive needle'), self.path, agent, 'sid').splitlines()
+                    rows = [json.loads(line) for line in fields[1:-1]]
+                    self.assertEqual(fields[0].split('\t')[8], '0')
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]['offset'], len(self.path.read_bytes().splitlines(keepends=True)[0]))
+                    self.assertEqual(rows[0]['role'], 'tool')
+                    self.write(call, result, replacement)
+                    self.assertEqual(len(reader.search_response(dict(self.query, search='distinctive needle'), self.path, agent, 'sid').splitlines()), 2)
+        self.write(self.tool_call(value=dict(command='x' * 2000 + 'distinctive needle')), self.tool_result('unrelated result'))
+        self.assertEqual(self.search('distinctive needle')[1], [])
+        self.write(self.tool_call(name='Read', value=dict(file_path='project/example.txt')))
+        self.assertEqual(len(self.search('Read example')[1]), 1)
+        self.write(self.tool_call(value=dict(description='normalized   summary', command='true')))
+        self.assertEqual(len(self.search('normalized summary')[1]), 1)
+
+    def test_igsh268_search_prefilter_covers_170_mb_and_chunk_boundaries(self):
+        padding = (json.dumps(self.event('cmd ' + 'x' * 15996)) + '\n').encode()
+        hit = (json.dumps(self.event('distinctive middle needle', timestamp='middle')) + '\n').encode()
+        last = (json.dumps(self.event('distinctive final needle', timestamp='last')) + '\n').encode()
+        count = 170_000_000 // len(padding) // 2 + 1
+        with self.path.open('wb') as output:
+            for _ in range(count):
+                output.write(padding)
+            middle = output.tell()
+            output.write(hit)
+            for _ in range(count):
+                output.write(padding)
+            final = output.tell()
+            output.write(last)
+            output.write(json.dumps(self.event('distinctive incomplete needle')).encode())
+        self.assertGreaterEqual(self.path.stat().st_size, 170_000_000)
+        with patch.object(reader.json, 'loads', wraps=json.loads) as loads, patch.object(reader.time, 'monotonic', return_value=0.0):
+            fields, rows = self.search('distinctive')
+        self.assertEqual(fields[8], '0')
+        self.assertEqual([(row['offset'], row['end'], row['timestamp']) for row in rows],
+                         [(middle, middle + len(hit), 'middle'), (final, final + len(last), 'last')])
+        self.assertLess(loads.call_count, 20)
+        with patch.object(reader.json, 'loads', wraps=json.loads) as loads, patch.object(reader.time, 'monotonic', return_value=0.0):
+            fields, rows = self.search('md instructions for')
+        self.assertEqual(fields[8], '0')
+        self.assertEqual(rows, [])
+        self.assertEqual(loads.call_count, 0)
+        data = (json.dumps(self.event('x' * (1024 * 1024 - 20) + 'boundary needle')) + '\n').encode()
+        self.path.write_bytes(b'{}\n' + data + (json.dumps(self.event('boundary needle')) + '\n').encode())
+        fields, rows = self.search('boundary needle')
+        self.assertEqual(fields[8], '0')
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([row['offset'] for row in rows], [3, 3 + len(data)])
+
+    def test_igsh268_search_prefilter_keeps_escaped_unicode_and_markup_matches(self):
+        for text, needle in [('Straße', 'strasse'), ('é', 'é'), ('quote " and \\ path', 'quote " and \\ path'),
+                             ('prefix <local-command-stdout>hidden</local-command-stdout>suffix', 'prefix suffix'),
+                             ('pre<local-command-stdout>hidden</local-command-stdout>fix', 'prefix'),
+                             ('<command-name>deploy</command-name><command-args>production now</command-args>', 'deploy production'),
+                             ('some<pasted_content>joined words</pasted_content> here', 'some joined words'),
+                             ('Kelvin ſtraße ﬃle', 'kelvin strasse ffile'), ('İ', 'i'), ('ŉame', 'name'),
+                             ('ßfoo', 'sfoo'), ('barﬀ', 'barf'), ('ﬃ', 'f'), ('ﬀ', 'f')]:
+            for ascii_json in (True, False):
+                with self.subTest(needle=needle, ascii_json=ascii_json):
+                    event = dict(type='user', message=dict(role='user', content=text))
+                    self.path.write_text(json.dumps(event, ensure_ascii=ascii_json) + '\n')
+                    self.assertEqual(len(self.search(needle)[1]), 1)
+        self.path.write_bytes(json.dumps(self.event('needle')).replace('needle', '\\u006eeedle').encode() + b'\n')
+        self.assertEqual(len(self.search('needle')[1]), 1)
+        self.path.write_bytes((json.dumps(self.event('needle')) + '\n').encode('utf-16-be'))
+        self.assertEqual(len(self.search('needle')[1]), 1)
+        for identity in ['escaped/id', 'escaped\\id', 'escaped"id', 'é', 'plain']:
+            self.write(self.tool_call(identity=identity), self.tool_result('distinctive needle', identity=identity))
+            self.assertEqual(len(self.search('distinctive needle')[1]), 1)
+
+    def test_igsh268_search_prefilter_unicode_fold_table_is_exhaustive(self):
+        expected = {chr(code) for code in range(128, sys.maxunicode + 1)
+                    if any('a' <= char <= 'z' for char in chr(code).casefold())}
+        self.assertEqual(set(reader.SEARCH_ASCII_FOLDS), expected)
+
+    def test_igsh268_pure_function_codex_and_service_dispatch(self):
+        self.write(dict(type='response_item', timestamp='now', payload=dict(type='message', role='user', content=[dict(type='input_text', text='Codex needle')])) )
+        pure = reader.search_response(dict(self.query, search='NEEDLE'), self.path, 'codex', 'sid')
+        self.assertIn('"role":"user"', pure)
+        self.assertIn('\tsearch\tok\tsid\t', pure)
+        self.write(self.event('service needle'))
+        request = dict(self.query, search='NEEDLE')
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/chat-bench/reader-service.py'), str(ROOT / 'src/chat_history_reader.py')],
+                                input=json.dumps(dict(job=12, protocol='history', request=json.dumps(request))) + '\n', text=True,
+                                capture_output=True, check=True, env=dict(os.environ, HOME=str(self.home)))
+        envelope = json.loads(result.stdout)
+        self.assertEqual(envelope['job'], 12)
+        self.assertIn('\tsearch\tok\tsid\t', envelope['wire'])
+        result = subprocess.run([sys.executable, str(ROOT / 'src/chat_history_reader.py'), '--serve'],
+                                input=json.dumps(request) + '\n', text=True, capture_output=True, check=True,
+                                env=dict(os.environ, HOME=str(self.home)))
+        self.assertIn('\tsearch\tok\tsid\t', json.loads(result.stdout)['wire'])
+
+    def test_igsh268_invalid_and_time_cap(self):
+        self.write(self.event('needle'))
+        for value in ('', 'x' * 201, None, 4, []):
+            with self.assertRaises(ValueError):
+                reader.response(dict(self.query, search=value))
+        with patch.object(reader.time, 'monotonic', side_effect=[0, 2]):
+            fields, rows = self.search('needle')
+        self.assertEqual(fields[8], '1')
+        self.assertEqual(rows, [])
+
+    def test_status_and_whole_conversation_search_share_source_offsets(self):
+        todo = self.tool_call("TodoWrite", dict(todos=[dict(content="status-only needle", status="pending")]))
+        todo["message"].update(model="claude-opus-5-5", usage=dict(input_tokens=76000))
+        self.write(self.event("conversation needle"), todo)
+        self.query["source_offsets"] = True
+        _, rows = self.read()
+        status = next(row for row in rows if row["role"] == "status")
+        self.assertEqual((status["model"], status["percent_left"]), ("Opus 5.5", 62))
+        self.assertNotIn("offset", status)
+        message = next(row for row in rows if row.get("text") == "conversation needle")
+        cache = dict(reader.STATUS_CACHE)
+        _, hits = self.search("conversation needle")
+        self.assertEqual((hits[0]["offset"], hits[0]["end"]), (message["offset"], message["end"]))
+        self.assertEqual(reader.STATUS_CACHE, cache)
+        self.assertEqual(self.search("Opus 5.5")[1], [])
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status"), status)
+
+    def tool_call(self, name='Bash', value=None, identity='call-263'):
+        return dict(type='assistant', timestamp='2026-10-18T11:00:00Z', message=dict(role='assistant', content=[
+            dict(type='tool_use', id=identity, name=name, input=value or dict(command='zig build test'))]))
+
+    def tool_result(self, output='passed', error=False, identity='call-263'):
+        return dict(type='user', timestamp='2026-10-18T11:00:01Z', message=dict(role='user', content=[
+            dict(type='tool_result', tool_use_id=identity, content=output, is_error=error)]))
+
+    def diff_row(self, name, value, result=None):
+        events = [self.tool_call(name, value)]
+        if result is not None:
+            events.append(dict(self.tool_result(), toolUseResult=result))
+        self.write(*events)
+        self.query.update(cached_sid='', offset=0)
+        return self.read()[1][0]
+
+    def test_igsh270_edit_structured_patch(self):
+        row = self.diff_row('Edit', dict(file_path='foo.zig', old_string='wrong', new_string='fallback'),
+                            dict(structuredPatch=[dict(lines=[' context', '-before', '+after', '+extra'])]))
+        self.assertEqual(row['diff'], ' context\n-before\n+after\n+extra')
+        self.assertEqual(row['text'], 'Edited foo.zig +2 -1')
+
+    def test_igsh270_edit_fallback_uses_uncapped_input(self):
+        old = 'same\n' * 1000 + 'before'
+        new = 'same\n' * 1000 + 'after'
+        row = self.diff_row('Edit', dict(file_path='foo.zig', old_string=old, new_string=new))
+        self.assertEqual(row['diff'], ' same\n-before\n+after')
+        self.assertEqual(row['text'], 'Edited foo.zig +1 -1')
+
+    def test_igsh270_multiedit(self):
+        row = self.diff_row('MultiEdit', dict(file_path='foo.zig', edits=[dict(old_string='a', new_string='b'),
+                                                                       dict(old_string='c', new_string='d\ne')]))
+        self.assertEqual(row['diff'], '-a\n+b\n-c\n+d\n+e')
+        self.assertEqual(row['text'], 'Edited foo.zig +3 -2')
+
+    def test_igsh270_write_create_all_green(self):
+        for result in [None, dict(type='create', structuredPatch=[], content='first\nsecond\n')]:
+            row = self.diff_row('Write', dict(file_path='new.zig', content='first\nsecond\n'), result)
+            self.assertEqual(row['diff'], '+first\n+second')
+            self.assertEqual(row['text'], 'Wrote new.zig +2 -0')
+
+    def test_igsh270_codex_apply_patch(self):
+        value = '*** Begin Patch\n*** Update File: foo.zig\n@@\n context\n-before\n+after\n*** Add File: new.zig\n+new\n*** End Patch'
+        for kind, field, payload in [('custom_tool_call', 'input', value),
+                                     ('function_call', 'arguments', json.dumps(dict(input=value)))]:
+            event = dict(type='response_item', payload=dict(type=kind, name='apply_patch', call_id='patch', **{field: payload}))
+            row = reader.tool_events(event, 'codex')[0]
+            self.assertEqual(row['diff'], ' context\n-before\n+after\n+new')
+            self.assertEqual(row['text'], 'Edited foo.zig +2 -1')
+
+    def test_igsh270_diff_cap_counts_all_lines(self):
+        row = self.diff_row('Edit', dict(file_path='foo.zig', old_string='old', new_string='new'),
+                            dict(structuredPatch=[dict(lines=['-old'] * 25 + ['+new'] * 30)]))
+        self.assertEqual(len(row['diff'].splitlines()), 41)
+        self.assertEqual(row['diff'].splitlines()[-1], ' … 15 more lines')
+        self.assertEqual(row['text'], 'Edited foo.zig +30 -25')
+
+    def test_igsh270_result_delta_and_flag(self):
+        result = dict(self.tool_result(), toolUseResult=dict(structuredPatch=[dict(lines=['-a', '+b'])]))
+        self.write(self.tool_call('Edit', dict(file_path='foo', old_string='a', new_string='c')))
+        self.read()
+        with self.path.open('a') as output:
+            output.write(json.dumps(result) + '\n')
+        row = self.read()[1][0]
+        self.assertEqual(row['diff'], '-a\n+b')
+        self.assertEqual((row['added'], row['removed']), (1, 1))
+        with patch.object(reader, 'ISSUE_270_DIFF_CARDS', False):
+            self.assertNotIn('diff', reader.tool_events(result, 'claude')[0])
+
+    def test_igsh263_claude_paired_ok_error_running_and_later_delta(self):
+        for error in (False, True):
+            self.query.update(cached_sid='', offset=0)
+            self.write(self.tool_call(), self.tool_result(error=error))
+            _, rows = self.read()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['role'], 'tool')
+            self.assertEqual(rows[0]['status'], 'error' if error else 'ok')
+            self.assertEqual(rows[0]['text'], 'Ran zig build test')
+            self.assertIn('\n\npassed', rows[0]['detail'])
+        self.query.update(cached_sid='', offset=0)
+        self.write(self.tool_call())
+        _, rows = self.read()
+        self.assertEqual(rows[0]['status'], 'running')
+        with self.path.open('a') as source:
+            source.write(json.dumps(self.tool_result()) + '\n')
+        _, rows = self.read()
+        self.assertEqual(rows, [dict(role='tool_result', id='call-263', timestamp='2026-10-18T11:00:01Z',
+                                     text='', status='ok', detail='passed')])
+
+    def test_igsh263_latest_result_replaces_output_without_losing_input(self):
+        self.write(self.tool_call(), self.tool_result('failed', error=True), self.tool_result('passed'))
+        _, rows = self.read()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['status'], 'ok')
+        self.assertEqual(rows[0]['detail'], '{"command":"zig build test"}\n\npassed')
+
+    def test_igsh263_result_only_is_not_a_question_or_user_row(self):
+        event = self.tool_result()
+        self.assertFalse(reader.asks_question(json.dumps(event), 'claude'))
+        self.write(event)
+        _, rows = self.read()
+        self.assertEqual([r['role'] for r in rows], ['tool_result'])
+        with patch.object(reader, 'ISSUE_263_TOOL_STEPS', False):
+            self.query.update(cached_sid='', offset=0)
+            _, rows = self.read()
+            self.assertEqual(rows, [])
+
+    def test_igsh263_codex_real_shapes_and_errors(self):
+        self.path = self.home / '.codex/sessions/2026/10/18/rollout-test-sid.jsonl'
+        self.path.parent.mkdir(parents=True)
+        self.query.update(codex=True)
+        for call_kind, result_kind in [('function_call', 'function_call_output'), ('custom_tool_call', 'custom_tool_call_output'),
+                                       ('local_shell_call', 'local_shell_call_output')]:
+            for output, status in [('Exit code: 0\npassed', 'ok'), ('Process exited with code 2', 'error'),
+                                   ('Exit code: 17', 'error'), ({'metadata': {'exit_code': 1}, 'output': 'failed'}, 'error'),
+                                   ({'success': False}, 'error'), ({'status': 'failed'}, 'error'),
+                                   ({'error': 'command rejected'}, 'error'), ('Error: command rejected', 'error'),
+                                   ('apply_patch verification failed: missing file', 'error'),
+                                   ('{"metadata":{"exit_code":3}}', 'error'),
+                                   ([{'type': 'input_text', 'text': 'Process exited with code 1'}], 'error')]:
+                self.query.update(cached_sid='', offset=0)
+                args = dict(cmd='zig build test')
+                payload = dict(type=call_kind, call_id='call-codex', name='exec_command', arguments=json.dumps(args))
+                if call_kind == 'custom_tool_call':
+                    payload['input'] = payload.pop('arguments')
+                if call_kind == 'local_shell_call':
+                    payload.pop('name')
+                    payload.pop('arguments')
+                    payload['action'] = dict(command=['zig', 'build', 'test'])
+                self.write(dict(type='response_item', payload=payload),
+                           dict(type='response_item', payload=dict(type=result_kind, call_id='call-codex', output=output)))
+                _, rows = self.read()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]['status'], status)
+                self.assertEqual(rows[0]['text'], 'Ran zig build test')
+                self.assertEqual(rows[0]['id'], 'call-codex')
+        self.query.update(cached_sid='', offset=0)
+        self.write(dict(type='response_item', payload=payload))
+        _, rows = self.read()
+        self.assertEqual(rows[0]['status'], 'running')
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='response_item', payload=dict(type=result_kind, call_id='call-codex', output='Exit code: 0'))) + '\n')
+        _, rows = self.read()
+        self.assertEqual(rows[0]['role'], 'tool_result')
+        self.assertEqual(rows[0]['status'], 'ok')
+
+    def test_tool_codex_result_metadata_overrides_output_examples(self):
+        outputs = ['Error: documented example', 'Exit code: 17', 'Process exited with code 2']
+        for metadata in [{'exit_code': 0}, {'is_error': False}, {'success': True}, {'status': 'completed'}]:
+            for output in outputs:
+                for value in [dict(metadata, output=output), dict(metadata=metadata, output=output),
+                              json.dumps(dict(metadata=metadata, output=output))]:
+                    with self.subTest(value=value):
+                        event = dict(type='response_item', payload=dict(type='function_call_output',
+                                     call_id='command', output=value))
+                        self.assertEqual(reader.tool_events(event, 'codex')[0]['status'], 'ok')
+        for metadata in [{'exit_code': 1}, {'is_error': True}, {'success': False}, {'status': 'failed'}]:
+            event = dict(type='response_item', payload=dict(type='function_call_output',
+                         call_id='command', output=dict(metadata=metadata, output='all fine')))
+            self.assertEqual(reader.tool_events(event, 'codex')[0]['status'], 'error')
+        for output in outputs:
+            event = dict(type='response_item', payload=dict(type='function_call_output',
+                         call_id='command', output=output))
+            self.assertEqual(reader.tool_events(event, 'codex')[0]['status'], 'error')
+
+    def test_igsh263_summary_per_tool_and_detail_cap_without_images(self):
+        cases = [('Edit', {'file_path': '/tmp/main.zig'}, 'Edited main.zig'),
+                 ('Write', {'file_path': 'C:\\src\\main.zig'}, 'Wrote main.zig'),
+                 ('MultiEdit', {'file_path': '/tmp/main.zig'}, 'Edited main.zig'),
+                 ('apply_patch', '*** Begin Patch\n*** Update File: src/main.zig\n', 'Edited main.zig'),
+                 ('apply_patch', '*** Add File: src/new.zig\n', 'Wrote new.zig'),
+                 ('Read', {'file_path': '/tmp/main.zig'}, 'Read main.zig'),
+                 ('Bash', {'description': 'tests', 'command': 'zig build test'}, 'Ran tests'),
+                 ('shell', {'command': 'zig build'}, 'Ran zig build'),
+                 ('exec_command', {'cmd': 'zig build'}, 'Ran zig build'),
+                 ('Grep', {'pattern': 'needle'}, 'Searched needle'),
+                 ('Glob', {'pattern': '*.zig'}, 'Searched *.zig'),
+                 ('WebFetch', {'url': 'https://example.com/a'}, 'Fetched example.com'),
+                 ('WebSearch', {'query': 'zig tests'}, 'Searched web zig tests'),
+                 ('Task', {'description': 'review'}, 'Agent: review'),
+                 ('Agent', {'description': 'review'}, 'Agent: review'),
+                 ('other', {}, 'other')]
+        for name, value, expected in cases:
+            self.assertEqual(reader.tool_summary(name, value), expected)
+        self.write(self.tool_call(value=dict(command='echo ' + 'word ' * 2000)),
+                   self.tool_result([dict(type='text', text='output ' * 1000),
+                                     dict(type='image', source=dict(type='base64', data='A' * 2000))]))
+        _, rows = self.read()
+        self.assertLessEqual(len(rows[0]['text']), 120)
+        self.assertEqual(len(rows[0]['detail']), 4000)
+        self.assertTrue(rows[0]['detail'].endswith('…'))
+        self.assertIn('\n\noutput ', rows[0]['detail'])
+        self.assertNotIn('A' * 256, rows[0]['detail'])
+        self.assertNotIn('A' * 256, reader.tool_text('data:image/png;base64,' + 'A' * 2000))
+
+    def test_igsh263_nested_input_is_compact_and_image_payloads_are_removed(self):
+        value = dict(action=dict(command=['zig', 'build']), source='ordinary source code', image=dict(type='image', source=dict(type='base64', data='short_base64')))
+        text = reader.tool_text(value)
+        self.assertEqual(json.loads(text)['action'], dict(command=['zig', 'build']))
+        self.assertEqual(json.loads(text)['source'], 'ordinary source code')
+        self.assertNotIn('short_base64', text)
+        self.assertNotIn('\n', text)
+
+    def test_igsh263_tail_search_passes_tool_result_events_to_find_question(self):
+        question = dict(type='user', message=dict(role='user', content='QUESTION-263 do the work'))
+        hidden = dict(type='progress', text='hidden ' * (reader.TAIL_BYTES // 7 + 100))
+        self.write(self.event('earlier'), question, hidden, self.tool_call(), self.tool_result(), self.event('answer'))
+        _, rows = self.read()
+        self.assertEqual(rows[0]['text'], 'QUESTION-263 do the work')
+        self.assertEqual([row['role'] for row in rows], ['user', 'tool', 'assistant'])
+
+    def test_igsh263_page_boundary_keeps_running_then_result_and_budgets_tools(self):
+        self.write(self.event('initial'))
+        self.read()
+        with self.path.open('a') as source:
+            source.write(json.dumps(self.tool_call()) + '\n' + json.dumps(self.tool_result('result ' * 40)) + '\n')
+        with patch.object(reader, 'PAGE_BYTES', 300):
+            fields, rows = self.read()
+            self.assertEqual(fields[8], '1')
+            self.assertEqual(rows[0]['status'], 'running')
+            _, rows = self.read()
+            self.assertEqual(rows[0]['role'], 'tool_result')
+        self.query.update(cached_sid='', offset=0)
+        self.write(*(self.tool_call(value=dict(command='word ' * 900), identity=str(i)) for i in range(250)))
+        _, rows = self.read()
+        self.assertLessEqual(sum(len(reader.wire_row(row)) + 1 for row in rows), reader.TAIL_BYTES)
+
+    def test_igsh361_compaction_summary_never_shows_as_the_newest_message(self):
+        fixture = json.loads((ROOT / 'tools/fixtures/igsh361/upwork-compact.json').read_text())
+        self.write(*fixture['records'])
+        _, rows = self.read()
+        self.assertFalse(any('This session is being continued' in row.get('text', '') for row in rows))
+        self.assertEqual(rows[-1]['role'], 'assistant')
+        self.assertTrue(rows[-1]['text'].startswith("**Yes, I've sent 3 more proposals"))
+
+    def test_igsh349_pasted_tags_keep_neutral_inner_text(self):
+        self.write(dict(type='user', timestamp='2026-10-17T15:06:44.490Z',
+                        message=dict(role='user', content='<pasted_content id="5ebf">\nplease check the build\n</pasted_content id="5ebf">')))
+        _, rows = self.read()
+        self.assertEqual(rows[0]['text'], 'please check the build')
+        self.assertEqual(reader.clean_command_markup('<PASTED_CONTENT id="x" other="y">\nplease check the build\n</PASTED_CONTENT id="x">'), 'please check the build')
+        self.assertEqual(reader.clean_command_markup('one<pasted_content id="x">two</pasted_content id="x">three'), 'one two three')
+        self.assertEqual(reader.clean_command_markup('before\n<pasted_content id="x">\nplease check the build\n</pasted_content id="x">\nafter'), 'before\nplease check the build\nafter')
+
+    def test_igsh349_queued_command_uses_latest_exact_queue_stamp(self):
+        text = 'please check the build'
+        self.query['settlement'] = True
+        self.write(
+            dict(type='queue-operation', operation='enqueue', timestamp='2026-10-17T15:06:45.089Z', content=text),
+            self.event('neutral reply', timestamp='2026-10-17T15:06:46.479Z'),
+            self.event('another neutral reply', timestamp='2026-10-17T15:06:47.140Z'),
+            dict(type='user', timestamp='2026-10-17T15:06:48.337Z', message=dict(role='user', content=[dict(type='tool_result', content='neutral result')])),
+            dict(type='queue-operation', operation='remove', timestamp='2026-10-17T15:06:48.689Z', content=text),
+            dict(type='attachment', timestamp='2026-10-17T15:06:44.490Z', attachment=dict(type='queued_command', prompt=text)))
+        _, rows = self.read()
+        self.assertEqual(rows[-1]['timestamp'], '2026-10-17T15:06:48.689Z')
+        self.assertGreaterEqual(rows[-1]['timestamp'], rows[0]['timestamp'])
+        self.query.update(offset=0, cached_sid='', settlement=False)
+        _, rows = self.read()
+        self.assertEqual(rows[-1]['timestamp'], '2026-10-17T15:06:48.689Z')
+        self.query.update(offset=0, cached_sid='')
+        with patch.object(reader, 'ISSUE_349_QUEUED_STAMP_FROM_QUEUE', False):
+            _, legacy = self.read()
+        self.assertEqual(legacy[-1]['timestamp'], '2026-10-17T15:06:44.490Z')
+
     def owner(self, name='secondary', uid=1001, home='/home/secondary'):
         return types.SimpleNamespace(pw_name=name, pw_uid=uid, pw_dir=home)
 
@@ -203,7 +864,7 @@ class HistoryReaderTest(unittest.TestCase):
     def test_tool_only_pages_advance_without_dropping_next_message(self):
         self.write(self.event('first'))
         self.read()
-        tool = json.dumps(dict(type='progress', text='large tool data')) + '\n'
+        tool = json.dumps(dict(type='progress', text='large tool data' * 10)) + '\n'
         with self.path.open('a') as source:
             source.write(tool + json.dumps(self.event('reply')) + '\n')
         with patch.object(reader, 'SCAN_BYTES', len(tool)):
@@ -224,6 +885,40 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(rows[0]['text'], 'new inode')
         self.query['cached_sid'] = 'another'
         self.assertEqual(self.read()[0][5], '0')
+
+    def test_issue358_first_page_starts_at_the_question_behind_a_big_hidden_record(self):
+        hidden = dict(type='user', isMeta=True, message=dict(role='user', content=[dict(type='text', text='s' * (reader.TAIL_BYTES + 100000))]))
+        question = dict(type='user', message=dict(role='user', content='QUESTION-358 research the best b2b repos'))
+        self.write(self.event('EARLIER-358'), self.event('p' * (reader.TAIL_BYTES + 1000)), question, hidden, self.event('ANSWER-358'))
+        old = subprocess.CompletedProcess([], 0, (ROOT / 'tools/fixtures/reader-before-e85be39.py').read_text(), '')
+        control = types.ModuleType('reader358control')
+        exec(compile(old.stdout, 'reader358control.py', 'exec'), control.__dict__)
+        control.HOME = self.home
+        control_rows = control.response(dict(self.query)).splitlines()[1:-1]
+        self.assertEqual([json.loads(row)['role'] for row in control_rows], ['assistant'])
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'tail')
+        self.assertEqual([row['text'] for row in rows], ['QUESTION-358 research the best b2b repos', 'ANSWER-358'])
+        self.assertEqual(fields[14], fields[5])
+        self.query['before'] = int(fields[5])
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'older')
+        self.assertIn('EARLIER-358', [row['text'] for row in rows])
+
+    def test_issue358_look_back_gives_up_before_the_reply_gets_too_big(self):
+        hidden = dict(type='user', isMeta=True, message=dict(role='user', content=[dict(type='text', text='s' * (reader.TAIL_BYTES + 100000))]))
+        question = dict(type='user', message=dict(role='user', content='QUESTION-358 far back'))
+        talk = [self.event('t' * 4000) for _ in range(reader.TAIL_BYTES // 4000 + 10)]
+        self.write(question, *talk, hidden, self.event('ANSWER-358'))
+        size = self.path.stat().st_size
+        wire = reader.response(dict(self.query))
+        fields = wire.splitlines()[0].split('\t')
+        self.assertGreaterEqual(int(fields[5]), size - reader.TAIL_BYTES)
+        self.assertNotIn('QUESTION-358', wire)
+        self.assertIn('ANSWER-358', wire)
+        with patch.object(reader, 'ISSUE_358_TAIL_STARTS_AT_QUESTION', False):
+            self.write(question, hidden, self.event('ANSWER-358'))
+            self.assertNotIn('QUESTION-358', reader.response(dict(self.query)))
 
     def test_shrunken_source_during_scroll_resets_to_tail_instead_of_retrying_stale_page_forever(self):
         self.write(self.event('x' * (reader.TAIL_BYTES + 100)), self.event('old latest'))
@@ -268,6 +963,16 @@ class HistoryReaderTest(unittest.TestCase):
                 patch.object(reader, 'process_table', return_value={10: (1, ['bash']), 99: (10, ['claude'])}), \
                 patch.object(reader, 'read_process_cwd', return_value='/wrong'):
             self.assertEqual(reader.resolve_tmux_agent('claude', 'term-1'), ('sid', self.path))
+
+    def test_new_session_without_transcript_never_shows_a_neighbours_chat(self):
+        self.write(self.event())
+        metadata = self.home / '.claude/sessions/99.json'
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(json.dumps(dict(sessionId='fresh', cwd='/work/demo')))
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', return_value={10: (1, ['bash']), 99: (10, ['claude'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'):
+            self.assertIsNone(reader.resolve_tmux_agent('claude', 'term-1'))
 
     def test_descends_sudo_su_and_runtime_without_mistaking_arguments_for_agents(self):
         table = {10: (1, ['bash']), 11: (10, ['sudo', '-u', 'secondary', 'claude']),
@@ -510,7 +1215,7 @@ class HistoryReaderTest(unittest.TestCase):
 
         def bounded(result):
             count, elapsed, fields, wire = result
-            self.assertLessEqual(count, reader.TAIL_BYTES + 64)
+            self.assertLessEqual(count, reader.QUESTION_SCAN_BYTES + 64)
             self.assertGreaterEqual(int(fields[5]), size - reader.TAIL_BYTES)
             self.assertEqual(int(fields[6]), size)
             self.assertIn('LATEST-50MB', wire)
@@ -525,6 +1230,138 @@ class HistoryReaderTest(unittest.TestCase):
         control.HOME = self.home
         with self.assertRaises(AssertionError):
             bounded(measure(control))
+
+    def test_stale_cursor_on_145mb_log_jumps_to_newest_in_one_reply(self):
+        row_size = 4096
+        overhead = len((json.dumps(self.event('')) + '\n').encode())
+        row = (json.dumps(self.event('y' * (row_size - overhead))) + '\n').encode()
+        self.assertEqual(len(row), row_size)
+        with self.path.open('wb') as output:
+            output.write(b'{"type":"progress","text":"')
+            chunk = b'x' * (1024 * 1024)
+            for _ in range(120):
+                output.write(chunk)
+            output.write(b'"}\n')
+            while output.tell() < 132 * 1024 * 1024:
+                output.write(row * min(256, (132 * 1024 * 1024 - output.tell() + row_size - 1) // row_size))
+        self.read()
+        stale = dict(self.query)
+        self.assertEqual(stale['offset'], self.path.stat().st_size)
+        with self.path.open('ab') as output:
+            for _ in range(13):
+                output.write(row * 256)
+            output.write((json.dumps(self.event('NEWEST-145MB')) + '\n').encode())
+        size = self.path.stat().st_size
+        self.assertGreaterEqual(size, 145 * 1024 * 1024)
+        behind = size - stale['offset']
+        self.assertGreater(behind, 2 * reader.SCAN_BYTES)
+        original_open = Path.open
+        read_bytes = 0
+
+        class Counted:
+            def __init__(self, source):
+                self.source = source
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.source.__exit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.source, name)
+
+            def read(self, *args):
+                nonlocal read_bytes
+                data = self.source.read(*args)
+                read_bytes += len(data)
+                return data
+
+        def counted_open(path, *args, **kwargs):
+            source = original_open(path, *args, **kwargs)
+            return Counted(source) if path == self.path and args == ('rb',) else source
+
+        with patch.object(Path, 'open', counted_open):
+            start = time.monotonic()
+            wire = reader.response(stale)
+            elapsed = time.monotonic() - start
+        fields = wire.splitlines()[0].split('\t')
+        self.assertEqual(fields[13], 'tail')
+        self.assertIn('NEWEST-145MB', wire)
+        self.assertEqual(fields[8], '0')
+        self.assertEqual(int(fields[6]), size)
+        self.assertEqual(fields[14], fields[5])
+        self.assertGreaterEqual(int(fields[5]), size - reader.TAIL_BYTES)
+        self.assertLessEqual(read_bytes, reader.QUESTION_SCAN_BYTES + 128)
+        self.assertLess(elapsed, 0.3)
+        print(f'stale-cursor source_bytes={size} behind_bytes={behind} ms={elapsed * 1000:.1f} read_bytes={read_bytes}')
+
+    def test_stale_cursor_switch_off_preserves_delta(self):
+        self.write(self.event('cached'))
+        self.read()
+        offset = self.query['offset']
+        row = json.dumps(self.event('new row')) + '\n'
+        with self.path.open('a') as output:
+            output.write(row * 8)
+        with patch.object(reader, 'SCAN_BYTES', len(row) * 2), \
+                patch.object(reader, 'ISSUE_345_STALE_JUMPS_TO_TAIL', False):
+            fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(fields[8], '1')
+        self.assertEqual(int(fields[5]), offset)
+        self.assertEqual(int(fields[6]), offset + len(row) * 2)
+        self.assertEqual([row['text'] for row in rows], ['new row', 'new row'])
+
+    def test_recent_cursor_appends_exact_new_rows_as_delta(self):
+        for behind in (1, 2):
+            with self.subTest(scan_multiple=behind):
+                self.write(self.event('cached'))
+                self.read()
+                offset = self.query['offset']
+                events = [self.event('new one'), self.event('new two')]
+                data = ''.join(json.dumps(event) + '\n' for event in events)
+                with self.path.open('a') as output:
+                    output.write(data)
+                with patch.object(reader, 'SCAN_BYTES', len(data) // behind):
+                    fields, rows = self.read()
+                    self.assertEqual(fields[13], 'delta')
+                    if fields[8] == '1':
+                        fields, page = self.read()
+                        self.assertEqual(fields[13], 'delta')
+                        rows += page
+                self.assertEqual([row['text'] for row in rows], ['new one', 'new two'])
+                self.assertEqual(fields[8], '0')
+                self.assertEqual(self.query['offset'], offset + len(data))
+
+    def test_stale_cursor_with_empty_tail_keeps_existing_delta_logic(self):
+        self.write(self.event('cached'))
+        self.read()
+        offset = self.query['offset']
+        row = json.dumps(self.event('new row')) + '\n'
+        with self.path.open('a') as output:
+            output.write(row)
+            output.write(json.dumps(dict(type='progress', text='x' * (reader.TAIL_BYTES + 100))) + '\n')
+        with patch.object(reader, 'SCAN_BYTES', len(row)):
+            fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(fields[8], '1')
+        self.assertEqual(int(fields[5]), offset)
+        self.assertEqual(int(fields[6]), offset + len(row))
+        self.assertEqual([row['text'] for row in rows], ['new row'])
+
+    def test_stale_cursor_whose_tail_has_no_messages_keeps_delta(self):
+        self.write(self.event('cached'))
+        self.read()
+        offset = self.query['offset']
+        row = json.dumps(self.event('new row')) + '\n'
+        tool = json.dumps(dict(type='progress', text='t' * 200)) + '\n'
+        with self.path.open('a') as output:
+            output.write(row + tool * (reader.TAIL_BYTES // len(tool) + 10))
+        with patch.object(reader, 'SCAN_BYTES', len(row) + len(tool)):
+            fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(int(fields[5]), offset)
+        self.assertEqual([row['text'] for row in rows], ['new row'])
 
     def start_server(self):
         bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"

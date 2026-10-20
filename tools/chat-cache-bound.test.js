@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -89,14 +90,14 @@ test('disk reads are bounded and disk writes/pruning are serialized on the worke
   assert.match(body('chatHistoryRead'), /bytes.items.len \+ n > chat_history.MAX_CACHE_BYTES/);
   assert.match(body('chatFileFetchThread'), /g_chat_cache_write_mutex.tryLock\(\)\) Sleep\(1\);[\s\S]*defer g_chat_cache_write_mutex.unlock\(\);[\s\S]*writeFileAtomicW\(path, bytes\)\)[\s\S]*chatHistoryPrune\(path\)/);
   assert.doesNotMatch(body('chatDeferTranscriptLoad'), /chatHistoryRead|History.decode|refreshChatTranscript/);
-  assert.match(body('chatFileRequest'), /!load_disk and !chatFetchAcquire/);
+  assert.match(body('chatFileRequestForDelivery'), /!load_disk and !chatFetchAcquire/);
   assert.match(body('chatFileOnReady'), /if \(!entry.loading_disk\) chatFetchRelease/);
 });
 
 test('a local cache load starts even with a remote worker busy and recent input in another window', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-local-priority-'));
   try {
-    for (const file of ['chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_echo.zig', 'chat_image.zig']) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    copyZig(['chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_echo.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
     const source = `
 const std = @import("std");
 const chat_history = @import("chat_history.zig");
@@ -122,6 +123,7 @@ fn chatFileFailed(_: *ChatHistoryEntry) void { @panic("spawn failed"); }
 fn debugLog(_: []const u8) void {}
 fn chatFileFetchThread(_: *ChatHistoryEntry, _: chat_transcript.Identity, _: u32, disk: bool) void { std.debug.assert(disk); completions.store(1, .release); }
 ${body('chatFileRequest')}
+${body('chatFileRequestForDelivery')}
 test "local cache bypasses busy remote worker and foreground reservation" {
     const key = chat_transcript.Identity.init(1, 0, false, "cached", "");
     chatFileRequest(key);

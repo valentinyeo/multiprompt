@@ -30,6 +30,7 @@ const readArchiveContent = @import("sidebar.zig").readArchiveContent;
 const archiveHasNewContent = @import("sidebar.zig").archiveHasNewContent;
 const logUnarchive = @import("sidebar.zig").logUnarchive;
 const setBlueDot = @import("sidebar.zig").setBlueDot;
+const dotTargetsTab = @import("sidebar.zig").dotTargetsTab;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const getSessionDir = @import("session.zig").getSessionDir;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
@@ -1319,6 +1320,7 @@ test "computeEtaAccuracy ignores malformed or zero-estimate lines" {
 }
 
 fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
+    defer @import("window_layout.zig").chatWorkingTimesPoll();
     if (active or std.mem.startsWith(u8, raw, "DONE:")) app_state.shells[i].hook_capable = true;
     app_state.shells[i].hidden_idle_streak = 0;
     if (app_state.shells[i].muted) {
@@ -1336,7 +1338,7 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
     const was_active = app_state.shells[i].activity == .active;
     if (!active and !std.mem.startsWith(u8, raw, "DONE:")) {
         const explicit_prompt = std.mem.startsWith(u8, raw, "NOTIFICATION:");
-        if (i != app_state.active_shell and (explicit_prompt or (!app_state.shells[i].hook_capable and app_state.shells[i].claude_sid_len == 0)) and setBlueDot(i, .notification, false)) stickyRemove(app_state.shells[i].shell_id);
+        if (dotTargetsTab(i) and (explicit_prompt or (!app_state.shells[i].hook_capable and app_state.shells[i].claude_sid_len == 0)) and setBlueDot(i, .notification, false)) stickyRemove(app_state.shells[i].shell_id);
         recordShellDiagEvent(i, "notification", raw);
         publishInboxState();
         saveSession();
@@ -1375,7 +1377,7 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
             }
         }
         if (app_state.g_voice_mode_active and i == app_state.active_shell) voiceScheduleTurnEnd(app_state.shells[i].shell_id);
-        if (completed_turn and i != app_state.active_shell and (!app_state.shells[i].inbox_archived or archiveHasNewContent(i))) {
+        if (completed_turn and dotTargetsTab(i) and (!app_state.shells[i].inbox_archived or archiveHasNewContent(i))) {
             if (app_state.shells[i].console_working) {
                 app_state.shells[i].deferred_done = true;
             } else if (setBlueDot(i, .hook_done, true)) {

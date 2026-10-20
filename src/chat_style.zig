@@ -76,7 +76,7 @@ pub fn bubbleWidth(width: i32, natural: i32, pad: i32) i32 {
     return std.math.clamp(natural + 2 * pad, 1, bubbleMaxWidth(width));
 }
 pub fn headerHeight(block: md.Block, scaled_height: i32) i32 {
-    return if (block.role != .user and block.role != .injected and block.first) scaled_height else 0;
+    return if (block.role != .user and block.role != .injected and block.role != .tool and block.first) scaled_height else 0;
 }
 pub fn timestamp(iso: []const u8) struct { time: [5]u16, zone: [6]u16 } {
     var result: @TypeOf(timestamp("")) = .{ .time = @splat(0), .zone = @splat(0) };
@@ -279,4 +279,18 @@ test "reading column recomputes centered bounds on resize and stays inside the p
     }
     try std.testing.expectEqual(@as(i32, 760), readingColumn(2000, 350, 760).width);
     try std.testing.expectEqual(@as(i32, 1400), readingColumn(4000, 350, 760).width);
+}
+
+pub fn statusHeight(known: bool, expanded: bool, count: usize, available: i32, header_h: i32, row_h: i32) i32 {
+    if (!known) return 0;
+    const limit = @max(0, @divTrunc(available, 2));
+    return @min(@max(0, available), header_h + if (expanded) @min(@as(i32, @intCast(@min(count, 50))) * row_h, @max(0, limit - header_h)) else @as(i32, 0));
+}
+
+test "status row geometry hides unknown state and reserves a bounded independent todo viewport" {
+    try std.testing.expectEqual(@as(i32, 0), statusHeight(false, true, 50, 600, 28, 24));
+    try std.testing.expectEqual(@as(i32, 28), statusHeight(true, false, 50, 600, 28, 24));
+    try std.testing.expectEqual(@as(i32, 196), statusHeight(true, true, 7, 600, 28, 24));
+    try std.testing.expectEqual(@as(i32, 300), statusHeight(true, true, 50, 600, 28, 24));
+    try std.testing.expectEqual(@as(i32, 10), statusHeight(true, true, 50, 10, 28, 24));
 }

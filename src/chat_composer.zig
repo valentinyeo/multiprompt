@@ -2,6 +2,7 @@ const app_state = @import("app_state.zig");
 const std = @import("std");
 const skill_model = @import("skills.zig");
 const chat_complete = @import("chat_complete.zig");
+const chat_reply = @import("chat_reply.zig");
 const chat_history = @import("chat_history.zig");
 const chat_style = @import("chat_style.zig");
 const WINAPI = @import("win32.zig").WINAPI;
@@ -94,6 +95,7 @@ const Sleep = @import("win32.zig").Sleep;
 const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const DeleteFileW = @import("win32.zig").DeleteFileW;
 const CreateFileW = @import("win32.zig").CreateFileW;
 const FlushFileBuffers = @import("win32.zig").FlushFileBuffers;
@@ -154,6 +156,9 @@ const chat_font_bytes = @import("app_state.zig").chat_font_bytes;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
+const DragAcceptFiles = @import("win32.zig").DragAcceptFiles;
+const ChangeWindowMessageFilterEx = @import("win32.zig").ChangeWindowMessageFilterEx;
+const chatDropFiles = @import("chat_render.zig").chatDropFiles;
 const chatImagePasteIntercept = @import("chat_render.zig").chatImagePasteIntercept;
 const chatCopyLatestCode = @import("chat_render.zig").chatCopyLatestCode;
 const chatCopyCodeKeyDown = @import("chat_render.zig").chatCopyCodeKeyDown;
@@ -162,6 +167,8 @@ const CHAT_COMPOSER_MAX_LINES = @import("app_state.zig").CHAT_COMPOSER_MAX_LINES
 const ChatAcRequest = @import("app_state.zig").ChatAcRequest;
 const CHAT_BUNDLED_SKILLS = @import("app_state.zig").CHAT_BUNDLED_SKILLS;
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
+const chatOutboxLegacyKeyForShell = @import("chat_send.zig").chatOutboxLegacyKeyForShell;
+const chatOutboxShellForKey = @import("chat_send.zig").chatOutboxShellForKey;
 const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
 const CHAT_DRAFT_SAVE_MS = @import("app_state.zig").CHAT_DRAFT_SAVE_MS;
 const insertTextIntoChatComposer = @import("voice.zig").insertTextIntoChatComposer;
@@ -203,7 +210,7 @@ pub fn chatViewLayout() ChatViewLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const gap = uiScaled(14);
-    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h;
+    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
     const slot_top = DEV_TOP_PAD + threadTitleHeight();
     const slot_bottom = @max(slot_top + uiScaled(160), rc.bottom - DEV_TOP_PAD);
     const split = if (browserSlotReserved()) calcBrowserLayout() else null;
@@ -248,13 +255,64 @@ pub fn chatViewLayout() ChatViewLayout {
         .composer_card = composer_card,
         .composer = .{
             .left = attach_btn.right + uiScaled(10),
-            .top = composer_card.top + uiScaled(12),
+            .top = composer_card.top + chatReplyBarH() + uiScaled(12),
             .right = send_btn.left - uiScaled(12),
             .bottom = composer_card.bottom - uiScaled(10),
         },
         .send_btn = send_btn,
         .attach_btn = attach_btn,
+        .stop_btn = .{
+            .left = right - uiScaled(64),
+            .right = right,
+            .top = transcript_bottom + uiScaled(2),
+            .bottom = composer_card.top - uiScaled(2),
+        },
     };
+}
+
+pub fn chatReplyBarH() i32 {
+    return if (app_state.g_chat_reply_len > 0) uiScaled(36) else 0;
+}
+
+pub fn chatReplyCancelRect() RECT {
+    const card = chatViewLayout().composer_card;
+    return .{ .left = card.right - uiScaled(36), .right = card.right - uiScaled(4), .top = card.top + uiScaled(2), .bottom = card.top + chatReplyBarH() };
+}
+
+pub fn clearChatReply() void {
+    app_state.g_chat_reply_len = 0;
+    app_state.g_chat_reply_preview_len = 0;
+    layoutChatControls();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+fn chatReplyRefreshPreview() void {
+    const a = std.heap.page_allocator;
+    const text = chat_reply.preview(a, app_state.g_chat_reply[0..app_state.g_chat_reply_len]) catch return;
+    defer a.free(text);
+    const wide = std.unicode.utf8ToUtf16LeAlloc(a, text) catch return;
+    defer a.free(wide);
+    var n = @min(wide.len, app_state.g_chat_reply_preview.len);
+    if (n > 0 and std.unicode.utf16IsHighSurrogate(wide[n - 1])) n -= 1;
+    @memcpy(app_state.g_chat_reply_preview[0..n], wide[0..n]);
+    app_state.g_chat_reply_preview_len = n;
+}
+
+pub fn selectChatReply(text: []const u16) void {
+    if (app_state.g_chat_composer_hwnd == null) return;
+    const bytes = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text) catch return;
+    defer std.heap.page_allocator.free(bytes);
+    if (bytes.len > app_state.g_chat_reply.len) {
+        showHeaderNoticeAscii("This message is too large to quote", 3500, true);
+        return;
+    }
+    @memcpy(app_state.g_chat_reply[0..bytes.len], bytes);
+    app_state.g_chat_reply_len = bytes.len;
+    chatReplyRefreshPreview();
+    chatAcClose();
+    layoutChatControls();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    _ = SetFocus(app_state.g_chat_composer_hwnd);
 }
 
 pub fn pointInRect(rc: RECT, x: i32, y: i32) bool {
@@ -267,6 +325,7 @@ pub fn chatViewOwnsInput() bool {
 }
 
 pub fn chatComposerFocusAllowed() bool {
+    if (app_state.g_chat_find_open) return false;
     if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) altqLog("composer_block pending={} handoff_left={} chat_owns={} fg={X}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), chatViewOwnsInput(), altqPtr(GetForegroundWindow()) });
     if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) return false;
     return chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and app_state.g_edit_hwnd == null and GetForegroundWindow() == app_state.g_main_hwnd;
@@ -314,8 +373,16 @@ pub fn postPaletteToggle() void {
 pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (!app_state.g_chat_active) return 0;
     const layout = chatViewLayout();
+    if (app_state.g_chat_reply_len > 0 and pointInRect(chatReplyCancelRect(), x, y)) return 9;
     if (pointInRect(layout.send_btn, x, y)) return 3;
     if (pointInRect(layout.attach_btn, x, y)) return 4;
+    if (@import("window_layout.zig").chatPermissionVisible()) {
+        for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
+            if (@import("window_layout.zig").chatPermissionRect(action)) |rc| {
+                if (pointInRect(rc, x, y)) return @intCast(6 + i);
+            }
+        }
+    } else if (@import("window_layout.zig").chatWorkingBarVisible() and pointInRect(layout.stop_btn, x, y)) return 5;
     return 0;
 }
 
@@ -434,6 +501,13 @@ pub fn layoutChatControls() void {
         layout = chatViewLayout();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     }
+    const status_h = @import("chat_render.zig").chatStatusHeight(layout.transcript.bottom - layout.transcript.top);
+    if (app_state.g_chat_status_hwnd != null) {
+        _ = MoveWindow(app_state.g_chat_status_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, status_h, 0);
+        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active) SW_SHOW else SW_HIDE);
+        _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
+    }
+    layout.transcript.top += status_h;
     var batch = BeginDeferWindowPos(2);
     if (batch != null and app_state.g_chat_transcript_hwnd != null)
         batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -475,6 +549,15 @@ fn ensureChatControls() bool {
             null,
         );
         if (app_state.g_chat_transcript_hwnd == null) return false;
+        DragAcceptFiles(app_state.g_chat_transcript_hwnd, 1);
+        for ([_]UINT{ 0x0233, 0x004A, 0x0049 }) |message| {
+            _ = ChangeWindowMessageFilterEx(app_state.g_chat_transcript_hwnd, message, 1, null);
+        }
+    }
+    if (app_state.g_chat_status_hwnd == null) {
+        app_state.g_chat_status_hwnd = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, app_state.g_main_hwnd, null, null, null);
+        if (app_state.g_chat_status_hwnd == null) return false;
+        _ = SetWindowLongPtrW(app_state.g_chat_status_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&@import("chat_render.zig").chatStatusWndProc)));
     }
     if (app_state.g_chat_composer_hwnd == null) {
         app_state.g_chat_composer_scroll_shown = false;
@@ -493,6 +576,10 @@ fn ensureChatControls() bool {
             null,
         );
         if (app_state.g_chat_composer_hwnd == null) return false;
+        DragAcceptFiles(app_state.g_chat_composer_hwnd, 1);
+        for ([_]UINT{ 0x0233, 0x004A, 0x0049 }) |message| {
+            _ = ChangeWindowMessageFilterEx(app_state.g_chat_composer_hwnd, message, 1, null);
+        }
         app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(app_state.g_chat_composer_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_chat_composer_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&chatComposerSubclassProc)));
         _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00C5, 16383, 0);
@@ -858,7 +945,7 @@ fn chatAcOnComposerChanged() void {
 }
 
 pub fn chatAcOpenBrowse() void {
-    if (!app_state.g_chat_active) openChatView();
+    if (!app_state.g_chat_active) toggleChatView();
     if (!chatViewOwnsInput() or chatAcAgent() == .other or app_state.g_chat_composer_hwnd == null) return;
     var caret: u32 = 0;
     _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&caret), 0);
@@ -961,9 +1048,18 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == 0x0233) {
+        chatDropFiles(@ptrFromInt(wp));
+        return 0;
+    }
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
+        clearChatReply();
+        return 0;
+    }
     if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_sel_active and !app_state.g_chat_ac.open) {
         chatSelectionClear();
         app_state.g_chat_sel_transcript_focus = false;
@@ -1080,6 +1176,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     }
     if (msg == WM_KILLFOCUS) chatAcClose();
     if (msg == WM_KEYDOWN and wp == 0x1B) {
+        if (@import("chat_working.zig").composerEscStops(@import("window_layout.zig").chatWorkingBarVisible(), app_state.g_chat_ac.open, app_state.g_chat_sel_active) and (lp & 0x40000000) == 0) _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell);
         return 0;
     }
     if (msg == WM_KEYDOWN and chatPaletteToggleKeyDown(wp)) {
@@ -1108,28 +1205,41 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     return CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
 }
 
-pub fn chatViewShouldShowForTab(mode: ChatViewMode, tab_remembered_on: bool, global_on: bool, is_first_view_after_switch: bool) bool {
+pub fn chatViewShouldShowForTab(mode: ChatViewMode, tab_remembered_on: bool, shell_override: bool, global_on: bool, is_first_view_after_switch: bool) bool {
     _ = global_on;
     _ = is_first_view_after_switch;
     return switch (mode) {
         .per_session => tab_remembered_on,
-        .everywhere => true,
+        .everywhere => !(app_state.ISSUE_373_SHELL_OVERRIDE and shell_override),
         .nowhere => false,
     };
 }
 
 test "chatViewShouldShowForTab: per_session always follows the tab's own remembered flag" {
-    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, true));
-    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, true, true));
-    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, false));
-    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, true, false));
+    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, false, true));
+    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, false, true, true));
+    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, false, false));
+    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, false, true, false));
 }
 
-test "chatViewShouldShowForTab: On Everywhere always shows, Off Everywhere never shows" {
-    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, true));
-    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, false));
-    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, true, true));
-    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, true, false));
+test "ISSUE-373 everywhere follows sessions without a shell override and nowhere stays off" {
+    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, false, true));
+    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, false, false));
+    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, false, true, true));
+    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, false, true, false));
+}
+
+test "ISSUE-373 shell overrides only suppress everywhere mode across tab switches" {
+    for ([_]bool{ false, true }) |remembered| {
+        for ([_]bool{ false, true }) |global| {
+            for ([_]bool{ false, true }) |first| {
+                try std.testing.expect(chatViewShouldShowForTab(.everywhere, remembered, false, global, first));
+                try std.testing.expect(!chatViewShouldShowForTab(.everywhere, remembered, true, global, first));
+                try std.testing.expectEqual(remembered, chatViewShouldShowForTab(.per_session, remembered, true, global, first));
+                try std.testing.expect(!chatViewShouldShowForTab(.nowhere, remembered, true, global, first));
+            }
+        }
+    }
 }
 
 fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_chat: bool, covered: bool) bool {
@@ -1139,7 +1249,7 @@ fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_c
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return false;
     const tab_wants_chat = (app_state.g_chat_view_mode != .everywhere or app_state.g_restoring or app_state.g_startup_progress) and
-        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.g_chat_active, false);
+        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, false);
     return shellConsoleVisibilityAllowed(
         idx == app_state.active_shell,
         app_state.g_chat_active,
@@ -1155,7 +1265,7 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
         if (IsWindowVisible(app_state.shells[idx].hwnd) == 0) return 0;
         if (verboseLoggingEnabled() and (app_state.g_chat_active or
             ((app_state.g_chat_view_mode != .everywhere or app_state.g_restoring or app_state.g_startup_progress) and
-                chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.g_chat_active, false))))
+                chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, false))))
         {
             var buf: [160]u8 = undefined;
             const line = std.fmt.bufPrint(&buf, "[chatview] suppressed console show shell={d} from={s}", .{ app_state.shells[idx].shell_id, from }) catch "[chatview] suppressed console show";
@@ -1178,8 +1288,9 @@ pub fn openChatView() void {
     if (app_state.g_chat_view_mode == .nowhere) return;
     if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     if (app_state.g_chat_browser_swap.shell_id == 0) {
-        app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id);
         app_state.g_chat_switch_started = GetTickCount64();
+        app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id, app_state.g_chat_switch_started);
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_BROWSER_SWAP, @import("chat_switch.zig").paint_deadline_ms, null);
         app_state.g_chat_switch_browser_sid = 0;
     }
     const was_preparing = app_state.g_chat_switch_preparing;
@@ -1218,10 +1329,12 @@ pub fn openChatView() void {
 }
 
 pub fn closeChatView() void {
+    @import("chat_find_ui.zig").close(false);
     chatAcClose();
     if (!app_state.g_chat_active) return;
     chatDraftFlush();
     app_state.g_chat_active = false;
+    @import("window_layout.zig").chatWorkingIndicatorSync();
     app_state.g_chat_browser_swap.cancel();
     app_state.g_chat_switch_browser_sid = 0;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
@@ -1236,6 +1349,7 @@ pub fn closeChatView() void {
     } else if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH);
     }
+    if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
@@ -1245,6 +1359,41 @@ pub fn closeChatView() void {
         focusActiveShell();
     }
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+test "ISSUE-373 overridden console is visible during restore and after tab switches" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_mode = app_state.g_chat_view_mode;
+    const saved_chat = app_state.g_chat_active;
+    const saved_restoring = app_state.g_restoring;
+    const saved_startup = app_state.g_startup_progress;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_chat_view_mode = saved_mode;
+        app_state.g_chat_active = saved_chat;
+        app_state.g_restoring = saved_restoring;
+        app_state.g_startup_progress = saved_startup;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].hwnd = @ptrFromInt(1);
+    app_state.shells[0].chat_shell_override = true;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_view_mode = .everywhere;
+    app_state.g_chat_active = false;
+    for ([_]bool{ false, true }) |restoring| {
+        app_state.g_restoring = restoring;
+        for ([_]bool{ false, true }) |startup| {
+            app_state.g_startup_progress = startup;
+            try std.testing.expect(shellConsoleShouldBeVisible(0));
+        }
+    }
+    app_state.shells[0].chat_shell_override = false;
+    try std.testing.expect(!shellConsoleShouldBeVisible(0));
 }
 
 fn chatDraftSafeName(id: []const u8, out: []u8) []const u8 {
@@ -1327,29 +1476,107 @@ fn chatDraftNoteEdit() void {
 }
 
 pub fn chatDraftBindToActive() void {
+    const ReplyStash = struct {
+        var drafts = std.StringHashMap([]u8).init(std.heap.page_allocator);
+    };
+    const SkillStash = struct {
+        var owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        var owner_len: usize = 0;
+        var name: @TypeOf(app_state.g_chat_skill_name) = undefined;
+        var name_len: usize = 0;
+        var body: @TypeOf(app_state.g_chat_skill_body) = undefined;
+        var body_len: usize = 0;
+    };
     if (app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var id_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const id = chatOutboxKeyForShell(app_state.active_shell, &id_buf);
     if (id.len == 0) return;
     if (app_state.g_chat_draft_owner_len == id.len and std.mem.eql(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], id)) return;
+    if (app_state.g_chat_draft_owner_len > 0 and app_state.g_chat_reply_len > 0) {
+        const a = std.heap.page_allocator;
+        const owner = a.dupe(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) catch return;
+        const quote = a.dupe(u8, app_state.g_chat_reply[0..app_state.g_chat_reply_len]) catch {
+            a.free(owner);
+            return;
+        };
+        ReplyStash.drafts.put(owner, quote) catch {
+            a.free(owner);
+            a.free(quote);
+            return;
+        };
+    }
+    app_state.g_chat_reply_len = 0;
+    app_state.g_chat_reply_preview_len = 0;
+    if (ReplyStash.drafts.fetchRemove(id)) |saved| {
+        @memcpy(app_state.g_chat_reply[0..saved.value.len], saved.value);
+        app_state.g_chat_reply_len = saved.value.len;
+        std.heap.page_allocator.free(saved.key);
+        std.heap.page_allocator.free(saved.value);
+        chatReplyRefreshPreview();
+    }
+    if (app_state.g_chat_draft_owner_len > 0) {
+        if (app_state.g_chat_skill_name_len > 0) {
+            @memcpy(SkillStash.owner[0..app_state.g_chat_draft_owner_len], app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+            SkillStash.owner_len = app_state.g_chat_draft_owner_len;
+            @memcpy(SkillStash.name[0..app_state.g_chat_skill_name_len], app_state.g_chat_skill_name[0..app_state.g_chat_skill_name_len]);
+            SkillStash.name_len = app_state.g_chat_skill_name_len;
+            @memcpy(SkillStash.body[0..app_state.g_chat_skill_body_len], app_state.g_chat_skill_body[0..app_state.g_chat_skill_body_len]);
+            SkillStash.body_len = app_state.g_chat_skill_body_len;
+        }
+        app_state.g_chat_skill_name_len = 0;
+        app_state.g_chat_skill_body_len = 0;
+    }
     chatDraftFlush();
     @memcpy(app_state.g_chat_draft_owner[0..id.len], id);
     app_state.g_chat_draft_owner_len = id.len;
+    if (SkillStash.owner_len > 0 and std.mem.eql(u8, SkillStash.owner[0..SkillStash.owner_len], id)) {
+        @memcpy(app_state.g_chat_skill_name[0..SkillStash.name_len], SkillStash.name[0..SkillStash.name_len]);
+        app_state.g_chat_skill_name_len = SkillStash.name_len;
+        @memcpy(app_state.g_chat_skill_body[0..SkillStash.body_len], SkillStash.body[0..SkillStash.body_len]);
+        app_state.g_chat_skill_body_len = SkillStash.body_len;
+        SkillStash.owner_len = 0;
+    }
     var text: [16400]u16 = undefined;
     var len: usize = 0;
+    var migrated = false;
     var path_buf: [560]u8 = undefined;
     if (getChatDraftPath(id, &path_buf)) |path| {
         if (readFileAllocWin32(path, 65536)) |bytes| {
             defer std.heap.page_allocator.free(bytes);
             len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch 0;
+        } else {
+            var path_wbuf: [600]u16 = undefined;
+            if (win32WidePath(&path_wbuf, path)) |path_w| {
+                if (GetFileAttributesW(path_w.ptr) == 0xFFFF_FFFF) {
+                    var legacy_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                    const legacy = chatOutboxLegacyKeyForShell(app_state.active_shell, &legacy_buf);
+                    if (legacy.len > 0 and chatOutboxShellForKey(legacy) == app_state.active_shell) {
+                        if (getChatDraftPath(legacy, &path_buf)) |legacy_path| {
+                            if (readFileAllocWin32(legacy_path, 65536)) |bytes| {
+                                defer std.heap.page_allocator.free(bytes);
+                                if (std.unicode.utf8ToUtf16Le(text[0..16383], bytes)) |n| {
+                                    len = n;
+                                    migrated = true;
+                                    var wbuf: [600]u16 = undefined;
+                                    if (win32WidePath(&wbuf, legacy_path)) |w| _ = DeleteFileW(w.ptr);
+                                } else |_| {}
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     text[len] = 0;
     _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&text));
     _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, len, @intCast(len));
-    app_state.g_chat_draft_dirty = false;
-    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
+    app_state.g_chat_draft_dirty = migrated;
+    if (app_state.g_main_hwnd != null) {
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
+        if (migrated) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    }
     chatComposerAutoGrow();
+    layoutChatControls();
 }
 
 test "chat draft safe name is file-name safe and collision-free" {
@@ -1367,7 +1594,20 @@ pub fn toggleChatView() void {
         showHeaderNoticeAscii("Chat View is off everywhere (Ctrl+K to change)", 3500, false);
         return;
     }
+    if (app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.g_chat_view_mode == .everywhere and
+        app_state.shells[app_state.active_shell].chat_shell_override != app_state.g_chat_active)
+    {
+        app_state.shells[app_state.active_shell].chat_shell_override = app_state.g_chat_active;
+        var buf: [96]u8 = undefined;
+        const line = std.fmt.bufPrint(&buf, "ISSUE-373 override={s} shell={d}", .{
+            if (app_state.g_chat_active) @as([]const u8, "on") else "off",
+            app_state.shells[app_state.active_shell].shell_id,
+        }) catch unreachable;
+        debugLog(line);
+    }
     if (app_state.g_chat_active) closeChatView() else openChatView();
+    saveSession();
 }
 
 pub fn invalidateChatHeader() void {
