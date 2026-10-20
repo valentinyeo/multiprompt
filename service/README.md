@@ -47,6 +47,7 @@ For self-hosted desktop sync, change the public service origin in `src/account_c
 - `GET|PUT /v1/usage`: account usage readback and service-token-authenticated ingestion
 - `POST /oauth/token`: authorization-code or refresh-token grant
 - `GET /v1/devices`, `DELETE /v1/devices/{id}`: list and revoke devices
+- `POST /v1/crash-reports`: device Bearer auth; strict Android report fields, 32 KiB body limit, duplicate IDs scoped to each device, newest 50 reports per device retained and deleted on revocation
 - `GET /v1/layout`, `PUT /v1/layout`: revision-based layout sync; stale writes return 409
 
 Callbacks accept only exact Android companion callback schemes or `http://127.0.0.1:<port>/callback`. Layout schema allows workspace names and tmux tab names, identities, host-slot indices (0/1/2), workspace membership, optional manual-title flags, and optional boolean `favorite` stars, and optional non-negative safe-integer `used` Unix-epoch millisecond timestamps. It rejects local paths, PIDs, SSH keys, and credential fields. Limits match desktop capacity: nine workspaces and 256 tabs.

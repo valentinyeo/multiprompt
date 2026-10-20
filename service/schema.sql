@@ -51,3 +51,11 @@ CREATE INDEX IF NOT EXISTS "passkey_credentialID_idx" ON "passkey"("credentialID
 CREATE TABLE IF NOT EXISTS usage (
  account TEXT PRIMARY KEY, updated INTEGER NOT NULL, status TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS crash_reports (
+ device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+ report_id TEXT NOT NULL, account TEXT NOT NULL, received_at INTEGER NOT NULL,
+ captured_at INTEGER NOT NULL, app_version TEXT NOT NULL, android_version TEXT NOT NULL,
+ thread TEXT NOT NULL, summary TEXT NOT NULL, stack_trace TEXT NOT NULL,
+ PRIMARY KEY (device_id, report_id)
+);
+CREATE INDEX IF NOT EXISTS crash_reports_device_received_idx ON crash_reports(device_id, received_at);

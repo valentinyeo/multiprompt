@@ -43,10 +43,19 @@ export function validateLayout(x) {
   return x;
 }
 
-async function body(request, limit = 1024 * 1024) {
+function validateCrashReport(x) {
+  const fields = ['id', 'captured_at', 'app_version', 'android_version', 'thread', 'summary', 'stack_trace'];
+  const limits = { app_version: 64, android_version: 64, thread: 200, summary: 2000, stack_trace: 16000 };
+  if (!x || typeof x !== 'object' || Array.isArray(x) || Object.keys(x).length !== fields.length || Object.keys(x).some(key => !fields.includes(key)) ||
+      typeof x.id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(x.id) || !Number.isSafeInteger(x.captured_at) ||
+      Object.entries(limits).some(([key, limit]) => typeof x[key] !== 'string' || x[key].length > limit) || !x.stack_trace.length) fail(400, 'invalid_crash_report');
+  return x;
+}
+
+async function body(request, limit = 1024 * 1024, invalid = 'invalid_json') {
   if (Number(request.headers.get('Content-Length')) > limit) fail(413, 'too_large');
   const reader = request.body?.getReader();
-  if (!reader) fail(400, 'invalid_json');
+  if (!reader) fail(400, invalid);
   let size = 0; const chunks = [];
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
@@ -55,7 +64,7 @@ async function body(request, limit = 1024 * 1024) {
   }
   const bytes = new Uint8Array(size); let pos = 0;
   for (const chunk of chunks) { bytes.set(chunk, pos); pos += chunk.length; }
-  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { fail(400, 'invalid_json'); }
+  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { fail(400, invalid); }
 }
 async function authenticate(request, db) {
   const token = request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
@@ -203,8 +212,20 @@ export default {
         return json({ device_id: device.id, devices: result.results });
       }
       if (url.pathname.startsWith('/v1/devices/') && request.method === 'DELETE') {
-        const result = await db.prepare('UPDATE devices SET revoked=1 WHERE id=? AND account=?').bind(url.pathname.slice('/v1/devices/'.length), device.account).run();
-        return result.meta.changes ? json({ revoked: true }) : json({ error: 'not_found' }, 404);
+        const id = url.pathname.slice('/v1/devices/'.length);
+        const result = await db.batch([
+          db.prepare('UPDATE devices SET revoked=1 WHERE id=? AND account=?').bind(id, device.account),
+          db.prepare('DELETE FROM crash_reports WHERE device_id IN (SELECT id FROM devices WHERE id=? AND account=?)').bind(id, device.account)
+        ]);
+        return result[0].meta.changes ? json({ revoked: true }) : json({ error: 'not_found' }, 404);
+      }
+      if (url.pathname === '/v1/crash-reports' && request.method === 'POST') {
+        const b = validateCrashReport(await body(request, 32 * 1024, 'invalid_crash_report'));
+        const result = await db.batch([
+          db.prepare('INSERT INTO crash_reports (device_id,report_id,account,received_at,captured_at,app_version,android_version,thread,summary,stack_trace) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,report_id) DO NOTHING').bind(device.id, b.id, device.account, now(), b.captured_at, b.app_version, b.android_version, b.thread, b.summary, b.stack_trace),
+          db.prepare('DELETE FROM crash_reports WHERE device_id=? AND rowid IN (SELECT rowid FROM crash_reports WHERE device_id=? ORDER BY received_at DESC,rowid DESC LIMIT -1 OFFSET 50)').bind(device.id, device.id)
+        ]);
+        return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
