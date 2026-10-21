@@ -209,19 +209,11 @@ pub fn chatViewLayout() ChatViewLayout {
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const gap = uiScaled(14);
     const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
-    const slot_top = DEV_TOP_PAD + threadTitleHeight();
-    const slot_bottom = @max(slot_top + uiScaled(160), rc.bottom - DEV_TOP_PAD);
-    const split = if (browserSlotReserved()) calcBrowserLayout() else null;
-    const column = chat_history.column(rc.right, SIDEBAR_W(), split != null, if (split) |bl| bl.console_x else 0, if (split) |bl| bl.console_w else 0);
-    const col = ConsoleColumn{ .left = column.left, .width = column.width };
-    const slot = RECT{ .left = col.left, .top = slot_top, .right = col.left + col.width, .bottom = slot_bottom };
-    const inset = paneFocusInset();
-    const full_width = app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
-    const content = chat_style.contentColumn(slot.left, col.width, browserSlotReserved(), browserSplitPermilleForActiveShell(), if (full_width) col.width else uiScaled(760), inset);
-    const left = content.left;
-    const right = left + content.width;
-    const content_top = slot.top + inset;
-    const bottom = slot.bottom - inset;
+    const slot = @import("window_layout.zig").activePaneRects(rc).primary;
+    const left = slot.left;
+    const right = slot.right;
+    const content_top = slot.top + threadTitleHeight();
+    const bottom = slot.bottom;
     const composer_card = RECT{
         .left = left,
         .top = bottom - composer_h,

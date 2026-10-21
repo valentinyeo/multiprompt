@@ -654,6 +654,7 @@ const TabGroup = struct {
     name_len: u32,
     collapsed: bool,
     color: u8,
+    color_set: bool = false,
 };
 pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
@@ -927,6 +928,10 @@ pub var g_search_group_move_mode: bool = false;
 pub var g_groupmove_tab_sid: u32 = 0;
 pub var g_search_skills_mode: bool = false;
 pub var g_search_tabctx_mode: bool = false;
+pub var g_search_groupctx_mode: bool = false;
+pub var g_groupctx_gid: u32 = 0;
+pub const SEARCH_GROUPCTX_BASE: usize = 10000;
+pub const SEARCH_GROUPCTX_COUNT: usize = 16 + MAX_LWS + MAX_WORKSPACES;
 pub var g_tabctx_sid: u32 = 0;
 pub var g_search_remind_input_mode: bool = false;
 pub var g_search_rename_input_mode: bool = false;

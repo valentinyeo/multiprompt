@@ -64,6 +64,7 @@ const tabRowH = @import("browser_pane.zig").tabRowH;
 const MAX_LWS = @import("app_state.zig").MAX_LWS;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
+const findGroupIdx = @import("sidebar.zig").findGroupIdx;
 const GROUP_COLORS = @import("app_state.zig").GROUP_COLORS;
 const GROUP_COLOR_NAMES = @import("app_state.zig").GROUP_COLOR_NAMES;
 const deleteGroup = @import("sidebar.zig").deleteGroup;
@@ -473,96 +474,6 @@ pub fn commitRename() void {
     if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
 }
 
-fn appendWorkspaceMoveMenuItems(menu: HANDLE, prefix: []const u8) void {
-    if (app_state.g_single_window) {
-        var wsi: u8 = 0;
-        while (wsi < app_state.g_lws_count) : (wsi += 1) {
-            if (wsi == app_state.g_active_workspace) continue;
-            var label_buf: [128]u16 = std.mem.zeroes([128]u16);
-            var bi: usize = 0;
-            for (prefix) |c| {
-                if (bi >= label_buf.len - 1) break;
-                label_buf[bi] = c;
-                bi += 1;
-            }
-            var nbuf: [32]u8 = undefined;
-            const nm = workspaceDisplayName(wsi, &nbuf);
-            for (nm) |c| {
-                if (bi >= label_buf.len - 1) break;
-                label_buf[bi] = c;
-                bi += 1;
-            }
-            label_buf[bi] = 0;
-            _ = AppendMenuW(menu, MF_STRING, MENU_MOVE_TO_PILL_BASE + wsi, @ptrCast(&label_buf));
-        }
-        mergeWorkspaceRegistryFromDisk();
-        scanLiveWorkspaceWindows(false);
-        for (0..app_state.g_workspace_count) |wi| {
-            if (!workspaceCanMoveIntoClosedStandalone(@intCast(wi))) continue;
-            var label_buf: [128]u16 = std.mem.zeroes([128]u16);
-            var bi: usize = 0;
-            for (prefix) |c| {
-                if (bi >= label_buf.len - 1) break;
-                label_buf[bi] = c;
-                bi += 1;
-            }
-            const e = &app_state.g_workspaces[wi];
-            const nlen = @min(e.name_len, @as(u32, @intCast(label_buf.len - bi - 1)));
-            for (0..nlen) |ni| {
-                label_buf[bi] = @intCast(e.name[ni]);
-                bi += 1;
-            }
-            if (nlen == 0) {
-                const fallback = "Workspace";
-                for (fallback) |c| {
-                    if (bi >= label_buf.len - 1) break;
-                    label_buf[bi] = c;
-                    bi += 1;
-                }
-            }
-            const suffix = " (closed)";
-            for (suffix) |c| {
-                if (bi >= label_buf.len - 1) break;
-                label_buf[bi] = c;
-                bi += 1;
-            }
-            label_buf[bi] = 0;
-            _ = AppendMenuW(menu, MF_STRING, MENU_MOVE_TO_WORKSPACE_BASE + wi, @ptrCast(&label_buf));
-        }
-        return;
-    }
-    mergeWorkspaceRegistryFromDisk();
-    const current = getInstanceName();
-    for (0..app_state.g_workspace_count) |wi| {
-        const e = &app_state.g_workspaces[wi];
-        const id = e.id[0..e.id_len];
-        if (std.mem.eql(u8, id, current)) continue;
-
-        var label_buf: [128]u16 = std.mem.zeroes([128]u16);
-        var bi: usize = 0;
-        for (prefix) |c| {
-            if (bi >= label_buf.len - 1) break;
-            label_buf[bi] = c;
-            bi += 1;
-        }
-        const nlen = @min(e.name_len, @as(u32, @intCast(label_buf.len - bi - 1)));
-        for (0..nlen) |ni| {
-            label_buf[bi] = @intCast(e.name[ni]);
-            bi += 1;
-        }
-        if (nlen == 0) {
-            const fallback = "Window";
-            for (fallback) |c| {
-                if (bi >= label_buf.len - 1) break;
-                label_buf[bi] = c;
-                bi += 1;
-            }
-        }
-        label_buf[bi] = 0;
-        _ = AppendMenuW(menu, MF_STRING, MENU_MOVE_TO_WORKSPACE_BASE + wi, @ptrCast(&label_buf));
-    }
-}
-
 pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
     if (tab_idx >= app_state.shell_count) return;
     const sid = app_state.shells[tab_idx].shell_id;
@@ -576,51 +487,97 @@ pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
     _ = InvalidateRect(hwnd, null, 0);
 }
 
-pub fn showGroupHeaderMenu(hwnd: HANDLE, gidx: u32, _: i32, my: i32) void {
-    if (gidx >= app_state.group_count) return;
-    const menu = CreatePopupMenu();
-    if (menu == null) return;
+pub fn paletteGroupId() u32 {
+    if (app_state.g_search_groupctx_mode) return app_state.g_groupctx_gid;
+    return if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].group_id else 0;
+}
 
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_NEW_TAB, L("New tab in this group"));
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_MOVE_WORKSPACE, L("Move group to new workspace"));
-    appendWorkspaceMoveMenuItems(menu, "Move group to workspace: ");
-    _ = AppendMenuW(menu, 0x0800, 0, null);
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_RENAME, L("Rename group"));
-    const coll_label: LPCWSTR = if (app_state.groups[gidx].collapsed) L("Expand group") else L("Collapse group");
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_COLLAPSE, coll_label);
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_UNGROUP, L("Ungroup"));
-    _ = AppendMenuW(menu, MF_STRING, MENU_HEADER_CLOSE, L("Close all tabs in group"));
+pub fn groupPaletteCommand(action: usize) usize {
+    return switch (action) {
+        0 => MENU_HEADER_NEW_TAB,
+        1 => MENU_HEADER_RENAME,
+        2 => MENU_HEADER_COLLAPSE,
+        3 => MENU_HEADER_UNGROUP,
+        4 => MENU_HEADER_CLOSE,
+        5 => MENU_HEADER_MOVE_WORKSPACE,
+        8...15 => MENU_HEADER_COLOR_BASE + action - 8,
+        16...24 => MENU_MOVE_TO_PILL_BASE + action - 16,
+        25...88 => MENU_MOVE_TO_WORKSPACE_BASE + action - 25,
+        else => 0,
+    };
+}
 
-    _ = AppendMenuW(menu, 0x0800, 0, null);
-    const cur_color: u8 = app_state.groups[gidx].color % @as(u8, @intCast(GROUP_COLORS.len));
-    for (GROUP_COLOR_NAMES, 0..) |cname, ci| {
-        var clabel: [48]u16 = std.mem.zeroes([48]u16);
-        var cli: usize = 0;
-        const cpfx = "Color: ";
-        for (cpfx) |c| {
-            clabel[cli] = c;
-            cli += 1;
+pub fn groupPaletteLabel(action: usize, buf: *[192]u16) usize {
+    const gi = findGroupIdx(paletteGroupId()) orelse return 0;
+    const label: []const u8 = switch (action) {
+        0 => "New tab in this group",
+        1 => "Rename group",
+        2 => if (app_state.groups[gi].collapsed) "Expand group" else "Collapse group",
+        3 => "Ungroup",
+        4 => "Close all tabs in group",
+        5 => "Move group to new workspace",
+        8...15 => GROUP_COLOR_NAMES[action - 8],
+        16...88 => "Move group to workspace: ",
+        else => return 0,
+    };
+    var len: usize = 0;
+    if (action >= 8 and action < 16) {
+        for ("Group color: ") |c| {
+            buf[len] = c;
+            len += 1;
         }
-        for (cname) |c| {
-            clabel[cli] = c;
-            cli += 1;
-        }
-        clabel[cli] = 0;
-        const flags: UINT = if (ci == @as(usize, cur_color)) (MF_STRING | 0x00000008) else MF_STRING;
-        _ = AppendMenuW(menu, flags, MENU_HEADER_COLOR_BASE + ci, @ptrCast(&clabel));
     }
+    for (label) |c| {
+        buf[len] = c;
+        len += 1;
+    }
+    if (action >= 16 and action < 25) {
+        const slot = action - 16;
+        for (app_state.g_ws_names[slot][0..app_state.g_ws_name_len[slot]]) |c| {
+            buf[len] = c;
+            len += 1;
+        }
+        if (app_state.g_ws_name_len[slot] == 0) {
+            buf[len] = @intCast('1' + slot);
+            len += 1;
+        }
+    } else if (action >= 25 and action < 89) {
+        const wi = action - 25;
+        if (wi >= app_state.g_workspace_count) return 0;
+        const ws = &app_state.g_workspaces[wi];
+        for (ws.name[0..ws.name_len]) |c| {
+            buf[len] = c;
+            len += 1;
+        }
+    }
+    return len;
+}
 
-    var pt = POINT{ .x = SIDEBAR_W() - 10, .y = my };
-    _ = ClientToScreen(hwnd, &pt);
-    _ = KillTimer(hwnd, TIMER_REFOCUS);
-    _ = SetForegroundWindow(hwnd);
-    _ = SetFocus(hwnd);
-    const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, null);
-    _ = PostMessageW(hwnd, 0, 0, 0);
-    _ = DestroyMenu(menu);
+pub fn groupPaletteActionAvailable(action: usize) bool {
+    if (findGroupIdx(paletteGroupId()) == null or groupPaletteCommand(action) == 0) return false;
+    if (action >= 16 and action < 25) return app_state.g_single_window and action - 16 < app_state.g_lws_count and !app_state.g_ws_snoozed[action - 16] and action - 16 != app_state.g_active_workspace;
+    if (action >= 25) return action - 25 < app_state.g_workspace_count and (if (app_state.g_single_window) workspaceCanMoveIntoClosedStandalone(@intCast(action - 25)) else !std.mem.eql(u8, app_state.g_workspaces[action - 25].id[0..app_state.g_workspaces[action - 25].id_len], getInstanceName()));
+    return true;
+}
 
-    if (cmd == 0) return;
-    const cmd_u: usize = @intCast(@as(u32, @bitCast(cmd)));
+pub fn openGroupContextPalette(hwnd: HANDLE, gidx: u32) void {
+    if (gidx >= app_state.group_count) return;
+    const gid = app_state.groups[gidx].id;
+    mergeWorkspaceRegistryFromDisk();
+    if (app_state.g_single_window) scanLiveWorkspaceWindows(false);
+    _ = SendMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
+    app_state.g_search_groupctx_mode = true;
+    app_state.g_groupctx_gid = gid;
+    app_state.g_search_len = 0;
+    app_state.g_search_sel = 0;
+    app_state.g_search_scroll = 0;
+    updateSearchResults();
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+pub fn runGroupPaletteAction(hwnd: HANDLE, gidx: u32, action: usize) void {
+    if (gidx >= app_state.group_count) return;
+    const cmd_u = groupPaletteCommand(action);
     if (cmd_u == MENU_HEADER_MOVE_WORKSPACE) {
         if (app_state.g_single_window) {
             if (newPillForMove()) |slot| moveGroupToPill(gidx, slot);
@@ -674,6 +631,7 @@ pub fn showGroupHeaderMenu(hwnd: HANDLE, gidx: u32, _: i32, my: i32) void {
     } else if (cmd_u >= MENU_HEADER_COLOR_BASE and cmd_u < MENU_HEADER_COLOR_BASE + GROUP_COLORS.len) {
         const ci = cmd_u - MENU_HEADER_COLOR_BASE;
         app_state.groups[gidx].color = @intCast(ci);
+        app_state.groups[gidx].color_set = true;
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         saveSession();
     }

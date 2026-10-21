@@ -2104,7 +2104,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
                 transfer.group_name[gi] = if (wc >= 32 and wc < 127) @intCast(wc) else '?';
             }
             transfer.group_name_len = glen;
-            transfer.group_color = app_state.groups[sgidx].color;
+            transfer.group_color = app_state.groups[sgidx].color | (if (app_state.groups[sgidx].color_set) @as(u8, 128) else 0);
             transfer.group_collapsed = if (app_state.groups[sgidx].collapsed) 1 else 0;
         }
     }

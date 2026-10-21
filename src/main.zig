@@ -1077,7 +1077,7 @@ const startThreadTitleRename = @import("rename.zig").startThreadTitleRename;
 const startGroupRename = @import("rename.zig").startGroupRename;
 const commitRename = @import("rename.zig").commitRename;
 const openTabContextPalette = @import("rename.zig").openTabContextPalette;
-const showGroupHeaderMenu = @import("rename.zig").showGroupHeaderMenu;
+const openGroupContextPalette = @import("rename.zig").openGroupContextPalette;
 const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const hideShellsForOverlay = @import("rename.zig").hideShellsForOverlay;
 const showActiveShellAfterOverlay = @import("rename.zig").showActiveShellAfterOverlay;
@@ -2347,7 +2347,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (tab_idx < app_state.shell_count) openTabContextPalette(hwnd, tab_idx);
                     },
                     .header => |gidx| {
-                        if (gidx < app_state.group_count) showGroupHeaderMenu(hwnd, gidx, mx, my);
+                        if (gidx < app_state.group_count) openGroupContextPalette(hwnd, gidx);
                     },
                     else => {},
                 }
@@ -3547,6 +3547,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
             app_state.g_tabctx_sid = 0;
             app_state.g_search_remind_input_mode = false;
@@ -3603,6 +3604,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
             app_state.g_tabctx_sid = 0;
             app_state.g_search_remind_input_mode = false;
@@ -3648,6 +3650,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_ws_move_mode = false;
             app_state.g_wsmove_tab_sid = 0;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_search_groupctx_mode = false;
             app_state.g_tabctx_sid = 0;
             app_state.g_search_session_overview_mode = false;
             app_state.g_search_rename_input_mode = false;
@@ -3946,8 +3949,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_scroll = 0;
                 updateSearchResults();
                 _ = InvalidateRect(hwnd, null, 0);
+            } else if (app_state.g_search_groupctx_mode) {
+                app_state.g_search_groupctx_mode = false;
+                app_state.g_search_len = 0;
+                app_state.g_search_sel = 0;
+                app_state.g_search_scroll = 0;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_tabctx_mode) {
                 app_state.g_search_tabctx_mode = false;
+                app_state.g_search_groupctx_mode = false;
                 app_state.g_tabctx_sid = 0;
                 app_state.g_search_sel = 0;
                 app_state.g_search_scroll = 0;
@@ -4422,6 +4433,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_ws_move_mode = false;
                     app_state.g_wsmove_tab_sid = 0;
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_browser_url_mode = false;
                     app_state.g_search_len = 0;
@@ -4468,6 +4480,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) {
+                    const gid = @import("rename.zig").paletteGroupId();
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    if (findGroupIdx(gid)) |gi| @import("rename.zig").runGroupPaletteAction(hwnd, gi, target - app_state.SEARCH_GROUPCTX_BASE);
+                    return 0;
+                }
                 if (target >= SEARCH_ADDFAVICON_OFFSET) {
                     if (!app_state.g_favicon_fetching and app_state.active_shell < app_state.shell_count) {
                         startFaviconFetch(app_state.active_shell);
@@ -4488,6 +4506,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_ws_move_mode = false;
                     app_state.g_wsmove_tab_sid = 0;
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_search_reminders_mode = false;
                     app_state.g_search_session_overview_mode = false;
@@ -4584,6 +4603,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_ws_move_mode = false;
                     app_state.g_search_theme_mode = false;
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
                     app_state.g_search_scroll = 0;
@@ -5788,6 +5808,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_TABCTX_BACK) {
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
@@ -5805,6 +5826,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_theme_mode = false;
                     app_state.g_wsmove_tab_sid = app_state.g_tabctx_sid;
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 1;
@@ -5818,6 +5840,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.g_pending_new_tab_group = app_state.shells[ti].group_id;
                     }
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
@@ -5836,6 +5859,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (target == SEARCH_TABCTX_RECONNECT) {
                             app_state.g_search_active = false;
                             app_state.g_search_tabctx_mode = false;
+                            app_state.g_search_groupctx_mode = false;
                             app_state.g_tabctx_sid = 0;
                             app_state.g_shell_focused = true;
                             clearSearchBackdrop();
@@ -5919,6 +5943,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         } else if (target == SEARCH_TABCTX_MOVE_NEW_WS) {
                             app_state.g_search_active = false;
                             app_state.g_search_tabctx_mode = false;
+                            app_state.g_search_groupctx_mode = false;
                             app_state.g_tabctx_sid = 0;
                             app_state.g_shell_focused = true;
                             clearSearchBackdrop();
@@ -5946,6 +5971,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -7405,7 +7431,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                                         .name = gname,
                                         .name_len = glen,
                                         .collapsed = transfer.group_collapsed != 0,
-                                        .color = transfer.group_color % @as(u8, @intCast(GROUP_COLORS.len)),
+                                        .color = (transfer.group_color & 127) % @as(u8, @intCast(GROUP_COLORS.len)),
+                                        .color_set = transfer.group_color & 128 != 0,
                                     };
                                     app_state.group_count += 1;
                                     if (transfer.group_id >= app_state.next_group_id) app_state.next_group_id = transfer.group_id + 1;

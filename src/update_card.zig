@@ -112,16 +112,16 @@ pub fn updateCardVisible() bool {
 
 pub fn updateCardSpan() i32 {
     if (!updateCardVisible()) return 0;
-    return uiScaled(UPDATE_CARD_H) + uiScaled(SIDEBAR_STICKY_CARD_GAP);
+    return uiScaled(UPDATE_CARD_H) + @import("window_layout.zig").paneGap();
 }
 
 pub fn updateCardRect() RECT {
     const sticky = sidebarStickyCardRect();
     return .{
         .left = sticky.left,
-        .top = sticky.top - uiScaled(SIDEBAR_STICKY_CARD_GAP) - uiScaled(UPDATE_CARD_H),
+        .top = sticky.top - @import("window_layout.zig").paneGap() - uiScaled(UPDATE_CARD_H),
         .right = sticky.right,
-        .bottom = sticky.top - uiScaled(SIDEBAR_STICKY_CARD_GAP),
+        .bottom = sticky.top - @import("window_layout.zig").paneGap(),
     };
 }
 

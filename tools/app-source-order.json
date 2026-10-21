@@ -294,7 +294,7 @@
   ["voice.zig", "fn voiceMicStop"],
   ["app_state.zig", "const VoiceFrame"],
   ["voice.zig", "fn voiceMicRunWasapi"],
-  ["window_layout.zig", "fn repositionActive"],
+  ["window_layout.zig", "fn paneOuterMargin"],
   ["app_state.zig", "const CHAT_WORKING_GENERIC"],
   ["window_layout.zig", "fn chatWorkingIndicatorText"],
   ["rename.zig", "fn editSubclassProc"],

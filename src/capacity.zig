@@ -238,23 +238,13 @@ fn sidebarAgentSessionBreakdown(host: u8) AgentSessionBreakdown {
 pub fn sidebarStickyCardSpan() i32 {
     if (app_state.g_hide_sidebar) return 0;
     const height = if (app_state.g_sidebar_collapsed) SIDEBAR_STICKY_CARD_COLLAPSED_H else SIDEBAR_STICKY_CARD_H;
-    return uiScaled(height) + uiScaled(SIDEBAR_STICKY_CARD_GAP) + updateCardSpan();
+    return uiScaled(height) + @import("window_layout.zig").paneGap() + updateCardSpan();
 }
 
 pub fn sidebarStickyCardRect() RECT {
     var client: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &client);
-    const logical_height: i32 = if (app_state.g_sidebar_collapsed) SIDEBAR_STICKY_CARD_COLLAPSED_H else SIDEBAR_STICKY_CARD_H;
-    const height = uiScaled(logical_height);
-    const gap = uiScaled(SIDEBAR_STICKY_CARD_GAP);
-    const left_margin: i32 = if (app_state.g_sidebar_collapsed) 4 else 6;
-    const side_margin: i32 = if (app_state.g_sidebar_collapsed) 4 else 7;
-    return .{
-        .left = left_margin,
-        .top = client.bottom - height - gap,
-        .right = SIDEBAR_W() - side_margin,
-        .bottom = client.bottom - gap,
-    };
+    return @import("window_layout.zig").activePaneRects(client).burn;
 }
 
 pub fn sidebarStickyCardHitTest(my: i32) bool {
@@ -630,8 +620,9 @@ test "VPS card normalizes load and exposes understandable capacity percentages" 
 pub fn paintSidebarVpsCard(hdc: HANDLE, host: u8, y: i32, font_title: HANDLE, font_subtitle: HANDLE) void {
     if (host >= app_state.g_host_capacity.len or app_state.g_sidebar_collapsed or app_state.g_hide_sidebar) return;
     const card_h = uiScaled(SIDEBAR_VPS_CARD_H);
-    const card_left: i32 = 6;
-    const card_right = SIDEBAR_W() - 7;
+    const column = sidebarStickyCardRect();
+    const card_left = column.left;
+    const card_right = column.right;
     if (card_right <= card_left + 40) return;
 
     const metrics = app_state.g_host_capacity[host];

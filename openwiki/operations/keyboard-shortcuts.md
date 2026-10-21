@@ -206,6 +206,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Drag tab onto a group | Move it there without changing pin or lock state |
 | Drag tab: PINNED / RECENTS | Change its order inside the group or ungrouped list |
 | Click tier heading | Collapse / expand ungrouped PINNED or RECENTS |
+| Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (lock / pin / reconnect / mute / close / move / group) |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |

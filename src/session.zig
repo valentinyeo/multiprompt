@@ -743,7 +743,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
                 @memcpy(json_buf[pos .. pos + cf.len], cf);
                 pos += cf.len;
             }
-            if (app_state.groups[gi].color != 0) {
+            if (app_state.groups[gi].color_set) {
+                const chosen = ",\"color_set\":true";
+                @memcpy(json_buf[pos .. pos + chosen.len], chosen);
+                pos += chosen.len;
                 const cpfx = ",\"color\":";
                 @memcpy(json_buf[pos .. pos + cpfx.len], cpfx);
                 pos += cpfx.len;
@@ -1467,9 +1470,10 @@ pub fn restoreSession() u32 {
         var gname: [64]u16 = std.mem.zeroes([64]u16);
         const gname_len = json_reader.copyWide(obj, "name", &gname);
         const gcoll = json_reader.boolTrue(obj, "collapsed");
-        const gcolor: u8 = @intCast(json_reader.uint(obj, "color") % GROUP_COLORS.len);
+        const color_set = json_reader.boolTrue(obj, "color_set");
+        const gcolor: u8 = if (color_set) @intCast(json_reader.uint(obj, "color") % GROUP_COLORS.len) else 7;
         if (gid != 0) {
-            app_state.groups[app_state.group_count] = .{ .id = gid, .name = gname, .name_len = gname_len, .collapsed = gcoll, .color = gcolor };
+            app_state.groups[app_state.group_count] = .{ .id = gid, .name = gname, .name_len = gname_len, .collapsed = gcoll, .color = gcolor, .color_set = color_set };
             app_state.group_count += 1;
             if (gid + 1 > app_state.next_group_id) app_state.next_group_id = gid + 1;
         }

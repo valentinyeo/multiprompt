@@ -160,7 +160,7 @@ test("all session rename entry points synchronize display surfaces without chang
   assert.match(inboxRename, /g_edit_is_inbox = true;[\s\S]*?g_edit_sync_remote_name = true/,
     "Inbox F2 must synchronize the same logical session name");
 
-  const commit = functionBody("commitRename", "appendWorkspaceMoveMenuItems");
+  const commit = functionBody("commitRename", "openTabContextPalette");
   assert.match(commit, /applyCanonicalSessionRename\(g_edit_tab, buf\[0\.\.ulen\], sync_remote\)/);
   assert.doesNotMatch(commit, /tmux_session_len\s*=\s*0/,
     "clearing a display name must not destroy the stable tmux binding");

@@ -608,7 +608,7 @@ pub fn threadTitleHeight() i32 {
 }
 
 pub fn threadTitleTop() i32 {
-    return if (threadTitleHeight() > 0) DEV_TOP_PAD else 0;
+    return if (threadTitleHeight() > 0) @import("window_layout.zig").paneOuterMargin() else 0;
 }
 
 pub fn armBrowserVisibilitySettle(ticks: i32) void {
@@ -1261,33 +1261,17 @@ pub fn calcBrowserLayout() ?BrowserLayout {
     if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return null;
     var rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_main_hwnd, &rc);
-    const px = SIDEBAR_W();
-    const browser_top: i32 = 0;
-    const console_top = DEV_TOP_PAD + threadTitleHeight();
-    const pbottom = rc.bottom - DEV_TOP_PAD;
-    const pw = rc.right - px;
-    const console_h = pbottom - console_top;
-    const browser_area_h = pbottom - browser_top;
-    if (pw <= BROWSER_SPLIT_W + 20 or console_h <= 20 or browser_area_h <= 20) return null;
-
-    var min_side: i32 = 200;
-    if (pw < min_side * 2 + BROWSER_SPLIT_W) {
-        min_side = @max(@as(i32, 40), @divTrunc(pw - BROWSER_SPLIT_W, 2));
-    }
-    const min_split = px + min_side;
-    const max_split = rc.right - min_side;
-    const split_permille: i32 = @intCast(browserSplitPermilleForActiveShell());
-    var split_x = px + @divTrunc(pw * split_permille, 1000);
-    if (split_x < min_split) split_x = min_split;
-    if (split_x > max_split) split_x = max_split;
-
-    const half = @divTrunc(BROWSER_SPLIT_W, 2);
-    const native_browser = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native;
-    const console_x = if (native_browser) browserDockConsoleX() else px + consoleEdgePad();
-    const console_w = split_x - console_x - half;
-    const browser_x = split_x + half;
-    const browser_w = rc.right - browser_x;
-    if (console_w <= 0 or browser_w <= 0) return null;
+    const panes = @import("window_layout.zig").activePaneRects(rc);
+    const console_x = panes.primary.left;
+    const console_top = panes.primary.top + threadTitleHeight();
+    const console_w = panes.primary.right - console_x;
+    const console_h = panes.primary.bottom - console_top;
+    const browser_x = panes.browser.left;
+    const browser_top = panes.browser.top;
+    const browser_w = panes.browser.right - browser_x;
+    const browser_area_h = panes.browser.bottom - browser_top;
+    const pbottom = panes.browser.bottom;
+    if (console_w <= 20 or browser_w <= 20 or console_h <= 20) return null;
     const ubh = if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) 0 else browserUrlBarH();
     if (browser_area_h <= ubh + 20) return null;
     return BrowserLayout{
@@ -1299,8 +1283,8 @@ pub fn calcBrowserLayout() ?BrowserLayout {
         .browser_y = browser_top + ubh,
         .browser_w = browser_w,
         .browser_h = browser_area_h - ubh,
-        .splitter_left = split_x - half,
-        .splitter_right = split_x + half,
+        .splitter_left = panes.splitter.left,
+        .splitter_right = panes.splitter.right,
         .splitter_top = browser_top,
         .splitter_bottom = pbottom,
         .urlbar_x = browser_x,
