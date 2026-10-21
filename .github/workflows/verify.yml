@@ -168,7 +168,9 @@ jobs:
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Verify real native browser emulation
         if: env.FEATURE == 'browser-emulation'
-        run: node .claude/skills/verify-multiprompt/browser-emulation.mjs
+        shell: powershell
+        run: |
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature browser-emulation -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Retain pre-launch failure result
         if: always()
         shell: powershell

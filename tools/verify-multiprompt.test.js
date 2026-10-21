@@ -301,7 +301,9 @@ test('browser emulation map drives the real native CLI and extension only on Git
   const driver = read(skill + 'browser-emulation.mjs');
   const map = read(skill + 'features/browser-emulation.md');
   assert.match(workflow, /FEATURE -notin @\([^\n)]*'browser-emulation'/);
-  assert.match(workflow, /run: node \.claude\/skills\/verify-multiprompt\/browser-emulation\.mjs/);
+  assert.match(workflow, /control\.ps1 -Feature browser-emulation/);
+  assert.match(control, /browserJob\.Start\(\$node/);
+  assert.match(control, /activeAfterStop = \$stopped\.ActiveProcesses/);
   assert.match(driver, /assert\.equal\(process\.env\.GITHUB_ACTIONS, 'true'/);
   assert.match(driver, /assert\.equal\(process\.platform, 'win32'/);
   assert.match(driver, /const exe = path\.resolve\('verify-bin\/zigshell-bridge\.exe'\)/);
@@ -315,7 +317,8 @@ test('browser emulation map drives the real native CLI and extension only on Git
   assert.match(driver, /requests\.some\(request => request\.url === '\/next' && \/iPhone\/\.test\(request\.userAgent\)\)/);
   assert.match(driver, /assert\.equal\(restored\.width, baseline\.width\)/);
   assert.match(driver, /assert\.equal\(offReloaded\.touch, baseline\.touch\)/);
-  assert.match(driver, /taskkill\.exe.*'\/PID'.*browser\.pid.*'\/T'/);
+  assert.match(driver, /cdp\('Browser\.close'\)/);
+  assert.match(driver, /pre\{white-space:pre-wrap;overflow-wrap:anywhere\}/);
   assert.match(map, /F12 and browser-chrome DevTools keys remain out of scope/);
   assert.match(read(skill + 'features/README.md'), /\[Browser emulation\]\(browser-emulation\.md\)/);
 

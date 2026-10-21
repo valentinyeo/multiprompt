@@ -31,7 +31,7 @@ const pending = new Map();
 const server = http.createServer((request, response) => {
   requests.push({ url: request.url, userAgent: request.headers['user-agent'] });
   response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
-  response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device preview verification</title><style>body{font:20px sans-serif;background:#eef4ff;color:#123;padding:16px}main{max-width:600px}a{display:block;padding:24px;background:#cde}</style><main><h1>Device preview verification</h1><p>This synthetic page checks persistent mobile previews.</p><a id="next" href="/next">Navigate to the next page</a><pre id="state"></pre></main><script>function update(){document.querySelector("#state").textContent=JSON.stringify({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,userAgent:navigator.userAgent},null,2)}update();addEventListener("resize",update)</script>');
+  response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device preview verification</title><style>body{font:20px sans-serif;background:#eef4ff;color:#123;padding:16px}main{max-width:600px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{display:block;padding:24px;background:#cde}</style><main><h1>Device preview verification</h1><p>This synthetic page checks persistent mobile previews.</p><a id="next" href="/next">Navigate to the next page</a><pre id="state"></pre></main><script>function update(){document.querySelector("#state").textContent=JSON.stringify({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,userAgent:navigator.userAgent},null,2)}update();addEventListener("resize",update)</script>');
 });
 
 async function waitFor(check, label, timeout = 60000) {
@@ -171,14 +171,14 @@ try {
 } finally {
   try {
     if (browser && browser.exitCode === null) {
-      await exec('taskkill.exe', ['/PID', String(browser.pid), '/T', '/F'], { timeout: 15000 });
-      if (browser.exitCode === null) await once(browser, 'exit');
+      await cdp('Browser.close');
+      await waitFor(() => browser.exitCode !== null, 'owned browser exit', 15000);
     }
     socket?.close();
     if (registered) await exec('reg.exe', ['delete', registry, '/f']);
     await new Promise(resolve => server.close(resolve));
     await fs.rm(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-    result.cleanup = 'owned browser process tree terminated; native registry entry and scratch removed';
+    result.cleanup = 'browser closed; native registry entry and scratch removed; outer Windows Job checks the process tree';
     result.scratchRemoved = true;
   } catch (error) {
     result.cleanup = error.stack;
