@@ -38,8 +38,8 @@ test('ISSUE-268 find intercepts keys before shell/composer routes and has child-
   assert.match(hook, /ownsKeys\(app_state\.g_chat_find_open, foregroundIsOurs\(\)\) and !find_modifier/);
   assert.ok(guard < hook.indexOf('globalPaletteChord('));
   const branch = hook.slice(guard, hook.indexOf('if (app_state.ISSUE_268_CHAT_FIND', guard));
-  assert.match(branch, /routeKey\(kb\.vkCode/);
-  assert.match(branch, /return 1;/);
+  assert.match(branch, /return CallNextHookEx\(app_state\.g_hook, nCode, wp, lp\);/);
+  assert.doesNotMatch(branch, /routeKey|return 1;/);
   for (const file of ['src/chat_composer.zig', 'src/chat_render.zig', 'src/main.zig']) {
     assert.match(fs.readFileSync(file, 'utf8'), /chat_find_ui\.zig"\)\.windowKey\(msg, wp\)/);
   }
