@@ -563,31 +563,39 @@ pub fn build(b: *std.Build) void {
         b.step("test-group-2", "Run Chat View regression fixtures"),
         b.step("test-group-3", "Run compiler-backed integration tests"),
         b.step("test-group-4", "Run portable modules and source regressions"),
-        b.step("test-group-5", "Run Chat View shell switching fixtures"),
+        b.step("test-group-5", "Run SSH reconnect fixtures"),
         b.step("test-group-6", "Run sync protocol tests"),
+        b.step("test-group-7", "Run desktop interaction fixtures"),
+        b.step("test-group-8", "Run Chat View CPU fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step)
             0
-        else if (dependency == &chat_view_gaps_tests.step or dependency == &chat_cpu_regression.step or dependency == &run_chat_perf_tests.step)
+        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step)
             1
-        else if (dependency == &chat_switch_tests.step)
+        else if (dependency == &ssh_reconnect_tests.step)
             4
         else if (dependency == &run_sync_protocol_tests.step)
             5
-        else if (dependency == &ssh_reconnect_tests.step or
+        else if (dependency == &chat_switch_tests.step or
             dependency == &frequent_integration_tests.step or dependency == &chat_drop_tests.step or
             dependency == &reply_quote_tests.step or
             dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
             2
+        else if (dependency == &version_stamp_tests.step or dependency == &launch_regression.step or
+            dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
+            dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step)
+            6
+        else if (dependency == &chat_cpu_regression.step)
+            7
         else
             3;
         test_groups[group].dependOn(dependency);
     }
     test_step.dependencies.clearRetainingCapacity();
-    const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-6)");
+    const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-8)");
     if (selected_group) |group| {
-        if (group < 1 or group > test_groups.len) @panic("test-group must be between 1 and 6");
+        if (group < 1 or group > test_groups.len) @panic("test-group must be between 1 and 8");
         test_step.dependOn(test_groups[group - 1]);
     } else {
         for (test_groups) |group| test_step.dependOn(group);
