@@ -37,14 +37,17 @@ test('the check catches a test file named nowhere', () => {
   assert.deepEqual(unwired(['tools/a.test.js', 'tools/b.test.js', 'tools/c.test.js', 'tools/a.test.json'], text), ['tools/a.test.js', 'tools/c.test.js']);
 });
 
-test('the capped Wine runner runs desktop tests then test-vps without forwarding desktop arguments', () => {
+test('the capped Wine runner compiles ARM64 in its shim then runs desktop tests and test-vps', () => {
   const script = fs.readFileSync(path.join(root, 'tools/test-windows-wine.sh'), 'utf8');
   assert.match(script, /^set -euo pipefail$/m);
   const builds = script.split('\n').filter(line => line.includes('"$zig" build'));
   assert.deepEqual(builds, [
+    'if ! "${runner[@]}" nice -n 15 "$zig" build -Dtarget=aarch64-windows-gnu -p "$shim/arm64" --summary none; then',
     '"${runner[@]}" nice -n 15 "${display[@]}" "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"',
     '"${runner[@]}" nice -n 15 "$zig" build test-vps --summary all',
   ]);
+  assert.match(builds[0], /-p "\$shim\/arm64"/);
+  assert.doesNotMatch(builds[0], /zig-out|\$@/);
   const docs = ['openwiki/operations/build-and-install.md'];
   if (fs.existsSync(path.join(root, 'tools/public-export'))) docs.push('CLAUDE.md', 'AGENTS.md', 'tools/public-export/overlay/openwiki/operations/build-and-install.md');
   for (const file of docs) {
@@ -66,15 +69,16 @@ test('the Wine runner propagates the selected compiler to native child tests', {
     const prefix = path.join(dir, 'wine-prefix');
     fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
     const zig = path.join(selected, 'zig');
-    fs.writeFileSync(zig, '#!/bin/sh\nprintf \'{"selected":"%s","resolved":"%s","exe":"%s","step":"%s"}\\n\' "$ZIG" "$(command -v zig)" "${ZIG_EXE:-}" "$2"\n', { mode: 0o755 });
+    fs.writeFileSync(zig, '#!/bin/sh\nprintf \'{"selected":"%s","resolved":"%s","exe":"%s","step":"%s","args":"%s"}\\n\' "$ZIG" "$(command -v zig)" "${ZIG_EXE:-}" "$2" "$*"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(older, 'zig'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
-    const result = spawnSync('bash', ['tools/test-windows-wine.sh'], {
+    const result = spawnSync('bash', ['tools/test-windows-wine.sh', '--toolchain-probe'], {
       cwd: root, encoding: 'utf8', timeout: 120000,
-      env: { ...process.env, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    const calls = result.stdout.trim().split('\n').map(line => JSON.parse(line));
-    assert.deepEqual(calls.map(call => call.step), ['test-desktop', 'test-vps']);
+    const calls = result.stdout.trim().split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+    assert.deepEqual(calls.map(call => call.step), ['-Dtarget=aarch64-windows-gnu', 'test-desktop', 'test-vps']);
+    assert.deepEqual(calls.map(call => call.args.includes('--toolchain-probe')), [false, true, false]);
     for (const call of calls) assert.deepEqual([call.selected, call.resolved, call.exe], [zig, zig, zig]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -113,8 +117,8 @@ for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
         assert.equal(result.stdout, '');
       } else {
         assert.equal(result.stdout, scenario === 'existing'
-          ? 'test-desktop::existing\ntest-vps::existing\n'
-          : 'test-desktop::test\ntest-vps:none\n');
+          ? '-Dtarget=aarch64-windows-gnu::existing\ntest-desktop::existing\ntest-vps::existing\n'
+          : '-Dtarget=aarch64-windows-gnu:none\ntest-desktop::test\ntest-vps:none\n');
       }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -167,4 +171,61 @@ test('ISSUE-444 Wine rendering checks require native GDI+ instead of accepting i
   assert.match(script, /export WINEDLLOVERRIDES=.*gdiplus=n/);
   assert.match(script, /export WINEPREFIX=\$\{MP_WINE_TEST_PREFIX:/);
   assert.match(script, /cp --remove-destination.*gdiplus\.dll/);
+});
+
+test('the Wine runner stops before tests when the ARM64 compile fails', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wine-arm64-'));
+  try {
+    const gdiplus = path.join(dir, 'gdiplus');
+    fs.mkdirSync(gdiplus);
+    fs.writeFileSync(path.join(gdiplus, 'gdiplus.dll'), 'mock renderer');
+    const prefix = path.join(dir, 'wine-prefix');
+    fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
+    const zig = path.join(dir, 'zig');
+    const calls = path.join(dir, 'calls');
+    fs.writeFileSync(zig, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$WINE_CALLS"\ncase " $* " in\n  *" -Dtarget=aarch64-windows-gnu "*) printf \'%s\\n\' \'error: @ptrCast increases pointer alignment\' >&2; exit 1 ;;\nesac\n', { mode: 0o755 });
+    const result = spawnSync('bash', ['tools/test-windows-wine.sh'], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined, ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /error: @ptrCast increases pointer alignment/);
+    assert.match(result.stderr, /^build-arm64 would fail in CI:/m);
+    const invoked = fs.readFileSync(calls, 'utf8').trim().split('\n');
+    assert.equal(invoked.length, 1);
+    assert.match(invoked[0], /-Dtarget=aarch64-windows-gnu/);
+    assert.doesNotMatch(invoked[0], /test-desktop|test-vps/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Wine runner stops before Zig when a staged pinned source has no updated public copy', { skip: process.platform === 'win32' || !fs.existsSync(path.join(root, 'tools/public-export')) }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wine-public-export-'));
+  try {
+    const gdiplus = path.join(dir, 'gdiplus');
+    fs.mkdirSync(gdiplus);
+    fs.writeFileSync(path.join(gdiplus, 'gdiplus.dll'), 'mock renderer');
+    const prefix = path.join(dir, 'wine-prefix');
+    fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
+    const zig = path.join(dir, 'zig');
+    const calls = path.join(dir, 'calls');
+    fs.writeFileSync(zig, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$WINE_CALLS"\n', { mode: 0o755 });
+    const env = { ...process.env, NODE_TEST_CONTEXT: undefined, GIT_INDEX_FILE: path.join(dir, 'index'), ZIG: zig, WINE_CALLS: calls, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' };
+    const tree = spawnSync('git', ['read-tree', 'HEAD'], { cwd: root, env, encoding: 'utf8' });
+    assert.equal(tree.status, 0, tree.stderr);
+    const source = fs.readFileSync(path.join(root, 'src/shortcuts.zig'), 'utf8');
+    const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: root, env, encoding: 'utf8', input: source + '\nconst wine_public_export_probe = true;\n' });
+    assert.equal(blob.status, 0, blob.stderr);
+    const staged = spawnSync('git', ['update-index', '--cacheinfo', `100644,${blob.stdout.trim()},src/shortcuts.zig`], { cwd: root, env, encoding: 'utf8' });
+    assert.equal(staged.status, 0, staged.stderr);
+    const result = spawnSync('bash', ['tools/test-windows-wine.sh'], { cwd: root, env, encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /^public-export would fail in CI:/m);
+    assert.match(result.stdout + result.stderr, /Re-clean every changed pinned source/);
+    assert.match(result.stdout + result.stderr, /src\/shortcuts\.zig/);
+    assert.ok(!fs.existsSync(calls), fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
