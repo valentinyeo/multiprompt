@@ -20,7 +20,7 @@ function load(mode) {
   assert.ok(!fs.existsSync(path.join(dir, 'error.txt')), 'infrastructure error is not a regression');
   const doctor = json('doctor.json');
   assert.ok([doctor.main, doctor.input_surface].includes(doctor.focus[0]));
-  assert.ok(doctor.focus[1] === doctor.input_surface || doctor.surface_focus[1] === doctor.input_surface);
+  assert.ok(doctor.focus[1] === doctor.input_surface || doctor.focus[0] === doctor.input_surface);
   assert.equal(doctor.two_transports, true);
   assert.ok(json('layout-control.json').layout_positive_control > 0);
   const cleanup = json('cleanup.json');

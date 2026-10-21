@@ -114,9 +114,8 @@ try {
     Start-Sleep -Seconds 3
     $before = [ReconnectDesktop]::Focus($main)
     if ($before[0] -ne $main.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: app or embedded console must be foreground' }
-    $surfaceFocus = [ReconnectDesktop]::Focus($inputSurface)
-    if ($before[1] -ne $inputSurface.ToInt64() -and $surfaceFocus[1] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
-    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; surface_focus=$surfaceFocus; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    if ($before[1] -ne $inputSurface.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
+    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
     $positiveControl = @([regex]::Matches((Read-Log), '\[reposition\]')).Count
     if ($positiveControl -lt 1) { throw 'Doctor: console layout positive control missing' }
     if ([ReconnectDesktop]::Owner($inputSurface) -ne (Transport 'verify-one').Id) { throw 'Doctor: active console is not tab one' }

@@ -29,7 +29,7 @@ The build job also runs the existing SSH reconnect/probe logic tests on Windows.
 
 ## Doctor
 
-Download the run's `verify-reconnect-build` artifact with `gh run download RUN_ID -n verify-reconnect-build -D evidence/build`. Inspect doctor.json: the launched PID/exe, nonzero main/input-surface HWNDs, foreground owned by main or its embedded console, and console typing focus in the app or console GUI thread, two live transports, and the configured ssh path must all agree. provenance.json records source revision, run URL, source mode, and actual exe SHA256. On the Windows runner, the read-only probe `[ReconnectDesktop]::Focus($main)` uses GetGUIThreadInfo on the application's GUI thread, not the PowerShell thread. Any startup/doctor error is infrastructure failure, never regression proof.
+Download the run's `verify-reconnect-build` artifact with `gh run download RUN_ID -n verify-reconnect-build -D evidence/build`. Inspect doctor.json: the launched PID/exe, nonzero main/input-surface HWNDs, foreground owned by main or its embedded console, and console typing focus or native-console foreground, two live transports, and the configured ssh path must all agree. provenance.json records source revision, run URL, source mode, and actual exe SHA256. Console HWNDs can report a console-client thread without a GUI queue; do not call GetGUIThreadInfo for that synthetic thread. On the Windows runner, the read-only probe `[ReconnectDesktop]::Focus($main)` uses GetGUIThreadInfo on the application's GUI thread, not the PowerShell thread. Any startup/doctor error is infrastructure failure, never regression proof.
 
 ## Drive
 
