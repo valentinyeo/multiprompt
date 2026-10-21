@@ -9,7 +9,7 @@ zig build -Dtarget=x86_64-windows-gnu
 zig build -Dtarget=aarch64-windows-gnu
 ```
 
-Push the branch and read `gh pr checks`; GitHub Actions runs the Windows suite, bench tests and server-tool tests. Never run `tools/test-windows-wine.sh` or `tools/chat-bench/run.mjs` on the shared server. The Wine wrapper compiles ARM64, runs the Windows desktop suite and then `test-vps`; the bench launches the app under Wine. Both entry points exit 2 before starting work unless `GITHUB_ACTIONS=true` (set automatically by Actions) or `MULTIPROMPT_ALLOW_LOCAL_HEAVY=1` on a machine you own. Keep local checks lightweight, such as `node --test tools/heavy-guard.test.js`; leave builds and full test suites to GitHub Actions.
+Push the branch and read `gh pr checks`; GitHub Actions runs the Windows suite, bench and server-tool tests. Never run `tools/test-windows-wine.sh` or `tools/chat-bench/run.mjs` on the shared server. The Wine wrapper compiles ARM64, runs the Windows desktop suite and then `test-vps`; the bench launches the app under Wine. Both entry points exit 2 before starting work unless `GITHUB_ACTIONS=true` (set automatically by Actions) or `MULTIPROMPT_ALLOW_LOCAL_HEAVY=1` on a machine you own. Keep local checks lightweight, such as `node --test tools/heavy-guard.test.js`; leave builds and full test suites to GitHub Actions.
 
 The version is `APP_VERSION` in `src/main.zig`; the title bar and the `MPVERSION` marker derive from it. End-user history is in `src/changelog.zig`. Extension changes must increase `extension/manifest.json`'s version; the native bridge reads the same version at build time.
 
