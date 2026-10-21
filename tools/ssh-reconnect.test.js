@@ -55,6 +55,15 @@ var alive = true;
 var spawns: usize = 0;
 var kills: usize = 0;
 var timers: usize = 0;
+var fixture = false;
+var repaints: usize = 0;
+var full_repaints: usize = 0;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+var last_paint: RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+fn chatBenchEnabled() bool { return fixture; }
+fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
+fn threadTitleTop() i32 { return 10; }
+fn threadTitleHeight() i32 { return 44; }
 var spawn_ok = true;
 var fake_exit_code: u32 = 0;
 fn GetExitCodeProcess(_: ?*anyopaque, code: *u32) u32 { code.* = fake_exit_code; return 1; }
@@ -76,7 +85,11 @@ fn CloseHandle(_: ?*anyopaque) u32 { return 1; }
 fn killProcessTree(_: u32) void { kills += 1; }
 fn SetTimer(_: ?*anyopaque, _: u32, _: u32, _: ?*anyopaque) u32 { timers += 1; return 1; }
 fn KillTimer(_: ?*anyopaque, _: u32) u32 { return 1; }
-fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: u32) u32 { return 1; }
+fn InvalidateRect(_: ?*anyopaque, rc: ?*const RECT, _: u32) u32 {
+    repaints += 1;
+    if (rc) |rect| { last_paint = rect.*; } else { full_repaints += 1; }
+    return 1;
+}
 var exit_logs: usize = 0;
 var timeout_logs: usize = 0;
 fn debugLog(line: []const u8) void {
@@ -543,4 +556,65 @@ test('ISSUE-512 pure notice policy and active-tab rendering use recovery state i
   assert.match(paint, /ssh_reconnect\.noticeReason\(now, shell\.disconnected\)/);
   assert.match(paint, /disconnected: \{s\} - Ctrl\+Shift\+R to reconnect/);
   assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
+});
+
+test('ISSUE-513 synthetic chat tabs never enter SSH recovery or repaint while idle', () => {
+  zig(runtime(`
+test "ISSUE-513 fixture recovery isolation" {
+    fixture = true;
+    shells[0].process = null;
+    markSshTabDisconnected(0);
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(@as(usize, 0), kills);
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expect(!g_ssh_reconnect_timer_on);
+    for (0..120) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    try std.testing.expectEqual(@as(usize, 0), timers);
+}
+`), 'ISSUE-513 fixture');
+});
+
+test('ISSUE-513 disconnected countdown repaints only its header and respects backoff', () => {
+  zig(runtime(`
+test "ISSUE-513 bounded countdown repaint" {
+    shells[0].process = null;
+    shells[0].disconnected = true;
+    shells[0].ssh_reconnect.phase = .disconnected;
+    shells[0].ssh_reconnect.next_tick = fake_now + 30000;
+    for (0..29) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 29), repaints);
+    try std.testing.expectEqual(@as(usize, 0), full_repaints);
+    try std.testing.expectEqual(@as(i32, 0), last_paint.left);
+    try std.testing.expectEqual(@as(i32, 1920), last_paint.right);
+    try std.testing.expectEqual(threadTitleTop(), last_paint.top);
+    try std.testing.expectEqual(threadTitleTop() + threadTitleHeight(), last_paint.bottom);
+    fake_now += 1000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), spawns);
+}
+`), 'ISSUE-513 bounded');
+});
+
+test('ISSUE-513 connected idle monitoring does not respawn or repaint', () => {
+  zig(runtime(`
+test "ISSUE-513 connected idle" {
+    for (0..120) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    try std.testing.expect(!shells[0].disconnected);
+}
+`), 'ISSUE-513 connected');
 });
