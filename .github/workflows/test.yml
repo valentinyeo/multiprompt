@@ -108,7 +108,7 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**', 'tools/**', 'extension/**', 'assets/**') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
             ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
@@ -176,7 +176,7 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**', 'tools/**', 'extension/**', 'assets/**') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
             ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
