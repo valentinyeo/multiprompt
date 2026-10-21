@@ -611,6 +611,7 @@ pub fn build(b: *std.Build) void {
         b.step("test-group-3", "Run portable modules, source regressions and SSH fixtures"),
         b.step("test-group-4", "Run sync protocol and desktop interaction fixtures"),
     };
+    test_groups[3].dependOn(&bridge_install.step);
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
             dependency == &chat_switch_tests.step or dependency == &frequent_integration_tests.step or
