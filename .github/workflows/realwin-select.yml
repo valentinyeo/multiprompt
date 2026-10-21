@@ -16,9 +16,9 @@ jobs:
       matrix:
         include:
           - label: master
-            revision: cf4ac72
+            revision: cf4ac72ca4cc19a1b9300e4b197dd75657f685f0
           - label: release-0.28.779
-            revision: 7a8704b
+            revision: 7a8704b932287b493689f7a1e175ee7f56d05f37
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
