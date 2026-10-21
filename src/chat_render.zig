@@ -1846,6 +1846,8 @@ pub fn shotFocusTick() void {
     debugLog(std.fmt.bufPrint(&log, "[paste-focus] attach foreground={} target={}", .{ attached_fg, attached_target }) catch "[paste-focus] attach");
     keybd_event(VK_MENU, 0, 0, 0);
     const foreground_ok = if (chat) SetForegroundWindow(app_state.g_main_hwnd) else activateConsoleForeground(target);
+    keybd_event(0xFF, 0, 0, 0);
+    keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
     keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     _ = SetFocus(target);
     const landed = if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == (if (chat) app_state.g_main_hwnd else target) and GetFocus() == target;
@@ -2912,7 +2914,9 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const mem_dc = CreateCompatibleDC(hdc);
             if (mem_dc == null) return 0;
             defer _ = DeleteDC(mem_dc);
-            const bmp = CreateCompatibleBitmap(hdc, w, h);
+            const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = w, .height = -h } };
+            var bits: ?*anyopaque = null;
+            const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
             if (bmp == null) return 0;
             defer _ = DeleteObject(bmp);
             const old_bmp = SelectObject(mem_dc, bmp);

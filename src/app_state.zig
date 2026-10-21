@@ -2608,6 +2608,7 @@ pub const ChatOutboxEntry = struct {
     channel_sent: bool = false,
     channel_pending: bool = false,
     sent_tick_ms: i64 = 0,
+    expires_ms: i64 = 0,
     channel_sent_ms: i64 = 0,
     channel_retries: u8 = 0,
     channel_history_revision: u64 = std.math.maxInt(u64),
