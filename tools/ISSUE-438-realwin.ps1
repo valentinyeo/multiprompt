@@ -97,11 +97,22 @@ try {
     $dpi = [Desktop438]::GetDpiForWindow($transcript)
     Write-Output "DISPLAY dpi=$dpi size=$([Desktop438]::GetSystemMetrics(0))x$([Desktop438]::GetSystemMetrics(1)) transcript=$($rect | ConvertTo-Json -Compress)"
     Shot 'before'
+    $screen = [Drawing.Image]::FromFile("$Output/before.png")
+    $cropWidth = [Math]::Min($rect.Right, $screen.Width) - $rect.Left
+    $cropHeight = [Math]::Min($rect.Bottom, $screen.Height) - $rect.Top
+    $crop = [Drawing.Bitmap]::new($cropWidth * 4, $cropHeight * 4)
+    $graphics = [Drawing.Graphics]::FromImage($crop)
+    try {
+        $graphics.DrawImage($screen, [Drawing.Rectangle]::new(0,0,$crop.Width,$crop.Height), [Drawing.Rectangle]::new($rect.Left,$rect.Top,$cropWidth,$cropHeight), [Drawing.GraphicsUnit]::Pixel)
+        $crop.Save("$Output/transcript.png", [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $crop.Dispose(); $screen.Dispose() }
     $ocr = 'C:/Program Files/Tesseract-OCR/tesseract.exe'
     if (!(Test-Path $ocr)) { $ocr=(Get-Command tesseract).Source }
-    & $ocr "$Output/before.png" "$Output/words" --psm 11 tsv
+    & $ocr "$Output/transcript.png" "$Output/words" --psm 6 tsv
     if ($LASTEXITCODE -ne 0) { throw "OCR exit $LASTEXITCODE" }
-    $words = Import-Csv "$Output/words.tsv" -Delimiter "`t"
+    $words = Import-Csv "$Output/words.tsv" -Delimiter "`t" | ForEach-Object {
+        [pscustomobject]@{text=$_.text;left=($rect.Left + [double]$_.left / 4);top=($rect.Top + [double]$_.top / 4);width=([double]$_.width / 4);height=([double]$_.height / 4)}
+    }
     function Word([string]$Text) {
         $found = @($words | Where-Object { $_.text -eq $Text -and [int]$_.left -ge $rect.Left -and [int]$_.top -ge $rect.Top -and [int]$_.left -lt $rect.Right -and [int]$_.top -lt $rect.Bottom })
         if ($found.Count -ne 1) { throw "Expected one visible '$Text', got $($found.Count)" }
