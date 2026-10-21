@@ -82,7 +82,7 @@ const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
 const GetTextExtentPoint32W = @import("win32.zig").GetTextExtentPoint32W;
 const GetTextExtentExPointW = @import("win32.zig").GetTextExtentExPointW;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
 const RoundRect = @import("win32.zig").RoundRect;
 const CreateCompatibleDC = @import("win32.zig").CreateCompatibleDC;
 const CreateCompatibleBitmap = @import("win32.zig").CreateCompatibleBitmap;
@@ -129,7 +129,7 @@ const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
 const CreatePopupMenu = @import("win32.zig").CreatePopupMenu;
 const AppendMenuW = @import("win32.zig").AppendMenuW;
-const TrackPopupMenu = @import("win32.zig").TrackPopupMenu;
+const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
 const DestroyMenu = @import("win32.zig").DestroyMenu;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
@@ -180,7 +180,6 @@ const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusAllowed;
 const chatPaletteToggleKeyDown = @import("chat_composer.zig").chatPaletteToggleKeyDown;
 const postPaletteToggle = @import("chat_composer.zig").postPaletteToggle;
-const ensureChatFontFamilyRegistered = @import("chat_composer.zig").ensureChatFontFamilyRegistered;
 const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
 const chatListMarkerLen = @import("chat_capture.zig").chatListMarkerLen;
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
@@ -221,7 +220,7 @@ const ChatImgThumb = @import("app_state.zig").ChatImgThumb;
 const ChatAttachError = @import("app_state.zig").ChatAttachError;
 const ChatAttachJob = @import("app_state.zig").ChatAttachJob;
 const OPENFILENAMEW = @import("app_state.zig").OPENFILENAMEW;
-const GetOpenFileNameW = @import("win32.zig").GetOpenFileNameW;
+const GetOpenFileNameW = @import("fonts.zig").openFileName;
 const chat_image_insert = @import("chat_image_insert.zig");
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
@@ -246,7 +245,7 @@ const findShellById = @import("inbox.zig").findShellById;
 fn ensureChatCodeFont() HANDLE {
     if (app_state.g_chat_code_font == null) {
         const pt = @max(8, app_state.g_chat_font_pt - 1);
-        app_state.g_chat_code_font = CreateFontW(-uiScaled(pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Consolas"));
+        app_state.g_chat_code_font = CreateFontW(-uiScaled(pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").MONO_FACE));
     }
     return app_state.g_chat_code_font;
 }
@@ -254,8 +253,7 @@ fn ensureChatCodeFont() HANDLE {
 fn chatLinkFont(code: bool) HANDLE {
     const slot = if (code) &app_state.g_chat_code_link_font else &app_state.g_chat_link_font;
     if (slot.* == null) {
-        if (!code) ensureChatFontFamilyRegistered();
-        slot.* = CreateFontW(-uiScaled(if (code) @max(8, app_state.g_chat_font_pt - 1) else app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 1, 0, 0, 0, 0, 5, 0, if (code) L("Consolas") else if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI"));
+        slot.* = CreateFontW(-uiScaled(if (code) @max(8, app_state.g_chat_font_pt - 1) else app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 1, 0, 0, 0, 0, 5, 0, if (code) L(@import("fonts.zig").MONO_FACE) else L(@import("fonts.zig").UI_FACE));
     }
     return slot.*;
 }
@@ -455,15 +453,14 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
 fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
     if (style.code) {
         if (!style.bold) return ensureChatCodeFont();
-        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, L("Consolas"));
+        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").MONO_FACE));
         return app_state.g_chat_rich_fonts[11];
     }
     const index: usize = if (level > 0) 4 + @as(usize, level) - 1 else @as(usize, @intFromBool(style.bold)) + 2 * @as(usize, @intFromBool(style.italic));
     if (index == 0) return ensureChatFont();
     if (app_state.g_chat_rich_fonts[index] == null) {
-        ensureChatFontFamilyRegistered();
         const extra: i32 = if (level == 1) 8 else if (level == 2) 5 else if (level > 0) 2 else 0;
-        app_state.g_chat_rich_fonts[index] = CreateFontW(-uiScaled(app_state.g_chat_font_pt + extra), 0, 0, 0, if (style.bold or level > 0) 700 else 400, @intFromBool(style.italic), 0, 0, 0, 0, 0, 5, 0, if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI"));
+        app_state.g_chat_rich_fonts[index] = CreateFontW(-uiScaled(app_state.g_chat_font_pt + extra), 0, 0, 0, if (style.bold or level > 0) 700 else 400, @intFromBool(style.italic), 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").UI_FACE));
     }
     return app_state.g_chat_rich_fonts[index];
 }
@@ -1845,7 +1842,7 @@ pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
 }
 
 pub fn chatMetadataFont() HANDLE {
-    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Segoe UI"));
+    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").UI_FACE));
     return app_state.g_chat_rich_fonts[10];
 }
 

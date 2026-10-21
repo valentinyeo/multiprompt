@@ -104,12 +104,16 @@ def run(args, cwd=ROOT):
 
 
 def verify():
-    zig = os.environ.get('ZIG', 'zig')
+    zig = shutil.which(os.environ.get('ZIG', 'zig'))
+    assert zig, 'Zig compiler not found'
+    zig = str(Path(zig).resolve())
+    os.environ['ZIG'] = os.environ['ZIG_EXE'] = zig
+    os.environ['PATH'] = str(Path(zig).parent) + os.pathsep + os.environ.get('PATH', '')
     assert subprocess.check_output([zig, 'version'], text=True).startswith('0.16.')
     try:
         run([zig, 'build', '-Dtarget=x86_64-windows-gnu'])
         run([zig, 'build', 'test-vps', '--summary', 'all'])
-        excluded = {'main.zig', 'bridge.zig', 'account_client.zig', 'sync_vault.zig', 'sync_auth.zig', 'usage_telemetry.zig'}
+        excluded = {'main.zig', 'bridge.zig', 'account_client.zig', 'sync_vault.zig', 'sync_auth.zig', 'usage_telemetry.zig', 'fonts.zig'}
         portable = [p for p in sorted((ROOT / 'src').glob('*.zig')) if p.name not in excluded and '@import("app_state.zig")' not in p.read_text() and re.search(r'^test ', p.read_text(), re.M)]
         for p in portable:
             optimize = ['-O', 'ReleaseFast'] if p.name == 'chat_perf_test.zig' else []

@@ -42,7 +42,7 @@ const SendMessageW = @import("win32.zig").SendMessageW;
 const CallWindowProcW = @import("win32.zig").CallWindowProcW;
 const CreatePopupMenu = @import("win32.zig").CreatePopupMenu;
 const AppendMenuW = @import("win32.zig").AppendMenuW;
-const TrackPopupMenu = @import("win32.zig").TrackPopupMenu;
+const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
 const DestroyMenu = @import("win32.zig").DestroyMenu;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const MF_STRING = @import("win32.zig").MF_STRING;
@@ -124,6 +124,7 @@ const publishInboxState = @import("inbox.zig").publishInboxState;
 const closeInbox = @import("inbox.zig").closeInbox;
 
 pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
@@ -193,6 +194,7 @@ pub fn startWindowRename() void {
         null,
     );
     if (app_state.g_edit_hwnd != null) {
+        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
@@ -287,6 +289,7 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
         );
     }
     if (app_state.g_edit_hwnd != null) {
+        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
@@ -341,6 +344,7 @@ pub fn startGroupRename(gidx: u32) void {
         null,
     );
     if (app_state.g_edit_hwnd != null) {
+        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));

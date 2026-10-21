@@ -137,6 +137,12 @@ pub fn build(b: *std.Build) void {
     const run_usage_telemetry_tests = b.addRunArtifact(usage_telemetry_tests);
 
     const test_step = b.step(if (b.graph.host.result.os.tag == .windows) "test" else "test-desktop", "Run desktop tests");
+    const font_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/fonts.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(font_tests).step);
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
@@ -361,6 +367,9 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
+    const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js" });
+    test_step.dependOn(&one_font_tests.step);
+    vps_test_step.dependOn(&one_font_tests.step);
     const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
     test_step.dependOn(&console_font_tests.step);
     vps_test_step.dependOn(&console_font_tests.step);

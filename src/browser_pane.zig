@@ -3696,6 +3696,7 @@ pub fn startBrowserUrlBarEdit() void {
     const edit_parent = if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) app_state.g_urlbar_hwnd else app_state.g_main_hwnd;
     app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, edit_x, edit_y, edit_w, edit_h, edit_parent, null, null, null);
     if (app_state.g_edit_hwnd != null) {
+        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));

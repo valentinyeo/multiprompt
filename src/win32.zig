@@ -1,6 +1,6 @@
 const std = @import("std");
-const OPENFILENAMEW = @import("app_state.zig").OPENFILENAMEW;
-const CREDUI_INFOW = @import("app_state.zig").CREDUI_INFOW;
+pub const OPENFILENAMEW = @import("app_state.zig").OPENFILENAMEW;
+pub const CREDUI_INFOW = @import("app_state.zig").CREDUI_INFOW;
 
 pub const WINAPI: std.builtin.CallingConvention = .winapi;
 pub const BOOL = i32;
@@ -596,6 +596,7 @@ pub extern "gdi32" fn GetTextExtentExPointW(HANDLE, [*]const u16, i32, i32, *i32
 pub extern "gdi32" fn CreateFontW(i32, i32, i32, i32, i32, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, ?LPCWSTR) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn AddFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) i32;
 pub extern "gdi32" fn RemoveFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) BOOL;
+pub extern "gdi32" fn RemoveFontMemResourceEx(HANDLE) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn AddFontMemResourceEx(?*const anyopaque, DWORD, ?*anyopaque, *DWORD) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn Polygon(HANDLE, [*]const POINT, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn Ellipse(HANDLE, i32, i32, i32, i32) callconv(WINAPI) BOOL;
@@ -1385,3 +1386,13 @@ pub extern "user32" fn ChangeWindowMessageFilterEx(HANDLE, UINT, DWORD, ?*anyopa
 pub const WM_APP_SHELL_DOUBLE_CLICK: u32 = WM_APP + 204;
 pub extern "user32" fn GetDoubleClickTime() callconv(WINAPI) UINT;
 pub extern "user32" fn GetSystemMetrics(i32) callconv(WINAPI) i32;
+
+pub extern "user32" fn EnumChildWindows(HANDLE, *const fn (HANDLE, LPARAM) callconv(WINAPI) BOOL, LPARAM) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetMenuItemCount(HANDLE) callconv(WINAPI) i32;
+pub extern "user32" fn GetMenuState(HANDLE, UINT, UINT) callconv(WINAPI) UINT;
+pub extern "user32" fn GetMenuItemID(HANDLE, i32) callconv(WINAPI) UINT;
+pub extern "user32" fn GetMenuStringW(HANDLE, UINT, [*]u16, i32, UINT) callconv(WINAPI) i32;
+pub extern "user32" fn ModifyMenuW(HANDLE, UINT, UINT, usize, ?LPCWSTR) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetSysColor(i32) callconv(WINAPI) DWORD;
+
+pub extern "gdi32" fn GetFontData(HANDLE, DWORD, DWORD, ?*anyopaque, DWORD) callconv(WINAPI) DWORD;
