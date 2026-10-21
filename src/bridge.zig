@@ -1,5 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
+const workspace_profile = @import("browser_workspace_profile.zig");
 const browser_profile_clone = @import("browser_profile_clone.zig");
 
 const app_name = "com.zigshell.bridge";
@@ -200,6 +201,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     defer if (profile_env) |token| allocator.free(token);
     g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
+    var parent_token: [32]u8 = undefined;
+    if (is_native_host and !is_legacy_host) {
+        if (try workspace_profile.nativeParentToken(allocator, &parent_token)) |actual| {
+            if (g_profile_token.len > 0 and !std.mem.eql(u8, actual, g_profile_token)) return error.ProfileParentMismatch;
+            g_profile_token = actual;
+        }
+    }
     var pipe_name_buf: [128]u8 = undefined;
     const profile_pipe_name = isolatedPipeName(&pipe_name_buf, g_profile_token) catch {
         if (!is_native_host) {
@@ -1196,6 +1204,13 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
         var name_buf: [128]u8 = undefined;
         const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
         const mutex = CreateMutexA(null, 0, name.ptr) orelse return error.ProfileMutexUnavailable;
+        if (workspace_profile.isWorkspaceToken(g_profile_token)) {
+            const immediate = WaitForSingleObject(mutex, 0);
+            if (immediate != 0 and immediate != 0x80) {
+                _ = CloseHandle(mutex);
+                return error.ProfileAlreadyRegistered;
+            }
+        }
         const wait = WaitForSingleObject(mutex, 0xFFFFFFFF);
         if (wait != 0 and wait != 0x80) {
             _ = CloseHandle(mutex);
@@ -1204,6 +1219,7 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
         break :blk mutex;
     } else null;
     defer if (profile_mutex) |mutex| {
+        if (workspace_profile.isWorkspaceToken(g_profile_token)) _ = ReleaseMutex(mutex);
         _ = ReleaseMutex(mutex);
         _ = CloseHandle(mutex);
     };
@@ -3134,4 +3150,47 @@ test "ISSUE-410 extended paths normalize before overlapping path protection" {
     try fixture.same("clone", ".multiprompt-clone-complete", "");
     try fixture.unchanged();
     std.debug.print("ISSUE-410 extended paths passed\n", .{});
+}
+
+test "IGSH-224 workspace profile module" {
+    std.testing.refAllDecls(workspace_profile);
+}
+
+test "IGSH-224 workspace profiles seed independently and retain bookmark edits" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("seed", "Default\\Bookmarks", "shared bookmarks");
+    for (0..6) |index| {
+        const destination = try std.fmt.allocPrint(std.testing.allocator, "{s}\\workspace-{d}", .{ fixture.base, index });
+        defer std.testing.allocator.free(destination);
+        try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, destination);
+        try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, destination));
+    }
+    try fixture.write("workspace-0", "Default\\Bookmarks", "workspace zero only");
+    try fixture.same("workspace-1", "Default\\Bookmarks", "shared bookmarks");
+    try fixture.same("seed", "Default\\Bookmarks", "shared bookmarks");
+    const zero = try std.fmt.allocPrint(std.testing.allocator, "{s}\\workspace-0", .{fixture.base});
+    defer std.testing.allocator.free(zero);
+    try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, zero);
+    try fixture.same("workspace-0", "Default\\Bookmarks", "workspace zero only");
+}
+
+test "IGSH-224 incomplete workspace destination is never launchable" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("clone", "Local State", "{}");
+    try std.testing.expect(!try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+    try std.testing.expectError(error.IncompleteWorkspaceProfile, browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, fixture.dest));
+    try fixture.same("clone", "Local State", "{}");
+}
+
+test "IGSH-224 a new installation creates a complete profile without creating a seed" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    const absent_seed = try std.fmt.allocPrint(std.testing.allocator, "{s}\\absent-seed", .{fixture.base});
+    defer std.testing.allocator.free(absent_seed);
+    try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, absent_seed, fixture.dest);
+    try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+    try fixture.absent("absent-seed");
+    try fixture.same("clone", "Default\\Preferences", "{}");
 }

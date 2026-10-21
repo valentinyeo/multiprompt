@@ -187,6 +187,7 @@ function nativeHarness(dir) {
   fs.writeFileSync(file, `const std = @import("std");
 ${section(bridge, 'const version =', 'const max_native_message')}
 var g_window_id: ?i64 = null;
+var zsb_profile_token: [32]u8 = std.mem.zeroes([32]u8);
 fn bridgeExePath() []const u8 { return "zigshell-bridge.exe"; }
 fn badArgs(_: []const u8) noreturn { @panic("unexpected bad arguments"); }
 fn runProfileClone(_: std.mem.Allocator, _: anytype, _: []const u8) !void { unreachable; }

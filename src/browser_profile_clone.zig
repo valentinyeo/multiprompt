@@ -261,9 +261,11 @@ pub fn clone(allocator: std.mem.Allocator, source_path: []const u8, destination_
             2 => {},
             else => return error.Browser_running,
         }
-    } else {
-        _ = CloseHandle(probe);
     }
+    defer if (probe != invalid_handle) {
+        _ = CloseHandle(probe);
+    };
+    try @import("browser_workspace_profile.zig").requireSourceClosed(allocator, source_path);
     try validate(allocator, source);
     var preflight = Walk{ .allocator = allocator, .options = options };
     try preflight.tree(source, null, true);
@@ -297,6 +299,9 @@ fn finish(allocator: std.mem.Allocator, source: [:0]const u16, partial: [:0]cons
     var copy = Walk{ .allocator = allocator, .options = options };
     try copy.tree(source, partial, true);
     try validate(allocator, partial);
+    const source_utf8 = try std.unicode.utf16LeToUtf8Alloc(allocator, source);
+    defer allocator.free(source_utf8);
+    try @import("browser_workspace_profile.zig").requireSourceClosed(allocator, source_utf8);
     const marker = try join(allocator, partial, std.unicode.utf8ToUtf16LeStringLiteral(".multiprompt-clone-complete"));
     defer allocator.free(marker);
     const handle = CreateFileW(marker, 0x40000000, 0, null, 1, 0x80, null);
@@ -304,4 +309,97 @@ fn finish(allocator: std.mem.Allocator, source: [:0]const u16, partial: [:0]cons
     if (CloseHandle(handle) == 0) return error.MarkerFailed;
     if (MoveFileExW(partial, dest, 0) == 0) return error.RenameFailed;
     return copy.result;
+}
+
+extern "kernel32" fn CreateMutexW(?*anyopaque, i32, [*:0]const u16) callconv(.winapi) ?HANDLE;
+extern "kernel32" fn WaitForSingleObject(HANDLE, u32) callconv(.winapi) u32;
+extern "kernel32" fn ReleaseMutex(HANDLE) callconv(.winapi) i32;
+extern "kernel32" fn WriteFile(HANDLE, [*]const u8, u32, *u32, ?*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn FlushFileBuffers(HANDLE) callconv(.winapi) i32;
+
+fn writeNew(path: [:0]const u16, data: []const u8) !void {
+    const file = CreateFileW(path, 0x40000000, 0, null, 1, 0x80, null);
+    if (file == invalid_handle) return error.CreateFileFailed;
+    defer _ = CloseHandle(file);
+    var written: u32 = 0;
+    if (WriteFile(file, data.ptr, @intCast(data.len), &written, null) == 0 or written != data.len or FlushFileBuffers(file) == 0) return error.WriteFailed;
+}
+
+pub fn ensureWorkspaceProfile(allocator: std.mem.Allocator, seed: []const u8, destination: []const u8) !void {
+    const dest = try absolute(allocator, destination);
+    defer allocator.free(dest);
+    try rejectReparseAncestors(allocator, dest);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(destination, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    const mutex_text = try std.fmt.allocPrint(allocator, "Local\\multiprompt-profile-clone-{s}", .{hex});
+    defer allocator.free(mutex_text);
+    const mutex_name = try std.unicode.utf8ToUtf16LeAllocZ(allocator, mutex_text);
+    defer allocator.free(mutex_name);
+    const mutex = CreateMutexW(null, 0, mutex_name) orelse return error.ProfileMutexUnavailable;
+    defer _ = CloseHandle(mutex);
+    const waited = WaitForSingleObject(mutex, 0);
+    if (waited != 0 and waited != 0x80) return error.ProfilePreparationInProgress;
+    defer _ = ReleaseMutex(mutex);
+    for (8..dest.len) |end| {
+        if (dest[end] != '\\') continue;
+        const parent = try allocator.dupeZ(u16, dest[0..end]);
+        defer allocator.free(parent);
+        if (try attributes(parent) == null and CreateDirectoryW(parent, null) == 0) return error.CreateDirectoryFailed;
+    }
+    const marker = try join(allocator, dest, std.unicode.utf8ToUtf16LeStringLiteral(".multiprompt-clone-complete"));
+    defer allocator.free(marker);
+    if (try attributes(dest) != null) {
+        if (!try plainFile(marker)) return error.IncompleteWorkspaceProfile;
+        const state = try join(allocator, dest, std.unicode.utf8ToUtf16LeStringLiteral("Local State"));
+        defer allocator.free(state);
+        if (!try plainFile(state)) return error.MissingLocalState;
+        return;
+    }
+    const source = try absolute(allocator, seed);
+    defer allocator.free(source);
+    if (try attributes(source) != null) {
+        _ = try clone(allocator, seed, destination, .{});
+        return;
+    }
+    const partial_text = try std.fmt.allocPrint(allocator, "{s}.partial", .{destination});
+    defer allocator.free(partial_text);
+    const partial = try absolute(allocator, partial_text);
+    defer allocator.free(partial);
+    try rejectReparseAncestors(allocator, partial);
+    try removeTree(allocator, partial);
+    const parent_end = std.mem.lastIndexOfScalar(u16, dest, '\\') orelse return error.InvalidPath;
+    const parent = try allocator.dupeZ(u16, dest[0 .. parent_end + 1]);
+    defer allocator.free(parent);
+    var free: u64 = 0;
+    if (GetDiskFreeSpaceExW(parent, &free, null, null) == 0) return error.DiskSpaceQueryFailed;
+    if (free < 1024 * 1024 * 1024) return error.Insufficient_disk_space;
+    if (CreateDirectoryW(partial, null) == 0) return error.CreateDirectoryFailed;
+    errdefer removeTree(allocator, partial) catch {};
+    const state = try join(allocator, partial, std.unicode.utf8ToUtf16LeStringLiteral("Local State"));
+    defer allocator.free(state);
+    try writeNew(state, "{}");
+    const default = try join(allocator, partial, std.unicode.utf8ToUtf16LeStringLiteral("Default"));
+    defer allocator.free(default);
+    if (CreateDirectoryW(default, null) == 0) return error.CreateDirectoryFailed;
+    const preferences = try join(allocator, default, std.unicode.utf8ToUtf16LeStringLiteral("Preferences"));
+    defer allocator.free(preferences);
+    try writeNew(preferences, "{}");
+    try validate(allocator, partial);
+    const complete = try join(allocator, partial, std.unicode.utf8ToUtf16LeStringLiteral(".multiprompt-clone-complete"));
+    defer allocator.free(complete);
+    try writeNew(complete, "");
+    if (MoveFileExW(partial, dest, 0) == 0) return error.RenameFailed;
+}
+
+pub fn workspaceReady(allocator: std.mem.Allocator, destination: []const u8) !bool {
+    const dest = try absolute(allocator, destination);
+    defer allocator.free(dest);
+    try rejectReparseAncestors(allocator, dest);
+    const marker = try join(allocator, dest, std.unicode.utf8ToUtf16LeStringLiteral(".multiprompt-clone-complete"));
+    defer allocator.free(marker);
+    if (!try plainFile(marker)) return false;
+    const state = try join(allocator, dest, std.unicode.utf8ToUtf16LeStringLiteral("Local State"));
+    defer allocator.free(state);
+    return plainFile(state);
 }

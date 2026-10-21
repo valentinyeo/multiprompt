@@ -226,3 +226,34 @@ test('issue: source preserves token-only lifetime mutex and shared pipe resolver
   assert.match(source, /g_profile_token = if \(is_legacy_host\) "" else profile_override orelse profile_env/);
   assert.match(fs.readFileSync(path.join(root, 'build.zig'), 'utf8'), /const bridge_tests = b\.addTest\(\.\{ \.root_module = bridge_exe\.root_module \}\);[\s\S]*test_step\.dependOn\(&run_bridge_tests\.step\);[\s\S]*b\.step\("test-bridge"/);
 });
+
+test('IGSH-224 workspace registrations reject duplicates and never route an unknown token to another profile', { timeout: 30000 }, async () => {
+  const suffix = process.pid.toString(16).padStart(30, '0');
+  const token = `e-${suffix}`;
+  const otherToken = `c-${suffix}`;
+  const first = new Host(token, 'workspace-edge');
+  const other = new Host(otherToken, 'workspace-chrome');
+  try {
+    await Promise.all([first.ready, other.ready]);
+    const duplicate = await cli(['native'], token);
+    assert.notEqual(duplicate.status, 0);
+    assert.match(duplicate.stderr, /ProfileAlreadyRegistered/);
+    const replies = await Promise.all([
+      cli(['--window', '42', 'tabs'], token),
+      cli(['--window', '42', 'tabs'], otherToken),
+    ]);
+    assert.equal(JSON.parse(replies[0].stdout).result.profile, 'workspace-edge');
+    assert.equal(JSON.parse(replies[1].stdout).result.profile, 'workspace-chrome');
+    assert.equal(first.requests.length, 1);
+    assert.equal(other.requests.length, 1);
+    const unknown = await cli(['tabs'], `e-${'f'.repeat(30)}`);
+    assert.equal(JSON.parse(unknown.stdout).ok, false);
+    assert.equal(first.requests.length, 1);
+    assert.equal(other.requests.length, 1);
+  } finally {
+    await first.close();
+    await other.close();
+  }
+  const stale = await cli(['tabs'], token);
+  assert.equal(JSON.parse(stale.stdout).ok, false);
+});

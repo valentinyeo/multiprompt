@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'browser-workspaces', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -451,7 +451,7 @@ function Snapshot([string]$Name) {
 }
 
 function Assert-Foreground {
-    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
+    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
 }
 
 function Press([int[]]$Keys, [string]$Label) {
@@ -961,6 +961,49 @@ try {
             Save-Json $after 'session-after.json'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
+        }
+        'browser-workspaces' {
+            $roots = @()
+            $identities = @()
+            $browserRoot = Join-Path $scratch 'local/ZigShell/BrowserWorkspaces/edge'
+            for ($index = 0; $index -lt 6; $index++) {
+                if ($index -gt 0) {
+                    Press @(0x11, 0x4E) 'Ctrl+N: create an independent workspace'
+                    Wait-Until { (Read-Session).workspace_count -eq $index + 1 } 'new workspace saved'
+                }
+                $state = Read-Session
+                $slot = [int]$state.active_workspace
+                $id = [string]$state.workspaces[$slot].wid
+                if (-not $id) { throw 'Workspace has no stable ID' }
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($id)))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
+                $root = Join-Path $browserRoot $hash
+                Press @(0x12, 0x41) 'Alt+A: open this workspace browser pane'
+                Wait-Until {
+                    (Test-Path (Join-Path $root '.multiprompt-clone-complete')) -and
+                    (Test-Path (Join-Path $root 'Local State')) -and
+                    @((Read-Inbox).shells | Where-Object { $_.ws -eq $slot -and $_.br -eq 2 }).Count -gt 0
+                } 'completed workspace profile and live docked browser' 60
+                $roots += $root
+                $identities += $id
+                Snapshot ('workspace-' + $index)
+                if ($index -eq 0) { Snapshot 'action' }
+                [void][VerifyNative]::SetForegroundWindow($script:window)
+                Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -eq $script:window } 'owned app foreground for workspace input'
+            }
+            if (@($roots | Select-Object -Unique).Count -ne 6) { throw 'Workspaces reused a browser profile root' }
+            $live = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*--user-data-dir=*' -and $_.CommandLine -notlike '*--type=*' })
+            foreach ($root in $roots) {
+                if (@($live | Where-Object { $_.CommandLine.Contains($root) }).Count -ne 1) { throw "Expected exactly one live browser process for $root" }
+            }
+            Save-Json @($live | Select-Object ProcessId, ParentProcessId, CommandLine) 'workspace-browser-processes.json'
+            Press @(0x12, 0x32) 'Alt+2: return to the first workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'first workspace restored'
+            if ((Read-Session).workspaces[0].wid -ne $identities[0]) { throw 'Workspace ID changed on return' }
+            if (@(Get-ChildItem $browserRoot -Directory).Count -ne 6) { throw 'Switching created another browser profile' }
+            if ((Test-Path (Join-Path $scratch 'local/ZigShell/EdgeUserData')) -or (Test-Path (Join-Path $scratch 'local/ZigShell/ChromeUserData'))) { throw 'Fresh launches wrote a shared seed' }
+            Snapshot 'after'
+            $result.checks += @{ name = 'six-stable-live-workspace-profiles'; workspaceIds = $identities; roots = $roots; liveProfiles = 6; sharedSeedCreated = $false; nativeExtensionRouting = 'not exercised; no extension installed in this fresh desktop' }
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'

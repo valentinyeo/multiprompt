@@ -6663,6 +6663,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             handleZsbBindRequest();
             return 0;
         },
+        @import("win32.zig").WM_APP_BROWSER_PROFILE_READY => {
+            @import("browser_pane.zig").handleWorkspaceProfileReady(wp);
+            return 0;
+        },
         WM_APP_DIAG => {
             handleDiagRequest();
             return 0;

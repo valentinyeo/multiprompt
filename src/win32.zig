@@ -124,6 +124,7 @@ pub const WM_KEYDOWN: u32 = 0x0100;
 pub const WM_KEYUP: u32 = 0x0101;
 pub const WM_SYSKEYUP: u32 = 0x0105;
 pub const WM_APP: u32 = 0x8000;
+pub const WM_APP_BROWSER_PROFILE_READY: u32 = WM_APP + 205;
 pub const WM_APP_NEXT_TAB: u32 = WM_APP + 1;
 pub const WM_APP_PREV_TAB: u32 = WM_APP + 2;
 pub const WM_APP_SPAWN: u32 = WM_APP + 3;

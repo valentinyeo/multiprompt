@@ -292,3 +292,44 @@ which is validated and marked `.multiprompt-clone-complete` before a rename
 without replacement publishes dst. A copy error removes the partial directory.
 Reparse points and overlapping source/destination paths are refused.
 Success prints one JSON line with destination, copied file count, and bytes.
+
+## Workspace browser profiles
+
+`src/browser_workspace_profile.zig` has the one-line `IGSH_224 = true` switch.
+Set it to false and rebuild to restore the shared isolated-profile behavior.
+The switch defaults on; it does not move or overwrite `EdgeUserData` or
+`ChromeUserData`. Those directories remain the read-only first-use seeds and
+rollback profiles.
+
+A stable workspace ID is SHA-256 hashed (the first 30 hexadecimal characters),
+never a display name or slot. Profiles live under
+`%LOCALAPPDATA%\ZigShell\BrowserWorkspaces\edge\<hash>` or `chrome\<hash>`.
+The engine-prefixed token (`e-<hash>` / `c-<hash>`) is shown in a header notice
+when opening a pane. Bookmark cleanup is manual and affects only that profile.
+Closing or deleting a workspace leaves its hash-addressed browser data intact;
+there is no automatic profile deletion. Retained directories can be backed up
+or recovered separately, without following a workspace display-name path.
+
+Before launching, a background worker prepares a missing profile. The shared
+source must have no running browser process. Its existing lock is held for the
+copy; process checks also cover a missing lock. Migration preflights the retained
+bytes plus 1 GiB, copies into `.partial`, validates Local State and at least one
+profile Preferences file, writes a completion marker, and atomically renames.
+Incomplete destinations never launch. A fresh install with no seed initializes
+a minimal complete profile without creating a shared seed. Interrupted partial
+copies are retried, not adopted. Service Worker registrations are retained;
+CacheStorage, ScriptCache, HTTP/code/GPU caches, component/model downloads,
+crash reports, and process locks are not copied. The source is never edited.
+
+The native host reads its Chromium ancestor's actual `--user-data-dir`, validates
+it against the local workspace profile root, and registers only the matching
+profile pipe. Workspace registrations reject duplicates. UI commands, recovery,
+URL polling and remote session binding carry the same token as the pane; a
+window ID alone is not globally unique across profiles. Missing/stale pipes and
+foreign/ambiguous windows fail closed, without using the shared pipe. Existing
+window protection and containment rules still apply. Workspace switching parks
+native windows; it does not close another profile. Engine switching closes old
+panes but retains their URLs and both engines' profile roots.
+
+V1 does not prune bookmarks, remove retained browser data, or claim that
+Chromium's OS-bound encrypted credentials are portable between machines.
