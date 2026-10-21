@@ -206,8 +206,20 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
     _ = DeleteObject(glyph_font);
 }
 
+pub fn chatSurfaceRadius() i32 {
+    return uiScaled(CHAT_BUBBLE_RADIUS);
+}
+
+pub fn chatSurfaceBorderW() i32 {
+    return @max(1, uiScaled(1));
+}
+
+pub fn chatSurfaceBorderColor() DWORD {
+    return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
+}
+
 fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
-    const edge = @max(1, uiScaled(1));
+    const edge = chatSurfaceBorderW();
     fillRoundRectAA(hdc, rc, radius, border_color);
     fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
 }
@@ -331,8 +343,8 @@ pub fn paintChatView(hdc: HANDLE) void {
     const layout = chatViewLayout();
     refreshChatBrushes();
     _ = SetBkMode(hdc, TRANSPARENT);
-    const card_border = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
-    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, uiScaled(CHAT_BUBBLE_RADIUS));
+    const card_border = chatSurfaceBorderColor();
+    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, chatSurfaceRadius());
     if (app_state.g_chat_reply_len > 0) {
         const old_font = SelectObject(hdc, ensureChatFont());
         defer _ = SelectObject(hdc, old_font);
