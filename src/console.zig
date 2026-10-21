@@ -2504,8 +2504,8 @@ pub fn switchToShell(idx: u32) void {
     if (defer_browser) hideBrowserFloatingChrome() else if (app_state.active_shell < app_state.shell_count) hideActiveBrowser();
     if (idx != prev) app_state.g_front_period.selected = null;
     app_state.active_shell = idx;
-    chatDraftBindToActive();
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
+    chatDraftBindToActive();
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
     }
