@@ -45,9 +45,17 @@ test("resume performs a second hook reinstall after the input stack settles", ()
   assert.notStrictEqual(timerEnd, -1);
   const resumeTimer = source.slice(timerStart, timerEnd);
   const rearm = resumeTimer.indexOf("forceReinstallHooks();");
-  const reconnect = resumeTimer.indexOf("reconnectSshTabsAfterResume();");
   assert.ok(rearm >= 0, "resume timer must force-cycle hooks");
-  assert.ok(reconnect > rearm, "hooks must be live before SSH reconnect work starts");
+  const resumeStart = source.indexOf("PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC => {");
+  const resumeEnd = source.indexOf("PBT_POWERSETTINGCHANGE => {", resumeStart);
+  assert.ok(resumeStart >= 0 && resumeEnd > resumeStart);
+  const resume = source.slice(resumeStart, resumeEnd);
+  const install = resume.search(/\binstallHook\(\);/);
+  const mouse = resume.indexOf("syncMouseHookForUrlClicks();");
+  const reconnect = resume.indexOf('sshReconnectArm(null, "power-resume");');
+  assert.ok(install >= 0 && mouse > install && reconnect > mouse,
+    "hooks must be live before SSH reconnect work starts");
+  assert.match(resume, /SetTimer\(hwnd, TIMER_RESUME_RECONNECT, 2500, null\)/);
 });
 
 test("a dedicated input thread repairs stale hooks independently of window activation", () => {

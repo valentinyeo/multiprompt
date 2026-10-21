@@ -6596,7 +6596,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     debugLog("WM_POWERBROADCAST: suspending — session snapshot saved");
                 },
                 PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC => {
-                    @import("chat_send.zig").sshReconnectArm(null, "power-resume");
                     app_state.g_resume_until_tick = GetTickCount64() + RESUME_RESPAWN_WINDOW_MS;
                     _ = KillTimer(hwnd, TIMER_RESUME_RECONNECT);
                     _ = SetTimer(hwnd, TIMER_RESUME_RECONNECT, 2500, null);
@@ -6605,6 +6604,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     syncMouseHookForUrlClicks();
                     app_state.g_last_kb_hook_tick = GetTickCount64();
                     app_state.g_last_mouse_hook_tick = GetTickCount64();
+                    @import("chat_send.zig").sshReconnectArm(null, "power-resume");
                     debugLog("WM_POWERBROADCAST: resumed — SSH reconnect timer armed, hooks reinstalled");
                     refreshPowerStatusFromSystem();
                     applyPowerProfile(hwnd);
