@@ -296,3 +296,27 @@ test('IGSH-376 browser journey retains upstream focus and scratch preparation co
   assert.doesNotMatch(control.replace('Prepare-ScratchEvidence $scratch', ''), prepareBeforeCopy);
   assert.doesNotMatch(control, /robocopy/);
 });
+
+test('browser emulation map drives the real native CLI and extension only on GitHub Windows', () => {
+  const driver = read(skill + 'browser-emulation.mjs');
+  const map = read(skill + 'features/browser-emulation.md');
+  assert.match(workflow, /FEATURE -notin @\([^\n)]*'browser-emulation'/);
+  assert.match(workflow, /run: node \.claude\/skills\/verify-multiprompt\/browser-emulation\.mjs/);
+  assert.match(driver, /assert\.equal\(process\.env\.GITHUB_ACTIONS, 'true'/);
+  assert.match(driver, /assert\.equal\(process\.platform, 'win32'/);
+  assert.match(driver, /const exe = path\.resolve\('verify-bin\/zigshell-bridge\.exe'\)/);
+  assert.match(driver, /--load-extension=\$\{extension\}/);
+  assert.match(driver, /allowed_origins: \[.*chrome-extension:/);
+  assert.match(driver, /exec\(exe, command/);
+  assert.doesNotMatch(driver, /Target\.attachToTarget|Runtime\.evaluate|page\.emulate|page\.setViewport/);
+  for (const args of ["['emulate', 'iphone']", "['emulate', 'pixel']", "['emulate', '360x740', '--mobile']", "['emulate', '800x600']", "['emulate', 'off']", "['click', '#next']", "['reload']"]) {
+    assert.ok(driver.includes(args), args);
+  }
+  assert.match(driver, /requests\.some\(request => request\.url === '\/next' && \/iPhone\/\.test\(request\.userAgent\)\)/);
+  assert.match(driver, /assert\.equal\(restored\.width, baseline\.width\)/);
+  assert.match(driver, /assert\.equal\(offReloaded\.touch, baseline\.touch\)/);
+  assert.match(driver, /taskkill\.exe.*'\/PID'.*browser\.pid.*'\/T'/);
+  assert.match(map, /F12 and browser-chrome DevTools keys remain out of scope/);
+  assert.match(read(skill + 'features/README.md'), /\[Browser emulation\]\(browser-emulation\.md\)/);
+
+});

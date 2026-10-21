@@ -88,7 +88,7 @@ try {
   await fs.mkdir(evidence, { recursive: true });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}/`;
-  browser = spawn(chrome, [`--user-data-dir=${scratch}`, `--load-extension=${extension}`, `--disable-extensions-except=${extension}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--window-size=1200,900', url], { stdio: 'ignore' });
+  browser = spawn(chrome, [`--user-data-dir=${scratch}`, `--load-extension=${extension}`, `--disable-extensions-except=${extension}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--silent-debugger-extension-api', '--window-size=1200,900', url], { stdio: 'ignore' });
   browser.on('error', error => { result.launchError = error.message; });
   const activePort = await waitFor(async () => {
     try { return (await fs.readFile(path.join(scratch, 'DevToolsActivePort'), 'utf8')).trim().split(/\r?\n/); } catch { return null; }
