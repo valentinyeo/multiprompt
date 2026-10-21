@@ -617,7 +617,7 @@ test "ISSUE-511 forty restored tabs" {
     }
     for (0..10) |tick| {
         sshAutoReconnectTick();
-        try std.testing.expectEqual(@min(tick + 1, 3) * 2, spawns);
+        try std.testing.expectEqual(@as(usize, @min(tick + 1, 3)) * 2, spawns);
         fake_now += 1000;
     }
     shells[0].ssh_reconnect.ok();
