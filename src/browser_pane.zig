@@ -652,7 +652,7 @@ pub fn consoleCellW() i32 {
 }
 
 pub fn centeredConsoleColumn(client_right: i32, sidebar_w: i32, edge_pad: i32, cell_w: i32) ConsoleColumn {
-    var w = DEV_SHELL_COLS * cell_w + 4;
+    var w = @min(DEV_SHELL_COLS * cell_w, uiScaled(800)) + 4;
     const avail = client_right - sidebar_w - edge_pad * 2;
     if (w > avail) w = avail;
     var left = sidebar_w + edge_pad + @divTrunc(avail - w, 2);
@@ -663,14 +663,14 @@ pub fn centeredConsoleColumn(client_right: i32, sidebar_w: i32, edge_pad: i32, c
 
 test "centeredConsoleColumn matches a plain centered layout" {
     const col = centeredConsoleColumn(1903, 220, 0, 10);
-    try std.testing.expectEqual(@as(i32, 1004), col.width);
-    try std.testing.expectEqual(@as(i32, 559), col.left);
+    try std.testing.expectEqual(@as(i32, 804), col.width);
+    try std.testing.expectEqual(@as(i32, 659), col.left);
 }
 
 test "centeredConsoleColumn adds the edge gutter when the sidebar is hidden" {
     const col = centeredConsoleColumn(1200, 0, 24, 10);
-    try std.testing.expectEqual(@as(i32, 1004), col.width);
-    try std.testing.expectEqual(@as(i32, 98), col.left);
+    try std.testing.expectEqual(@as(i32, 804), col.width);
+    try std.testing.expectEqual(@as(i32, 198), col.left);
 }
 
 test "centeredConsoleColumn clamps to the available space on a narrow window" {
@@ -3086,6 +3086,17 @@ pub fn paneFocusInset() i32 {
 }
 fn paneFocusCornerR() i32 {
     return uiScaled(8);
+}
+
+pub fn paneRingState() u8 {
+    if (!foregroundIsOurs()) return 1;
+    return if (activeBrowserHasForegroundFocus()) 3 else 2;
+}
+
+pub fn paneRingRepaintNeeded(last: *u8, state: u8) bool {
+    const changed = last.* != state;
+    last.* = state;
+    return changed;
 }
 
 pub fn activePaneBorderOn() bool {

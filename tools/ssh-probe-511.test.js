@@ -85,7 +85,7 @@ test('ISSUE-511 relaunch queues remote tabs and reconnect timer staggers host st
   const account = body('applyServerLayout', read('account_desktop.zig'));
   assert.doesNotMatch(account, /spawnShellWithSession\(/);
   assert.match(account, /sshDisconnect\(app_state\.shell_count - 1, "account-restore-pending"\)/);
-  const timer = body('armSshReconnectTimerIfNeeded', send).match(/SetTimer\([^\n]*TIMER_SSH_RECONNECT, (\d+), null\)/);
+  const timer = body('armSshReconnectTimerIfNeeded', send).match(/if \(urgent\) (\d+) else if \(any\) 15_000/);
   assert.ok(timer);
   assert.ok(1000 / Number(timer[1]) <= 3);
   const tick = body('sshAutoReconnectTick', send);
@@ -119,7 +119,7 @@ test('ISSUE-521 automatic reconnect paths never relayout the window or steal foc
     assert.doesNotMatch(fn, forbidden, name);
     assert.doesNotMatch(fn, /InvalidateRect\([^\n]*null/, name);
   }
-  assert.match(body('resolveSshPath', console), /!app_state\.g_ssh_reconnect_timer_on/);
+  assert.match(body('resolveSshPath', console), /app_state\.g_ssh_reconnect_timer_ms == 0/);
   const invalidate = body('invalidateReconnectContent', read('drawing.zig'));
   assert.match(invalidate, /eventEffects\(reconnectTabVisible\(idx\)\)\.invalidate_content/);
   assert.equal((invalidate.match(/InvalidateRect\(/g) || []).length, 1);

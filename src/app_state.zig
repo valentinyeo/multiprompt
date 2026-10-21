@@ -684,6 +684,7 @@ pub const HitTarget = union(enum) {
 };
 
 pub const ClosedShell = struct {
+    chat_id: u64 = 0,
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
@@ -972,6 +973,7 @@ pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bott
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
+pub var g_pane_ring_state: u8 = 0;
 pub var g_browser_edge_mask_rects: [BROWSER_EDGE_MASK_COUNT]RECT = [_]RECT{std.mem.zeroes(RECT)} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_shown: [BROWSER_EDGE_MASK_COUNT]bool = [_]bool{false} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_nextunread_count: u32 = 0;
@@ -1389,6 +1391,7 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_chat_id: u64 = 0;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -1568,6 +1571,8 @@ pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
 pub var g_dictation_transcript_len: usize = 0;
+pub var g_dictation_draft_owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+pub var g_dictation_draft_owner_len: usize = 0;
 pub var g_dictation_error: [160]u16 = std.mem.zeroes([160]u16);
 pub var g_dictation_error_len: usize = 0;
 pub var g_pending_tmux_cmd: [1024]u8 = std.mem.zeroes([1024]u8);
@@ -2688,6 +2693,7 @@ pub const ChatOutboxEntry = struct {
     channel_sent: bool = false,
     channel_pending: bool = false,
     sent_tick_ms: i64 = 0,
+    expires_ms: i64 = 0,
     channel_sent_ms: i64 = 0,
     channel_retries: u8 = 0,
     channel_history_revision: u64 = std.math.maxInt(u64),
@@ -2715,7 +2721,7 @@ pub var g_chat_echo_layout_ids: [CHAT_OUTBOX_MAX_PER_KEY]u64 = @splat(0);
 pub var g_chat_echo_layout_count: usize = 0;
 pub var g_chat_scroll_bottom_pending: bool = false;
 pub var g_chat_outbox_timer_on: bool = false;
-pub var g_ssh_reconnect_timer_on: bool = false;
+pub var g_ssh_reconnect_timer_ms: u32 = 0;
 
 pub var g_chat_outbox_revision: u64 = 0;
 
