@@ -1261,7 +1261,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.793";
+pub const APP_VERSION = "0.28.794";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -7514,6 +7514,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
                             app_state.active_shell = app_state.shell_count - 1;
+                            @import("chat_composer.zig").chatDraftBindToActive();
                             ensureActiveVisible();
                             _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_COPYDATA");
                             repositionActive();

@@ -1874,6 +1874,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     }
 
     app_state.shells[idx] = .{
+        .chat_id = app_state.g_pending_chat_id,
         .hwnd = cmd_hwnd,
         .process = pi.hProcess,
         .pid = pi.dwProcessId,
@@ -1945,6 +1946,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
     if (@as(usize, @intCast(app_state.next_shell_id)) >= SPAWN_TITLES.len) return false;
 
+    const saved_chat_id = app_state.shells[idx].chat_id;
     const saved_sync_owned = app_state.shells[idx].sync_owned;
     const saved_name = app_state.shells[idx].name;
     const saved_name_len = app_state.shells[idx].name_len;
@@ -2086,6 +2088,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 
     if (app_state.shells[idx].kind != .tmux) chatHistoryForget(app_state.shells[idx].shell_id);
     app_state.shells[idx] = .{
+        .chat_id = saved_chat_id,
         .sync_owned = saved_sync_owned,
         .hwnd = cmd_hwnd,
         .process = pi.hProcess,
@@ -2316,6 +2319,7 @@ pub fn killProcessTree(root_pid: DWORD) void {
 
 pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (idx >= app_state.shell_count) return;
+    @import("chat_composer.zig").chatDraftCloseForShell(idx);
     accountRecordClose(idx);
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
@@ -2347,6 +2351,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
             app_state.g_closed_count = MAX_CLOSED_HISTORY - 1;
         }
         var entry: ClosedShell = undefined;
+        entry.chat_id = app_state.shells[idx].chat_id;
         entry.kind = app_state.shells[idx].kind;
         entry.tmux_host = app_state.shells[idx].tmux_host;
         entry.name = app_state.shells[idx].name;
@@ -2409,6 +2414,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         } else if (app_state.active_shell > idx) {
             app_state.active_shell -= 1;
         }
+        chatDraftBindToActive();
         saveSession();
         return;
     }
@@ -2531,6 +2537,7 @@ pub fn switchToShell(idx: u32) void {
     if (idx != prev) app_state.g_front_period.selected = null;
     app_state.active_shell = idx;
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
+    chatDraftBindToActive();
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
     }
@@ -2573,7 +2580,6 @@ pub fn switchToShell(idx: u32) void {
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {
-                chatDraftBindToActive();
                 chatDeferTranscriptLoad();
                 layoutChatControls();
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);
