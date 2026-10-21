@@ -95,3 +95,69 @@ test('ISSUE-511 reused ids cannot apply stale probes and stable outbox identitie
   assert.doesNotMatch(body('chatOutboxKeyForShell', send), /shell_id/);
   assert.match(read('main.zig'), /if \(got_code and exit_code == @import\("win32\.zig"\)\.STILL_ACTIVE\) return 0/);
 });
+
+test('ISSUE-521 reconnect paths never relayout the window or steal focus', () => {
+  const console = read('console.zig');
+  for (const [name, source] of [['respawnShellInPlace', console], ['markSshTabDisconnected', console], ['sshDisconnect', send], ['sshReconnectOk', send], ['sshAutoReconnectTick', send]]) {
+    const fn = body(name, source);
+    assert.doesNotMatch(fn, /repositionActive\(|invalidateSidebar\(|SetFocus\(|SetForegroundWindow\(|switchToShell\(|chatOutboxTick\(|showHeaderNoticeAscii\(/, name);
+    assert.doesNotMatch(fn, /InvalidateRect\([^\n]*null/, name);
+  }
+  assert.match(body('resolveSshPath', console), /!app_state\.g_ssh_reconnect_timer_on/);
+  const invalidate = body('invalidateReconnectContent', read('drawing.zig'));
+  assert.match(invalidate, /eventEffects\(reconnectTabVisible\(idx\)\)\.invalidate_content/);
+  assert.equal((invalidate.match(/InvalidateRect\(/g) || []).length, 1);
+  assert.match(invalidate, /&rc, 0/);
+  assert.match(body('markSshTabDisconnected', console), /if \(state_changed\).*invalidateReconnectContent/);
+  assert.match(body('sshReconnectOk', send), /if \(state_changed\).*invalidateReconnectContent/);
+  assert.match(body('respawnShellInPlace', console), /SWP_NOACTIVATE \| SWP_NOREDRAW/);
+  const show = body('showReconnectedConsole', console);
+  assert.match(show, /eventEffects\(/);
+  assert.match(show, /shellConsoleShouldBeVisible/);
+  assert.doesNotMatch(show, /repositionActive\(|SetFocus\(|SetForegroundWindow\(/);
+  assert.match(reconnect, /test "ISSUE-521 reconnect effects/);
+});
+
+test('ISSUE-521 healthy probes confirm missing sessions before ending and skip ended tabs', () => {
+  const worker = body('sshProbeThread', send);
+  assert.match(worker, /tmux list-sessions -F '@@S #\{session_name\}' 2>\/dev\/null;/);
+  assert.match(worker, /\.sessionGone\(/);
+  const finish = body('sshProbeFinish', send);
+  assert.match(finish, /if \(item\.session_gone\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
+  assert.match(finish, /phase == \.ended/);
+  assert.match(body('sshProbeStart', send), /phase == \.ended/);
+  assert.match(body('sshAutoReconnectTick', send), /phase == \.ended/);
+  assert.match(body('sshDisconnect', send), /phase == \.ended/);
+  const ended = body('sshSessionEnded', send);
+  assert.match(ended, /ssh-reconnect ended id=\{d\} reason=session-gone/);
+  assert.match(ended, /\.end\(\)/);
+  assert.doesNotMatch(ended, /repositionActive|invalidateSidebar|SetFocus|SetForegroundWindow/);
+  assert.match(body('sessionGone', reconnect), /ssh_ok and exit_code == 0/);
+  assert.match(reconnect, /test "ISSUE-521 session gone/);
+  assert.match(reconnect, /test "ISSUE-521 ended tabs/);
+  assert.match(body('due', reconnect), /!self\.awaiting_probe/);
+  assert.match(body('sshDisconnect', send), /exit_code == 1.*3000/);
+});
+
+test('ISSUE-521 ended overlay and palette restart the same named host session explicitly', () => {
+  const drawing = read('drawing.zig');
+  assert.match(drawing, /"Session ended"/);
+  assert.match(drawing, /L\("Start new session"\)/);
+  const cmd = body('makeCmdLine', read('console.zig'));
+  assert.match(cmd, /if \(new_session\) "tmux new-session -A -s " else "tmux attach -t "/);
+  assert.match(cmd, /appendWideRemoteShellSingleQuoted\(buf, &pos, tmux_session\.\?\)/);
+  assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
+  assert.match(body('manual', reconnect), /self\.phase == \.ended/);
+  assert.match(read('app_state.zig'), /SEARCH_TABCTX_START_SESSION: usize = 7183/);
+  assert.match(read('command_palette.zig'), /phase == \.ended/);
+  assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
+  assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_START_SESSION\) L\("Start new session"\)/);
+  const main = read('main.zig');
+  const start = main.indexOf('if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION)');
+  assert.ok(start >= 0);
+  const dispatch = main.slice(start, main.indexOf('} else if', start));
+  assert.match(dispatch, /sshReconnectNow\(ti\)/);
+  assert.doesNotMatch(dispatch, /switchToShell|showActiveShellAfterOverlay|SetFocus|SetForegroundWindow/);
+  assert.match(read('shortcuts.zig'), /Start new session/);
+  assert.match(fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8'), /Start new session/);
+});

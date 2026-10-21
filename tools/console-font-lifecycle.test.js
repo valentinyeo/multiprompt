@@ -36,6 +36,7 @@ function creation(name, signature) {
   const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(').replace('    if (cmd_hwnd != null) {\n', '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
+    ${name === 'respawnShellInPlace' ? 'const idx: u32 = @intCast(slot);' : ''}
     var si = std.mem.zeroes(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     const cmd_ptr = L("shell");
@@ -92,7 +93,7 @@ fn pollFonts() void {
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
-    .replaceAll('@import("console.zig").', '')
+    .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
@@ -119,6 +120,8 @@ const CONSOLE_SCREEN_BUFFER_INFOEX = struct { cbSize: u32 = 0, dwSize: COORD = .
 const PROCESS_INFORMATION = struct { dwProcessId: u32 = 0, hThread: HANDLE = null, hProcess: HANDLE = null };
 const STARTUPINFOW = struct { cb: u32 = 0 };
 const Shell = struct {
+    spawn_tick: u64 = 0,
+    ssh_reconnect: struct { awaiting_probe: bool = false } = .{},
     hwnd: HANDLE = null, process: HANDLE = null, pid: u32 = 0, kind: ShellKind = .cmd,
     shell_id: u32 = 0, full_width: bool = false, console_font_logged: bool = false,
     base_font_h: i16 = 0, base_font_w: i16 = 0, base_font_dpi: i32 = 96,
@@ -274,6 +277,7 @@ fn debugLog(text: []const u8) void { if (std.mem.indexOf(u8, text, "selection fa
 fn requestRemoteTmuxPaneRedraw(_: u32) void { redraws += 1; }
 fn shellProcessAliveForRead(i: usize) bool { return shells[i].pid != 0 and consoles[shells[i].pid].live; }
 fn GetTickCount64() u64 { return 1; }
+fn sshRequestSessionProbe() void {}
 fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?usize) usize { return 1; }
 fn KillTimer(_: HANDLE, _: usize) BOOL { return 1; }
 fn GetDpiForWindow(_: HANDLE) u32 { return g_main_monitor_dpi; }

@@ -44,6 +44,8 @@ const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
+fn sshRequestSessionProbe() void { ssh_probe_next_tick = 0; }
+fn invalidateReconnectContent(_: u32) void {}
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
 const DWORD = u32;
@@ -89,9 +91,9 @@ ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 =
 `;
 function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
-  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
+  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("win32.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
 
 function armRuntime(tests) {

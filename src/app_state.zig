@@ -1367,6 +1367,7 @@ pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;
 pub const SEARCH_TABCTX_CHAT_ALLOW: usize = 7180;
 pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
+pub const SEARCH_TABCTX_START_SESSION: usize = 7183;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;

@@ -291,6 +291,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reconnect active SSH/tmux tab", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Start new session", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
     .{ .a = "Alt+E", .b = "Move active tab to Waiting until it gets a blue dot", .header = false },

@@ -926,12 +926,31 @@ test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 perc
     }
 }
 
+pub fn reconnectTabVisible(idx: u32) bool {
+    return idx < app_state.shell_count and idx == app_state.active_shell and
+        (!app_state.g_single_window or app_state.shells[idx].workspace == app_state.g_active_workspace) and
+        !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+        !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+        !app_state.g_snippet_create_active and !app_state.g_restoring and !app_state.g_account_locked;
+}
+
+pub fn invalidateReconnectContent(idx: u32) void {
+    if (!@import("ssh_reconnect.zig").eventEffects(reconnectTabVisible(idx)).invalidate_content) return;
+    var rc: RECT = undefined;
+    if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return;
+    rc.left = SIDEBAR_W();
+    rc.top = threadTitleTop();
+    rc.right = threadTitleBandRightFor(rc.right);
+    if (app_state.g_chat_active) rc.bottom = threadTitleTop() + threadTitleHeight();
+    _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+}
+
 pub fn reconnectButtonRect(win_w: i32) ?RECT {
     if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].disconnected) return null;
     const shell = app_state.shells[app_state.active_shell];
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return null;
     const right = threadTitleBandRightFor(win_w) - uiScaled(8);
-    return .{ .left = @max(SIDEBAR_W(), right - uiScaled(96)), .top = threadTitleTop() + uiScaled(3), .right = right, .bottom = threadTitleTop() + threadTitleHeight() - uiScaled(3) };
+    return .{ .left = @max(SIDEBAR_W(), right - uiScaled(if (shell.ssh_reconnect.phase == .ended) 152 else 96)), .top = threadTitleTop() + uiScaled(3), .right = right, .bottom = threadTitleTop() + threadTitleHeight() - uiScaled(3) };
 }
 
 fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) void {
@@ -940,9 +959,7 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
     const old_font = SelectObject(hdc, uiFontSubtitle());
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, customColorOr("warning", if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70)));
-    var buf: [96]u8 = undefined;
-    const seconds = (shell.ssh_reconnect.next_tick -| GetTickCount64() + 999) / 1000;
-    const text = if (shell.ssh_reconnect.phase == .reconnecting) "Disconnected. Reconnecting..." else std.fmt.bufPrint(&buf, "Disconnected. Reconnecting in {d}s", .{seconds}) catch "Disconnected. Reconnecting...";
+    const text = if (shell.ssh_reconnect.phase == .ended) "Session ended" else "Disconnected. Reconnecting...";
     var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
     drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));
@@ -950,7 +967,7 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
     _ = FillRect(hdc, &rc, brush);
     _ = DeleteObject(brush);
     _ = SetTextColor(hdc, themeConsoleFg());
-    _ = DrawTextW(hdc, L("Reconnect"), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = DrawTextW(hdc, if (shell.ssh_reconnect.phase == .ended) L("Start new session") else L("Reconnect"), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 pub fn paintDisconnectedShell(hdc: HANDLE) void {
@@ -963,5 +980,5 @@ pub fn paintDisconnectedShell(hdc: HANDLE) void {
     const old_font = SelectObject(hdc, uiFontTitle());
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, themeConsoleFg());
-    _ = DrawTextW(hdc, L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = DrawTextW(hdc, if (app_state.shells[app_state.active_shell].ssh_reconnect.phase == .ended) L("Session ended") else L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
