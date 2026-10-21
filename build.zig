@@ -524,7 +524,7 @@ pub fn build(b: *std.Build) void {
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });
     test_step.dependOn(&zig_copy_tests.step);
     vps_test_step.dependOn(&zig_copy_tests.step);
-    const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js" });
+    const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
     const bridge_version_heal_tests = b.addSystemCommand(&.{ "node", "--test", "tools/bridge-version-heal.test.js", "tools/zsb-extension-reload.test.js" });

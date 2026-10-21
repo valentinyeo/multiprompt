@@ -9,7 +9,7 @@ This public repo is where Multiprompt is developed, checked and released. GitHub
 Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](openwiki/operations/build-and-install.md).
 
 - Build locally for development only: `zig build` on a Windows development machine. On Linux, cross-compile: `zig build -Dtarget=x86_64-windows-gnu` (ARM64: `-Dtarget=aarch64-windows-gnu`). `zig build dev` builds the DEV channel for big or risky changes only.
-- Test: `zig build test` and `node --test tools/<name>.test.js` for the area you touched. Before opening a PR from Linux, run `tools/test-windows-wine.sh` (Windows tests under Wine plus `test-vps`, about 5 minutes, one run at a time); it must exit 0.
+- Test: push the branch and read `gh pr checks`; GitHub Actions runs the Windows suite and bench tests. Never run `tools/test-windows-wine.sh` or `tools/chat-bench/run.mjs` on the shared server. Both require GitHub Actions or `MULTIPROMPT_ALLOW_LOCAL_HEAVY=1` on a machine you own. Run only lightweight `node --test tools/<name>.test.js` checks locally.
 - Never bump the version in a PR: add `changelog.d/<TICKET>-<slug>.md` (see `changelog.d/README.md`), commit as `<TICKET>: Brief description`, and after the merge run `node tools/version-stamp.mjs release`. CI fails a PR that edits `APP_VERSION` or a `.ver` line by hand.
 - Releases are built and published by GitHub Actions after the release PR merges. Install from Linux with `tools/install-laptop1.sh --release latest --bench <results.json>`; never compile on the laptop.
 - Every extension change (`bridge.js`, manifest) bumps `"version"` in `extension/manifest.json`, independent of the app version. The extension-version check fails a PR that changes shipped files in `extension/` without a bump.
