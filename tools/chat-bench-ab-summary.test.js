@@ -29,14 +29,21 @@ test('odd medians, extrema, failed checks and signed differences use real result
   assert.match(text, /Linux\/Wine on a GitHub-hosted Ubuntu 24\.04 runner; not native Windows acceptance/);
 });
 
-test('runner tooling and production reader require LF checkout on every OS', () => {
+test('runner tooling and production reader require LF checkout on every OS', t => {
   const files = ['tools/chat-bench/run.mjs', 'tools/chat-bench/lib.mjs', 'tools/chat-bench/reader-service.py', 'tools/chat-bench/browser-fixture.c', 'tools/chat-bench/config.json', 'src/chat_history_reader.py'];
-  const result = spawnSync('git', ['check-attr', 'text', 'eol', '--', ...files], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+  const cwd = path.join(__dirname, '..');
+  const result = spawnSync('git', ['check-attr', 'text', 'eol', '--', ...files], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-checkout-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const checkout = spawnSync('git', ['-c', 'core.autocrlf=true', 'checkout-index', `--prefix=${dir}/`, '--', ...files], { cwd, encoding: 'utf8' });
+  assert.equal(checkout.status, 0, checkout.stderr);
   for (const file of files) {
     assert.ok(result.stdout.includes(`${file}: text: set\n`), file);
     assert.ok(result.stdout.includes(`${file}: eol: lf\n`), file);
-    assert.equal(fs.readFileSync(path.join(__dirname, '..', file)).includes(13), false, file);
+    const bytes = fs.readFileSync(path.join(dir, file));
+    assert.equal(bytes.includes(13), false, file);
+    assert.deepEqual(bytes, fs.readFileSync(path.join(cwd, file)), file);
   }
 });
 
