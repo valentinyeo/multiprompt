@@ -4,50 +4,38 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import readline from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { defaults, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate } from './lib.mjs';
+import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate } from './lib.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);
-const options = {};
-for (let i = 2; i < process.argv.length; i += 2) {
-  const key = process.argv[i];
-  if (!['--exe', '--minutes', '--out', '--config'].includes(key) || !process.argv[i + 1]) throw new Error('Usage: node tools/chat-bench/run.mjs --exe <path> [--minutes N] [--out dir] [--config file]');
-  options[key.slice(2)] = process.argv[i + 1];
-}
-if (!options.exe) throw new Error('--exe is required (cross-build with zig build -Dtarget=x86_64-windows-gnu)');
-const requestedExe = path.resolve(options.exe);
-const override = options.config ? JSON.parse(fs.readFileSync(options.config)) : {};
-const config = { ...defaults, ...override, rules: { ...defaults.rules, ...override.rules }, capacity: { ...defaults.capacity, ...override.capacity } };
-if (options.minutes) config.minutes = Number(options.minutes);
-for (const key of ['minutes', 'tabs', 'windows', 'width', 'height', 'warmupSeconds', 'switchSeconds', 'idleSettleSeconds', 'idleSeconds', 'appendSeconds', 'sampleMs', 'hangSeconds', 'startupSeconds']) {
-  if (!Number.isFinite(config[key]) || config[key] <= 0) throw new Error(`Invalid config ${key}`);
-}
-for (const [key, value] of Object.entries(config.rules)) {
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid rule ${key}`);
-}
-for (const [key, value] of Object.entries(config.capacity)) {
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid capacity ${key}`);
-}
-if (![config.tabs, config.windows, config.width, config.height].every(Number.isInteger) || config.windows > config.tabs) throw new Error('Invalid fixture dimensions');
-const out = options.out ? path.resolve(options.out) : fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-'));
-fs.mkdirSync(out, { recursive: true });
-if (!process.env.CHAT_BENCH_XVFB) {
-  if (os.getPriority() < 15) os.setPriority(15);
-  const child = spawn('systemd-run', ['--user', '--scope', '--quiet', '-p', `MemoryMax=${config.rules.maxRssMiB}M`, '-p', 'MemorySwapMax=0', '--', 'xvfb-run', '-a', '-n', String(1000 + process.pid % 50000), '-e', path.join(out, 'xvfb.log'), '-s', `-screen 0 ${config.width * 3}x${config.height * Math.ceil(config.windows / 3)}x24 -nolisten tcp`, process.execPath, script,
-    ...process.argv.slice(2).filter((_, i, a) => !(a[i - 1] === '--out' || a[i] === '--out')), '--out', out],
-  { stdio: 'inherit', detached: true, env: { ...process.env, CHAT_BENCH_XVFB: '1' } });
-  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-    try { process.kill(-child.pid, signal); } catch {  }
-  });
-  child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
-} else {
-  await run();
+async function main() {
+  const argv = process.argv.slice(2);
+  const parsed = parseArgs(argv);
+  const { options } = parsed;
+  if (!options.exe) throw new Error('--exe is required (cross-build with zig build -Dtarget=x86_64-windows-gnu)');
+  const { config, installable } = options.config ? parseArgs(argv, JSON.parse(fs.readFileSync(options.config))) : parsed;
+  if (!installable) console.log('SMOKE: NOT INSTALLABLE; install-laptop1.sh only accepts default-config receipts');
+  const requestedExe = path.resolve(options.exe);
+  const out = options.out ? path.resolve(options.out) : fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-'));
+  fs.mkdirSync(out, { recursive: true });
+  if (!process.env.CHAT_BENCH_XVFB) {
+    if (os.getPriority() < 15) os.setPriority(15);
+    const child = spawn('systemd-run', ['--user', '--scope', '--quiet', '-p', `MemoryMax=${config.rules.maxRssMiB}M`, '-p', 'MemorySwapMax=0', '--', 'xvfb-run', '-a', '-n', String(1000 + process.pid % 50000), '-e', path.join(out, 'xvfb.log'), '-s', `-screen 0 ${config.width * 3}x${config.height * Math.ceil(config.windows / 3)}x24 -nolisten tcp`, process.execPath, script,
+      ...process.argv.slice(2).filter((_, i, a) => !(a[i - 1] === '--out' || a[i] === '--out')), '--out', out],
+    { stdio: 'inherit', detached: true, env: { ...process.env, CHAT_BENCH_XVFB: '1' } });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+      try { process.kill(-child.pid, signal); } catch {  }
+    });
+    child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  } else {
+    await run({ requestedExe, config, out, installable });
+  }
 }
 
-async function run() {
+async function run({ requestedExe, config, out, installable }) {
   process.env.MAGICK_THREAD_LIMIT = '1';
   const prefix = path.join(out, 'wine-prefix');
   if (fs.existsSync(prefix)) throw new Error('Output already contains a Wine prefix; choose a new output directory');
@@ -70,7 +58,7 @@ async function run() {
   const logFd = fs.openSync(path.join(out, 'wine.log'), 'a');
   const fixtures = generate(out, config);
   const priority = Number(execFileSync('ps', ['-o', 'ni=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
-  const run = { schema: 1, requestedExe, exe, binary, prefix, out, config, fixtures, priority, display: process.env.DISPLAY, runnerHashes: { run: hash(script), lib: hash(path.join(path.dirname(script), 'lib.mjs')), service: hash(path.join(path.dirname(script), 'reader-service.py')) }, started: new Date().toISOString(), samples: [], switches: [], readerResponses: [], appends: [], errors: [], infra: [], processes: [], restarted: false };
+  const run = { schema: 1, requestedExe, exe, binary, prefix, out, config, installable, fixtures, priority, display: process.env.DISPLAY, runnerHashes: { run: hash(script), lib: hash(path.join(path.dirname(script), 'lib.mjs')), service: hash(path.join(path.dirname(script), 'reader-service.py')) }, started: new Date().toISOString(), samples: [], switches: [], readerResponses: [], appends: [], errors: [], infra: [], processes: [], restarted: false };
   const hz = +execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' });
   const pageSize = +execFileSync('getconf', ['PAGESIZE'], { encoding: 'utf8' });
   const screenshots = path.join(out, 'screenshots'); fs.mkdirSync(screenshots);
@@ -389,3 +377,5 @@ async function run() {
   atomic(path.join(out, 'summary.txt'), summary); console.log(summary);
   process.exitCode = verdict.status === 'PASS' ? 0 : verdict.status === 'INFRA' ? 75 : 1;
 }
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) await main();

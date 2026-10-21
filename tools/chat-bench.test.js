@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const lib = import('./chat-bench/lib.mjs');
 const fixture = import('./chat-bench/good-run.mjs');
 
 test('capture helpers are limited to one thread without changing the GUI workload', () => {
   const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
-  const start = source.indexOf('async function run() {') + 'async function run() {'.length;
+  const start = source.indexOf('  process.env.MAGICK_THREAD_LIMIT');
   const preamble = source.slice(start, source.indexOf('  const prefix =', start));
   const env = { MAGICK_THREAD_LIMIT: '18', WINEPREFIX: '/fixture' };
   require('node:vm').runInNewContext(preamble, { process: { env } });
@@ -19,14 +19,15 @@ test('capture helpers are limited to one thread without changing the GUI workloa
 
 test('outer launch inherits nice 15 and scopes Xvfb with the configured maxRssMiB', () => {
   const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
-  const launch = source.slice(source.indexOf("if (!process.env.CHAT_BENCH_XVFB) {") + "if (!process.env.CHAT_BENCH_XVFB) {".length, source.indexOf('} else {\n  await run();'));
+  const launch = source.slice(source.indexOf("if (!process.env.CHAT_BENCH_XVFB) {") + "if (!process.env.CHAT_BENCH_XVFB) {".length, source.indexOf('} else {\n    await run('));
   assert.match(launch, /spawn\('systemd-run'/);
   assert.match(launch, /MemoryMax=\$\{config\.rules\.maxRssMiB\}M/);
-  for (const priority of [0, 15, 19]) {
+  for (const priority of [0, 15, 19]) for (const smoke of [false, true]) {
+    const args = smoke ? ['--smoke', '--exe', 'app.exe', '--minutes', '5', '--config', 'custom.json'] : ['--exe', 'app.exe'];
     const changes = [], calls = [];
     require('node:vm').runInNewContext(launch, {
       os: { getPriority: () => priority, setPriority: value => changes.push(value) },
-      process: { env: {}, pid: 42, execPath: '/node', argv: ['node', 'run.mjs', '--exe', 'app.exe'], on: () => {} },
+      process: { env: {}, pid: 42, execPath: '/node', argv: ['node', 'run.mjs', ...args, '--out', '/original'], on: () => {} },
       config: { width: 1280, height: 800, windows: 6, rules: { maxRssMiB: 4321 } },
       path, out: '/bench', script: '/run.mjs',
       spawn: (...args) => { calls.push(args); return { on: () => {} }; },
@@ -35,6 +36,7 @@ test('outer launch inherits nice 15 and scopes Xvfb with the configured maxRssMi
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], 'systemd-run');
     assert.deepEqual(Array.from(calls[0][1].slice(0, 10)), ['--user', '--scope', '--quiet', '-p', 'MemoryMax=4321M', '-p', 'MemorySwapMax=0', '--', 'xvfb-run', '-a']);
+    assert.deepEqual(Array.from(calls[0][1].slice(calls[0][1].indexOf('/run.mjs') + 1)), [...args, '--out', '/bench']);
     assert.equal(calls[0][2].env.CHAT_BENCH_XVFB, '1');
     assert.equal(calls[0][2].detached, true);
   }
@@ -269,5 +271,113 @@ test('browser regression oracle rejects clipped header, split composer, blank lo
   }
   for (const mutate of [r => { r.switches[2].geometry.browser_foreign = false; }, r => { r.switches[0].geometryInside = false; }, r => { r.switches[0].headerInk = false; }, r => { r.switches[0].composerInk = false; }, r => { r.switches[0].earlyContent = false; r.switches[0].loadingInk = false; }, r => { r.switches[3].contentPaintMs = 5000; }, r => { r.switches[3].earlyContent = false; }]) {
     const r = goodRun(); mutate(r); assert.equal(evaluate(r, defaults).pass, false);
+  }
+});
+
+test('runner requires an executable before reading a smoke config or starting work', async () => {
+  const { parseArgs } = await lib;
+  assert.equal(parseArgs([]).options.exe, undefined);
+  for (const args of [[], ['--smoke', '--config', '/nonexistent.json']]) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'chat-bench/run.mjs'), ...args], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--exe is required/);
+    assert.equal(result.stdout, '');
+  }
+});
+
+test('documented smoke guard rejects duration and config overrides without doing IO', async () => {
+  const { parseArgs, defaults } = await lib;
+  for (const args of [['--minutes', '5'], ['--config', '/nonexistent.json'], ['--minutes', String(defaults.minutes)]]) {
+    assert.throws(() => parseArgs(['--exe', '/nonexistent.exe', ...args]), error => {
+      assert.match(error.message, /--smoke/);
+      assert.match(error.message, /install-laptop1\.sh only accepts default-config receipts/);
+      return true;
+    });
+  }
+});
+
+test('documented smoke overrides parse purely and never become installable', async () => {
+  const { parseArgs, defaults } = await lib;
+  const before = structuredClone(defaults);
+  for (const args of [['--smoke', '--minutes', '5'], ['--minutes', '5', '--smoke']]) {
+    const parsed = parseArgs(['--exe', '/nonexistent.exe', ...args]);
+    assert.equal(parsed.config.minutes, 5);
+    assert.equal(parsed.installable, false);
+  }
+  assert.equal(parseArgs(['--exe', 'app.exe', '--smoke']).installable, false);
+  const override = { minutes: 1, rules: { maxRssMiB: 4321 }, capacity: { waitMinutes: 1 } };
+  const parsed = parseArgs(['--exe', 'app.exe', '--smoke', '--config', '/nonexistent.json', '--minutes', '5'], override);
+  assert.equal(parsed.config.minutes, 5);
+  assert.deepEqual(parsed.config.rules, { ...defaults.rules, maxRssMiB: 4321 });
+  assert.deepEqual(parsed.config.capacity, { ...defaults.capacity, waitMinutes: 1 });
+  assert.deepEqual(override, { minutes: 1, rules: { maxRssMiB: 4321 }, capacity: { waitMinutes: 1 } });
+  assert.deepEqual(defaults, before);
+  for (const minutes of ['0', '-1', 'NaN', 'Infinity']) assert.throws(() => parseArgs(['--exe', 'app.exe', '--smoke', '--minutes', minutes]), /Invalid config minutes/);
+  assert.throws(() => parseArgs(['--exe', 'app.exe', '--minutes', '--smoke']), /Usage/);
+});
+
+test('documented runner import does not parse arguments or start bench work', () => {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    process.argv = ['node', '/nonexistent-entry.mjs', '--minutes', '5'];
+    await import(${JSON.stringify(require('node:url').pathToFileURL(path.join(__dirname, 'chat-bench/run.mjs')).href)});
+    console.log('IMPORT_SAFE');
+  `], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'IMPORT_SAFE');
+});
+
+test('documented smoke warning precedes output setup and the inner bench launch', async () => {
+  const { parseArgs } = await lib;
+  const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  const main = source.slice(source.indexOf('async function main() {'), source.indexOf('\nasync function run('));
+  for (const smoke of [false, true]) {
+    const events = [];
+    await require('node:vm').runInNewContext(`${main}\nmain()`, {
+      parseArgs, path, process: { argv: ['node', 'run.mjs', '--exe', 'app.exe', '--out', '/bench', ...(smoke ? ['--smoke', '--minutes', '5'] : [])], env: { CHAT_BENCH_XVFB: '1' } },
+      console: { log: message => events.push(message) }, fs: { mkdirSync: () => events.push('mkdir') },
+      run: async options => { assert.equal(options.installable, !smoke); events.push('run'); },
+    });
+    assert.deepEqual(events.slice(-2), ['mkdir', 'run']);
+    assert.equal(events.length, smoke ? 3 : 2);
+    if (smoke) assert.match(events[0], /NOT INSTALLABLE/);
+  }
+});
+
+test('documented smoke status is serialized in results.json', async () => {
+  const { parseArgs } = await lib;
+  const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
+  const create = source.slice(source.indexOf('  const run = { schema:'), source.indexOf("  const hz ="));
+  const write = source.match(/atomic\(path\.join\(out, 'results\.json'\),[^\n]+/)[0];
+  for (const smoke of [false, true]) {
+    const { config, installable } = parseArgs(['--exe', 'app.exe', ...(smoke ? ['--smoke'] : [])]);
+    let result;
+    require('node:vm').runInNewContext(`${create}\n${write}`, {
+      requestedExe: 'app.exe', exe: 'app.exe', binary: {}, prefix: '/prefix', out: '/bench', config, installable, fixtures: {}, priority: 15,
+      process: { env: {} }, hash: () => 'hash', script: '/run.mjs', path, verdict: { pass: true },
+      atomic: (file, text) => { assert.equal(file, '/bench/results.json'); result = JSON.parse(text); },
+    });
+    assert.equal(result.installable, !smoke);
+  }
+});
+
+test('documented smoke receipts are rejected even with default config and a clean PASS', async t => {
+  const { defaults, hash } = await lib;
+  const { goodRun } = await fixture;
+  const { checkReceipt } = await import('./chat-bench/receipt.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-receipt-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const exe = path.join(dir, 'app.exe'), pe = Buffer.alloc(256);
+  pe.write('MZ'); pe.writeUInt32LE(0x80, 0x3c); pe.write('PE\0\0', 0x80); pe.writeUInt16LE(0x8664, 0x84);
+  fs.writeFileSync(exe, pe);
+  const run = { ...goodRun(), config: structuredClone(defaults), status: 'PASS', pass: true, failures: [], exe,
+    binary: { exeSha256: hash(exe) },
+    runnerHashes: Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' }).map(([key, file]) => [key, hash(path.join(__dirname, 'chat-bench', file))])) };
+  for (const installable of [undefined, true, false]) {
+    if (installable === undefined) delete run.installable;
+    else run.installable = installable;
+    const result = checkReceipt(run, run.binary.exeSha256);
+    assert.equal(result.ok, installable !== false, result.reasons.join('; '));
+    if (installable === false) assert.deepEqual(result.reasons, ['smoke run is NOT INSTALLABLE; install-laptop1.sh only accepts default-config receipts']);
   }
 });
