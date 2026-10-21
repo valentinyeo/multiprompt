@@ -6,7 +6,7 @@ Automatic reconnect after a transport exit, background-tab isolation, retained t
 
 ## How to get to it (user POV)
 
-Open Multiprompt with two SSH/tmux tabs. Select the first with Ctrl+1 and click its typing box. The other tab stays in the background when its network connection drops. Ctrl+Shift+R reconnects an active remote tab manually.
+Open Multiprompt with two SSH/tmux tabs. Select the first with Ctrl+1 and click its native console. The other tab stays in the background when its network connection drops. Ctrl+Shift+R reconnects an active remote tab manually.
 
 ## Driving it with the Windows reconnect harness
 
@@ -14,4 +14,4 @@ Dispatch exe_source=build. Case A records native foreground and GUI-thread focus
 
 ## Gotchas
 
-Initial restore and selecting tabs legitimately layout; the measured slice starts only after settling and before the kill. Reconnect allocates a new shell ID, so the driver obtains it from idx=1's respawn log. HWND sampling is not a compositor/frame-by-frame flicker proof; the layout log signals provide the direct regression oracle. The released pre-fix app is the negative control.
+Initial restore and selecting tabs legitimately layout; the measured slice starts only after settling and before the kill. Reconnect allocates a new shell ID, so the driver obtains it from idx=1's respawn log. HWND sampling is not a compositor/frame-by-frame flicker proof; the layout log signals provide the direct regression oracle. Console view is required because Chat View returns before that log point. The released pre-fix app is the negative control.

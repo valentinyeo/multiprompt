@@ -62,9 +62,9 @@ try {
     $env:MP_VERIFY_STATE = $state
     [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
     [IO.File]::WriteAllText("$state/sessions.txt", "verify-one`nverify-two`n")
-    @{active_tab=0; single_window=$true; chat_active=$true; chat_view_mode='everywhere'; tabs=@(
-        @{kind='tmux'; name='Verify one'; manual=$true; tmux_host=0; tmux_session='verify-one'; cv=$true; pid=0},
-        @{kind='tmux'; name='Verify two'; manual=$true; tmux_host=0; tmux_session='verify-two'; cv=$true; pid=0}
+    @{active_tab=0; single_window=$true; chat_active=$false; chat_view_mode='off'; tabs=@(
+        @{kind='tmux'; name='Verify one'; manual=$true; tmux_host=0; tmux_session='verify-one'; cv=$false; pid=0},
+        @{kind='tmux'; name='Verify two'; manual=$true; tmux_host=0; tmux_session='verify-two'; cv=$false; pid=0}
     )} | ConvertTo-Json -Depth 6 | Set-Content "$settings/session.json"
     Copy-Item "$settings/session.json" "$Output/seed-session.json"
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
@@ -93,12 +93,14 @@ try {
         })
     }
     Tab 1
-    $composer = Wait-For 'visible typing box' { $h = [ReconnectDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
-    [ReconnectDesktop]::Click($composer)
+    $inputSurface = Wait-For 'visible native console' { $h = [ReconnectDesktop]::InputSurface($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [ReconnectDesktop]::Click($inputSurface)
     Start-Sleep -Seconds 3
     $before = [ReconnectDesktop]::Focus($main)
-    if ($before[0] -ne $main.ToInt64() -or $before[1] -ne $composer.ToInt64()) { throw 'Doctor: app foreground and composer focus are required' }
-    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); composer=$composer.ToInt64(); focus=$before; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    if ($before[0] -ne $main.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: app or embedded console must be foreground' }
+    $surfaceFocus = [ReconnectDesktop]::Focus($inputSurface)
+    if ($before[1] -ne $inputSurface.ToInt64() -and $surfaceFocus[1] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
+    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; surface_focus=$surfaceFocus; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
     Shot 'before'
     $offset = (Read-Log).Length
     $old = Transport 'verify-two'

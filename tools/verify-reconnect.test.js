@@ -24,6 +24,8 @@ assert.match(drive, /ssh-reconnect attempt=/);
 assert.match(drive, /ssh-reconnect ended id=/);
 assert.match(drive, /respawnShellInPlace ok kind=tmux idx=1 new_id=/);
 assert.match(drive, /ssh-path\.txt/);
+assert.match(drive, /chat_view_mode='off'/);
+assert.match(desktop, /Class\(h\)=="ConsoleWindowClass"/);
 assert.match(desktop, /GetForegroundWindow/);
 assert.match(desktop, /GetGUIThreadInfo/);
 assert.match(desktop, /SendInput/);

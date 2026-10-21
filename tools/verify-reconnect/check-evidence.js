@@ -19,8 +19,8 @@ function load(mode) {
   assert.match(provenance.exe_sha256, /^[a-f0-9]{64}$/);
   assert.ok(!fs.existsSync(path.join(dir, 'error.txt')), 'infrastructure error is not a regression');
   const doctor = json('doctor.json');
-  assert.equal(doctor.focus[0], doctor.main);
-  assert.equal(doctor.focus[1], doctor.composer);
+  assert.ok([doctor.main, doctor.input_surface].includes(doctor.focus[0]));
+  assert.ok(doctor.focus[1] === doctor.input_surface || doctor.surface_focus[1] === doctor.input_surface);
   assert.equal(doctor.two_transports, true);
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0);
@@ -58,8 +58,9 @@ const red = load('v0.28.788');
 assert.equal(green.run.conclusion, 'success');
 assert.equal(red.run.conclusion, 'failure');
 assert.equal(green.provenance.revision, red.provenance.revision, 'same harness revision required');
+assert.equal(green.provenance.revision, require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
 assert.ok(green.summary.every(s => s.pass));
-assert.ok(red.summary.some(s => !s.pass));
+assert.equal(red.summary[0].pass, false, 'released case A must catch layout/focus regression');
 assert.ok(red.summary[0].reposition_lines > 0 || red.summary[0].focus_changed || red.summary[1].session_gone_count !== 1 || red.summary[1].attempts_after_gone > 0);
 for (const run of [green, red]) {
   console.log(run.run.url);
