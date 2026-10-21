@@ -17,6 +17,14 @@ The version is `APP_VERSION` in `src/main.zig`; the title bar and the `MPVERSION
 
 After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publishes the new version as the latest GitHub Release, with the extension ZIP and SHA-256 checksums. Existing version tags are not republished. Keep credentials, runtime state, screenshots and build outputs out of commits. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for configuration and checks.
 
+## Automatic desktop updates
+
+The desktop checks the latest stable release before restoring tabs and every three hours while running. Only releases published by `github-actions[bot]` in `valentinyeo/multiprompt` are accepted, with the native ARM64 or x64 executable and its exact `SHA256SUMS.txt` entry. Current releases are unsigned; checksum verification and the GitHub release author are the trust boundary. A signed installation requires a valid update signature from the same publisher.
+
+While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** let you choose when to save sessions and restart. Installation retains `<app>.previous.exe`. A new process must signal readiness after session restoration and remain alive; otherwise the helper restores and starts the previous executable and suppresses that failed release. No update starts while another workspace window is already running at startup.
+
+`pub const IGSH_246 = true;` in `src/update_release.zig` is the default-on switch. Set the process environment variable `IGSH_246=0` to disable release checks and installs without changing the executable. The install directory must be writable; network, permission and verification failures leave the current app running. The isolated desktop verifier disables release updates to keep the selected revision fixed.
+
 ## Install a release
 
 Never compile on the laptop. Run the installer on Linux with `gh`, `lh`, Node and a default-config passing bench receipt for the exact released x64 executable:

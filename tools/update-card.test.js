@@ -35,9 +35,9 @@ test('update card wiring: poll on timer and activate, card paint, hit test, thre
   assert.match(main, /updateCardRelaunch\(hwnd\)/);
   assert.match(main, /update_check\.runRelaunchHelperIfRequested\(\)\) return;/);
   assert.match(main, /SEARCH_UPDATE_OFFSET\) \{[^]*?updateCardRelaunch/);
-  assert.match(main, /\.a = "Ctrl\+K \\u\{2192\} Update: Relaunch"/);
+  assert.match(main, /\.a = "Ctrl\+K \\u\{2192\} Restart to update"/);
   const wiki = fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8');
-  assert.match(wiki, /Update: Relaunch/);
+  assert.match(wiki, /Restart to update/);
 });
 
 test('changelog entry for the current version is public bullets without private tracker links', () => {

@@ -479,6 +479,7 @@ const workspaceStripHitTest = @import("sidebar.zig").workspaceStripHitTest;
 const hitTestSidebar = @import("sidebar.zig").hitTestSidebar;
 const sidebarStickyCardHitTest = @import("capacity.zig").sidebarStickyCardHitTest;
 const UPDATE_CHECK_MS = @import("app_state.zig").UPDATE_CHECK_MS;
+const update_release = @import("update_release.zig");
 const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
@@ -7744,6 +7745,8 @@ pub fn main(init: std.process.Init) void {
         sendNotify(payload);
         return;
     }
+
+    if (update_release.startup()) return;
 
     var console_fonts = @import("console.zig").registerBundledConsoleFonts();
     defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);

@@ -2570,9 +2570,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         if (result_idx == SEARCH_UPDATE_OFFSET) {
                             var ub: [64]u8 = undefined;
                             const ut = if (app_state.g_update_ver_len > 0)
-                                (std.fmt.bufPrint(&ub, "Update: Relaunch to v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update: Relaunch")
+                                (std.fmt.bufPrint(&ub, "Restart to update to v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Restart to update")
                             else
-                                "Update: no update ready";
+                                "Restart to update (no update ready)";
                             drawAscii(hdc, ut, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else {
                             _ = DrawTextW(hdc, L("Restart multiprompt"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
