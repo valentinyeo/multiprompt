@@ -102,15 +102,15 @@ test('copy palette offset is exclusive in the complete draw classification chain
   assert.ok(classify(constants.SEARCH_ADDFAVICON_OFFSET).includes('is_addfavicon'));
 });
 
-test('image attach and inline previews ship on every surface (issue)', () => {
+test('file attachment and inline image previews ship on every surface (issue)', () => {
   assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET: usize = 6372/);
-  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "chat view attach image/);
+  assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file/);
   assert.match(src, /is_chat_copy or is_chat_attach or/);
-  assert.match(src, /L\("Chat View: Attach Image"\)/);
+  assert.match(src, /L\("Chat View: Attach File"\)/);
   assert.match(src, /target == SEARCH_CHAT_ATTACH_OFFSET/);
   assert.match(src, /\.a = "\+ button \/ Ctrl\+V in Chat View"/);
   assert.match(docs, /\+ button \/ Ctrl\+V in Chat View/);
-  assert.match(docs, /Chat View: Attach Image/);
+  assert.match(docs, /Chat View: Attach File/);
   assert.ok(build.includes('src/chat_image.zig'));
   assert.ok(build.includes('comdlg32'));
   assert.match(body('chatButtonAt'), /attach_btn/);
