@@ -568,10 +568,11 @@ pub fn build(b: *std.Build) void {
         "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",            "tools/chat-tables.test.js",
         "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",         "tools/crash-report.test.js",
         "tools/debug-log.test.js",                "tools/favorites.test.js",             "tools/focus-guard.test.js",
-        "tools/issue-513-idle-front.test.js",      "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
+        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
         "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js", "tools/token-ladder-panel.test.js",
         "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
         "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
+        "tools/issue-513-idle-front.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
