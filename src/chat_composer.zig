@@ -89,8 +89,6 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("fonts.zig").create;
-const CHAT_QUALITY = @import("fonts.zig").CHAT_QUALITY;
 const chatLineHeight = @import("fonts.zig").chatLineHeight;
 const Sleep = @import("win32.zig").Sleep;
 const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
@@ -389,8 +387,7 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
 
 pub fn ensureChatFont() HANDLE {
     if (app_state.g_chat_font == null) {
-        const face = L(@import("fonts.zig").UI_MEDIUM_FACE);
-        app_state.g_chat_font = CreateFontW(-uiScaled(app_state.g_chat_font_pt), 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, face);
+        app_state.g_chat_font = @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt), false, false, false, .{});
     }
     return app_state.g_chat_font;
 }
