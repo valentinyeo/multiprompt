@@ -1,4 +1,6 @@
 const app_state = @import("app_state.zig");
+const Shell = app_state.Shell;
+const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
@@ -1243,6 +1245,7 @@ pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate
 
 pub fn openBrowserPaneForShell(idx: u32, raw_url: []const u8) void {
     if (idx >= app_state.shell_count) return;
+    if (app_state.shells[idx].browser_open_failed) closeBrowserForShell(idx);
     const url = std.mem.trim(u8, raw_url, &[_]u8{ '\r', '\n', ' ', '\t' });
     if (url.len > 0) {
         navigateBrowserPane(idx, url);
@@ -1998,12 +2001,13 @@ test "issue: one in-flight window resolve per shell, stale entries recycle" {
 }
 
 pub fn startBrowserWindowResolve(idx: u32) void {
-    if (idx >= app_state.shell_count or app_state.g_main_hwnd == null) return;
+    if (idx >= app_state.shell_count or app_state.g_main_hwnd == null or
+        !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_open_failed) return;
     const shell_id = app_state.shells[idx].shell_id;
     const now = GetTickCount64();
     const slot = browserResolveSlot(&app_state.g_browser_resolve_inflight, shell_id, now) orelse return;
     const job = std.heap.page_allocator.create(BrowserResolveJob) catch return;
-    job.* = .{ .shell_id = shell_id };
+    job.* = .{ .shell_id = shell_id, .connection_id = app_state.shells[idx].browser_connection_id };
     const nonce_len = @min(@as(usize, app_state.shells[idx].browser_bind_nonce_len), job.nonce.len);
     if (nonce_len > 0) @memcpy(job.nonce[0..nonce_len], app_state.shells[idx].browser_bind_nonce[0..nonce_len]);
     job.nonce_len = nonce_len;
@@ -2021,30 +2025,25 @@ fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
         resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
     else
         resolveBrowserWindowIdForShell(job.shell_id);
-    const shell_id = job.shell_id;
-    std.heap.page_allocator.destroy(job);
-    const wid: i64 = resolved orelse 0;
-    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_RESOLVED, shell_id, @intCast(wid));
+    job.window_id = resolved orelse 0;
+    if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_RESOLVED, 0, @bitCast(@intFromPtr(job))) == 0)
+        std.heap.page_allocator.destroy(job);
 }
 
-pub fn handleBrowserWindowResolved(shell_id: u32, wid: i64) void {
-    var nonce: [40]u8 = std.mem.zeroes([40]u8);
-    var nonce_len: usize = 0;
-    var tracked = false;
+pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
+    defer std.heap.page_allocator.destroy(job);
+    const shell_id = job.shell_id;
     for (&app_state.g_browser_resolve_inflight) |*entry| {
-        if (entry.shell_id != shell_id) continue;
-        nonce = entry.nonce;
-        nonce_len = entry.nonce_len;
-        tracked = true;
-        entry.* = .{};
+        if (entry.shell_id == shell_id and std.mem.eql(u8, entry.nonce[0..entry.nonce_len], job.nonce[0..job.nonce_len])) entry.* = .{};
     }
-    if (!tracked or wid <= 0) return;
+    if (app_state.g_app_closing or app_state.g_account_locked) return;
     const idx = findShellById(shell_id) orelse return;
+    if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id) or job.window_id <= 0) return;
     const bh = app_state.shells[idx].browser_hwnd orelse return;
     if (IsWindow(bh) == 0 or app_state.shells[idx].browser_window_id != 0) return;
     const current = app_state.shells[idx].browser_bind_nonce[0..app_state.shells[idx].browser_bind_nonce_len];
-    if (!std.mem.eql(u8, current, nonce[0..nonce_len])) return;
-    bindBrowserWindowIdForShell(idx, wid);
+    if (!std.mem.eql(u8, current, job.nonce[0..job.nonce_len])) return;
+    bindBrowserWindowIdForShell(idx, job.window_id);
     if (app_state.shells[idx].browser_pending_url_len > 0) {
         var url_buf: [BROWSER_PENDING_URL_CAP]u8 = undefined;
         const len: usize = app_state.shells[idx].browser_pending_url_len;
@@ -2053,12 +2052,19 @@ pub fn handleBrowserWindowResolved(shell_id: u32, wid: i64) void {
         app_state.g_browser_pending_activate_sid = 0;
         if (!std.mem.eql(u8, url_buf[0..len], "about:blank")) navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
     }
+    if (idx == app_state.active_shell) {
+        repositionActive();
+        updateBrowserVisibility();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    }
     publishInboxState();
 }
 
 fn bindBrowserWindowIdForShell(idx: u32, wid: i64) void {
     if (idx >= app_state.shell_count or wid <= 0) return;
     app_state.shells[idx].browser_window_id = wid;
+    app_state.shells[idx].browser_launch_tick = 0;
+    app_state.shells[idx].browser_open_failed = false;
     writeBrowserWindowIdFile(app_state.shells[idx].shell_id, wid);
     writePaneSessionFileForShell(idx);
     var cmd_buf: [512]u8 = undefined;
@@ -2152,7 +2158,6 @@ fn dockBrowserWindow(idx: u32, hwnd: HANDLE, foreground_launch: bool) void {
     if (beacon_was_foreground) _ = focusGuardReturnFromPane(hwnd);
     showBrowserWindowAsync(hwnd, SW_HIDE);
     setBrowserWindowPosAsync(hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    app_state.shells[idx].browser_launch_tick = 0;
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_health_misses = 0;
     app_state.shells[idx].browser_relaunch_after_tick = 0;
@@ -2207,7 +2212,7 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
     const hwnd = job.hwnd;
     const foreground_launch = job.foreground_launch;
     const beacon_was_foreground = job.beacon_was_foreground;
-    const frame_ready = browserPaneMayOccupyLayout(idx);
+    const frame_ready = browserPaneMayOccupyLayout(idx) and app_state.shells[idx].browser_window_id != 0;
     const trusted_beacon_handoff = foreground_launch and beacon_was_foreground;
     if (trusted_beacon_handoff) {
         _ = SetForegroundWindow(app_state.g_main_hwnd);
@@ -2284,6 +2289,7 @@ fn unlockForegroundAfterRequestLaunch() void {
 
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
+    if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     const launch_now = GetTickCount64();
     if (app_state.shells[idx].browser_relaunch_after_tick != 0 and launch_now < app_state.shells[idx].browser_relaunch_after_tick) return;
     if (app_state.shells[idx].browser_hwnd) |existing| {
@@ -2296,6 +2302,7 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     app_state.shells[idx].browser_native = app_state.g_browser_native_default;
     const now = launch_now;
     app_state.g_browser_nonce_counter += 1;
+    beginBrowserOpening(&app_state.shells[idx], now, app_state.g_browser_nonce_counter);
     const nonce_slice = std.fmt.bufPrint(
         &app_state.g_browser_adopt_nonce,
         "ZSPANE{d}-{d}",
@@ -2314,7 +2321,9 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
         IsIconic(app_state.g_main_hwnd) == 0 and foregroundIsOurs() and
         !browserChromeHiddenForOverlay() and !webView2OwnsShell(idx);
     _ = EnumWindows(&enumBrowserSnapshot, 0);
-    app_state.shells[idx].browser_launch_tick = now;
+    @memcpy(app_state.shells[idx].browser_bind_nonce[0..nonce_slice.len], nonce_slice);
+    app_state.shells[idx].browser_bind_nonce_len = @intCast(nonce_slice.len);
+    publishInboxState();
     app_state.g_browser_adopt_deadline = now + 6000;
     browserTraceN("launchBrowserForShell idx=", idx);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch nonce=", nonce_slice);
@@ -2435,7 +2444,6 @@ pub fn adoptBrowserTick() void {
     if (now >= app_state.g_browser_adopt_deadline) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_ADOPT);
         unlockForegroundAfterRequestLaunch();
-        app_state.shells[target].browser_launch_tick = 0;
         app_state.g_browser_adopt_target_idx = 0xFFFFFFFF;
         app_state.g_browser_adopt_foreground_launch = false;
         var close_ctx = BrowserAdoptCtx{};
@@ -2492,7 +2500,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (browserChromeHiddenForOverlay()) {
+    if (app_state.shells[app_state.active_shell].browser_window_id == 0 or browserChromeHiddenForOverlay()) {
         parkBrowserWindow(bh);
         if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0)
             _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
@@ -2673,9 +2681,25 @@ pub fn browserHealthTick() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_app_closing) return;
     const now = GetTickCount64();
+    for (&app_state.g_cancelled_browser_launches) |*launch| {
+        if (launch.nonce_len == 0) continue;
+        if (now >= launch.deadline) {
+            launch.* = .{};
+            continue;
+        }
+        _ = EnumWindows(&enumCloseCancelledBrowserLaunch, @bitCast(@intFromPtr(launch)));
+    }
     sweepBrowserOrphans(now);
     var active_lost = false;
     for (0..app_state.shell_count) |i| {
+        if (browserOpeningExpired(&app_state.shells[i], now)) {
+            closeBrowserForShell(@intCast(i));
+            app_state.shells[i].browser_open_failed = true;
+            publishInboxState();
+            if (i == app_state.active_shell) active_lost = true;
+        }
+        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_launch_tick != 0 and
+            app_state.shells[i].browser_window_id == 0 and app_state.shells[i].browser_hwnd != null) startBrowserWindowResolve(@intCast(i));
         const bh = app_state.shells[i].browser_hwnd orelse continue;
         if (IsWindow(bh) == 0) {
             forgetCrashedBrowserPane(@intCast(i), now);
@@ -2798,14 +2822,16 @@ pub fn updateBrowserVisibility() void {
             _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
         hideBrowserEdgeMasks();
     }
-    if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and app_state.shells[app_state.active_shell].browser_launch_tick == 0) {
+    if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and
+        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0)
+    {
         if (app_state.g_chat_active) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
     }
 }
 
 pub fn relaunchActiveRestoredBrowserPane() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    if (!app_state.shells[app_state.active_shell].browser_enabled) return;
+    if (!app_state.shells[app_state.active_shell].browser_enabled or app_state.shells[app_state.active_shell].browser_open_failed) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         if (IsWindow(bh) != 0 and windowOwnerProcessStillActive(bh)) return;
         forgetCrashedBrowserPane(app_state.active_shell, GetTickCount64());
@@ -2829,8 +2855,31 @@ pub fn hideActiveBrowser() void {
         _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
 }
 
+fn enumCloseCancelledBrowserLaunch(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
+    if (!edgeWindowClassMatches(hwnd)) return 1;
+    const launch: *const app_state.CancelledBrowserLaunch = @ptrFromInt(@as(usize, @bitCast(lp)));
+    var title: [128]u16 = undefined;
+    const len = InternalGetWindowText(hwnd, &title, title.len);
+    if (len <= 0) return 1;
+    var nonce: [40]u16 = undefined;
+    for (launch.nonce[0..launch.nonce_len], 0..) |c, i| nonce[i] = c;
+    if (std.mem.indexOf(u16, title[0..@intCast(len)], nonce[0..launch.nonce_len]) != null) {
+        hideBrowserWindowHard(hwnd);
+        _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    }
+    return 1;
+}
+
 pub fn closeBrowserForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
+    if (app_state.shells[idx].browser_hwnd == null and app_state.shells[idx].browser_bind_nonce_len > 0) {
+        const now = GetTickCount64();
+        for (&app_state.g_cancelled_browser_launches) |*launch| {
+            if (launch.nonce_len != 0 and now < launch.deadline) continue;
+            launch.* = .{ .nonce = app_state.shells[idx].browser_bind_nonce, .nonce_len = app_state.shells[idx].browser_bind_nonce_len, .deadline = now + BROWSER_PLACEHOLDER_NOT_OPEN_MS };
+            break;
+        }
+    }
     cancelBrowserAdoptionForShell(idx);
     if (idx == app_state.active_shell) hideBrowserEdgeMasks();
     if (app_state.shells[idx].browser_hwnd) |bh| {
@@ -2839,18 +2888,22 @@ pub fn closeBrowserForShell(idx: u32) void {
             _ = PostMessageW(bh, WM_CLOSE, 0, 0);
         }
     }
-    app_state.shells[idx].browser_hwnd = null;
-    app_state.shells[idx].browser_docking = false;
-    app_state.shells[idx].browser_launch_tick = 0;
-    app_state.shells[idx].browser_suspended = false;
-    app_state.shells[idx].browser_health_misses = 0;
-    app_state.shells[idx].browser_relaunch_after_tick = 0;
-    if (app_state.shells[idx].browser_window_id != 0) {
-        app_state.shells[idx].browser_window_id = 0;
-        deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
-        removePaneSessionFilesForShell(idx);
+    resetBrowserConnection(&app_state.shells[idx]);
+    for (&app_state.g_browser_resolve_inflight) |*entry| {
+        if (entry.shell_id == app_state.shells[idx].shell_id) entry.* = .{};
     }
-    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL);
+    if (app_state.g_browser_pending_activate_sid == app_state.shells[idx].shell_id) app_state.g_browser_pending_activate_sid = 0;
+    deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
+    removePaneSessionFilesForShell(idx);
+    if (idx == app_state.active_shell) {
+        app_state.g_slot_placeholder_since = 0;
+        cancelBrowserVisibilitySettle();
+        if (app_state.g_main_hwnd != null) {
+            _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL);
+            _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER);
+        }
+    }
+    publishInboxState();
 }
 
 pub fn finishBrowserEngineSwitch(hwnd: HANDLE) void {
@@ -2989,40 +3042,112 @@ pub fn hibernateAllParkedBrowserPanesNow() u32 {
     return count;
 }
 
+fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
+    sh.browser_enabled = true;
+    sh.browser_launch_tick = now;
+    sh.browser_connection_id = connection_id;
+    sh.browser_open_failed = false;
+}
+
+fn resetBrowserConnection(sh: *Shell) void {
+    sh.browser_hwnd = null;
+    sh.browser_docking = false;
+    sh.browser_launch_tick = 0;
+    sh.browser_connection_id = 0;
+    sh.browser_open_failed = false;
+    sh.browser_suspended = false;
+    sh.browser_health_misses = 0;
+    sh.browser_relaunch_after_tick = 0;
+    sh.browser_window_id = 0;
+    sh.browser_bind_nonce_len = 0;
+    sh.browser_pending_url_len = 0;
+}
+
+fn browserConnectionMatches(sh: *const Shell, connection_id: u64) bool {
+    return sh.browser_enabled and !sh.browser_open_failed and sh.browser_connection_id == connection_id;
+}
+
+fn browserOpeningExpired(sh: *const Shell, now: u64) bool {
+    return sh.browser_enabled and !sh.browser_open_failed and sh.browser_launch_tick != 0 and
+        now -| sh.browser_launch_tick >= BROWSER_PLACEHOLDER_NOT_OPEN_MS;
+}
+
+pub fn browserConnectionState(sh: *const Shell) []const u8 {
+    if (!sh.browser_enabled) return "closed";
+    if (sh.browser_open_failed) return "failed";
+    if (sh.browser_launch_tick != 0 or sh.browser_window_id == 0) return "opening";
+    return "connected";
+}
+
 fn browserPlaceholderPure(reserved: bool, covered: bool, shown_ms: u64, launch_in_flight: bool) BrowserPlaceholder {
+    _ = launch_in_flight;
     if (!reserved or covered) return .none;
-    if (shown_ms >= BROWSER_PLACEHOLDER_NOT_OPEN_MS and !launch_in_flight) return .not_open;
+    if (shown_ms >= BROWSER_PLACEHOLDER_NOT_OPEN_MS) return .failed;
     return .opening;
 }
 
-test "browserPlaceholderPure covers, waits, then falls back to the open hint" {
+fn browserPlaceholderDelay(state: BrowserPlaceholder, elapsed: u64) ?UINT {
+    if (state != .opening) return null;
+    return @intCast(@max(1, BROWSER_PLACEHOLDER_NOT_OPEN_MS -| elapsed));
+}
+
+test "browser placeholder deadline also applies to in-flight launches" {
     try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(false, false, 0, false));
     try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 99_000, false));
     try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 0, false));
     try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 19_999, false));
-    try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 60_000, true));
-    try std.testing.expectEqual(BrowserPlaceholder.not_open, browserPlaceholderPure(true, false, 20_000, false));
-}
-
-fn browserPlaceholderDelay(state: BrowserPlaceholder, elapsed: u64, launching: bool) ?UINT {
-    if (state != .opening or launching) return null;
-    return @intCast(@max(1, @as(u64, 20_000) -| elapsed));
+    try std.testing.expectEqual(BrowserPlaceholder.failed, browserPlaceholderPure(true, false, 60_000, true));
+    try std.testing.expectEqual(BrowserPlaceholder.failed, browserPlaceholderPure(true, false, 20_000, false));
 }
 
 test "browser placeholder wakes only for its opening deadline" {
-    try std.testing.expectEqual(@as(?UINT, 20_000), browserPlaceholderDelay(.opening, 0, false));
-    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 19_999, false));
-    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 20_000, false));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.opening, 0, true));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.not_open, 20_000, false));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.none, 0, false));
+    try std.testing.expectEqual(@as(?UINT, 20_000), browserPlaceholderDelay(.opening, 0));
+    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 19_999));
+    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 20_000));
+    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.failed, 20_000));
+    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.none, 0));
+}
+
+test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits retry" {
+    var sh = app_state.empty_shell;
+    const url = "https://example.com/";
+    @memcpy(sh.browser_url[0..url.len], url);
+    sh.browser_url_len = url.len;
+    beginBrowserOpening(&sh, 1000, 1);
+    try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
+    sh.browser_enabled = false;
+    resetBrowserConnection(&sh);
+    try std.testing.expectEqualStrings("closed", browserConnectionState(&sh));
+    try std.testing.expectEqualStrings(url, sh.browser_url[0..sh.browser_url_len]);
+    try std.testing.expectEqual(@as(u64, 0), sh.browser_connection_id);
+    beginBrowserOpening(&sh, 2000, 2);
+    try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
+    try std.testing.expect(!browserConnectionMatches(&sh, 1));
+    try std.testing.expect(browserConnectionMatches(&sh, 2));
+    try std.testing.expect(!browserOpeningExpired(&sh, 21_999));
+    try std.testing.expect(browserOpeningExpired(&sh, 22_000));
+    resetBrowserConnection(&sh);
+    sh.browser_open_failed = true;
+    try std.testing.expectEqualStrings("failed", browserConnectionState(&sh));
+    try std.testing.expect(!browserConnectionMatches(&sh, 2));
+    try std.testing.expectEqual(BrowserPlaceholder.failed, browserPlaceholderPure(true, false, 20_000, true));
+    try std.testing.expectEqual(@as(?UINT, 20_000), browserPlaceholderDelay(.opening, 0));
+    beginBrowserOpening(&sh, 23_000, 3);
+    try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
+    try std.testing.expect(browserConnectionMatches(&sh, 3));
+    try std.testing.expectEqualStrings(url, sh.browser_url[0..sh.browser_url_len]);
+    sh.browser_window_id = 7;
+    sh.browser_launch_tick = 0;
+    try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
+    try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
+    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 100_000, true));
 }
 
 pub fn browserPaneCoversSlot() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     if (webView2OwnsActiveShell()) return true;
     const sh = &app_state.shells[app_state.active_shell];
-    if (!sh.browser_enabled or sh.browser_suspended) return false;
+    if (!sh.browser_enabled or sh.browser_suspended or sh.browser_window_id == 0) return false;
     const bh = sh.browser_hwnd;
     if (bh == null or IsWindow(bh) == 0 or IsWindowVisible(bh) == 0) return false;
     if (!browserPaneMayOccupyLayout(app_state.active_shell)) return false;
@@ -3041,7 +3166,10 @@ fn currentBrowserPlaceholder() BrowserPlaceholder {
         app_state.g_slot_placeholder_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_slot_placeholder_since = now;
     }
-    return browserPlaceholderPure(true, false, now - app_state.g_slot_placeholder_since, app_state.shells[app_state.active_shell].browser_launch_tick != 0);
+    const sh = &app_state.shells[app_state.active_shell];
+    if (sh.browser_open_failed) return .failed;
+    const since = if (sh.browser_launch_tick != 0) sh.browser_launch_tick else app_state.g_slot_placeholder_since;
+    return browserPlaceholderPure(true, false, now -| since, sh.browser_launch_tick != 0);
 }
 
 pub fn browserPlaceholderRect() ?RECT {
@@ -3068,15 +3196,48 @@ pub fn paintBrowserPlaceholder(hdc: HANDLE) void {
     const old_font = SelectObject(hdc, uiFontSubtitle());
     _ = SetBkMode(hdc, TRANSPARENT);
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120));
-    const msg = if (state == .opening) L("Opening browser…") else L("Browser not open — Alt+W to open");
+    const msg = if (state == .opening) L("Opening browser…") else L("Browser could not connect.");
+    if (state == .failed) rc.bottom -= uiScaled(48);
     _ = DrawTextW(hdc, msg, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    if (state == .failed) {
+        for ([_]bool{ true, false }) |retry| {
+            var button = browserPlaceholderButtonRect(retry) orelse continue;
+            const pen = CreatePen(0, uiScaled(1), if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(160, 160, 170));
+            const old_pen = SelectObject(hdc, pen);
+            const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            _ = @import("smooth.zig").drawRoundRect(hdc, button.left, button.top, button.right, button.bottom, uiScaled(4), uiScaled(4));
+            _ = SelectObject(hdc, old_brush);
+            _ = SelectObject(hdc, old_pen);
+            _ = DeleteObject(pen);
+            _ = DrawTextW(hdc, if (retry) L("Retry") else L("Close"), -1, &button, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+    }
     _ = SelectObject(hdc, old_font);
     if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER);
-        if (browserPlaceholderDelay(state, GetTickCount64() -| app_state.g_slot_placeholder_since, app_state.shells[app_state.active_shell].browser_launch_tick != 0)) |delay| {
+        if (browserPlaceholderDelay(state, GetTickCount64() -| (if (app_state.shells[app_state.active_shell].browser_launch_tick != 0) app_state.shells[app_state.active_shell].browser_launch_tick else app_state.g_slot_placeholder_since))) |delay| {
             _ = SetTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER, delay, null);
         }
     }
+}
+
+fn browserPlaceholderButtonRect(retry: bool) ?RECT {
+    const rc = browserPlaceholderRect() orelse return null;
+    const cx = @divTrunc(rc.left + rc.right, 2);
+    const top = @divTrunc(rc.top + rc.bottom, 2) + uiScaled(16);
+    return .{ .left = cx + uiScaled(if (retry) -100 else 8), .right = cx + uiScaled(if (retry) -8 else 100), .top = top, .bottom = top + uiScaled(30) };
+}
+
+pub fn browserPlaceholderClick(mx: i32, my: i32) bool {
+    if (currentBrowserPlaceholder() != .failed) return false;
+    for ([_]bool{ true, false }) |retry| {
+        const rc = browserPlaceholderButtonRect(retry) orelse return false;
+        if (mx >= rc.left and mx < rc.right and my >= rc.top and my < rc.bottom) {
+            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, if (retry) 2 else 0, 0);
+            return true;
+        }
+    }
+    return false;
 }
 
 pub fn paintBrowserSplitter(hdc: HANDLE) void {

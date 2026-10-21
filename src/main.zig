@@ -1122,7 +1122,6 @@ const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const BROWSER_SHORTCUT_OPEN_GUARD_MS = @import("app_state.zig").BROWSER_SHORTCUT_OPEN_GUARD_MS;
 const claimBrowserToggleEvent = @import("shortcuts.zig").claimBrowserToggleEvent;
 const physicalBrowserShortcutMayClose = @import("shortcuts.zig").physicalBrowserShortcutMayClose;
-const physicalBrowserShortcutShouldRecover = @import("shortcuts.zig").physicalBrowserShortcutShouldRecover;
 const startStaleAltMouseHookThread = @import("shortcuts.zig").startStaleAltMouseHookThread;
 const recordNativeBrowserDropGesture = @import("shortcuts.zig").recordNativeBrowserDropGesture;
 const openUrlAtScreenPoint = @import("clipboard.zig").openUrlAtScreenPoint;
@@ -1345,6 +1344,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     }
     if (msg == WM_APP_LAYOUT_READY) {
         handleLayoutReply(lp);
+        return 0;
+    }
+    if (msg == WM_APP_BROWSER_RESOLVED) {
+        handleBrowserWindowResolved(@ptrFromInt(@as(usize, @bitCast(lp))));
         return 0;
     }
     if (msg == WM_APP_BROWSER_DOCKED) {
@@ -1571,6 +1574,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDOWN => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+
+            if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
+                !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("browser_pane.zig").browserPlaceholderClick(mx, my)) return 0;
 
             if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
                 var client_rc: RECT = std.mem.zeroes(RECT);
@@ -2591,6 +2598,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_TOGGLE => {
+            if (wp == 2) {
+                if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) {
+                    openBrowserPaneForShell(app_state.active_shell, "");
+                }
+                return 0;
+            }
             const physical_shortcut = wp == 1;
             if (physical_shortcut) {
                 const event_time: u32 = @truncate(@as(usize, @bitCast(lp)));
@@ -2610,35 +2623,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     IsWindow(bh) != 0 and windowOwnerProcessStillActive(bh)
                 else
                     false;
-                const recover_dead_pane = physical_shortcut and physicalBrowserShortcutShouldRecover(
-                    app_state.shells[target_idx].browser_enabled,
-                    browser_hwnd_live,
+                if (physical_shortcut and app_state.shells[target_idx].browser_enabled and browser_hwnd_live and
+                    app_state.shells[target_idx].browser_window_id != 0 and !physicalBrowserShortcutMayClose(
+                    app_state.shells[target_idx].shell_id,
                     app_state.shells[target_idx].browser_launch_tick,
-                );
-                if (physical_shortcut and app_state.shells[target_idx].browser_enabled and !recover_dead_pane) {
-                    const now = GetTickCount64();
-                    if (!physicalBrowserShortcutMayClose(
-                        app_state.shells[target_idx].shell_id,
-                        app_state.shells[target_idx].browser_launch_tick,
-                        now,
-                        app_state.g_browser_shortcut_open_guard_shell_id,
-                        app_state.g_browser_shortcut_open_guard_until,
-                    )) {
-                        browserTrace("shortcutToggle suppressed during open guard");
-                        return 0;
-                    }
-                }
+                    GetTickCount64(),
+                    app_state.g_browser_shortcut_open_guard_shell_id,
+                    app_state.g_browser_shortcut_open_guard_until,
+                )) return 0;
                 if (app_state.g_webview2_active) {
                     closeWebView2();
                     if (app_state.active_shell < app_state.shell_count) _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_APP_BROWSER_TOGGLE");
                 }
-                if (recover_dead_pane) {
-                    closeBrowserForShell(target_idx);
-                    app_state.shells[target_idx].browser_enabled = true;
-                    browserTrace("shortcutToggle recovering enabled pane without a live HWND");
-                } else {
-                    app_state.shells[target_idx].browser_enabled = !app_state.shells[target_idx].browser_enabled;
-                }
+                app_state.shells[target_idx].browser_enabled = !app_state.shells[target_idx].browser_enabled;
                 if (app_state.shells[target_idx].browser_enabled) {
                     if (physical_shortcut) {
                         app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[target_idx].shell_id;
@@ -5212,6 +5209,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     if (app_state.active_shell < app_state.shell_count) {
+                        if (app_state.shells[app_state.active_shell].browser_enabled and app_state.shells[app_state.active_shell].browser_launch_tick != 0) {
+                            _ = PostMessageW(hwnd, WM_APP_BROWSER_TOGGLE, 0, 0);
+                            return 0;
+                        }
                         const browser_hwnd_live = if (app_state.shells[app_state.active_shell].browser_hwnd) |bh|
                             IsWindow(bh) != 0 and windowOwnerProcessStillActive(bh)
                         else
@@ -6572,10 +6573,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             handleZsbBindRequest();
             return 0;
         },
-        WM_APP_BROWSER_RESOLVED => {
-            handleBrowserWindowResolved(@intCast(wp & 0xFFFFFFFF), @intCast(lp));
-            return 0;
-        },
         WM_APP_DIAG => {
             handleDiagRequest();
             return 0;
@@ -7106,6 +7103,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == TIMER_BROWSER_PLACEHOLDER) {
                 _ = KillTimer(hwnd, TIMER_BROWSER_PLACEHOLDER);
+                browserHealthTick();
                 if (browserSlotReserved() and !browserPaneCoversSlot()) {
                     if (browserPlaceholderRect()) |prc| {
                         var inv = prc;

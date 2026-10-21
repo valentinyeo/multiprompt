@@ -35,11 +35,13 @@ jobs:
           persist-credentials: false
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js
+      - name: Check browser recovery journey contract
+        run: node tools/check-browser-pane-stuck.mjs
       - name: Validate journey and syntax
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck')) { throw 'Unknown feature map' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null

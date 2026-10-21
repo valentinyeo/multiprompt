@@ -242,6 +242,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
 | Alt+A | Toggle the Edge browser pane for this tab |
+| Alt+Shift+A | Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane) |
 | Ctrl+Shift+S | Screenshot browser tab, paste link + space, focus Chat View composer or shell |
 | Ctrl+Shift+X | Insert current browser tab URL (or most recent) + space at the Chat View caret; never send |
 | Ctrl+Shift+L / Ctrl+L | Focus browser address bar |

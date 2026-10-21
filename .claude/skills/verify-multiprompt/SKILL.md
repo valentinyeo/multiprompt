@@ -20,7 +20,7 @@ gh run watch <id> --interval 60
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `sessions`, `workspaces`, `inbox`, `command-palette`, and `session-open`. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `sessions`, `workspaces`, `inbox`, `command-palette`, `session-open`, and `browser-pane-stuck`. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
@@ -57,6 +57,8 @@ The executable helper is [control.ps1](control.ps1). Its exact workflow-side inv
 Invoke it only through `verify.yml`; it refuses non-GitHub/non-Windows execution. This single command performs Launch, Doctor, the selected feature recipe, Evidence and Cleanup. No helper requires a separate interpreter investigation or an undocumented server.
 
 The harness uses .NET System.Windows.Automation for window identity and accessibility snapshots, and Win32 SendInput for genuine keyboard input. Text uses keyboard-layout-mapped virtual keys, not Unicode packets (the palette hook consumes those). Custom-painted palette rows are not UIA buttons: do not invent accessibility selectors or send private WM_APP messages. Selection uses actual Ctrl+K search terms and arrow/Enter navigation from the feature maps. Native HWND ownership, not screen coordinates, determines where input goes. The foreground root must be our window before every input. Window-relative pixels are used only for screenshots and read-only theme luminance checks, never clicking.
+
+The `browser-pane-stuck` journey reads the app-published `browser_state`, `browser_connection_id`, `browser_window_id` and `browser_url` fields in `inbox-default.json`; it never writes them. Run `node tools/check-browser-pane-stuck.mjs` for its static map/workflow/driver contract check (no app execution).
 
 Bounded condition waits inspect actual saved state and window titles. A missing precondition fails the journey with an error and retained evidence. Never change the expected outcome, write settings yourself, add a test-only setter, or skip the failing action to make a run green. Fix a broken driver only when the real user path is unchanged.
 

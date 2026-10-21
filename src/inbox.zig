@@ -305,7 +305,7 @@ pub fn publishInboxStateNow() void {
 
     var first = true;
     for (0..app_state.shell_count) |i| {
-        if (pos >= json.len - 800) break;
+        if (pos >= json.len - 4096) break;
         if (app_state.g_single_window and app_state.g_ws_snoozed[app_state.shells[i].workspace]) continue;
         if (!inboxPublishesShell(&app_state.shells[i])) continue;
         if (!first) {
@@ -381,6 +381,24 @@ pub fn publishInboxStateNow() void {
             pos += obr.len;
             pos += writeUintTo(json[pos..], browserInboxState(&app_state.shells[i]));
         }
+        const pane_state = ",\"browser_state\":\"";
+        @memcpy(json[pos .. pos + pane_state.len], pane_state);
+        pos += pane_state.len;
+        appendJsonEscaped(&json, &pos, @import("browser_pane.zig").browserConnectionState(&app_state.shells[i]));
+        const pane_id = "\",\"browser_connection_id\":";
+        @memcpy(json[pos .. pos + pane_id.len], pane_id);
+        pos += pane_id.len;
+        pos += writeUintTo(json[pos..], app_state.shells[i].browser_connection_id);
+        const pane_window = ",\"browser_window_id\":";
+        @memcpy(json[pos .. pos + pane_window.len], pane_window);
+        pos += pane_window.len;
+        pos += writeUintTo(json[pos..], @intCast(@max(0, app_state.shells[i].browser_window_id)));
+        const pane_url = ",\"browser_url\":\"";
+        @memcpy(json[pos .. pos + pane_url.len], pane_url);
+        pos += pane_url.len;
+        appendJsonEscaped(&json, &pos, app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len]);
+        json[pos] = '"';
+        pos += 1;
         if (app_state.shells[i].eta_total_ms > 0) {
             const oed = ",\"ed\":";
             @memcpy(json[pos .. pos + oed.len], oed);

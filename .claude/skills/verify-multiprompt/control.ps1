@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -215,6 +215,35 @@ function Read-Inbox {
         try { return Get-Content $path -Raw | ConvertFrom-Json } catch { return $null }
     }
     return $null
+}
+
+function Read-BrowserPane {
+    $state = Read-Inbox
+    if ($null -eq $state) { return $null }
+    return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
+}
+
+function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0, [string]$Url = '') {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq $State -and
+            (($State -eq 'opening' -and $pane.browser_connection_id -gt $PreviousId) -or
+             ($State -ne 'opening' -and $pane.browser_connection_id -eq 0)) -and
+            ($Url -eq '' -or $pane.browser_url -eq $Url)
+    } "browser-pane-stuck ${Step}: $State, connection identity and saved URL" 25
+    $pane = Read-BrowserPane
+    if ($pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
+    Save-Json $pane ("browser-pane-$Step.json")
+    $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id; url = $pane.browser_url }
+    Write-Host "browser-pane-stuck $Step PASS"
+    return $pane
+}
+
+function Open-StuckBrowserPane([string]$Step, [long]$PreviousId = 0, [string]$Url = '') {
+    Palette 'open browser'
+    Press @(0x0D) 'Enter: Open Browser Pane'
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
+    return Assert-BrowserPane 'opening' $Step $PreviousId $Url
 }
 
 function Doctor {
@@ -510,6 +539,36 @@ try {
             Press @(0x1B) 'Esc: return from Inbox'
             Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
             Snapshot 'returned'
+        }
+        'browser-pane-stuck' {
+            $script:browserShellId = (Read-Inbox).shells[0].sid
+            if (Test-Path (Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension/manifest.json')) { throw 'Expected no browser extension in the isolated profile' }
+            Press @(0x12, 0x43) 'Alt+C: open Chat View'
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.cv -eq $true }).Count -eq 1 } 'Chat View saved for the initial session'
+            $first = Open-StuckBrowserPane 'initial-opening'
+            if ([string]::IsNullOrWhiteSpace($first.browser_url)) { throw 'Opening pane did not retain a URL' }
+            $url = $first.browser_url
+            Snapshot 'action'
+            Press @(0x12, 0x41) 'Alt+A: close opening browser pane'
+            $closed = Assert-BrowserPane 'closed' 'shortcut-close' 0 $url
+            $second = Open-StuckBrowserPane 'reopen-after-shortcut' $first.browser_connection_id $url
+            Palette 'close all browser panes'
+            Press @(0x0D) 'Enter: Close All Browser Panes while opening'
+            $closed = Assert-BrowserPane 'closed' 'palette-close-all' 0 $url
+            if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Close All left a browser pane open' }
+            $third = Open-StuckBrowserPane 'reopen-after-close-all' $second.browser_connection_id $url
+            Palette 'close browser pane'
+            Press @(0x0D) 'Enter: Close Browser Pane while opening'
+            $closed = Assert-BrowserPane 'closed' 'palette-close-pane' 0 $url
+            $fourth = Open-StuckBrowserPane 'reopen-after-close-pane' $third.browser_connection_id $url
+            $failed = Assert-BrowserPane 'failed' 'opening-timeout' 0 $url
+            Snapshot 'timeout'
+            Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: Retry Browser Pane'
+            $retry = Assert-BrowserPane 'opening' 'shortcut-retry' $fourth.browser_connection_id $url
+            Palette 'close all browser panes'
+            Press @(0x0D) 'Enter: Close All Browser Panes after retry'
+            $closed = Assert-BrowserPane 'closed' 'final-close' 0 $url
+            Snapshot 'after'
         }
         'command-palette' {
             Palette 'interface'
