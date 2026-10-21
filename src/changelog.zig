@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.783", .items = &.{
+        .{ .text = "Files sent to server chats no longer time out while the upload is still making progress.", .ticket = "IGSH-455" },
+        .{ .text = "The shell uses the Hack font again and keeps it.", .ticket = "IGSH-456" },
+    } },
     .{ .ver = "0.28.782", .items = &.{
         .{ .text = "Every new version is now built and published on the GitHub Releases page.", .ticket = "IGSH-454" },
         .{ .text = "Messages you queue while a session is busy are delivered in order, or shown as failed with Send again.", .ticket = "IGSH-460" },
