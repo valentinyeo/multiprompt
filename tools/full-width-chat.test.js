@@ -37,7 +37,7 @@ const HANDLE = ?usize;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const ISSUE_373_SHELL_OVERRIDE = true;
 const ChatViewMode = enum { everywhere, per_session, nowhere };
-var shells = [_]struct { pid: u32 = 42, full_width: bool = false, chat_shell_override: bool = false }{ .{}, .{} };
+var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, chat_shell_override: bool = false }{ .{}, .{} };
 var active_shell: u32 = 0;
 var shell_count: u32 = 2;
 var g_chat_active = false;
@@ -69,6 +69,8 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
                 g_chat_active = chatViewShouldShowForTab(mode, remembered, override, false, true);
                 const chat = g_chat_active;
                 shells[0].full_width = false;
+                shells[0].full_width_pending_console_resize = false;
+                shells[1].full_width_pending_console_resize = false;
                 shells[0].chat_shell_override = override;
                 shells[1].full_width = true;
                 resizes = 0;
@@ -76,8 +78,11 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
                 layouts = 0;
                 try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
                 try std.testing.expect(shells[0].full_width);
+                try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
                 try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
                 try std.testing.expect(!shells[0].full_width);
+                try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
+                try std.testing.expect(!shells[1].full_width_pending_console_resize);
                 try std.testing.expectEqual(if (chat) @as(usize, 0) else 2, resizes);
                 try std.testing.expectEqual(@as(usize, 2), saves);
                 try std.testing.expectEqual(@as(usize, 2), layouts);
@@ -125,7 +130,7 @@ test('ISSUE-440 executes the production toggle and chat layout; old console work
     const result = run(toggle(source), content(source));
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
-    const oldHandler = toggle(source).replace('fullWidthShouldResizeConsole(g_chat_active) and ', '');
+    const oldHandler = toggle(source).replace('fullWidthShouldResizeConsole(g_chat_active)', 'true');
     const oldGeometry = content(source).replace(/^    const full_width =[^\n]+\n/m, '').replace('if (full_width) col.width else uiScaled(760)', 'uiScaled(760)');
     assert.notEqual(oldHandler, toggle(source));
     assert.notEqual(oldGeometry, content(source));
@@ -150,7 +155,8 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   const restore = body(source, 'restoreBrowserStateFromSavedTab');
   for (const field of ['chat_view_on = tab.cv', 'chat_shell_override = tab.cso', 'full_width = tab.fw']) assert.ok(restore.includes(field));
   const close = body(source, 'closeChatView');
-  assert.match(close, /ISSUE_440_FULL_WIDTH_CHAT[^]*applyBlackConsoleBackground/);
+  assert.match(close, /if \(ISSUE_440_FULL_WIDTH_CHAT and shells\[active_shell\]\.full_width_pending_console_resize\)/);
+  assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);
   assert.ok(close.indexOf('applyBlackConsoleBackground') < close.indexOf('showShellConsole'));
   assert.match(body(source, 'respawnShellInPlace'), /\.full_width = saved_full_width/);
   assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('].full_width)'));

@@ -281,6 +281,7 @@ pub const Shell = struct {
     tmux_host: u8,
     spawn_tick: u64 = 0,
     full_width: bool,
+    full_width_pending_console_resize: bool = false,
     last_active: u64,
     last_active_event: u64 = 0,
     hidden_idle_streak: u8 = 0,

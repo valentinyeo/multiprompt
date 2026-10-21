@@ -1377,7 +1377,10 @@ pub fn closeChatView() void {
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
-        if (app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.shells[app_state.active_shell].pid != 0) @import("console.zig").applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+        if (app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.shells[app_state.active_shell].full_width_pending_console_resize) {
+            app_state.shells[app_state.active_shell].full_width_pending_console_resize = false;
+            if (app_state.shells[app_state.active_shell].pid != 0) @import("console.zig").applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+        }
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "closeChatView");
         repositionActive();
         updateBrowserVisibility();
