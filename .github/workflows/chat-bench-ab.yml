@@ -130,7 +130,7 @@ jobs:
           anchor = "      if (guiCount !== config.windows)"
           trace = """      if (run.samples.at(-1).idle && !traced.has(phase)) {
                   traced.add(phase);
-                  const args = ['timeout', '12s', 'strace', '-f', '-tt', '-T', '-o', path.join(out, `idle-${phase}.strace`), ...[...current.keys()].flatMap(pid => ['-p', String(pid)])];
+                  const args = ['timeout', '12s', 'strace', '-f', '-tt', '-T', '-o', path.join('/opt/chat-bench/results', `idle-${path.basename(out)}-${phase}.strace`), ...[...current.keys()].flatMap(pid => ['-p', String(pid)])];
                   const trace = spawn('sudo', args, { stdio: ['ignore', 'ignore', logFd] });
                   trace.on('error', error => run.errors.push(`trace: ${error.message}`));
                 }
