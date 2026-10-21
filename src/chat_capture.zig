@@ -1163,7 +1163,7 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
         const tool_header = !table_line and (chatLineIsToolActivity(line) or chatLineIsGenericToolHeader(line));
         if (chatLineIsAgentStatusNoise(line) or chatLineIsCollapsedToolSummary(line) or
             (row +| 20 >= rows and chatLineLooksLikeTitledRule(line)) or
-            (!tool_header and voice_filter.isClaudeChrome(line)))
+            (!table_line and !tool_header and voice_filter.isClaudeChrome(line)))
         {
             hidden_tool_rows +|= 1;
             continue;

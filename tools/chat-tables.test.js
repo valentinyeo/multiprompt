@@ -14,8 +14,10 @@ function body(name) {
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-capture-'));
   try {
-    copyZig(['chat_markdown.zig', 'link_detect.zig'], dir);
+    copyZig(['chat_markdown.zig', 'link_detect.zig', 'voice_filter.zig'], dir);
     let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer'].map(body).join('\n');
+    let chrome = body('captureChatTranscript').match(/\((?:!table_line and )?!tool_header and voice_filter\.isClaudeChrome\(line\)\)/)[0];
+    if (control === 'chrome') chrome = chrome.replace('!table_line and ', '');
     if (control === 'reflow') functions = functions.replace('previous_was_divider = is_divider or table_line;', 'previous_was_divider = is_divider;').replace('const table_line = chat_markdown.consoleTableLine(line);', '');
     if (control === true) functions = functions.replace('line.len == 0 or chat_markdown.consoleTableLine(line)', 'line.len == 0');
     fs.writeFileSync(path.join(dir, 'test.zig'), String.raw`
@@ -24,9 +26,28 @@ const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
 const ChatBlockRole = chat_markdown.Role;
 const link_detect = @import("link_detect.zig");
+const voice_filter = @import("voice_filter.zig");
 var g_chat_line_starts: [32]usize = undefined;
 var g_chat_line_lens: [32]usize = undefined;
 ${functions}
+test "table surface: chrome filtering keeps structural borders but hides real chrome" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_]struct { text: []const u16, table: bool, hidden: bool }{
+        .{ .text = w("┌─┬─┐"), .table = true, .hidden = false },
+        .{ .text = w("├─┼─┤"), .table = true, .hidden = false },
+        .{ .text = w("└─┴─┘"), .table = true, .hidden = false },
+        .{ .text = w("│A│B│"), .table = true, .hidden = false },
+        .{ .text = w("────"), .table = false, .hidden = true },
+        .{ .text = w("✔ Update installed · Restart to update"), .table = false, .hidden = true },
+        .{ .text = w("ordinary prose"), .table = false, .hidden = false },
+    }) |sample| {
+        const line = sample.text;
+        const table_line = chat_markdown.consoleTableLine(line);
+        const tool_header = false;
+        try std.testing.expectEqual(sample.table, table_line);
+        try std.testing.expectEqual(sample.hidden, ${chrome});
+    }
+}
 test "table surface: narrative rows survive while genuine tool details stay hidden" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expect(!chatLineIsToolDetail(w("│ Event │ Status │")));
@@ -110,4 +131,10 @@ test('terminal table oracle rejects reflow joining the closing border to adjacen
   const result = runHarness('reflow');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /FAIL/);
+});
+
+test('IGSH-436 console chrome oracle rejects dropping the real table borders', () => {
+  const result = runHarness('chrome');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected false, found true/);
 });
