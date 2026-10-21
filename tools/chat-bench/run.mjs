@@ -166,7 +166,7 @@ async function run({ requestedExe, config, out, installable }) {
     const batch = `chat-bench-launch-${instance.index}.cmd`;
     atomic(path.join(prefix, 'drive_c', batch), `@echo off\r\nset "APPDATA=${winPath(instance.appdata)}"\r\n"${winPath(exe)}" --name bench-${instance.index} --no-window-restore\r\n`);
     instance.child = spawn('wine', ['C:\\windows\\system32\\cmd.exe', '/c', `C:\\${batch}`],
-      { env: { ...env, ZIGSHELL_CHAT_FIXTURE_DIR: winPath(instance.mailbox), CHAT_BENCH_SSH_DIR: winPath(instance.sshDir) }, stdio: ['ignore', logFd, logFd] });
+      { env: { ...env, ZIGSHELL_CHAT_FIXTURE_DIR: winPath(instance.mailbox) }, stdio: ['ignore', logFd, logFd] });
     const launch = instance.child;
     launch.on('exit', (code, signal) => {
       if (instance.child !== launch || !instance.live || stopping) return;
@@ -325,8 +325,6 @@ async function run({ requestedExe, config, out, installable }) {
     if (await waitForCapacity()) {
       await execute(process.env.ZIG || 'zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-municode', '-Wl,--subsystem,windows', path.join(path.dirname(script), 'browser-fixture.c'), '-o', browserExe, '-luser32'], { timeout: 60_000, maxBuffer: 1024 * 1024 });
       run.runnerHashes.browser = hash(path.join(path.dirname(script), 'browser-fixture.c'));
-      await execute(process.env.ZIG || 'zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-municode', path.join(path.dirname(script), 'ssh-fixture.c'), '-o', path.join(out, 'ssh-fixture.exe')], { timeout: 60_000, maxBuffer: 1024 * 1024 });
-      run.runnerHashes.ssh = hash(path.join(path.dirname(script), 'ssh-fixture.c'));
       await execute('xdpyinfo', [], { timeout: 5000, maxBuffer: 1024 * 1024 });
       await execute('wineboot', ['--init'], { env, timeout: 180_000, maxBuffer: 1024 * 1024 });
       timer = setInterval(() => { try { sample(); } catch (error) { run.errors.push(`sample: ${error.message}`); } }, config.sampleMs);
@@ -342,7 +340,6 @@ async function run({ requestedExe, config, out, installable }) {
         for (const tab of saved.tabs) tab.bon = false;
         atomic(sessionFile, JSON.stringify(saved));
         for (const file of fs.readdirSync(instance.mailbox)) fs.unlinkSync(path.join(instance.mailbox, file));
-        for (const file of fs.readdirSync(instance.sshDir)) fs.unlinkSync(path.join(instance.sshDir, file));
         await start(instance);
       }
       run.restarted = true;
