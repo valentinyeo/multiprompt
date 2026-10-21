@@ -33,7 +33,7 @@ function audit(desktop, client) {
   assert.match(client, /WinHttpQueryHeaders\(req, 22, null, &header_buf, &size, null\)/);
   assert.match(client, /hosts_supported = layoutSupportsHosts\(raw\);/);
   assert.match(client, /\.hosts_supported = hosts_supported/);
-  assert.match(client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field(')), /X-Layout-Features: favorite,used,visits,input,hosts\\r\\n/);
+  assert.match(client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field(')), /X-Layout-Features: favorite,used,visits,input,settings,hosts\\r\\n/);
   const worker = desktop.slice(desktop.indexOf('fn layoutSyncWorker('), desktop.indexOf('fn layoutSyncWorker(') + 700);
   assert.match(worker, /accountRequest\(job, reply\)/);
   assert.match(desktop, /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
@@ -63,7 +63,7 @@ test('hosts sync discovery is worker-serialized, cached with owned data, bounded
     assert.ok(desktop.includes(before));
     assert.throws(() => audit(desktop.replace(before, after), client));
   }
-  assert.throws(() => audit(desktop, client.replace(',input,hosts', ',input')));
+  assert.throws(() => audit(desktop, client.replace(',settings,hosts', ',settings')));
 });
 
 test('hosts support is fail-closed and rechecked from the latest reply after conflicts', () => {

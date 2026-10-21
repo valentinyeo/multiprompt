@@ -554,6 +554,10 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
+const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
+const SEARCH_SHOW_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_SHOW_FAVORITES_OFFSET;
+const SEARCH_SHOW_ALL_OFFSET = @import("app_state.zig").SEARCH_SHOW_ALL_OFFSET;
 const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
 const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
 const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
@@ -3083,7 +3087,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_TOGGLE_UNREAD => {
             app_state.g_unread_only = !app_state.g_unread_only;
-            if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+            if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -4670,7 +4674,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_UNREADONLY_OFFSET) {
                     app_state.g_unread_only = !app_state.g_unread_only;
-                    if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                    if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -4811,7 +4815,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const restored = unarchiveHiddenWorkspaceSessions(target_ws);
                     if (was_from_inbox and app_state.g_inbox_active) {
                         loadInboxModel();
-                        if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                        if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                     } else {
                         showActiveShellAfterOverlay();
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
@@ -5503,6 +5507,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_SHOW_FREQUENT_OFFSET or target == SEARCH_FREQUENT_FIRST_OFFSET or target == SEARCH_SHOW_FAVORITES_OFFSET or target == SEARCH_SHOW_ALL_OFFSET) {
+                    var settings = app_state.g_layout_settings orelse frequent.Settings{};
+                    switch (target) {
+                        SEARCH_SHOW_FREQUENT_OFFSET => settings.frequent = !settings.frequent,
+                        SEARCH_FREQUENT_FIRST_OFFSET => settings.frequent_first = !settings.frequent_first,
+                        SEARCH_SHOW_FAVORITES_OFFSET => settings.favorites = !settings.favorites,
+                        SEARCH_SHOW_ALL_OFFSET => settings.all = !settings.all,
+                        else => unreachable,
+                    }
+                    app_state.g_layout_settings = settings;
+                    @import("inbox.zig").ensureInboxSplitVisible();
+                    saveSession();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7218,8 +7237,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     have_sel = true;
                 }
                 loadInboxModel();
-                if (app_state.g_inbox_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1) app_state.g_inbox_tab = frequent.all_split;
-                if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                if (app_state.g_inbox_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
+                if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                 var resel = false;
                 if (have_sel) {
                     var c: u32 = 0;

@@ -202,7 +202,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .workspace = workspaces.items[ws].name,
         });
     }
-    return .{ .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = app_state.g_layout_settings, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 var g_account_hosts_cache: struct {
@@ -827,6 +827,8 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_active_workspace = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else 0;
         switchToWorkspace(app_state.g_active_workspace);
     }
+    app_state.g_layout_settings = desired.settings;
+    @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
     saveSession();
     syncInProcessWorkspacesToRegistry();
