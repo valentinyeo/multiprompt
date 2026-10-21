@@ -337,6 +337,19 @@ pub fn reconcileBrowserWorkspace(idx: u32) void {
 }
 
 threadlocal var browser_command_profile: []const u8 = "";
+var browser_notice_profile: [32]u8 = std.mem.zeroes([32]u8);
+
+fn showWorkspaceBrowserProfile(idx: u32, force: bool) void {
+    if (!browser_workspace_profile.IGSH_224 or idx != app_state.active_shell) return;
+    var token_buf: [32]u8 = undefined;
+    const value = workspaceProfileForShell(idx, &token_buf) catch return;
+    if (!force and std.mem.eql(u8, value, &browser_notice_profile)) return;
+    @memcpy(&browser_notice_profile, value);
+    var notice_buf: [96]u8 = undefined;
+    const notice = std.fmt.bufPrint(&notice_buf, "Browser profile: {s}", .{value}) catch return;
+    showHeaderNoticeAscii(notice, 8000, false);
+}
+
 
 fn browserEngineToken() []const u8 {
     return switch (app_state.g_browser_engine) {
@@ -936,9 +949,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         _ = browser_workspace_profile.path(&profile_path, local_buf[0..local_n], browserEngineToken(), profile_token) catch return;
         if (user_data_dir.len >= seed_path.len) return;
         @memcpy(seed_path[0..user_data_dir.len], user_data_dir);
-        var notice_buf: [160]u8 = undefined;
-        const notice = std.fmt.bufPrint(&notice_buf, "Workspace browser profile: {s} (bookmarks are independent)", .{profile_token}) catch return;
-        showHeaderNoticeAscii(notice, 8000, false);
+        showWorkspaceBrowserProfile(launch_idx orelse app_state.active_shell, true);
     }
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
     appendBrowserWideAscii(&params, &pos, if (browser_workspace_profile.IGSH_224) std.mem.sliceTo(&profile_path, 0) else user_data_dir);
@@ -3007,6 +3018,11 @@ pub fn updateBrowserVisibility() void {
     browserTrace("updVis enter");
     if (app_state.g_app_closing) return;
     reconcileBrowserWorkspace(app_state.active_shell);
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
+        showWorkspaceBrowserProfile(app_state.active_shell, false);
+    } else {
+        @memset(&browser_notice_profile, 0);
+    }
     if (app_state.g_monitor_transition.active) {
         parkBrowserForMonitorTransition();
         return;
