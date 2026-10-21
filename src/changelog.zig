@@ -54,6 +54,7 @@ const ChangelogEntry = struct {
 };
 pub const CHANGELOG = [_]ChangelogEntry{
     .{ .ver = "0.28.789", .items = &.{
+        .{ .text = "Locked session warnings now wait for a failed reconnect, explain why, and disappear when the tab recovers.", .ticket = "IGSH-512" },
         .{ .text = "Chat View now keeps reply text before or after each tool step in the correct order.", .ticket = "IGSH-402" },
         .{ .text = "Copying a very long selection in Chat View now copies all of it and reports when copying fails.", .ticket = "IGSH-404" },
         .{ .text = "Press Alt+1 to open the new Starred workspace, which automatically mirrors your starred sessions without moving them.", .ticket = "IGSH-457" },
