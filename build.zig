@@ -171,7 +171,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_settle_tests.step);
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
-    const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs" });
+    const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
     const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });

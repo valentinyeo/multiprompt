@@ -120,7 +120,7 @@ def verify():
             run([zig, 'test', str(p.relative_to(ROOT)), *optimize])
         run([zig, 'fmt', '--check', 'build.zig', *map(str, (p.relative_to(ROOT) for p in sorted((ROOT / 'src').glob('*.zig'))))])
         run(['node', 'tools/json-reader/benchmark.mjs'])
-        tests = sorted(str(p.relative_to(ROOT)) for folder in ('tools', 'extension') for p in (ROOT / folder).glob('*.test.js'))
+        tests = sorted([str(p.relative_to(ROOT)) for folder in ('tools', 'extension') for p in (ROOT / folder).glob('*.test.js')] + ['tools/release-version.test.mjs'])
         run(['node', '--test', '--test-concurrency=2', *tests])
         for folder in ('tools/agent-notifications', 'tools/usage-telemetry', 'tests'):
             run(['python3', '-m', 'unittest', 'discover', '-s', folder, '-p', 'test_*.py'])
