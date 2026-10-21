@@ -849,7 +849,10 @@ pub fn chatFileOnReady() void {
                 };
                 suffix.deinit(std.heap.page_allocator);
             } else {
-                entry.tables.refresh(std.heap.page_allocator, entry.history.blocks.items, history.blocks.items);
+                if (!belongs_to_active or !app_state.g_chat_active) {
+                    const tables = if (app_state.g_chat_tables_shell_id == entry.key.shell_id) &app_state.g_chat_tables else &entry.tables;
+                    tables.refresh(std.heap.page_allocator, entry.history.blocks.items, history.blocks.items);
+                }
                 entry.history.deinit(std.heap.page_allocator);
                 entry.history = history;
             }
