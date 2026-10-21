@@ -74,15 +74,20 @@ const plans = [
   [8, 3, [[1], [2], [3], [4], [5], [6], [7], [8]], [[1], [2], [3]]],
   [4, 2, [[1, 5], [2, 3], [4, 6], [7, 8]], [[1, 2], [3]]],
   [3, 2, [[1, 5, 6], [2, 3, 8], [4, 7]], [[1, 2], [3]]],
+  [3, 1, [[1, 5, 6], [2, 3, 8], [4, 7]], [[1, 2, 3]]],
+  [2, 2, [[1, 2, 3, 4], [5, 6, 7, 8]], [[1, 2], [3]]],
   [2, 1, [[1, 2, 3, 4], [5, 6, 7, 8]], [[1, 2, 3]]],
 ];
 if ([1, 2, 3, 4, 5, 6, 7, 8].every(group => stats('windows', group, 'test', 0.9) !== null) && [1, 2, 3].every(group => stats('vps', group, 'test', 0.9) !== null)) {
-  console.log('\nShard model: successful non-STAMP samples only; sum test-step percentiles within each merged group plus maximum group setup/teardown percentile. No queue prediction: fewer occupied slots are a proxy, not a causal queue estimate. Add changes/aggregate and arm64 critical path for full Tests wall time.');
-  console.log('\n| Windows + VPS | Shard job-min p50 | Slowest shard p90 (s) | Slots / 20 | Groups (Windows; VPS) |');
-  console.log('|---|---:|---:|---:|---|');
+  const jobP90 = (workflow, name) => percentile(samples.filter(item => item.conclusion === 'success' && item.workflow === workflow && item.job === name).map(item => item.duration), 0.9) || 0;
+  const routing = jobP90('test.yml', 'changes') + jobP90('test.yml', 'test');
+  const arm64 = Math.max(jobP90('release.yml', 'build-arm64'), jobP90('test.yml', 'build-arm64'));
+  console.log(`\nShard model: successful non-STAMP samples only; sum test-step percentiles within each merged group plus maximum group setup/teardown percentile. Active Tests model adds ${routing}s routing/aggregate and the ${arm64}s arm64 critical path. Summed percentiles are conservative estimates, not a measured percentile of merged jobs. No queue prediction: fewer occupied slots are a proxy, not a causal queue estimate.`);
+  console.log('\n| Windows + VPS | Shard job-min p50 | Slowest shard p90 model (s) | Tests active p90 model (s) | Slots / 20 | Groups (Windows; VPS) |');
+  console.log('|---|---:|---:|---:|---:|---|');
   for (const [windows, vps, winGroups, vpsGroups] of plans) {
     const estimate = p => [['windows', winGroups], ['vps', vpsGroups]].flatMap(([platform, groups]) => groups.map(group => group.reduce((sum, id) => sum + stats(platform, id, 'test', p), 0) + Math.max(...group.map(id => stats(platform, id, 'overhead', p)))));
-    console.log(`| ${windows} + ${vps} | ${fmt(estimate(0.5).reduce((sum, value) => sum + value, 0) / 60)} | ${fmt(Math.max(...estimate(0.9)))} | ${windows + vps} / 20 | ${winGroups.map(group => group.join('+')).join(', ')}; ${vpsGroups.map(group => group.join('+')).join(', ')} |`);
+    console.log(`| ${windows} + ${vps} | ${fmt(estimate(0.5).reduce((sum, value) => sum + value, 0) / 60)} | ${fmt(Math.max(...estimate(0.9)))} | ${fmt(routing + Math.max(arm64, ...estimate(0.9)))} | ${windows + vps} / 20 | ${winGroups.map(group => group.join('+')).join(', ')}; ${vpsGroups.map(group => group.join('+')).join(', ')} |`);
   }
 }
 for (const run of runs.filter(run => run.path?.split('@')[0].endsWith('/test.yml') && run.status === 'completed' && run.conclusion === 'success')) {
