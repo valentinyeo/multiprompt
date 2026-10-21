@@ -101,6 +101,9 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.match(transport, /Doctor\s+Assert-Foreground\s+Record/);
   assert.match(transport, /ConnectAsync\('127\.0\.0\.1', \$Port\)/);
   assert.match(transport, /connecting\.Wait\(5000\)/);
+  const suppressConnectResult = /\[void\]\$connecting\.GetAwaiter\(\)\.GetResult\(\)/;
+  assert.match(transport, suppressConnectResult);
+  assert.doesNotMatch(transport.replace('[void]$connecting', '$connecting'), suppressConnectResult);
   assert.match(transport, /WriteTimeout = 5000/);
   assert.match(transport, /90000 - \$timer.ElapsedMilliseconds/);
   assert.match(transport, /16 \* 1024 \* 1024/);

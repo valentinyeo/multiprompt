@@ -286,7 +286,7 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
     try {
         $connecting = $client.ConnectAsync('127.0.0.1', $Port)
         if (-not $connecting.Wait(5000)) { throw 'zsb local bridge connection timed out' }
-        $connecting.GetAwaiter().GetResult()
+        [void]$connecting.GetAwaiter().GetResult()
         $stream = $client.GetStream()
         $stream.WriteTimeout = 5000
         $stream.Write($wire, 0, $wire.Length)
