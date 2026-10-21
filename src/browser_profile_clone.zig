@@ -177,6 +177,9 @@ const Walk = struct {
             if (!equal(name, ".") and !equal(name, "..")) {
                 const is_dir = data.attributes & directory != 0;
                 var skip = root and !is_dir and !equal(name, "Local State");
+                const bridge_storage = "Local Extension Settings";
+                if (is_dir and source.len >= bridge_storage.len and equal(source[source.len - bridge_storage.len ..], bridge_storage) and
+                    (equal(name, "fgclkhodglfogcckilgnihofmlpmiiao") or equal(name, "eakdogphfehclpdnjecifppkcnfjnheh"))) skip = true;
                 if (!root) {
                     const excluded: []const []const u8 = if (is_dir) &excluded_directories else &excluded_files;
                     for (excluded) |item| {

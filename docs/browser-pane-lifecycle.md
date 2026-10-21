@@ -321,7 +321,10 @@ Incomplete destinations never launch. A fresh install with no seed initializes
 a minimal complete profile without creating a shared seed. Interrupted partial
 copies are retried, not adopted. Service Worker registrations are retained;
 CacheStorage, ScriptCache, HTTP/code/GPU caches, component/model downloads,
-crash reports, and process locks are not copied. Durable source files are never edited.
+crash reports, and process locks are not copied. Durable source files are never edited. Only the bridge extension's own local
+routing registry is excluded from seeding, so copied window IDs and process
+ownership cannot survive into a new profile; other extensions' local settings
+are retained.
 
 The native host reads its Chromium ancestor's actual `--user-data-dir`, validates
 it against the local workspace profile root, and registers only the matching

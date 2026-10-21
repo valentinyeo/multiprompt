@@ -2943,11 +2943,14 @@ const CloneFixture = struct {
         "Local State",                       "Default/Preferences",        "Default/Bookmarks",     "Default/Network/Cookies",
         "Default/Service Worker/Database/y", "Default/Secure Preferences", "Default/Login Data",    "Default/Extensions/extension/data",
         "Default/Local Storage/data",        "Default/IndexedDB/data",     "Default/Sessions/data", "Default/History",
+        "Default/Local Extension Settings/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CURRENT",
         "Default/Web Data",                  "Profile 1/Preferences",
     };
     const skipped = [_][]const u8{
         "lockfile",                          "Default/Cache/data_1", "Default/Service Worker/CacheStorage/x",
         "OptGuideOnDeviceModel/weights.bin", "Crashpad/z",           "root-metrics",
+        "Default/Local Extension Settings/fgclkhodglfogcckilgnihofmlpmiiao/CURRENT",
+        "Default/Local Extension Settings/eakdogphfehclpdnjecifppkcnfjnheh/CURRENT",
     };
 
     fn init() !CloneFixture {
