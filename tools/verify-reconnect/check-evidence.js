@@ -22,6 +22,7 @@ function load(mode) {
   assert.ok([doctor.main, doctor.input_surface].includes(doctor.focus[0]));
   assert.ok(doctor.focus[1] === doctor.input_surface || doctor.surface_focus[1] === doctor.input_surface);
   assert.equal(doctor.two_transports, true);
+  assert.ok(json('layout-control.json').layout_positive_control > 0);
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.evidence_preserved, true);

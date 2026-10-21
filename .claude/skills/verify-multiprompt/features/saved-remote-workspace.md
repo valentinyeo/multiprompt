@@ -10,7 +10,7 @@ Close and reopen a workspace containing SSH tabs. Existing named server sessions
 
 ## Driving it with the Windows reconnect harness
 
-The driver seeds the real APPDATA/ZigShell/session.json with two kind=tmux records, tmux_session verify-one/verify-two, tmux_host=0, active_tab=0, and chat_view_mode=off. It launches the actual app normally, waits for both live ssh transports and connected log evidence, sends Ctrl+1, clicks the visible ConsoleWindowClass child, and verifies foreground/focus via native APIs. seed-session.json, doctor.json, debug.log, and before.png preserve the input and resulting state.
+The driver seeds the real APPDATA/ZigShell/session.json with two kind=tmux records, tmux_session verify-one/verify-two, tmux_host=0, active_tab=0, and chat_view_mode=nowhere. It launches the actual app normally, waits for both live ssh transports and connected log evidence, sends Ctrl+1, clicks the visible ConsoleWindowClass child, and verifies foreground/focus via native APIs. seed-session.json, doctor.json, debug.log, and before.png preserve the input and resulting state.
 
 ## Gotchas
 

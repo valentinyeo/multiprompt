@@ -15,7 +15,23 @@ $log = "$settings/debug.log"
 $results = [Collections.Generic.List[object]]::new()
 $app = $null
 $failure = $null
-function Read-Log { if (Test-Path $log) { return [IO.File]::ReadAllText($log) }; return '' }
+function Read-Log {
+    if (!(Test-Path $log)) { return '' }
+    for ($retry = 0; $retry -lt 100; $retry++) {
+        $stream = $null
+        $reader = $null
+        try {
+            $stream = [IO.File]::Open($log, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+            $reader = [IO.StreamReader]::new($stream)
+            return $reader.ReadToEnd()
+        } catch [IO.IOException] {
+            if ($retry -eq 99) { throw }
+            Start-Sleep -Milliseconds 10
+        } finally {
+            if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() }
+        }
+    }
+}
 function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 200 } while ([DateTime]::UtcNow -lt $deadline)
@@ -62,7 +78,7 @@ try {
     $env:MP_VERIFY_STATE = $state
     [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
     [IO.File]::WriteAllText("$state/sessions.txt", "verify-one`nverify-two`n")
-    @{active_tab=0; single_window=$true; chat_active=$false; chat_view_mode='off'; tabs=@(
+    @{active_tab=0; single_window=$false; chat_active=$false; chat_view_mode='nowhere'; tabs=@(
         @{kind='tmux'; name='Verify one'; manual=$true; tmux_host=0; tmux_session='verify-one'; cv=$false; pid=0},
         @{kind='tmux'; name='Verify two'; manual=$true; tmux_host=0; tmux_session='verify-two'; cv=$false; pid=0}
     )} | ConvertTo-Json -Depth 6 | Set-Content "$settings/session.json"
@@ -101,6 +117,10 @@ try {
     $surfaceFocus = [ReconnectDesktop]::Focus($inputSurface)
     if ($before[1] -ne $inputSurface.ToInt64() -and $surfaceFocus[1] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
     @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; surface_focus=$surfaceFocus; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    $positiveControl = @([regex]::Matches((Read-Log), '\[reposition\]')).Count
+    if ($positiveControl -lt 1) { throw 'Doctor: console layout positive control missing' }
+    if ([ReconnectDesktop]::Owner($inputSurface) -ne (Transport 'verify-one').Id) { throw 'Doctor: active console is not tab one' }
+    @{layout_positive_control=$positiveControl} | ConvertTo-Json | Set-Content "$Output/layout-control.json"
     Shot 'before'
     $offset = (Read-Log).Length
     $old = Transport 'verify-two'
@@ -163,8 +183,6 @@ try {
     Write-Output "HARNESS ERROR $failure"
     $failure | Set-Content "$Output/error.txt"
 } finally {
-    if (Test-Path $log) { Copy-Item $log "$Output/debug.log" }
-    if (Test-Path $state) { Copy-Item $state "$Output/stand-in" -Recurse -Force }
     try { Shot 'final' } catch { Write-Output "Screenshot error: $_" }
     if ($app -and !$app.HasExited) { & taskkill /PID $app.Id /T /F | Out-Null }
     foreach ($file in Get-ChildItem "$state/transport-*.txt" -ErrorAction SilentlyContinue) {
@@ -172,6 +190,8 @@ try {
         $process = Get-Process -Id $id -ErrorAction SilentlyContinue
         if ($process -and $process.Path -eq $Ssh) { Stop-Process -Id $id -Force }
     }
+    if (Test-Path $log) { Copy-Item $log "$Output/debug.log" }
+    if (Test-Path $state) { Copy-Item $state "$Output/stand-in" -Recurse -Force }
     $alive = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Ssh -or ($app -and $_.ProcessId -eq $app.Id) })
     @{app_pid=$(if ($app) { $app.Id } else { $null }); remaining_owned_processes=$alive.Count; evidence_preserved=(Test-Path "$Output/debug.log")} | ConvertTo-Json | Set-Content "$Output/cleanup.json"
     Remove-Item $profile -Recurse -Force -ErrorAction SilentlyContinue

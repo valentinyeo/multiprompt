@@ -21,6 +21,7 @@ public static class ReconnectDesktop {
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
     [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    public static uint Owner(IntPtr h) { uint pid; GetWindowThreadProcessId(h,out pid); return pid; }
     public static string Class(IntPtr h) { var s=new StringBuilder(256); GetClassName(h,s,256); return s.ToString(); }
     public static IntPtr Window(uint pid) { IntPtr found=IntPtr.Zero; EnumWindows((h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner); if(owner==pid && IsWindowVisible(h) && Class(h)!="ConsoleWindowClass") { found=h; return false; } return true; },IntPtr.Zero); return found; }
     public static IntPtr InputSurface(IntPtr parent) { IntPtr found=IntPtr.Zero; EnumChildWindows(parent,(h,p)=>{ if(Class(h)=="ConsoleWindowClass" && IsWindowVisible(h)) { found=h; return false; } return true; },IntPtr.Zero); return found; }

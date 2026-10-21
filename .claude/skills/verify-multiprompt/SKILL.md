@@ -25,7 +25,7 @@ On the runner the workflow invokes:
 ./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
 ```
 
-The build job also runs the existing SSH reconnect/probe logic tests on Windows. The driver creates a unique RUNNER_TEMP profile, sets APPDATA and LOCALAPPDATA, bypasses account login with the existing MULTIPROMPT_NO_LOGIN=1 option, enables ZIGSHELL_DEBUG, and seeds session.json with two named tmux tabs. No credentials are needed. Readiness requires live stand-in transports and explicit reconnect-ok evidence for both tabs after using the normal Ctrl+Shift+R shortcut, not just a main HWND. The fixture uses console view (chat_view_mode=off): Chat View returns before the production [reposition] log and would make that absence check vacuous. An existing desktop instance is not safe to double-drive; use a fresh hosted runner.
+The build job also runs the existing SSH reconnect/probe logic tests on Windows. The driver creates a unique RUNNER_TEMP profile, sets APPDATA and LOCALAPPDATA, bypasses account login with the existing MULTIPROMPT_NO_LOGIN=1 option, enables ZIGSHELL_DEBUG, and seeds session.json with two named tmux tabs. No credentials are needed. Readiness requires live stand-in transports and explicit reconnect-ok evidence for both tabs after using the normal Ctrl+Shift+R shortcut, not just a main HWND. The fixture uses console view (chat_view_mode=nowhere): Chat View returns before the production [reposition] log and would make that absence check vacuous. An existing desktop instance is not safe to double-drive; use a fresh hosted runner.
 
 ## Doctor
 
@@ -45,7 +45,7 @@ Prove the harness with build green and v0.28.788 red using the same harness revi
 
 ## Cleanup
 
-The driver always runs finally: copy logs/stand-in state to evidence, capture the final screen, taskkill only the app PID tree it started, terminate any surviving owned fake transport PID after matching its executable path, remove the unique temporary profile, and record remaining owned processes. Never kill by process name. cleanup.json must show zero remaining owned processes and preserved debug.log. Artifacts remain outside the removed profile even after failures. Downloaded evidence is not deleted.
+The driver always runs finally: capture the final screen, taskkill only the app PID tree it started, terminate any surviving owned fake transport PID after matching its executable path, copy logs/stand-in state to evidence, remove the unique temporary profile, and record remaining owned processes. Never kill by process name. cleanup.json must show zero remaining owned processes and preserved debug.log. Artifacts remain outside the removed profile even after failures. Downloaded evidence is not deleted.
 
 ## Helpers
 
