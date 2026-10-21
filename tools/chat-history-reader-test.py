@@ -803,6 +803,25 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(reader.clean_command_markup('one<pasted_content id="x">two</pasted_content id="x">three'), 'one two three')
         self.assertEqual(reader.clean_command_markup('before\n<pasted_content id="x">\nplease check the build\n</pasted_content id="x">\nafter'), 'before\nplease check the build\nafter')
 
+    def test_igsh437_reminders_are_hidden_without_losing_conversation_text(self):
+        reminder = '<system-reminder>\nSynthetic background task completed.\n</system-reminder>'
+        for role in ('user', 'assistant'):
+            for content in (reminder, 'Before\n\n' + reminder,
+                            reminder + '\nAfter', 'Before\n' + reminder + '\nAfter'):
+                with self.subTest(role=role, content=content):
+                    event = dict(type=role, message=dict(role=role, content=[dict(type='text', text=content)]))
+                    rows = reader.conversation_rows(event, 'claude')
+                    expected = content.replace(reminder + '\n', '').replace(reminder, '')
+                    self.assertEqual([row['text'] for row in rows], [expected] if expected.strip() else [])
+
+    def test_igsh437_inline_mentions_incomplete_tags_and_task_handling_are_preserved(self):
+        for content in ('Explain <system-reminder>example</system-reminder> literally.',
+                        '<system-reminder>incomplete example'):
+            event = dict(type='user', message=dict(role='user', content=content))
+            self.assertEqual(reader.conversation_event(event, 'claude')['text'], content)
+        event = dict(type='user', message=dict(role='user', content='<task-notification>synthetic task</task-notification>'))
+        self.assertIsNone(reader.conversation_event(event, 'claude'))
+
     def test_igsh349_queued_command_uses_latest_exact_queue_stamp(self):
         text = 'please check the build'
         self.query['settlement'] = True
