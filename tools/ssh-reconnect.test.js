@@ -42,6 +42,7 @@ var active_shell: u32 = 0;
 const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
+var ssh_probe_next_tick: u64 = 0;
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
 const SW_HIDE = 0;
@@ -83,9 +84,9 @@ ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 =
 `;
 function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
-  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt');
+  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name)).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
 }
 test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', () => {
   if (modern) {
@@ -115,6 +116,8 @@ test "ISSUE-501 missed exit" {
     alive = false;
     sshAutoReconnectTick();
     try std.testing.expect(shells[0].disconnected);
+    fake_now += 2000;
+    sshAutoReconnectTick();
     fake_now += 2000;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 1), spawns);
@@ -178,7 +181,6 @@ test "ISSUE-501 live ssh silent detach" {
   const job = source.slice(start, source.indexOf('\n};', start) + 3);
   const code = runtime('').replace('fn sshProbeFinish() void {}', '') + job + `
 var ssh_probe_job: ?*SshProbeJob = null;
-var ssh_probe_next_tick: u64 = 0;
 fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id and shell_count > 0) 0 else null; }
 ` + body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + `
 test "ISSUE-501 live ssh silent detach" {
@@ -204,6 +206,8 @@ test "ISSUE-501 offline hint" {
     markSshTabDisconnected(0);
     fake_now += 2000;
     network = false;
+    sshAutoReconnectTick();
+    fake_now += 2000;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 1), spawns);
 }

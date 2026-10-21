@@ -2215,7 +2215,7 @@ pub fn markSshTabDisconnected(idx: u32) void {
     app_state.shells[idx].activity = .idle;
     app_state.shells[idx].needs_attention = false;
     app_state.shells[idx].disconnected = true;
-    app_state.shells[idx].ssh_reconnect.lost(GetTickCount64(), GetTickCount64() ^ app_state.shells[idx].shell_id);
+    @import("chat_send.zig").sshReconnectArm(idx, "link-exit");
     debugLog("markSshTabDisconnected: preserving SSH/tmux tab for automatic reconnect");
     var reconnect_log: [160]u8 = undefined;
     debugLog(std.fmt.bufPrint(&reconnect_log, "ssh-reconnect scheduled id={d} attempt={d} delay_ms={d}", .{ app_state.shells[idx].shell_id, app_state.shells[idx].ssh_reconnect.attempts +| 1, app_state.shells[idx].ssh_reconnect.delay_ms }) catch "ssh-reconnect scheduled");
@@ -2251,40 +2251,7 @@ pub fn markPinnedLocalTabDisconnected(idx: u32) void {
 }
 
 pub fn reconnectSshTabsAfterResume() void {
-    var reconnected: u32 = 0;
-    var i: u32 = 0;
-    while (i < app_state.shell_count) {
-        const k = app_state.shells[i].kind;
-        if (k == .vps or k == .vps2 or k == .tmux) {
-            if (respawnShellInPlace(i, true)) {
-                reconnected += 1;
-                i += 1;
-            } else {
-                debugLog("reconnectSshTabsAfterResume: respawn failed, preserving tab");
-                markSshTabDisconnected(i);
-                i += 1;
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    if (reconnected > 0) {
-        app_state.g_tmux_fetch_tick = 0;
-        fetchTmuxSessions();
-        saveSession();
-        repositionActive();
-        app_state.g_refocus_remaining = 4;
-        _ = SetTimer(app_state.g_main_hwnd, TIMER_REFOCUS, 350, null);
-
-        var buf: [96]u8 = undefined;
-        var pos: usize = 0;
-        const msg = "reconnectSshTabsAfterResume: reconnected=";
-        @memcpy(buf[0..msg.len], msg);
-        pos = msg.len;
-        appendDecimal(&buf, &pos, reconnected);
-        debugLog(buf[0..pos]);
-    }
+    @import("chat_send.zig").sshReconnectArm(null, "power-resume");
 }
 
 pub fn killProcessTree(root_pid: DWORD) void {

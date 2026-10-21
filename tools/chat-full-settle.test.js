@@ -112,7 +112,7 @@ fn clear() void {
 }
 fn add(id: u64, state: ChatEchoState, written: bool, queued: bool, sent: i64) !void {
     var entry: ChatOutboxEntry = .{ .id = id, .key_len = 13, .state = state, .write_started = written,
-        .transcript_queued = queued, .anchor = .{.sent_ms = sent},
+        .transcript_queued = queued, .anchor = .{.sent_ms = sent}, .sent_tick_ms = sent,
         .text = try std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, "please check the build") };
     @memcpy(entry.key[0..13], "tmux:0:term-1");
     try g_chat_outbox.append(std.heap.page_allocator, entry);

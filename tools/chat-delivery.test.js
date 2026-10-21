@@ -170,6 +170,7 @@ const acceptance = `
 fn enqueue(text: []const u16, state: ChatEchoState) !void {
     try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "test", text, state));
     g_chat_outbox.items[g_chat_outbox.items.len - 1].anchor = chatEchoAnchorNow(0);
+    g_chat_outbox.items[g_chat_outbox.items.len - 1].sent_tick_ms = 1500;
     g_chat_outbox.items[g_chat_outbox.items.len - 1].write_started = state != .queued;
     g_chat_outbox_revision +%= 1;
 }
@@ -499,7 +500,7 @@ test "delivery: legacy delivered entries without a timestamp cannot stay queued 
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
-test "delivery: old delivered outbox settles on load without waiting for another turn and keeps late matching" {
+test "delivery: restored delivered outbox uses a fresh monotonic budget and keeps late matching" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("older persisted message");
     try enqueue(text, .delivered);
@@ -507,10 +508,10 @@ test "delivery: old delivered outbox settles on load without waiting for another
     fake_now_ms = 601499;
     try reload();
     try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
-    fake_now_ms = 601500;
-    try reload();
+    fake_now_ms += 600000;
+    chatOutboxTick();
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
-    try std.testing.expect(!g_chat_outbox.items[0].write_started);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
     try std.testing.expect(g_chat_outbox.items[0].retryable);
     transcript(text, 2000);
     chatEchoMatchActive();

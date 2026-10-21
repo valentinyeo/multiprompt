@@ -12,12 +12,19 @@ pub const State = struct {
     attempts: u8 = 0,
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
+    veto_until: ?u64 = null,
 
     pub fn lost(self: *State, now: u64, jitter: u64) void {
         if (self.phase == .closed or self.phase == .disconnected) return;
         self.phase = .disconnected;
         self.delay_ms = backoffMs(self.attempts, jitter);
         self.next_tick = now + self.delay_ms;
+    }
+
+    pub fn networkVeto(self: *State, now: u64, connected: bool) bool {
+        if (connected) return false;
+        if (self.veto_until == null) self.veto_until = now + self.delay_ms;
+        return now < self.veto_until.?;
     }
 
     pub fn due(self: State, now: u64) bool {
@@ -28,10 +35,11 @@ pub const State = struct {
         if (self.phase == .closed) return;
         self.phase = .reconnecting;
         self.attempts +|= 1;
+        self.veto_until = null;
     }
 
     pub fn manual(self: *State, now: u64) void {
-        if (self.phase == .closed) return;
+        if (self.phase == .closed or self.phase == .reconnecting) return;
         self.phase = .disconnected;
         self.next_tick = now;
         self.delay_ms = 0;

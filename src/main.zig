@@ -6559,7 +6559,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const spawn_tick = app_state.shells[idx].spawn_tick;
                 const alive_ms = if (spawn_tick != 0) now -| spawn_tick else std.math.maxInt(u64);
                 const action = decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms);
-                if (is_ssh_kind and action != .close) {
+                if (is_ssh_kind) {
                     @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
                     return 0;
                 }
@@ -6585,6 +6585,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        @import("win32.zig").WM_TIMECHANGE => {
+            @import("chat_send.zig").sshReconnectArm(null, "time-change");
+            return 0;
+        },
         WM_POWERBROADCAST => {
             switch (wp) {
                 PBT_APMSUSPEND => {
@@ -6592,6 +6596,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     debugLog("WM_POWERBROADCAST: suspending — session snapshot saved");
                 },
                 PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC => {
+                    @import("chat_send.zig").sshReconnectArm(null, "power-resume");
                     app_state.g_resume_until_tick = GetTickCount64() + RESUME_RESPAWN_WINDOW_MS;
                     _ = KillTimer(hwnd, TIMER_RESUME_RECONNECT);
                     _ = SetTimer(hwnd, TIMER_RESUME_RECONNECT, 2500, null);
@@ -6614,7 +6619,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.g_power_energy_saver = data0 != 0;
                         } else if (guidEql(setting.PowerSetting, GUID_CONSOLE_DISPLAY_STATE)) {
                             app_state.g_power_display_off = data0 == 0;
-                            if (!app_state.g_power_display_off) exitDeepIdleNow(hwnd);
+                            if (!app_state.g_power_display_off) {
+                                @import("chat_send.zig").sshReconnectArm(null, "standby-display-on");
+                                exitDeepIdleNow(hwnd);
+                            }
                         }
                         applyPowerProfile(hwnd);
                         var tbuf: [256]u16 = undefined;
@@ -7218,7 +7226,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = KillTimer(hwnd, TIMER_RESUME_RECONNECT);
                 forceReinstallHooks();
                 debugLog("TIMER_RESUME_RECONNECT: delayed hooks reinstalled");
-                reconnectSshTabsAfterResume();
             } else if (wp == TIMER_REMINDERS) {
                 checkDueReminders();
             } else if (wp == TIMER_INBOX_REFRESH) {
