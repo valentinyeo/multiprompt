@@ -1554,7 +1554,10 @@ fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
 pub fn browserWinFilePathA(buf: *[640]u8, shell_id: u32) ?[]const u8 {
     const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
     if (appdata_len == 0 or appdata_len >= 490) return null;
-    const suffix = std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}.txt", .{shell_id}) catch return null;
+    const suffix = if (browser_workspace_profile.IGSH_224)
+        std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}-{d}.txt", .{ GetCurrentProcessId(), shell_id }) catch return null
+    else
+        std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}.txt", .{shell_id}) catch return null;
     return buf[0 .. appdata_len + suffix.len];
 }
 
@@ -2000,7 +2003,13 @@ fn deleteSessionDirFiles(glob: []const u8) void {
 
 pub fn cleanupStalePanewinFiles() void {
     deleteSessionDirFiles("panewin-*.txt");
-    deleteSessionDirFiles("browserwin-*.txt");
+    if (browser_workspace_profile.IGSH_224) {
+        var pattern_buf: [80]u8 = undefined;
+        const pattern = std.fmt.bufPrint(&pattern_buf, "browserwin-{d}-*.txt", .{GetCurrentProcessId()}) catch return;
+        deleteSessionDirFiles(pattern);
+    } else {
+        deleteSessionDirFiles("browserwin-*.txt");
+    }
     deleteSessionDirFiles("webview-*.flag");
 }
 pub fn bridgeExePath() []const u8 {

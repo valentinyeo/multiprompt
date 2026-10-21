@@ -335,7 +335,11 @@ V1 does not prune bookmarks, remove retained browser data, or claim that
 Chromium's OS-bound encrypted credentials are portable between machines.
 
 Local shell commands read the window ID and profile token from one atomically
-published `browserwin-<shell-id>.txt` snapshot. Missing, incomplete, or old
+published `browserwin-<owner-pid>-<shell-id>.txt` snapshot. Missing, incomplete, or old
 numeric-only bindings cannot fall back to the shared profile while isolation is
 on. Explicit CLI `--profile`/environment targets remain available; reopening the
 exact pane refreshes its shell binding after a move or engine change.
+
+Local binding filenames include the owning app PID, so two app windows with
+the same shell counter cannot overwrite each other. Startup only clears its own
+local binding namespace, not another live window's files.
