@@ -733,7 +733,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
-        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach image upload picture photo screenshot ctrl v drop drag",
+        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
         SEARCH_CHAT_COPY_SELECTION_OFFSET => "chat view copy selection ctrl c",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
@@ -2513,7 +2513,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "chat view attach image", "attach image", "upload image", "add image", "picture", "photo", "ctrl v", "drop", "drag" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Attach File", "attach file", "pdf", "zip", "log", "document", "image", "upload image", "add image", "picture", "photo", "screenshot", "ctrl v", "drop", "drag" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ATTACH_OFFSET;
         app_state.g_search_result_count += 1;

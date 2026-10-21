@@ -373,6 +373,7 @@ fn layoutSnippetCreateControls() void {
 }
 
 fn snippetEditSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;

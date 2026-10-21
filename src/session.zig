@@ -1360,11 +1360,8 @@ pub fn restoreSession() u32 {
     loadChromeExeConfig();
     if (IS_DEV) {
         ensureDevThemeInitialized();
-        const font = json_reader.uintDefault(json, "dev_font_idx", std.math.maxInt(u64));
-        if (font < DEV_CONSOLE_FONTS.len) {
-            app_state.g_dev_font_idx = if (app_state.ISSUE_441 and font == 2) app_state.DEFAULT_CONSOLE_FONT_IDX else @intCast(font);
-            setWideAscii(&app_state.g_dev_theme.console_font, DEV_CONSOLE_FONTS[app_state.g_dev_font_idx]);
-        }
+        app_state.g_dev_font_idx = app_state.DEFAULT_CONSOLE_FONT_IDX;
+        setWideAscii(&app_state.g_dev_theme.console_font, DEV_CONSOLE_FONTS[app_state.g_dev_font_idx]);
         const size = json_reader.uint(json, "dev_console_size");
         if (size >= 8 and size <= 40) app_state.g_dev_theme.console_font_height = @intCast(size);
     }

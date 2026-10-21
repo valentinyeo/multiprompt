@@ -519,6 +519,25 @@ fn fetchHostPersistent(host: u8, buf: []u8) ?usize {
 }
 
 pub fn sshOneShotCapture(cmd_str: []const u8, buf: []u8) usize {
+    return sshOneShotCaptureInput(cmd_str, buf, null, 20000).len;
+}
+
+fn sshInputPump(input: HANDLE, output: HANDLE) void {
+    defer _ = CloseHandle(output);
+    var chunk: [65536]u8 = undefined;
+    while (true) {
+        var count: DWORD = 0;
+        if (ReadFile(input, &chunk, chunk.len, &count, null) == 0 or count == 0) return;
+        var pos: DWORD = 0;
+        while (pos < count) {
+            var written: DWORD = 0;
+            if (WriteFile(output, chunk[pos..].ptr, count - pos, &written, null) == 0 or written == 0) return;
+            pos += written;
+        }
+    }
+}
+
+pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, timeout_ms: DWORD) struct { len: usize, success: bool } {
     var sa = SECURITY_ATTRIBUTES{
         .nLength = @sizeOf(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = null,
@@ -528,23 +547,44 @@ pub fn sshOneShotCapture(cmd_str: []const u8, buf: []u8) usize {
     var write_pipe: HANDLE = null;
     if (CreatePipe(&read_pipe, &write_pipe, &sa, 1 << 20) == 0) {
         debugLog("sshOneShotCapture: CreatePipe failed");
-        return 0;
+        return .{ .len = 0, .success = false };
     }
+
+    var stdin_read: HANDLE = null;
+    var stdin_write: HANDLE = null;
+    if (stdin != null) {
+        if (CreatePipe(&stdin_read, &stdin_write, &sa, 0) == 0) {
+            _ = CloseHandle(write_pipe);
+            _ = CloseHandle(read_pipe);
+            return .{ .len = 0, .success = false };
+        }
+        if (SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0) == 0) {
+            _ = CloseHandle(stdin_read);
+            _ = CloseHandle(stdin_write);
+            _ = CloseHandle(write_pipe);
+            _ = CloseHandle(read_pipe);
+            return .{ .len = 0, .success = false };
+        }
+    }
+    defer if (stdin_write != null) {
+        _ = CloseHandle(stdin_write);
+    };
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     si.dwFlags = 0x00000100;
     si.hStdOutput = write_pipe;
     si.hStdError = write_pipe;
-    si.hStdInput = null;
+    si.hStdInput = stdin_read;
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    var cmd_buf: [2048]u16 = undefined;
+    var cmd_buf: [4096]u16 = undefined;
     var pos: usize = 0;
     pos = std.unicode.utf8ToUtf16Le(cmd_buf[0 .. cmd_buf.len - 1], cmd_str) catch {
+        if (stdin_read != null) _ = CloseHandle(stdin_read);
         _ = CloseHandle(write_pipe);
         _ = CloseHandle(read_pipe);
-        return 0;
+        return .{ .len = 0, .success = false };
     };
     cmd_buf[pos] = 0;
 
@@ -561,23 +601,33 @@ pub fn sshOneShotCapture(cmd_str: []const u8, buf: []u8) usize {
         &si,
         &pi,
     );
+    if (stdin_read != null) _ = CloseHandle(stdin_read);
     _ = CloseHandle(write_pipe);
     if (ok == 0) {
         sshSpawnFailed();
         debugLog("sshOneShotCapture: CreateProcessW failed");
         _ = CloseHandle(read_pipe);
-        return 0;
+        return .{ .len = 0, .success = false };
     }
     _ = CloseHandle(pi.hThread);
 
+    const pump = if (stdin != null) std.Thread.spawn(.{}, sshInputPump, .{ stdin, stdin_write }) catch {
+        _ = TerminateProcess(pi.hProcess, 1);
+        _ = CloseHandle(pi.hProcess);
+        _ = CloseHandle(read_pipe);
+        return .{ .len = 0, .success = false };
+    } else null;
+    if (pump != null) stdin_write = null;
+    defer if (pump) |thread| thread.join();
+
     const WAIT_TIMEOUT: DWORD = 0x00000102;
-    const result = WaitForSingleObject(pi.hProcess, 20000);
+    const result = WaitForSingleObject(pi.hProcess, timeout_ms);
     if (result == WAIT_TIMEOUT) {
         debugLog("sshOneShotCapture: SSH timed out");
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         _ = CloseHandle(read_pipe);
-        return 0;
+        return .{ .len = 0, .success = false };
     }
 
     var total: usize = 0;
@@ -587,10 +637,12 @@ pub fn sshOneShotCapture(cmd_str: []const u8, buf: []u8) usize {
         if (rr == 0 or bytes_read == 0) break;
         total += bytes_read;
     }
+    var exit_code: DWORD = 1;
+    const exited = GetExitCodeProcess(pi.hProcess, &exit_code) != 0 and exit_code == 0;
     sshLoaderFailed(pi.hProcess);
     _ = CloseHandle(pi.hProcess);
     _ = CloseHandle(read_pipe);
-    return total;
+    return .{ .len = total, .success = exited };
 }
 
 fn parseHostOutputIntoCache(host: u8, buf: []const u8, cache_count: *u32) u32 {

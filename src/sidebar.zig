@@ -3094,7 +3094,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var attach_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Attach Image"), -1, &attach_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, L("Chat View: Attach File"), -1, &attach_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                         _ = SelectObject(hdc, font_subtitle);
                         var attach_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("Ctrl+V"), -1, &attach_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);

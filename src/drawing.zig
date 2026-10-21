@@ -9,7 +9,6 @@ const DT_RIGHT = @import("win32.zig").DT_RIGHT;
 const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
 const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
 const TRANSPARENT = @import("win32.zig").TRANSPARENT;
-const DEFAULT_GUI_FONT = @import("win32.zig").DEFAULT_GUI_FONT;
 const NULL_BRUSH = @import("win32.zig").NULL_BRUSH;
 const RECT = @import("win32.zig").RECT;
 const IsWindow = @import("win32.zig").IsWindow;
@@ -23,7 +22,7 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
 const Ellipse = @import("win32.zig").Ellipse;
 const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
@@ -187,7 +186,7 @@ pub fn resetFontCache() void {
         app_state.g_chat_code_link_font = null;
     }
     if (app_state.g_chat_font != null) {
-        const fallback = GetStockObject(DEFAULT_GUI_FONT);
+        const fallback = @import("fonts.zig").controlFont();
         if (app_state.g_chat_composer_hwnd != null) _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(fallback), 0);
         _ = DeleteObject(app_state.g_chat_font);
         app_state.g_chat_font = null;
@@ -278,7 +277,7 @@ pub fn uiFontTitle() HANDLE {
     if (app_state.g_font_title == null) {
         app_state.g_font_title = CreateFontW(uiScaled(themeTitleFontHeight()), 0, 0, 0, themeTitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
     }
-    return app_state.g_font_title orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_title orelse @import("fonts.zig").controlFont();
 }
 
 pub fn uiFontShellTabTitle() HANDLE {
@@ -295,7 +294,7 @@ pub fn uiFontSubtitle() HANDLE {
     if (app_state.g_font_subtitle == null) {
         app_state.g_font_subtitle = CreateFontW(uiScaled(themeSubtitleFontHeight()), 0, 0, 0, themeSubtitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
     }
-    return app_state.g_font_subtitle orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_subtitle orelse @import("fonts.zig").controlFont();
 }
 
 pub fn uiFontStatusCard() HANDLE {
@@ -314,7 +313,7 @@ pub fn uiFontInboxTitle() HANDLE {
         const weight: i32 = if (app_state.g_multiprompt_theme) 500 else 700;
         app_state.g_font_inbox_title = CreateFontW(uiScaled(derived), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
     }
-    return app_state.g_font_inbox_title orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_inbox_title orelse @import("fonts.zig").controlFont();
 }
 
 pub fn uiFontInboxSub() HANDLE {
@@ -324,21 +323,21 @@ pub fn uiFontInboxSub() HANDLE {
         const weight: i32 = if (app_state.g_multiprompt_theme) 400 else 700;
         app_state.g_font_inbox_sub = CreateFontW(uiScaled(derived), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
     }
-    return app_state.g_font_inbox_sub orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_inbox_sub orelse @import("fonts.zig").controlFont();
 }
 
 fn uiFontThreadTitle() HANDLE {
     if (app_state.g_font_thread_title == null) {
         app_state.g_font_thread_title = CreateFontW(uiScaled(@as(i32, @intCast(@abs(themeTitleFontHeight()))) + 8), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
     }
-    return app_state.g_font_thread_title orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_thread_title orelse @import("fonts.zig").controlFont();
 }
 
 pub fn uiFontClose() HANDLE {
     if (app_state.g_font_close == null) {
         app_state.g_font_close = CreateFontW(uiScaled(themeCloseFontHeight()), 0, 0, 0, themeCloseFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeCloseFontFace());
     }
-    return app_state.g_font_close orelse GetStockObject(DEFAULT_GUI_FONT);
+    return app_state.g_font_close orelse @import("fonts.zig").controlFont();
 }
 
 fn browserPaneLive(shell: *const Shell) bool {

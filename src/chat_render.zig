@@ -82,7 +82,9 @@ const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
 const GetTextExtentPoint32W = @import("win32.zig").GetTextExtentPoint32W;
 const GetTextExtentExPointW = @import("win32.zig").GetTextExtentExPointW;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
+const CHAT_QUALITY = @import("fonts.zig").CHAT_QUALITY;
+const chatLineHeight = @import("fonts.zig").chatLineHeight;
 const RoundRect = @import("win32.zig").RoundRect;
 const CreateCompatibleDC = @import("win32.zig").CreateCompatibleDC;
 const CreateCompatibleBitmap = @import("win32.zig").CreateCompatibleBitmap;
@@ -129,7 +131,7 @@ const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
 const CreatePopupMenu = @import("win32.zig").CreatePopupMenu;
 const AppendMenuW = @import("win32.zig").AppendMenuW;
-const TrackPopupMenu = @import("win32.zig").TrackPopupMenu;
+const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
 const DestroyMenu = @import("win32.zig").DestroyMenu;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
@@ -180,7 +182,6 @@ const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusAllowed;
 const chatPaletteToggleKeyDown = @import("chat_composer.zig").chatPaletteToggleKeyDown;
 const postPaletteToggle = @import("chat_composer.zig").postPaletteToggle;
-const ensureChatFontFamilyRegistered = @import("chat_composer.zig").ensureChatFontFamilyRegistered;
 const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
 const chatListMarkerLen = @import("chat_capture.zig").chatListMarkerLen;
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
@@ -221,7 +222,7 @@ const ChatImgThumb = @import("app_state.zig").ChatImgThumb;
 const ChatAttachError = @import("app_state.zig").ChatAttachError;
 const ChatAttachJob = @import("app_state.zig").ChatAttachJob;
 const OPENFILENAMEW = @import("app_state.zig").OPENFILENAMEW;
-const GetOpenFileNameW = @import("win32.zig").GetOpenFileNameW;
+const GetOpenFileNameW = @import("fonts.zig").openFileName;
 const chat_image_insert = @import("chat_image_insert.zig");
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
@@ -245,7 +246,7 @@ const findShellById = @import("inbox.zig").findShellById;
 fn ensureChatCodeFont() HANDLE {
     if (app_state.g_chat_code_font == null) {
         const pt = @max(8, app_state.g_chat_font_pt - 1);
-        app_state.g_chat_code_font = CreateFontW(-uiScaled(pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Consolas"));
+        app_state.g_chat_code_font = CreateFontW(-uiScaled(pt), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
     }
     return app_state.g_chat_code_font;
 }
@@ -253,8 +254,7 @@ fn ensureChatCodeFont() HANDLE {
 fn chatLinkFont(code: bool) HANDLE {
     const slot = if (code) &app_state.g_chat_code_link_font else &app_state.g_chat_link_font;
     if (slot.* == null) {
-        if (!code) ensureChatFontFamilyRegistered();
-        slot.* = CreateFontW(-uiScaled(if (code) @max(8, app_state.g_chat_font_pt - 1) else app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 1, 0, 0, 0, 0, 5, 0, if (code) L("Consolas") else if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI"));
+        slot.* = CreateFontW(-uiScaled(if (code) @max(8, app_state.g_chat_font_pt - 1) else app_state.g_chat_font_pt), 0, 0, 0, 500, 0, 1, 0, 0, 0, 0, CHAT_QUALITY, 0, if (code) L(@import("fonts.zig").MONO_FACE) else L(@import("fonts.zig").UI_MEDIUM_FACE));
     }
     return slot.*;
 }
@@ -346,7 +346,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     const old_font = SelectObject(hdc, base);
     defer _ = SelectObject(hdc, old_font);
     var line_rc = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
-    const line_h = @max(1, DrawTextW(hdc, L("Ag"), 2, &line_rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    const line_h = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &line_rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
     const max_w = @max(1, area.right - area.left);
     var indent: i32 = if (code) 0 else chatLineIndentPx(hdc, text, 0);
     if (indent >= max_w) indent = 0;
@@ -454,15 +454,14 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
 fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
     if (style.code) {
         if (!style.bold) return ensureChatCodeFont();
-        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 5, 0, L("Consolas"));
+        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
         return app_state.g_chat_rich_fonts[11];
     }
     const index: usize = if (level > 0) 4 + @as(usize, level) - 1 else @as(usize, @intFromBool(style.bold)) + 2 * @as(usize, @intFromBool(style.italic));
     if (index == 0) return ensureChatFont();
     if (app_state.g_chat_rich_fonts[index] == null) {
-        ensureChatFontFamilyRegistered();
         const extra: i32 = if (level == 1) 8 else if (level == 2) 5 else if (level > 0) 2 else 0;
-        app_state.g_chat_rich_fonts[index] = CreateFontW(-uiScaled(app_state.g_chat_font_pt + extra), 0, 0, 0, if (style.bold or level > 0) 700 else 400, @intFromBool(style.italic), 0, 0, 0, 0, 0, 5, 0, if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI"));
+        app_state.g_chat_rich_fonts[index] = CreateFontW(-uiScaled(app_state.g_chat_font_pt + extra), 0, 0, 0, if (style.bold or level > 0) 700 else 500, @intFromBool(style.italic), 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
     }
     return app_state.g_chat_rich_fonts[index];
 }
@@ -471,7 +470,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     const old_font = SelectObject(hdc, chatRichFont(.{ .bold = force_bold }, level));
     defer _ = SelectObject(hdc, old_font);
     var calc = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
-    const line_h = @max(1, DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    const line_h = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
     const max_w = @max(1, area.right - area.left);
     var span_buf: [512]chat_markdown.Span = undefined;
     const spans = if (text.len <= span_buf.len) span_buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null);
@@ -567,7 +566,7 @@ fn chatTableCellSize(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.T
     const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, 0));
     defer _ = SelectObject(hdc, old);
     var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-    var height = @max(1, DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
     var buf: [512]chat_markdown.Span = undefined;
     const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
     defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
@@ -578,7 +577,7 @@ fn chatTableCellSize(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.T
         style.bold = style.bold or bold;
         _ = SelectObject(hdc, chatRichFont(style, 0));
         width += chatTextWidth(hdc, text[span.text.start..span.text.end]);
-        height = @max(height, DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+        height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
     }
     return .{ .width = width, .height = height };
 }
@@ -1585,6 +1584,120 @@ fn chatAttachStartFiles(paths: []const []const u16, delete_after: bool) void {
     showHeaderNoticeAscii("Uploading image...", 2500, false);
 }
 
+const ChatFileJob = struct {
+    path: [:0]const u16,
+    shell_id: u32,
+    host: u8,
+    session_dir: [80]u8,
+    session_dir_len: usize,
+};
+
+fn chatSendFileRun(job: ChatFileJob) enum { sent, failed, too_big } {
+    const win32 = @import("win32.zig");
+    const input = win32.CreateFileW(job.path.ptr, 0x80000000, 1, null, 3, 0x08000000, null);
+    if (input == win32.INVALID_HANDLE_VALUE_PTR or input == null) return .failed;
+    defer _ = CloseHandle(input);
+    var size: i64 = 0;
+    if (win32.GetFileSizeEx(input, &size) == 0 or size < 0) return .failed;
+    if (size > 200 * 1024 * 1024) return .too_big;
+    var name_buf: [80]u8 = undefined;
+    const name = chat_drop.remoteName(job.path, &name_buf);
+    var remote_buf: [2048]u8 = undefined;
+    const remote = chat_drop.uploadCommand(job.session_dir[0..job.session_dir_len], name, @intCast(size), &remote_buf);
+    if (remote.len == 0) return .failed;
+    var cmd_buf: [4096]u8 = undefined;
+    var pos: usize = 0;
+    if (!@import("console.zig").appendSshExe(&cmd_buf, &pos)) return .failed;
+    const tail = std.fmt.bufPrint(cmd_buf[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s}", .{ @import("console.zig").tmuxSshTarget(job.host), remote }) catch return .failed;
+    var output: [8192]u8 = undefined;
+    const timeout: DWORD = @intCast(20000 + @divTrunc(size + 512 * 1024 - 1, 512 * 1024) * 1000);
+    const result = @import("vps.zig").sshOneShotCaptureInput(cmd_buf[0 .. pos + tail.len], &output, input, timeout);
+    if (!result.success) return .failed;
+    var lines = std.mem.splitScalar(u8, output[0..result.len], '\n');
+    var path: []const u8 = "";
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, "\r");
+        if (trimmed.len > 0) path = trimmed;
+    }
+    if (path.len <= name.len or path[0] != '/' or !std.mem.endsWith(u8, path, name)) return .failed;
+    const separator = path[path.len - name.len - 1];
+    if (separator != '/' and separator != '-') return .failed;
+    queueShotPaste(job.shell_id, path, true);
+    return .sent;
+}
+
+fn chatSendFilesThread(jobs: []ChatFileJob) void {
+    defer std.heap.page_allocator.free(jobs);
+    for (jobs) |job| {
+        defer std.heap.page_allocator.free(job.path);
+        const result = chatSendFileRun(job);
+        if (result == .sent) continue;
+        const name_start = if (std.mem.lastIndexOfAny(u16, job.path, &.{ '/', '\\' })) |i| i + 1 else 0;
+        const filename = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, job.path[name_start..]) catch null;
+        defer if (filename) |name| std.heap.page_allocator.free(name);
+        const notice = if (result == .too_big)
+            std.fmt.allocPrintSentinel(std.heap.page_allocator, "Could not send {s} to the server: file is bigger than 200 MB", .{filename orelse "file"}, 0) catch continue
+        else
+            std.fmt.allocPrintSentinel(std.heap.page_allocator, "Could not send {s} to the server", .{filename orelse "file"}, 0) catch continue;
+        if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) std.heap.page_allocator.free(notice);
+    }
+}
+
+pub fn chatFileNotice(lp: LPARAM) void {
+    const text = std.mem.span(@as([*:0]const u8, @ptrFromInt(@as(usize, @bitCast(lp)))));
+    defer std.heap.page_allocator.free(text[0..text.len :0]);
+    const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch {
+        showHeaderNoticeAscii("Could not send that file to the server", 4000, true);
+        return;
+    };
+    defer std.heap.page_allocator.free(wide);
+    showHeaderNoticeAscii("", 4000, true);
+    var len = @min(wide.len, app_state.g_cap_msg_text.len - 1);
+    if (len > 0 and std.unicode.utf16IsHighSurrogate(wide[len - 1])) len -= 1;
+    @memcpy(app_state.g_cap_msg_text[0..len], wide[0..len]);
+    app_state.g_cap_msg_len = len;
+    app_state.g_cap_msg_text[len] = 0;
+}
+
+fn chatSendStartFiles(paths: []const []const u16) bool {
+    if (paths.len == 0) return true;
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell = &app_state.shells[app_state.active_shell];
+    const host = @import("vps.zig").tmuxHostForShell(shell) orelse {
+        showHeaderNoticeAscii("Files can be sent only to server sessions", 4000, true);
+        return false;
+    };
+    const allocator = std.heap.page_allocator;
+    const jobs = allocator.alloc(ChatFileJob, paths.len) catch {
+        showHeaderNoticeAscii("Could not start sending files", 3000, true);
+        return false;
+    };
+    var copied: usize = 0;
+    var started = false;
+    defer if (!started) {
+        for (jobs[0..copied]) |job| allocator.free(job.path);
+        allocator.free(jobs);
+    };
+    var dir_buf: [80]u8 = undefined;
+    const dir = chat_drop.remoteSessionDir(shell.tmux_session[0..shell.tmux_session_len], &dir_buf);
+    for (paths, jobs) |path, *job| {
+        const owned = allocator.dupeZ(u16, path) catch {
+            showHeaderNoticeAscii("Could not start sending files", 3000, true);
+            return false;
+        };
+        job.* = .{ .path = owned, .shell_id = shell.shell_id, .host = host, .session_dir = dir_buf, .session_dir_len = dir.len };
+        copied += 1;
+    }
+    const thread = std.Thread.spawn(.{}, chatSendFilesThread, .{jobs}) catch {
+        showHeaderNoticeAscii("Could not start sending files", 3000, true);
+        return false;
+    };
+    started = true;
+    thread.detach();
+    showHeaderNoticeAscii("Sending file...", 2500, false);
+    return true;
+}
+
 fn chatReadDropPaths(drop: HANDLE, paths: *std.ArrayList([]const u16)) !void {
     const allocator = std.heap.page_allocator;
     const count = DragQueryFileW(drop, 0xFFFFFFFF, null, 0);
@@ -1607,19 +1720,9 @@ fn chatFreeDropPaths(paths: *std.ArrayList([]const u16)) void {
 fn chatAttachPaths(paths: []const []const u16) void {
     const selected = chat_drop.select(paths);
     chatAttachStartFiles(selected.attached[0..selected.count], false);
-    if (selected.first_refused) |path| {
-        const start = if (std.mem.lastIndexOfAny(u16, path, &.{ '/', '\\' })) |i| i + 1 else 0;
-        const prefix = "Only images can be attached for now: ";
-        const suffix: []const u16 = if (selected.refused_too_many > 0) std.unicode.utf8ToUtf16LeStringLiteral(". Attached the first 10 images") else &.{};
-        var name_len = @min(path.len - start, app_state.g_cap_msg_text.len - 1 - prefix.len - suffix.len);
-        if (name_len > 0 and std.unicode.utf16IsHighSurrogate(path[start + name_len - 1])) name_len -= 1;
-        showHeaderNoticeAscii(prefix, 5000, true);
-        @memcpy(app_state.g_cap_msg_text[prefix.len..][0..name_len], path[start..][0..name_len]);
-        @memcpy(app_state.g_cap_msg_text[prefix.len + name_len ..][0..suffix.len], suffix);
-        app_state.g_cap_msg_len = prefix.len + name_len + suffix.len;
-        app_state.g_cap_msg_text[app_state.g_cap_msg_len] = 0;
-    } else if (selected.refused_too_many > 0) {
-        showHeaderNoticeAscii("Attached the first 10 images", 5000, false);
+    const sending = chatSendStartFiles(selected.files[0..selected.file_count]);
+    if (selected.refused_too_many > 0 and sending) {
+        showHeaderNoticeAscii(if (selected.file_count == 0) "Attached the first 10 images" else "Attached up to 10 images and sent up to 10 files", 5000, false);
     }
 }
 
@@ -1640,17 +1743,17 @@ pub fn chatAttachPick() void {
     var ofn = std.mem.zeroes(OPENFILENAMEW);
     ofn.lStructSize = @sizeOf(OPENFILENAMEW);
     ofn.hwndOwner = app_state.g_main_hwnd;
-    ofn.lpstrFilter = L("Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00All files\x00*.*\x00");
+    ofn.lpstrFilter = L("All files\x00*.*\x00Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00");
     ofn.nFilterIndex = 1;
     ofn.lpstrFile = &file_buf;
     ofn.nMaxFile = file_buf.len;
-    ofn.lpstrTitle = L("Attach image");
+    ofn.lpstrTitle = L("Attach file");
     ofn.Flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000004 | 0x00000008;
     if (GetOpenFileNameW(&ofn) == 0) {
         if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
         return;
     }
-    chatAttachStart(file_buf, false);
+    chatAttachPaths(&.{std.mem.sliceTo(&file_buf, 0)});
 }
 
 fn chatClipboardHasImageOnly() bool {
@@ -1661,7 +1764,8 @@ fn chatClipboardHasImageOnly() bool {
         defer chatFreeDropPaths(&paths);
         const drop = GetClipboardData(15) orelse return false;
         chatReadDropPaths(drop, &paths) catch return false;
-        return chat_drop.select(paths.items).count > 0;
+        const selected = chat_drop.select(paths.items);
+        return selected.count > 0 or selected.file_count > 0;
     }
     if (IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 or IsClipboardFormatAvailable(CF_TEXT) != 0) return false;
     return IsClipboardFormatAvailable(2) != 0 or IsClipboardFormatAvailable(8) != 0 or IsClipboardFormatAvailable(17) != 0;
@@ -1845,7 +1949,7 @@ pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
 }
 
 pub fn chatMetadataFont() HANDLE {
-    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Segoe UI"));
+    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
     return app_state.g_chat_rich_fonts[10];
 }
 

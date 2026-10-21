@@ -342,7 +342,7 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetBkColor = @import("win32.zig").SetBkColor;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
 const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const BitBlt = @import("win32.zig").BitBlt;
@@ -379,8 +379,8 @@ const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = @import("win32.zig").JOB_OBJECT_LIMIT
 const JobObjectExtendedLimitInformation = @import("win32.zig").JobObjectExtendedLimitInformation;
 const EnumWindows = @import("win32.zig").EnumWindows;
 const SendMessageW = @import("win32.zig").SendMessageW;
-const TrackPopupMenu = @import("win32.zig").TrackPopupMenu;
-const MessageBoxW = @import("win32.zig").MessageBoxW;
+const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
+const MessageBoxW = @import("fonts.zig").messageBox;
 const WindowFromPoint = @import("win32.zig").WindowFromPoint;
 const GetAncestor = @import("win32.zig").GetAncestor;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
@@ -1253,7 +1253,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.771";
+pub const APP_VERSION = "0.28.774";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1326,6 +1326,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         finishBrowserDock(job);
         return 0;
     }
+    if (msg == 0x0120) {
+        if (@import("fonts.zig").menuChar(wp)) |result| return result;
+    }
+    if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -3272,7 +3276,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_ATTACH_FAILED => {
-            showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
+            if (lp != 0) @import("chat_render.zig").chatFileNotice(lp) else showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
             return 0;
         },
         WM_APP_CHAT_COPY_SELECTION => {
@@ -7595,7 +7599,7 @@ pub fn drawStartupProgress(done: u32, total: u32, name: []const u16) void {
         }
     }
 
-    const hfont = CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L("Segoe UI"));
+    const hfont = CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L(@import("fonts.zig").UI_FACE));
     const old_font: HANDLE = if (hfont != null) SelectObject(hdc, hfont) else null;
     defer {
         if (hfont != null) {
@@ -7638,6 +7642,9 @@ pub fn main(init: std.process.Init) void {
     }
 
     if (update_check.runRelaunchHelperIfRequested()) return;
+
+    defer @import("fonts.zig").unregister();
+    if (!@import("fonts.zig").register()) return;
 
     if (parseSyncAuthCallbackArg()) |callback_url| {
         if (handleSyncAuthCallback(callback_url)) {
