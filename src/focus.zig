@@ -106,6 +106,8 @@ const leftMouseButtonDown = @import("browser_pane.zig").leftMouseButtonDown;
 const syncPaneFocusModeFromForeground = @import("browser_pane.zig").syncPaneFocusModeFromForeground;
 const clearSelectedTabDotOnReturn = @import("sidebar.zig").clearSelectedTabDotOnReturn;
 const activePaneBorderOn = @import("browser_pane.zig").activePaneBorderOn;
+const paneRingState = @import("browser_pane.zig").paneRingState;
+const paneRingRepaintNeeded = @import("browser_pane.zig").paneRingRepaintNeeded;
 const invalidateBrowserBottomMask = @import("browser_pane.zig").invalidateBrowserBottomMask;
 const hideBrowserEdgeMasks = @import("browser_pane.zig").hideBrowserEdgeMasks;
 const suspendBrowserEdgeMaskRaiseForPopup = @import("browser_pane.zig").suspendBrowserEdgeMaskRaiseForPopup;
@@ -433,7 +435,7 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
         browserTrace("FGevt not-ours -> hide masks");
         hideBrowserEdgeMasks();
     }
-    if (activePaneBorderOn()) {
+    if (paneRingRepaintNeeded(&app_state.g_pane_ring_state, paneRingState()) and activePaneBorderOn()) {
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         invalidateBrowserBottomMask();
     }

@@ -498,6 +498,10 @@ pub fn build(b: *std.Build) void {
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);
     vps_test_step.dependOn(&console_font_lifecycle_tests.step);
+    const window_flicker_tests = b.addSystemCommand(&.{ "node", "--test", "tools/window-flicker.test.js" });
+    window_flicker_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&window_flicker_tests.step);
+    vps_test_step.dependOn(&window_flicker_tests.step);
     const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/chat-view-console-return.test.js", "tools/full-width-chat.test.js" });
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);

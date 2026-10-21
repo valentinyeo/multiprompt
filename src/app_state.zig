@@ -971,6 +971,7 @@ pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bott
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
+pub var g_pane_ring_state: u8 = 0;
 pub var g_browser_edge_mask_rects: [BROWSER_EDGE_MASK_COUNT]RECT = [_]RECT{std.mem.zeroes(RECT)} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_shown: [BROWSER_EDGE_MASK_COUNT]bool = [_]bool{false} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_nextunread_count: u32 = 0;
