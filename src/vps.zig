@@ -23,7 +23,6 @@ const WriteFile = @import("win32.zig").WriteFile;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
 const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
-const GetSystemTimeAsFileTime = @import("win32.zig").GetSystemTimeAsFileTime;
 const SECURITY_ATTRIBUTES = @import("win32.zig").SECURITY_ATTRIBUTES;
 const GetExitCodeProcess = @import("win32.zig").GetExitCodeProcess;
 const SESSION_JSON_CAPACITY = @import("app_state.zig").SESSION_JSON_CAPACITY;
@@ -868,9 +867,7 @@ fn tmuxFetchThreadDual() void {
         fetchHostIntoCache(TMUX_HOST_INNE, command_inne[0..pos_inne], &count);
 
     app_state.g_tmux_cache_count = count;
-    var ft_now: [2]DWORD = undefined;
-    GetSystemTimeAsFileTime(&ft_now);
-    app_state.g_tmux_cache_tick = ((@as(u64, ft_now[1]) << 32) | @as(u64, ft_now[0])) / 10_000;
+    app_state.g_tmux_cache_tick = GetTickCount64();
     app_state.g_tmux_fetch_tick = GetTickCount64();
     app_state.g_tmux_fetching = false;
 
@@ -1058,9 +1055,7 @@ pub fn loadVpsPollCacheIfChanged() void {
                 count += 1;
             }
             app_state.g_tmux_cache_count = count;
-            var ft_now: [2]DWORD = undefined;
-            GetSystemTimeAsFileTime(&ft_now);
-            app_state.g_tmux_cache_tick = ((@as(u64, ft_now[1]) << 32) | @as(u64, ft_now[0])) / 10_000;
+            app_state.g_tmux_cache_tick = GetTickCount64();
             app_state.g_tmux_fetch_tick = GetTickCount64();
         }
     }

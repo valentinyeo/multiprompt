@@ -20,6 +20,7 @@ const Entry = struct {
     channel_pending: bool = false,
     channel_sent: bool = false,
     channel_sent_ms: i64 = 0,
+    sent_tick_ms: i64 = 0,
     channel_retries: u8 = 0,
 };
 var storage = [_]Entry{.{}};
@@ -64,7 +65,7 @@ fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool) bool {
     if (spawn_ok) storage[0].channel_pending = true;
     return spawn_ok;
 }
-fn nowFileTime() u64 { return 0; }
+fn GetTickCount64() u64 { return 12345; }
 fn findShellById(_: u32) ?u32 { return 0; }
 fn chatOutboxChanged() void { notices += 1; }
 fn reset() void {

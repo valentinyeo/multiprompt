@@ -1255,7 +1255,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.784";
+pub const APP_VERSION = "0.28.786";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1499,6 +1499,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 var canvas = @import("smooth.zig").Canvas.init(hdc);
                 paintSidebar(hdc);
                 paintChatView(hdc);
+                @import("drawing.zig").paintDisconnectedShell(hdc);
                 paintBrowserPlaceholder(hdc);
                 paintBrowserSplitter(hdc);
                 canvas.deinit();
@@ -1512,6 +1513,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             var canvas = @import("smooth.zig").Canvas.init(mem_dc);
             paintSidebar(mem_dc);
             paintChatView(mem_dc);
+            @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
             paintActivePaneBorder(mem_dc);
@@ -1542,6 +1544,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDOWN => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+
+            if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
+                var client_rc: RECT = std.mem.zeroes(RECT);
+                _ = GetClientRect(hwnd, &client_rc);
+                if (@import("drawing.zig").reconnectButtonRect(client_rc.right)) |button| {
+                    if (mx >= button.left and mx < button.right and my >= button.top and my < button.bottom) {
+                        _ = PostMessageW(hwnd, WM_APP_RECONNECT, 0, 0);
+                        return 0;
+                    }
+                }
+            }
 
             if (chatViewOwnsInput() and mx >= SIDEBAR_W() and !inboxButtonHitTest(mx, my)) {
                 if (browserSplitterHit(mx, my)) {
@@ -2521,9 +2534,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_RECONNECT => {
             if (app_state.active_shell < app_state.shell_count) {
-                if (respawnShellInPlace(app_state.active_shell, true)) {
-                    switchToShell(app_state.active_shell);
-                }
+                @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
             }
             return 0;
         },
@@ -5866,7 +5877,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.g_pending_new_tab_group = 0;
                             showActiveShellAfterOverlay();
                             _ = InvalidateRect(hwnd, null, 0);
-                            if (respawnShellInPlace(ti, true)) switchToShell(ti);
+                            @import("chat_send.zig").sshReconnectNow(ti);
+                            switchToShell(ti);
                             return 0;
                         } else if (target == SEARCH_TABCTX_CHAT_ALLOW) {
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .allow);
@@ -6535,6 +6547,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
+                if (app_state.shells[idx].disconnected and app_state.shells[idx].process == null) return 0;
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
@@ -6571,7 +6584,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
                 const alive_ms = if (spawn_tick != 0) now -| spawn_tick else std.math.maxInt(u64);
-                switch (decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms)) {
+                const action = decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms);
+                if (is_ssh_kind) {
+                    @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
+                    return 0;
+                }
+                switch (action) {
                     .respawn => {
                         if (!respawnShellInPlace(idx, false)) {
                             debugLog("respawnShellInPlace returned false — preserving disconnected SSH/tmux tab");
@@ -6593,6 +6611,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        @import("win32.zig").WM_TIMECHANGE => {
+            @import("chat_send.zig").sshReconnectArm(null, "time-change");
+            return 0;
+        },
         WM_POWERBROADCAST => {
             switch (wp) {
                 PBT_APMSUSPEND => {
@@ -6608,6 +6630,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     syncMouseHookForUrlClicks();
                     app_state.g_last_kb_hook_tick = GetTickCount64();
                     app_state.g_last_mouse_hook_tick = GetTickCount64();
+                    @import("chat_send.zig").sshReconnectArm(null, "power-resume");
                     debugLog("WM_POWERBROADCAST: resumed — SSH reconnect timer armed, hooks reinstalled");
                     refreshPowerStatusFromSystem();
                     applyPowerProfile(hwnd);
@@ -6622,7 +6645,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.g_power_energy_saver = data0 != 0;
                         } else if (guidEql(setting.PowerSetting, GUID_CONSOLE_DISPLAY_STATE)) {
                             app_state.g_power_display_off = data0 == 0;
-                            if (!app_state.g_power_display_off) exitDeepIdleNow(hwnd);
+                            if (!app_state.g_power_display_off) {
+                                @import("chat_send.zig").sshReconnectArm(null, "standby-display-on");
+                                exitDeepIdleNow(hwnd);
+                            }
                         }
                         applyPowerProfile(hwnd);
                         var tbuf: [256]u16 = undefined;
@@ -7226,7 +7252,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = KillTimer(hwnd, TIMER_RESUME_RECONNECT);
                 forceReinstallHooks();
                 debugLog("TIMER_RESUME_RECONNECT: delayed hooks reinstalled");
-                reconnectSshTabsAfterResume();
             } else if (wp == TIMER_REMINDERS) {
                 checkDueReminders();
             } else if (wp == TIMER_INBOX_REFRESH) {
@@ -7443,6 +7468,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.shells[app_state.shell_count] = new_shell;
                             registerShellExitWait(app_state.shell_count);
                             app_state.shell_count += 1;
+                            @import("chat_send.zig").armSshReconnectTimerIfNeeded();
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
                             app_state.active_shell = app_state.shell_count - 1;

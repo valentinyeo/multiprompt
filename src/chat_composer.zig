@@ -1263,7 +1263,7 @@ fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_c
 }
 
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
-    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return false;
+    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
     const tab_wants_chat = (app_state.g_chat_view_mode != .everywhere or app_state.g_restoring or app_state.g_startup_progress) and
         chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, false);
     return shellConsoleVisibilityAllowed(

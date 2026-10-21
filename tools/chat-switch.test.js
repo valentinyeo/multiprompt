@@ -75,7 +75,9 @@ test('foreign HWND mutations and bridge/OS launches never wait on the UI thread'
 
 test('pane follows without requesting browser focus and debug timings sample actual placement', () => {
   assert.match(body('switchToShell'), /cancelPendingNativeBrowserFocus\(\)/);
-  assert.match(body('switchToShell'), /if \(!defer_browser and idx < shell_count and shells\[idx\]\.hwnd == null/);
+  assert.match(body('switchToShell'), /if \(idx < shell_count and shells\[idx\]\.hwnd == null/);
+  assert.match(body('switchToShell'), /armSshReconnectTimerIfNeeded\(\)/);
+  assert.doesNotMatch(body('switchToShell'), /respawnShellInPlace\(/);
   assert.doesNotMatch(body('openChatView'), /shells\[active_shell\]\.hwnd == null/);
   assert.match(body('updateBrowserVisibility'), /if \(g_chat_active\) launchBrowserForShellFromRequest/);
   assert.doesNotMatch(body('chatSwitchBrowserTick'), /requestNativeBrowserFocus|focusActiveBrowserPane/);

@@ -288,7 +288,7 @@ pub fn chatSendVerifyTick() void {
             const entry = &app_state.g_chat_outbox.items[echo_index.?];
             entry.state = .delivered;
             entry.left_box_ms = GetTickCount64();
-            entry.delivery_watch.observe(busy, chat_echo.fileTimeToUnixMs(nowFileTime()));
+            entry.delivery_watch.observe(busy, @intCast(GetTickCount64()));
             _ = saveChatOutbox();
             chatOutboxChanged();
             chatVerifyClear();
@@ -502,10 +502,10 @@ fn chatLinkLooksDown(shell_index: u32) bool {
     const sh = &app_state.shells[shell_index];
     const alive = if (sh.process != null) shellProcessAliveForRead(@intCast(shell_index)) else true;
     return chatLinkDownDecision(
-        sh.disconnected,
+        sh.disconnected or sh.ssh_reconnect.phase == .reconnecting,
         sh.pid,
         alive,
-        chatNetworkReportsConnected(),
+        true,
         false,
     );
 }
@@ -754,10 +754,9 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         };
                         const entry = &list.items[list.items.len - 1];
                         entry.channel_sent = entry.write_started and std.mem.startsWith(u8, key, "tmux:");
-                        const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
-                        if (entry.state == .delivered and (entry.anchor.sent_ms == 0 or chat_echo.expiredSent(entry.state, entry.anchor.sent_ms, now_ms))) {
+                        entry.sent_tick_ms = @intCast(GetTickCount64());
+                        if (entry.state == .delivered and entry.anchor.sent_ms == 0) {
                             entry.state = .not_sent;
-                            entry.write_started = false;
                             entry.retryable = true;
                         }
                     }
@@ -1105,6 +1104,7 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?u
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
     const added = app_state.g_chat_outbox.items.len - 1;
     app_state.g_chat_outbox.items[added].anchor = anchor;
+    app_state.g_chat_outbox.items[added].sent_tick_ms = @intCast(GetTickCount64());
     _ = saveChatOutbox();
     chatOutboxChanged();
     return added;
@@ -1191,13 +1191,13 @@ pub fn chatEchoMatchActive() void {
     if (key.len == 0) return;
     var expired = false;
     const loaded_ms = chatEchoLoadedMs();
-    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    const now_ms: i64 = @intCast(GetTickCount64());
     const busy = app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working;
     for (app_state.g_chat_outbox.items) |*e| {
         if (e.state != .delivered or !std.mem.eql(u8, e.key[0..e.key_len], key)) continue;
         if (e.channel_sent or e.channel_pending) continue;
         e.delivery_watch.observe(busy, now_ms);
-        if (!busy and (chat_echo.expiredSent(e.state, e.anchor.sent_ms, now_ms) or e.delivery_watch.due(now_ms, loaded_ms))) {
+        if (!busy and (chat_echo.expiredSent(e.state, e.sent_tick_ms, now_ms) or e.delivery_watch.due(now_ms, loaded_ms))) {
             expired = true;
             break;
         }
@@ -1252,7 +1252,7 @@ pub fn chatEchoMatchActive() void {
             }
             app_state.g_chat_outbox.items[i].delivery_watch.evidence(facts, now_ms);
         }
-        if (e.state == .delivered and !enqueued and (refused or (!busy and (app_state.g_chat_outbox.items[i].delivery_watch.due(now_ms, loaded_ms) or chat_echo.expiredSent(e.state, e.anchor.sent_ms, now_ms))))) {
+        if (e.state == .delivered and !enqueued and (refused or (!busy and (app_state.g_chat_outbox.items[i].delivery_watch.due(now_ms, loaded_ms) or chat_echo.expiredSent(e.state, e.sent_tick_ms, now_ms))))) {
             app_state.g_chat_outbox.items[i].state = .not_sent;
             app_state.g_chat_outbox.items[i].write_started = false;
             app_state.g_chat_outbox.items[i].retryable = true;
@@ -1308,7 +1308,7 @@ pub fn chatEchoSendAgain(id: u64) void {
         .mark_delivered => {
             entry.state = .delivered;
             entry.transcript_queued = facts.enqueued;
-            entry.delivery_watch.evidence(facts, chat_echo.fileTimeToUnixMs(nowFileTime()));
+            entry.delivery_watch.evidence(facts, @intCast(GetTickCount64()));
         },
         .press_enter_only => {
             if (app_state.g_chat_verify_echo_id != 0 or chatLinkLooksDown(si)) {
@@ -1477,6 +1477,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
         if (entry.write_started) return .write_failed;
         entry.state = .sending;
         entry.anchor = chatEchoAnchorNow(shell_index);
+        entry.sent_tick_ms = @intCast(GetTickCount64());
         entry.write_started = true;
         if (!saveChatOutbox()) {
             entry.write_started = false;
@@ -1555,7 +1556,7 @@ pub fn chatOutboxTick() void {
     if (ISSUE_349_FULL_SETTLE) chatFullSettleFinish();
     chatTmuxSettle();
     var changed = false;
-    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    const now_ms: i64 = @intCast(GetTickCount64());
     for (app_state.g_chat_outbox.items) |*entry| {
         if (!entry.channel_pending and chat_echo.orphanedSending(entry.state, entry.id, app_state.g_chat_verify_echo_id)) {
             entry.state = .delivered;
@@ -1563,7 +1564,7 @@ pub fn chatOutboxTick() void {
             changed = true;
         }
         if (entry.state != .delivered and entry.state != .sending) continue;
-        if (chat_echo.expiredSent(.delivered, entry.anchor.sent_ms, now_ms) and !entry.channel_pending and !entry.transcript_queued) {
+        if (chat_echo.expiredSent(.delivered, entry.sent_tick_ms, now_ms) and !entry.channel_pending and !entry.transcript_queued) {
             entry.state = .not_sent;
             entry.retryable = true;
             entry.transcript_queued = false;
@@ -1584,7 +1585,10 @@ pub fn chatOutboxTick() void {
             const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
             const idx = chatOutboxShellForKey(key) orelse continue;
             if (chatLinkLooksDown(idx)) continue;
-            if (chatOutboxTrySendEntry(idx, e)) break;
+            if (chatOutboxTrySendEntry(idx, e)) {
+                sshOutboxFlushed(idx);
+                break;
+            }
         }
     }
     if (ISSUE_349_FULL_SETTLE) chatFullSettleStart();
@@ -1631,100 +1635,196 @@ pub fn chatOutboxClearActive() void {
     showHeaderNoticeAscii(msg, 3500, false);
 }
 
-fn chatReconnectBackoffMs(attempt: u8) u64 {
-    return switch (attempt) {
-        0 => 5000,
-        1 => 10000,
-        2 => 20000,
-        else => 30000,
-    };
-}
-
-test "Chat View reconnect backoff schedule" {
-    try std.testing.expectEqual(@as(u64, 5000), chatReconnectBackoffMs(0));
-    try std.testing.expectEqual(@as(u64, 10000), chatReconnectBackoffMs(1));
-    try std.testing.expectEqual(@as(u64, 20000), chatReconnectBackoffMs(2));
-    try std.testing.expectEqual(@as(u64, 30000), chatReconnectBackoffMs(3));
-    try std.testing.expectEqual(@as(u64, 30000), chatReconnectBackoffMs(99));
-}
-
 pub fn armSshReconnectTimerIfNeeded() void {
     if (app_state.g_main_hwnd == null) return;
-    if (!SSH_AUTO_RECONNECT_ENABLED) {
-        if (app_state.g_ssh_reconnect_timer_on) {
-            app_state.g_ssh_reconnect_timer_on = false;
-            _ = KillTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT);
-        }
-        return;
-    }
     var any = false;
-    for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].kind == .tmux and app_state.shells[i].disconnected) {
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) {
             any = true;
             break;
         }
     }
-    if (any) {
-        if (!app_state.g_ssh_reconnect_timer_on) {
-            app_state.g_ssh_reconnect_timer_on = true;
-            _ = SetTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT, 1000, null);
-        }
-    } else if (app_state.g_ssh_reconnect_timer_on) {
+    if (any and !app_state.g_ssh_reconnect_timer_on) {
+        app_state.g_ssh_reconnect_timer_on = true;
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT, 1000, null);
+    } else if (!any and app_state.g_ssh_reconnect_timer_on) {
         app_state.g_ssh_reconnect_timer_on = false;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT);
     }
 }
 
-pub fn sshAutoReconnectTick() void {
-    if (!chatNetworkReportsConnected()) return;
+pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
     const now = GetTickCount64();
-    var probe_in_flight = [_]bool{false} ** 256;
-    var host_healthy = [_]bool{false} ** 256;
-    var attempted_this_tick = [_]bool{false} ** 256;
-    for (app_state.shells[0..app_state.shell_count]) |*shell| {
-        if (shell.kind != .tmux or shell.spawn_tick == 0) continue;
-        const running = !shell.disconnected and shell.process != null;
-        const alive_ms = now -| shell.spawn_tick;
-        if (running and alive_ms >= shell_exit.ISSUE_416_FAST_FAIL_MS) {
-            host_healthy[shell.tmux_host] = true;
-        } else if (shell_exit.hostProbeBusy(running, alive_ms, shell.ssh_reconnect_attempts, chatReconnectBackoffMs(shell.ssh_reconnect_attempts -| 1))) {
-            probe_in_flight[shell.tmux_host] = true;
+    for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
+        if (affected != null and affected.? != i) continue;
+        if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.ssh_reconnect.phase == .closed) continue;
+        if (affected != null) {
+            shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
+        } else if (shell.process == null or !shellProcessAliveForRead(i)) {
+            sshDisconnect(@intCast(i), reason);
         }
     }
-    var reconnected: u32 = 0;
-    var i: u32 = 0;
-    while (i < app_state.shell_count) : (i += 1) {
-        if (app_state.shells[i].kind != .tmux) continue;
-        if (!app_state.shells[i].disconnected) {
-            if (app_state.shells[i].ssh_reconnect_attempts > 0 and now >= app_state.shells[i].ssh_reconnect_next_tick + 60_000) {
-                app_state.shells[i].ssh_reconnect_attempts = 0;
-                app_state.shells[i].ssh_reconnect_next_tick = 0;
-            }
-            continue;
-        }
-        if (app_state.shells[i].ssh_reconnect_next_tick != 0 and now < app_state.shells[i].ssh_reconnect_next_tick) continue;
-        const host = app_state.shells[i].tmux_host;
-        if (!shell_exit.reconnectAllowed(probe_in_flight[host], host_healthy[host], attempted_this_tick[host])) continue;
-        attempted_this_tick[host] = true;
-        if (app_state.shells[i].ssh_reconnect_attempts > 0 and now >= app_state.shells[i].ssh_reconnect_next_tick + 60_000) app_state.shells[i].ssh_reconnect_attempts = 0;
-        const attempts = app_state.shells[i].ssh_reconnect_attempts;
-        app_state.shells[i].ssh_reconnect_attempts = attempts +| 1;
-        app_state.shells[i].ssh_reconnect_next_tick = now + chatReconnectBackoffMs(attempts);
-        if (respawnShellInPlace(i, true)) {
-            logSessionAuditAlways("chat-outbox-ssh-reconnected");
-            if (attempts == 0) reconnected += 1;
-        } else {
-            markSshTabDisconnected(i);
-        }
-    }
-    if (reconnected > 0) {
-        app_state.g_tmux_fetch_tick = 0;
-        fetchTmuxSessions();
-        saveSession();
-        repositionActive();
-        showHeaderNoticeAscii(if (reconnected == 1) "Reconnected" else "Reconnected sessions", 4000, false);
-    }
+    if (affected == null) ssh_probe_next_tick = 0;
     armSshReconnectTimerIfNeeded();
+}
+
+pub fn sshDisconnect(idx: u32, reason: []const u8) void {
+    if (idx >= app_state.shell_count) return;
+    var buf: [160]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect disconnect id={d} reason={s}", .{ app_state.shells[idx].shell_id, reason }) catch return);
+    markSshTabDisconnected(idx);
+}
+
+pub fn sshReconnectNow(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    const shell = &app_state.shells[idx];
+    if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
+    if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
+    shell.ssh_reconnect.manual(GetTickCount64());
+    shell.disconnected = true;
+    sshReconnectAttempt(idx);
+}
+
+fn sshReconnectAttempt(idx: u32) void {
+    const shell = &app_state.shells[idx];
+    if (shell.ssh_reconnect.phase != .disconnected) return;
+    shell.ssh_reconnect.start();
+    var buf: [160]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect attempt={d} id={d} delay_ms={d}", .{ shell.ssh_reconnect.attempts, shell.shell_id, shell.ssh_reconnect.delay_ms }) catch return);
+    if (!respawnShellInPlace(idx, true)) sshDisconnect(idx, "spawn-failed");
+}
+
+fn sshNetworkVeto(idx: u32, now: u64) bool {
+    const shell = &app_state.shells[idx];
+    const veto = shell.ssh_reconnect.networkVeto(now, chatNetworkReportsConnected());
+    if (veto) {
+        var buf: [160]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect veto reason=windows-network-offline id={d} cap_ms={d}", .{ shell.shell_id, shell.ssh_reconnect.delay_ms }) catch "ssh-reconnect veto reason=windows-network-offline");
+    }
+    return veto;
+}
+
+pub fn sshAutoReconnectTick() void {
+    sshProbeFinish();
+    const now = GetTickCount64();
+    var attempted = [_]bool{false} ** 256;
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.ssh_reconnect.phase == .reconnecting) attempted[shell.tmux_host] = true;
+    }
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.process != null and !shellProcessAliveForRead(i)) {
+            sshDisconnect(@intCast(i), "process-exit-poll");
+        } else if (shell.ssh_reconnect.phase == .reconnecting and now -| shell.spawn_tick >= 60_000) {
+            sshDisconnect(@intCast(i), "attach-timeout");
+        } else if (shell.kind != .tmux and shell.ssh_reconnect.phase == .reconnecting and now -| shell.spawn_tick >= 3000) {
+            sshReconnectOk(@intCast(i));
+        }
+        if (shell.disconnected and shell.ssh_reconnect.phase == .connected) sshReconnectArm(@intCast(i), "link-disconnected");
+        const host = shell.tmux_host;
+        if (!attempted[host] and shell.ssh_reconnect.due(now)) {
+            if (sshNetworkVeto(@intCast(i), now)) continue;
+            attempted[host] = true;
+            sshReconnectAttempt(@intCast(i));
+        }
+    }
+    sshProbeStart();
+    armSshReconnectTimerIfNeeded();
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected) {
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    }
+}
+
+fn sshReconnectOk(idx: u32) void {
+    const shell = &app_state.shells[idx];
+    shell.ssh_reconnect.ok();
+    shell.disconnected = false;
+    var buf: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect ok id={d}", .{shell.shell_id}) catch return);
+    armChatOutboxTimerIfNeeded();
+    chatOutboxTick();
+    repositionActive();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    saveSession();
+}
+
+const SshProbeJob = struct {
+    const Item = struct { id: u32, host: u8, session: [64]u8, len: u32, attached: bool = false };
+    items: [256]Item = undefined,
+    count: usize = 0,
+    healthy: [256]bool = @splat(false),
+    finished: std.atomic.Value(bool) = .init(false),
+};
+
+var ssh_probe_job: ?*SshProbeJob = null;
+var ssh_probe_next_tick: u64 = 0;
+
+fn sshProbeStart() void {
+    if (ssh_probe_job != null or GetTickCount64() < ssh_probe_next_tick) return;
+    const job = std.heap.page_allocator.create(SshProbeJob) catch return;
+    job.* = .{};
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.kind != .tmux or shell.process == null or shell.tmux_session_len == 0 or GetTickCount64() -| shell.spawn_tick < 3000) continue;
+        job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len };
+        job.count += 1;
+    }
+    if (job.count == 0) {
+        std.heap.page_allocator.destroy(job);
+        return;
+    }
+    const thread = std.Thread.spawn(.{}, sshProbeThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return;
+    };
+    ssh_probe_job = job;
+    thread.detach();
+}
+
+fn sshProbeThread(job: *SshProbeJob) void {
+    defer job.finished.store(true, .release);
+    var checked = [_]bool{false} ** 256;
+    for (job.items[0..job.count]) |item| {
+        if (checked[item.host]) continue;
+        checked[item.host] = true;
+        var wide: [2048]u16 = undefined;
+        var pos: usize = 0;
+        if (!@import("console.zig").appendSshExe(&wide, &pos)) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ")) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, @import("console.zig").tmuxSshTarget(item.host))) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; printf '@@MP_LIVE@@\\n'\"")) continue;
+        const a = std.heap.page_allocator;
+        const cmd = std.unicode.utf16LeToUtf8Alloc(a, wide[0..pos]) catch continue;
+        defer a.free(cmd);
+        var output: [32768]u8 = undefined;
+        const result = @import("vps.zig").sshOneShotCaptureInput(cmd, &output, null, 10_000);
+        job.healthy[item.host] = result.success and std.mem.indexOf(u8, output[0..result.len], "@@MP_LIVE@@") != null;
+        for (job.items[0..job.count]) |*candidate| {
+            if (candidate.host == item.host) candidate.attached = @import("ssh_reconnect.zig").attached(output[0..result.len], candidate.session[0..candidate.len]);
+        }
+    }
+}
+
+fn sshProbeFinish() void {
+    const job = ssh_probe_job orelse return;
+    if (!job.finished.load(.acquire)) return;
+    defer {
+        std.heap.page_allocator.destroy(job);
+        ssh_probe_job = null;
+        ssh_probe_next_tick = GetTickCount64() + 15_000;
+    }
+    for (job.items[0..job.count]) |item| {
+        const idx = @import("inbox.zig").findShellById(item.id) orelse continue;
+        if (app_state.shells[idx].process == null) continue;
+        if (!job.healthy[item.host]) {
+            sshDisconnect(idx, "probe-unreachable");
+        } else if (!item.attached) {
+            sshDisconnect(idx, "tmux-detached");
+        } else if (app_state.shells[idx].disconnected) {
+            sshReconnectOk(idx);
+        }
+    }
 }
 
 test "Chat View outbox is FIFO and capped per key" {
@@ -2011,7 +2111,7 @@ fn chatTmuxSendFinish() void {
         const entry = &app_state.g_chat_outbox.items[i];
         entry.channel_pending = false;
         entry.channel_sent = (job.written and !job.rejected) or job.retry;
-        entry.channel_sent_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+        entry.channel_sent_ms = @intCast(GetTickCount64());
         if (job.retry) entry.channel_retries += 1;
         entry.state = .delivered;
     }
@@ -2026,7 +2126,7 @@ fn chatTmuxSendFinish() void {
 }
 
 fn chatTmuxSettle() void {
-    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    const now_ms: i64 = @intCast(GetTickCount64());
     var changed = false;
     var i: usize = 0;
     while (i < app_state.g_chat_outbox.items.len) {
@@ -2062,7 +2162,7 @@ fn chatTmuxSettle() void {
             entry.channel_history_revision = history.history.revision;
             entry.channel_history_generation = history.generation;
         }
-        if (evidence == .enqueued and now_ms - history.loaded_ms > 60_000) {
+        if (evidence == .enqueued and now_ms -| history.loaded_ms > 60_000) {
             evidence = .none;
             entry.transcript_queued = false;
             changed = true;
@@ -2105,10 +2205,10 @@ pub const ISSUE_349_FULL_SETTLE = true;
 fn chatFullSettleStart() void {
     if (!ISSUE_349_FULL_SETTLE or app_state.g_chat_full_settle_job != null) return;
     const a = std.heap.page_allocator;
-    const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+    const now_ms: i64 = @intCast(GetTickCount64());
     const tick = GetTickCount64();
     for (app_state.g_chat_outbox.items) |entry| {
-        if (!chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.anchor.sent_ms, now_ms)) continue;
+        if (!chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.sent_tick_ms, now_ms)) continue;
         const outbox_key = entry.key[0..entry.key_len];
         const idx = chatOutboxShellForKey(outbox_key) orelse continue;
         const key = chatFileIdentityForShell(idx);
@@ -2133,7 +2233,7 @@ fn chatFullSettleStart() void {
                 if (job.count == job.entries.len) break;
                 if ((candidate.id > last_id) != (pass == 0)) continue;
                 if (!std.mem.eql(u8, candidate.key[0..candidate.key_len], outbox_key) or
-                    !chat_echo.needsFullSettle(candidate.state, candidate.write_started, candidate.transcript_queued, candidate.anchor.sent_ms, now_ms)) continue;
+                    !chat_echo.needsFullSettle(candidate.state, candidate.write_started, candidate.transcript_queued, candidate.sent_tick_ms, now_ms)) continue;
                 const text = a.dupe(u16, candidate.text) catch {
                     for (job.entries[0..job.count]) |target| a.free(target.text);
                     a.destroy(job);
@@ -2313,4 +2413,9 @@ test "IGSH-442 removed outbox entry is absent after JSON save and reload" {
     chatOutboxParseJson(&loaded, allocator, json[0..len]);
     try std.testing.expectEqual(@as(usize, 1), loaded.items.len);
     try std.testing.expectEqualSlices(u16, kept, loaded.items[0].text);
+}
+
+fn sshOutboxFlushed(idx: u32) void {
+    var buf: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect outbox-flushed id={d} count=1", .{app_state.shells[idx].shell_id}) catch return);
 }

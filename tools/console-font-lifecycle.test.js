@@ -117,7 +117,7 @@ const Shell = struct {
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
     chat_view_on: bool = false, chat_shell_override: bool = true, full_width_pending_console_resize: bool = false,
-    hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false,
+    hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
 };
 const empty_shell: Shell = .{};
 const MAX_SHELLS = 8;
