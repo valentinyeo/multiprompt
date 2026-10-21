@@ -1,10 +1,10 @@
 const { copyZig } = require('./zig-copy');
-const { test } = require('node:test');
+const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
@@ -13,12 +13,20 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
-function zig(code, filter, state = true, expected = 0) {
+async function zig(code, filter, state = true, expected = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', status => resolve({ status, stdout, stderr }));
+    });
     assert.equal(result.status, expected, result.stdout + result.stderr);
     if (expected === 0) assert.match(result.stderr, /All \d+ tests passed/);
     else assert.match(result.stderr, /expected 15000, found 1000/);
@@ -124,15 +132,16 @@ function runtime(tests) {
   else functions.push('chatReconnectBackoffMs');
   return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
-test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', () => {
+describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
+test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
   if (modern) {
-    zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-501 imported logic" { _ = reconnect; }', 'ISSUE-501');
+    await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-501 imported logic" { _ = reconnect; }', 'ISSUE-501');
   } else {
-    zig('const std = @import("std");\n' + body('chatReconnectBackoffMs') + '\ntest "ISSUE-501 first retry is one second" { try std.testing.expectEqual(@as(u64, 1000), chatReconnectBackoffMs(0)); }', 'ISSUE-501', false);
+    await zig('const std = @import("std");\n' + body('chatReconnectBackoffMs') + '\ntest "ISSUE-501 first retry is one second" { try std.testing.expectEqual(@as(u64, 1000), chatReconnectBackoffMs(0)); }', 'ISSUE-501', false);
   }
 });
-test('ISSUE-501 marking disconnected arms a timer and schedules a delayed retry', () => {
-  zig(runtime(`
+test('ISSUE-501 marking disconnected arms a timer and schedules a delayed retry', async () => {
+  await zig(runtime(`
 test "ISSUE-501 marked disconnected is scheduled" {
     markSshTabDisconnected(0);
     try std.testing.expect(shells[0].disconnected);
@@ -143,8 +152,8 @@ test "ISSUE-501 marked disconnected is scheduled" {
 }
 `), 'ISSUE-501 marked');
 });
-test('ISSUE-501 monitoring survives connected state and detects a missed exit despite offline hint', () => {
-  zig(runtime(`
+test('ISSUE-501 monitoring survives connected state and detects a missed exit despite offline hint', async () => {
+  await zig(runtime(`
 test "ISSUE-501 missed exit" {
     armSshReconnectTimerIfNeeded();
     try std.testing.expect(g_ssh_reconnect_timer_ms != 0);
@@ -160,9 +169,9 @@ test "ISSUE-501 missed exit" {
 }
 `), 'ISSUE-501 missed');
 });
-test('ISSUE-501 manual retry skips wait failure backs off and a closed tab cannot respawn', () => {
+test('ISSUE-501 manual retry skips wait failure backs off and a closed tab cannot respawn', async () => {
   assert.ok(modern, 'manual retry must enter the retry state machine');
-  zig(runtime(`
+  await zig(runtime(`
 test "ISSUE-501 manual and close" {
     markSshTabDisconnected(0);
     spawn_ok = false;
@@ -181,7 +190,7 @@ test "ISSUE-501 manual and close" {
 }
 `), 'ISSUE-501 manual');
 });
-test('ISSUE-501 silent-detach probe and UI reconnect actions are integrated', () => {
+test('ISSUE-501 silent-detach probe and UI reconnect actions are integrated', async () => {
   const tick = body('sshAutoReconnectTick');
   assert.match(tick, /sshProbeFinish\(\)/);
   assert.match(body('sshProbeThread'), /tmux list-clients/);
@@ -203,9 +212,9 @@ test('ISSUE-501 silent-detach probe and UI reconnect actions are integrated', ()
   assert.match(source, /SSH_OPTS = "-o ServerAliveInterval=15 -o ServerAliveCountMax=4 /);
 });
 
-test('ISSUE-501 successful probe detects silent detach while ssh remains alive', () => {
+test('ISSUE-501 successful probe detects silent detach while ssh remains alive', async () => {
   if (!modern) {
-    zig(runtime(`
+    await zig(runtime(`
 test "ISSUE-501 live ssh silent detach" {
     sshAutoReconnectTick();
     try std.testing.expect(shells[0].disconnected);
@@ -235,11 +244,11 @@ test "ISSUE-501 live ssh silent detach" {
     try std.testing.expect(shells[0].ssh_reconnect.next_tick > fake_now);
 }
 `;
-  zig(code, 'ISSUE-501 live');
+  await zig(code, 'ISSUE-501 live');
 });
 
-test('ISSUE-501 offline network hint cannot indefinitely block a scheduled retry', () => {
-  zig(runtime(`
+test('ISSUE-501 offline network hint cannot indefinitely block a scheduled retry', async () => {
+  await zig(runtime(`
 test "ISSUE-501 offline hint" {
     markSshTabDisconnected(0);
     fake_now += 2000;
@@ -314,8 +323,8 @@ ${registration}
 ` + tests;
 }
 
-test('ISSUE-501 exit code 0 after attach routes to reconnect even without a console', () => {
-  zig(startupRuntime(`
+test('ISSUE-501 exit code 0 after attach routes to reconnect even without a console', async () => {
+  await zig(startupRuntime(`
 test "ISSUE-501 clean attach exit" {
     fake_exit_code = 0;
     try std.testing.expect(spawnStartup(.tmux));
@@ -329,8 +338,8 @@ test "ISSUE-501 clean attach exit" {
 `), 'ISSUE-501 clean attach');
 });
 
-test('ISSUE-501 exit during startup routes every remote kind to reconnect', () => {
-  zig(startupRuntime(`
+test('ISSUE-501 exit during startup routes every remote kind to reconnect', async () => {
+  await zig(startupRuntime(`
 test "ISSUE-501 startup exit" {
     for ([_]ShellKind{ .tmux, .vps, .vps2 }) |kind| {
         shells[0] = .{};
@@ -347,8 +356,8 @@ test "ISSUE-501 startup exit" {
   assert.match(body('preserveFailedRemoteSavedTab'), /sshDisconnect\(idx, "restore-spawn-failed"\)/);
 });
 
-test('ISSUE-501 a null-process unclosed tab is probed and reconnected even if another client is attached', () => {
-  zig(probeRuntime(`
+test('ISSUE-501 a null-process unclosed tab is probed and reconnected even if another client is attached', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-501 null child probe" {
     fake_now = 10000;
     shells[0].process = null;
@@ -380,9 +389,9 @@ test "ISSUE-501 null child poll" {
 `), 'ISSUE-501 null child');
 });
 
-test('ISSUE-501 a stuck probe is abandoned after timeout and the next probe runs', () => {
+test('ISSUE-501 a stuck probe is abandoned after timeout and the next probe runs', async () => {
   const bounded = body('sshProbeFinish').includes('owners.fetchSub');
-  zig(probeRuntime(`
+  await zig(probeRuntime(`
 test "ISSUE-501 stuck probe turnover" {
     fake_now = 10000;
     sshProbeStart();
@@ -413,8 +422,8 @@ test "ISSUE-501 stuck probe turnover" {
 `), 'ISSUE-501 stuck');
 });
 
-test('ISSUE-501 user close does not reconnect or probe on late exit or missing child', () => {
-  zig(probeRuntime(`
+test('ISSUE-501 user close does not reconnect or probe on late exit or missing child', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-501 user close" {
     fake_now = 10000;
     shells[0].ssh_reconnect.close();
@@ -439,14 +448,14 @@ test "ISSUE-501 user close" {
   }
 });
 
-test('ISSUE-501 exit events reconnect every remote kind for clean and failed exits in every phase', () => {
+test('ISSUE-501 exit events reconnect every remote kind for clean and failed exits in every phase', async () => {
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
   const start = main.indexOf('        WM_APP_SHELL_EXITED => {');
   const end = main.indexOf('        @import("win32.zig").WM_TIMECHANGE => {', start);
   assert.ok(start >= 0 && end > start);
   const handler = main.slice(start, end).replace('WM_APP_SHELL_EXITED => {', 'fn dispatchExit(wp: usize) u32 {')
     .replace(/},\s*$/, '}').replaceAll('app_state.', '').replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect').replaceAll('@import("win32.zig").STILL_ACTIVE', '259');
-  zig(runtime('') + `
+  await zig(runtime('') + `
 const ISSUE_350_KEEP_TMUX_TABS = true;
 const g_resume_until_tick: u64 = 0;
 fn sshSpawnFailed() void {}
@@ -493,7 +502,7 @@ test "ISSUE-511 reused id ignores late exit for live replacement" {
 `, '');
 });
 
-test('ISSUE-501 production probe worker handles host indices BatchMode failure and abandoned ownership', () => {
+test('ISSUE-501 production probe worker handles host indices BatchMode failure and abandoned ownership', async () => {
   const worker = body('sshProbeThread').replaceAll('@import("console.zig")', 'probeConsole').replaceAll('@import("vps.zig")', 'probeVps');
   const code = probeRuntime('').replace('fn sshProbeThread(_: *SshProbeJob) void {}', worker) + `
 var capture_count: usize = 0;
@@ -609,11 +618,11 @@ test "ISSUE-501 worker releases abandoned allocation" {
     try std.testing.expectEqual(before, capture_count);
 }
 `;
-  zig(code, 'worker');
+  await zig(code, 'worker');
 });
 
 
-test('ISSUE-511 restored tabs cap in-flight reconnects at three per host and one new start per tick', () => {
+test('ISSUE-511 restored tabs cap in-flight reconnects at three per host and one new start per tick', async () => {
   const code = runtime(`
 test "ISSUE-511 forty restored tabs" {
     for (&shells, 0..) |*shell, i| {
@@ -637,16 +646,16 @@ test "ISSUE-511 forty restored tabs" {
 }
 `).replace('var shells = [_]Shell{.{}};', 'var shells: [40]Shell = @splat(.{});')
     .replace('var shell_count: u32 = 1;', 'var shell_count: u32 = 40;');
-  zig(code, 'ISSUE-511 forty');
+  await zig(code, 'ISSUE-511 forty');
 });
 
-test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', () => {
-  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-521 imported logic" { _ = reconnect; }', 'ISSUE-521');
+test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', async () => {
+  await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-521 imported logic" { _ = reconnect; }', 'ISSUE-521');
 });
 
 
-test('ISSUE-521 fast attach failure waits for probe and ended tabs stay stopped until explicit restart', () => {
-  zig(probeRuntime(`
+test('ISSUE-521 fast attach failure waits for probe and ended tabs stay stopped until explicit restart', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-521 confirmed gone stops and restarts" {
     fake_now = 10000;
     shells[0] = .{ .spawn_tick = 9999 };
@@ -688,8 +697,8 @@ test "ISSUE-521 confirmed gone stops and restarts" {
 `), 'ISSUE-521 confirmed');
 });
 
-test('ISSUE-511 failed or session-present probes release the attach exit pause', () => {
-  zig(probeRuntime(`
+test('ISSUE-511 failed or session-present probes release the attach exit pause', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-511 completed probe releases retry" {
     for ([_]bool{ false, true }) |healthy| {
         fake_now = 10000;
@@ -715,8 +724,8 @@ test "ISSUE-511 completed probe releases retry" {
 `), 'ISSUE-511 completed probe');
 });
 
-test('ISSUE-511 an unavailable probe cannot pause attach exit retries indefinitely', () => {
-  zig(runtime(`
+test('ISSUE-511 an unavailable probe cannot pause attach exit retries indefinitely', async () => {
+  await zig(runtime(`
 test "ISSUE-511 bounded probe wait" {
     fake_now = 10000;
     shells[0] = .{ .spawn_tick = fake_now - 1 };
@@ -735,8 +744,8 @@ test "ISSUE-511 bounded probe wait" {
 });
 
 
-test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', () => {
-  zig(runtime(`
+test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', async () => {
+  await zig(runtime(`
 test "ISSUE-512 recovered tab has no stale global notice" {
     shells[0].locked = true;
     markSshTabDisconnected(0);
@@ -748,8 +757,8 @@ test "ISSUE-512 recovered tab has no stale global notice" {
 `), 'ISSUE-512');
 });
 
-test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', () => {
-  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
+test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', async () => {
+  await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
   const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
   const paint = body('paintDisconnectedNotice', drawing);
   assert.match(paint, /shells\[app_state\.active_shell\]/);
@@ -758,8 +767,8 @@ test('ISSUE-512 pure notice policy and active-tab rendering use recovery state i
   assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
 });
 
-test('ISSUE-512 debounced warnings refresh only the header and stop after recovery', () => {
-  zig(runtime(`
+test('ISSUE-512 debounced warnings refresh only the header and stop after recovery', async () => {
+  await zig(runtime(`
 test "ISSUE-512 quiet warning refresh" {
     shells[0].process = null;
     shells[0].disconnected = true;
@@ -791,8 +800,8 @@ test "ISSUE-512 quiet warning refresh" {
   assert.match(paint, /const text = if \(shell\.ssh_reconnect\.phase == \.ended\)\s*"Session ended"\s*else if \(shell\.ssh_reconnect\.noticeReason/);
 });
 
-test('ISSUE-513 synthetic chat tabs never enter SSH recovery or repaint while idle', () => {
-  zig(runtime(`
+test('ISSUE-513 synthetic chat tabs never enter SSH recovery or repaint while idle', async () => {
+  await zig(runtime(`
 test "ISSUE-513 fixture recovery isolation" {
     fixture = true;
     shells[0].process = null;
@@ -820,8 +829,8 @@ test "ISSUE-513 fixture recovery isolation" {
 `), 'ISSUE-513 fixture');
 });
 
-test('ISSUE-513 disconnected countdown repaints only its header and respects backoff', () => {
-  zig(runtime(`
+test('ISSUE-513 disconnected countdown repaints only its header and respects backoff', async () => {
+  await zig(runtime(`
 test "ISSUE-513 bounded countdown repaint" {
     shells[0].process = null;
     shells[0].disconnected = true;
@@ -845,8 +854,8 @@ test "ISSUE-513 bounded countdown repaint" {
 `), 'ISSUE-513 bounded');
 });
 
-test('ISSUE-513 connected idle monitoring does not respawn or repaint', () => {
-  zig(runtime(`
+test('ISSUE-513 connected idle monitoring does not respawn or repaint', async () => {
+  await zig(runtime(`
 test "ISSUE-513 connected idle" {
     for (0..120) |_| {
         fake_now += 1000;
@@ -859,8 +868,8 @@ test "ISSUE-513 connected idle" {
 `), 'ISSUE-513 connected');
 });
 
-test('ISSUE-511 a probe requested during an old job runs immediately for a newly spawned awaiting tab', () => {
-  zig(probeRuntime(`
+test('ISSUE-511 a probe requested during an old job runs immediately for a newly spawned awaiting tab', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-511 pending urgent probe" {
     fake_now = 10000;
     sshProbeStart();
@@ -885,8 +894,8 @@ test "ISSUE-511 pending urgent probe" {
 `), 'ISSUE-511 pending urgent');
 });
 
-test('ISSUE-511 repeated gone results cannot kill a live transport or end a creating or never-attached tab', () => {
-  zig(probeRuntime(`
+test('ISSUE-511 repeated gone results cannot kill a live transport or end a creating or never-attached tab', async () => {
+  await zig(probeRuntime(`
 test "ISSUE-511 protected gone results" {
     fake_now = 10000;
     for (0..4) |mode| {
@@ -969,14 +978,15 @@ test "ISSUE-513 pending probes and reconnects keep one-second monitoring and clo
 }
 `;
 
-test('ISSUE-513 production idle reconnect scheduler coalesces healthy checks but keeps recovery responsive', () => {
-  zig(runtime(idleTimerChecks), 'ISSUE-513 healthy');
-  zig(runtime(idleTimerChecks), 'ISSUE-513 pending');
-  zig(runtime(idleTimerChecks), 'ISSUE-513 manual');
+test('ISSUE-513 production idle reconnect scheduler coalesces healthy checks but keeps recovery responsive', async () => {
+  await zig(runtime(idleTimerChecks), 'ISSUE-513 healthy');
+  await zig(runtime(idleTimerChecks), 'ISSUE-513 pending');
+  await zig(runtime(idleTimerChecks), 'ISSUE-513 manual');
 });
 
-test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy reconnect timer', () => {
+test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy reconnect timer', async () => {
   const original = body('armSshReconnectTimerIfNeeded', fs.readFileSync(path.join(__dirname, 'fixtures/issue-513-reconnect-before.zig'), 'utf8')).replaceAll('app_state.', '');
   const code = runtime(idleTimerChecks).replace(body('armSshReconnectTimerIfNeeded'), original) + '\nvar g_ssh_reconnect_timer_on = false;\n';
-  zig(code, 'ISSUE-513 healthy', true, 1);
+  await zig(code, 'ISSUE-513 healthy', true, 1);
+});
 });

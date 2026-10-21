@@ -1,10 +1,10 @@
 const { copyZig } = require('./zig-copy');
-const { test } = require('node:test');
+const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const main = fs.readFileSync(path.join(__dirname, '../src/main.zig'), 'utf8');
 const root = path.resolve(__dirname, '..');
@@ -14,12 +14,20 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
-function zig(code, filter, state = true) {
+async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
+    if (files.length) copyZig(files, dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', status => resolve({ status, stdout, stderr }));
+    });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
   } finally {
@@ -110,11 +118,12 @@ function armRuntime(tests) {
   return runtime(tests);
 }
 
-for (const kind of ['tmux', 'vps', 'vps2']) {
-  test(`ISSUE-501 ${kind} link exit routes to single reconnect arm`, () => {
-    assert.match(body('markSshTabDisconnected'), /sshReconnectArm\(idx,/);
-    assert.match(main, /if \(is_ssh_kind\) \{\s*@import\("chat_send.zig"\).sshDisconnect\(idx, "process-exit-event"\)/);
-    zig(armRuntime(`
+describe('SSH clock and standby', { concurrency: os.availableParallelism() }, () => {
+  for (const kind of ['tmux', 'vps', 'vps2']) {
+    test(`ISSUE-501 ${kind} link exit routes to single reconnect arm`, async () => {
+      assert.match(body('markSshTabDisconnected'), /sshReconnectArm\(idx,/);
+      assert.match(main, /if \(is_ssh_kind\) \{\s*@import\("chat_send.zig"\).sshDisconnect\(idx, "process-exit-event"\)/);
+      await zig(armRuntime(`
 test "ISSUE-501 link exit" {
     shells[0].kind = .${kind};
     markSshTabDisconnected(0);
@@ -128,16 +137,16 @@ test "ISSUE-501 link exit" {
     try std.testing.expectEqual(@as(usize, 1), spawns);
 }
 `), 'ISSUE-501 link exit');
-  });
-}
+    });
+  }
 
-function dispatchRuntime() {
-  assert.ok(modern, 'reconnect state and single arm must exist');
-  const time = main.slice(main.indexOf('        @import("win32.zig").WM_TIMECHANGE => {'), main.indexOf('        WM_POWERBROADCAST => {'));
-  assert.match(time, /sshReconnectArm\(null, "time-change"\)/);
-  const power = main.slice(main.indexOf('        WM_POWERBROADCAST => {'), main.indexOf('        WM_ACTIVATEAPP => {'));
-  const dispatch = (time + power).replaceAll('app_state.', '').replaceAll('@import("win32.zig").WM_TIMECHANGE', 'WM_TIMECHANGE').replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm');
-  return armRuntime('') + `
+  function dispatchRuntime() {
+    assert.ok(modern, 'reconnect state and single arm must exist');
+    const time = main.slice(main.indexOf('        @import("win32.zig").WM_TIMECHANGE => {'), main.indexOf('        WM_POWERBROADCAST => {'));
+    assert.match(time, /sshReconnectArm\(null, "time-change"\)/);
+    const power = main.slice(main.indexOf('        WM_POWERBROADCAST => {'), main.indexOf('        WM_ACTIVATEAPP => {'));
+    const dispatch = (time + power).replaceAll('app_state.', '').replaceAll('@import("win32.zig").WM_TIMECHANGE', 'WM_TIMECHANGE').replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm');
+    return armRuntime('') + `
 const win = @import("win32.zig");
 const WM_TIMECHANGE = win.WM_TIMECHANGE;
 const WM_POWERBROADCAST = win.WM_POWERBROADCAST;
@@ -173,20 +182,20 @@ ${dispatch}
     }
 }
 `;
-}
+  }
 
-for (const trigger of [
-  ['time change clock', '_ = dispatch(g_main_hwnd, WM_TIMECHANGE, 0, 0);'],
-  ['standby power-setting display-on', `var setting = std.mem.zeroes(POWERBROADCAST_SETTING); setting.PowerSetting = GUID_CONSOLE_DISPLAY_STATE; setting.DataLength = 4; setting.Data[0] = 1; _ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE, @intCast(@intFromPtr(&setting)));`],
-  ['standby PBT automatic resume', '_ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);'],
-  ['standby PBT suspend resume', '_ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_APMRESUMESUSPEND, 0);'],
-]) {
-  test(`ISSUE-501 ${trigger[0]} routes to single reconnect arm without killing healthy tabs`, () => {
-    const handler = trigger[0].startsWith('time') ? main.slice(main.indexOf('WM_TIMECHANGE'), main.indexOf('        WM_POWERBROADCAST => {')) : main.slice(main.indexOf('        WM_POWERBROADCAST => {'), main.indexOf('        WM_ACTIVATEAPP => {'));
-    assert.match(handler, trigger[0].includes('display-on') ? /sshReconnectArm\(null, "standby-display-on"\)/ : trigger[0].startsWith('time') ? /sshReconnectArm\(null, "time-change"\)/ : /sshReconnectArm\(null, "power-resume"\)/);
-    const power = fs.readFileSync(path.join(root, 'src/power.zig'), 'utf8');
-    assert.match(power, /RegisterPowerSettingNotification\(hwnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE\)/);
-    copyDispatch(`
+  for (const trigger of [
+    ['time change clock', '_ = dispatch(g_main_hwnd, WM_TIMECHANGE, 0, 0);'],
+    ['standby power-setting display-on', `var setting = std.mem.zeroes(POWERBROADCAST_SETTING); setting.PowerSetting = GUID_CONSOLE_DISPLAY_STATE; setting.DataLength = 4; setting.Data[0] = 1; _ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE, @intCast(@intFromPtr(&setting)));`],
+    ['standby PBT automatic resume', '_ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);'],
+    ['standby PBT suspend resume', '_ = dispatch(g_main_hwnd, WM_POWERBROADCAST, PBT_APMRESUMESUSPEND, 0);'],
+  ]) {
+    test(`ISSUE-501 ${trigger[0]} routes to single reconnect arm without killing healthy tabs`, async () => {
+      const handler = trigger[0].startsWith('time') ? main.slice(main.indexOf('WM_TIMECHANGE'), main.indexOf('        WM_POWERBROADCAST => {')) : main.slice(main.indexOf('        WM_POWERBROADCAST => {'), main.indexOf('        WM_ACTIVATEAPP => {'));
+      assert.match(handler, trigger[0].includes('display-on') ? /sshReconnectArm\(null, "standby-display-on"\)/ : trigger[0].startsWith('time') ? /sshReconnectArm\(null, "time-change"\)/ : /sshReconnectArm\(null, "power-resume"\)/);
+      const power = fs.readFileSync(path.join(root, 'src/power.zig'), 'utf8');
+      assert.match(power, /RegisterPowerSettingNotification\(hwnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE\)/);
+      await copyDispatch(`
 test "ISSUE-501 ${trigger[0]}" {
     ssh_probe_next_tick = 90000;
     ${trigger[1]}
@@ -210,25 +219,16 @@ test "ISSUE-501 ${trigger[0]}" {
     try std.testing.expectEqual(@as(u8, 1), shells[0].ssh_reconnect.attempts);
 }
 `);
-  });
-}
-
-function copyDispatch(tests) {
-  const code = dispatchRuntime() + tests;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-dispatch-'));
-  try {
-    copyZig(['ssh_reconnect.zig', 'win32.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), code);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-501'], { encoding: 'utf8', timeout: 120000 });
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    });
   }
-}
 
-test('ISSUE-501 duplicate link and manual triggers do not multiply attempts or children', () => {
-  if (!modern) {
-    zig(runtime('') + body('reconnectSshTabsAfterResume') + `
+  async function copyDispatch(tests) {
+    await zig(dispatchRuntime() + tests, 'ISSUE-501', ['ssh_reconnect.zig', 'win32.zig']);
+  }
+
+  test('ISSUE-501 duplicate link and manual triggers do not multiply attempts or children', async () => {
+    if (!modern) {
+      await zig(runtime('') + body('reconnectSshTabsAfterResume') + `
 var g_refocus_remaining: u32 = 0;
 const TIMER_REFOCUS = 2;
 fn appendDecimal(_: []u8, _: *usize, _: anytype) void {}
@@ -237,9 +237,9 @@ test "ISSUE-501 duplicate baseline resume" {
     try std.testing.expect(spawns <= 1);
 }
 `, 'ISSUE-501 duplicate');
-    return;
-  }
-  zig(armRuntime(`
+      return;
+    }
+    await zig(armRuntime(`
 test "ISSUE-501 duplicate triggers" {
     markSshTabDisconnected(0);
     fake_now = shells[0].ssh_reconnect.next_tick;
@@ -254,10 +254,10 @@ test "ISSUE-501 duplicate triggers" {
     try std.testing.expectEqual(@as(u8, 1), shells[0].ssh_reconnect.attempts);
 }
 `), 'ISSUE-501 duplicate');
-});
+  });
 
-test('ISSUE-501 stale Windows network veto logs tab reason and expires within one backoff step', () => {
-  zig(runtime(`
+  test('ISSUE-501 stale Windows network veto logs tab reason and expires within one backoff step', async () => {
+    await zig(runtime(`
 test "ISSUE-501 stale network veto" {
     markSshTabDisconnected(0);
     fake_now = ${modern ? 'shells[0].ssh_reconnect.next_tick' : '10000'};
@@ -275,11 +275,11 @@ test "ISSUE-501 stale network veto" {
     try std.testing.expectEqual(@as(usize, 1), spawns);
 }
 `), 'ISSUE-501 stale');
-});
+  });
 
-for (const jump of [-3_600_000, 3_600_000]) {
-  test(`ISSUE-501 clock jump ${jump} leaves monotonic outbox timeout unchanged`, () => {
-    const code = `
+  for (const jump of [-3_600_000, 3_600_000]) {
+    test(`ISSUE-501 clock jump ${jump} leaves monotonic outbox timeout unchanged`, async () => {
+      const code = `
 const std = @import("std");
 const chat_echo = @import("chat_echo.zig");
 const Entry = struct {
@@ -324,30 +324,23 @@ test "ISSUE-501 injected clock jump" {
     try std.testing.expectEqual(chat_echo.OutboxState.not_sent, storage[0].state);
 }
 `;
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-clock-'));
-    try {
-      copyZig(['chat_echo.zig'], dir);
-      fs.writeFileSync(path.join(dir, 'test.zig'), code);
-      const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-501 injected'], { encoding: 'utf8', timeout: 120000 });
-      assert.equal(result.status, 0, result.stdout + result.stderr);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-}
-
-test('ISSUE-501 clock audit keeps confirmation and VPS deadlines monotonic', () => {
-  const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
-  const history = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
-  const vps = fs.readFileSync(path.join(root, 'src/vps.zig'), 'utf8');
-  for (const name of ['chatOutboxTick', 'chatEchoMatchActive', 'chatTmuxSettle', 'chatFullSettleStart', 'sshAutoReconnectTick']) {
-    assert.match(body(name), /GetTickCount64\(\)/, name);
-    assert.doesNotMatch(body(name), /nowFileTime\(\)/, name);
+      await zig(code, 'ISSUE-501 injected', ['chat_echo.zig']);
+    });
   }
-  assert.match(history, /entry.loaded_ms = @intCast\(GetTickCount64\(\)\)/);
-  assert.doesNotMatch(body('chatSendVerifyTick'), /nowFileTime\(\)/);
-  assert.doesNotMatch(body('chatEchoSendAgain'), /nowFileTime\(\)/);
-  assert.doesNotMatch(vps, /GetSystemTimeAsFileTime/);
-  assert.match(vps, /GetTickCount64\(\) - last_activity >= timeout_ms/);
-  assert.match(send, /entry.sent_tick_ms = @intCast\(GetTickCount64\(\)\)/);
+
+  test('ISSUE-501 clock audit keeps confirmation and VPS deadlines monotonic', () => {
+    const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
+    const history = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
+    const vps = fs.readFileSync(path.join(root, 'src/vps.zig'), 'utf8');
+    for (const name of ['chatOutboxTick', 'chatEchoMatchActive', 'chatTmuxSettle', 'chatFullSettleStart', 'sshAutoReconnectTick']) {
+      assert.match(body(name), /GetTickCount64\(\)/, name);
+      assert.doesNotMatch(body(name), /nowFileTime\(\)/, name);
+    }
+    assert.match(history, /entry.loaded_ms = @intCast\(GetTickCount64\(\)\)/);
+    assert.doesNotMatch(body('chatSendVerifyTick'), /nowFileTime\(\)/);
+    assert.doesNotMatch(body('chatEchoSendAgain'), /nowFileTime\(\)/);
+    assert.doesNotMatch(vps, /GetSystemTimeAsFileTime/);
+    assert.match(vps, /GetTickCount64\(\) - last_activity >= timeout_ms/);
+    assert.match(send, /entry.sent_tick_ms = @intCast\(GetTickCount64\(\)\)/);
+  });
 });
