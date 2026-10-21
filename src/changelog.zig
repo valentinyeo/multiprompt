@@ -54,6 +54,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.773", .items = &.{
+        .{ .text = "Drop or paste files into Chat View to send them to your server and insert their paths.", .ticket = "IGSH-393" },
+    } },
     .{ .ver = "0.28.772", .items = &.{
         .{ .text = "IBM Plex Sans now appears throughout the desktop, with real bold and italic text.", .ticket = "IGSH-443" },
         .{ .text = "Shells and Chat View code use Nordwand Mono SemiBold at the same size as before.", .ticket = "IGSH-443" },
