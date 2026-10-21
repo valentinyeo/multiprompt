@@ -505,6 +505,7 @@ pub fn uninstallKeyboardHook() void {
     app_state.g_palette_chord_held = false;
     app_state.g_favorite_chord_held = false;
     app_state.g_screenshot_chord_held = false;
+    app_state.g_tab_url_chord_held = false;
     if (app_state.g_hook != null) {
         _ = UnhookWindowsHookEx(app_state.g_hook);
         app_state.g_hook = null;
