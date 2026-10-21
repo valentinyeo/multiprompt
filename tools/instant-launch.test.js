@@ -13,7 +13,8 @@ function verifyStartup(main, cache, account, transcript) {
   assert.ok(entry.indexOf('launch_cache.restore();') < entry.indexOf('UpdateWindow(hwnd)'));
   assert.ok(entry.indexOf('UpdateWindow(hwnd)') < entry.indexOf('while (GetMessageW('));
   assert.doesNotMatch(entry, /accountBootstrap\(hwnd\)|ensureUsageTelemetryCollector\(\)|maintainTunnelKeepers\(\)|restoreSession\(\)|relaunchActiveRestoredBrowserPane\(\)/);
-  assert.match(main, /if \(msg == launch_cache.WM_DEFERRED\) \{[\s\S]*?launch_cache\.deferred\(\);\s*initializeDeferred\(hwnd\);/);
+  assert.match(main, /if \(msg == launch_cache.WM_DEFERRED\) \{[\s\S]*?SetTimer\(hwnd, launch_cache\.TIMER_STARTUP/);
+  assert.match(main, /if \(msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP\)[\s\S]*?initializeDeferred\(hwnd\)/);
   assert.match(cache, /if \(!sidebar_painted or \(cached and state\.g_chat_active and !chat_painted\)\) return;[\s\S]*?step\(\.paint\);[\s\S]*?PostMessageW\(state\.g_main_hwnd, WM_DEFERRED/);
   assert.match(main, /EndPaint\(hwnd, &ps\);\s*launch_cache\.painted\(false\);/);
   assert.match(transcript, /EndPaint\(hwnd, &ps\);[\s\S]*?if \(painted\) @import\("launch_cache.zig"\)\.painted\(true\);/);

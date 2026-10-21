@@ -1289,6 +1289,86 @@ test "ISSUE-439 restore seeds missing active workspace memory without replacing 
     try std.testing.expectEqual(@as(u32, 41), last_shell[1]);
 }
 
+var startup_bytes: ?[]u8 = null;
+var startup_parsed: ?std.json.Parsed(std.json.Value) = null;
+var startup_ready = std.atomic.Value(bool).init(false);
+
+pub fn prepareStartupRestore() bool {
+    var path_buf: [512]u8 = @splat(0);
+    const path = getSessionPath(&path_buf) orelse return false;
+    const thread = std.Thread.spawn(.{}, startupRestoreWorker, .{ path_buf, path.len }) catch return false;
+    thread.detach();
+    return true;
+}
+
+fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
+    _ = @import("console.zig").resolveSshPath(false);
+    startup_bytes = readSessionBytes(path_buf[0..len]);
+    if (startup_bytes) |bytes| {
+        startup_parsed = json_reader.parse(std.heap.page_allocator, bytes) catch null;
+        if (startup_parsed) |parsed| {
+            const tabs = std.heap.page_allocator.alloc(SavedTab, MAX_SHELLS) catch {
+                startup_ready.store(true, .release);
+                return;
+            };
+            defer std.heap.page_allocator.free(tabs);
+            const count = json_reader.sessionTabs(parsed.value, tabs, MAX_LWS);
+            for (tabs[0..count]) |tab| {
+                if (tab.pid != 0 and !tab.keep_alive) killProcessTree(tab.pid);
+            }
+        }
+    }
+    startup_ready.store(true, .release);
+}
+
+pub fn startupRestoreReady() bool {
+    return startup_ready.load(.acquire);
+}
+
+fn readSessionBytes(path: []const u8) ?[]u8 {
+    const json_buf = std.heap.page_allocator.alloc(u8, SESSION_JSON_CAPACITY) catch return null;
+    defer std.heap.page_allocator.free(json_buf);
+    var json_len: usize = 0;
+    {
+        const h = win32OpenRead(path) orelse {
+            debugLog("restoreSession:no-session-file");
+            return null;
+        };
+        json_len = win32ReadAll(h, json_buf);
+        _ = CloseHandle(h);
+    }
+    if (json_len == 0) {
+        debugLog("restoreSession:empty-session-file");
+        return null;
+    }
+
+    if (!sessionFileIsValid(json_buf[0..json_len])) {
+        var arch_buf: [540]u8 = undefined;
+        const arch_path = std.fmt.bufPrint(&arch_buf, "{s}.corrupt-{d}", .{ path, GetTickCount64() }) catch "";
+        if (arch_path.len > 0) _ = win32MovePath(path, arch_path);
+        debugLog("restoreSession:corrupt-main-archived-trying-bak");
+        debugLog("restoreSession: main session file failed validity check — archived, trying .bak");
+        var bak_pbuf: [520]u8 = undefined;
+        const bak_path_str = std.fmt.bufPrint(&bak_pbuf, "{s}.bak", .{path}) catch "";
+        json_len = 0;
+        if (bak_path_str.len > 0) {
+            if (win32OpenRead(bak_path_str)) |bh| {
+                json_len = win32ReadAll(bh, json_buf);
+                _ = CloseHandle(bh);
+            }
+        }
+        if (json_len == 0 or !sessionFileIsValid(json_buf[0..json_len])) {
+            debugLog("restoreSession:corrupt-main-and-bak-zero-tabs");
+            debugLog("restoreSession: .bak also invalid or missing — starting with zero tabs");
+            return null;
+        }
+        debugLog("restoreSession:restored-from-bak");
+        debugLog("restoreSession: successfully restored from .bak");
+    }
+
+    return std.heap.page_allocator.dupe(u8, json_buf[0..json_len]) catch null;
+}
+
 pub fn restoreSession() u32 {
     if (app_state.g_account_locked) return 0;
     app_state.g_restored_valid_session = false;
@@ -1305,46 +1385,20 @@ pub fn restoreSession() u32 {
         return 0;
     };
 
-    var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
-    var json_len: usize = 0;
-    {
-        const h = win32OpenRead(path) orelse {
-            logSessionAudit("restoreSession:no-session-file");
-            return 0;
-        };
-        json_len = win32ReadAll(h, &json_buf);
-        _ = CloseHandle(h);
-    }
-    if (json_len == 0) {
-        logSessionAudit("restoreSession:empty-session-file");
-        return 0;
-    }
+    const json_buf = if (@import("launch_cache.zig").pending and startupRestoreReady()) ready: {
+        const bytes = startup_bytes;
+        startup_bytes = null;
+        break :ready bytes;
+    } else readSessionBytes(path);
+    const bytes = json_buf orelse return 0;
+    defer std.heap.page_allocator.free(bytes);
 
-    if (!sessionFileIsValid(json_buf[0..json_len])) {
-        var arch_buf: [540]u8 = undefined;
-        const arch_path = std.fmt.bufPrint(&arch_buf, "{s}.corrupt-{d}", .{ path, GetTickCount64() }) catch "";
-        if (arch_path.len > 0) _ = win32MovePath(path, arch_path);
-        logSessionAuditAlways("restoreSession:corrupt-main-archived-trying-bak");
-        debugLog("restoreSession: main session file failed validity check — archived, trying .bak");
-        var bak_pbuf: [520]u8 = undefined;
-        const bak_path_str = std.fmt.bufPrint(&bak_pbuf, "{s}.bak", .{path}) catch "";
-        json_len = 0;
-        if (bak_path_str.len > 0) {
-            if (win32OpenRead(bak_path_str)) |bh| {
-                json_len = win32ReadAll(bh, &json_buf);
-                _ = CloseHandle(bh);
-            }
-        }
-        if (json_len == 0 or !sessionFileIsValid(json_buf[0..json_len])) {
-            logSessionAuditAlways("restoreSession:corrupt-main-and-bak-zero-tabs");
-            debugLog("restoreSession: .bak also invalid or missing — starting with zero tabs");
-            return 0;
-        }
-        logSessionAuditAlways("restoreSession:restored-from-bak");
-        debugLog("restoreSession: successfully restored from .bak");
-    }
-
-    var parsed = json_reader.parse(std.heap.page_allocator, json_buf[0..json_len]) catch return 0;
+    const prepared = @import("launch_cache.zig").pending and startupRestoreReady();
+    var parsed = if (prepared) ready: {
+        const value = startup_parsed;
+        startup_parsed = null;
+        break :ready value orelse return 0;
+    } else json_reader.parse(std.heap.page_allocator, bytes) catch return 0;
     defer parsed.deinit();
     const json = parsed.value;
 
@@ -1477,7 +1531,7 @@ pub fn restoreSession() u32 {
         }
     }
 
-    for (0..tab_count) |t| {
+    for (0..if (prepared) 0 else tab_count) |t| {
         if (tabs[t].pid != 0 and !tabs[t].keep_alive) {
             const orphan = OpenProcess(PROCESS_TERMINATE, 0, tabs[t].pid);
             if (orphan != null) {
@@ -1560,6 +1614,16 @@ pub fn restoreSession() u32 {
         }
     }
 
+    const selected_chat = @import("launch_cache.zig").selected_chat_id;
+    if (@import("launch_cache.zig").pending and selected_chat != 0) {
+        for (app_state.shells[0..app_state.shell_count], 0..) |shell, i| {
+            if (shell.chat_id == selected_chat) {
+                app_state.active_shell = @intCast(i);
+                app_state.g_active_workspace = shell.workspace;
+                break;
+            }
+        }
+    }
     seedActiveWorkspaceLastShell(app_state.shells[0..app_state.shell_count], app_state.active_shell, &app_state.g_ws_last_shell);
 
     if (spawned > 0 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
@@ -1573,12 +1637,27 @@ pub fn restoreSession() u32 {
         var lg_buf: [520]u8 = undefined;
         const lg_path = std.fmt.bufPrint(&lg_buf, "{s}.lastgood", .{path}) catch "";
         if (lg_path.len > 0) {
-            if (win32OpenWrite(lg_path)) |lh| {
-                win32WriteAll(lh, json_buf[0..json_len]);
+            if (prepared) {
+                if (std.heap.page_allocator.dupe(u8, bytes)) |copy| {
+                    const thread = std.Thread.spawn(.{}, writeStartupLastgood, .{ lg_buf, lg_path.len, copy }) catch {
+                        std.heap.page_allocator.free(copy);
+                        return spawned;
+                    };
+                    thread.detach();
+                } else |_| {}
+            } else if (win32OpenWrite(lg_path)) |lh| {
+                win32WriteAll(lh, bytes);
                 _ = CloseHandle(lh);
             }
         }
     }
 
     return spawned;
+}
+
+fn writeStartupLastgood(path_buf: [520]u8, len: usize, bytes: []u8) void {
+    defer std.heap.page_allocator.free(bytes);
+    const file = win32OpenWrite(path_buf[0..len]) orelse return;
+    defer _ = CloseHandle(file);
+    win32WriteAll(file, bytes);
 }

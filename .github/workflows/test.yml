@@ -22,6 +22,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Verify responsive startup ordering and original regression controls
+        env:
+          STARTUP_BEFORE_REF: 508459a0022bb944a152d4f897d196d27dbb5455
+        run: node --test tools/startup-responsive.test.js
       - name: Classify changed paths
         id: paths
         shell: bash

@@ -1064,7 +1064,22 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     submitted = app_state.g_account_busy;
 }
 
+var startup_reply: LPARAM = 0;
+
+pub fn resumeStartupReply() void {
+    const reply = startup_reply;
+    startup_reply = 0;
+    if (reply != 0) handleLayoutReply(reply);
+}
+
 pub fn handleLayoutReply(lp: LPARAM) void {
+    if (lp != 0 and @import("launch_cache.zig").pending) {
+        const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (!reply.unauthorized and !reply.signed_out and reply.job.kind == .startup) {
+            startup_reply = lp;
+            return;
+        }
+    }
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
@@ -1350,10 +1365,6 @@ pub fn accountClaim(hwnd: HANDLE) bool {
 
 pub fn accountBootstrap(hwnd: HANDLE) bool {
     if (app_state.g_account_bypass) return true;
-    if (readDpapiFile("account-device.dat", 16384)) |token| {
-        app_state.g_account_has_token = true;
-        freeSecret(token);
-    }
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
     startAccountJob(accountResumeJob(.startup));
