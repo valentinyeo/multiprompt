@@ -54,6 +54,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.770", .items = &.{
+        .{ .text = "Selecting chat text now follows the mouse smoothly across messages, tables, lists, and code.", .ticket = "IGSH-438" },
+        .{ .text = "Double-click selects a word and triple-click selects the paragraph under the mouse.", .ticket = "IGSH-438" },
+        .{ .text = "Copy keeps the selected text highlighted, and right-click Copy copies the message when no text is selected.", .ticket = "IGSH-438" },
+    } },
     .{ .ver = "0.28.769", .items = &.{
         .{ .text = "Your servers follow your account to a new computer without replacing servers you already set up there.", .ticket = "IGSH-422" },
     } },
