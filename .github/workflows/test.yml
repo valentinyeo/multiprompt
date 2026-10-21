@@ -102,10 +102,10 @@ jobs:
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
             ${{ runner.temp }}/zig-x86_64-windows-0.16.0
-          key: ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
-            ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -115,7 +115,8 @@ jobs:
             Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
             $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
             if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+            tar -xf $zip -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
@@ -158,10 +159,10 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v1-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-
-            ${{ runner.os }}-zig-0.16.0-vps-
+            ${{ runner.os }}-zig-0.16.0-shards-v1-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v1-vps-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |

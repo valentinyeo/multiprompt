@@ -566,9 +566,9 @@ pub fn build(b: *std.Build) void {
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step)
             0
-        else if (dependency == &chat_view_gaps_tests.step)
+        else if (dependency == &chat_view_gaps_tests.step or dependency == &chat_cpu_regression.step or dependency == &run_chat_perf_tests.step)
             1
-        else if (dependency == &chat_cpu_regression.step or dependency == &ssh_reconnect_tests.step or
+        else if (dependency == &ssh_reconnect_tests.step or
             dependency == &frequent_integration_tests.step or dependency == &chat_drop_tests.step or
             dependency == &chat_switch_tests.step or dependency == &reply_quote_tests.step or
             dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
