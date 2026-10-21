@@ -413,20 +413,24 @@ try {
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
             $initial = Read-Session
             if (@($initial.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' }).Count -ne 0) { throw 'verify-1 already exists before the journey' }
-            $groupCount = 0
-            if ($initial.PSObject.Properties['groups']) { $groupCount = @($initial.groups).Count }
+            $initialGroupIds = @()
+            if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
+            $groupCount = $initialGroupIds.Count
             Palette 'move to group'
             Press @(0x0D) 'Enter: Move to Group submenu'
             Type-Text 'new group'
             Snapshot 'group-action'
-            Press @(0x0D) 'Enter: New group and inline name editor'
-            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq $groupCount + 1 } 'user-created group saved'
-            Press @(0x11, 0x41) 'Ctrl+A: replace group name'
-            Type-Text 'Verify group'
-            Press @(0x0D) 'Enter: save group name'
-            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.groups | Where-Object { $_.name -ceq 'Verify group' }).Count -eq 1 } 'named group persisted in session.json'
+            Press @(0x0D) 'Enter: New group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups'] -or @($state.groups).Count -ne $groupCount + 1) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
+                $newGroups.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($newGroups[0].name) -and $state.tabs[$initial.active_tab].group_id -eq $newGroups[0].id
+            } 'user-created group name and original tab membership saved'
             $baseline = Read-Session
-            $group = @($baseline.groups | Where-Object { $_.name -ceq 'Verify group' })[0]
+            $group = @($baseline.groups | Where-Object { $_.id -notin $initialGroupIds })[0]
+            $result.groupSetup = @{ name = $group.name; id = $group.id; customNameExercised = $false; reason = 'Palette creation does not reliably focus an inline rename editor; using the default name read from session.json' }
+            Record ('Use persisted group ' + $group.name + '; custom name path not exercised')
             $workspaceBefore = $baseline.active_workspace
             $activeTabBefore = $baseline.active_tab
             $activeBefore = $baseline.tabs[$activeTabBefore]

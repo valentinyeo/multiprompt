@@ -10,7 +10,7 @@ Open an existing remote tmux session as a named background tab through the agent
 
 ## How to get to it (user POV)
 
-- With an active session, press Ctrl+K, search `move to group`, Enter, search `new group`, Enter. The new sidebar group immediately opens its name editor; type a name and Enter.
+- With an active session, press Ctrl+K, search `move to group`, Enter, search `new group`, Enter. This creates a sidebar group with a default name such as `Group 1` and moves the active tab into it. The app attempts an inline rename, but keyboard focus is not reliable on this path; do not type a name without a focused EDIT control. `Rename group` is a group context-menu action, not a palette command.
 - An agent runs `zsb workspace-list`, then `zsb session-open --workspace <workspace name> --group <group name> --host <reported host> --tmux verify-1 --name "Verify 1"`. Names match exactly; the group must already exist.
 - The CLI is `tools/vps-multiprompt-browser.sh`. Normally it connects to the reverse tunnel at remote localhost port 19548 (`ZSB_PORT` overrides it). The tunnel leads to the owning app's ephemeral IPv4 loopback listener. This journey connects directly to that same local listener on the runner, not to a mock or private window message.
 
@@ -23,7 +23,7 @@ Preconditions:
 - The normal tunnel-inbound listener starts even with `MULTIPROMPT_NO_LOGIN=1`. The helper reads its ephemeral port from the isolated app's `debug.log` and requires a listening `127.0.0.1` socket owned by that app PID.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=session-open`; Windows selects `control.ps1 -Feature session-open`.
-- **Group.** Follow the keyboard path above, replace the inline name with `Verify group`, and wait for exactly one additional saved group. Read its name and ID from `session.json`, and require the initial active tab to belong to it. Doctor precedes every keyboard input and bridge request.
+- **Group.** Follow the keyboard creation path above, then wait for exactly one additional saved group with a nonempty name and the initial active tab assigned to its ID. Identify the new group by excluding the initial group IDs; read its real default name and ID from `session.json` without typing into an unfocused editor or assuming `Group 1`. Record `groupSetup.customNameExercised: false` and the reason in `result.json` and `actions.json`: the custom name path is not exercised. Doctor precedes every keyboard input and bridge request.
 - **Discover.** Save the active workspace, active tab, foreground HWND and window titles; capture `before.png`. Send `workspace-list` and require the saved active workspace and named group by both ID and name. Choose a host from the reply, never a hard-coded host.
 - **Request.** Capture `action.png` with the named group visible. Send the CLI's exact wire format: `ZSB:workspace:<base64>\n`, with UTF-8 arguments separated by byte `0x1f` and a trailing separator. The helper uses .NET TCP directly so no separate Bash/Python process escapes the app's cleanup job. Require `ok:true`, `created:true` and a positive tab ID.
 - **Repeat.** Immediately read the app's saved file with a bounded wait, retaining `session-created.json`. Send the identical request again; require `ok:true`, `existing:true`, the same tab ID and the same workspace name. Retain `session-repeated.json`.
@@ -35,7 +35,7 @@ Preconditions:
 
 - This verifies the real local agent request handler and app persistence, not Bash argument validation, a reverse SSH tunnel, successful authentication, remote tmux existence or browser-extension behavior.
 - Port 19548 is the remote CLI default, not the app's local inbound port. Do not use the separate notification listener or set an internal port/state value.
-- Fresh groups are created through the palette and inline rename, never by writing session JSON. Workspace display names fall back to `Workspace N` when the saved name is empty.
+- Fresh groups are created through the palette, never by writing session JSON. Group persistence is not proof of rename-editor focus; this journey uses the saved default group name and does not verify custom naming. Workspace display names fall back to `Workspace N` when the saved name is empty.
 - Idempotency is keyed by host and tmux session across all workspaces, not by the requested title. Both calls deliberately use the same arguments.
 - If a future app removes failed SSH tabs, this preservation check fails rather than silently passing. Retain the immediate `session-created.json` evidence and update the journey's boundary explicitly before relying on a creation-only assertion.
 - Screenshots show the unchanged local CMD selection and the background tab in the sidebar, not a working remote shell. A passing static Node contract test is not a Windows journey result; dispatch the workflow and inspect its artifact separately.

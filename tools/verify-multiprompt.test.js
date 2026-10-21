@@ -46,20 +46,34 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.throws(() => allowsSessionOpen(workflow.replace(", 'session-open'", '')));
 });
 
-test('G2: custom group is created and named through the real keyboard palette', () => {
-  assert.ok(journey.length > 0);
+function assertsGroupSetup(text) {
   const steps = [
+    '$initialGroupIds = @()',
     "Palette 'move to group'", "'Enter: Move to Group submenu'", "Type-Text 'new group'",
-    "'Enter: New group and inline name editor'", "'user-created group saved'",
-    "'Ctrl+A: replace group name'", "Type-Text 'Verify group'", "'Enter: save group name'",
-    "'named group persisted in session.json'", '$baseline = Read-Session', '$group = @($baseline.groups',
+    "'Enter: New group'", 'Wait-Until {', '$state = Read-Session',
+    '@($state.groups).Count -ne $groupCount + 1',
+    '$newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })',
+    '$newGroups.Count -eq 1', '[string]::IsNullOrWhiteSpace($newGroups[0].name)',
+    '$state.tabs[$initial.active_tab].group_id -eq $newGroups[0].id',
+    "'user-created group name and original tab membership saved'", '$baseline = Read-Session',
+    '$group = @($baseline.groups | Where-Object { $_.id -notin $initialGroupIds })[0]',
+    '$result.groupSetup = @{ name = $group.name; id = $group.id; customNameExercised = $false;',
   ];
   let offset = -1;
   for (const step of steps) {
-    const next = journey.indexOf(step, offset + 1);
+    const next = text.indexOf(step, offset + 1);
     assert.ok(next > offset, `missing or misordered ${step}`);
     offset = next;
   }
+  assert.doesNotMatch(text, /Type-Text 'Verify group'|Ctrl\+A: replace group name|Enter: save group name|\$group\s*=.*'Group 1'/);
+}
+
+test('G2: keyboard palette creates a group and waits for its real saved name and membership', () => {
+  assert.ok(journey.length > 0);
+  assertsGroupSetup(journey);
+  assert.throws(() => assertsGroupSetup(journey.replace('$newGroups.Count -eq 1', '$true')));
+  assert.throws(() => assertsGroupSetup(journey.replace('$state.tabs[$initial.active_tab].group_id -eq $newGroups[0].id', '$true')));
+  assert.throws(() => assertsGroupSetup(journey.replace("            $baseline = Read-Session", "            Type-Text 'Verify group'\n            $baseline = Read-Session")));
   assert.match(journey, /\$activeBefore\.group_id -ne \$group\.id/);
   const palette = read('src/command_palette.zig');
   assert.match(palette, /groupmove_labels[^\n]*"move to group"/);
