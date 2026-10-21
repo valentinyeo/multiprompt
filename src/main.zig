@@ -154,6 +154,7 @@ const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OP
 const WM_APP_ARCHIVE_ARM = @import("win32.zig").WM_APP_ARCHIVE_ARM;
 const WM_APP_SHOT_PASTE = @import("win32.zig").WM_APP_SHOT_PASTE;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
+const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
 const WM_APP_MARK_ACTIVE_UNREAD = @import("win32.zig").WM_APP_MARK_ACTIVE_UNREAD;
 const WM_APP_SNIPPET_DELETE = @import("win32.zig").WM_APP_SNIPPET_DELETE;
 const WM_APP_INBOX_UNARCHIVE = @import("win32.zig").WM_APP_INBOX_UNARCHIVE;
@@ -670,6 +671,7 @@ const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELEC
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
+const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
 const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_CLEAR_OFFSET;
 const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
 const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
@@ -723,6 +725,7 @@ const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALL
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -1263,7 +1266,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.794";
+pub const APP_VERSION = "0.28.795";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -2713,6 +2716,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             syncMouseHookForUrlClicks();
             _ = InvalidateRect(hwnd, null, 0);
             _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+            return 0;
+        },
+        WM_APP_CHAT_TAB_URL => {
+            @import("chat_render.zig").chatInsertBrowserTabUrl();
             return 0;
         },
         WM_APP_BROWSER_SHOTURL => {
@@ -5140,6 +5147,20 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_CHAT_TAB_URL_OFFSET or target == SEARCH_TABCTX_CHAT_TAB_URL) {
+                    const target_idx: ?u32 = if (target == SEARCH_TABCTX_CHAT_TAB_URL) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (target_idx) |ti| {
+                        if (ti != app_state.active_shell) switchToShell(ti);
+                        @import("chat_render.zig").chatInsertBrowserTabUrl();
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_RESET_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = false;
@@ -6539,6 +6560,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             handleZsbOpenRequest();
             return 0;
         },
+        @import("win32.zig").WM_APP_ZSB_WORKSPACE => {
+            @import("browser_bridge.zig").handleZsbWorkspaceRequest();
+            return 0;
+        },
         WM_APP_ZSB_WHO => {
             handleZsbWhoRequest();
             return 0;
@@ -6578,6 +6603,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @memcpy(app_state.shells[ti].browser_url[0..copy_len], new_url[0..copy_len]);
                 app_state.shells[ti].browser_url_len = copy_len;
                 if (ti == app_state.active_shell) {
+                    @import("browser_pane.zig").rememberActiveBrowserTabUrl();
                     if (calcBrowserLayout()) |layout| {
                         var urlbar_rc = RECT{
                             .left = layout.urlbar_x,

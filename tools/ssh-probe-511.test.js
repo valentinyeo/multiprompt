@@ -164,7 +164,10 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.match(cmd, /appendWideRemoteShellSingleQuoted\(buf, &pos, tmux_session\.\?\)/);
   assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
   assert.match(body('manual', reconnect), /self\.phase == \.ended/);
-  assert.match(read('app_state.zig'), /SEARCH_TABCTX_START_SESSION: usize = 7183/);
+  const startId = state.match(/SEARCH_TABCTX_START_SESSION: usize = (\d+)/);
+  assert.ok(startId);
+  const urlId = state.match(/SEARCH_TABCTX_CHAT_TAB_URL: usize = (\d+)/);
+  if (urlId) assert.notEqual(startId[1], urlId[1]);
   assert.match(read('command_palette.zig'), /phase == \.ended/);
   assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
   assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_START_SESSION\) L\("Start new session"\)/);

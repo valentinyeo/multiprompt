@@ -440,6 +440,8 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
+    const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
+    test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/tmux_identity.zig"),
         .target = target,
@@ -496,7 +498,7 @@ pub fn build(b: *std.Build) void {
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
     vps_test_step.dependOn(&ssh_reconnect_tests.step);
-    const screenshot_pipeline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/screenshot-pipeline.test.js", "tools/screenshot-caret.test.js", "extension/screenshot-shortcut.test.js", "tools/issue-509-screenshot-system-menu.test.js" });
+    const screenshot_pipeline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/screenshot-pipeline.test.js", "tools/screenshot-caret.test.js", "extension/screenshot-shortcut.test.js", "tools/issue-509-screenshot-system-menu.test.js", "tools/issue-493-tab-url-shortcut.test.js" });
     test_step.dependOn(&screenshot_pipeline_tests.step);
     const paste_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/paste-focus.test.js" });
     test_step.dependOn(&paste_focus_tests.step);
@@ -515,6 +517,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
+    const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
+    test_step.dependOn(&zsb_session_open_tests.step);
+    vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });

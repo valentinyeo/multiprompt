@@ -1759,18 +1759,39 @@ pub fn notifyTabCapReached() void {
     showHeaderNoticeAscii("Tab limit reached (256) - close a tab", 4000, true);
 }
 
+pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) bool {
+    const old_host = app_state.g_pending_tmux_host;
+    const old_workspace = app_state.g_pending_background_workspace;
+    defer {
+        app_state.g_pending_tmux_host = old_host;
+        app_state.g_pending_background_workspace = old_workspace;
+    }
+    app_state.g_pending_tmux_host = host;
+    app_state.g_pending_background_workspace = workspace;
+    const old_cmd_len = app_state.g_pending_tmux_cmd_len;
+    const old_resurrect_len = app_state.g_pending_resurrect_len;
+    defer {
+        app_state.g_pending_tmux_cmd_len = old_cmd_len;
+        app_state.g_pending_resurrect_len = old_resurrect_len;
+    }
+    app_state.g_pending_tmux_cmd_len = 0;
+    app_state.g_pending_resurrect_len = 0;
+    return spawnShellWithSession(.tmux, session, null, null);
+}
+
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
     if (app_state.g_account_locked) return false;
+    const background_workspace = app_state.g_pending_background_workspace;
     if (tmux_session) |session| {
         if (findLocalTmuxTab(app_state.g_pending_tmux_host, session)) |existing| {
-            if (!app_state.g_restoring) {
+            if (!app_state.g_restoring and background_workspace == null) {
                 if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(existing) else switchToShell(existing);
             }
             return false;
         }
     }
     if (app_state.shell_count >= MAX_SHELLS) {
-        notifyTabCapReached();
+        if (background_workspace == null) notifyTabCapReached();
         return false;
     }
     const shell_id = app_state.allocateShellId() orelse return false;
@@ -1877,7 +1898,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
         style |= @as(isize, @intCast(WS_CHILD));
         _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
-        _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+        const no_activate: UINT = if (background_workspace != null) @import("win32.zig").SWP_NOACTIVATE else 0;
+        _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | no_activate);
     }
 
     app_state.shells[idx] = .{
@@ -1928,14 +1950,16 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         }
     }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
-    if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
+    if (background_workspace) |workspace| {
+        app_state.shells[idx].workspace = workspace;
+    } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
-    if (!app_state.g_restoring) app_state.shells[idx].last_active = nowFileTime();
+    if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
     registerShellExitWait(idx);
     if (cmd_hwnd == null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
 
-    if (!app_state.g_restoring) {
+    if (!app_state.g_restoring and background_workspace == null) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
         requestShellRefocus(20, 12);
         saveSession();
@@ -2579,6 +2603,7 @@ pub fn switchToShell(idx: u32) void {
     }
     app_state.g_browser_focus_mode = false;
     const prev = app_state.active_shell;
+    @import("browser_pane.zig").rememberActiveBrowserTabUrl();
     if (!app_state.g_restoring and idx < app_state.shell_count and prev < app_state.shell_count and idx != prev) {
         app_state.g_previous_shell_sid = app_state.shells[prev].shell_id;
     }
