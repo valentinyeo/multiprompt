@@ -60,5 +60,8 @@ test('CI runs the paste focus regression through the full Zig test graph', () =>
   const root = path.resolve(__dirname, '..');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /const paste_focus_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/paste-focus.test.js" \}\);\s*test_step.dependOn\(&paste_focus_tests.step\)/);
-  assert.match(fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8'), /run: zig build test --summary all/);
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const windows = workflow.split('\n  test:\n')[1].split('\n  test-vps:\n')[0];
+  assert.match(windows, /targets: [^\n]*\btest-group-4\b/);
+  assert.match(windows, /run: zig build \$\{\{ matrix.targets \}\} --summary all/);
 });

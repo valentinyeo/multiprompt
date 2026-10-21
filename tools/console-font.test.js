@@ -138,8 +138,10 @@ test('CI runs the console font regression', () => {
   assert.match(build, /vps_test_step\.dependOn\(&console_font_tests\.step\)/);
   assert.match(build, /test_step\.dependOn\(&console_font_lifecycle_tests\.step\)/);
   assert.match(build, /vps_test_step\.dependOn\(&console_font_lifecycle_tests\.step\)/);
-  assert.match(read('.github/workflows/test.yml'), /run: zig build test --summary all/);
-  assert.match(read('.github/workflows/test.yml'), /run: zig build test-vps --summary all/);
+  const workflow = read('.github/workflows/test.yml');
+  assert.match(workflow, /targets: [^\n]*\btest-group-4\b/);
+  assert.match(workflow, /targets: [^\n]*\btest-vps-group-3\b/);
+  assert.equal((workflow.match(/run: zig build \$\{\{ matrix.targets \}\} --summary all/g) || []).length, 2);
 });
 
 
