@@ -36,6 +36,8 @@ const DT_NOPREFIX = 4;
 const WM_MOUSEHWHEEL = 0x020e;
 const WM_MOUSEWHEEL = 0x020a;
 const CHAT_CODE_PAD = 12;
+const CHAT_FIND_TOP_H = 40;
+var g_chat_find_open = false;
 const CHAT_AGENT_PAD_X = 16;
 const CHAT_BUBBLE_PAD = 12;
 const CHAT_AGENT_HEADER_H = 24;
@@ -46,8 +48,9 @@ var g_chat_sel_active = false;
 var g_chat_sel_transcript_focus = false;
 var g_chat_hover_link: ?link_detect.Range = null;
 var g_light_theme = false;
-var g_chat_blocks: [1]ChatBlock = undefined;
-var g_chat_layout_rects: [1]RECT = undefined;
+var g_chat_block_count: usize = 1;
+var g_chat_blocks: [3]ChatBlock = undefined;
+var g_chat_layout_rects: [3]RECT = undefined;
 var g_chat_capture: []const u16 = &.{};
 var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_content_left: i32 = 0;
@@ -60,6 +63,15 @@ var clips: usize = 0;
 var grids: usize = 0;
 var draws: usize = 0;
 var invalidates: usize = 0;
+var rounded: usize = 0;
+var captures: usize = 0;
+var last_invalidate: ?RECT = null;
+var last_thumb: RECT = .{};
+var last_thumb_color: u32 = 0;
+var chat_table_drag: ?struct { offset: usize, hash: u64, pointer_x: i32, scroll: i32 } = null;
+fn SetCapture(_: HANDLE) HANDLE { captures += 1; return null; }
+fn fillRoundRectAA(_: HANDLE, r: RECT, _: i32, color: u32) void { rounded += 1; last_thumb = r; last_thumb_color = color; }
+
 var header_draws: usize = 0;
 var normal_draws: usize = 0;
 var selection_at: usize = 0;
@@ -84,7 +96,7 @@ fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, rect: *RECT, flags: u32) i32 {
 }
 fn uiScaled(n: i32) i32 { return @divTrunc(n * scale, 100); }
 fn customColorOr(_: []const u8, color: u32) u32 { return color; }
-fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
+fn RGB(r: u8, g: u8, b: u8) u32 { return @as(u32, r) | (@as(u32, g) << 8) | (@as(u32, b) << 16); }
 fn themeConsoleFg() u32 { return 0; }
 fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn CreateSolidBrush(_: u32) HANDLE { return @ptrFromInt(1); }
@@ -104,8 +116,13 @@ fn chatFlowText(_: HANDLE, _: []const u16, _: RECT, _: bool, _: bool, _: ?ChatHi
 fn GET_X(lp: LPARAM) i32 { return @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)))))); }
 fn GET_Y(lp: LPARAM) i32 { return @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)) >> 16)))); }
 fn ScreenToClient(_: HANDLE, _: *POINT) i32 { return 1; }
-fn chatTranscriptBlockAtPoint(y: i32) ?usize { return if (y >= g_chat_layout_rects[0].top and y < g_chat_layout_rects[0].bottom) 0 else null; }
-fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: i32) i32 { invalidates += 1; return 1; }
+fn chatTranscriptBlockAtPoint(y: i32) ?usize {
+    for (g_chat_layout_rects[0..g_chat_block_count], 0..) |r, i| {
+        if (y + g_chat_scroll_y >= r.top and y + g_chat_scroll_y < r.bottom) return i;
+    }
+    return null;
+}
+fn InvalidateRect(_: HANDLE, r: ?*const RECT, _: i32) i32 { invalidates += 1; last_invalidate = if (r) |rect| rect.* else null; return 1; }
 fn GetDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
 fn ReleaseDC(_: HANDLE, _: HANDLE) i32 { return 1; }
 `;
@@ -122,7 +139,7 @@ test "ISSUE-421 production rich table caches layout clips draws and preserves hi
     try std.testing.expectEqual(@as(usize, 1), log_count);
     try std.testing.expect(std.mem.startsWith(u8, logs[0][0..log_lens[0]], "CHAT_TABLE rows=1 columns=2 header_bold=1 content_w="));
     try std.testing.expect(std.mem.endsWith(u8, logs[0][0..log_lens[0]], "view_w=100 source=pipe"));
-    try std.testing.expectEqual(@as(i32, 74), h);
+    try std.testing.expectEqual(@as(i32, 83), h);
     try std.testing.expect(header_draws > 0 and normal_draws > 0 and grids > 0);
     try std.testing.expectEqual(@as(usize, 4), clips);
     const layout = &g_chat_tables.entries.getPtr(41).?.layout;
@@ -185,16 +202,122 @@ test "ISSUE-421 nested marker and body share the depth indent and trace only the
     try std.testing.expectEqual(before + 1, log_count);
     try std.testing.expectEqualStrings("CHAT_LIST depth=2", logs[before][0..log_lens[before]]);
 }
+test "ISSUE-458 production scrollbar paints without hover in both themes and reserves no space when narrow" {
+    g_chat_tables.clear(std.heap.page_allocator);
+    defer { g_chat_tables.deinit(std.heap.page_allocator); g_chat_tables = .{}; }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Wide header | Another header |\n|---|---|\n| body | value |");
+    const area = RECT{ .left = 20, .top = 30, .right = 120 };
+    var height: i32 = 0;
+    rounded = 0;
+    g_light_theme = false;
+    g_chat_hover_link = null;
+    _ = chatFlowTable(null, text, area, true, null, 0, &height);
+    const layout = &g_chat_tables.entries.getPtr(0).?.layout;
+    var body_h: i32 = 1;
+    for (layout.heights) |h| body_h += h;
+    try std.testing.expectEqual(@as(usize, 2), rounded);
+    try std.testing.expectEqual(body_h + 16, height);
+    const dark = last_thumb_color;
+    const initial = last_thumb;
+    layout.scroll = layout.content_w - layout.view_w;
+    _ = chatFlowTable(null, text, area, true, null, 0, null);
+    try std.testing.expectEqual(area.right, last_thumb.right);
+    try std.testing.expectEqual(initial.right - initial.left, last_thumb.right - last_thumb.left);
+    g_light_theme = true;
+    _ = chatFlowTable(null, text, area, true, null, 0, null);
+    try std.testing.expect(last_thumb_color != dark);
+    try std.testing.expectEqual(@as(usize, 6), rounded);
+    rounded = 0;
+    const wide = RECT{ .right = 2000 };
+    _ = chatFlowTable(null, text, wide, true, null, 0, &height);
+    try std.testing.expectEqual(@as(usize, 0), rounded);
+    try std.testing.expectEqual(body_h, height);
+    g_light_theme = false;
+}
+
+test "ISSUE-458 production thumb captures outside movement and track clicks page without selecting or redundant redraws" {
+    g_chat_tables.clear(std.heap.page_allocator);
+    defer { g_chat_tables.deinit(std.heap.page_allocator); g_chat_tables = .{}; chat_table_drag = null; }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Wide header | Another header |\n|---|---|\n| body | value |");
+    g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .code, .kind = .table, .first = true };
+    g_chat_layout_rects[0] = .{ .left = 5, .top = 100, .right = 129, .bottom = 250 };
+    g_chat_block_count = 1;
+    g_chat_content_left = 30;
+    g_chat_scroll_y = 50;
+    const layout = chatTableLayout(null, text, 0, 100).?;
+    const left = 30 + 5 + CHAT_CODE_PAD;
+    const top = 100 - 50 + CHAT_AGENT_HEADER_H + CHAT_CODE_PAD;
+    const y = top + layout.bodyHeight() + 8;
+    captures = 0;
+    invalidates = 0;
+    g_chat_sel_active = false;
+    g_chat_sel_transcript_focus = false;
+    try std.testing.expect(!chatTableMouseDown(null, left + 1, top + 1));
+    try std.testing.expect(!chatTableMouseDown(null, left - 1, y));
+    try std.testing.expect(chatTableMouseDown(null, left + 1, y));
+    try std.testing.expectEqual(@as(usize, 1), captures);
+    try std.testing.expect(chat_table_drag != null);
+    try std.testing.expect(chatTableMouseMove(null, left + 10000));
+    try std.testing.expectEqual(layout.content_w - layout.view_w, layout.scroll);
+    try std.testing.expectEqual(@as(usize, 1), invalidates);
+    try std.testing.expectEqual(@as(i32, 35), last_invalidate.?.left);
+    try std.testing.expectEqual(@as(i32, 50), last_invalidate.?.top);
+    try std.testing.expect(chatTableMouseMove(null, left + 20000));
+    try std.testing.expectEqual(@as(usize, 1), invalidates);
+    try std.testing.expect(chatTableMouseMove(null, left - 10000));
+    try std.testing.expectEqual(@as(i32, 0), layout.scroll);
+    try std.testing.expect(!g_chat_sel_active and !g_chat_sel_transcript_focus);
+    chat_table_drag = null;
+    try std.testing.expect(!chatTableMouseMove(null, left + 1));
+    try std.testing.expect(chatTableMouseDown(null, left + 99, y));
+    try std.testing.expectEqual(@as(i32, 100), layout.scroll);
+    try std.testing.expect(chat_table_drag == null);
+    try std.testing.expect(chatTableMouseDown(null, left, y));
+    try std.testing.expectEqual(@as(i32, 0), layout.scroll);
+    g_chat_content_left = 0;
+    g_chat_scroll_y = 0;
+}
+
+test "ISSUE-458 production wheel targets the pointed table and leaves vertical wheel and narrow tables alone" {
+    g_chat_tables.clear(std.heap.page_allocator);
+    defer { g_chat_tables.deinit(std.heap.page_allocator); g_chat_tables = .{}; g_chat_block_count = 1; }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Wide header | Another header |\n|---|---|\n| body | value |");
+    for (0..2) |i| {
+        const start = i * 100;
+        g_chat_blocks[i] = .{ .start = start, .len = text.len, .role = .code, .kind = .table };
+        const top: i32 = @intCast(i * 150);
+        g_chat_layout_rects[i] = .{ .top = top, .right = 124, .bottom = top + 130 };
+        _ = chatTableLayout(null, text, start, 100);
+    }
+    g_chat_block_count = 2;
+    const first = &g_chat_tables.entries.getPtr(0).?.layout;
+    const second = &g_chat_tables.entries.getPtr(100).?.layout;
+    const point: LPARAM = 20 | (170 << 16);
+    invalidates = 0;
+    try std.testing.expect(chatTableWheel(null, WM_MOUSEHWHEEL, 120 << 16, point));
+    try std.testing.expectEqual(@as(i32, 0), first.scroll);
+    try std.testing.expectEqual(@as(i32, 54), second.scroll);
+    try std.testing.expect(!chatTableWheel(null, WM_MOUSEWHEEL, 120 << 16, point));
+    try std.testing.expectEqual(@as(i32, 54), second.scroll);
+    try std.testing.expect(chatTableWheel(null, WM_MOUSEWHEEL, (120 << 16) | 4, point));
+    try std.testing.expectEqual(@as(i32, 0), second.scroll);
+    try std.testing.expectEqual(@as(usize, 2), invalidates);
+    try std.testing.expect(chatTableWheel(null, WM_MOUSEWHEEL, (120 << 16) | 4, point));
+    try std.testing.expectEqual(@as(usize, 2), invalidates);
+    try std.testing.expect(!chatTableWheel(null, WM_MOUSEHWHEEL, 120 << 16, 4 | (170 << 16)));
+    _ = chatTableLayout(null, text, 100, 2000);
+    try std.testing.expect(!chatTableWheel(null, WM_MOUSEHWHEEL, 120 << 16, point));
+}
 `;
 function execute(control) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-grid-'));
   try {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
-    let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
+    let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + lineHeightPolicy + '\n' + functions + checks);
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-421'], { encoding: 'utf8', timeout: 120000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-'], { encoding: 'utf8', timeout: 120000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('ISSUE-421 executed production grid layout, rich cells, clipping, traces, find and horizontal input', () => {
@@ -210,4 +333,20 @@ test('ISSUE-421 production hit-test oracle rejects missing horizontal source tra
 test('ISSUE-421 wheel routing works while the composer owns keyboard focus', () => {
   const main = fs.readFileSync('src/main.zig', 'utf8');
   assert.match(main, /WM_MOUSEWHEEL, WM_MOUSEHWHEEL => \{[^]*?pointInRect\(layout\.transcript, pt\.x, pt\.y\)[^]*?chatTableWheel\(app_state\.g_chat_transcript_hwnd, msg, wp, lp\)/);
+});
+
+
+test('ISSUE-458 captured scrollbar gestures precede text selection and release on button-up or capture loss', () => {
+  const proc = body('chatTranscriptWndProc');
+  for (const message of ['WM_LBUTTONDOWN', 'WM_LBUTTONDBLCLK']) {
+    const start = proc.indexOf(`${message} => {`);
+    const end = proc.indexOf('\n        },', start);
+    const handler = proc.slice(start, end);
+    assert.ok(handler.indexOf('chatTableMouseDown') >= 0);
+    assert.ok(handler.indexOf('chatTableMouseDown') < handler.indexOf('chatTranscriptMouseDown'));
+  }
+  assert.match(proc, /WM_MOUSEMOVE => \{\s*if \(chatTableMouseMove\(hwnd, GET_X\(lp\)\)\) return 0/);
+  assert.match(proc, /WM_LBUTTONUP => \{\s*if \(chat_table_drag != null\) \{[^]*?chat_table_drag = null;[^]*?ReleaseCapture\(\);\s*return 0;/);
+  assert.match(proc, /0x0215, 0x001F => \{[^]*?chat_table_drag = null;/);
+  assert.match(body('refreshChatBlockCache'), /g_chat_tables\.refresh/);
 });

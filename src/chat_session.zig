@@ -956,8 +956,11 @@ fn refreshChatBlockCache(force: bool) bool {
     const generation = if (from_file) entry.?.generation else 0;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and len == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
-    const changed_offset = if (app_state.g_chat_layout_reuse > 0 and app_state.g_chat_layout_reuse < count) entry.?.history.blocks.items[app_state.g_chat_layout_reuse].start else 0;
-    app_state.g_chat_tables.clearFrom(std.heap.page_allocator, changed_offset);
+    if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
+        app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], entry.?.history.blocks.items);
+    } else if (app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id or from_file != app_state.g_chat_blocks_from_file or generation != app_state.g_chat_cache_generation) {
+        app_state.g_chat_tables.clear(std.heap.page_allocator);
+    }
     const keep_selection = @import("chat_hit.zig").keepSelection(
         app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id,
         app_state.g_chat_capture[0..app_state.g_chat_last_len],
@@ -988,8 +991,12 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_block_count = if (len > 0) 1 else 0;
         if (len > 0) app_state.g_chat_blocks[0] = .{ .start = 0, .len = len, .role = .code };
     } else {
-        app_state.g_chat_block_count = chatClassifyBlocks(app_state.g_chat_capture[0..len], app_state.g_chat_blocks[0..CHAT_MAX_BLOCKS]);
-        chat_style.markScreenMessages(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
+        var screen_blocks: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
+        const screen_count = chatClassifyBlocks(app_state.g_chat_capture[0..len], &screen_blocks);
+        chat_style.markScreenMessages(screen_blocks[0..screen_count]);
+        app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], screen_blocks[0..screen_count]);
+        app_state.g_chat_block_count = screen_count;
+        @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
         chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len]);
     }
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
