@@ -1,8 +1,6 @@
 [extend]
 useDefault = true
 
-# The default rules missed a Cloudflare token written as `value <token>` in a markdown table,
-# so a 40-character token near a Cloudflare word counts as a key.
 [[rules]]
 id = "cloudflare-token-named-nearby"
 description = "Cloudflare API token with Cloudflare named on the same line"
@@ -11,7 +9,6 @@ secretGroup = 1
 entropy = 3.5
 keywords = ["cloudflare", "cf", "wrangler"]
 
-# A long random value in quotes or backticks next to token, secret, key or password.
 [[rules]]
 id = "quoted-token-named-nearby"
 description = "Quoted long random value next to the word token, secret, key or password"
@@ -24,31 +21,18 @@ keywords = ["token", "secret", "key", "password"]
 description = "Public deterministic cryptographic vectors, never service credentials"
 regexTarget = "secret"
 regexes = [
-  # vaultKey: published test input, exercised by src/sync_protocol.zig.
   '''^/ZYZhQZidIeSytjbKLOIqgK1lbaq3Bdchyfe0pQdXcw=$''',
-  # kek: published test input, exercised by src/sync_protocol.zig.
   '''^DCA1BJZdQXTT7L1cXnd6Gd13WirAMa0OIOPjFsE1jDM=$''',
-  # vaultKey: published test input, exercised by src/sync_protocol.zig.
   '''^1M0RyVORDep4eafLm8oBTtbAct2564ukkgcdPkZPU3k=$''',
-  # kek: published test input, exercised by src/sync_protocol.zig.
   '''^1VkDPkH9ITbidlRIxQ1Y93TbwlbmCKhT\+GyKVe\+2NnY=$''',
-  # vaultKey: published test input, exercised by src/sync_protocol.zig.
   '''^z9Mctj/Vy\+KC/T7Vvqfvq8Gku52QVmDI3Zzpk2fvUsE=$''',
-  # kek: published test input, exercised by src/sync_protocol.zig.
   '''^2AvqpEHvlVoaxqrJXCdf9o\+wpBT99VeLST2CgM7dTJI=$''',
-  # vaultKey: published test input, exercised by src/sync_protocol.zig.
   '''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=$''',
-  # vaultKey: published test input, exercised by src/sync_protocol.zig.
   '''^KoBEqtQcor8xHDyYJSi3vzzOzPHEC\+VSjpGmyaCJJOg=$''',
-  # kek: published test input, exercised by src/sync_protocol.zig.
   '''^dQV3kSACQZrqWzgsAG/aJ1sm0wSjex5i/F0E71P4Kok=$''',
-  # recoveryKeyBytes: published test input, exercised by src/sync_protocol.zig.
   '''^gPC5kTQL5wPP5LcORDhJNXBXsJ3c5q4bLbWaz8mzTTo=$''',
-  # recoveryKeyString: published test input, exercised by src/sync_protocol.zig.
   '''^G3RB\-K49M\-1FKG\-7KZ4\-PW74\-8E29\-6NR5\-FC4X\-VKKA\-W6SD\-PPDC\-ZJDK\-9MX0\-V9EG$''',
-  # recoveryKek: published test input, exercised by src/sync_protocol.zig.
   '''^wTgOSUtCQd4JWn8KILDa1/V3aiN9hqYr3gxco3O7B0E=$''',
-  # keyBytes: published test input, exercised by src/sync_protocol.zig.
   '''^TdQKLgWd/3o402SCuv3f1cjveLKMwyA4yFerRgp9TRY=$''',
 ]
 

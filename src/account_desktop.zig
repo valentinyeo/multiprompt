@@ -841,6 +841,7 @@ fn accountPrepareRestore(json: []const u8) !void {
     if (!writeFileAtomicW(path, cache)) return error.Storage;
 }
 pub fn applyServerLayout(json: []const u8) !void {
+    const was_starred = app_state.g_starred_workspace;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -986,6 +987,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     syncInProcessWorkspacesToRegistry();
     @import("inbox.zig").publishInboxStateNow();
     @import("inbox.zig").loadInboxModel();
+    app_state.g_starred_workspace = was_starred;
+    if (was_starred) @import("workspaces.zig").refreshStarredWorkspace();
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }

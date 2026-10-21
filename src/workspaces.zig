@@ -39,6 +39,7 @@ const SetParent = @import("win32.zig").SetParent;
 const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
 const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
+const SetTimer = @import("win32.zig").SetTimer;
 const DestroyWindow = @import("win32.zig").DestroyWindow;
 const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
@@ -2377,16 +2378,178 @@ test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
     try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[1]);
 }
 
+test "IGSH-457 Starred is never serialized into session or synced layout" {
+    const old_starred = app_state.g_starred_workspace;
+    defer app_state.g_starred_workspace = old_starred;
+    const old_starred_last = app_state.g_starred_last_shell;
+    defer app_state.g_starred_last_shell = old_starred_last;
+    app_state.g_starred_last_shell = 0;
+    app_state.g_starred_workspace = false;
+    const old_active = app_state.g_active_workspace;
+    const old_selected = app_state.active_shell;
+    const old_snoozed = app_state.g_ws_snoozed;
+    const old_single = app_state.g_single_window;
+    const old_count = app_state.g_lws_count;
+    const old_names = app_state.g_ws_names;
+    const old_lengths = app_state.g_ws_name_len;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    const old_last_shell = app_state.g_ws_last_shell;
+    const old_shell_count = app_state.shell_count;
+    const old_shells = app_state.shells[0..2].*;
+    defer {
+        app_state.g_active_workspace = old_active;
+        app_state.active_shell = old_selected;
+        app_state.g_ws_snoozed = old_snoozed;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_count;
+        app_state.g_ws_names = old_names;
+        app_state.g_ws_name_len = old_lengths;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.g_ws_last_shell = old_last_shell;
+        app_state.shell_count = old_shell_count;
+        app_state.shells[0..2].* = old_shells;
+    }
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 0;
+    app_state.active_shell = 0;
+    app_state.g_ws_snoozed = [_]bool{false} ** MAX_LWS;
+    app_state.g_lws_count = 2;
+    app_state.shell_count = 2;
+    for (0..2) |ws| {
+        app_state.shells[ws] = empty_shell;
+        app_state.shells[ws].kind = .tmux;
+        app_state.shells[ws].workspace = @intCast(ws);
+        app_state.shells[ws].shell_id = @intCast(41 + ws);
+        app_state.shells[ws].favorite = true;
+        app_state.shells[ws].name[0] = @intCast('A' + ws);
+        app_state.shells[ws].name_len = 1;
+        app_state.shells[ws].tmux_session[0] = @intCast('a' + ws);
+        app_state.shells[ws].tmux_session_len = 1;
+        app_state.shells[ws].tmux_host = @intCast(ws);
+        app_state.g_ws_last_shell[ws] = app_state.shells[ws].shell_id;
+        app_state.g_ws_names[ws][0] = @intCast('A' + ws);
+        app_state.g_ws_name_len[ws] = 1;
+        app_state.g_ws_ids[ws][0] = @intCast('a' + ws);
+        app_state.g_ws_id_len[ws] = 1;
+    }
+    switchToWorkspace(@import("workspace_view.zig").fromDigit(1).?);
+    try std.testing.expect(app_state.g_starred_workspace);
+    try std.testing.expectEqual(@as(u8, 2), app_state.g_lws_count);
+    var temp: [512]u8 = undefined;
+    const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(temp_len > 0 and temp_len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\igsh-457-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(@import("session.zig").saveSessionTo(path, null));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var parsed = try json_reader.parse(std.testing.allocator, bytes);
+    defer parsed.deinit();
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(bytes, &tabs));
+    const workspaces = json_reader.array(json_reader.field(parsed.value, "workspaces"));
+    try std.testing.expectEqual(@as(usize, 2), workspaces.len);
+    for (workspaces, 0..) |workspace, ws| {
+        try std.testing.expectEqual(@as(u64, app_state.g_ws_last_shell[ws]), json_reader.uint(workspace, "last_shell"));
+        try std.testing.expectEqual(app_state.g_ws_last_shell[ws], tabs[ws].shell_id);
+    }
+    try std.testing.expectEqual(@as(u64, 2), json_reader.uint(parsed.value, "workspace_count"));
+    try std.testing.expectEqual(@as(u64, 0), json_reader.uint(parsed.value, "active_workspace"));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const layout = @import("session_layout.zig");
+    const starred_layout = try @import("account_desktop.zig").captureSessionLayout(allocator, false);
+    const encoded_starred = try layout.encode(allocator, starred_layout);
+    app_state.g_starred_workspace = false;
+    const home_layout = try @import("account_desktop.zig").captureSessionLayout(allocator, false);
+    const encoded_home = try layout.encode(allocator, home_layout);
+    try std.testing.expectEqualStrings(encoded_home, encoded_starred);
+    const rebased = try @import("account_layout.zig").rebase(allocator, home_layout, starred_layout, home_layout);
+    try std.testing.expectEqualStrings(encoded_home, try layout.encode(allocator, rebased));
+    try std.testing.expectEqual(@as(usize, 2), starred_layout.workspaces.len);
+    for (starred_layout.tabs, 0..) |tab, ws| try std.testing.expectEqualStrings(starred_layout.workspaces[ws].name, tab.workspace);
+}
+
+pub fn starredShellVisible(idx: usize) bool {
+    const shell = &app_state.shells[idx];
+    return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
+        @import("inbox.zig").inboxPublishesShell(shell) and
+        (!app_state.g_single_window or !app_state.g_ws_snoozed[shell.workspace]);
+}
+
+pub fn refreshStarredWorkspace() void {
+    if (!app_state.g_starred_workspace) return;
+    if (app_state.active_shell < app_state.shell_count and starredShellVisible(app_state.active_shell)) return;
+    var target: ?u32 = null;
+    for (0..app_state.shell_count) |i| {
+        if (!starredShellVisible(i)) continue;
+        if (target == null or app_state.shells[i].last_active >= app_state.shells[target.?].last_active) target = @intCast(i);
+        if (app_state.shells[i].shell_id == app_state.g_starred_last_shell) {
+            target = @intCast(i);
+            break;
+        }
+    }
+    if (target) |idx| {
+        if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+    } else {
+        const chat_on = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on else false;
+        @import("chat_composer.zig").closeChatView();
+        if (app_state.active_shell < app_state.shell_count) {
+            app_state.shells[app_state.active_shell].chat_view_on = chat_on;
+            if (app_state.shells[app_state.active_shell].hwnd != null) _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+        }
+        app_state.active_shell = app_state.shell_count;
+        hideBrowserFloatingChrome();
+        parkStrayBrowserPanes(null);
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
 pub fn switchToWorkspace(ws_in: u32) void {
     app_state.g_browser_focus_mode = false;
     if (!app_state.g_single_window) return;
+    if (ws_in == @import("workspace_view.zig").starred) {
+        app_state.g_starred_workspace = true;
+        @import("inbox.zig").loadInboxModel();
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
+        app_state.g_inbox_step_context_active = false;
+        app_state.g_sidebar_scroll = 0;
+        for (0..app_state.shell_count) |i| {
+            if (starredShellVisible(i) and app_state.shells[i].shell_id == app_state.g_starred_last_shell) {
+                switchToShell(@intCast(i));
+                break;
+            }
+        }
+        refreshStarredWorkspace();
+        if (app_state.active_shell < app_state.shell_count) {
+            app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;
+            focusActiveShell();
+        }
+        updateMainWindowTitle();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
+    const was_starred = app_state.g_starred_workspace;
+    app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
     if (ws != app_state.g_active_workspace) {
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToWorkspace: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.g_active_workspace, ws, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
-    if (ws == app_state.g_active_workspace and app_state.active_shell < app_state.shell_count and !isTabHidden(app_state.active_shell)) {
+    if (!was_starred and ws == app_state.g_active_workspace and app_state.active_shell < app_state.shell_count and !isTabHidden(app_state.active_shell)) {
         focusActiveShell();
         return;
     }
@@ -2834,6 +2997,7 @@ fn leaveSingleWindowMode() bool {
     }
 
     app_state.g_single_window = false;
+    app_state.g_starred_workspace = false;
     setWindowDisplayNameUtf8(active_name_buf[0..active_name_len]);
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
@@ -2877,6 +3041,7 @@ fn leaveSingleWindowMode() bool {
 pub fn newWorkspace() void {
     if (!app_state.g_single_window) return;
     if (app_state.g_lws_count >= MAX_LWS) return;
+    app_state.g_starred_workspace = false;
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;

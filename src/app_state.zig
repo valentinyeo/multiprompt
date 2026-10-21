@@ -617,6 +617,8 @@ pub var active_shell: u32 = 0;
 
 pub const MAX_LWS: u8 = 9;
 pub var g_single_window: bool = false;
+pub var g_starred_workspace: bool = false;
+pub var g_starred_last_shell: u32 = 0;
 pub var g_active_workspace: u8 = 0;
 pub var g_lws_count: u8 = 1;
 pub var g_ws_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
@@ -633,6 +635,7 @@ pub const WS_PILL_W: i32 = 24;
 pub const WS_PILL_GAP: i32 = 5;
 pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
+pub var g_workspace_hover: ?u8 = null;
 pub var g_inbox_button_hover: bool = false;
 
 pub const MAX_GROUPS: usize = 16;
@@ -658,7 +661,7 @@ pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
 pub var next_group_id: u32 = 1;
 
-const RowKind = enum { section, header, tab };
+const RowKind = enum { section, header, tab, inbox };
 pub const SidebarTier = enum(u1) { recent = 0, pinned = 1 };
 pub const Row = struct {
     kind: RowKind,
@@ -667,7 +670,7 @@ pub const Row = struct {
     section_tier: SidebarTier = .recent,
     y: i32,
 };
-pub const MAX_ROWS: usize = MAX_SHELLS + MAX_GROUPS + 6;
+pub const MAX_ROWS: usize = MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
 pub const SECTION_HEADER_H: i32 = 24;
 
 pub const HitTarget = union(enum) {
@@ -675,6 +678,7 @@ pub const HitTarget = union(enum) {
     section: SidebarTier,
     header: u32,
     tab: u32,
+    inbox: u32,
     buttons: void,
 };
 
@@ -1079,7 +1083,6 @@ pub var g_chat_working_applied_len: usize = 0;
 pub var g_chat_raw: [262144]u16 = std.mem.zeroes([262144]u16);
 pub var g_chat_capture_storage: [262144]u16 = @splat(0);
 pub var g_chat_capture: []u16 = &g_chat_capture_storage;
-pub var g_chat_sel_text: [262144]u16 = undefined;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
 pub var g_chat_line_lens: [1400]usize = std.mem.zeroes([1400]usize);
 pub var g_chat_reply: [131072]u8 = @splat(0);
@@ -1333,6 +1336,7 @@ pub const SEARCH_BROWSER_ENGINE_OFFSET: usize = 6297;
 pub const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;
 pub const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;
 pub const SEARCH_CUSTOMCMD_OFFSET: usize = 7200;
+pub const SEARCH_STARRED_OFFSET: usize = 6377;
 pub const SEARCH_WORKSPACE_BACK_OFFSET: usize = 6300;
 pub const SEARCH_WORKSPACE_DELETE_OFFSET: usize = 6400;
 pub const SEARCH_WSSORT_OFFSET: usize = 6470;

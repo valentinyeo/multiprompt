@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -62,7 +63,9 @@ function harness() {
   const production = (core + visibility + bundled + '\n' +
     creation('spawnShellWithSession', 'spawnSession(kind: ShellKind, slot: usize)') + '\n' +
     creation('respawnShellInPlace', 'reconnectSession(kind: ShellKind, slot: usize)') + '\n' +
-    fn(workspace, 'switchToWorkspace') + '\n' + fn(workspace, 'pickWorkspaceTarget').replace(/\bshells\b/g, 'candidates') + '\n' +
+    fn(workspace, 'switchToWorkspace') + '\n' + fn(workspace, 'starredShellVisible') + '\n' +
+    fn(workspace, 'refreshStarredWorkspace') + '\n' + fn(read('inbox.zig'), 'inboxPublishesShell') + '\n' +
+    fn(workspace, 'pickWorkspaceTarget').replace(/\bshells\b/g, 'candidates') + '\n' +
     handler('WM_APP_TOGGLE_FULLWIDTH', 'WM_APP_RECONNECT', 'toggleFullWidth(hwnd: HANDLE) i32') + '\n' +
     handler('WM_DPICHANGED', 'WM_MOVE', 'dpiChanged(hwnd: HANDLE, wp: usize, lp: isize) i32') + '\n' +
     handler('WM_APP_FONT_BIGGER', 'WM_APP_FONT_SMALLER', 'zoomBigger(hwnd: HANDLE) i32') + '\n' +
@@ -87,6 +90,8 @@ fn pollFonts() void {
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '')
+    .replaceAll('@import("inbox.zig").', '')
+    .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
   return prelude + `\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
@@ -118,6 +123,7 @@ const Shell = struct {
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
     chat_view_on: bool = false, chat_shell_override: bool = true, full_width_pending_console_resize: bool = false,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
+    favorite: bool = false, inbox_excluded: bool = false,
 };
 const empty_shell: Shell = .{};
 const MAX_SHELLS = 8;
@@ -200,6 +206,10 @@ var g_chat_font_pt: u32 = 16;
 var g_chat_browser_swap: struct { shell_id: u32 = 0, fn cancel(_: *@This()) void {} } = .{};
 var g_browser_focus_mode = false;
 var g_single_window = true;
+var g_starred_workspace = false;
+var g_starred_last_shell: u32 = 0;
+var g_inbox_step_context_active = false;
+const TIMER_INBOX_REFRESH = 1;
 var g_lws_count: u32 = 2;
 var g_ws_snoozed: [2]bool = @splat(false);
 var g_active_workspace: u8 = 0;
@@ -352,6 +362,7 @@ fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) BOOL { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn openChatView() void { g_chat_active = true; }
 fn saveSession() void {}
+fn loadInboxModel() void {}
 fn chatBenchEnabled() bool { return false; }
 fn chatViewOwnsInput() bool { return g_chat_active; }
 fn resetFontCache() void {}
@@ -371,6 +382,7 @@ fn prepare() BundledConsoleFonts {
     fail_set = false; reject_shell_font = false; fail_attach = false; fail_registration = false; selection_errors = 0;
     g_console_font_override = 0; g_main_monitor_dpi = 96; g_font_gen = 1; g_font_sync_done = 0;
     g_chat_active = false; g_chat_view_mode = .per_session; g_active_workspace = 0;
+    g_starred_workspace = false; g_starred_last_shell = 0; g_inbox_step_context_active = false;
     test_pane_h = 540; geometry_pending = false; g_monitor_transition = .{};
     return registerBundledConsoleFonts();
 }
@@ -471,6 +483,15 @@ test "workspace switch chooses remembered native tab and adoption ignores stale 
     try std.testing.expectEqual(@as(u32, 1), active_shell);
     switchToWorkspace(0); drain(); try expectShellFont(); switchToWorkspace(0); drain(); try expectShellFont();
 }
+test "IGSH-457 Starred workspace switch keeps the selected console on the shell font" {
+    const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
+    try std.testing.expect(spawnSession(.cmd, 0)); try std.testing.expect(spawnSession(.tmux, 1));
+    shells[1].workspace = 1; shells[1].favorite = true;
+    seedWrong(1, 12); fontSyncMarkAllStale(g_main_hwnd, "starred workspace");
+    switchToWorkspace(@import("workspace_view.zig").starred); drain(); try expectShellFont();
+    try std.testing.expect(g_starred_workspace);
+    try std.testing.expectEqual(@as(u32, 1), active_shell);
+}
 test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
     for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
         for ([_]bool{ false, true }) |full| {
@@ -561,10 +582,21 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
 }
 `;
 
+test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
+  const source = harness();
+  for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel']) {
+    assert.ok(source.includes(`fn ${name}(`), name);
+  }
+  assert.match(source, /var g_starred_workspace = false/);
+  assert.match(source, /var g_starred_last_shell: u32 = 0/);
+  assert.doesNotMatch(source, /@import\("inbox.zig"\)/);
+});
+
 test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold after events and queued sync work', () => {
   const dir = fs.mkdtempSync(path.join(process.env.CONSOLE_FONT_TEST_TMP || os.tmpdir(), 'console-font-lifecycle-'));
   try {
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
+    copyZig(['workspace_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness());
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {

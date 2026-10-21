@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -107,6 +108,72 @@ def install_hax_eta():
     return write(config_path, json.dumps(data, indent=2) + "\n")
 
 
+def tmux_config(fifo):
+    destination = shlex.quote(str(fifo))
+
+    def emit(event):
+        fields = f"{event} #{{q:session_name}}'' #{{q:pane_current_command}}'' #{{pane_pid}}'' #{{pane_id}}'' #{{q:socket_path}}''"
+        command = f"if [ -p {destination} ]; then printf '%s\\0' {fields} 3<>{destination} >&3; fi"
+        return "run-shell -b " + json.dumps(command, ensure_ascii=False)
+
+    rearm = "kill-session -C -t #{session_id}; set-option -w -t #{window_id} monitor-activity on"
+    activity = (
+        "if-shell -F '#{window_active}' { kill-session -C; set-option -w monitor-activity off; "
+        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},0}' { set-environment MULTIPROMPT_NOTIFY_STATE 1; "
+        "run-shell -bCd 3 " + json.dumps(rearm) + " } { "
+        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},1}' { set-environment MULTIPROMPT_NOTIFY_STATE 2 }; " + emit("activity") + "; "
+        "run-shell -bCd 15 " + json.dumps(rearm) + " } }"
+    )
+    silence = (
+        "if-shell -F '#{&&:#{window_active},#{!=:#{MULTIPROMPT_NOTIFY_STATE},0}}' { kill-session -C; "
+        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},2}' { " + emit("silence") + " }; "
+        "set-environment MULTIPROMPT_NOTIFY_STATE 0 }"
+    )
+    title = "if-shell -F '#{&&:#{&&:#{window_active},#{pane_active}},#{m:✳*,#{pane_title}}}' { " + emit("title") + " }"
+    lines = [
+        "set-option -g monitor-activity on",
+        "set-option -gw monitor-silence 10",
+        "set-option -g activity-action any",
+        "set-option -g silence-action any",
+        "set-environment -g MULTIPROMPT_NOTIFY_STATE 0",
+    ]
+    for event, command in (
+        ("alert-activity", activity), ("alert-silence", silence),
+        ("pane-title-changed", title), ("session-created", emit("session")),
+        ("client-attached", emit("attach")),
+    ):
+        lines.append(f"set-hook -g {event}[514] {{ {command} }}")
+    return "\n".join(lines) + "\n"
+
+
+def install_tmux_hooks():
+    snippet = DEST / "tmux-notifications.conf"
+    write(DEST / "tmux_notify.py", (BASE / "tmux_notify.py").read_text(encoding="utf-8"))
+    write(snippet, tmux_config(Path(f"/tmp/mp-notify-{os.getuid()}/tmux-events")))
+    config = HOME / ".tmux.conf"
+    text = config.read_text(encoding="utf-8") if config.exists() else ""
+    source = "source-file -q " + shlex.quote(str(snippet))
+    if source not in text.splitlines():
+        write(config, text + ("\n" if text and not text.endswith("\n") else "") + source + "\n")
+    unit = HOME / ".config/systemd/user/zigshell-watcher.service"
+    try:
+        result = subprocess.run(["systemctl", "--user", "disable", "--now", "zigshell-watcher.service"], check=False)
+        if result.returncode and unit.exists():
+            raise RuntimeError("Legacy watcher service could not be stopped and disabled")
+    except (OSError, subprocess.CalledProcessError) as error:
+        if unit.exists():
+            raise
+        print("Legacy watcher service not disabled:", error)
+    for path in (HOME / ".local/bin/zigshell-watcher.sh", HOME / ".config/systemd/user/zigshell-watcher.service"):
+        if path.exists():
+            shutil.copy2(path, str(path) + ".pre-zigshell-" + STAMP)
+            path.unlink()
+    try:
+        subprocess.run(["tmux", "source-file", str(snippet)], check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError):
+        print("Tmux hooks saved; a new tmux server will load them from ~/.tmux.conf.")
+
+
 def install(with_eta=False):
     write(DEST / "notify.py", (BASE / "notify.py").read_text(encoding="utf-8"))
     for filename in ("mp_complete.py", "claude_interactive_builtins.tsv", "codex_slash.txt", "harvest_tui.sh"):
@@ -176,6 +243,7 @@ def install(with_eta=False):
     if (HOME / ".pi/agent").is_dir():
         write(HOME / ".pi/agent/extensions/zigshell.ts", (BASE / "pi-zigshell.ts").read_text(encoding="utf-8"))
     if os.name != "nt":
+        install_tmux_hooks()
         write(DEST / "mp_notify_relay.py", (BASE / "mp_notify_relay.py").read_text(encoding="utf-8"))
         unit = HOME / ".config/systemd/user/mp-notify-relay.service"
         write(unit, (BASE / "mp-notify-relay.service").read_text(encoding="utf-8"))
@@ -195,12 +263,7 @@ def install(with_eta=False):
             path = HOME / f".claude/hooks/zigshell-{name}.sh"
             write(path, f'#!/bin/sh\nexec python3 "$HOME/.local/share/zigshell/notify.py" claude {event}\n')
             path.chmod(0o755)
-        watcher = HOME / ".local/bin/zigshell-watcher.sh"
-        if watcher.exists():
-            changed = write(watcher, (BASE / "zigshell-watcher.sh").read_text(encoding="utf-8"))
-            watcher.chmod(0o755)
-            if changed:
-                subprocess.run(["systemctl", "--user", "restart", "zigshell-watcher"], check=True)
+
 
 
 if __name__ == "__main__":

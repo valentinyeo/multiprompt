@@ -206,6 +206,9 @@ pub fn build(b: *std.Build) void {
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);
+    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
+    test_step.dependOn(&chat_bench_ab_summary_tests.step);
+    vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
     const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js" });
     vps_test_step.dependOn(&chat_bench_linux_tests.step);
     const install_guard_tests = b.addSystemCommand(&.{ "node", "--test", "tools/install-guard.test.js" });
@@ -225,13 +228,15 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.graph.host,
             .optimize = .Debug,
         }) });
-        account_test_step.dependOn(&b.addRunArtifact(tests).step);
+        const run_tests = b.addRunArtifact(tests);
+        account_test_step.dependOn(&run_tests.step);
+        if (std.mem.eql(u8, source, "src/workspace_view.zig")) test_step.dependOn(&run_tests.step);
     }
     vps_test_step.dependOn(account_test_step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -416,6 +421,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
     test_step.dependOn(&chat_rich_tests.step);
+    test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js" });
     test_step.dependOn(&chat_autocomplete_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });

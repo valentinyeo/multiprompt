@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 only_ext=0
+allow_downgrade=0
 bench=''
 release=''
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$script_dir/install-version-guard.sh"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --extension-only) only_ext=1; shift ;;
+    --allow-downgrade) allow_downgrade=1; shift ;;
     --bench|--release)
       if [ "$#" -lt 2 ] || [[ "$2" = --* ]]; then echo "missing $1 value" >&2; exit 1; fi
       if [ "$1" = --bench ]; then bench="$2"; else release="$2"; fi
@@ -15,7 +18,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 if [ -z "$release" ]; then
-  echo 'usage: tools/install-laptop1.sh [--extension-only] --release <vX.Y.Z|latest> [--bench <results.json>]' >&2
+  echo 'usage: tools/install-laptop1.sh [--extension-only] [--allow-downgrade] --release <vX.Y.Z|latest> [--bench <results.json>]' >&2
   exit 1
 fi
 if [ "$only_ext" = 0 ] && [ -z "$bench" ]; then
@@ -84,13 +87,28 @@ for (const name of names) {
 NODE
 if [ "$only_ext" = 0 ]; then
   receipt_sha=$(sha256sum "$download_dir/multiprompt-x64.exe" | cut -d' ' -f1)
-  node "$script_dir/chat-bench/receipt.mjs" "$bench" "$receipt_sha"
+  node --input-type=module - "$bench" "$download_dir/multiprompt-x64.exe" "$download_dir/results-local.json" <<'NODE'
+import fs from 'node:fs';
+const [input, exe, output] = process.argv.slice(2);
+try {
+  const receipt = JSON.parse(fs.readFileSync(input, 'utf8'));
+  receipt.exe = exe;
+  fs.writeFileSync(output, JSON.stringify(receipt));
+} catch (error) {
+  console.error(`RECEIPT_REJECTED: ${error.message}`);
+  process.exitCode = 1;
+}
+NODE
+  node "$script_dir/chat-bench/receipt.mjs" "$download_dir/results-local.json" "$receipt_sha"
 fi
 check_no_zig
 checked_pc=1
 profile=$(lh shell '$env:USERPROFILE' --timeout 60 | tr -d '\r\n')
 if [[ ! "$profile" =~ ^[A-Za-z]:\\Users\\[A-Za-z0-9._-]+$ ]]; then echo 'refusing install: unexpected laptop user folder' >&2; exit 1; fi
 app="$profile\\Documents\\GitHub\\zigshell"
+if [ "$only_ext" = 0 ]; then
+  check_install_version "$app\\zig-out\\bin\\multiprompt.exe" "$release" "$allow_downgrade"
+fi
 upload_pc="$app\\release-upload-$(basename "$download_dir")"
 staged_pc=1
 lh shell "\$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force '$upload_pc' | Out-Null" --timeout 60
@@ -114,7 +132,7 @@ upload() {
 for asset in "${assets[@]}"; do upload "$asset"; done
 if [ "$only_ext" = 0 ]; then
   lh shell "\$ErrorActionPreference='Stop'; \$b='$app\\zig-out\\bin'; \$s='$upload_pc'; \$t=Get-Date -Format HHmmss;
-    \$v=(Select-String -Path \"\$b\\multiprompt.exe\" -Pattern 'multiprompt v0\.\d+\.\d+' -Encoding Unicode -List).Matches[0].Value -replace 'multiprompt ','';
+    \$v='v$installed_version';
     Rename-Item \"\$b\\multiprompt.exe\" \"multiprompt-stable-\$v-\$t.exe\"; Copy-Item \"\$s\\multiprompt-x64.exe\" \"\$b\\multiprompt.exe\";
     Rename-Item \"\$b\\zigshell-bridge.exe\" \"zigshell-bridge-old-\$t.exe\" -ErrorAction SilentlyContinue; Copy-Item \"\$s\\zigshell-bridge-x64.exe\" \"\$b\\zigshell-bridge.exe\" -Force;
     Get-ChildItem \"\$b\\multiprompt-stable-v*.exe\" | Sort LastWriteTime -Descending | Select -Skip 5 | Remove-Item;

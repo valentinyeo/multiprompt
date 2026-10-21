@@ -122,7 +122,7 @@ fn etaElapsedMs(_: u64, _: i64) u64 { return 0; }
   normalize(between('fn stampSessionUse(', 'fn inboxPublishesShell(')) +
   normalize(between('pub fn sessionFrontSelected(', 'fn wndProc(', read('src/main.zig'))) +
   between('fn inboxFrequent(', 'fn loadInboxModel(') +
-  between('fn favoriteSplitMatches(', 'fn toggleFavorite(') +
+  between('const favoriteSplitMatches =', 'fn toggleFavorite(') +
   between('fn inboxRowVisible(', 'test "cached inbox navigation') +
   between('fn inboxVisibleCount(', 'fn rememberInboxRow(') + `
 fn paintRows() void {
@@ -251,7 +251,7 @@ test "v2 fixture production paint puts beta alpha gamma on screen and gamma at g
 function runHarness(mutate = x => x) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-frequent-'));
   try {
-    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig'], dir);
+    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig'], dir);
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
