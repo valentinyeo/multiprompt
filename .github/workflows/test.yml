@@ -127,6 +127,9 @@ jobs:
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Sweep real zsb.exe command help
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 4
+        run: node --test tools/zsb-help.test.js
 
   test-vps:
     name: test-vps (${{ matrix.group }})
