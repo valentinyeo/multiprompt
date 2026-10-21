@@ -1894,6 +1894,7 @@ pub const SavedTab = struct {
 
 pub const ISSUE_347_KEEP_FULL_WIDTH = true;
 pub const ISSUE_373_SHELL_OVERRIDE = true;
+pub const ISSUE_440_FULL_WIDTH_CHAT = true;
 pub const ISSUE_274_DOT_ON_SELECTED_TAB = true;
 
 pub var g_restored_valid_session = false;
