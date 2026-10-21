@@ -118,7 +118,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next() orelse return error.InvalidArguments;
-` + section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n' +
+` + section(bridge, '    var profile_override:', '    var help_args = args;') + '    if (profile_override != null) return error.InvalidArguments;\n' +
     '    if (' + section(bridge, 'std.mem.eql(u8, command, "text") or', '    } else if (std.mem.eql(u8, command, "links"))') +
     '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "eval") or', '    } else if (std.mem.eql(u8, command, "key"))') +
     '    } else return error.InvalidArguments;\n}\n');
