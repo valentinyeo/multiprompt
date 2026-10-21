@@ -90,6 +90,8 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const CreateFontW = @import("fonts.zig").create;
+const CHAT_QUALITY = @import("fonts.zig").CHAT_QUALITY;
+const chatLineHeight = @import("fonts.zig").chatLineHeight;
 const Sleep = @import("win32.zig").Sleep;
 const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
 const CloseHandle = @import("win32.zig").CloseHandle;
@@ -186,7 +188,7 @@ fn chatComposerLineH() i32 {
     defer _ = SelectObject(dc, old_font);
     var one = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
     _ = DrawTextW(dc, L("Ag"), -1, &one, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
-    return @max(uiScaled(14), one.bottom - one.top);
+    return @max(uiScaled(14), chatLineHeight(one.bottom - one.top));
 }
 fn chatComposerBaseCardH() i32 {
     return @max(uiScaled(44), chatComposerTopPad() + chatComposerLineH() + chatComposerBottomPad());
@@ -387,8 +389,8 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
 
 pub fn ensureChatFont() HANDLE {
     if (app_state.g_chat_font == null) {
-        const face = L(@import("fonts.zig").UI_FACE);
-        app_state.g_chat_font = CreateFontW(-uiScaled(app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, face);
+        const face = L(@import("fonts.zig").UI_MEDIUM_FACE);
+        app_state.g_chat_font = CreateFontW(-uiScaled(app_state.g_chat_font_pt), 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, face);
     }
     return app_state.g_chat_font;
 }

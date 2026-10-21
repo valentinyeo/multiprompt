@@ -6,10 +6,12 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { copyZig } = require('./zig-copy');
 const source = require('./app-source').readAppSource();
-function body(name) {
-  const start = source.indexOf(`fn ${name}(`);
+const fontSource = fs.readFileSync(path.join(__dirname, '../src/fonts.zig'), 'utf8');
+const lineHeightPolicy = fontSource.match(/^pub const CHAT_LINE_HEIGHT_PERMILLE[^;]+;/m)[0] + '\n' + body('chatLineHeight', fontSource);
+function body(name, text = source) {
+  const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
-  return source.slice(start, source.indexOf('\n}', start) + 2);
+  return text.slice(start, text.indexOf('\n}', start) + 2);
 }
 const prelude = String.raw`
 const std = @import("std");
@@ -189,9 +191,9 @@ function execute(control) {
   try {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
-    let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableWheel', 'chatFindY'].map(body).join('\n');
+    let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + functions + checks);
+    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + lineHeightPolicy + '\n' + functions + checks);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-421'], { encoding: 'utf8', timeout: 120000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

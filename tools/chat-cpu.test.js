@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
+const fontSource = fs.readFileSync(path.join(__dirname, '../src/fonts.zig'), 'utf8');
+const lineHeightPolicy = fontSource.match(/^pub const CHAT_LINE_HEIGHT_PERMILLE[^;]+;/m)[0] + '\n' + body(fontSource, 'chatLineHeight');
 function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -17,7 +19,7 @@ function run(code) {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + code);
+    fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code);
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
