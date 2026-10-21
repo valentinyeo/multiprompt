@@ -538,6 +538,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
             user_initiated = true;
         }
         try sendBrowserRequest(allocator, "shoturl", if (user_initiated) "\"userInitiated\":true" else "", null);
+    } else if (std.mem.eql(u8, command, "emulate")) {
+        const device = args.next() orelse badArgs(command);
+        var mobile = false;
+        if (args.next()) |flag| {
+            if (!std.mem.eql(u8, flag, "--mobile")) badArgs(command);
+            mobile = true;
+        }
+        if (args.next() != null or !validEmulationTarget(device, mobile)) badArgs(command);
+        var fields = std.array_list.Managed(u8).init(allocator);
+        defer fields.deinit();
+        try fields.appendSlice("\"device\":");
+        try appendJsonString(&fields, device);
+        try fields.print(",\"mobile\":{s}", .{if (mobile) "true" else "false"});
+        try sendBrowserRequest(allocator, "emulate", fields.items, null);
     } else if (std.mem.eql(u8, command, "cdp")) {
         const cdp_method = args.next() orelse badArgs(command);
         if (std.mem.eql(u8, cdp_method, "--script") or std.mem.eql(u8, cdp_method, "--script-json")) {
@@ -693,6 +707,7 @@ const usage_text =
     \\  screenshot [-o file.png] [--tab <id|match>] Return a PNG or save it
     \\  console [-n N|--clear]         Return recent console and page-log entries
     \\  shoturl                        Upload active tab screenshot and paste its link into the owning shell
+    \\  emulate <device|WIDTHxHEIGHT> [--mobile]  Keep viewport, user agent and touch per tab; emulate off resets
     \\  cdp <method> [params-json]     Send a Chrome DevTools Protocol command
     \\  cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
     \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
@@ -2327,7 +2342,7 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
         return makeResultResponse(
             allocator,
             id,
-            "{\"transport\":\"chrome-native-messaging\",\"commands\":[\"ping\",\"version\",\"capabilities\",\"navigate\",\"createPaneWindow\",\"back\",\"forward\",\"reload\",\"extensionReload\",\"setTheme\",\"protectWindow\",\"browserDropGesture\",\"routingAudit\",\"sidebar\",\"tabs\",\"activeTab\",\"url\",\"activate\",\"closeTab\",\"text\",\"links\",\"snapshot\",\"find\",\"click\",\"type\",\"insert\",\"cursor\",\"eval\",\"key\",\"screenshot\",\"console\",\"shoturl\",\"cdp\",\"fgUnlock\",\"shutdown\"]}",
+            "{\"transport\":\"chrome-native-messaging\",\"commands\":[\"ping\",\"version\",\"capabilities\",\"navigate\",\"createPaneWindow\",\"back\",\"forward\",\"reload\",\"extensionReload\",\"setTheme\",\"protectWindow\",\"browserDropGesture\",\"routingAudit\",\"sidebar\",\"tabs\",\"activeTab\",\"url\",\"activate\",\"closeTab\",\"text\",\"links\",\"snapshot\",\"find\",\"click\",\"type\",\"insert\",\"cursor\",\"eval\",\"key\",\"screenshot\",\"console\",\"shoturl\",\"cdp\",\"emulate\",\"fgUnlock\",\"shutdown\"]}",
         );
     }
 
@@ -2384,8 +2399,46 @@ fn commandLookup(command: []const u8) []const u8 {
     return if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
 }
 
+fn validEmulationTarget(device: []const u8, mobile: bool) bool {
+    if (std.mem.eql(u8, device, "off")) return !mobile;
+    if (std.mem.eql(u8, device, "iphone") or std.mem.eql(u8, device, "pixel")) return true;
+    var dimensions = std.mem.splitScalar(u8, device, 'x');
+    for (0..2) |_| {
+        const part = dimensions.next() orelse return false;
+        if (part.len == 0) return false;
+        for (part) |c| if (c < '0' or c > '9') return false;
+        const value = std.fmt.parseInt(u32, part, 10) catch return false;
+        if (value == 0 or value > 10000) return false;
+    }
+    return dimensions.next() == null;
+}
+
+test "IGSH-127 emulation presets dimensions and off validate locally" {
+    for ([_][]const u8{ "iphone", "pixel", "390x844", "1x10000" }) |device| {
+        try std.testing.expect(validEmulationTarget(device, false));
+        try std.testing.expect(validEmulationTarget(device, true));
+    }
+    try std.testing.expect(validEmulationTarget("off", false));
+    try std.testing.expect(!validEmulationTarget("off", true));
+    for ([_][]const u8{ "", "tablet", "0x844", "390x0", "10001x10", "390", "390x844x2", "-1x2", "+1x2", "1.5x2", "1x" }) |device| {
+        try std.testing.expect(!validEmulationTarget(device, false));
+    }
+}
+
 fn commandHelp(command: []const u8) !void {
     const lookup = commandLookup(command);
+    if (std.mem.eql(u8, lookup, "emulate")) {
+        return writeStdout(
+            \\usage: zsb emulate <device|WIDTHxHEIGHT> [--mobile]
+            \\       zsb emulate off
+            \\Devices: iphone (390x844), pixel (412x915). Sizes must be 1-10000 pixels.
+            \\Keep viewport, user agent and touch on this tab across navigations until off.
+            \\Custom sizes are desktop unless --mobile is supplied. Reload to refresh UA-dependent content.
+            \\F12 and browser DevTools are outside page automation; this does not open DevTools.
+            \\Examples: zsb emulate iphone; zsb emulate 390x844 --mobile; zsb emulate off
+            \\
+        );
+    }
     if (std.mem.eql(u8, lookup, "cdp")) {
         return writeStdout(
             \\usage: zsb cdp <method> [params-json]

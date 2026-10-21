@@ -86,7 +86,8 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -eq 'browser-emulation' -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
@@ -150,9 +151,24 @@ jobs:
           $image = [Drawing.Bitmap]::FromFile("$pwd/chat-markdown-proof.bmp")
           try { $image.Save("$pwd/evidence/chat-markdown-render.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
       - name: Launch Doctor Drive Evidence Cleanup
+        if: env.FEATURE != 'browser-emulation'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: env.FEATURE == 'browser-emulation'
+        with:
+          node-version: 22
+      - name: Install isolated Chrome for Testing driver
+        if: env.FEATURE == 'browser-emulation'
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
+          if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
+          "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Verify real native browser emulation
+        if: env.FEATURE == 'browser-emulation'
+        run: node .claude/skills/verify-multiprompt/browser-emulation.mjs
       - name: Retain pre-launch failure result
         if: always()
         shell: powershell

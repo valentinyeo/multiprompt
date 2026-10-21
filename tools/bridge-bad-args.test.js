@@ -76,6 +76,7 @@ const cases = [
   ['console', '-n', 'not-a-number'],
   ['shoturl', '--unknown'],
   ['cdp'],
+  ...[[], ['off', '--mobile'], ['unknown'], ['0x844'], ['390x0'], ['10001x10'], ['390x844', '--unknown'], ['iphone', '--mobile', '--mobile']].map(args => ['emulate', ...args]),
   ['resolve-window', '--shell-id', 'not-a-number'],
   ['manifest'],
   ['version', 'extra'],

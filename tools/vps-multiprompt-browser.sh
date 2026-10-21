@@ -67,6 +67,17 @@ print_help() {
       console) echo 'usage: zsb console [-n N | --limit N] [--clear]' ;;
       routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]' ;;
       resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]' ;;
+      emulate)
+        cat <<'EMULATE_HELP'
+usage: zsb emulate <device|WIDTHxHEIGHT> [--mobile]
+       zsb emulate off
+Devices: iphone (390x844), pixel (412x915). Sizes must be 1-10000 pixels.
+Keep viewport, user agent and touch on this tab across navigations until off.
+Custom sizes are desktop unless --mobile is supplied. Reload to refresh UA-dependent content.
+F12 and browser DevTools are outside page automation; this does not open DevTools.
+Examples: zsb emulate iphone; zsb emulate 390x844 --mobile; zsb emulate off
+EMULATE_HELP
+        ;;
       cdp)
         cat <<'CDP_HELP'
 usage: zsb cdp <method> [params-json]
@@ -140,6 +151,7 @@ Commands and flags:
   pane-info                         Ask the app for hosting tab name, active, visible, windowId
   status | doctor | back | forward | reload | shoturl
   cursor [on | off | move X Y | click X Y]
+  emulate <device|WIDTHxHEIGHT> [--mobile] | emulate off
   insert <text> | eval <code> | cdp <method> [params-json]
   cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
 
