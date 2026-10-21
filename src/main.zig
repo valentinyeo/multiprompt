@@ -554,6 +554,7 @@ const SEARCH_CLOSEWIN_OFFSET = @import("app_state.zig").SEARCH_CLOSEWIN_OFFSET;
 const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET;
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
+const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -1174,6 +1175,7 @@ const openInboxFilter = @import("inbox.zig").openInboxFilter;
 const closeInboxFilter = @import("inbox.zig").closeInboxFilter;
 const toggleInbox = @import("inbox.zig").toggleInbox;
 const armInboxStepContext = @import("inbox.zig").armInboxStepContext;
+const jumpToInboxRow = @import("inbox.zig").jumpToInboxRow;
 const inboxJump = @import("inbox.zig").inboxJump;
 const inboxStepJump = @import("inbox.zig").inboxStepJump;
 const refreshNextUnreadCache = @import("inbox.zig").refreshNextUnreadCache;
@@ -1851,6 +1853,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const target = hitTestSidebar(logical_my);
                 switch (target) {
+                    .inbox => |ri| {
+                        jumpToInboxRow(ri);
+                        return 0;
+                    },
                     .section => |tier| {
                         toggleSidebarSectionCollapsed(tier);
                         return 0;
@@ -2028,6 +2034,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
+            if (app_state.g_workspace_hover != null) {
+                app_state.g_workspace_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_inbox_button_hover) {
                 app_state.g_inbox_button_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2046,6 +2056,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = TrackMouseEvent(&tracking);
                     }
                 }
+            }
+            const ws_hover = workspaceStripHitTest(GET_X(lp), GET_Y(lp));
+            if (ws_hover != app_state.g_workspace_hover) {
+                app_state.g_workspace_hover = ws_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (ws_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
             }
             const hovered = inboxButtonHitTest(GET_X(lp), GET_Y(lp));
             if (hovered != app_state.g_inbox_button_hover) {
@@ -2367,7 +2386,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const my = GET_Y(lp);
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (workspaceStripHitTest(mx, my)) |ws| {
-                    if (ws != WS_NEW_PILL) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
+                    if (ws < app_state.g_lws_count) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
@@ -2854,14 +2873,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CYCLE_WORKSPACE => {
             if (app_state.g_inbox_active) closeInbox(hwnd);
-            if (app_state.g_single_window and app_state.g_lws_count > 1) {
-                const cur: u32 = app_state.g_active_workspace;
-                const cnt: u32 = app_state.g_lws_count;
+            if (app_state.g_single_window) {
+                const cur: u32 = if (app_state.g_starred_workspace) 0 else @as(u32, app_state.g_active_workspace) + 1;
+                const cnt: u32 = @as(u32, app_state.g_lws_count) + 1;
                 var step: u32 = 1;
                 while (step < cnt) : (step += 1) {
                     const next: u32 = if (wp == 1) (cur + step) % cnt else (cur + cnt - step) % cnt;
-                    if (!app_state.g_ws_snoozed[next]) {
-                        switchToWorkspace(next);
+                    if (next == 0 or !app_state.g_ws_snoozed[next - 1]) {
+                        switchToWorkspace(if (next == 0) @import("workspace_view.zig").starred else next - 1);
                         break;
                     }
                 }
@@ -2870,6 +2889,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_INBOX_STEP => {
+            if (app_state.g_single_window and !app_state.g_inbox_active and (app_state.g_starred_workspace or !app_state.g_inbox_step_context_active)) {
+                _ = SendMessageW(hwnd, WM_APP_CYCLE_WORKSPACE, wp, 0);
+                return 0;
+            }
             inboxStepJump(if (wp == 1) 1 else -1);
             return 0;
         },
@@ -3702,6 +3725,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
+            if (wp == 0 and app_state.g_starred_workspace) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -5546,6 +5570,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_CLOSEWIN_OFFSET) {
                     app_state.g_search_active = false;
                     clearSearchBackdrop();
+                    if (app_state.g_starred_workspace) {
+                        showActiveShellAfterOverlay();
+                        return 0;
+                    }
                     if (app_state.g_single_window and app_state.g_lws_count > 1) {
                         app_state.g_shell_focused = true;
                         showActiveShellAfterOverlay();
@@ -5610,6 +5638,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_tab = frequent.frequent_split;
                     openInbox(hwnd);
                     app_state.g_inbox_sel = 0;
+                    return 0;
+                }
+                if (target == SEARCH_STARRED_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    app_state.g_search_from_inbox = false;
+                    if (app_state.g_inbox_active) closeInbox(hwnd);
+                    switchToWorkspace(@import("workspace_view.zig").starred);
                     return 0;
                 }
                 if (target == SEARCH_GOINBOX_OFFSET) {
@@ -7298,6 +7335,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         const sv = allSessionsVisibleCount();
                         if (app_state.g_all_sessions_sel >= sv) app_state.g_all_sessions_sel = if (sv > 0) sv - 1 else 0;
                     }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (app_state.g_starred_workspace and !app_state.g_inbox_active) {
+                    loadInboxModel();
+                    @import("workspaces.zig").refreshStarredWorkspace();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

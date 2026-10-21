@@ -319,14 +319,14 @@ pub fn buildWindowTitle(buf: *[256]u16) LPCWSTR {
         }
     } else if (app_state.g_single_window) {
         var nbuf: [32]u8 = undefined;
-        const wsname = workspaceDisplayName(app_state.g_active_workspace, &nbuf);
+        const wsname = if (app_state.g_starred_workspace) "Starred" else workspaceDisplayName(app_state.g_active_workspace, &nbuf);
         for (wsname) |c| {
             if (pos >= 255) break;
             buf[pos] = @intCast(c);
             pos += 1;
         }
         var cbuf: [20]u8 = undefined;
-        const cnt: []const u8 = std.fmt.bufPrint(&cbuf, " ({d}/{d}) - ", .{ @as(u32, app_state.g_active_workspace) + 1, app_state.g_lws_count }) catch " - ";
+        const cnt: []const u8 = std.fmt.bufPrint(&cbuf, " ({d}/{d}) - ", .{ if (app_state.g_starred_workspace) @as(u32, 1) else @as(u32, app_state.g_active_workspace) + 2, app_state.g_lws_count + 1 }) catch " - ";
         for (cnt) |c| {
             if (pos >= 255) break;
             buf[pos] = @intCast(c);
