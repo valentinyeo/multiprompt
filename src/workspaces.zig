@@ -2725,6 +2725,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
     }
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
     captureWorkspaceFocus();
+    app_state.g_browser_focus_mode = false;
     const was_starred = app_state.g_starred_workspace;
     app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
@@ -2737,7 +2738,6 @@ pub fn switchToWorkspace(ws_in: u32) void {
         return;
     }
     _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
-    app_state.g_browser_focus_mode = false;
     app_state.g_active_workspace = ws;
 
     const target = pickWorkspaceTarget(app_state.shells[0..app_state.shell_count], ws, app_state.g_ws_last_shell[ws]);
