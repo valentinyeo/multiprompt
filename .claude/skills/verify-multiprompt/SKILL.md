@@ -102,6 +102,7 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 - `result.json`: pass/fail, asserted side effects, explicit offline-login boundary, errors, cleanup outcome and observed scratch removal.
 - `process-tree.json`: kernel job accounting, including total owned processes and zero active processes after termination.
 - `build.json`, `doctor.json`: source revision/release, executable hash/version and PID/HWND identity.
+- `scratch-transient-files.json`: inventory of browser process locks excluded from durable evidence; these may disappear after the owned job stops.
 - `scratch-reparse-points.json`: inventory of scratch junctions/symlinks retained as metadata, never traversed during evidence copying or deletion.
 - `stdout.log`, `stderr.log`, and `data/`: the isolated app's saved files, debug/session-audit logs and any file created by the user journey, copied before scratch removal.
 

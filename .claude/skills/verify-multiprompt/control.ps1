@@ -296,6 +296,7 @@ $job = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
+$script:transientEvidence = New-Object System.Collections.ArrayList
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -311,7 +312,11 @@ function Record([string]$Action) {
 function Prepare-ScratchEvidence([string]$Path) {
     $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
     foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
-        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        if (-not $entry.PSIsContainer -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
+            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            $entry.Delete()
+        } elseif (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
             Save-Json @($script:scratchLinks) 'scratch-links.json'
             $entry.Delete()
@@ -1120,6 +1125,7 @@ try {
             } finally {
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
+                    Save-Json @($script:transientEvidence.ToArray()) 'scratch-transient-files.json'
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
                     $deadline = [DateTime]::UtcNow.AddSeconds(20)
