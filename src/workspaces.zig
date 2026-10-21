@@ -2445,11 +2445,6 @@ test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last 
         app_state.g_ws_focus[ws] = .none;
         app_state.g_ws_focus[ws] = parseWorkspaceFocus(workspace);
         try std.testing.expectEqual(expected, app_state.g_ws_focus[ws]);
-        app_state.shells[ws].chat_view_on = expected != .chat;
-        app_state.shells[ws].chat_shell_override = expected == .chat;
-        prepareWorkspaceFocus(@intCast(ws));
-        try std.testing.expectEqual(expected == .chat, app_state.shells[ws].chat_view_on);
-        try std.testing.expectEqual(expected == .shell, app_state.shells[ws].chat_shell_override);
     }
     swapWorkspaceSlots(0, 1);
     try std.testing.expectEqual(@as(u32, 42), app_state.g_ws_last_shell[0]);
@@ -2623,25 +2618,8 @@ pub fn captureWorkspaceFocus() void {
     rememberWorkspaceFocus(shell.workspace, shell.shell_id, input);
 }
 
-pub fn prepareWorkspaceFocus(idx: u32) void {
-    if (idx >= app_state.shell_count) return;
-    const shell = &app_state.shells[idx];
-    if (shell.workspace >= MAX_LWS or shell.shell_id != app_state.g_ws_last_shell[shell.workspace]) return;
-    switch (app_state.g_ws_focus[shell.workspace]) {
-        .none => {},
-        .chat => {
-            if (app_state.g_chat_view_mode == .nowhere) return;
-            shell.chat_view_on = true;
-            shell.chat_shell_override = false;
-        },
-        .shell => {
-            shell.chat_view_on = false;
-            shell.chat_shell_override = true;
-        },
-    }
-}
-
-test "IGSH-522 leaving and returning restores chat and shell input without changing the selected session" {
+test "IGSH-522 workspace return follows the current session surface, not stale focus" {
+    const chatViewShouldShowForTab = @import("chat_composer.zig").chatViewShouldShowForTab;
     const old_focus = app_state.g_ws_focus;
     const old_last_shell = app_state.g_ws_last_shell;
     const old_shells = app_state.shells[0..3].*;
@@ -2669,27 +2647,34 @@ test "IGSH-522 leaving and returning restores chat and shell input without chang
     for ([_]app_state.WorkspaceFocus{ .chat, .shell }) |input| {
         rememberWorkspaceFocus(0, 41, input);
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
-        prepareWorkspaceFocus(app_state.active_shell);
         rememberWorkspaceFocus(1, 42, .shell);
-        app_state.shells[0].chat_view_on = input != .chat;
-        app_state.shells[0].chat_shell_override = input == .chat;
+        app_state.shells[0].chat_view_on = input == .chat;
+        app_state.shells[0].chat_shell_override = input == .shell;
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
-        prepareWorkspaceFocus(app_state.active_shell);
         try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
         try std.testing.expectEqual(input, app_state.g_ws_focus[0]);
+        const session = &app_state.shells[app_state.active_shell];
+        try std.testing.expectEqual(input == .chat, chatViewShouldShowForTab(app_state.g_chat_view_mode, session.chat_view_on, session.chat_shell_override, false, true));
         try std.testing.expectEqual(input == .chat, app_state.shells[0].chat_view_on);
         try std.testing.expectEqual(input == .shell, app_state.shells[0].chat_shell_override);
     }
     rememberWorkspaceFocus(0, 41, .chat);
+    app_state.shells[0].chat_view_on = false;
+    app_state.shells[0].chat_shell_override = true;
+    rememberWorkspaceFocus(0, 41, .none);
+    app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
+    app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
+    try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
+    try std.testing.expectEqual(app_state.WorkspaceFocus.chat, app_state.g_ws_focus[0]);
+    const shell = &app_state.shells[app_state.active_shell];
+    try std.testing.expect(!chatViewShouldShowForTab(app_state.g_chat_view_mode, shell.chat_view_on, shell.chat_shell_override, true, true));
+    try std.testing.expect(!shell.chat_view_on);
+    try std.testing.expect(shell.chat_shell_override);
+    try std.testing.expect(!chatViewShouldShowForTab(.everywhere, shell.chat_view_on, shell.chat_shell_override, true, true));
+    shell.chat_view_on = true;
+    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, shell.chat_view_on, shell.chat_shell_override, true, true));
     rememberWorkspaceFocus(0, 43, .none);
     try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[0]);
-    app_state.shells[2].chat_view_on = false;
-    prepareWorkspaceFocus(2);
-    try std.testing.expect(!app_state.shells[2].chat_view_on);
-    app_state.g_chat_view_mode = .nowhere;
-    app_state.shells[0].chat_view_on = false;
-    prepareWorkspaceFocus(0);
-    try std.testing.expect(!app_state.shells[0].chat_view_on);
     for ([_][]const u8{ "{}", "{\"focus\":\"unknown\"}", "{\"focus\":42}" }) |raw| {
         var parsed = try json_reader.parse(std.testing.allocator, raw);
         defer parsed.deinit();
@@ -2743,7 +2728,6 @@ pub fn switchToWorkspace(ws_in: u32) void {
     const target = pickWorkspaceTarget(app_state.shells[0..app_state.shell_count], ws, app_state.g_ws_last_shell[ws]);
 
     if (target) |idx| {
-        prepareWorkspaceFocus(idx);
         if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
         focusActiveShell();
     } else {

@@ -27,6 +27,7 @@ using System.Text;
 using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
@@ -38,6 +39,9 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
@@ -107,6 +111,17 @@ public static class VerifyNative {
             return true;
         }, IntPtr.Zero);
         return visible;
+    }
+    public static void ClickClient(IntPtr hwnd, int x, int y) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");
+        if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Cannot position mouse on pill");
+        foreach (uint flags in new uint[] { 2, 4 }) {
+            Input input = new Input(); input.type = 0;
+            input.data.mouse = new Mouse { flags = flags };
+            if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
+            Thread.Sleep(35);
+        }
     }
     public static string Title(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(512); GetWindowText(hwnd, text, text.Capacity); return text.ToString();
@@ -428,6 +443,13 @@ function Type-Text([string]$Text) {
     Assert-Foreground
     Record ('Type ' + $Text)
     [VerifyNative]::Text($Text)
+}
+
+function Click-WorkspacePill([int]$Workspace) {
+    Doctor
+    Assert-Foreground
+    Record ("Click workspace pill for stored workspace $Workspace")
+    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
 }
 
 function Palette([string]$Query) {
@@ -767,7 +789,36 @@ try {
             $result.checks += @{ name = 'workspace-focus-chat'; text = $expectedText; composer = $composerHandle; activeTab = $chatState.active_tab; savedFocus = $chatState.workspaces[0].focus }
             Write-Output 'workspace-focus chat PASS'
             Snapshot 'chat-returned'
+            Click-WorkspacePill $second
+            Wait-Until { (Read-Session).active_workspace -eq $second } 'pill left Chat View workspace'
+            Click-WorkspacePill 0
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'pill returned to Chat View workspace'
+            Type-Text '-pill'
+            Wait-Until {
+                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $value.Current.Value -ceq ($expectedText + '-pill')
+            } 'pill return restored Chat View input without a composer click'
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $pillState = Read-Session
+            if ($focused.Current.NativeWindowHandle -ne $composerHandle -or $pillState.active_tab -ne $initialTab -or $pillState.workspaces[0].focus -ne 'chat') { throw 'Pill return lost Chat View focus or selected session' }
+            $result.checks += @{ name = 'workspace-focus-chat-pill'; text = ($expectedText + '-pill'); composer = $composerHandle; activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
+            Write-Output 'workspace-focus chat pill PASS'
             Press @(0x12, 0x43) 'Alt+C: switch to shell console'
+            $pillMarker = Join-Path $scratch 'workspace-focus-shell-pill.txt'
+            if (Test-Path $pillMarker) { throw 'Pill shell marker must not exist before input' }
+            Type-Text 'echo workspace-focus-shell-pill'
+            Click-WorkspacePill $second
+            Wait-Until { (Read-Session).active_workspace -eq $second } 'pill left shell workspace'
+            if ((Read-Session).workspaces[0].focus -ne 'shell') { throw 'Pill mouse-down did not capture the newly selected shell surface' }
+            Click-WorkspacePill 0
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'pill returned to shell workspace'
+            Type-Text ('>"' + $pillMarker + '"')
+            Press @(0x0D) 'Enter: execute in pill-restored shell without a console click'
+            Wait-Until { (Test-Path $pillMarker) -and (Get-Content $pillMarker -Raw).Trim() -ceq 'workspace-focus-shell-pill' } 'pill-restored console executed typed command'
+            $pillState = Read-Session
+            if ($pillState.active_tab -ne $initialTab -or $pillState.workspaces[0].focus -ne 'shell') { throw 'Pill return lost shell focus or selected session' }
+            $result.checks += @{ name = 'workspace-focus-shell-pill'; marker = (Get-Content $pillMarker -Raw).Trim(); activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
+            Write-Output 'workspace-focus shell pill PASS'
             $marker = Join-Path $scratch 'workspace-focus-shell.txt'
             if (Test-Path $marker) { throw 'Shell focus marker must not exist before input' }
             Type-Text 'echo workspace-focus-shell'

@@ -29,6 +29,7 @@ const WM_ACTIVATEAPP = @import("win32.zig").WM_ACTIVATEAPP;
 const WM_SETTINGCHANGE = @import("win32.zig").WM_SETTINGCHANGE;
 const WM_THEMECHANGED = @import("win32.zig").WM_THEMECHANGED;
 const WM_SETFOCUS = @import("win32.zig").WM_SETFOCUS;
+const WM_MOUSEACTIVATE: UINT = 0x0021;
 const WM_DESTROY = @import("win32.zig").WM_DESTROY;
 const WM_MOVE = @import("win32.zig").WM_MOVE;
 const WM_WINDOWPOSCHANGED = @import("win32.zig").WM_WINDOWPOSCHANGED;
@@ -1596,7 +1597,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        WM_MOUSEACTIVATE => {
+            @import("workspaces.zig").captureWorkspaceFocus();
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        },
         WM_LBUTTONDOWN => {
+            @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
 
@@ -8165,7 +8171,6 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
         },
         .chat => {
-            @import("workspaces.zig").prepareWorkspaceFocus(app_state.active_shell);
             launch_cache.bindRestoredChat();
             if (app_state.active_shell < app_state.shell_count and
                 chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_view_restore_on, true))
