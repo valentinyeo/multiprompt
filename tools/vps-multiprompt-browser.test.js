@@ -70,6 +70,26 @@ test('screenshot -o validates the reply before creating or overwriting the file'
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+for (const flag of ['-o', '--output']) {
+  test(`screenshot ${flag} creates missing nested output directories`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-screenshot-'));
+    try {
+      const file = path.join(dir, 'evidence', 'nested', 'initial.png');
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aBZkAAAAASUVORK5CYII=', 'base64');
+      assert.equal(fs.existsSync(path.dirname(file)), false);
+      const result = await run(['screenshot', flag, file, '--tab', '42'], JSON.stringify({
+        ok: true, result: { data: png.toString('base64') },
+      }));
+      assert.equal(result.code, 0, result.stdout + result.stderr);
+      assert.equal(result.stderr, '');
+      assert.deepEqual(fs.readFileSync(file), png);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        ok: true, path: file, bytes: png.length, via: 'Page.captureScreenshot',
+      });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
 test('selftest reports the transport cause for open, hosting and cleanup, not JSON parsing or null hosting', async () => {
   for (const reply of ['', 'not JSON']) {
     const result = await run(['selftest'], reply);

@@ -171,6 +171,18 @@ pub const Canvas = struct {
         return self;
     }
 
+    pub fn activate(self: *Canvas) void {
+        paint_hdc = self.hdc;
+        paint_graphics = self.graphics;
+    }
+
+    pub fn deactivate(self: *Canvas) void {
+        if (paint_graphics == self.graphics) {
+            paint_hdc = null;
+            paint_graphics = null;
+        }
+    }
+
     pub fn deinit(self: *Canvas) void {
         if (self.graphics != null and !self.borrowed) {
             if (paint_graphics == self.graphics) {

@@ -477,6 +477,7 @@ except Exception as exc:
     print(f"multiprompt-browser: screenshot PNG base64 decode failed: {exc}", file=sys.stderr)
     sys.exit(1)
 
+pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 pathlib.Path(out_path).write_bytes(png)
 report = {"ok": True, "path": out_path, "bytes": len(png)}
 via = result.get("via") or ("Page.captureScreenshot" if result.get("data") else "")

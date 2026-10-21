@@ -132,7 +132,15 @@ pub fn drawModalShadow(hdc: HANDLE, x: i32, y: i32, w: i32, h: i32, radius: i32)
     }
 }
 
+var paint_canvas = smooth.Canvas{ .hdc = null };
+
+pub fn beginPaintCanvas() *smooth.Canvas {
+    paint_canvas.activate();
+    return &paint_canvas;
+}
+
 pub fn resetPaintBackbuffer() void {
+    paint_canvas.deinit();
     if (app_state.g_paint_mem_dc) |dc| {
         if (app_state.g_paint_old_bmp != null) _ = SelectObject(dc, app_state.g_paint_old_bmp);
     }
@@ -147,12 +155,16 @@ pub fn resetPaintBackbuffer() void {
 
 pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
     if (w <= 0 or h <= 0) return null;
-    if (app_state.g_paint_mem_dc != null and app_state.g_paint_bmp != null and app_state.g_paint_w == w and app_state.g_paint_h == h) return app_state.g_paint_mem_dc;
+    if (app_state.g_paint_mem_dc != null and app_state.g_paint_bmp != null and app_state.g_paint_w >= w and app_state.g_paint_h >= h) return app_state.g_paint_mem_dc;
 
     resetPaintBackbuffer();
     const mem_dc = CreateCompatibleDC(hdc);
     if (mem_dc == null) return null;
-    const bmp = CreateCompatibleBitmap(hdc, w, h);
+    const width = @divTrunc(w + 127, 128) * 128;
+    const height = @divTrunc(h + 127, 128) * 128;
+    const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
     if (bmp == null) {
         _ = DeleteDC(mem_dc);
         return null;
@@ -160,8 +172,10 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
     app_state.g_paint_old_bmp = SelectObject(mem_dc, bmp);
     app_state.g_paint_mem_dc = mem_dc;
     app_state.g_paint_bmp = bmp;
-    app_state.g_paint_w = w;
-    app_state.g_paint_h = h;
+    app_state.g_paint_w = width;
+    app_state.g_paint_h = height;
+    paint_canvas = smooth.Canvas.init(mem_dc);
+    paint_canvas.deactivate();
     return mem_dc;
 }
 
@@ -970,4 +984,85 @@ pub fn paintDisconnectedShell(hdc: HANDLE) void {
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, themeConsoleFg());
     _ = DrawTextW(hdc, L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+test "ISSUE-444 paint backbuffer exposes pixels so smooth shapes avoid full-surface transfers" {
+    const w = @import("win32.zig");
+    const Bitmap = extern struct { kind: i32, width: i32, height: i32, stride: i32, planes: u16, bits_pixel: u16, bits: ?*anyopaque };
+    resetPaintBackbuffer();
+    defer resetPaintBackbuffer();
+    const screen = w.GetDC(null);
+    try std.testing.expect(screen != null);
+    defer _ = w.ReleaseDC(null, screen);
+    for ([_][2]i32{ .{ 1250, 950 }, .{ 1251, 950 }, .{ 1251, 950 } }) |size| {
+        const dc = ensurePaintBackbuffer(screen, size[0], size[1]);
+        try std.testing.expect(dc != null);
+        var bitmap: Bitmap = undefined;
+        try std.testing.expect(w.GetObjectW(w.GetCurrentObject(dc, 7), @sizeOf(Bitmap), &bitmap) != 0);
+        try std.testing.expect(bitmap.width >= size[0]);
+        try std.testing.expect(bitmap.height >= size[1]);
+        try std.testing.expectEqual(@as(u16, 32), bitmap.bits_pixel);
+        try std.testing.expect(bitmap.bits != null);
+        const area = RECT{ .left = 0, .top = 0, .right = size[0], .bottom = size[1] };
+        const brush = CreateSolidBrush(0x123456);
+        defer _ = DeleteObject(brush);
+        _ = FillRect(dc, &area, brush);
+        var canvas = smooth.Canvas.init(dc);
+        defer canvas.deinit();
+        try std.testing.expect(canvas.graphics != null);
+        var nested = smooth.Canvas.init(dc);
+        try std.testing.expectEqual(canvas.graphics, nested.graphics);
+        nested.deinit();
+        smooth.fillRoundRect(dc, .{ .left = 10, .top = 10, .right = 42, .bottom = 38 }, 4, 0xffffff);
+        try std.testing.expectEqual(@as(u32, 0xffffff), w.GetPixel(dc, 20, 20));
+        try std.testing.expectEqual(@as(u32, 0x123456), w.GetPixel(dc, 10, 10));
+        const pixels: [*]const u32 = @ptrCast(@alignCast(bitmap.bits.?));
+        try std.testing.expectEqual(@as(u32, 0xffffff), pixels[@intCast(20 * @divTrunc(bitmap.stride, 4) + 20)] & 0xffffff);
+    }
+}
+
+test "ISSUE-444 repaint and nearby resizes reuse one graphics and refresh its clipping" {
+    const w = @import("win32.zig");
+    const Probe = struct {
+        var create: @TypeOf(app_state.g_gdip_api.create_from_hdc) = undefined;
+        var count: usize = 0;
+        fn graphics(dc: HANDLE, result: *HANDLE) callconv(w.WINAPI) app_state.GpStatus {
+            count += 1;
+            return create(dc, result);
+        }
+    };
+    try std.testing.expect(smooth.gdipLoad());
+    Probe.create = app_state.g_gdip_api.create_from_hdc;
+    Probe.count = 0;
+    app_state.g_gdip_api.create_from_hdc = Probe.graphics;
+    defer app_state.g_gdip_api.create_from_hdc = Probe.create;
+    resetPaintBackbuffer();
+    defer resetPaintBackbuffer();
+    const screen = w.GetDC(null);
+    try std.testing.expect(screen != null);
+    defer _ = w.ReleaseDC(null, screen);
+    const brush = CreateSolidBrush(0x123456);
+    defer _ = DeleteObject(brush);
+    var graphics: HANDLE = null;
+    for ([_]i32{ 1250, 1251, 1250 }, 0..) |width, frame| {
+        const dc = ensurePaintBackbuffer(screen, width, 950);
+        try std.testing.expect(dc != null);
+        const area = RECT{ .left = 0, .top = 0, .right = width, .bottom = 950 };
+        _ = FillRect(dc, &area, brush);
+        const saved = w.SaveDC(dc);
+        try std.testing.expect(saved != 0);
+        if (frame == 0) _ = w.IntersectClipRect(dc, 10, 10, 30, 38);
+        const canvas = beginPaintCanvas();
+        try std.testing.expect(canvas.graphics != null);
+        if (frame == 0) graphics = canvas.graphics;
+        try std.testing.expectEqual(graphics, canvas.graphics);
+        smooth.fillRoundRect(dc, .{ .left = 10, .top = 10, .right = 42, .bottom = 38 }, 4, 0xffffff);
+        canvas.deactivate();
+        _ = w.RestoreDC(dc, saved);
+        try std.testing.expectEqual(@as(u32, 0xffffff), w.GetPixel(dc, 20, 20));
+        try std.testing.expectEqual(@as(u32, if (frame == 0) 0x123456 else 0xffffff), w.GetPixel(dc, 35, 20));
+        try std.testing.expectEqual(@as(usize, 1), Probe.count);
+    }
+    try std.testing.expect(ensurePaintBackbuffer(screen, 1500, 950) != null);
+    try std.testing.expectEqual(@as(usize, 2), Probe.count);
 }

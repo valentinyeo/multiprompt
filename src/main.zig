@@ -1262,7 +1262,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.792";
+pub const APP_VERSION = "0.28.793";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1477,9 +1477,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
-            resetPaintBackbuffer();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
+                resetPaintBackbuffer();
                 if (app_state.g_power_minimized_since_tick == 0) app_state.g_power_minimized_since_tick = GetTickCount64();
             } else if (app_state.g_power_minimized_since_tick != 0) {
                 exitDeepIdleNow(hwnd);
@@ -1531,14 +1531,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (saved_dc != 0) {
                 _ = IntersectClipRect(mem_dc, paint_rc.left, paint_rc.top, paint_rc.right, paint_rc.bottom);
             }
-            var canvas = @import("smooth.zig").Canvas.init(mem_dc);
+            const canvas = @import("drawing.zig").beginPaintCanvas();
             paintSidebar(mem_dc);
             paintChatView(mem_dc);
             @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
             paintActivePaneBorder(mem_dc);
-            canvas.deinit();
+            canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
             _ = EndPaint(hwnd, &ps);
