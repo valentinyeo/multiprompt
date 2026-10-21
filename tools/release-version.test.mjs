@@ -82,7 +82,7 @@ test('CLI reads files and fails closed', t => {
 
 test('workflow preserves all triggers, both architectures, immutable builds and version concurrency', () => {
   assert.match(workflow, /push:\n    branches: \[master\]\n    tags: \['v\*'\]/);
-  assert.match(workflow, /pull_request:/);
+  assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /secrets\.|--draft/);
@@ -100,15 +100,24 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
 });
 
-test('PR release coverage is one arm64 build without release preparation or packaging', () => {
+test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', () => {
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
-  assert.match(jobs['pr-build'], /if: github.event_name == 'pull_request'/);
-  assert.match(jobs['pr-build'], /name: build-arm64/);
-  assert.match(jobs['pr-build'], /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.doesNotMatch(jobs['pr-build'], /needs:|upload-artifact|setup-node|Package/);
+  assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
+  assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
+  assert.match(tests, /needs: \[changes, test, test-vps, service, build-arm64\]/);
+});
+
+test('three Windows and two VPS jobs retain every original test group exactly once', () => {
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const targets = [...tests.matchAll(/^            targets: (.+)$/gm)].map(match => match[1].split(' '));
+  assert.deepEqual(targets.slice(0, 3).flat().sort(), Array.from({ length: 8 }, (_, index) => `test-group-${index + 1}`));
+  assert.deepEqual(targets.slice(3).flat().sort(), Array.from({ length: 3 }, (_, index) => `test-vps-group-${index + 1}`));
+  assert.equal((tests.match(/run: zig build \$\{\{ matrix.targets \}\} --summary all -Dcpu=x86_64_v3/g) || []).length, 2);
 });
 
 test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {

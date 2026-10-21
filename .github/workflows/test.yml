@@ -42,11 +42,17 @@ jobs:
           import fs from 'node:fs';
           const paths = fs.readFileSync(`${process.env.RUNNER_TEMP}/changed-paths`, 'utf8').split('\0').filter(Boolean);
           const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
-          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path));
+          const unusedTools = new Set(['tools/ci-cost.mjs']);
+          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path) && !unusedTools.has(path));
           for (const [paths, expected] of [
             [['README.md', 'openwiki/operations/build.md'], false],
             [['changelog.d/IGSH-519-checks.md', 'CHANGELOG.md'], false],
             [['docs/guide.md', 'docs-site/src/pages/index.astro'], false],
+            [['tools/ci-cost.mjs'], false],
+            [['tools/ci-cost.mjs', 'README.md'], false],
+            [['tools/ci-cost.mjs', 'tools/release-version.mjs'], true],
+            [['tools/app-source.js'], true],
+            [['tools/font-probe-dwrite.cpp'], true],
             [['README.md', 'build.zig'], true],
             [['src/testdata/history.md'], true],
             [['.github/workflows/test.yml'], true],
@@ -67,7 +73,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8]
+        include:
+          - group: 1
+            targets: test-group-1 test-group-5 test-group-6
+          - group: 2
+            targets: test-group-2 test-group-3 test-group-8
+          - group: 3
+            targets: test-group-4 test-group-7
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -80,7 +92,6 @@ jobs:
         with:
           node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: matrix.group != 1 && matrix.group != 6
         with:
           python-version: '3.12'
       - name: Test release version
@@ -108,9 +119,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -126,7 +137,7 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        run: zig build ${{ matrix.targets }} --summary all -Dcpu=x86_64_v3
 
   test-vps:
     name: test-vps (${{ matrix.group }})
@@ -137,7 +148,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3]
+        include:
+          - group: 1
+            targets: test-vps-group-1 test-vps-group-2
+          - group: 2
+            targets: test-vps-group-3
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -148,7 +163,6 @@ jobs:
         with:
           node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: matrix.group != 2
         with:
           python-version: '3.12'
       - name: Test release version
@@ -176,9 +190,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
@@ -190,10 +204,25 @@ jobs:
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        run: zig build ${{ matrix.targets }} --summary all -Dcpu=x86_64_v3
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
+
+  build-arm64:
+    name: build-arm64
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Build release executables for arm64
+        run: zig build -Dtarget=aarch64-windows-gnu
 
   service:
     name: service
@@ -214,7 +243,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [changes, test, test-vps, service]
+    needs: [changes, test, test-vps, service, build-arm64]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -226,23 +255,25 @@ jobs:
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
           SERVICE: ${{ needs.service.result }}
+          ARM64: ${{ github.event_name == 'pull_request' && needs.build-arm64.result || 'success' }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1
             case "$2" in
               false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
+              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] && [ "$6" = success ] ;;
               *) return 1 ;;
             esac
           }
-          require_jobs success true success success success
-          require_jobs success false skipped skipped skipped
+          require_jobs success true success success success success
+          require_jobs success false skipped skipped skipped skipped
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success success; then exit 1; fi
-            if require_jobs success true success "$result" success; then exit 1; fi
-            if require_jobs success true success success "$result"; then exit 1; fi
+            if require_jobs "$result" false skipped skipped skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success success success; then exit 1; fi
+            if require_jobs success true success "$result" success success; then exit 1; fi
+            if require_jobs success true success success "$result" success; then exit 1; fi
+            if require_jobs success true success success success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success success; then exit 1; fi
+          if require_jobs success invalid success success success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$SERVICE"
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$SERVICE" "$ARM64"
