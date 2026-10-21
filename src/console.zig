@@ -2714,7 +2714,7 @@ fn startupShellWorker(job: *StartupShell) void {
             style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
             style |= @as(isize, @intCast(WS_CHILD));
             _ = SetWindowLongPtrW(job.hwnd, GWL_STYLE, style);
-            _ = SetWindowPos(job.hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+            _ = SetWindowPos(job.hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | @import("win32.zig").SWP_NOACTIVATE);
         }
     }
     if (job.hwnd == null and job.process != null and !isRemoteShellKind(job.kind)) {
