@@ -17,11 +17,6 @@ on:
         required: true
         default: '3'
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/chat-bench-ab.yml
-      - .gitattributes
-      - tools/chat-bench/**
 
 permissions:
   contents: read
@@ -84,7 +79,7 @@ jobs:
       - name: Set up the documented Linux and Wine environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3 wine64 wine fonts-wine fonts-liberation fonts-dejavu-core xfonts-base xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
+          sudo apt-get install -y --no-install-recommends strace python3 wine64 wine fonts-wine fonts-liberation fonts-dejavu-core xfonts-base xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
           sudo loginctl enable-linger "$(id -un)"
           sudo systemctl start "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
@@ -124,6 +119,26 @@ jobs:
             git -C "$GITHUB_WORKSPACE/tooling" ls-files --eol tools/chat-bench src/chat_history_reader.py
             sha256sum tools/chat-bench/run.mjs tools/chat-bench/lib.mjs tools/chat-bench/reader-service.py tools/chat-bench/browser-fixture.c
           } | tee ../results/environment.txt
+      - name: Trace idle syscalls
+        working-directory: tooling
+        run: |
+          python3 - <<'PYTRACE'
+          from pathlib import Path
+          p = Path('/opt/chat-bench/tooling/tools/chat-bench/run.mjs')
+          s = p.read_text()
+          s = s.replace("let timer;", "let timer; const traced = new Set();")
+          anchor = "      if (guiCount !== config.windows)"
+          trace = """      if (run.samples.at(-1).idle && !traced.has(phase)) {
+                  traced.add(phase);
+                  const args = ['timeout', '12s', 'strace', '-f', '-tt', '-T', '-o', path.join(out, `idle-${phase}.strace`), ...[...current.keys()].flatMap(pid => ['-p', String(pid)])];
+                  const trace = spawn('sudo', args, { stdio: ['ignore', 'ignore', logFd] });
+                  trace.on('error', error => run.errors.push(`trace: ${error.message}`));
+                }
+          """
+          assert anchor in s
+          s = s.replace(anchor, trace + anchor)
+          p.write_text(s)
+          PYTRACE
       - name: Run default config in A B order
         working-directory: tooling
         run: |
