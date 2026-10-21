@@ -73,6 +73,9 @@ fn browserPaneOwnsForegroundHwnd(fg: HANDLE, _: HANDLE) bool {
 fn foregroundIsOurs() bool {
     return foreground != null and foreground != win(9);
 }
+fn focusTrace(event: enum { allowed, activation_refocus, blocked }, _: HANDLE, _: usize) void {
+    if (event == .blocked) blocked_logs += 1;
+}
 fn debugLog(text: []const u8) void {
     if (std.mem.startsWith(u8, text, "focus guard: blocked")) blocked_logs += 1;
     if (std.mem.startsWith(u8, text, "focus guard: returned focus")) returned_logs += 1;

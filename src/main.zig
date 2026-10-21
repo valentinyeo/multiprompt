@@ -6608,6 +6608,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
+                @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
@@ -6626,6 +6627,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         0x0006 => {
             const active = @as(u16, @truncate(wp));
+            if (active == 0) @import("diagnostics.zig").focusTrace(.activate_inactive, @ptrFromInt(@as(usize, @bitCast(lp))), 0);
             if (active != 0) {
                 focusGuardNoteActivation();
                 exitDeepIdleNow(hwnd);

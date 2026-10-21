@@ -90,7 +90,7 @@ test('console height stays unchanged, weight is SemiBold and readback logs once 
   assert.match(readback, /utf16LeToUtf8\(&face_buf, std\.mem\.sliceTo\(&f2\.FaceName, 0\)\)/);
   assert.match(readback, /"\[consolefont\] pid=\{d\} face=\{s\} h=\{d\}", \.\{ pid, face_buf\[0\.\.face_len\], f2\.dwFontSize\.y \}/);
   assert.ok(readback.indexOf('[consolefont] pid={d} face={s} h={d}') < readback.indexOf('if (verboseLoggingEnabled())'));
-  assert.match(read('src/diagnostics.zig'), /if \(!verboseLoggingEnabled\(\) and !std\.mem\.startsWith\(u8, msg, "\[consolefont\] "\)\) return;/);
+  assert.match(read('src/diagnostics.zig'), /if \(!verboseLoggingEnabled\(\) and !std\.mem\.startsWith\(u8, msg, "\[consolefont\] "\) and !std\.mem\.startsWith\(u8, msg, "\[focus-trace\] "\)\) return;/);
 });
 
 test('spawn and respawn apply the console theme before hiding and parenting the window', () => {
