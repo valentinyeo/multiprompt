@@ -29,6 +29,51 @@ The installer downloads assets from `valentinyeo/multiprompt`, verifies GitHub a
 
 The bridge now makes the running extension reload itself when it sees the installed bridge's newer version; the installer falls back to `extension-reload` and polling only if the first check fails.
 
+### Get a GitHub bench receipt for a release
+
+The chat bench runs on GitHub Actions, using Linux/Wine in WSL2 on `windows-latest`, not native Windows acceptance. Dispatch both A/B slots for the release you want to install. One run per slot is enough for an installable receipt: each run uses the full default config, not smoke settings.
+
+```sh
+tag=v0.28.789
+gh workflow run chat-bench-ab.yml --repo valentinyeo/multiprompt --ref master -f tag_a="$tag" -f tag_b="$tag" -f runs=1
+gh run list --repo valentinyeo/multiprompt --workflow chat-bench-ab.yml --event workflow_dispatch --limit 5
+```
+
+Take the run ID matching your dispatch, then watch and download its evidence:
+
+```sh
+run_id=<run-id>
+gh run watch "$run_id" --repo valentinyeo/multiprompt --interval 60 --exit-status
+gh run download "$run_id" --repo valentinyeo/multiprompt --name chat-bench-ab --dir "bench-$tag"
+```
+
+A successful workflow or A/B summary does not guarantee a PASS receipt. Use the artifact's manifest to find a clean PASS `results.json` for the requested tag:
+
+```sh
+node --input-type=module - "bench-$tag" "$tag" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+const [dir, tag] = process.argv.slice(2);
+const passes = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'))
+  .filter(entry => entry.tag === tag)
+  .map(entry => path.join(dir, entry.path))
+  .filter(file => {
+    const run = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return run.binary?.version === tag.slice(1) && run.status === 'PASS' && run.pass === true && Array.isArray(run.failures) && run.failures.length === 0;
+  });
+if (!passes.length) throw new Error(`No clean PASS receipt for ${tag}`);
+console.log(passes.join('\n'));
+NODE
+```
+
+Install with a printed path, for example:
+
+```sh
+tools/install-laptop1.sh --release "$tag" --bench "bench-$tag/runs/A-$tag-1/results.json"
+```
+
+If only B passed, use its printed path instead. The installer validates the receipt against the release executable it downloaded and SHA-checked, not the GitHub runner's recorded executable path. It leaves the original receipt unchanged and still rejects mismatched executable hashes, non-default configs, stale runner hashes, invalid PE files and failed or incomplete verdicts. The artifact records its bench tooling revision in `tooling-commit.txt`; if bench tooling changes, obtain a fresh receipt rather than weakening runner-hash checks.
+
 ### Wine rendering prerequisite
 
 Wine's built-in GDI+ accepts smoothing settings without anti-aliasing shapes. The Windows test runner therefore requires the Microsoft x64 `gdiplus.dll`, available from a licensed Windows installation or Microsoft's redistributable through Winetricks. Put it in `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/gdiplus/gdiplus.dll`, or set `MP_WINE_GDIPLUS_DIR` to its directory. The runner installs that DLL into an isolated `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/wine-tests` prefix, overridable with `MP_WINE_TEST_PREFIX`; it does not alter your normal Wine prefix. No Windows DLL is distributed in this repository. Headless runs also require `xvfb-run`.
