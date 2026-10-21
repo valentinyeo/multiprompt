@@ -44,6 +44,8 @@ const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
+fn sshRequestSessionProbe() void { ssh_probe_next_tick = 0; }
+fn invalidateReconnectContent(_: u32) void {}
 var ssh_probe_misses: [256]u8 = @splat(0);
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
@@ -80,7 +82,9 @@ fn KillTimer(_: ?*anyopaque, _: u32) u32 { return 1; }
 fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: u32) u32 { return 1; }
 var exit_logs: usize = 0;
 var timeout_logs: usize = 0;
+var ended_logs: usize = 0;
 fn debugLog(line: []const u8) void {
+    if (std.mem.indexOf(u8, line, "reason=session-gone") != null) ended_logs += 1;
     if (std.mem.indexOf(u8, line, "exit_code=0 known=true") != null) exit_logs += 1;
     if (std.mem.indexOf(u8, line, "reason=timeout") != null) timeout_logs += 1;
 }
@@ -94,9 +98,9 @@ ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 =
 `;
 function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
-  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
+  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("win32.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
 test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', () => {
   if (modern) {
@@ -161,7 +165,8 @@ test('ISSUE-501 silent-detach probe and UI reconnect actions are integrated', ()
   assert.match(body('sshProbeThread'), /tmux list-clients/);
   assert.match(body('sshProbeFinish'), /sshDisconnect\(idx, "tmux-detached"\)/);
   assert.match(body('sshProbeFinish'), /findShellById\(item.id\)/);
-  assert.match(body('sshReconnectOk'), /chatOutboxTick\(\)/);
+  assert.match(body('sshReconnectOk'), /armChatOutboxTimerIfNeeded\(\)/);
+  assert.doesNotMatch(body('sshReconnectOk'), /chatOutboxTick\(\)/);
   assert.match(body('respawnShellInPlace'), /saved_tmux\[0\.\.saved_tmux_len\]/);
   assert.match(body('markSshTabDisconnected'), /killProcessTree/);
   assert.match(body('closeShellRemember'), /ssh_reconnect.close\(\)/);
@@ -480,7 +485,7 @@ const probeVps = struct {
         std.debug.assert(std.mem.indexOf(u8, cmd, "-o ConnectTimeout=5") != null);
         std.debug.assert(timeout == 10000);
         capture_count += 1;
-        const result = if (capture_ok) "session\\n@@MP_LIVE@@\\n" else "Permission denied";
+        const result = if (capture_ok) "session\\n@@S session\\n@@MP_LIVE@@\\n" else "Permission denied";
         @memcpy(output[0..result.len], result);
         return .{ .len = result.len, .success = capture_ok, .exit_code = if (capture_ok) 0 else 255 };
     }
@@ -579,4 +584,45 @@ test "ISSUE-511 forty restored tabs" {
 `).replace('var shells = [_]Shell{.{}};', 'var shells: [40]Shell = @splat(.{});')
     .replace('var shell_count: u32 = 1;', 'var shell_count: u32 = 40;');
   zig(code, 'ISSUE-511 forty');
+});
+
+
+test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', () => {
+  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-521 imported logic" { _ = reconnect; }', 'ISSUE-521');
+});
+
+
+test('ISSUE-521 fast attach failure waits for probe and ended tabs stay stopped until explicit restart', () => {
+  zig(probeRuntime(`
+test "ISSUE-521 confirmed gone stops and restarts" {
+    fake_now = 10000;
+    shells[0] = .{ .spawn_tick = 9999 };
+    fake_exit_code = 1;
+    sshDisconnect(0, "process-exit-event");
+    try std.testing.expect(shells[0].ssh_reconnect.awaiting_probe);
+    fake_now += 3000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    const job = ssh_probe_job orelse return error.MissingProbe;
+    job.healthy[0] = true;
+    job.items[0].session_gone = true;
+    job.finished.store(true, .release);
+    _ = job.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
+    try std.testing.expectEqual(@as(usize, 1), ended_logs);
+    const probes = probe_starts;
+    for (0..60) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+        sshDisconnect(0, "late-exit");
+    }
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(probes, probe_starts);
+    try std.testing.expectEqual(@as(usize, 1), ended_logs);
+    sshReconnectNow(0);
+    try std.testing.expectEqual(@as(usize, 1), spawns);
+    try std.testing.expect(shells[0].ssh_reconnect.create_session);
+}
+`), 'ISSUE-521 confirmed');
 });

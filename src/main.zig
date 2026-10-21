@@ -699,6 +699,7 @@ const SEARCH_WSMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_NEW_OFFS
 const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET;
 const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
 const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
+const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
 const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
 const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
 const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
@@ -5586,12 +5587,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RECONNECT_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_RECONNECT, 0, 0);
-                    _ = InvalidateRect(hwnd, null, 0);
+                    @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
                     return 0;
                 }
                 if (target == SEARCH_SINGLEWIN_OFFSET) {
@@ -5914,24 +5910,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
-                    const tc_sid = app_state.g_tabctx_sid;
+                    const tc_sid = if (target == SEARCH_TABCTX_START_SESSION and app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
-                        if (target == SEARCH_TABCTX_RECONNECT) {
-                            app_state.g_search_active = false;
-                            app_state.g_search_tabctx_mode = false;
-                            app_state.g_tabctx_sid = 0;
-                            app_state.g_shell_focused = true;
-                            clearSearchBackdrop();
-                            app_state.g_pending_new_tab_group = 0;
-                            showActiveShellAfterOverlay();
-                            _ = InvalidateRect(hwnd, null, 0);
+                        if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {
                             @import("chat_send.zig").sshReconnectNow(ti);
-                            switchToShell(ti);
                             return 0;
                         } else if (target == SEARCH_TABCTX_CHAT_ALLOW) {
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .allow);
