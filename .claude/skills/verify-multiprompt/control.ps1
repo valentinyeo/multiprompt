@@ -31,6 +31,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
     static void Key(ushort key, ushort scan, uint flags) {
         Input input = new Input(); input.type = 1;
@@ -43,7 +44,16 @@ public static class VerifyNative {
         Thread.Sleep(250);
     }
     public static void Text(string text) {
-        foreach (char c in text) { Key(0, c, 4); Key(0, c, 6); Thread.Sleep(30); }
+        foreach (char c in text) {
+            short mapping = VkKeyScan(c);
+            if (mapping == -1 || (mapping & 0x600) != 0) throw new InvalidOperationException("Character requires an unsupported keyboard layout: " + c);
+            bool shift = (mapping & 0x100) != 0;
+            if (shift) { Key(0x10, 0, 0); Thread.Sleep(35); }
+            ushort key = (ushort)(mapping & 0xff);
+            Key(key, 0, 0); Thread.Sleep(35); Key(key, 0, 2);
+            if (shift) Key(0x10, 0, 2);
+            Thread.Sleep(30);
+        }
         Thread.Sleep(250);
     }
     public static string Title(IntPtr hwnd) {
@@ -260,6 +270,7 @@ try {
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
             Wait-Until { [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox window state'
+            Press @(0x12, 0x49) 'Alt+I: select All split'
             Snapshot 'action'
             $prior = (Read-Inbox).shells[0].att
             Press @(0x55) 'u: toggle selected Inbox session unread'

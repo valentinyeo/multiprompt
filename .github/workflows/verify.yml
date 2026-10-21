@@ -86,6 +86,14 @@ jobs:
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+      - name: Retain pre-launch failure result
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          if (-not (Test-Path evidence/result.json)) {
+            @{ feature = $env:FEATURE; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' } | ConvertTo-Json | Set-Content -Encoding UTF8 evidence/result.json
+          }
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

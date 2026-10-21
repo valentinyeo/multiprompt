@@ -35,7 +35,7 @@ These are the baseline's five high-value user-facing areas: the README's session
 ## Code interview anchors
 
 - Primary surface, normal build and offline mode: `README.md`, `CONTRIBUTING.md`.
-- Keyboard routing and shortcut labels: `src/shortcuts.zig`, `openwiki/operations/keyboard-shortcuts.md`, `src/shortcuts.zig`, `src/focus.zig`.
+- Keyboard routing and shortcut labels: `src/shortcuts.zig`, `openwiki/operations/keyboard-shortcuts.md`, `src/focus.zig`.
 - Startup flags and versioned title: `src/startup.zig:108`, `src/startup.zig:310`; initial shell and readiness: `src/main.zig:8017`.
 - Palette query matching and actions: `src/command_palette.zig:1672`, `src/command_palette.zig:2071`, `src/command_palette.zig:3788`; displayed labels: `src/sidebar.zig:3563`, `src/sidebar.zig:3895`.
 - Theme persistence and user action: `src/themes.zig:232`, `src/main.zig:6301`.

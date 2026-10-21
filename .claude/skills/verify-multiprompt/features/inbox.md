@@ -23,7 +23,7 @@ Preconditions:
 - Inbox has a visible selected session, with no active search or unread-only filter hiding it.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=inbox`; Windows runs `control.ps1 -Feature inbox`.
-- **Open.** Press Ctrl+Shift+I. Require the actual window title to start `Inbox - ` and capture `action.png`, showing the list before the mutation.
+- **Open.** Press Ctrl+Shift+I. Require the actual window title to start `Inbox - ` then press Alt+I to select All and capture `action.png`, showing the list before the mutation.
 - **Toggle.** Read the session's current attention value, then press the real `u` key. Require the published session attention value to change. Capture `after.png` while Inbox is visible.
 - **Return.** Press Esc. The actual window title must no longer start `Inbox - `. Capture `returned.png` with the usable workspace restored.
 - **Proof.** Inspect the screenshots for the selected session and blue dot. `result.json` records attention before/after and the Inbox window title. `data/roaming/ZigShell/inbox-default.json` is the app-published side effect, not a harness-created fixture.
