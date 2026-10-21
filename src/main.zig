@@ -628,6 +628,7 @@ const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET
 const SEARCH_CRASH_REPORTS_OFFSET = @import("app_state.zig").SEARCH_CRASH_REPORTS_OFFSET;
 const SEARCH_CRASH_NOW_OFFSET = @import("app_state.zig").SEARCH_CRASH_NOW_OFFSET;
 const SEARCH_HIBERNATE_NOW_OFFSET = @import("app_state.zig").SEARCH_HIBERNATE_NOW_OFFSET;
+const SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET = @import("app_state.zig").SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
 const SEARCH_INBOX_EXCLUDE_OFFSET = @import("app_state.zig").SEARCH_INBOX_EXCLUDE_OFFSET;
 const SEARCH_REMIND_PRESET_OFFSET = @import("app_state.zig").SEARCH_REMIND_PRESET_OFFSET;
 const SEARCH_GROUPMOVE_GROUP_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_GROUP_OFFSET;
@@ -5308,6 +5309,28 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     if (crash_now) crash_recorder.crashNow() else crash_recorder.openFolder();
+                    return 0;
+                }
+                if (target == SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_browser_focus_mode = false;
+                    app_state.g_shell_focused = true;
+                    app_state.g_browser_shortcut_open_guard_until = 0;
+                    clearSearchBackdrop();
+                    discardBrowserUrlBarEdit();
+                    closeWebView2();
+                    for (0..app_state.shell_count) |i| {
+                        app_state.shells[i].browser_enabled = false;
+                        closeBrowserForShell(@intCast(i));
+                    }
+                    showActiveShellAfterOverlay();
+                    updateBrowserVisibility();
+                    repositionActive();
+                    syncMouseHookForUrlClicks();
+                    invalidateSidebar();
+                    saveSession();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
                 if (target == SEARCH_HIBERNATE_NOW_OFFSET) {

@@ -255,6 +255,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+P | Keep this tab's browser pane awake (exempt from freeze/hibernate) |
 | Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |
 | Ctrl+K → Hibernate Browser Panes Now | Immediately hibernate every parked, unpinned browser pane |
+| Ctrl+K → Close All Browser Panes | Close browser panes in every workspace and keep their saved URLs |
 | Ctrl+K → Insert browser-control instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |
 | Ctrl+Click URL in shell | Open link in the docked browser pane (was: default browser) |
