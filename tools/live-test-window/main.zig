@@ -64,6 +64,35 @@ extern "user32" fn GetAncestor(H, u32) callconv(WINAPI) H;
 extern "user32" fn SendInput(u32, [*]const Input, i32) callconv(WINAPI) u32;
 extern "user32" fn PostMessageW(H, u32, usize, isize) callconv(WINAPI) i32;
 
+const Point = extern struct { x: i32, y: i32 };
+const Rect = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+extern "user32" fn GetClientRect(H, *Rect) callconv(WINAPI) i32;
+extern "user32" fn ClientToScreen(H, *Point) callconv(WINAPI) i32;
+extern "user32" fn GetSystemMetrics(i32) callconv(WINAPI) i32;
+extern "user32" fn WindowFromPoint(Point) callconv(WINAPI) H;
+extern "user32" fn SetProcessDpiAwarenessContext(isize) callconv(WINAPI) i32;
+extern "user32" fn OpenClipboard(H) callconv(WINAPI) i32;
+extern "user32" fn CloseClipboard() callconv(WINAPI) i32;
+extern "user32" fn GetClipboardData(u32) callconv(WINAPI) H;
+extern "kernel32" fn GlobalLock(H) callconv(WINAPI) H;
+extern "kernel32" fn GlobalUnlock(H) callconv(WINAPI) i32;
+extern "kernel32" fn GlobalSize(H) callconv(WINAPI) usize;
+extern "user32" fn GetDC(H) callconv(WINAPI) H;
+extern "user32" fn ReleaseDC(H, H) callconv(WINAPI) i32;
+extern "gdi32" fn BitBlt(H, i32, i32, i32, i32, H, i32, i32, u32) callconv(WINAPI) i32;
+extern "gdi32" fn CreateCompatibleDC(H) callconv(WINAPI) H;
+extern "gdi32" fn CreateCompatibleBitmap(H, i32, i32) callconv(WINAPI) H;
+extern "gdi32" fn SelectObject(H, H) callconv(WINAPI) H;
+extern "gdi32" fn DeleteObject(H) callconv(WINAPI) i32;
+extern "gdi32" fn DeleteDC(H) callconv(WINAPI) i32;
+const GdiStartup = extern struct { version: u32 = 1, callback: H = null, no_thread: i32 = 0, no_codecs: i32 = 0 };
+const Guid = extern struct { a: u32, b: u16, c: u16, d: [8]u8 };
+extern "gdiplus" fn GdiplusStartup(*usize, *const GdiStartup, H) callconv(WINAPI) i32;
+extern "gdiplus" fn GdiplusShutdown(usize) callconv(WINAPI) void;
+extern "gdiplus" fn GdipCreateBitmapFromHBITMAP(H, H, *H) callconv(WINAPI) i32;
+extern "gdiplus" fn GdipSaveImageToFile(H, W, *const Guid, H) callconv(WINAPI) i32;
+extern "gdiplus" fn GdipDisposeImage(H) callconv(WINAPI) i32;
+
 pub const Decision = enum { send, refuse_foreground, refuse_active };
 
 pub fn sendDecision(foreground_mine: bool, idle_ms: u64, min_idle_ms: u64, first: bool) Decision {
@@ -229,7 +258,7 @@ fn environment(appdata: []const u8) ![]u16 {
     return result.items;
 }
 
-fn start(io: std.Io, path: []const u8, exe_arg: ?[]const u8, minimum: u64, idle: u64) !u8 {
+fn start(io: std.Io, path: []const u8, exe_arg: ?[]const u8, session: ?[]const u8, minimum: u64, idle: u64) !u8 {
     if (idle < minimum) return activeRefusal(idle, minimum);
     if (try load(io, path)) |state| {
         if (alive(state)) {
@@ -243,6 +272,13 @@ fn start(io: std.Io, path: []const u8, exe_arg: ?[]const u8, minimum: u64, idle:
     const appdata = try fmt("{s}\\appdata", .{folder});
     try cwd().createDirPath(io, appdata);
     errdefer removeFolder(io, folder) catch {};
+    if (session) |seed| {
+        const settings = try fmt("{s}\\ZigShell", .{appdata});
+        try cwd().createDirPath(io, settings);
+        const data = try cwd().readFileAlloc(io, seed, a, .limited(131072));
+        _ = try std.json.parseFromSlice(std.json.Value, a, data, .{});
+        try cwd().writeFile(io, .{ .sub_path = try fmt("{s}\\session-livetest.json", .{settings}), .data = data });
+    }
     const block = try environment(appdata);
     var startup: Startup = .{};
     var process: Process = undefined;
@@ -354,6 +390,121 @@ fn typeOrKey(state: State, text: []const u8, is_key: bool, minimum: u64, idle: u
     return 0;
 }
 
+fn clientRect(state: State) !Rect {
+    if (!alive(state) or windowPid(@ptrFromInt(state.hwnd)) != state.pid) return error.ProcessIdentityMismatch;
+    var rect: Rect = undefined;
+    const hwnd: H = @ptrFromInt(state.hwnd);
+    if (GetClientRect(hwnd, &rect) == 0) return error.RectUnavailable;
+    var origin: Point = .{ .x = 0, .y = 0 };
+    if (ClientToScreen(hwnd, &origin) == 0) return error.RectUnavailable;
+    return .{ .left = origin.x, .top = origin.y, .right = origin.x + rect.right, .bottom = origin.y + rect.bottom };
+}
+
+fn screenPoint(rect: Rect, x: i32, y: i32) !Point {
+    if (x < 0 or y < 0 or x >= rect.right - rect.left or y >= rect.bottom - rect.top) return error.PointOutsideClient;
+    return .{ .x = rect.left + x, .y = rect.top + y };
+}
+
+fn absoluteAxis(value: i32, origin: i32, extent: i32) !i32 {
+    const offset = @as(i64, value) - origin;
+    if (extent <= 0 or offset < 0 or offset >= extent) return error.PointOutsideDesktop;
+    return @intCast(@divTrunc(offset * 65536 + 32768, extent));
+}
+
+test "ISSUE-438 client coordinates and absolute mouse coordinates include negative monitor origins" {
+    const rect: Rect = .{ .left = -1200, .top = 80, .right = -200, .bottom = 780 };
+    try std.testing.expectEqual(Point{ .x = -1180, .y = 110 }, try screenPoint(rect, 20, 30));
+    try std.testing.expectError(error.PointOutsideClient, screenPoint(rect, -1, 0));
+    try std.testing.expectError(error.PointOutsideClient, screenPoint(rect, 1000, 0));
+    try std.testing.expectError(error.PointOutsideClient, screenPoint(rect, 0, 700));
+    try std.testing.expectEqual(@as(i32, 32776), try absoluteAxis(0, -1920, 3840));
+    try std.testing.expectError(error.PointOutsideDesktop, absoluteAxis(-1921, -1920, 3840));
+    try std.testing.expectError(error.PointOutsideDesktop, absoluteAxis(1920, -1920, 3840));
+    try std.testing.expectError(error.PointOutsideDesktop, absoluteAxis(0, 0, 0));
+}
+
+test "ISSUE-438 mouse sends use the foreground and initial idle guard" {
+    try std.testing.expectEqual(Decision.refuse_foreground, sendDecision(false, 60000, 60000, true));
+    try std.testing.expectEqual(Decision.refuse_active, sendDecision(true, 59999, 60000, true));
+    try std.testing.expectEqual(Decision.send, sendDecision(true, 60000, 60000, true));
+    try std.testing.expectEqual(Decision.refuse_foreground, sendDecision(false, 0, 60000, false));
+    try std.testing.expectEqual(Decision.send, sendDecision(true, 0, 60000, false));
+}
+
+fn mouseInput(point: Point, flags: u32) !Input {
+    return .{ .kind = 0, .data = .{ .mouse = .{
+        .x = try absoluteAxis(point.x, GetSystemMetrics(76), GetSystemMetrics(78)),
+        .y = try absoluteAxis(point.y, GetSystemMetrics(77), GetSystemMetrics(79)),
+        .data = 0,
+        .flags = flags | 0x8000 | 0x4000 | 0x2000 | 1,
+        .time = 0,
+        .extra = 0,
+    } } };
+}
+
+fn mouse(state: State, positions: []const []const u8, drag: bool, right: bool, steps: u32, minimum: u64, idle: u64) !u8 {
+    const rect = try clientRect(state);
+    const from = try screenPoint(rect, try std.fmt.parseInt(i32, positions[0], 10), try std.fmt.parseInt(i32, positions[1], 10));
+    const to = if (drag) try screenPoint(rect, try std.fmt.parseInt(i32, positions[2], 10), try std.fmt.parseInt(i32, positions[3], 10)) else from;
+    var inputs: std.ArrayList(Input) = .empty;
+    defer inputs.deinit(a);
+    try inputs.append(a, try mouseInput(from, 0));
+    try inputs.append(a, try mouseInput(from, if (right) 8 else 2));
+    if (drag) {
+        for (1..steps + 2) |i| {
+            const point: Point = .{
+                .x = from.x + @as(i32, @intCast(@divTrunc((@as(i64, to.x) - from.x) * @as(i64, @intCast(i)), steps + 1))),
+                .y = from.y + @as(i32, @intCast(@divTrunc((@as(i64, to.y) - from.y) * @as(i64, @intCast(i)), steps + 1))),
+            };
+            try inputs.append(a, try mouseInput(point, 0));
+        }
+    }
+    try inputs.append(a, try mouseInput(to, if (right) 16 else 4));
+    if (windowPid(WindowFromPoint(from)) != state.pid or windowPid(WindowFromPoint(to)) != state.pid) {
+        print("refused: mouse point is not the test window\n", .{});
+        return 3;
+    }
+    return send(state, inputs.items, idle, minimum, true);
+}
+
+fn clipboard() !u8 {
+    if (OpenClipboard(null) == 0) return error.ClipboardUnavailable;
+    defer _ = CloseClipboard();
+    const handle = GetClipboardData(13) orelse return error.ClipboardTextUnavailable;
+    const ptr: [*]const u16 = @ptrCast(@alignCast(GlobalLock(handle) orelse return error.ClipboardTextUnavailable));
+    defer _ = GlobalUnlock(handle);
+    const units = ptr[0 .. GlobalSize(handle) / 2];
+    const end = std.mem.indexOfScalar(u16, units, 0) orelse return error.InvalidClipboardText;
+    const text = try std.unicode.utf16LeToUtf8Alloc(a, units[0..end]);
+    print("{s}\n", .{try std.json.Stringify.valueAlloc(a, text, .{})});
+    return 0;
+}
+
+fn shot(state: State, path: []const u8) !u8 {
+    const rect = try clientRect(state);
+    const hwnd: H = @ptrFromInt(state.hwnd);
+    const dc = GetDC(hwnd) orelse return error.CaptureDCFailed;
+    defer _ = ReleaseDC(hwnd, dc);
+    const memory = CreateCompatibleDC(dc) orelse return error.CaptureDCFailed;
+    defer _ = DeleteDC(memory);
+    const bitmap = CreateCompatibleBitmap(dc, rect.right - rect.left, rect.bottom - rect.top) orelse return error.CaptureBitmapFailed;
+    defer _ = DeleteObject(bitmap);
+    const previous = SelectObject(memory, bitmap);
+    defer _ = SelectObject(memory, previous);
+    if (BitBlt(memory, 0, 0, rect.right - rect.left, rect.bottom - rect.top, dc, 0, 0, 0x00cc0020) == 0) return error.CapturePrintFailed;
+    var token: usize = 0;
+    const startup: GdiStartup = .{};
+    if (GdiplusStartup(&token, &startup, null) != 0) return error.CaptureStartupFailed;
+    defer GdiplusShutdown(token);
+    var image: H = null;
+    if (GdipCreateBitmapFromHBITMAP(bitmap, null, &image) != 0) return error.CaptureBitmapFailed;
+    defer _ = GdipDisposeImage(image);
+    const png: Guid = .{ .a = 0x557cf406, .b = 0x1a04, .c = 0x11d3, .d = .{ 0x9a, 0x73, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e } };
+    if (GdipSaveImageToFile(image, try wide(path), &png, null) != 0) return error.CaptureSaveFailed;
+    print("saved\n", .{});
+    return 0;
+}
+
 fn stop(io: std.Io, path: []const u8, state: State) !u8 {
     const h = OpenProcess(0x100000 | 0x1000 | 1, 0, state.pid);
     defer if (h != null) {
@@ -376,10 +527,14 @@ fn stop(io: std.Io, path: []const u8, state: State) !u8 {
 }
 
 fn run(init: std.process.Init) !u8 {
+    _ = SetProcessDpiAwarenessContext(-4);
     const idle = try idleMs();
     const args = try init.minimal.args.toSlice(a);
     var state_path: ?[]const u8 = null;
     var exe: ?[]const u8 = null;
+    var session: ?[]const u8 = null;
+    var steps: u32 = 20;
+    var right = false;
     var minimum: u64 = 300000;
     var positional: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
@@ -388,18 +543,28 @@ fn run(init: std.process.Init) !u8 {
             try positional.append(a, args[i]);
             continue;
         }
-        if (std.mem.eql(u8, args[i], "--state") or std.mem.eql(u8, args[i], "--exe") or std.mem.eql(u8, args[i], "--idle-seconds")) {
+        if (std.mem.eql(u8, args[i], "--state") or std.mem.eql(u8, args[i], "--exe") or std.mem.eql(u8, args[i], "--idle-seconds") or std.mem.eql(u8, args[i], "--session") or std.mem.eql(u8, args[i], "--steps")) {
             if (i + 1 == args.len) return error.InvalidArguments;
             const option = args[i];
             i += 1;
-            if (std.mem.eql(u8, option, "--state")) state_path = args[i] else if (std.mem.eql(u8, option, "--exe")) exe = args[i] else minimum = try std.math.mul(u64, try std.fmt.parseInt(u64, args[i], 10), 1000);
+            if (std.mem.eql(u8, option, "--state")) state_path = args[i] else if (std.mem.eql(u8, option, "--exe")) exe = args[i] else if (std.mem.eql(u8, option, "--session")) session = args[i] else if (std.mem.eql(u8, option, "--steps")) {
+                steps = try std.fmt.parseInt(u32, args[i], 10);
+                if (steps > 1000) return error.InvalidArguments;
+            } else minimum = try std.math.mul(u64, try std.fmt.parseInt(u64, args[i], 10), 1000);
+        } else if (std.mem.eql(u8, args[i], "--right")) {
+            right = true;
         } else try positional.append(a, args[i]);
     }
     if (positional.items.len == 0) return error.InvalidArguments;
     const command = positional.items[0];
     const is_type = std.mem.eql(u8, command, "type");
     const is_key = std.mem.eql(u8, command, "key");
-    if (positional.items.len != @as(usize, if (is_type or is_key) 2 else 1)) return error.InvalidArguments;
+    const is_drag = std.mem.eql(u8, command, "drag");
+    const is_click = std.mem.eql(u8, command, "click");
+    const is_shot = std.mem.eql(u8, command, "shot");
+    if (positional.items.len != @as(usize, if (is_drag) 5 else if (is_click) 3 else if (is_type or is_key or is_shot) 2 else 1)) return error.InvalidArguments;
+    if (right and !is_click) return error.InvalidArguments;
+    if (std.mem.eql(u8, command, "clipboard")) return clipboard();
     const path = try fullPath(state_path orelse try fmt("{s}\\mp-livetest\\state.txt", .{try env(std.unicode.utf8ToUtf16LeStringLiteral("LOCALAPPDATA"))}));
     if (std.fs.path.dirname(path)) |parent| try cwd().createDirPath(init.io, parent);
     const lock = CreateFileW(try wide(try fmt("{s}.lock", .{path})), 0x80000000 | 0x40000000, 0, null, 4, 0x80, null);
@@ -408,7 +573,7 @@ fn run(init: std.process.Init) !u8 {
         return 4;
     }
     defer _ = CloseHandle(lock);
-    if (std.mem.eql(u8, command, "start")) return start(init.io, path, exe, minimum, idle);
+    if (std.mem.eql(u8, command, "start")) return start(init.io, path, exe, session, minimum, idle);
     const state = try load(init.io, path);
     if (std.mem.eql(u8, command, "status")) {
         const fg = GetForegroundWindow();
@@ -420,13 +585,19 @@ fn run(init: std.process.Init) !u8 {
         return 4;
     };
     if (is_type or is_key) return typeOrKey(s, positional.items[1], is_key, minimum, idle);
+    if (is_drag or is_click) return mouse(s, positional.items[1..], is_drag, right, steps, minimum, idle);
+    if (std.mem.eql(u8, command, "rect")) {
+        print("{s}\n", .{try std.json.Stringify.valueAlloc(a, try clientRect(s), .{})});
+        return 0;
+    }
+    if (is_shot) return shot(s, positional.items[1]);
     if (std.mem.eql(u8, command, "stop")) return stop(init.io, path, s);
     return error.InvalidArguments;
 }
 
 pub fn main(init: std.process.Init) void {
     const code = run(init) catch |err| {
-        print("error: {s}\nusage: mp-livetest [--state path] start [--exe path] [--idle-seconds N] | status | type text [--idle-seconds N] | key name [--idle-seconds N] | stop\n", .{@errorName(err)});
+        print("error: {s}\nusage: mp-livetest [--state path] start [--exe path] [--session json] [--idle-seconds N] | status | type text | key name | drag x1 y1 x2 y2 [--steps N] | click x y [--right] | clipboard | rect | shot path | stop (input commands accept --idle-seconds N)\n", .{@errorName(err)});
         std.process.exit(1);
     };
     std.process.exit(code);
