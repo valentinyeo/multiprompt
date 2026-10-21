@@ -397,7 +397,7 @@ pub fn build(b: *std.Build) void {
             .target = b.graph.host,
             .optimize = .Debug,
         }),
-        .filters = &.{ "IGSH-443", "IGSH-456" },
+        .filters = &.{ "IGSH-443", "IGSH-456", "ISSUE-456" },
     });
     const run_shell_font_migration_tests = b.addRunArtifact(shell_font_migration_tests);
     test_step.dependOn(&run_shell_font_migration_tests.step);

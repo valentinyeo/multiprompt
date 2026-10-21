@@ -80,7 +80,7 @@ test('scanner rejects literals, UTF-16 names, theme JSON, LOGFONT and unknown GD
   ]) assert.notEqual(violations(source).length, 0, source);
   assert.deepEqual(violations('CreateFontW(18, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, L("IBM Plex Sans SmBld"));'), []);
   assert.deepEqual(violations('const face = "IBM Plex Sans Medm";'), []);
-  assert.deepEqual(violations('const SHELL_FACE = "Hack";'), []);
+  assert.deepEqual(violations('const SHELL_FACE = MONO_FACE;'), []);
   assert.deepEqual(violations('const MONO_FACE = "Nordwand Mono MP SemiBold";'), []);
   assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono MP SemiBold"/);
   assert.deepEqual(violations('L("Segoe UI Symbol"); L("Segoe UI Emoji");'), []);

@@ -489,7 +489,7 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "subtitle_weight": 400,
     \\    "close_weight": 400,
     \\    "console_font_height": 18,
-    \\    "console_font_weight": 400
+    \\    "console_font_weight": 600
     \\  },
     \\  "colors": {
     \\    "sidebar_bg": "#03080E",
