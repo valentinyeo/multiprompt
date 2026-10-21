@@ -617,7 +617,9 @@ try {
             if ($fourth.browser_connection_id -le $second.browser_connection_id + 1) { throw 'Palette batch did not open and cancel an intermediate connection' }
             Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
             Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
+            $shiftToggleCooldown = [Diagnostics.Stopwatch]::StartNew()
             $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
+            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
             Palette 'close all browser panes'
