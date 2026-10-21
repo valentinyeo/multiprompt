@@ -148,7 +148,14 @@ try {
     [Desktop438]::Mouse($p[0],$p[1],8); [Desktop438]::Mouse($p[0],$p[1],16)
     Start-Sleep -Milliseconds 300
     Shot 'copy-menu'
-    Key 0x24; Key 0x0D
+    $menu = Wait-For 'native context menu' { $h=[Desktop438]::FindWindowEx([IntPtr]::Zero,[IntPtr]::Zero,'#32768',$null); if($h -ne [IntPtr]::Zero) { $h } }
+    $menuRect = [Desktop438+RECT]::new()
+    [void][Desktop438]::GetWindowRect($menu,[ref]$menuRect)
+    $copyX = $menuRect.Left + 30
+    $copyY = $menuRect.Top + [int](15 * $dpi / 96)
+    Write-Output "COPY_MENU rect=$($menuRect | ConvertTo-Json -Compress) click=$copyX,$copyY"
+    Move-Pointer $copyX $copyY
+    [Desktop438]::Mouse($copyX,$copyY,2); [Desktop438]::Mouse($copyX,$copyY,4)
     Start-Sleep -Milliseconds 300
     $message=Get-Clipboard -Raw
     Write-Output "MESSAGE_CLIPBOARD $($message | ConvertTo-Json -Compress)"
