@@ -171,6 +171,7 @@ try {
     [ReconnectDesktop]::Type(0x43)
     [ReconnectDesktop]::Key(0x12, $true)
     $composer = Wait-For 'chat composer' { $h = [ReconnectDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 30
+    Start-Sleep -Seconds 1
     [ReconnectDesktop]::Click($composer)
     Start-Sleep -Seconds 3
     $beforeF = [ReconnectDesktop]::Focus($main)
