@@ -222,7 +222,7 @@ function auditFileUpload(source) {
   assert.match(run, /-T -o BatchMode=yes -o ConnectTimeout=5/);
   assert.match(run, /tmuxSshTarget\(job.host\)/);
   assert.match(run, /chat_drop.uploadCommand/);
-  assert.match(run, /20000[^]*512 \* 1024[^]*1000/);
+  assert.match(run, /const timeout: DWORD = 20000;/);
   assert.match(run, /sshOneShotCaptureInput[^]*input, timeout/);
   assert.match(run, /if \(!result.success\) return .failed/);
   assert.match(run, /path\[0\] != '\/'[^]*endsWith/);
@@ -315,7 +315,7 @@ const mockConsole = struct {
 const mockVps = struct {
     fn sshOneShotCaptureInput(command: []const u8, buf: []u8, input: HANDLE, timeout: DWORD) struct { len: usize, success: bool } {
         std.debug.assert(input == @as(HANDLE, @ptrFromInt(1)));
-        const expected = 20000 + @divTrunc(mock_size + 512 * 1024 - 1, 512 * 1024) * 1000;
+        const expected = 20000;
         std.debug.assert(timeout == expected);
         std.debug.assert(std.mem.startsWith(u8, command, "ssh -T -o BatchMode=yes -o ConnectTimeout=5 user@server sh -c '"));
         calls += 1;

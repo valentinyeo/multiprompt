@@ -500,7 +500,7 @@ pub fn build(b: *std.Build) void {
     bridge_version_heal_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     test_step.dependOn(&bridge_version_heal_tests.step);
     vps_test_step.dependOn(&bridge_version_heal_tests.step);
-    const chat_drop_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drop.test.js", "tools/chat-double-click.test.js" });
+    const chat_drop_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drop.test.js", "tools/chat-double-click.test.js", "tools/ssh-upload-reliability.test.js" });
     chat_drop_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drop_tests.step);
     vps_test_step.dependOn(&chat_drop_tests.step);

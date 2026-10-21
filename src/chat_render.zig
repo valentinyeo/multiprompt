@@ -1544,7 +1544,7 @@ fn chatSendFileRun(job: ChatFileJob) enum { sent, failed, too_big } {
     if (!@import("console.zig").appendSshExe(&cmd_buf, &pos)) return .failed;
     const tail = std.fmt.bufPrint(cmd_buf[pos..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} {s}", .{ @import("console.zig").tmuxSshTarget(job.host), remote }) catch return .failed;
     var output: [8192]u8 = undefined;
-    const timeout: DWORD = @intCast(20000 + @divTrunc(size + 512 * 1024 - 1, 512 * 1024) * 1000);
+    const timeout: DWORD = 20000;
     const result = @import("vps.zig").sshOneShotCaptureInput(cmd_buf[0 .. pos + tail.len], &output, input, timeout);
     if (!result.success) return .failed;
     var lines = std.mem.splitScalar(u8, output[0..result.len], '\n');

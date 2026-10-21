@@ -522,9 +522,9 @@ pub fn sshOneShotCapture(cmd_str: []const u8, buf: []u8) usize {
     return sshOneShotCaptureInput(cmd_str, buf, null, 20000).len;
 }
 
-fn sshInputPump(input: HANDLE, output: HANDLE) void {
+fn sshInputPump(input: HANDLE, output: HANDLE, activity: *std.atomic.Value(u64)) void {
     defer _ = CloseHandle(output);
-    var chunk: [65536]u8 = undefined;
+    var chunk: [4096]u8 = undefined;
     while (true) {
         var count: DWORD = 0;
         if (ReadFile(input, &chunk, chunk.len, &count, null) == 0 or count == 0) return;
@@ -533,6 +533,7 @@ fn sshInputPump(input: HANDLE, output: HANDLE) void {
             var written: DWORD = 0;
             if (WriteFile(output, chunk[pos..].ptr, count - pos, &written, null) == 0 or written == 0) return;
             pos += written;
+            _ = activity.fetchMax(GetTickCount64(), .release);
         }
     }
 }
@@ -611,7 +612,8 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     }
     _ = CloseHandle(pi.hThread);
 
-    const pump = if (stdin != null) std.Thread.spawn(.{}, sshInputPump, .{ stdin, stdin_write }) catch {
+    var activity = std.atomic.Value(u64).init(GetTickCount64());
+    const pump = if (stdin != null) std.Thread.spawn(.{}, sshInputPump, .{ stdin, stdin_write, &activity }) catch {
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         _ = CloseHandle(read_pipe);
@@ -621,21 +623,36 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     defer if (pump) |thread| thread.join();
 
     const WAIT_TIMEOUT: DWORD = 0x00000102;
-    const result = WaitForSingleObject(pi.hProcess, timeout_ms);
-    if (result == WAIT_TIMEOUT) {
-        debugLog("sshOneShotCapture: SSH timed out");
-        _ = TerminateProcess(pi.hProcess, 1);
-        _ = CloseHandle(pi.hProcess);
-        _ = CloseHandle(read_pipe);
-        return .{ .len = 0, .success = false };
-    }
-
     var total: usize = 0;
-    while (total < buf.len - 1) {
-        var bytes_read: DWORD = 0;
-        const rr = ReadFile(read_pipe, @ptrCast(buf[total..].ptr), @intCast(buf.len - total - 1), &bytes_read, null);
-        if (rr == 0 or bytes_read == 0) break;
-        total += bytes_read;
+    while (true) {
+        const result = WaitForSingleObject(pi.hProcess, 100);
+        var available: DWORD = 0;
+        while (PeekNamedPipe(read_pipe, null, 0, null, &available, null) != 0 and available > 0) {
+            var chunk: [4096]u8 = undefined;
+            var bytes_read: DWORD = 0;
+            if (ReadFile(read_pipe, &chunk, @min(available, chunk.len), &bytes_read, null) == 0 or bytes_read == 0) break;
+            if (stdin != null) _ = activity.fetchMax(GetTickCount64(), .release);
+            if (stdin == null) {
+                const keep = @min(bytes_read, buf.len - 1 - total);
+                @memcpy(buf[total .. total + keep], chunk[0..keep]);
+                total += keep;
+            } else {
+                const keep = @min(bytes_read, buf.len - 1);
+                const retained = @min(total, buf.len - 1 - keep);
+                std.mem.copyForwards(u8, buf[0..retained], buf[total - retained .. total]);
+                @memcpy(buf[retained .. retained + keep], chunk[bytes_read - keep .. bytes_read]);
+                total = retained + keep;
+            }
+        }
+        if (result != WAIT_TIMEOUT) break;
+        const last_activity = activity.load(.acquire);
+        if (GetTickCount64() - last_activity >= timeout_ms) {
+            debugLog("sshOneShotCapture: SSH timed out");
+            _ = TerminateProcess(pi.hProcess, 1);
+            _ = CloseHandle(pi.hProcess);
+            _ = CloseHandle(read_pipe);
+            return .{ .len = 0, .success = false };
+        }
     }
     var exit_code: DWORD = 1;
     const exited = GetExitCodeProcess(pi.hProcess, &exit_code) != 0 and exit_code == 0;
