@@ -171,7 +171,9 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /git rev-parse HEAD > evidence\/revision\.txt/);
   assert.match(auditJob, /if: always\(\)/);
   assert.match(auditJob, /name: verify-chat-sync-audit/);
-  assert.match(workflow, /  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest/);
+  for (const ending of ['\n', '\r\n']) {
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+  }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(chat-sync-audit.md\)/);
   assert.match(read(skill + 'features/chat-sync-audit.md'), /not a Windows desktop journey/);
 });
