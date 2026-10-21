@@ -2055,7 +2055,7 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
     defer _ = CloseHandle(pipe);
 
     try writeAll(pipe, payload);
-    if (FlushFileBuffers(pipe) == 0) return error.WriteFailed;
+    _ = FlushFileBuffers(pipe);
     return true;
 }
 

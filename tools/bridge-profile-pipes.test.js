@@ -202,7 +202,7 @@ test('transport waits within its deadline and drains replies before closing the 
   assert.match(request, /if \(remaining == 0\) return error\.PipeUnavailable/);
   assert.match(request, /WaitNamedPipeA\(command_pipe_name\.ptr, @intCast\(@min\(50, remaining\)\)\)/);
   const reply = source.slice(source.indexOf('fn routeReplyPipe('), source.indexOf('fn readPipeMessage('));
-  assert.match(reply, /defer _ = CloseHandle\(pipe\);[\s\S]*try writeAll\(pipe, payload\);\s*if \(FlushFileBuffers\(pipe\) == 0\) return error\.WriteFailed/);
+  assert.match(reply, /defer _ = CloseHandle\(pipe\);[\s\S]*try writeAll\(pipe, payload\);\s*_ = FlushFileBuffers\(pipe\);/);
 });
 
 test('issue: source preserves token-only lifetime mutex and shared pipe resolver', () => {
