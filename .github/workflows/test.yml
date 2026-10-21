@@ -13,23 +13,77 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      heavy: ${{ steps.paths.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          base="$BASE"
+          if [ "$EVENT" = pull_request ]; then
+            base="$(git merge-base "$BASE" "$HEAD")"
+          elif [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          git diff --name-only -z "$base" "$HEAD" > "$RUNNER_TEMP/changed-paths"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const paths = fs.readFileSync(`${process.env.RUNNER_TEMP}/changed-paths`, 'utf8').split('\0').filter(Boolean);
+          const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
+          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path));
+          for (const [paths, expected] of [
+            [['README.md', 'openwiki/operations/build.md'], false],
+            [['changelog.d/IGSH-519-checks.md', 'CHANGELOG.md'], false],
+            [['docs/guide.md', 'docs-site/src/pages/index.astro'], false],
+            [['README.md', 'build.zig'], true],
+            [['src/testdata/history.md'], true],
+            [['.github/workflows/test.yml'], true],
+            [[], true],
+          ]) assert.equal(requiresTests(paths), expected);
+          console.log('Path routing controls passed');
+          const heavy = requiresTests(paths);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `heavy=${heavy}\n`);
+          console.log(JSON.stringify({ heavy, paths }));
+          NODE
+
   test:
-    name: test
+    name: test-windows (${{ matrix.group }})
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - name: Test release version
+        if: matrix.group == 1
         run: node --test tools/release-version.test.mjs
       - name: Check version rule
         id: rule
@@ -40,32 +94,50 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Cache Zig
+        if: steps.rule.outputs.kind != 'STAMP'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+            ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
         run: |
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
+            $zip = "$env:RUNNER_TEMP\zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }}
 
   test-vps:
     name: test-vps
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - name: Test release version
@@ -79,6 +151,17 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Cache Zig
+        if: steps.rule.outputs.kind != 'STAMP'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-
+            ${{ runner.os }}-zig-0.16.0-vps-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
@@ -95,11 +178,13 @@ jobs:
 
   service:
     name: service
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Build the account Worker
@@ -107,3 +192,38 @@ jobs:
         run: npm ci && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
         run: node --test service/test/infra.test.js service/test/worker.test.js
+
+  test-result:
+    name: test
+    needs: [changes, test, test-vps, service]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every test job
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          HEAVY: ${{ needs.changes.outputs.heavy }}
+          WINDOWS: ${{ needs.test.result }}
+          VPS: ${{ needs.test-vps.result }}
+          SERVICE: ${{ needs.service.result }}
+        run: |
+          require_jobs() {
+            [ "$1" = success ] || return 1
+            case "$2" in
+              false) return 0 ;;
+              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
+              *) return 1 ;;
+            esac
+          }
+          require_jobs success true success success success
+          require_jobs success false skipped skipped skipped
+          for result in failure cancelled skipped; do
+            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success success; then exit 1; fi
+            if require_jobs success true success "$result" success; then exit 1; fi
+            if require_jobs success true success success "$result"; then exit 1; fi
+          done
+          if require_jobs success invalid success success success; then exit 1; fi
+          echo 'Aggregate routing controls passed'
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$SERVICE"
