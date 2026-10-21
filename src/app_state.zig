@@ -849,7 +849,6 @@ pub var g_last_mouse_hook_tick: u64 = 0;
 pub var g_last_hook_watchdog_tick: u64 = 0;
 pub const HOOK_WATCHDOG_STALL_MS: u64 = 75_000;
 pub var g_startup_progress: bool = false;
-pub var g_startup_paint_first: bool = true;
 
 pub const BrowserPopupEvidence = struct {
     same_edge_process: bool = false,
@@ -1815,7 +1814,7 @@ pub var g_debug_log_mutex: SpinMutex = .{};
 
 pub var g_pollshell_count: u64 = 0;
 
-pub var g_account_locked = true;
+pub var g_account_locked = @import("account_state.zig").startupLocked();
 pub var g_account_bypass = false;
 pub var g_account_bootstrapping = true;
 pub var g_account_busy = false;

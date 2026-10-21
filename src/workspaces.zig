@@ -202,7 +202,6 @@ const nowFileTime = @import("inbox.zig").nowFileTime;
 const writeUintTo = @import("inbox.zig").writeUintTo;
 const publishInboxState = @import("inbox.zig").publishInboxState;
 const shellProcessAliveForRead = @import("shell_poll.zig").shellProcessAliveForRead;
-const drawStartupProgress = @import("main.zig").drawStartupProgress;
 
 fn getWorkspaceRegistryPath(buf: *[512]u8) ?[]const u8 {
     const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
@@ -3765,7 +3764,6 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     for (0..tab_count) |t| {
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
         if (findLocalTmuxTab(tabs[t].tmux_host, tabs[t].tmux_session[0..tabs[t].tmux_session_len]) != null) continue;
-        if (app_state.g_startup_progress) drawStartupProgress(@intCast(t), tab_count, tabs[t].name[0..tabs[t].name_len]);
         const src_ws = tabs[t].workspace;
         if (slot_map[src_ws] == 255) {
             if (app_state.g_lws_count >= MAX_LWS) {

@@ -1101,12 +1101,12 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         app_state.g_account_has_token = false;
         app_state.g_account_reauth = true;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
-        if (app_state.g_account_bootstrapping) {
-            app_state.g_account_status = "Sign in to multiprompt to open your workspaces.";
+        if (reply.job.kind == .startup) {
+            accountLock();
         } else {
             showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to multiprompt", 86400000, true);
+            _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         }
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         return;
     }
     if (reply.has_token) {
@@ -1251,7 +1251,7 @@ test "second launch refuses stale or foreign owners, focuses live owners and rep
     try std.testing.expectEqual(SecondLaunchAction.replace, secondLaunchAction(true, true, false, true));
 }
 
-pub fn accountBootstrap(hwnd: HANDLE) bool {
+pub fn accountClaim(hwnd: HANDLE) bool {
     var dir: [512]u8 = undefined;
     if (getSessionDir(&dir)) |path| win32MakeDir(path);
     var env: [8]u8 = undefined;
@@ -1342,18 +1342,18 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     var instance_buf: [96]u8 = undefined;
     const instance = std.fmt.bufPrint(&instance_buf, "{d} {d}\n", .{ GetCurrentProcessId(), @intFromPtr(hwnd) }) catch return false;
     if (!writeFileAtomicW(instance_path, instance)) debugLog("second-launch: owner record write failed");
+    return true;
+}
+
+pub fn accountBootstrap(hwnd: HANDLE) bool {
+    if (app_state.g_account_bypass) return true;
     if (readDpapiFile("account-device.dat", 16384)) |token| {
         app_state.g_account_has_token = true;
         freeSecret(token);
     }
-    startAccountJob(accountResumeJob(.startup));
-    var msg: MSG = std.mem.zeroes(MSG);
-    while (app_state.g_account_locked) {
-        if (GetMessageW(&msg, null, 0, 0) <= 0) return false;
-        _ = TranslateMessage(&msg);
-        _ = DispatchMessageW(&msg);
-    }
+    app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
+    startAccountJob(accountResumeJob(.startup));
     _ = SetTimer(hwnd, TIMER_ACCOUNT, 20000, null);
     return true;
 }
@@ -2189,4 +2189,45 @@ test "device prompt guard blocks nested rounds and background jobs until decisio
     accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[]}", true);
     try std.testing.expect(!g_account_key_prompt_active);
     try std.testing.expect(!app_state.g_account_busy);
+}
+
+test "ISSUE-502 optimistic account startup blocks only a confirmed signed out result" {
+    const locked = app_state.g_account_locked;
+    const bootstrapping = app_state.g_account_bootstrapping;
+    const reauth = app_state.g_account_reauth;
+    const token = app_state.g_account_has_token;
+    const count = app_state.shell_count;
+    const shell = app_state.shells[0];
+    const status = app_state.g_account_status;
+    const retry = app_state.g_account_retry;
+    defer {
+        app_state.g_account_locked = locked;
+        app_state.g_account_bootstrapping = bootstrapping;
+        app_state.g_account_reauth = reauth;
+        app_state.g_account_has_token = token;
+        app_state.shell_count = count;
+        app_state.shells[0] = shell;
+        app_state.g_account_status = status;
+        app_state.g_account_retry = retry;
+    }
+    app_state.g_account_bootstrapping = false;
+    app_state.g_account_locked = false;
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 42;
+    accountSyncFailed(true);
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
+    const signed_in = try std.heap.page_allocator.create(LayoutReply);
+    signed_in.* = .{ .job = .{ .kind = .startup }, .has_token = true, .bytes = try std.heap.page_allocator.dupe(u8, "not a layout") };
+    handleLayoutReply(@bitCast(@intFromPtr(signed_in)));
+    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_has_token);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
+    const signed_out = try std.heap.page_allocator.create(LayoutReply);
+    signed_out.* = .{ .job = .{ .kind = .startup }, .unauthorized = true };
+    handleLayoutReply(@bitCast(@intFromPtr(signed_out)));
+    try std.testing.expect(app_state.g_account_locked);
+    try std.testing.expectEqualStrings("Sign in to multiprompt to open your workspaces.", app_state.g_account_status);
+    try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
 }

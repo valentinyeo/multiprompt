@@ -1034,6 +1034,7 @@ fn chatImgReleaseThumb(entry: *ChatImgEntry) void {
 }
 
 fn chatImgStartLocked(idx: usize) void {
+    if (@import("launch_cache.zig").pending and @import("launch_cache.zig").queue.next <= 2) return;
     const entry = &app_state.g_chat_img_cache[idx];
     if (app_state.g_chat_img_inflight.load(.acquire) >= chat_image.MAX_FETCHES) return;
     if (!gdipImgLoad()) {
@@ -2814,6 +2815,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
                 if (painted) chatBenchPaint();
+                if (painted) @import("launch_cache.zig").painted(true);
             }
             if (hdc == null) return 0;
             var client_rc: RECT = std.mem.zeroes(RECT);

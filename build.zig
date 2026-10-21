@@ -213,6 +213,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_usage_telemetry_tests.step);
+    const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
+    test_step.dependOn(&launch_regression.step);
+    vps_test_step.dependOn(&launch_regression.step);
     const usage_mode_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_single_exe.test.js" });
     test_step.dependOn(&usage_mode_regression.step);
     const usage_mode_tests = b.addTest(.{ .root_module = b.createModule(.{
