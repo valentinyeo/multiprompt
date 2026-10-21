@@ -2190,8 +2190,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (idx == app_state.active_shell) {
         app_state.g_front_period.selected = null;
         if (@import("drawing.zig").reconnectTabVisible(idx)) {
-            positionReconnectedConsole(idx);
-            _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "respawnShellInPlace");
+            if (positionReconnectedConsole(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "respawnShellInPlace");
         }
     }
 
@@ -2229,22 +2228,21 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 pub fn showReconnectedConsole(idx: u32) void {
     if (!@import("ssh_reconnect.zig").eventEffects(@import("drawing.zig").reconnectTabVisible(idx)).invalidate_content or
         !@import("chat_composer.zig").shellConsoleShouldBeVisible(idx)) return;
-    positionReconnectedConsole(idx);
-    _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+    if (positionReconnectedConsole(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
 }
 
-fn positionReconnectedConsole(idx: u32) void {
-    if (!@import("drawing.zig").reconnectTabVisible(idx)) return;
+fn positionReconnectedConsole(idx: u32) bool {
+    if (!@import("drawing.zig").reconnectTabVisible(idx)) return false;
     const shell = &app_state.shells[idx];
-    if (shell.hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return;
+    if (shell.hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return false;
     const pane = @import("browser_pane.zig");
     var rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
     rc.left = SIDEBAR_W();
     rc.top = app_state.DEV_TOP_PAD + pane.threadTitleHeight();
     rc.bottom -= app_state.DEV_TOP_PAD;
     if (pane.browserSlotReserved()) {
-        const layout = pane.calcBrowserLayout() orelse return;
+        const layout = pane.calcBrowserLayout() orelse return false;
         const inset: i32 = if (shell.browser_native) pane.paneFocusInset() else 0;
         rc = .{ .left = layout.console_x + inset, .top = layout.console_y + inset, .right = layout.console_x + layout.console_w - inset, .bottom = layout.console_y + layout.console_h - inset };
     } else if (!shell.full_width) {
@@ -2252,7 +2250,7 @@ fn positionReconnectedConsole(idx: u32) void {
         rc.left = col.left;
         rc.right = col.left + col.width;
     }
-    _ = SetWindowPos(shell.hwnd, null, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    return SetWindowPos(shell.hwnd, null, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW) != 0;
 }
 
 pub fn markSshTabDisconnected(idx: u32) void {

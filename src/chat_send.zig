@@ -1790,7 +1790,7 @@ pub fn sshRequestSessionProbe() void {
 fn sshSessionEnded(idx: u32) void {
     if (chatBenchEnabled()) return;
     const shell = &app_state.shells[idx];
-    if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed or shellProcessAliveForRead(idx)) return;
+    if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed or (shell.process != null and shellProcessAliveForRead(idx))) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
     if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
     shell.hwnd = null;
@@ -1924,7 +1924,7 @@ fn sshProbeFinish() void {
         const shell = &app_state.shells[idx];
         if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
-        const process_alive = shellProcessAliveForRead(idx);
+        const process_alive = shell.process != null and shellProcessAliveForRead(idx);
         if (shell.ssh_reconnect.observeGone(item.session_gone, process_alive)) {
             sshSessionEnded(idx);
             continue;

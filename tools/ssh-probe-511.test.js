@@ -228,10 +228,10 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
   assert.match(observe, /gone and eligible and !process_alive/);
   assert.match(observe, /self\.gone_results >= 2/);
   const finish = body('sshProbeFinish', send);
-  assert.match(finish, /const process_alive = shellProcessAliveForRead\(idx\)/);
+  assert.match(finish, /const process_alive = shell\.process != null and shellProcessAliveForRead\(idx\)/);
   assert.match(finish, /if \(item\.session_gone and process_alive\) continue/);
   assert.match(finish, /gone_results > 0\) \{\s*shell\.ssh_reconnect\.awaiting_probe = true;\s*sshRequestSessionProbe\(\);\s*continue/);
-  assert.match(body('sshSessionEnded', send), /or shellProcessAliveForRead\(idx\)\) return/);
+  assert.match(body('sshSessionEnded', send), /or \(shell\.process != null and shellProcessAliveForRead\(idx\)\)\) return/);
   assert.match(reconnect, /test "ISSUE-511 gone requires two consecutive results/);
   assert.match(reconnect, /test "ISSUE-511 creating reconnecting and never attached/);
   const respawn = body('respawnShellInPlace', read('console.zig'));
@@ -250,9 +250,9 @@ test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survi
 test('ISSUE-511 active respawn sizes its console before show without touching any other window', () => {
   const console = read('console.zig');
   const respawn = body('respawnShellInPlace', console);
-  assert.match(respawn, /if \(idx == app_state\.active_shell\) \{[^]*if \(@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*positionReconnectedConsole\(idx\);\s*_ = showShellConsole\(idx, SW_SHOWNOACTIVATE/);
+  assert.match(respawn, /if \(idx == app_state\.active_shell\) \{[^]*if \(@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*if \(positionReconnectedConsole\(idx\)\) _ = showShellConsole\(idx, SW_SHOWNOACTIVATE/);
   const position = body('positionReconnectedConsole', console);
-  assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return/);
+  assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return false/);
   assert.match(position, /rc\.left = SIDEBAR_W\(\)/);
   assert.match(position, /pane\.calcBrowserLayout\(\)/);
   assert.match(position, /pane\.centeredConsoleColumn\(/);
