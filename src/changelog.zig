@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.782", .items = &.{
+        .{ .text = "Every new version is now built and published on the GitHub Releases page.", .ticket = "IGSH-454" },
+        .{ .text = "Messages you queue while a session is busy are delivered in order, or shown as failed with Send again.", .ticket = "IGSH-460" },
+    } },
     .{ .ver = "0.28.781", .items = &.{
         .{ .text = "The app now records what takes focus away from the chat typing box so focus problems can be fixed.", .ticket = "IGSH-451" },
         .{ .text = "The chat typing box keeps its focus again, and new device approvals no longer pop up while you type.", .ticket = "IGSH-451" },
