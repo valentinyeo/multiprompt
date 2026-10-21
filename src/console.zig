@@ -2205,7 +2205,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 }
 
 pub fn markSshTabDisconnected(idx: u32) void {
-    if (idx >= app_state.shell_count) return;
+    if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
     if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;

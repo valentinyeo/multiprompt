@@ -140,9 +140,6 @@ pub fn routeKey(vk: u32, ctrl: bool, shift: bool, alt: bool) void {
         for (text[0..n]) |char| if (char >= 0x20 and char != 0x7f) {
             _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_FIND, 3, char);
         };
-    } else if (!ctrl and !alt) {
-        const char = @import("command_palette.zig").reductionSearchChar(vk, shift);
-        if (char != 0) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_FIND, 3, char);
     }
 }
 
@@ -158,6 +155,10 @@ pub fn windowKey(msg: u32, vk: usize) bool {
     }
     if (!app_state.g_chat_find_open) return false;
     if (down) routeKey(@intCast(vk), ctrl, shift, alt);
+    if (msg == 0x0102) {
+        const char: u16 = @truncate(vk);
+        if (char >= 0x20 and char != 0x7f) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_FIND, 3, char);
+    }
     return down or msg == 0x0101 or msg == 0x0105 or msg == 0x0102 or msg == 0x0106 or msg == 0x0302;
 }
 
