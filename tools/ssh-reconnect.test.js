@@ -417,7 +417,7 @@ test "ISSUE-501 user close" {
   }
 });
 
-test('ISSUE-501 exit events reconnect every remote kind for clean and failed exits in every phase', () => {
+test('ISSUE-501 long-lived exit events reconnect every remote kind for clean and failed exits in every phase', () => {
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
   const start = main.indexOf('        WM_APP_SHELL_EXITED => {');
   const end = main.indexOf('        @import("win32.zig").WM_TIMECHANGE => {', start);
@@ -437,6 +437,7 @@ test "ISSUE-501 event exits" {
     for ([_]ShellKind{ .tmux, .vps, .vps2 }) |kind| {
         for ([_]u32{ 0, 1, 255, 0xC0000139 }) |code| {
             for ([_]bool{ false, true }) |starting| {
+                fake_now += 10_000;
                 shells[0] = .{ .kind = kind };
                 if (starting) shells[0].ssh_reconnect.phase = .reconnecting;
                 fake_exit_code = code;

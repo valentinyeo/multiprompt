@@ -44,7 +44,7 @@ function Shot([string]$Name) {
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Tab([int]$Number) {
-    [ReconnectDesktop]::Click($main)
+    [ReconnectDesktop]::Activate($main)
     Start-Sleep -Milliseconds 250
     [ReconnectDesktop]::Key(0x11, $false)
     [ReconnectDesktop]::Key([ushort](0x30 + $Number), $false)
@@ -94,14 +94,10 @@ try {
     [void][ReconnectDesktop]::SetForegroundWindow($main)
     Start-Sleep -Seconds 18
     foreach ($number in 1, 2) {
-        Tab $number
         $readyOffset = (Read-Log).Length
-        [ReconnectDesktop]::Key(0x11, $false)
-        [ReconnectDesktop]::Key(0x10, $false)
-        [ReconnectDesktop]::Key(0x52, $false)
-        [ReconnectDesktop]::Key(0x52, $true)
-        [ReconnectDesktop]::Key(0x10, $true)
-        [ReconnectDesktop]::Key(0x11, $true)
+        $readyName = if ($number -eq 1) { 'verify-one' } else { 'verify-two' }
+        $readyTransport = Transport $readyName
+        Stop-Process -Id $readyTransport.Id -Force
         [void](Wait-For "tab $number confirmed connected" {
             $ready = (Read-Log).Substring($readyOffset)
             $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) new_id=(\d+)")
