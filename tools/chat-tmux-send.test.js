@@ -166,8 +166,9 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(settle, /chatFileRequestForDelivery\(key, true\)/);
   assert.match(settle, /facts\.enqueued[^]*transcriptStatus\(/);
   assert.match(settle, /chatEchoAssignForKey[^]*chatEchoStoreAnchors/);
-  assert.match(settle, /chatTmuxSendStart\(idx, entry\.text, entry\.id, true\)/);
-  assert.doesNotMatch(settle, /pasteText|sendEnterToShell|\.activity/);
+  assert.match(settle, /transcriptStatus\(&entry\.delivery_watch, busy, now_ms, history\.loaded_ms, evidence\)/);
+  assert.match(settle, /\.activity == \.active/);
+  assert.doesNotMatch(settle, /chatTmuxSendStart|pasteText|sendEnterToShell/);
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
   assert.match(body('chatPaintEchoStatus'), /pendingLabel\(phase, link_down, e\.transcript_queued\)/);
   assert.match(body('chatPaintEchoStatus'), /Queued, session is busy/);

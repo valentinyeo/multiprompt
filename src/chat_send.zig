@@ -283,6 +283,18 @@ pub fn chatSendVerifyTick() void {
             const retry_ok = if (held == true) sendEnterToShell(si) else true;
             if (retry_ok and app_state.g_main_hwnd != null and SetTimer(app_state.g_main_hwnd, TIMER_CHAT_SEND_VERIFY, delay, null) != 0) return;
         }
+        const busy = app_state.shells[si].activity == .active or (si == app_state.active_shell and app_state.g_chat_screen_working);
+        if (echo_index != null and chat_echo.verifyExpiredState(busy, held) == .delivered) {
+            const entry = &app_state.g_chat_outbox.items[echo_index.?];
+            entry.state = .delivered;
+            entry.left_box_ms = GetTickCount64();
+            entry.delivery_watch.observe(busy, chat_echo.fileTimeToUnixMs(nowFileTime()));
+            _ = saveChatOutbox();
+            chatOutboxChanged();
+            chatVerifyClear();
+            chatOutboxTick();
+            return;
+        }
     }
     if (echo_index) |ei| chatEchoMarkNotSent(ei);
     showHeaderNoticeAscii("Delivery unconfirmed - check the terminal before sending again", 8000, true);
@@ -1155,9 +1167,9 @@ fn chatEchoLoadedMs() i64 {
 }
 
 fn chatEchoDeliveryEvidence(entry: ChatOutboxEntry) chat_echo.DeliveryEvidence {
-    if (app_state.active_shell >= app_state.shell_count) return .{};
+    const si = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse return .{};
     for (app_state.g_chat_histories.items) |history| {
-        if (history.retired or history.key.shell_id != app_state.shells[app_state.active_shell].shell_id) continue;
+        if (history.retired or history.key.shell_id != app_state.shells[si].shell_id) continue;
         return history.history.deliveryEvidence(std.heap.page_allocator, .{ .text = entry.text, .prefix = &.{}, .anchor = entry.anchor }) catch .{};
     }
     return .{};
@@ -1272,6 +1284,65 @@ pub fn chatEchoPushQueuedNow() void {
     app_state.g_chat_scroll_bottom_pending = true;
     if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
     showHeaderNoticeAscii("Asked Claude to take the queued message now", 2500, false);
+}
+
+pub fn chatEchoSendAgain(id: u64) void {
+    const ei = chatOutboxIndexById(id) orelse return;
+    const entry = &app_state.g_chat_outbox.items[ei];
+    if (!chat_echo.pendingActions(entry.state).send_again or entry.channel_pending) return;
+    if (chatEchoTryMatchEntry(ei)) return;
+    const facts = chatEchoDeliveryEvidence(entry.*);
+    const si = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse return;
+    var prefix_buf: [20]u16 = undefined;
+    const prefix = chatOutboxPrefixOf(entry.text, &prefix_buf);
+    const held = if (prefix.len > 0) chatPromptStillInInputBox(si, prefix) else null;
+    switch (chat_echo.resendDecision(false, facts, held)) {
+        .mark_delivered => {
+            entry.state = .delivered;
+            entry.transcript_queued = facts.enqueued;
+            entry.delivery_watch.evidence(facts, chat_echo.fileTimeToUnixMs(nowFileTime()));
+        },
+        .press_enter_only => {
+            if (app_state.g_chat_verify_echo_id != 0 or chatLinkLooksDown(si)) {
+                showHeaderNoticeAscii("Waiting for the terminal before sending again", 3000, true);
+                return;
+            }
+            if (!sendEnterToShell(si)) return;
+            entry.write_started = true;
+            entry.channel_sent = false;
+            entry.state = if (chatArmSendVerify(si, entry.text, id)) .sending else .not_sent;
+            entry.delivery_watch = .{};
+            entry.left_box_ms = 0;
+        },
+        .write_again => {
+            entry.state = .queued;
+            entry.write_started = false;
+            entry.retryable = false;
+            entry.delivery_watch = .{};
+            entry.left_box_ms = 0;
+            entry.channel_sent = false;
+            entry.channel_retries = 0;
+            entry.transcript_queued = false;
+        },
+    }
+    _ = saveChatOutbox();
+    app_state.g_chat_scroll_bottom_pending = true;
+    chatOutboxChanged();
+    chatOutboxTick();
+}
+
+pub fn chatEchoRemove(id: u64) void {
+    const ei = chatOutboxIndexById(id) orelse return;
+    if (!chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).remove) return;
+    const entry = app_state.g_chat_outbox.orderedRemove(ei);
+    if (!saveChatOutbox()) {
+        app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);
+        showHeaderNoticeAscii("Could not save message removal; try again", 3500, true);
+        return;
+    }
+    if (entry.text.len > 0) std.heap.page_allocator.free(entry.text);
+    if (app_state.g_chat_verify_echo_id == id) chatVerifyClear();
+    chatOutboxChanged();
 }
 
 pub fn chatEchoRetryAllForActive() void {
@@ -1965,7 +2036,8 @@ fn chatTmuxSettle() void {
             entry.channel_history_revision = history.history.revision;
             entry.channel_history_generation = history.generation;
         }
-        switch (chat_echo.transcriptStatus(now_ms - entry.channel_sent_ms, entry.channel_retries, evidence)) {
+        const busy = app_state.shells[idx].activity == .active or (idx == app_state.active_shell and app_state.g_chat_screen_working);
+        switch (chat_echo.transcriptStatus(&entry.delivery_watch, busy, now_ms, history.loaded_ms, evidence)) {
             .wait => {},
             .queued => {
                 if (entry.state != .delivered) {
@@ -1980,11 +2052,6 @@ fn chatTmuxSettle() void {
                 chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
                 changed = true;
                 continue;
-            },
-            .retry => {
-                if (app_state.g_chat_tmux_send_job == null) {
-                    _ = chatTmuxSendStart(idx, entry.text, entry.id, true);
-                }
             },
             .unconfirmed => {
                 if (entry.state != .not_sent) {
@@ -2189,4 +2256,30 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
     }
     var log: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ if (digit == 0x1B) @as([]const u8, "stop") else "permission", key.shell_id }) catch "");
+}
+
+test "IGSH-442 removed outbox entry is absent after JSON save and reload" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    const removed = std.unicode.utf8ToUtf16LeStringLiteral("remove this unconfirmed message");
+    const kept = std.unicode.utf8ToUtf16LeStringLiteral("keep this message");
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:0:test", removed, .not_sent));
+    list.items[0].write_started = true;
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, "tmux:0:test", kept));
+    chatOutboxRemoveAtIn(&list, allocator, 0);
+    var len: usize = 0;
+    const json = chatOutboxSerialize(&list, allocator, &len) orelse return error.SerializeFailed;
+    defer allocator.free(json);
+    var loaded: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (loaded.items) |entry| allocator.free(entry.text);
+        loaded.deinit(allocator);
+    }
+    chatOutboxParseJson(&loaded, allocator, json[0..len]);
+    try std.testing.expectEqual(@as(usize, 1), loaded.items.len);
+    try std.testing.expectEqualSlices(u16, kept, loaded.items[0].text);
 }

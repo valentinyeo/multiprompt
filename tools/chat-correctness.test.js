@@ -28,9 +28,11 @@ const CONSOLE_SCREEN_BUFFER_INFO = struct {
     dwCursorPosition: Coord = .{ .y = 1 },
     srWindow: struct { bottom: i16 = 1 } = .{},
 };
-const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux };
+const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, activity: enum { idle, active } = .idle };
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
+var active_shell: u32 = 0;
+var g_chat_screen_working = false;
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_verify_shell_id: u32 = 0;
 var g_chat_verify_echo_id: u64 = 0;
@@ -42,7 +44,7 @@ const TIMER_CHAT_SEND_VERIFY = 33;
 const CHAT_SEND_VERIFY_DELAYS_MS = [_]u32{ 700, 1200, 2000, 3000, 4000, 5000 };
 const Entry = struct {
     id: u64 = 1, state: ChatEchoState = .queued, write_started: bool = false,
-    anchor: chat_echo.Anchor = .{}, left_box_ms: u64 = 0,
+    anchor: chat_echo.Anchor = .{}, left_box_ms: u64 = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
 };
 const ChatOutboxEntry = Entry;
 var storage = [_]Entry{.{}};
@@ -59,6 +61,8 @@ fn reset() void {
     storage[0] = .{};
     g_chat_outbox.items = &storage;
     shells[0].pid = 1;
+    shells[0].activity = .idle;
+    g_chat_screen_working = false;
     timer_ok = true;
     timer_arms = 0;
     enters = 0;
@@ -85,6 +89,7 @@ fn chatTrimRawConsoleRow(_: usize, _: DWORD, r: usize) []const u16 {
     return if (input_held) std.unicode.utf8ToUtf16LeStringLiteral("❯ hello") else std.unicode.utf8ToUtf16LeStringLiteral("❯");
 }
 fn GetTickCount64() u64 { return 2000; }
+fn nowFileTime() u64 { return 116444736020000000; }
 fn saveChatOutbox() bool { return true; }
 fn chatOutboxChanged() void {}
 fn chatEchoTryMatchEntry(_: usize) bool { if (matched) storage[0].state = .not_sent; return matched; }
@@ -161,6 +166,32 @@ test "correctness unreadable: every failed or partial console read stays unknown
     reset();
     shells[0].pid = 0;
     try std.testing.expectEqual(@as(?bool, null), @as(?bool, chatPromptStillInInputBox(0, std.unicode.utf8ToUtf16LeStringLiteral("hello"))));
+}
+test "correctness unreadable: IGSH-442 busy unknown input hands off to delivery watch" {
+    for ([_]bool{ false, true }) |screen_busy| {
+        reset();
+        _ = sendTextToShellVerifiedAt(0, std.unicode.utf8ToUtf16LeStringLiteral("hello"), 1);
+        failure = .read;
+        shells[0].activity = if (screen_busy) .idle else .active;
+        g_chat_screen_working = screen_busy;
+        for (0..6) |_| chatSendVerifyTick();
+        try std.testing.expectEqual(ChatEchoState.delivered, storage[0].state);
+        try std.testing.expect(storage[0].delivery_watch.busy_seen);
+        try std.testing.expect(!storage[0].delivery_watch.due(100_000, 100_000));
+        try std.testing.expectEqual(@as(u64, 0), g_chat_verify_echo_id);
+        try std.testing.expectEqual(@as(usize, 1), writes);
+        try std.testing.expectEqual(@as(usize, 1), enters);
+    }
+}
+test "correctness unreadable: IGSH-442 busy held input retries only Enter with bounded failure" {
+    reset();
+    _ = sendTextToShellVerifiedAt(0, std.unicode.utf8ToUtf16LeStringLiteral("hello"), 1);
+    shells[0].activity = .active;
+    for (0..6) |_| chatSendVerifyTick();
+    try std.testing.expectEqual(ChatEchoState.not_sent, storage[0].state);
+    try std.testing.expectEqual(@as(u64, 0), g_chat_verify_echo_id);
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    try std.testing.expectEqual(@as(usize, 6), enters);
 }
 test "correctness unreadable: readable held prompt retries only Enter, readable empty prompt frees the queue" {
     reset();
