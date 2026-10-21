@@ -2389,6 +2389,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         } else if (app_state.active_shell > idx) {
             app_state.active_shell -= 1;
         }
+        chatDraftBindToActive();
         saveSession();
         return;
     }
@@ -2503,6 +2504,7 @@ pub fn switchToShell(idx: u32) void {
     if (defer_browser) hideBrowserFloatingChrome() else if (app_state.active_shell < app_state.shell_count) hideActiveBrowser();
     if (idx != prev) app_state.g_front_period.selected = null;
     app_state.active_shell = idx;
+    chatDraftBindToActive();
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
@@ -2546,7 +2548,6 @@ pub fn switchToShell(idx: u32) void {
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {
-                chatDraftBindToActive();
                 chatDeferTranscriptLoad();
                 layoutChatControls();
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);

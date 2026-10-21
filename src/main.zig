@@ -7445,6 +7445,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
                             app_state.active_shell = app_state.shell_count - 1;
+                            @import("chat_composer.zig").chatDraftBindToActive();
                             ensureActiveVisible();
                             _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_COPYDATA");
                             repositionActive();
