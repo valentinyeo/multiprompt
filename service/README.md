@@ -91,3 +91,6 @@ input when its rule applies, otherwise the newest visit. Android follows
 to newest, so the newest key is the last bottom row. Shared fixture:
 `tools/fixtures/issue-415-frequent.json`; at its fixed clock the screen reads
 beta, alpha, gamma (bottom). `src/fixtures/issue-415-frequent.json` is identical.
+
+Clients send the `hosts` feature token to share up to three server addresses, users, ports and public host keys, never private keys or identity files.
+Hosts are hidden from older clients, whose saves preserve them; host-aware saves replace only the server slots they send.

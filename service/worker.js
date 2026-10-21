@@ -18,16 +18,30 @@ function layoutResponse(request, value, status = 200) {
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
+  if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings');
+  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts');
   return response;
 }
 export function validateLayout(x) {
   const keys = (v, expected) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected.sort().join(',');
   const text = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && !/[\x00-\x1f\x7f]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v);
-  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...(Object.hasOwn(x || {}, 'settings') ? ['settings'] : [])]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
+  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
       !Array.isArray(x.workspaces) || x.workspaces.length > 9 || !Array.isArray(x.tabs) || x.tabs.length > 256) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'settings') && (!x.settings || typeof x.settings !== 'object' || Array.isArray(x.settings) || Object.entries(x.settings).some(([key, value]) => !['frequent', 'favorites', 'all', 'frequent_first'].includes(key) || typeof value !== 'boolean'))) fail(400, 'invalid_layout');
+  if (Object.hasOwn(x, 'hosts')) {
+    const slots = new Set();
+    if (!Array.isArray(x.hosts) || x.hosts.length > 3 || JSON.stringify(x.hosts).includes('PRIVATE KEY')) fail(400, 'invalid_hosts');
+    for (const h of x.hosts) {
+      if (!keys(h, ['slot', 'name', 'hostname', 'port', 'user', ...(Object.hasOwn(h || {}, 'host_keys') ? ['host_keys'] : [])]) ||
+          !Number.isInteger(h.slot) || h.slot < 0 || h.slot > 2 || slots.has(h.slot) || !text(h.name, 32) || /[\u0080-\u009f]/u.test(h.name) ||
+          !text(h.hostname, 253) || !/^(?:[A-Za-z0-9.-]{1,253}|[0-9A-Fa-f:]{2,45})$/.test(h.hostname) ||
+          !Number.isInteger(h.port) || h.port < 1 || h.port > 65535 || !text(h.user, 32) || !/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(h.user) ||
+          (Object.hasOwn(h, 'host_keys') && (!Array.isArray(h.host_keys) || h.host_keys.length > 4 || new Set(h.host_keys).size !== h.host_keys.length ||
+            h.host_keys.some(key => !text(key, 1024) || !/^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-rsa) [A-Za-z0-9+/]+={0,2}$/.test(key))))) fail(400, 'invalid_hosts');
+      slots.add(h.slot);
+    }
+  }
   const ws = new Set(), ids = new Set();
   for (const w of x.workspaces) {
     if (!keys(w, ['name']) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
@@ -219,6 +233,12 @@ export default {
         if (!layoutFeature(request, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;
+        }
+        if (!layoutFeature(request, 'hosts')) {
+          if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;
+          else delete layout.hosts;
+        } else if (previousLayout?.hosts !== undefined || layout.hosts !== undefined) {
+          layout.hosts = [...new Map([...(previousLayout?.hosts || []), ...(layout.hosts || [])].map(host => [host.slot, host])).values()].sort((a, b) => a.slot - b.slot);
         }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {

@@ -3,6 +3,7 @@ const tmux_identity = @import("tmux_identity.zig");
 const Allocator = std.mem.Allocator;
 
 pub const max_bytes = 1024 * 1024;
+pub const Host = @import("account_hosts.zig").Host;
 pub const Workspace = struct { name: []const u8 };
 pub const Tab = struct {
     kind: []const u8 = "tmux",
@@ -21,6 +22,7 @@ pub const Layout = struct {
     revision: u64 = 0,
     workspaces: []const Workspace,
     tabs: []const Tab,
+    hosts: ?[]const Host = null,
 };
 
 pub fn sameTab(a: Tab, b: Tab) bool {
@@ -48,6 +50,7 @@ fn validText(text: []const u8, max_units: usize) bool {
 
 pub fn validate(layout: Layout) !void {
     if (layout.schema != 1 or layout.workspaces.len > 64 or layout.tabs.len > 4096) return error.InvalidLayout;
+    if (layout.hosts) |hosts| try @import("account_hosts.zig").validate(hosts);
     for (layout.workspaces, 0..) |ws, i| {
         if (ws.name.len > 32 or !validText(ws.name, 32)) return error.InvalidLayout;
         for (layout.workspaces[0..i]) |old| if (std.mem.eql(u8, old.name, ws.name)) return error.InvalidLayout;
@@ -127,7 +130,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     if (workspaces.items.len > max_workspaces or tabs.items.len > max_tabs) return error.LayoutCapacity;
     const ws = try workspaces.toOwnedSlice(a);
     errdefer a.free(ws);
-    return .{ .revision = server.revision, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .revision = server.revision, .hosts = server.hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
 }
 
 fn freeMerge(a: Allocator, layout: Layout) void {
@@ -419,4 +422,32 @@ test "input encoding omits unknown and round trips safe integers" {
     var invalid = test_tab;
     invalid.input = 9_007_199_254_740_992;
     try std.testing.expectError(error.InvalidLayout, encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{invalid} }));
+}
+
+test "hosts portable round trip validates hosts and rejects private fields" {
+    const host = Host{ .slot = 0, .name = "Host 1", .hostname = "203.0.113.5", .port = 22, .user = "owner", .host_keys = &.{"ssh-ed25519 AAAA=="} };
+    const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{test_tab}, .hosts = &.{host} });
+    defer std.testing.allocator.free(json);
+    const parsed = try parse(std.testing.allocator, json);
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings(host.hostname, parsed.value.hosts.?[0].hostname);
+    try std.testing.expectEqualStrings(host.host_keys.?[0], parsed.value.hosts.?[0].host_keys.?[0]);
+    const extra = "{\"workspaces\":[],\"tabs\":[],\"hosts\":[{\"slot\":0,\"name\":\"Server\",\"hostname\":\"example.com\",\"port\":22,\"user\":\"root\",\"identity_file\":\"id_rsa\"}]}";
+    try std.testing.expectError(error.UnknownField, parse(std.testing.allocator, extra));
+    var bad = host;
+    bad.host_keys = &.{"ssh-rsa PRIVATE KEY"};
+    try std.testing.expectError(error.InvalidHosts, encode(std.testing.allocator, .{ .workspaces = &.{}, .tabs = &.{}, .hosts = &.{bad} }));
+}
+
+test "null hosts are omitted from layout JSON while an empty slice is explicit" {
+    const without_hosts = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{test_tab}, .hosts = null });
+    defer std.testing.allocator.free(without_hosts);
+    const absent = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, without_hosts, .{});
+    defer absent.deinit();
+    try std.testing.expect(!absent.value.object.contains("hosts"));
+    const with_hosts = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{test_tab}, .hosts = &.{} });
+    defer std.testing.allocator.free(with_hosts);
+    const present = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, with_hosts, .{});
+    defer present.deinit();
+    try std.testing.expectEqual(@as(usize, 0), present.value.object.get("hosts").?.array.items.len);
 }

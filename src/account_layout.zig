@@ -60,7 +60,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
         try tabs.append(a, tab);
     }
     if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
-    return .{ .revision = remote.revision, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
@@ -81,7 +81,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
         try tabs.insert(a, @min(i, tabs.items.len), t);
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, .{ .name = t.workspace });
     }
-    return .{ .revision = edited.revision, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .revision = edited.revision, .hosts = edited.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layout {
@@ -158,7 +158,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             dest += 1;
         };
     }
-    const result = Layout{ .revision = remote.revision, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    const result = Layout{ .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
     try layout.validate(result);
     return result;
 }
