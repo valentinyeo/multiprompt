@@ -13,14 +13,15 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
-function zig(code, filter, state = true) {
+function zig(code, filter, state = true, expected = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stderr, /All \d+ tests passed/);
+    assert.equal(result.status, expected, result.stdout + result.stderr);
+    if (expected === 0) assert.match(result.stderr, /All \d+ tests passed/);
+    else assert.match(result.stderr, /expected 15000, found 1000/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -41,7 +42,9 @@ var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
 const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
-var g_ssh_reconnect_timer_on = false;
+var g_ssh_reconnect_timer_ms: u32 = 0;
+var ssh_probe_job: ?*anyopaque = null;
+const UINT = u32;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
 const TIMER_SSH_RECONNECT = 1;
@@ -55,6 +58,8 @@ var alive = true;
 var spawns: usize = 0;
 var kills: usize = 0;
 var timers: usize = 0;
+var timer_ms: u32 = 0;
+var timer_kills: usize = 0;
 var fixture = false;
 var repaints: usize = 0;
 var full_repaints: usize = 0;
@@ -83,8 +88,8 @@ fn unregisterShellExitWait(_: u32) void {}
 fn ShowWindow(_: ?*anyopaque, _: u32) u32 { return 0; }
 fn CloseHandle(_: ?*anyopaque) u32 { return 1; }
 fn killProcessTree(_: u32) void { kills += 1; }
-fn SetTimer(_: ?*anyopaque, _: u32, _: u32, _: ?*anyopaque) u32 { timers += 1; return 1; }
-fn KillTimer(_: ?*anyopaque, _: u32) u32 { return 1; }
+fn SetTimer(_: ?*anyopaque, _: u32, ms: u32, _: ?*anyopaque) u32 { timers += 1; timer_ms = ms; return 1; }
+fn KillTimer(_: ?*anyopaque, _: u32) u32 { timer_ms = 0; timer_kills += 1; return 1; }
 fn InvalidateRect(_: ?*anyopaque, rc: ?*const RECT, _: u32) u32 {
     repaints += 1;
     if (rc) |rect| { last_paint = rect.*; } else { full_repaints += 1; }
@@ -123,7 +128,7 @@ test('ISSUE-501 marking disconnected arms a timer and schedules a delayed retry'
 test "ISSUE-501 marked disconnected is scheduled" {
     markSshTabDisconnected(0);
     try std.testing.expect(shells[0].disconnected);
-    try std.testing.expect(g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms != 0);
     const due = ${modern ? 'shells[0].ssh_reconnect.next_tick' : 'shells[0].ssh_reconnect_next_tick'};
     try std.testing.expect(due >= fake_now + 1000 and due <= fake_now + 1250);
     try std.testing.expectEqual(@as(usize, 1), kills);
@@ -134,7 +139,7 @@ test('ISSUE-501 monitoring survives connected state and detects a missed exit de
   zig(runtime(`
 test "ISSUE-501 missed exit" {
     armSshReconnectTimerIfNeeded();
-    try std.testing.expect(g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms != 0);
     network = false;
     alive = false;
     sshAutoReconnectTick();
@@ -164,7 +169,7 @@ test "ISSUE-501 manual and close" {
     try std.testing.expectEqual(@as(usize, 1), spawns);
     shell_count = 0;
     armSshReconnectTimerIfNeeded();
-    try std.testing.expect(!g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms == 0);
 }
 `), 'ISSUE-501 manual');
 });
@@ -202,7 +207,7 @@ test "ISSUE-501 live ssh silent detach" {
   const start = source.indexOf('const SshProbeJob = struct {');
   assert.ok(start >= 0);
   const job = source.slice(start, source.indexOf('\n};', start) + 3);
-  const code = runtime('').replace('fn sshProbeFinish() void {}', '') + job + `
+  const code = runtime('').replace('var ssh_probe_job: ?*anyopaque = null;', '').replace('fn sshProbeFinish() void {}', '') + job + `
 var ssh_probe_job: ?*SshProbeJob = null;
 fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id and shell_count > 0) 0 else null; }
 ` + body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + `
@@ -241,7 +246,7 @@ test "ISSUE-501 offline hint" {
 function probeRuntime(tests) {
   const start = source.indexOf('const SshProbeJob = struct {');
   const job = source.slice(start, source.indexOf('\n};', start) + 3);
-  return runtime('').replace('fn sshProbeFinish() void {}', '').replace('fn sshProbeStart() void {}', '') + job + `
+  return runtime('').replace('var ssh_probe_job: ?*anyopaque = null;', '').replace('fn sshProbeFinish() void {}', '').replace('fn sshProbeStart() void {}', '') + job + `
 var ssh_probe_job: ?*SshProbeJob = null;
 var probe_starts: usize = 0;
 fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id and shell_count > 0) 0 else null; }
@@ -567,7 +572,7 @@ test "ISSUE-513 fixture recovery isolation" {
     try std.testing.expect(!shells[0].disconnected);
     try std.testing.expectEqual(@as(usize, 0), kills);
     armSshReconnectTimerIfNeeded();
-    try std.testing.expect(!g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms == 0);
     for (0..120) |_| {
         fake_now += 1000;
         sshAutoReconnectTick();
@@ -617,4 +622,58 @@ test "ISSUE-513 connected idle" {
     try std.testing.expect(!shells[0].disconnected);
 }
 `), 'ISSUE-513 connected');
+});
+
+const idleTimerChecks = `
+test "ISSUE-513 healthy remote monitoring wakes four times per minute without resetting unchanged timers" {
+    for ([_]ShellKind{.tmux, .vps, .vps2}) |kind| {
+        shells[0].kind = kind;
+        armSshReconnectTimerIfNeeded();
+        try std.testing.expectEqual(@as(u32, 15000), timer_ms);
+        const before = timers;
+        var wakes: usize = 0;
+        var elapsed: u64 = 0;
+        while (elapsed < 60000) {
+            elapsed += timer_ms;
+            fake_now += timer_ms;
+            sshAutoReconnectTick();
+            wakes += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 4), wakes);
+        try std.testing.expectEqual(before, timers);
+    }
+}
+test "ISSUE-513 pending probes and reconnects keep one-second monitoring and closed tabs stop it" {
+    armSshReconnectTimerIfNeeded();
+    ssh_probe_job = @ptrFromInt(1);
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 1000), timer_ms);
+    ssh_probe_job = null;
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 15000), timer_ms);
+    shells[0].ssh_reconnect.lost(fake_now, 0);
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 1000), timer_ms);
+    shells[0].ssh_reconnect.start();
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 1000), timer_ms);
+    shells[0].ssh_reconnect.ok();
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 15000), timer_ms);
+    shells[0].ssh_reconnect.close();
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 0), timer_ms);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+}
+`;
+
+test('ISSUE-513 production idle reconnect scheduler coalesces healthy checks but keeps recovery responsive', () => {
+  zig(runtime(idleTimerChecks), 'ISSUE-513 healthy');
+  zig(runtime(idleTimerChecks), 'ISSUE-513 pending');
+});
+
+test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy reconnect timer', () => {
+  const original = body('armSshReconnectTimerIfNeeded', fs.readFileSync(path.join(__dirname, 'fixtures/issue-513-reconnect-before.zig'), 'utf8'));
+  const code = runtime(idleTimerChecks).replace(body('armSshReconnectTimerIfNeeded'), original) + '\nvar g_ssh_reconnect_timer_on = false;\n';
+  zig(code, 'ISSUE-513 healthy', true, 1);
 });

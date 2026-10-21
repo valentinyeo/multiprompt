@@ -6,6 +6,7 @@ const chat_complete = @import("chat_complete.zig");
 const chat_echo = @import("chat_echo.zig");
 const shell_exit = @import("shell_exit.zig");
 const DWORD = @import("win32.zig").DWORD;
+const UINT = @import("win32.zig").UINT;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const TIMER_CHAT_REFRESH = @import("win32.zig").TIMER_CHAT_REFRESH;
 const TIMER_CHAT_SEND_VERIFY = @import("win32.zig").TIMER_CHAT_SEND_VERIFY;
@@ -1634,18 +1635,20 @@ pub fn chatOutboxClearActive() void {
 
 pub fn armSshReconnectTimerIfNeeded() void {
     if (chatBenchEnabled() or app_state.g_main_hwnd == null) return;
-    var any = false;
+    var any = ssh_probe_job != null;
+    var urgent = any;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if (shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) {
-            any = true;
-            break;
-        }
+        if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.ssh_reconnect.phase == .closed) continue;
+        any = true;
+        if (shell.disconnected or shell.ssh_reconnect.phase != .connected) urgent = true;
     }
-    if (any and !app_state.g_ssh_reconnect_timer_on) {
-        app_state.g_ssh_reconnect_timer_on = true;
-        _ = SetTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT, 1000, null);
-    } else if (!any and app_state.g_ssh_reconnect_timer_on) {
-        app_state.g_ssh_reconnect_timer_on = false;
+    const interval: UINT = if (urgent) 1000 else if (any) 15_000 else 0;
+    if (interval == app_state.g_ssh_reconnect_timer_ms) return;
+    app_state.g_ssh_reconnect_timer_ms = interval;
+    if (interval != 0) {
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT, interval, null);
+    } else {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_SSH_RECONNECT);
     }
 }

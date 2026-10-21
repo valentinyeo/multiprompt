@@ -2636,7 +2636,7 @@ pub var g_chat_echo_layout_ids: [CHAT_OUTBOX_MAX_PER_KEY]u64 = @splat(0);
 pub var g_chat_echo_layout_count: usize = 0;
 pub var g_chat_scroll_bottom_pending: bool = false;
 pub var g_chat_outbox_timer_on: bool = false;
-pub var g_ssh_reconnect_timer_on: bool = false;
+pub var g_ssh_reconnect_timer_ms: u32 = 0;
 
 pub var g_chat_outbox_revision: u64 = 0;
 
