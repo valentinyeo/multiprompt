@@ -1552,13 +1552,30 @@ pub fn chatDraftFlush() void {
     var it = chat_drafts.entries.iterator();
     while (it.next()) |entry| {
         const draft = entry.value_ptr;
-        if (!draft.dirty) continue;
+        if (!draft.dirty) {
+            if (draft.evict) {
+                chat_drafts.remove(entry.key_ptr.*);
+                it = chat_drafts.entries.iterator();
+            }
+            continue;
+        }
         var path_buf: [560]u8 = undefined;
-        const path = getChatDraftPath(entry.key_ptr.*, &path_buf) orelse continue;
-        const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, draft.text) catch continue;
+        const path = getChatDraftPath(entry.key_ptr.*, &path_buf) orelse {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
+        const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, draft.text) catch {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
         defer std.heap.page_allocator.free(utf8);
         if (chatDraftWriteFile(path, utf8)) draft.dirty = false;
-        if (draft.dirty) app_state.g_chat_draft_dirty = true;
+        if (draft.dirty) {
+            app_state.g_chat_draft_dirty = true;
+        } else if (draft.evict) {
+            chat_drafts.remove(entry.key_ptr.*);
+            it = chat_drafts.entries.iterator();
+        }
     }
     if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
@@ -1580,8 +1597,30 @@ fn chatDraftNoteEdit() void {
     }
 }
 
+pub fn chatDraftCloseForShell(idx: u32) void {
+    if (idx >= app_state.shell_count or app_state.shells[idx].chat_id == 0) return;
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &buf);
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) chatDraftNoteEdit();
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = true;
+    chatDraftFlush();
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
+        app_state.g_chat_draft_owner_len = 0;
+        chat_draft_loading = true;
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+        chat_draft_loading = false;
+    }
+}
+
 pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
     if (id.len == 0) return;
+    for (0..app_state.shell_count) |idx| {
+        if (app_state.shells[idx].chat_id == 0) continue;
+        var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        if (std.mem.eql(u8, id, chatDraftKeyForShell(@intCast(idx), &buf))) break;
+    } else {
+        return;
+    }
     chatDraftLoad(id);
     chat_drafts.append(id, text) catch return;
     if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) and app_state.g_chat_composer_hwnd != null) {
@@ -1615,6 +1654,7 @@ pub fn chatDraftBindToActive() void {
     var id_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const id = chatDraftKeyForShell(app_state.active_shell, &id_buf);
     if (id.len == 0) return;
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = false;
     if (app_state.g_chat_draft_owner_len == id.len and std.mem.eql(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], id)) return;
     if (app_state.g_chat_draft_owner_len > 0 and app_state.g_chat_reply_len > 0) {
         const a = std.heap.page_allocator;

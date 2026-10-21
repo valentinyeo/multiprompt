@@ -683,6 +683,7 @@ pub const HitTarget = union(enum) {
 };
 
 pub const ClosedShell = struct {
+    chat_id: u64 = 0,
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
@@ -1387,6 +1388,7 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_chat_id: u64 = 0;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {

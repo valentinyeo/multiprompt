@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Store = struct {
-    pub const Draft = struct { text: []u16, dirty: bool };
+    pub const Draft = struct { text: []u16, dirty: bool, evict: bool = false };
 
     allocator: std.mem.Allocator,
     entries: std.StringHashMap(Draft),
@@ -24,11 +24,19 @@ pub const Store = struct {
         errdefer self.allocator.free(owned_text);
         if (self.entries.getPtr(id)) |draft| {
             self.allocator.free(draft.text);
-            draft.* = .{ .text = owned_text, .dirty = dirty };
+            draft.text = owned_text;
+            draft.dirty = dirty;
         } else {
             const key = try self.allocator.dupe(u8, id);
             errdefer self.allocator.free(key);
             try self.entries.put(key, .{ .text = owned_text, .dirty = dirty });
+        }
+    }
+
+    pub fn remove(self: *Store, id: []const u8) void {
+        if (self.entries.fetchRemove(id)) |entry| {
+            self.allocator.free(entry.key);
+            self.allocator.free(entry.value.text);
         }
     }
 
@@ -66,5 +74,17 @@ test "ISSUE-498 stable-id draft map isolates edits, dictation and clearing" {
     try std.testing.expect(store.hasDraft("session-a"));
     try store.set("session-a", &.{}, true);
     try std.testing.expect(!store.hasDraft("session-a"));
+    try std.testing.expect(store.hasDraft("session-b"));
+}
+
+test "ISSUE-498 evicting a closed draft frees its key and text without touching another session" {
+    var store = Store.init(std.testing.allocator);
+    defer store.deinit();
+    try store.set("session-a", &.{'a'}, true);
+    try store.set("session-b", &.{'b'}, true);
+    store.remove("session-a");
+    store.remove("session-a");
+    try std.testing.expectEqual(@as(u32, 1), store.entries.count());
+    try std.testing.expect(!store.entries.contains("session-a"));
     try std.testing.expect(store.hasDraft("session-b"));
 }
