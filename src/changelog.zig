@@ -54,6 +54,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.771", .items = &.{
+        .{ .text = "Hide the Frequent, Favorites or All split from Ctrl+K, or place Frequent after Favorites; your choices follow your account to your phone.", .ticket = "IGSH-423" },
+    } },
     .{ .ver = "0.28.770", .items = &.{
         .{ .text = "Selecting chat text now follows the mouse smoothly across messages, tables, lists, and code.", .ticket = "IGSH-438" },
         .{ .text = "Double-click selects a word and triple-click selects the paragraph under the mouse.", .ticket = "IGSH-438" },
