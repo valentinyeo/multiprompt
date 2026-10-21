@@ -6,6 +6,7 @@ pub const IGSH_224 = true;
 
 extern "kernel32" fn OpenProcess(u32, i32, u32) callconv(.winapi) ?windows.HANDLE;
 extern "kernel32" fn CloseHandle(windows.HANDLE) callconv(.winapi) i32;
+extern "kernel32" fn QueryFullProcessImageNameW(windows.HANDLE, u32, [*]u16, *u32) callconv(.winapi) i32;
 extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) u32;
 extern "kernel32" fn GetEnvironmentVariableA([*:0]const u8, [*]u8, u32) callconv(.winapi) u32;
 extern "ntdll" fn NtQueryInformationProcess(windows.HANDLE, u32, *anyopaque, u32, ?*u32) callconv(.winapi) i32;
@@ -54,7 +55,7 @@ pub fn processCommandLine(allocator: std.mem.Allocator, process: windows.HANDLE)
     var required: u32 = 0;
     _ = NtQueryInformationProcess(process, 60, &required, 0, &required);
     if (required < @sizeOf(UnicodeString) or required > 256 * 1024) return error.ProcessCommandLineUnavailable;
-    const memory = try allocator.alignedAlloc(u8, .of(UnicodeString), required);
+    const memory = try allocator.alignedAlloc(u8, std.mem.Alignment.of(UnicodeString), required);
     defer allocator.free(memory);
     if (NtQueryInformationProcess(process, 60, memory.ptr, required, null) < 0) return error.ProcessCommandLineUnavailable;
     const text: *const UnicodeString = @ptrCast(@alignCast(memory.ptr));
@@ -92,8 +93,8 @@ pub fn tokenFromPath(buf: *[32]u8, local: []const u8, candidate: []const u8) !?[
     return buf;
 }
 
-pub fn nativeParentToken(allocator: std.mem.Allocator, buf: *[32]u8) !?[]const u8 {
-    if (!IGSH_224) return null;
+pub fn nativeParentToken(allocator: std.mem.Allocator, buf: *[32]u8) !struct { chromium: bool = false, token: ?[]const u8 = null } {
+    if (!IGSH_224) return .{};
     var local_buf: [1024]u8 = undefined;
     const n = GetEnvironmentVariableA("LOCALAPPDATA", &local_buf, local_buf.len);
     if (n == 0 or n >= local_buf.len) return error.LocalAppDataUnavailable;
@@ -104,17 +105,27 @@ pub fn nativeParentToken(allocator: std.mem.Allocator, buf: *[32]u8) !?[]const u
         var basic: BasicInfo = undefined;
         if (NtQueryInformationProcess(process, 0, &basic, @sizeOf(BasicInfo), null) < 0) return error.ParentProcessUnavailable;
         if (pid != GetCurrentProcessId()) {
-            const line = try processCommandLine(allocator, process);
-            defer allocator.free(line);
-            if (try userDataArgument(allocator, line)) |profile| {
-                defer allocator.free(profile);
-                return tokenFromPath(buf, local_buf[0..n], profile);
+            var image: [32768]u16 = undefined;
+            var image_len: u32 = image.len;
+            if (QueryFullProcessImageNameW(process, 0, &image, &image_len) == 0) return error.ParentProcessUnavailable;
+            const image_text = try std.unicode.utf16LeToUtf8Alloc(allocator, image[0..image_len]);
+            defer allocator.free(image_text);
+            const start = if (std.mem.lastIndexOfScalar(u8, image_text, '\\')) |at| at + 1 else 0;
+            const name = image_text[start..];
+            if (std.ascii.eqlIgnoreCase(name, "msedge.exe") or std.ascii.eqlIgnoreCase(name, "chrome.exe")) {
+                const line = try processCommandLine(allocator, process);
+                defer allocator.free(line);
+                if (try userDataArgument(allocator, line)) |profile| {
+                    defer allocator.free(profile);
+                    return .{ .chromium = true, .token = try tokenFromPath(buf, local_buf[0..n], profile) };
+                }
+                return .{ .chromium = true };
             }
         }
-        if (basic.parent == 0 or basic.parent > std.math.maxInt(u32)) return null;
+        if (basic.parent == 0 or basic.parent > std.math.maxInt(u32)) return .{};
         pid = @intCast(basic.parent);
     }
-    return null;
+    return .{};
 }
 
 const ProcessEntry = extern struct {

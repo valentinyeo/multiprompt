@@ -1477,6 +1477,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
 threadlocal var zsb_profile_token: [32]u8 = std.mem.zeroes([32]u8);
 
 fn zsbBuildBridgeCmd(window_id: i64, argv: []const []const u8, cmd_buf: []u8) ?[]const u8 {
+    if (argv.len == 0 or argv[0].len == 0 or argv[0][0] == '-') return null;
     const exe = bridgeExePath();
     var cp: usize = 0;
 

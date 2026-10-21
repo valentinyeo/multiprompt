@@ -203,7 +203,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
     var parent_token: [32]u8 = undefined;
     if (is_native_host and !is_legacy_host) {
-        if (try workspace_profile.nativeParentToken(allocator, &parent_token)) |actual| {
+        const parent = try workspace_profile.nativeParentToken(allocator, &parent_token);
+        if (parent.chromium) {
+            const actual = parent.token orelse "";
             if (g_profile_token.len > 0 and !std.mem.eql(u8, actual, g_profile_token)) return error.ProfileParentMismatch;
             g_profile_token = actual;
         }
@@ -1204,22 +1206,15 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
         var name_buf: [128]u8 = undefined;
         const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
         const mutex = CreateMutexA(null, 0, name.ptr) orelse return error.ProfileMutexUnavailable;
-        if (workspace_profile.isWorkspaceToken(g_profile_token)) {
-            const immediate = WaitForSingleObject(mutex, 0);
-            if (immediate != 0 and immediate != 0x80) {
-                _ = CloseHandle(mutex);
-                return error.ProfileAlreadyRegistered;
-            }
-        }
-        const wait = WaitForSingleObject(mutex, 0xFFFFFFFF);
+        const wait = WaitForSingleObject(mutex, if (workspace_profile.isWorkspaceToken(g_profile_token)) 0 else 0xFFFFFFFF);
         if (wait != 0 and wait != 0x80) {
             _ = CloseHandle(mutex);
+            if (workspace_profile.isWorkspaceToken(g_profile_token)) return error.ProfileAlreadyRegistered;
             return error.ProfileMutexUnavailable;
         }
         break :blk mutex;
     } else null;
     defer if (profile_mutex) |mutex| {
-        if (workspace_profile.isWorkspaceToken(g_profile_token)) _ = ReleaseMutex(mutex);
         _ = ReleaseMutex(mutex);
         _ = CloseHandle(mutex);
     };

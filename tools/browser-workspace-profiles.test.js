@@ -20,3 +20,10 @@ test('IGSH-224 native hosts discover the actual Chromium profile before binding 
   assert.match(bridge, /nativeParentToken/);
   assert.match(bridge, /ProfileAlreadyRegistered/);
 });
+
+test('IGSH-224 remote commands cannot override the bound profile or window with CLI flags', () => {
+  const bridge = read('src/browser_bridge.zig');
+  assert.match(bridge, /if \(argv\.len == 0 or argv\[0\]\.len == 0 or argv\[0\]\[0\] == '-'\) return null/);
+  assert.match(bridge, /zsb_profile_token = app_state\.g_zsb_bind_info\.profile/);
+  assert.match(bridge, /" --profile \{s\}"/);
+});

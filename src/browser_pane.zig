@@ -1131,7 +1131,20 @@ pub fn syncEdgeProfileTheme() void {
         return;
     }
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].browser_hwnd != null) spawnBrowserCliForShell(@intCast(i), cmd);
+        if (app_state.shells[i].browser_hwnd == null) continue;
+        var value_buf: [32]u8 = undefined;
+        const value = workspaceProfileForShell(@intCast(i), &value_buf) catch continue;
+        var already_sent = false;
+        for (0..i) |j| {
+            if (app_state.shells[j].browser_hwnd == null) continue;
+            var prior_buf: [32]u8 = undefined;
+            const prior = workspaceProfileForShell(@intCast(j), &prior_buf) catch continue;
+            if (std.mem.eql(u8, value, prior)) {
+                already_sent = true;
+                break;
+            }
+        }
+        if (!already_sent) spawnBrowserCliForShell(@intCast(i), cmd);
     }
 }
 

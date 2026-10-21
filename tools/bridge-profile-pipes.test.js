@@ -221,7 +221,7 @@ test('issue: source preserves token-only lifetime mutex and shared pipe resolver
   assert.match(source, /fn isolatedPipeName\(buf: \[\]u8, token: \[\]const u8\) !\[:0\]const u8/);
   assert.equal((source.match(/try isolatedPipeName\(&pipe_name_buf, g_profile_token\)/g) || []).length, 1);
   assert.match(source, /const profile_pipe_name = isolatedPipeName\(&pipe_name_buf, g_profile_token\)/);
-  assert.match(source, /const profile_mutex = if \(g_profile_token\.len > 0\)[\s\S]*?CreateMutexA\(null, 0, name\.ptr\)[\s\S]*?WaitForSingleObject\(mutex, 0xFFFFFFFF\)[\s\S]*?wait != 0 and wait != 0x80/);
+  assert.match(source, /const profile_mutex = if \(g_profile_token\.len > 0\)[\s\S]*?CreateMutexA\(null, 0, name\.ptr\)[\s\S]*?WaitForSingleObject\(mutex, if \(workspace_profile\.isWorkspaceToken\(g_profile_token\)\) 0 else 0xFFFFFFFF\)[\s\S]*?wait != 0 and wait != 0x80/);
   assert.ok(source.indexOf('defer if (profile_mutex)') < source.indexOf('std.Thread.spawn(.{}, runPipeServer'));
   assert.match(source, /g_profile_token = if \(is_legacy_host\) "" else profile_override orelse profile_env/);
   assert.match(fs.readFileSync(path.join(root, 'build.zig'), 'utf8'), /const bridge_tests = b\.addTest\(\.\{ \.root_module = bridge_exe\.root_module \}\);[\s\S]*test_step\.dependOn\(&run_bridge_tests\.step\);[\s\S]*b\.step\("test-bridge"/);
