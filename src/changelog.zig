@@ -54,6 +54,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.774", .items = &.{
+        .{ .text = "Shell box frames, charts, and arrow prompts now line up without gaps or solid rectangles.", .ticket = "IGSH-443" },
+        .{ .text = "Chat text is a little bolder and uses smoother edges for easier reading on dark backgrounds.", .ticket = "IGSH-445" },
+        .{ .text = "Line spacing stays the same.", .ticket = "IGSH-445" },
+    } },
     .{ .ver = "0.28.773", .items = &.{
         .{ .text = "Drop or paste files into Chat View to send them to your server and insert their paths.", .ticket = "IGSH-393" },
     } },
