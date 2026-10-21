@@ -630,6 +630,7 @@ pub fn build(b: *std.Build) void {
             2;
         test_groups[group].dependOn(dependency);
     }
+    test_groups[3].dependOn(&bridge_install.step);
     test_step.dependencies.clearRetainingCapacity();
     const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-4)");
     if (selected_group) |group| {
