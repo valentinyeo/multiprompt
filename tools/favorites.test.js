@@ -153,6 +153,7 @@ test('IGSH-457 production Starred rows include other windows without duplicating
     assert.ok(start >= 0 && end > start);
     const production = sidebar.slice(start, end) + '    return 0;\n}\n';
     fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
+    fs.writeFileSync(path.join(tmp, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 8; }\n');
     fs.writeFileSync(path.join(tmp, 'integration.zig'), `const std = @import("std");
 const frequent = @import("frequent.zig");
 const MAX_ROWS = 8;
