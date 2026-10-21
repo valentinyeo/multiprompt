@@ -54,6 +54,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.766", .items = &.{
+        .{ .text = "Full width keeps Chat View open and respects your choice to show a session’s terminal.", .ticket = "IGSH-440" },
+        .{ .text = "The desktop shell now uses the bundled Nordwand Mono font at the same size as before.", .ticket = "IGSH-441" },
+    } },
     .{ .ver = "0.28.765", .items = &.{
         .{ .text = "If an Allow or Deny answer fails to reach the agent, the buttons stay so you can click again.", .ticket = "" },
     } },
