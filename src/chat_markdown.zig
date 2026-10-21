@@ -269,7 +269,9 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
             }
         }
         if (handled) continue;
-        if (text[pos] == '\\' and pos + 1 < text.len) {
+        if (!style.code and text[pos] == '\\' and pos + 1 < text.len and
+            text[pos + 1] <= 0x7f and std.ascii.isPunctuation(@intCast(text[pos + 1])))
+        {
             out[n] = .{ .text = .{ .start = pos + 1, .end = pos + 2 }, .style = style };
             n += 1;
             pos += 2;

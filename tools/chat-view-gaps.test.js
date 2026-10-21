@@ -29,7 +29,7 @@ function prepare(t, name, modules = []) {
 }
 
 function zig(args, dir) {
-  return spawnSync('zig', [...args, '-j1', '--cache-dir', path.join(dir, 'zig-cache'), '--global-cache-dir', path.join(dir, 'zig-global-cache')], {
+  return spawnSync('zig', [...args, '-j1', '--cache-dir', path.join(dir, 'zig-cache'), '--global-cache-dir', process.env.ZIG_GLOBAL_CACHE_DIR || path.join(dir, 'zig-global-cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
 }
@@ -404,18 +404,86 @@ test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestl
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-405 inline code preserves Windows path backslashes', { todo: 'ISSUE-405' }, (t) => {
+test('ISSUE-405 inline code preserves Windows path backslashes', (t) => {
   const run = execute(t, 'markdown-path', String.raw`
 const std = @import("std");
 const md = @import("chat_markdown.zig");
 test "AUDIT inline code preserves the literal Windows path" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("\u{0060}C:\\Users\\name\u{0060}");
-    var spans: [64]md.Span = undefined;
-    var rendered: std.ArrayList(u16) = .empty;
-    defer rendered.deinit(std.testing.allocator);
-    const n = md.inlineSpans(text, &spans);
-    for (spans[0..n]) |span| try rendered.appendSlice(std.testing.allocator, text[span.text.start..span.text.end]);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("C:\\Users\\name"), rendered.items);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_][]const u16{ w("C:\\Users\\name"), w("\\*\\_\\[\\]\\\\"), w("C:\\Users\\name\\") };
+    for (cases) |expected| {
+        var input: std.ArrayList(u16) = .empty;
+        defer input.deinit(std.testing.allocator);
+        try input.append(std.testing.allocator, 0x60);
+        try input.appendSlice(std.testing.allocator, expected);
+        try input.append(std.testing.allocator, 0x60);
+        const text = input.items;
+        var spans: [64]md.Span = undefined;
+        var rendered: std.ArrayList(u16) = .empty;
+        defer rendered.deinit(std.testing.allocator);
+        const n = md.inlineSpans(text, &spans);
+        for (spans[0..n]) |span| {
+            try std.testing.expect(span.style.code);
+            try rendered.appendSlice(std.testing.allocator, text[span.text.start..span.text.end]);
+        }
+        try std.testing.expectEqualSlices(u16, expected, rendered.items);
+    }
+}
+`, ['chat_markdown.zig'], 'AUDIT');
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+});
+
+test('ISSUE-405 fenced code blocks preserve every backslash', (t) => {
+  const run = execute(t, 'markdown-fenced-path', String.raw`
+const std = @import("std");
+const md = @import("chat_markdown.zig");
+test "AUDIT fenced code preserves paths and punctuation literally" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("\u{0060}\u{0060}\u{0060}text\nC:\\Users\\name\n\\*\\_\\[\\]\\\\\n\u{0060}\u{0060}\u{0060}");
+    var blocks: [4]md.Block = undefined;
+    try std.testing.expectEqual(@as(usize, 1), md.blocks(text, 0, .prose, &blocks));
+    try std.testing.expectEqual(md.Role.code, blocks[0].role);
+    try std.testing.expectEqualSlices(u16, w("C:\\Users\\name\n\\*\\_\\[\\]\\\\"), text[blocks[0].start..][0..blocks[0].len]);
+}
+`, ['chat_markdown.zig'], 'AUDIT');
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(body('chatFlowBlock'), /block\.role == \.code[^\n]*return chatFlowText/);
+});
+
+test('ISSUE-405 plain text backslashes escape ASCII punctuation', (t) => {
+  const run = execute(t, 'markdown-escaped-punctuation', String.raw`
+const std = @import("std");
+const md = @import("chat_markdown.zig");
+test "AUDIT plain text escapes only ASCII punctuation" {
+    var spans: [4]md.Span = undefined;
+    for (0x21..0x7f) |c| {
+        if (!std.ascii.isPunctuation(@intCast(c))) continue;
+        const text = [_]u16{ '\\', @intCast(c) };
+        const n = md.inlineSpans(&text, &spans);
+        try std.testing.expectEqual(@as(usize, 1), n);
+        try std.testing.expectEqualSlices(u16, text[1..], text[spans[0].text.start..spans[0].text.end]);
+        try std.testing.expect(!spans[0].style.code);
+    }
+}
+`, ['chat_markdown.zig'], 'AUDIT');
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+});
+
+test('ISSUE-405 plain text Windows paths preserve backslashes', (t) => {
+  const run = execute(t, 'markdown-plain-path', String.raw`
+const std = @import("std");
+const md = @import("chat_markdown.zig");
+test "AUDIT plain text keeps backslashes before non-punctuation and at end" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_][]const u16{ w("C:\\Users\\name"), w("\\0\\ \\é\\。\\") };
+    for (cases) |text| {
+        var spans: [64]md.Span = undefined;
+        var rendered: std.ArrayList(u16) = .empty;
+        defer rendered.deinit(std.testing.allocator);
+        const n = md.inlineSpans(text, &spans);
+        for (spans[0..n]) |span| try rendered.appendSlice(std.testing.allocator, text[span.text.start..span.text.end]);
+        try std.testing.expectEqualSlices(u16, text, rendered.items);
+    }
 }
 `, ['chat_markdown.zig'], 'AUDIT');
   assert.equal(run.status, 0, run.stdout + run.stderr);

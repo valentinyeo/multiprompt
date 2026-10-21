@@ -130,7 +130,7 @@ test "legacy uniqueness" {
 `);
 });
 
-test('legacy outbox migration survives rename and purges ambiguous same-named keys', (t) => {
+test('legacy outbox migration survives rename and retains ambiguous keys without delivering them', (t) => {
   execute(t, keys + `
 const Entry = struct { key: [CHAT_OUTBOX_KEY_CAP]u8 = undefined, key_len: u32 = 0 };
 var g_chat_outbox: std.ArrayList(Entry) = .empty;
@@ -152,8 +152,9 @@ test "migrate only unique legacy outbox" {
     shells[0].name_len = 0;
     shell_count = 2;
     try g_chat_outbox.append(std.testing.allocator, entry);
-    try std.testing.expect(chatOutboxPurgeOrphans());
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(!chatOutboxPurgeOrphans());
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(?u32, null), chatOutboxShellForKey("cmd:"));
 }
 `);
 });
