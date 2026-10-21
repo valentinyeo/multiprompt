@@ -237,7 +237,7 @@ test('non-image files use non-inheritable source input for SSH, validate output,
   assert.throws(() => auditFileUpload(render.replace('queueShotPaste(job.shell_id, path, true)', 'queueShotPaste(job.shell_id, path, false)')));
 });
 
-test('production upload command runs in POSIX sh with private permissions, safe collision handling and no path on failure', () => {
+test('production upload command runs in POSIX sh with private permissions, safe collision handling and no path on failure', { skip: process.platform === 'win32' ? 'POSIX server shell and Unix modes are covered by test-vps on Linux' : false }, () => {
   const os = require('node:os');
   const { spawnSync } = require('node:child_process');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-upload-'));
