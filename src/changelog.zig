@@ -53,6 +53,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.789", .items = &.{
+        .{ .text = "Chat View now keeps reply text before or after each tool step in the correct order.", .ticket = "IGSH-402" },
+        .{ .text = "Copying a very long selection in Chat View now copies all of it and reports when copying fails.", .ticket = "IGSH-404" },
+        .{ .text = "Press Alt+1 to open the new Starred workspace, which automatically mirrors your starred sessions without moving them.", .ticket = "IGSH-457" },
+    } },
     .{ .ver = "0.28.788", .items = &.{
         .{ .text = "Links with non-English letters in Chat View now open the correct address.", .ticket = "IGSH-403" },
         .{ .text = "Android crash reports can be read newest first with device names, UTC timestamps, and full stack traces.", .ticket = "IGSH-429" },
