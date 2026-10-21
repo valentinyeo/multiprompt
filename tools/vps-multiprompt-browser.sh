@@ -29,6 +29,15 @@ json_error() {
 
 print_help() {
   if [ -n "${1:-}" ]; then
+    local deadline=15
+    case "$1" in
+      status|version) deadline=5 ;;
+      doctor) deadline=20 ;;
+      text|get-text|snapshot|cdp|eval|script) deadline=30 ;;
+      screenshot|shoturl) deadline=60 ;;
+      selftest) deadline=180 ;;
+    esac
+    printf 'Total reply deadline: %ss; override with ZSB_TIMEOUT (finite seconds > 0, at most 86400).\n' "$deadline"
     case "$1" in
       text|get-text|snapshot|links)
         local unit=characters default_limit=2000
@@ -121,6 +130,11 @@ Commands and flags:
 
 Unqualified reads and actions use the target:true tab in zsb tabs, not necessarily active:true.
 Use zsb <command> --help or -h for local command help without contacting the browser.
+Reply deadlines (total seconds from send, not idle time):
+  Default 15; status/version 5; doctor 20; text/get-text/snapshot/cdp/eval/script 30;
+  screenshot/shoturl 60; selftest 180 total across its requests.
+  ZSB_TIMEOUT overrides these defaults: finite seconds greater than 0, at most 86400.
+  Expiry returns nonzero with JSON error reply_timeout, elapsed time, deadline and a recovery hint.
 Remote recovery: reconnect SSH/tmux, open or rebind this session's pane, then run zsb status.
 EOF
 }
@@ -169,6 +183,7 @@ import base64
 import datetime
 import html
 import json
+import math
 import os
 import subprocess
 import struct
@@ -178,6 +193,15 @@ import urllib.parse
 import uuid
 
 session, port, wrapper = sys.argv[1:]
+try:
+    timeout = float(os.environ.get("ZSB_TIMEOUT", "180"))
+    if not math.isfinite(timeout) or not 0 < timeout <= 86400:
+        raise ValueError()
+except ValueError:
+    print(json.dumps({"ok": False, "error": "bad_args", "message": "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400", "session": session, "port": int(port)}))
+    sys.exit(1)
+started = time.monotonic()
+deadline = started + timeout
 stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 title = f"zsb selftest {session} {stamp}"
 marker = "zsb-selftest-" + uuid.uuid4().hex
@@ -195,9 +219,18 @@ window_id = None
 
 
 def request(*args):
-    # Use the same validated transport as ordinary CLI commands.
-    run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
-                         env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port})
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError()
+    try:
+        run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
+                             timeout=remaining,
+                             env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port,
+                                  "ZSB_TIMEOUT": str(remaining)})
+    except subprocess.TimeoutExpired:
+        raise TimeoutError() from None
+    if time.monotonic() >= deadline:
+        raise TimeoutError()
     if run.returncode:
         raise ValueError(run.stderr.strip().removeprefix("multiprompt-browser: "))
     raw = run.stdout
@@ -249,6 +282,8 @@ def step(name, action):
     try:
         details = action() or {}
         summary["steps"][name] = {"pass": True, **details}
+    except TimeoutError:
+        raise
     except Exception as exc:
         summary["steps"][name] = {"pass": False, "error": str(exc)}
 
@@ -267,7 +302,7 @@ def open_page():
                 break
         except ValueError:
             pass
-        time.sleep(0.5)
+        time.sleep(min(0.5, max(0, deadline - time.monotonic())))
     tab = find_test_tab()
     if tab.get("title") != title or tab.get("target") is False:
         raise ValueError("selftest page is not this session's target browser tab")
@@ -338,16 +373,27 @@ def close_page():
 
 
 try:
-    step("open", open_page)
-    for name, action in [("text", read_page), ("type", type_input),
-                         ("click", click_button), ("screenshot", screenshot)]:
-        if tab_id is None:
-            summary["steps"][name] = {"pass": False, "skipped": "open did not identify a test tab"}
-        else:
-            step(name, action)
-    step("hosting", hosting)
-finally:
-    step("close", close_page)
+    try:
+        step("open", open_page)
+        for name, action in [("text", read_page), ("type", type_input),
+                             ("click", click_button), ("screenshot", screenshot)]:
+            if tab_id is None:
+                summary["steps"][name] = {"pass": False, "skipped": "open did not identify a test tab"}
+            else:
+                step(name, action)
+        step("hosting", hosting)
+    finally:
+        if time.monotonic() < deadline:
+            step("close", close_page)
+    if time.monotonic() >= deadline:
+        raise TimeoutError()
+except TimeoutError:
+    hint = "Reconnect this SSH session and reopen/rebind its browser pane; selftest cleanup may be incomplete."
+    message = f"multiprompt selftest reply timeout after {time.monotonic() - started:.3f}s (deadline {timeout:g}s). {hint}"
+    print("multiprompt-browser: " + message, file=sys.stderr)
+    print(json.dumps({"ok": False, "error": "reply_timeout", "message": message,
+                      "session": session, "port": int(port), "hint": hint}))
+    sys.exit(1)
 summary["ok"] = all(result["pass"] for result in summary["steps"].values())
 print(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))
 state = "visible" if summary["visible"] else "not visible"
@@ -366,20 +412,34 @@ send_zsb() {
   python3 - "$sess" "$port" "$@" <<'PY_REQUEST'
 import base64
 import json
+import math
+import os
 import socket
 import sys
+import time
 
 session, port, *args = sys.argv[1:]
 fix = "Restart/reconnect multiprompt and this SSH session; if it persists, reload the multiprompt extension in the browser (chrome://extensions)."
 
 
-def fail(code, message, reply=None):
+def fail(code, message, reply=None, hint=None):
     message = " ".join(str(message).split())
     print("multiprompt-browser: " + message, file=sys.stderr)
     print(json.dumps(reply if reply is not None else
                      {"ok": False, "error": code, "message": message,
-                      "session": session, "port": int(port)}))
+                      "session": session, "port": int(port), **({"hint": hint} if hint else {})}))
     sys.exit(1)
+
+
+default_timeout = {"status": 5, "version": 5, "doctor": 20,
+                   "text": 30, "get-text": 30, "snapshot": 30, "cdp": 30, "eval": 30, "script": 30,
+                   "screenshot": 60, "shoturl": 60}.get(args[0], 15)
+try:
+    timeout = float(os.environ.get("ZSB_TIMEOUT", default_timeout))
+    if not math.isfinite(timeout) or not 0 < timeout <= 86400:
+        raise ValueError()
+except ValueError:
+    fail("bad_args", "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400")
 
 
 if args[0] == "workspace-list":
@@ -409,11 +469,19 @@ except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
-        sock.settimeout(90)
+        started = time.monotonic()
+        deadline = started + timeout
+        sock.settimeout(timeout)
         sock.sendall(f"ZSB:{session}:{payload}\n".encode())
         chunks, size = [], 0
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout()
+            sock.settimeout(remaining)
             chunk = sock.recv(65536)
+            if time.monotonic() >= deadline:
+                raise socket.timeout()
             if not chunk:
                 break
             size += len(chunk)
@@ -421,7 +489,7 @@ try:
                 fail("reply_too_large", "multiprompt reply exceeded 16 MiB. Retry with a smaller output limit.")
             chunks.append(chunk)
 except socket.timeout:
-    fail("reply_timeout", "multiprompt app/bridge did not answer before the timeout. " + fix)
+    fail("reply_timeout", f"multiprompt app/bridge reply timeout after {time.monotonic() - started:.3f}s (deadline {timeout:g}s). " + fix, hint=fix)
 except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
 raw = b"".join(chunks).decode(errors="replace")

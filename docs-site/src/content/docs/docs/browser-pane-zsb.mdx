@@ -75,7 +75,7 @@ Use Ctrl+K actions when available:
 
 ## multiprompt-browser
 
-`Alt+E` hides a session and its docked browser window but does not close the pane or remove its browser binding. The normal browser auto-suspend policy may close an inactive pane after 20 minutes. Any later `multiprompt-browser` command, including `status` or `doctor`, relaunches and rebinds a configured missing pane and waits for selected-browser adoption before reporting the result.
+`Alt+E` hides a session and its docked browser window but does not close the pane or remove its browser binding. The normal browser auto-suspend policy may close an inactive pane after 20 minutes. Any later `multiprompt-browser` command can trigger relaunch and rebinding of a configured missing pane. The remote `status` probe stops waiting after 5 seconds by default; use `doctor` to allow up to 20 seconds for selected-browser adoption.
 
 `multiprompt-browser` is the browser-control CLI available inside multiprompt-spawned shells. The former `zsb` command remains as a compatibility alias.
 
@@ -88,7 +88,7 @@ Common commands:
 - `multiprompt-browser url` reports the exact targeted tab URL. Read, screenshot, find, and click commands accept `--tab <id|url-substring>` so a background tab can be inspected without activation. `multiprompt-browser console [-n N]` returns recent page console and browser log entries; add `--clear` to clear the captured buffer.
 - `multiprompt-browser click <selector>`, `key <combo>`, and both `type <text>` and `type <selector> <text>` use trusted CDP input. Selector-based type clicks and replaces the target; one-argument type inserts at the focused editable.
 - Text, links, find, snapshots, and selector lookup traverse same-origin and cross-origin frames. Snapshot controls include visible menu items, options, list rows, tab controls, and icon-only controls with accessible labels.
-- A page scripting failure returns top-level `ok:false` with `error:"page_error"`. Ordinary actions time out after 15 seconds, so a stuck page or debugger operation cannot hold the native bridge forever.
+- A page scripting failure returns top-level `ok:false` with `error:"page_error"`. Ordinary extension actions time out after 15 seconds; the remote wrapper also enforces a total reply deadline, even if the app or bridge hangs or sends a trickle of bytes.
 - Screenshots validate PNG bytes and retry with a fresh debugger session up to three times before returning the real capture error.
 - `multiprompt-browser open` preserves signed URLs up to 8 KiB, and the remote transport accepts decoded requests up to 48 KiB within Windows' command-line limit.
 - `multiprompt-browser theme <name>` is the internal profile-wide theme command used by the app; when the selected browser does not already have that one package, the command restarts only the isolated profile. System is resolved by the app before this boundary, so valid bridge names remain `dark`, `mid`, `light`, `amoled`, `edgegray`, `multiprompt`, and `devblue`.
@@ -111,6 +111,14 @@ multiprompt-browser status
 multiprompt-browser doctor
 multiprompt-browser sidebar
 ```
+
+## Remote reply deadlines
+
+The remote `zsb` / `multiprompt-browser` wrapper measures total reply time from sending, not time since the last byte. Defaults are **15 seconds**, **5** for `status` and `version`, **20** for `doctor`, **30** for `text` / `get-text` / `snapshot` / `cdp` / `eval` / `script`, **60** for `screenshot` / `shoturl`, and **180** for the whole `selftest`, including cleanup. Connecting to the IPv4 tunnel has a separate 5-second maximum.
+
+Longer defaults accommodate pane recovery, page scripts, and screenshot retries. Set `ZSB_TIMEOUT=2.5 zsb open https://example.com` to override any default in seconds. Values must be finite, greater than zero and at most 86400; invalid or empty values return JSON `error:"bad_args"` before sending. App-side limits still apply independently. The CLI currently has no per-command `--timeout` flag; CDP JSON parameters pass through unchanged.
+
+Expiry exits nonzero with the usual JSON error shape: `ok:false`, `error:"reply_timeout"`, `message` containing elapsed seconds and the deadline, plus `session`, `port`, and a recovery `hint`. Reconnect the SSH session, open/rebind its pane, then retry `status`. A timeout does not cancel app-side work; inspect tabs before repeating `open`. Selftest's timeout hint warns if cleanup may be incomplete.
 
 ## Workspace and tmux session commands
 
