@@ -1,0 +1,95 @@
+name: Verify desktop
+run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature:
+        description: Feature map file stem in .claude/skills/verify-multiprompt/features
+        required: true
+        default: appearance
+        type: string
+      tag:
+        description: Optional release tag instead of building this branch
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - .claude/skills/verify-multiprompt/**
+      - .github/workflows/verify.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      FEATURE: ${{ inputs.feature || 'appearance' }}
+      RELEASE_TAG: ${{ inputs.tag || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate journey and syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette')) { throw 'Unknown feature map' }
+          if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+      - name: Install Zig 0.16.0
+        if: env.RELEASE_TAG == ''
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build branch executable
+        if: env.RELEASE_TAG == ''
+        run: zig build
+      - name: Resolve real executable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
+          $revision = (git rev-parse HEAD).Trim()
+          if ($env:RELEASE_TAG) {
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            $checks = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64} [ *]multiprompt-x64\.exe$' })
+            if ($checks.Count -ne 1) { throw 'Expected exactly one x64 checksum' }
+            $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
+            if ((Get-FileHash verify-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Release checksum mismatch' }
+            Move-Item verify-bin/multiprompt-x64.exe verify-bin/multiprompt.exe
+            $version = $env:RELEASE_TAG.Substring(1)
+          } else {
+            Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
+            $source = Get-Content src/main.zig -Raw
+            if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Version not found' }
+            $version = $Matches[1]
+          }
+          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
+          "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Launch Doctor Drive Evidence Cleanup
+        shell: powershell
+        run: |
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+      - name: Upload durable verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verify-${{ env.FEATURE }}
+          path: evidence/
+          if-no-files-found: error
