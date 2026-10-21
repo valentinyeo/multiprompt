@@ -28,7 +28,8 @@ var mode: enum { success, failed, stuck, transient, instance, tabs, tabs_old, tr
 fn Sleep(ms: u32) void { clock += ms; }
 fn GetTickCount64() u64 { return clock; }
 fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields: []const u8, deadline: ?u64) ![]u8 {
-    if (deadline) |until| {
+    if (deadline != null and deadline.? <= 15_000) {
+        const until = deadline.?;
         try std.testing.expectEqualStrings("tabs", method);
         try std.testing.expectEqualStrings("", fields);
         try std.testing.expect(until <= 15_000 and until > clock);
@@ -38,6 +39,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields: []co
         if (mode == .transient and probes == 2) return allocator.dupe(u8, "invalid");
         return allocator.dupe(u8, "{\\"extensionVersion\\":\\"" ++ version ++ "\\"}");
     }
+    try std.testing.expectEqual(@as(?u64, 20_000), deadline);
     calls += 1;
     if (mode == .transport and calls == 1) return error.PipeUnavailable;
     if (mode == .instance and calls == 1) return allocator.dupe(u8, "{\\"ok\\":false,\\"error\\":\\"No window with id: 42.\\",\\"extensionVersion\\":\\"" ++ version ++ "\\"}");

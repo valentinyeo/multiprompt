@@ -121,7 +121,7 @@ test('stalled and abruptly truncated connections return actionable errors', asyn
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-timeout-'));
   try {
     const script = path.join(dir, 'zsb.sh');
-    fs.writeFileSync(script, fs.readFileSync(wrapper, 'utf8').replace('sock.settimeout(90)', 'sock.settimeout(0.05)'));
+    fs.writeFileSync(script, fs.readFileSync(wrapper, 'utf8').replace('os.environ.get("ZSB_TIMEOUT_SECONDS", "90")', '"0.05"'));
     failed(await run(['status'], () => {}, script), /timeout/, /[Rr]econnect/);
     failed(await run(['tabs'], socket => { socket.write('{"ok":'); socket.destroy(); }), /invalid reply|connection closed/, /[Rr]econnect/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

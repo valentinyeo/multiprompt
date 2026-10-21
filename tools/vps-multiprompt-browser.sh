@@ -49,6 +49,7 @@ print_help() {
         return ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)'; return ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)'; return ;;
+      reset) echo 'usage: zsb reset (reconnect bridge and clear stuck CDP sessions; keeps the pane open)'; return ;;
       extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)'; return ;;
       tabs) echo 'usage: zsb tabs [--close ID]'; return ;;
       url) echo 'usage: zsb url [--tab ID]'; return ;;
@@ -96,6 +97,7 @@ Commands and flags:
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
+  reset                             Reconnect bridge and clear stuck CDP sessions (keeps pane open)
   extension-reload                  Reload unpacked extension code (no app restart)
   active-tab | activate <id> | close-tab <id> | tab close <id>
   url [--tab ID]                    Read a tab URL
@@ -365,6 +367,8 @@ import base64
 import json
 import socket
 import sys
+import os
+import time
 
 session, port, *args = sys.argv[1:]
 fix = "Restart/reconnect multiprompt and this SSH session; if it persists, reload the multiprompt extension in the browser (chrome://extensions)."
@@ -399,17 +403,28 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
+try:
+    timeout = float(os.environ.get("ZSB_TIMEOUT_SECONDS", "90"))
+    if not 0 < timeout <= 300:
+        raise ValueError()
+except ValueError:
+    fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
+deadline = time.monotonic() + timeout
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 try:
-    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=5)
+    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
-        sock.settimeout(90)
+        sock.settimeout(max(0.001, deadline - time.monotonic()))
         sock.sendall(f"ZSB:{session}:{payload}\n".encode())
         chunks, size = [], 0
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout()
+            sock.settimeout(remaining)
             chunk = sock.recv(65536)
             if not chunk:
                 break
@@ -418,7 +433,7 @@ try:
                 fail("reply_too_large", "multiprompt reply exceeded 16 MiB. Retry with a smaller output limit.")
             chunks.append(chunk)
 except socket.timeout:
-    fail("reply_timeout", "multiprompt app/bridge did not answer before the timeout. " + fix)
+    fail("reply_timeout", "multiprompt app/bridge exceeded the command deadline (timeout); run zsb reset to reconnect without reopening the pane. " + fix)
 except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
 raw = b"".join(chunks).decode(errors="replace")

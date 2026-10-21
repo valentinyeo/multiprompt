@@ -4,3 +4,5 @@
 - [Power management](pane-hibernation.md)
 - [CLI selftest](zsb-selftest.md)
 - [Native lifecycle](../../docs/browser-pane-lifecycle.md)
+
+- [zsb deadlines and recovery](../../docs/zsb-recovery.md): reset, command deadlines, and the IGSH-154 investigation.
