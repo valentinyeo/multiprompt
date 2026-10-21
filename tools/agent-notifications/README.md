@@ -63,21 +63,50 @@ The installer stops and disables `zigshell-watcher.service`, backs up and remove
 its old user unit and script, and preserves unrelated tmux hooks using index 514.
 The tmux snippet enables activity and ten-second silence monitoring, with
 `activity-action any` and `silence-action any`: tmux's default `other` misses the
-current window even when attached. These options also enable tmux's normal alert
-bells or messages. Detached alert flags are cleared to rearm monitoring.
+current window even when attached. `visual-activity off` and `visual-silence off`
+avoid status-line alert messages. In tmux 3.4, `off` still sends a terminal bell;
+`bell-action` controls bell alerts, not activity/silence bells, so it is unchanged.
+Only detached sessions need their latched alert flags cleared to rearm monitoring.
+Attached current windows do not latch these flags.
 
 The existing relay hosts one blocking FIFO reader; no new service or pane-output
-stream is used. Native tmux one-shot timers debounce and throttle events before a shell
-builtin queues a bounded, NUL-framed record in the relay's private directory.
+stream is used. Hidden session environment variables hold debounce/readiness state;
+monitoring stays enabled. Native three-second debounce and fifteen-second rearm
+timers launch a socket-pinned tmux command to restore readiness and clear flags only
+if the session is still detached. The attachment check is evaluated when the timer
+fires, not when it is scheduled. A shell-backed one-shot is intentional:
+`run-shell -bC` queues commands on a client and can lose rearming when that client
+disconnects. Deleted sessions exit silently. There is no periodic rearm process.
+A shell builtin queues each bounded, NUL-framed event in the relay's private directory.
 One shared Python sender detects agents directly through `/proc`, reads titles only
 on title/attach events using the exact hook socket and pane, applies semantic
 marker and title rules, then sends the unchanged TCP messages to localhost:19548,
 one per connection with no newline. Session creation detects the agent;
 client attachment resends AGENT and semantic TITLE, replacing periodic rebroadcast.
 There is no periodic agent reclassification; activity and silence events detect
-the current process again before applying marker suppression. Activity monitoring
-is disabled between native rearm timers, so short bursts wholly inside a resend
-window can be coalesced, including after completion. Silence still sees all output.
+the current process again before applying marker suppression. Activity delivery
+is gated between rearm timers, so short bursts wholly inside a resend window can be
+coalesced, including after completion. Ten seconds without output still ends a
+reported burst with DONE; a burst shorter than the three-second debounce emits
+neither ACTIVE nor DONE.
+
+### Why hooks must not change options
+
+In tmux 3.4, `options_push_changes()` in `options.c` redraws **every attached
+client** for any `set-option`, including window/pane user options and unchanged
+values. `kill-session -C` redraws its session even when no alert flags were set.
+By contrast, `set-environment` and a native `run-shell -C` timer do not request a
+redraw. See upstream [option changes](https://github.com/tmux/tmux/blob/3.4/options.c#L1103),
+[alert clearing](https://github.com/tmux/tmux/blob/3.4/cmd-kill-session.c#L54), and
+[alert handling](https://github.com/tmux/tmux/blob/3.4/alerts.c#L248).
+The hook bodies therefore never write options or clear alerts on attached sessions.
+The configuration-time options still cause a one-time redraw when sourced.
+
+An isolated six-client experiment issued each action once per second for ten
+seconds. Baseline, hidden-environment writes, and native environment-only timers
+ran six status jobs each; window-option writes ran 60, user-option writes 49,
+and alert clearing 15. Even repeatedly setting `bell-action none` ran 54 jobs:
+changing another option is not a redraw-free workaround.
 
 The installer enables the user service and writes
 `~/.local/state/multiprompt/relay-v1` after it starts. Browser (ZSB) requests
