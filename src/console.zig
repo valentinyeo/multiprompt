@@ -1849,23 +1849,25 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         }
     }
 
-    if (cmd_hwnd == null) {
+    if (cmd_hwnd == null and !isRemoteShellKind(kind)) {
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         return false;
     }
 
-    if (kind != .gitbash) {
+    if (cmd_hwnd != null and kind != .gitbash) {
         applyBlackConsoleBackground(pi.dwProcessId);
     }
 
-    _ = ShowWindow(cmd_hwnd, SW_HIDE);
-    _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
-    var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
-    style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
-    style |= @as(isize, @intCast(WS_CHILD));
-    _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
-    _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+    if (cmd_hwnd != null) {
+        _ = ShowWindow(cmd_hwnd, SW_HIDE);
+        _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
+        var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
+        style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
+        style |= @as(isize, @intCast(WS_CHILD));
+        _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
+        _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+    }
 
     app_state.shells[idx] = .{
         .hwnd = cmd_hwnd,
@@ -1918,6 +1920,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     app_state.shell_count += 1;
     if (!app_state.g_restoring) app_state.shells[idx].last_active = nowFileTime();
     registerShellExitWait(idx);
+    if (cmd_hwnd == null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
 
     if (!app_state.g_restoring) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
@@ -2058,6 +2061,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         }
     }
     if (cmd_hwnd == null) {
+        var exit_code: DWORD = std.math.maxInt(DWORD);
+        const got_code = GetExitCodeProcess(pi.hProcess, &exit_code) != 0;
+        var exit_log: [192]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&exit_log, "ssh-reconnect exit id={d} reason=respawn-console-missing exit_code={d} known={}", .{ title_id, exit_code, got_code }) catch "ssh-reconnect exit log-overflow");
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         return false;
@@ -2201,6 +2208,7 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
+    if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
