@@ -481,6 +481,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     };
     var x: i32 = 0;
     var y: i32 = 0;
+    var raw_link = link_detect.next(text, 0);
     for (spans[0..n]) |span| {
         var style = span.style;
         style.bold = style.bold or force_bold;
@@ -503,7 +504,19 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             }
             var end = pos + 1;
             while (end < span.text.end and text[end] != ' ' and text[end] != '\t' and text[end] != '\r' and text[end] != '\n') : (end += 1) {}
-            const target = span.target;
+            var target = span.target;
+            if (raw_link != null and raw_link.?.end <= pos) raw_link = link_detect.next(text, pos);
+            // Parser targets are atomic; the forward scan only fills plain-text gaps.
+            if (target == null and !style.code) {
+                if (raw_link) |link| {
+                    if (link.start == pos) {
+                        target = .{ .start = link.start, .end = link.end };
+                        end = @min(end, link.end);
+                    } else if (link.start > pos and link.start < end) {
+                        end = link.start;
+                    }
+                }
+            }
             if (x > 0 and chatTextWidth(hdc, text[pos..end]) > max_w - x) {
                 x = 0;
                 y += line_h;
@@ -825,8 +838,8 @@ test "IGSH-537 clicking either side of a URL underscore opens the exact address"
     const old_font = SelectObject(dc, chatRichFont(.{}, 0));
     defer _ = SelectObject(dc, old_font);
     const prefix_w = chatTextWidth(dc, w("https://claude.ai/code/session_"));
-    var calc = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
-    const line_h = chatLineHeight(DrawTextW(dc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    var line_h: i32 = 0;
+    _ = chatRichText(dc, w("Ag"), .{ .left = 0, .top = 0, .right = 100, .bottom = 0 }, 0, false, null, 0, &line_h, false);
     for ([_]struct { width: i32, x: i32, y: i32 }{
         .{ .width = 4096, .x = 2, .y = 2 },
         .{ .width = 4096, .x = prefix_w + 2, .y = 2 },
@@ -838,6 +851,24 @@ test "IGSH-537 clicking either side of a URL underscore opens the exact address"
         var bytes: [256]u8 = undefined;
         const len = clickedLinkUrl(text[target.start - 17 .. target.end - 17], &bytes).?;
         try std.testing.expectEqualStrings("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv", bytes[0..len]);
+    }
+    const area = RECT{ .left = 0, .top = 0, .right = 4096, .bottom = 100 };
+    try std.testing.expect(chatRichText(dc, w("`https://example.test/session_code_01`"), area, 0, false, .{ .x = 2, .y = 2 }, 0, null, false) == null);
+    const url = w("https://example.test/session_next_02");
+    const space_w = chatTextWidth(dc, w(" "));
+    for ([_]struct { text: []const u16, prefix: []const u16, code: bool = false }{
+        .{ .text = w("https://example.test/session_first_01. https://example.test/session_next_02"), .prefix = w("https://example.test/session_first_01.") },
+        .{ .text = w("`https://example.test/session_code_01` https://example.test/session_next_02"), .prefix = w("https://example.test/session_code_01"), .code = true },
+        .{ .text = w("[first](https://example.test/session_label_01) https://example.test/session_next_02"), .prefix = w("first") },
+        .{ .text = w("<https://example.test/session_auto_01> https://example.test/session_next_02"), .prefix = w("https://example.test/session_auto_01") },
+    }) |sequence| {
+        _ = SelectObject(dc, chatRichFont(.{ .code = sequence.code }, 0));
+        const next_x = chatTextWidth(dc, sequence.prefix) + space_w + 2;
+        const target = chatRichText(dc, sequence.text, area, 0, false, .{ .x = next_x, .y = 2 }, 17, null, false) orelse return error.TestUnexpectedResult;
+        const start = std.mem.indexOf(u16, sequence.text, url).?;
+        try std.testing.expectEqual(@as(usize, 17) + start, target.start);
+        try std.testing.expectEqual(@as(usize, 17) + start + url.len, target.end);
+        try std.testing.expectEqualSlices(u16, url, sequence.text[target.start - 17 .. target.end - 17]);
     }
 }
 
