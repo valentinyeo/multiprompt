@@ -198,10 +198,10 @@ test("text, snapshot and links report full length and truncation across frames",
   }
 });
 
-test("literal-text commands forward --help and -h instead of showing wrapper help", async () => {
+test("help-like literal text remains command data", async () => {
   const script = path.join(__dirname, "vps-multiprompt-browser.sh");
   for (const command of ["find", "type", "insert", "eval", "key", "cdp"]) {
-    for (const text of ["--help", "-h"]) {
+    for (const text of ["literal --help", "literal -h"]) {
       let wire = "";
       const server = net.createServer((socket) => {
         socket.on("data", (chunk) => {
@@ -230,6 +230,65 @@ test("literal-text commands forward --help and -h instead of showing wrapper hel
         server.close();
       }
     }
+  }
+});
+
+test("every SSH command answers both help flags locally before session lookup or transport", async () => {
+  const script = path.join(__dirname, "vps-multiprompt-browser.sh");
+  const source = fs.readFileSync(path.join(__dirname, "..", "src", "bridge.zig"), "utf8");
+  const dispatch = source.slice(source.indexOf("pub fn main("), source.indexOf("const usage_text ="));
+  const commands = [...new Set([...dispatch.matchAll(/std\.mem\.eql\(u8, command, "([\w-]+)"\)/g)]
+    .map(match => match[1]).filter(command => !command.startsWith("-")))];
+  assert.ok(commands.includes("cdp") && commands.includes("profile-clone"));
+  let connections = 0;
+  const server = net.createServer(socket => {
+    connections++;
+    socket.on("data", () => socket.end('{"ok":true}\n'));
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const env = { ...process.env, TMUX: "", ZSB_SESSION: "fixture", ZSB_PORT: String(server.address().port) };
+  const run = args => new Promise((resolve, reject) => {
+    const child = spawn("bash", [script, ...args], { env });
+    let output = "";
+    child.stdout.on("data", chunk => { output += chunk; });
+    child.stderr.on("data", chunk => { output += chunk; });
+    child.once("error", reject);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+    child.once("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, output });
+    });
+  });
+  try {
+    assert.equal((await run(["cdp", "Page.enable"])).status, 0);
+    assert.equal(connections, 1, "positive control reaches transport");
+    connections = 0;
+    const invocations = [...commands, "selftest", "pane-info"].map(command => [command]);
+    invocations.push(["tab", "close"], ["tabs", "--close"]);
+    for (const args of invocations) {
+      for (const flag of ["--help", "-h"]) {
+        const result = await run([...args, flag]);
+        assert.equal(result.signal, null);
+        assert.equal(result.status, 0, `${args} ${flag}: ${result.output}`);
+        assert.match(result.output, /^usage: zsb /);
+        assert.ok(result.output.includes(args[0]), result.output);
+        if (args[0] === "cdp") {
+          assert.match(result.output, /cdp <method> \[params-json\]/);
+          assert.match(result.output, /Examples:/);
+          assert.match(result.output, /Page\.enable/);
+          assert.match(result.output, /Runtime\.evaluate.*expression/);
+        }
+        assert.equal(connections, 0, `${args} ${flag} reached transport`);
+        const local = spawnSync("bash", [script, ...args, flag], {
+          env: { PATH: process.env.PATH }, encoding: "utf8", timeout: 5000,
+        });
+        assert.ifError(local.error);
+        assert.equal(local.status, 0, local.stdout + local.stderr);
+        assert.match(local.stdout, /^usage: zsb /);
+      }
+    }
+  } finally {
+    await new Promise(resolve => server.close(resolve));
   }
 });
 

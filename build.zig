@@ -440,7 +440,7 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
-    const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
+    const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js", "tools/zsb-help-dispatch.test.js" });
     zsb_help_tests.step.dependOn(&bridge_install.step);
     zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&zsb_help_tests.step);

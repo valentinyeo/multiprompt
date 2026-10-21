@@ -51,6 +51,31 @@ print_help() {
       console) echo 'usage: zsb console [-n N | --limit N] [--clear]'; return ;;
       routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]'; return ;;
       resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]'; return ;;
+      cdp)
+        cat <<'CDP_HELP'
+usage: zsb cdp <method> [params-json]
+Send a Chrome DevTools Protocol command. Params must be a JSON object.
+
+Examples:
+  zsb cdp Page.enable
+  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+CDP_HELP
+        return ;;
+      open) echo 'usage: zsb open [url]'; return ;;
+      sidebar|status|doctor|back|forward|reload|active-tab|shoturl|native|version|browser-drop-gesture)
+        printf 'usage: zsb %s\n' "$1"; return ;;
+      activate) echo 'usage: zsb activate <tabId> [--target-only]'; return ;;
+      close-tab) echo 'usage: zsb close-tab <id|match>'; return ;;
+      tab) echo 'usage: zsb tab close <id|match>'; return ;;
+      insert) echo 'usage: zsb insert <text>'; return ;;
+      eval|script) printf 'usage: zsb %s <js> [--tab ID]\n' "$1"; return ;;
+      key) echo 'usage: zsb key <combo>'; return ;;
+      cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]'; return ;;
+      profile-clone) echo 'usage: zsb profile-clone <src> <dst>'; return ;;
+      create-pane-window) echo 'usage: zsb create-pane-window <url> [--app] [--bounds L T W H]'; return ;;
+      theme) echo 'usage: zsb theme <name>'; return ;;
+      protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]'; return ;;
+      manifest) echo 'usage: zsb manifest <exe> <extension-id>'; return ;;
       type) echo 'usage: zsb type [--tab ID] [--keys] <text> | <selector> <text>'; return ;;
     esac
   fi
@@ -82,7 +107,7 @@ Commands and flags:
   insert <text> | eval <code> | cdp <method> [params-json]
 
 Unqualified reads and actions use the target:true tab in zsb tabs, not necessarily active:true.
-Use zsb <command> --help for command flags (literal-text commands pass --help as text).
+Use zsb <command> --help or -h for local command help without contacting the browser.
 Remote recovery: reconnect SSH/tmux, open or rebind this session's pane, then run zsb status.
 EOF
 }
@@ -98,15 +123,16 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "${1:-}" in
-  type|insert|find|eval|key|cdp) ;;
-  *)
-    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
-      print_help "$1"
-      exit 0
-    fi
-    ;;
-esac
+if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+  print_help "$1"
+  exit 0
+fi
+if { [ "$1" = tab ] && [ "${2:-}" = close ]; } || { [ "$1" = tabs ] && [ "${2:-}" = --close ]; }; then
+  if [ "${3:-}" = "--help" ] || [ "${3:-}" = "-h" ]; then
+    print_help "$1"
+    exit 0
+  fi
+fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"

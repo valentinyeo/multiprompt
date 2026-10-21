@@ -46,9 +46,10 @@ test('every native zsb command and alias answers both help flags without transpo
     track(socket);
     requests++;
     let data = '';
-    socket.on('data', chunk => { data += chunk; });
-    socket.on('end', () => {
-      const request = JSON.parse(data);
+    socket.on('data', chunk => {
+      data += chunk;
+      let request;
+      try { request = JSON.parse(data); } catch { return; }
       const reply = net.createConnection(request.replyPipe, () => reply.end('{"ok":true,"result":{}}'));
       track(reply);
     });
