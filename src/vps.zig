@@ -533,7 +533,7 @@ fn sshInputPump(input: HANDLE, output: HANDLE, activity: *std.atomic.Value(u64))
             var written: DWORD = 0;
             if (WriteFile(output, chunk[pos..].ptr, count - pos, &written, null) == 0 or written == 0) return;
             pos += written;
-            activity.store(GetTickCount64(), .release);
+            _ = activity.fetchMax(GetTickCount64(), .release);
         }
     }
 }
@@ -631,7 +631,7 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
             var chunk: [4096]u8 = undefined;
             var bytes_read: DWORD = 0;
             if (ReadFile(read_pipe, &chunk, @min(available, chunk.len), &bytes_read, null) == 0 or bytes_read == 0) break;
-            if (stdin != null) activity.store(GetTickCount64(), .release);
+            if (stdin != null) _ = activity.fetchMax(GetTickCount64(), .release);
             if (stdin == null) {
                 const keep = @min(bytes_read, buf.len - 1 - total);
                 @memcpy(buf[total .. total + keep], chunk[0..keep]);
