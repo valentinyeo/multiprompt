@@ -26,7 +26,18 @@ test('odd medians, extrema, failed checks and signed differences use real result
   assert.match(text, /v0\.28\.783 \| 3 \| 20 \[10, 30\] \| 2 \[1, 3\]/);
   assert.match(text, /switchPaintP95Ms \| 40 \| 20 \| yes/);
   assert.match(text, /failedChecks \| -2 \| 2 \| no/);
-  assert.match(text, /Wine/);
+  assert.match(text, /Linux\/Wine on a GitHub-hosted Ubuntu 24\.04 runner; not native Windows acceptance/);
+});
+
+test('runner tooling and production reader require LF checkout on every OS', () => {
+  const files = ['tools/chat-bench/run.mjs', 'tools/chat-bench/lib.mjs', 'tools/chat-bench/reader-service.py', 'tools/chat-bench/browser-fixture.c', 'tools/chat-bench/config.json', 'src/chat_history_reader.py'];
+  const result = spawnSync('git', ['check-attr', 'text', 'eol', '--', ...files], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  for (const file of files) {
+    assert.ok(result.stdout.includes(`${file}: text: set\n`), file);
+    assert.ok(result.stdout.includes(`${file}: eol: lf\n`), file);
+    assert.equal(fs.readFileSync(path.join(__dirname, '..', file)).includes(13), false, file);
+  }
 });
 
 test('even and single-run medians, equal tags and zero spread are valid', async () => {
