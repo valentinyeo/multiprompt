@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.787", .items = &.{
+        .{ .text = "Multiprompt opens straight to your saved chat and sidebar, without a progress bar.", .ticket = "IGSH-502" },
+        .{ .text = "Connections, other tabs, the browser and sign-in checks load after the window appears.", .ticket = "IGSH-502" },
+    } },
     .{ .ver = "0.28.786", .items = &.{
         .{ .text = "Wide tables in the chat now have a scrollbar you can drag, click, or scroll with Shift+wheel or a touchpad swipe.", .ticket = "IGSH-458" },
     } },
