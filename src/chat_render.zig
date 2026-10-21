@@ -253,7 +253,7 @@ fn ensureChatCodeFont() HANDLE {
 fn chatLinkFont(code: bool) HANDLE {
     const slot = if (code) &app_state.g_chat_code_link_font else &app_state.g_chat_link_font;
     if (slot.* == null) {
-        slot.* = CreateFontW(-uiScaled(if (code) @max(8, app_state.g_chat_font_pt - 1) else app_state.g_chat_font_pt), 0, 0, 0, 500, 0, 1, 0, 0, 0, 0, CHAT_QUALITY, 0, if (code) L(@import("fonts.zig").MONO_FACE) else L(@import("fonts.zig").UI_MEDIUM_FACE));
+        slot.* = if (code) CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 500, 0, 1, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE)) else @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt), false, false, true, .{});
     }
     return slot.*;
 }
@@ -460,7 +460,7 @@ fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
     if (index == 0) return ensureChatFont();
     if (app_state.g_chat_rich_fonts[index] == null) {
         const extra: i32 = if (level == 1) 8 else if (level == 2) 5 else if (level > 0) 2 else 0;
-        app_state.g_chat_rich_fonts[index] = CreateFontW(-uiScaled(app_state.g_chat_font_pt + extra), 0, 0, 0, if (style.bold or level > 0) 700 else 500, @intFromBool(style.italic), 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
+        app_state.g_chat_rich_fonts[index] = @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt + extra), style.bold or level > 0, style.italic, false, .{});
     }
     return app_state.g_chat_rich_fonts[index];
 }
@@ -1883,7 +1883,7 @@ pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
 }
 
 pub fn chatMetadataFont() HANDLE {
-    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
+    if (app_state.g_chat_rich_fonts[10] == null) app_state.g_chat_rich_fonts[10] = @import("fonts.zig").chat(-uiScaled(@max(8, app_state.g_chat_font_pt - 3)), false, false, false, .{});
     return app_state.g_chat_rich_fonts[10];
 }
 

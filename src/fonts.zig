@@ -63,6 +63,16 @@ pub fn create(height: i32, width: i32, escapement: i32, orientation: i32, weight
     return w.CreateFontW(height, width, escapement, orientation, actual_weight, if (mono) 0 else italic, underline, strikeout, if (mono) 1 else charset, output, clip, quality, pitch, actual_face);
 }
 
+pub const ChatFontOptions = struct {
+    body_weight: i32 = 500,
+    bold_weight: i32 = 700,
+    quality: w.DWORD = CHAT_QUALITY,
+};
+
+pub fn chat(height: i32, bold: bool, italic: bool, underline: bool, options: ChatFontOptions) w.HANDLE {
+    return create(height, 0, 0, 0, if (bold) options.bold_weight else options.body_weight, @intFromBool(italic), @intFromBool(underline), 0, 0, 0, 0, options.quality, 0, if (options.body_weight == 500) L(UI_MEDIUM_FACE) else L(UI_FACE));
+}
+
 pub fn controlFont() w.HANDLE {
     if (control_font == null) control_font = create(-16, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(UI_FACE));
     return control_font;
@@ -352,10 +362,10 @@ test "IGSH-445 Chat View requests grayscale Medium body and Bold emphasis" {
             try std.testing.expect(std.mem.indexOf(u8, line, ", CHAT_QUALITY, 0, ") != null);
             try std.testing.expect(std.mem.indexOf(u8, line, ", 400, ") == null);
         }
-        try std.testing.expect(requests > 0);
-        try std.testing.expect(std.mem.indexOf(u8, source, "L(@import(\"fonts.zig\").UI_MEDIUM_FACE)") != null);
+        try std.testing.expect(requests > 0 or std.mem.indexOf(u8, source, ".chat(") != null);
+        try std.testing.expect(std.mem.indexOf(u8, source, "@import(\"fonts.zig\").chat(") != null);
     }
-    try std.testing.expect(std.mem.indexOf(u8, @embedFile("chat_render.zig"), "if (style.bold or level > 0) 700 else 500") != null);
+    try std.testing.expect(std.mem.indexOf(u8, @embedFile("chat_render.zig"), "style.bold or level > 0") != null);
     const medium_os2 = fontTable(UI_MEDIUM, "OS/2");
     const italic_os2 = fontTable(UI_MEDIUM_ITALIC, "OS/2");
     try std.testing.expectEqual(@as(u16, 500), std.mem.readInt(u16, medium_os2[4..6], .big));
@@ -374,4 +384,34 @@ test "IGSH-445 line height preserves today's metric advance for every chat size"
         try std.testing.expectEqualSlices(u8, fontTable(UI_REGULAR, "hhea")[4..10], fontTable(file, "hhea")[4..10]);
         try std.testing.expectEqualSlices(u8, fontTable(UI_REGULAR, "head")[18..20], fontTable(file, "head")[18..20]);
     }
+}
+
+test "chat probe options and shipped defaults select the same authentic embedded faces" {
+    defer unregister();
+    try std.testing.expect(register());
+    const dc = w.CreateCompatibleDC(null);
+    try std.testing.expect(dc != null);
+    defer _ = w.DeleteDC(dc);
+    const cases = .{
+        .{ 400, false, false, UI_REGULAR },
+        .{ 400, true, false, UI_BOLD },
+        .{ 500, false, false, UI_MEDIUM },
+        .{ 500, true, false, UI_BOLD },
+        .{ 500, false, true, UI_MEDIUM_ITALIC },
+    };
+    inline for (cases) |case| {
+        const font = chat(-21, case[1], case[2], false, .{ .body_weight = case[0] });
+        try std.testing.expect(font != null);
+        defer _ = w.DeleteObject(font);
+        const old = w.SelectObject(dc, font);
+        defer _ = w.SelectObject(dc, old);
+        const expected = fontTable(case[3], "OS/2");
+        var actual: [1024]u8 = undefined;
+        const len = w.GetFontData(dc, std.mem.readInt(u32, "OS/2", .little), 0, &actual, actual.len);
+        try std.testing.expectEqual(expected.len, len);
+        try std.testing.expectEqualSlices(u8, expected, actual[0..len]);
+    }
+    try std.testing.expectEqual(@as(i32, 500), (ChatFontOptions{}).body_weight);
+    try std.testing.expectEqual(@as(i32, 700), (ChatFontOptions{}).bold_weight);
+    try std.testing.expectEqual(CHAT_QUALITY, (ChatFontOptions{}).quality);
 }

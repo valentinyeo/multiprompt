@@ -157,19 +157,19 @@ test('Chat View uses grayscale Medium body text, real Bold emphasis and unchange
   assert.match(fonts, /actual_weight == 500\) L\(UI_MEDIUM_FACE\)/);
   for (const file of ['chat_render', 'chat_composer']) {
     const source = read(`src/${file}.zig`);
-    const requests = source.split('\n').filter(line => line.includes('CreateFontW('));
-    assert.ok(requests.length > 0, file);
-    for (const request of requests) {
-      assert.match(request, /, CHAT_QUALITY, 0, /, request);
-      assert.doesNotMatch(request, /, 400, |CLEARTYPE_QUALITY/, request);
-    }
-    assert.match(source, /const CHAT_QUALITY = @import\("fonts\.zig"\)\.CHAT_QUALITY/);
+    assert.match(source, /@import\("fonts\.zig"\)\.chat\(/);
     assert.match(source, /const chatLineHeight = @import\("fonts\.zig"\)\.chatLineHeight/);
-    assert.match(source, /L\(@import\("fonts\.zig"\)\.UI_MEDIUM_FACE\)/);
+    for (const request of source.split('\n').filter(line => line.includes('CreateFontW('))) {
+      assert.match(request, /CHAT_QUALITY/);
+      assert.match(request, /MONO_FACE/);
+    }
   }
-  assert.match(read('src/chat_composer.zig'), /CreateFontW\(-uiScaled\(app_state\.g_chat_font_pt\), 0, 0, 0, 500,/);
+  assert.match(fonts, /body_weight: i32 = 500/);
+  assert.match(fonts, /bold_weight: i32 = 700/);
+  assert.match(fonts, /quality: w\.DWORD = CHAT_QUALITY/);
+  assert.match(read('src/chat_composer.zig'), /\.chat\(-uiScaled\(app_state\.g_chat_font_pt\), false, false, false, \.\{\}\)/);
   const render = read('src/chat_render.zig');
-  assert.match(render, /if \(style\.bold or level > 0\) 700 else 500/);
+  assert.match(render, /style\.bold or level > 0, style\.italic, false, \.\{\}/);
   assert.equal((render.match(/chatLineHeight\(DrawTextW/g) || []).length, 4);
   assert.match(read('src/chat_composer.zig'), /chatLineHeight\(one\.bottom - one\.top\)/);
 });
