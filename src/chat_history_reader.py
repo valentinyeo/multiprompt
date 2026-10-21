@@ -13,6 +13,9 @@ import sys
 import time
 from pathlib import Path
 
+if sys.platform != "win32":
+    import pwd
+
 HOME = Path.home()
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
@@ -52,7 +55,6 @@ def conversation_owner(cwd):
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", parts[2])):
         return None
     try:
-        import pwd
         user = pwd.getpwnam(parts[2])
     except KeyError:
         return None
@@ -251,7 +253,6 @@ def tmux_owner_process(agent, name, source):
         if result.returncode == 0:
             data = json.loads(result.stdout)
             if isinstance(data, dict) and isinstance(data.get("pid"), int) and data["pid"] > 0:
-                import pwd
                 user = pwd.getpwnam(data["user"])
                 if user.pw_uid != 0:
                     return data["pid"], (user.pw_name, Path(user.pw_dir))
@@ -1364,7 +1365,6 @@ elif __name__ == "__main__":
         query = json.loads(base64.b64decode(sys.argv[1], validate=True))
 
         if "--discover" in sys.argv[2:]:
-            import pwd
             pid = agent_pid_for_panes(query["panes"], local_ssh_process_table(), query["agent"])
             user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid) if pid is not None else None
             print(json.dumps(dict(pid=pid, user=user.pw_name) if user else None))
