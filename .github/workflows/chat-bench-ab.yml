@@ -1,0 +1,148 @@
+name: Chat bench A/B
+run-name: chat bench ${{ inputs.tag_a || 'v0.28.783' }} vs ${{ inputs.tag_b || 'v0.28.786' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_a:
+        description: First release tag, such as v0.28.783
+        required: true
+        type: string
+      tag_b:
+        description: Second release tag, such as v0.28.786
+        required: true
+        type: string
+      runs:
+        description: Runs per tag (1 to 10)
+        required: true
+        default: '3'
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/chat-bench-ab.yml
+      - tools/chat-bench/**
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.783' || inputs.tag_a }}
+      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.786' || inputs.tag_b }}
+      RUNS: ${{ github.event_name == 'pull_request' && '3' || inputs.runs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: master
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test summary calculations
+        run: node --test candidate/tools/chat-bench-ab-summary.test.js
+      - name: Download and verify release executables
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          if ($env:TAG_A -notmatch '^v\d+\.\d+\.\d+$' -or $env:TAG_B -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected version tags such as v0.28.783' }
+          if ($env:RUNS -notmatch '^(?:[1-9]|10)$') { throw 'Runs must be an integer from 1 to 10' }
+          New-Item -ItemType Directory results | Out-Null
+          git -C tooling rev-parse HEAD | Set-Content results/tooling-commit.txt
+          Copy-Item tooling/tools/chat-bench/config.json results/config.json
+          $tags = @{ A = $env:TAG_A; B = $env:TAG_B }
+          foreach ($label in @('A', 'B')) {
+            $dir = "results/releases/$label"
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            gh release download $tags[$label] --repo $env:GITHUB_REPOSITORY --dir $dir --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt
+            if ($LASTEXITCODE -ne 0) { throw "Release download failed for $label" }
+            $lines = @(Get-Content "$dir/SHA256SUMS.txt" | Where-Object { $_ -match '^[a-fA-F0-9]{64} [ *]multiprompt-x64\.exe$' })
+            if ($lines.Count -ne 1) { throw "Expected exactly one x64 checksum for $label" }
+            $expected = ($lines[0] -split '\s+')[0].ToLowerInvariant()
+            $actual = (Get-FileHash "$dir/multiprompt-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Release checksum mismatch for $label" }
+            "$($tags[$label]) $actual" | Set-Content "$dir/verified.txt"
+          }
+          $plan = @()
+          for ($index = 1; $index -le [int]$env:RUNS; $index++) {
+            foreach ($label in @('A', 'B')) {
+              $plan += @{ label = $label; tag = $tags[$label]; index = $index; path = "runs/$label-$($tags[$label])-$index/results.json" }
+            }
+          }
+          ConvertTo-Json -InputObject $plan -Depth 4 | Set-Content results/manifest.json
+          "[wsl2]`nmemory=10GB`nswap=0`n" | Set-Content "$env:USERPROFILE/.wslconfig"
+      - name: Set up the documented Linux and Wine environment on Windows
+        uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          use-cache: false
+          wsl-conf: |
+            [boot]
+            systemd=true
+          additional-packages: nodejs python3 wine64 wine xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
+      - name: Prepare synthetic fixtures and reader tooling
+        shell: wsl-bash {0}
+        working-directory: tooling
+        run: |
+          mkdir -p /opt/chat-bench/tooling /opt/chat-bench/results
+          cp -r tools src /opt/chat-bench/tooling/
+          cp -r ../results/. /opt/chat-bench/results/
+          cd /opt/chat-bench
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz' | sha256sum -c -
+          tar -xf zig.tar.xz
+          test "$(cat /proc/1/comm)" = systemd
+          loginctl enable-linger root
+          systemctl start user@0.service
+          export XDG_RUNTIME_DIR=/run/user/0
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+          systemd-run --user --scope --quiet true
+          node --version
+          wine --version
+          printf 'Linux/Wine in WSL2 on windows-latest; not native Windows acceptance.\n' > results/environment.txt
+      - name: Run default config in A B order
+        shell: wsl-bash {0}
+        working-directory: tooling
+        run: |
+          destination="$(pwd)/../results"
+          trap 'cp -r /opt/chat-bench/results/. "$destination/"' EXIT
+          cd /opt/chat-bench/tooling
+          export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
+          export XDG_RUNTIME_DIR=/run/user/0
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+          node -e 'const fs = require("fs"); for (const r of JSON.parse(fs.readFileSync("../results/manifest.json"))) console.log([r.label, r.path].join("\t"))' > ../plan.tsv
+          while IFS=$'\t' read -r label result; do
+            out="/opt/chat-bench/results/$(dirname "$result")"
+            mkdir -p "$out"
+            set +e
+            node tools/chat-bench/run.mjs --exe "/opt/chat-bench/results/releases/$label/multiprompt-x64.exe" --out "$out" 2>&1 | tee "$out/runner.log"
+            code=${PIPESTATUS[0]}
+            set -e
+            printf '%s\n' "$code" > "$out/exit-code.txt"
+            if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then
+              echo "Benchmark infrastructure failed with exit $code"
+              exit "$code"
+            fi
+            test -f "$out/results.json"
+          done < ../plan.tsv
+      - name: Write A/B summary
+        if: always()
+        run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
+      - name: Upload all benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-bench-ab
+          path: results/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 9
