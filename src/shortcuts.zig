@@ -640,11 +640,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (find_key_up) return 1;
         const find_modifier = kb.vkCode == 0x10 or kb.vkCode == 0x11 or kb.vkCode == 0x12 or (kb.vkCode >= 0xA0 and kb.vkCode <= 0xA5);
         if (@import("chat_find.zig").ownsKeys(app_state.g_chat_find_open, foregroundIsOurs()) and !find_modifier) {
-            if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {
-                if (kb.vkCode < app_state.g_chat_find_consumed.len) app_state.g_chat_find_consumed[kb.vkCode] = true;
-                @import("chat_find_ui.zig").routeKey(kb.vkCode, isCtrlDown(), (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0, (kb.flags & 0x20) != 0);
-            }
-            return 1;
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
         if (app_state.ISSUE_268_CHAT_FIND and !app_state.g_win_held and wp == WM_KEYDOWN and kb.vkCode == 0x46 and isCtrlDown() and
             (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and (kb.flags & 0x20) == 0 and

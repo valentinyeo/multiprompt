@@ -342,38 +342,132 @@ test "AUDIT injected agent Markdown reaches the same rich layout as assistant pr
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-407 the find box searches for ! when Shift+1 is typed', { todo: 'ISSUE-407' }, (t) => {
-  const route = fileBody('chat_find_ui.zig', 'routeKey')
+function findKeyboard(t, name, assertions) {
+  const production = ['routeKey', 'windowKey', 'key'].map(name => fileBody('chat_find_ui.zig', name)).join('\n')
     .replaceAll('app_state.', '')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
+    .replaceAll('@import("focus.zig").isCtrlDown', 'isCtrlDown')
     .replaceAll('@import("clipboard.zig").readClipboardTextWithRetry', 'readClipboardTextWithRetry')
+    .replaceAll('@import("chat_composer.zig").chatViewOwnsInput', 'chatViewOwnsInput')
     .replaceAll('@import("command_palette.zig").reductionSearchChar', 'reductionSearchChar');
-  const result = execute(t, 'find-keyboard', `
+  const result = execute(t, name, `
 const std = @import("std");
+const win32 = struct {
+    const WM_KEYDOWN: u32 = 0x0100;
+    fn GetAsyncKeyState(vk: u32) i16 { return if ((vk == 0x10 and shift_down) or (vk == 0x12 and alt_down)) -1 else 0; }
+};
+const model = struct {
+    const ISSUE_268_CHAT_FIND = true;
+    fn step(_: usize, _: usize, _: bool) usize { return 0; }
+};
 const g_main_hwnd: usize = 1;
 const WM_APP_CHAT_FIND: u32 = 202;
-var posted: [400]u16 = undefined;
-var count: usize = 0;
+const WM_SYSKEYDOWN: u32 = 0x0104;
+var g_chat_find_open = true;
+var g_chat_find_high_surrogate: u16 = 0;
+var g_chat_find_len: usize = 0;
+var g_chat_find_query: [401]u16 = @splat(0);
+var g_chat_find_result: ?struct { hits: []const u8 } = null;
+var g_chat_find_selected: usize = 0;
+var g_chat_find_jump = false;
+var ctrl_down = false;
+var shift_down = false;
+var alt_down = false;
+var actions: [400]usize = undefined;
+var posted_count: usize = 0;
 fn PostMessageW(_: usize, _: u32, action: usize, char: u16) i32 {
-    if (action == 3) {
-        posted[count] = char;
-        count += 1;
-    }
+    actions[posted_count] = action;
+    posted_count += 1;
+    key(action, char);
     return 1;
 }
-fn readClipboardTextWithRetry(_: []u16) usize { return 0; }
+fn readClipboardTextWithRetry(out: []u16) usize { out[0] = 'p'; return 1; }
+fn isCtrlDown() bool { return ctrl_down; }
+fn chatViewOwnsInput() bool { return true; }
+fn open() void { g_chat_find_open = true; }
+fn close(_: bool) void { g_chat_find_open = false; }
+fn changed() void {}
+fn jump() void {}
+fn invalidate() void {}
 ${fileBody('command_palette.zig', 'reductionSearchChar')}
-${route}
-test "letters survive find routing" {
-    count = 0;
-    routeKey(0x41, false, false, false);
-    try std.testing.expectEqualSlices(u16, &.{'a'}, posted[0..count]);
+${production}
+test "ISSUE-407 ${name}" {
+${assertions}
 }
-test "shift digit searches for the symbol" {
-    count = 0;
-    routeKey(0x31, false, true, false);
-    try std.testing.expectEqualSlices(u16, &.{'!'}, posted[0..count]);
-}
-`);
+`, [], '', ['-fno-llvm', '-fno-lld']);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+test('ISSUE-407 the find box searches for ! when Shift+1 is typed', (t) => {
+  findKeyboard(t, 'find-shift-symbol', `
+    shift_down = true;
+    try std.testing.expect(windowKey(0x0100, 0x31));
+    try std.testing.expect(windowKey(0x0102, '!'));
+    try std.testing.expectEqualSlices(u16, &.{'!'}, g_chat_find_query[0..g_chat_find_len]);
+  `);
+});
+
+test('ISSUE-407 the find box accepts é via WM_CHAR after a dead key', (t) => {
+  findKeyboard(t, 'find-dead-key', `
+    try std.testing.expect(windowKey(0x0100, 0xde));
+    _ = windowKey(0x0103, 0x00b4);
+    try std.testing.expect(windowKey(0x0100, 0x45));
+    try std.testing.expect(windowKey(0x0102, 0x00e9));
+    try std.testing.expectEqualSlices(u16, &.{0x00e9}, g_chat_find_query[0..g_chat_find_len]);
+  `);
+});
+
+test('ISSUE-407 the find box inserts a plain letter only once from WM_CHAR', (t) => {
+  findKeyboard(t, 'find-no-double-insert', `
+    try std.testing.expect(windowKey(0x0100, 0x41));
+    try std.testing.expectEqual(@as(usize, 0), g_chat_find_len);
+    try std.testing.expect(windowKey(0x0102, 'a'));
+    try std.testing.expect(windowKey(0x0101, 0x41));
+    try std.testing.expectEqualSlices(u16, &.{'a'}, g_chat_find_query[0..g_chat_find_len]);
+    try std.testing.expectEqual(@as(usize, 1), posted_count);
+    g_chat_find_open = false;
+    try std.testing.expect(!windowKey(0x0102, 'b'));
+    try std.testing.expectEqual(@as(usize, 1), posted_count);
+  `);
+});
+
+test('ISSUE-407 the find box preserves AltGr, surrogate pairs, paste and editing', (t) => {
+  findKeyboard(t, 'find-unicode-editing', `
+    ctrl_down = true;
+    alt_down = true;
+    try std.testing.expect(windowKey(0x0104, 0x51));
+    try std.testing.expect(windowKey(0x0102, '@'));
+    ctrl_down = false;
+    alt_down = false;
+    try std.testing.expect(windowKey(0x0102, 0xd83d));
+    try std.testing.expect(windowKey(0x0102, 0xde00));
+    try std.testing.expectEqualSlices(u16, &.{'@', 0xd83d, 0xde00}, g_chat_find_query[0..g_chat_find_len]);
+    try std.testing.expect(windowKey(0x0100, 0x08));
+    try std.testing.expect(windowKey(0x0102, 0x08));
+    try std.testing.expectEqualSlices(u16, &.{'@'}, g_chat_find_query[0..g_chat_find_len]);
+    ctrl_down = true;
+    try std.testing.expect(windowKey(0x0100, 0x56));
+    try std.testing.expect(windowKey(0x0102, 0x16));
+    try std.testing.expectEqualSlices(u16, &.{'@', 'p'}, g_chat_find_query[0..g_chat_find_len]);
+    ctrl_down = false;
+    try std.testing.expect(windowKey(0x0100, 0x0d));
+    try std.testing.expectEqual(@as(usize, 4), actions[posted_count - 1]);
+    const before_enter_char = posted_count;
+    try std.testing.expect(windowKey(0x0102, 0x0d));
+    try std.testing.expectEqual(before_enter_char, posted_count);
+    shift_down = true;
+    try std.testing.expect(windowKey(0x0100, 0x72));
+    try std.testing.expectEqual(@as(usize, 5), actions[posted_count - 1]);
+    try std.testing.expect(windowKey(0x0100, 0x1b));
+    try std.testing.expect(!g_chat_find_open);
+  `);
+});
+
+test('ISSUE-407 the find hook lets Windows translate text instead of swallowing it', () => {
+  const hook = fileBody('shortcuts.zig', 'keyboardHookProc');
+  const start = hook.indexOf('if (@import("chat_find.zig").ownsKeys(');
+  assert.ok(start >= 0);
+  const branch = hook.slice(start, hook.indexOf('if (app_state.ISSUE_268_CHAT_FIND', start));
+  assert.match(branch, /return CallNextHookEx\(app_state\.g_hook, nCode, wp, lp\);/);
+  assert.doesNotMatch(branch, /routeKey|return 1;/);
 });
