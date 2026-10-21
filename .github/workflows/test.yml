@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: [1, 2, 3, 4, 5, 6]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -76,9 +76,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
@@ -94,6 +91,12 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Cache Zig toolchain
+        if: steps.rule.outputs.kind != 'STAMP'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -101,11 +104,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-            ${{ runner.temp }}/zig-x86_64-windows-0.16.0
-          key: ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**', 'tools/**', 'extension/**', 'assets/**') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-
-            ${{ runner.os }}-zig-0.16.0-shards-v1-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -121,27 +122,29 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }}
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
 
   test-vps:
-    name: test-vps
+    name: test-vps (${{ matrix.group }})
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - name: Test release version
+        if: matrix.group == 1
         run: node --test tools/release-version.test.mjs
       - name: Check version rule
         id: rule
@@ -152,6 +155,12 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Cache Zig toolchain
+        if: steps.rule.outputs.kind != 'STAMP'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -159,22 +168,23 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v1-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**', 'tools/**', 'extension/**', 'assets/**') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v1-vps-${{ hashFiles('build.zig', 'build.zig.zon') }}-
-            ${{ runner.os }}-zig-0.16.0-shards-v1-vps-
+            ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
-          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
       - name: Run session restore fixtures
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
 
   service:
