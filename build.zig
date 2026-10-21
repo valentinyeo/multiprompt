@@ -418,6 +418,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
     test_step.dependOn(&chat_rich_tests.step);
+    test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js" });
     test_step.dependOn(&chat_autocomplete_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });

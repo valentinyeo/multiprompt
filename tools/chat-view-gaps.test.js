@@ -292,40 +292,108 @@ test "IGSH-403 click preserves Unicode in a detected transcript link" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', { todo: 'ISSUE-404' }, (t) => {
-  const run = execute(t, 'render-copy', `
+test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', (t) => {
+  const production = ['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
+    .replaceAll('std.heap.page_allocator', 'copy_allocator');
+  const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
+var copy_allocator = std.testing.allocator;
 var g_chat_capture: [262200]u16 = @splat('x');
 var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
-var g_chat_blocks: [1]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }};
+var g_chat_blocks: [2]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }, .{ .start = 0, .len = 0, .role = .user }};
 var g_chat_sel_active = false;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;
 var g_chat_sel_dragging = false;
 var g_chat_sel_transcript_focus = false;
-var g_chat_sel_text: [262144]u16 = undefined;
 var g_chat_transcript_hwnd: ?usize = null;
 var g_chat_composer_hwnd: ?usize = null;
 var copied: usize = 0;
+var clipboard: [524404]u16 = undefined;
+var clipboard_ok = true;
+var clipboard_calls: usize = 0;
 var notice: [64]u8 = undefined;
 var notice_len: usize = 0;
+var notice_error = false;
 fn chatBlockDisplayRange(_: []const u16, block: ChatBlock) struct { start: usize, len: usize } { return .{ .start = block.start, .len = block.len }; }
 fn InvalidateRect(_: ?usize, _: ?*anyopaque, _: i32) i32 { return 1; }
-fn setUnicodeClipboardTextWithRetry(text: []const u16) bool { copied = text.len; return true; }
-fn showHeaderNoticeAscii(text: []const u8, _: u32, _: bool) void { @memcpy(notice[0..text.len], text); notice_len = text.len; }
+fn setUnicodeClipboardTextWithRetry(text: []const u16) bool {
+    clipboard_calls += 1;
+    if (!clipboard_ok) return false;
+    copied = text.len;
+    @memcpy(clipboard[0..copied], text);
+    return true;
+}
+fn showHeaderNoticeAscii(text: []const u8, _: u32, failed: bool) void {
+    @memcpy(notice[0..text.len], text);
+    notice_len = text.len;
+    notice_error = failed;
+}
 fn chatComposerFocusAllowed() bool { return false; }
 fn SetFocus(_: ?usize) ?usize { return null; }
-${['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection'].map(body).join('\n')}
-test "AUDIT full conversation selection copies every selected character" {
+` + production + String.raw`
+test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestly" {
+    g_chat_capture[g_chat_capture.len - 2] = 0xd83d;
+    g_chat_capture[g_chat_capture.len - 1] = 0xde00;
     chatSelectAll();
     chatCopySelection();
     try std.testing.expectEqualStrings("Copied", notice[0..notice_len]);
-    try std.testing.expectEqual(g_chat_capture.len, copied);
+    try std.testing.expect(!notice_error);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    g_chat_sel_anchor = g_chat_capture.len;
+    g_chat_sel_caret = 0;
+    chatCopySelection();
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    chatCopyBlockToClipboard(0);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    const snapshot = try chatCopyTextAlloc(copy_allocator, null);
+    defer std.testing.allocator.free(snapshot);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, snapshot);
+    clipboard_ok = false;
+    chatCopySelection();
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy to clipboard; try again", notice[0..notice_len]);
+    const calls = clipboard_calls;
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    copy_allocator = failing.allocator();
+    chatCopySelection();
+    try std.testing.expectEqual(calls, clipboard_calls);
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy text; try again", notice[0..notice_len]);
+    var rich_failure = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    copy_allocator = rich_failure.allocator();
+    g_chat_blocks[0].role = .prose;
+    chatCopySelection();
+    try std.testing.expectEqual(calls, clipboard_calls);
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy text; try again", notice[0..notice_len]);
+    g_chat_blocks[0].role = .user;
+    copy_allocator = std.testing.allocator;
+    clipboard_ok = true;
+    @memset(&g_chat_capture, '\n');
+    chatCopySelection();
+    try std.testing.expectEqual(g_chat_capture.len * 2, copied);
+    for (0..g_chat_capture.len) |i| try std.testing.expectEqualSlices(u16, &.{ '\r', '\n' }, clipboard[i * 2 ..][0..2]);
+    g_chat_last_len = 2;
+    g_chat_capture[0] = 'a';
+    g_chat_capture[1] = 'b';
+    g_chat_block_count = 2;
+    g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .user };
+    g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .user };
+    chatSelectAll();
+    chatCopySelection();
+    try std.testing.expectEqualSlices(u16, &.{ 'a', '\r', '\n', '\r', '\n', 'b' }, clipboard[0..copied]);
+    var small: [1]u16 = undefined;
+    try std.testing.expectError(error.NoSpaceLeft, chatSelectionToClipboard(&small));
+    chatSelectionClear();
+    chatCopySelection();
+    try std.testing.expect(!notice_error);
+    try std.testing.expectEqualStrings("Nothing selected", notice[0..notice_len]);
 }
-`, ['chat_markdown.zig'], 'AUDIT');
+`, ['chat_markdown.zig'], 'IGSH-404');
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
