@@ -293,6 +293,7 @@ pub const Shell = struct {
     adopt_streak: u8 = 0,
     revert_streak: u8 = 0,
     external_name_sync: ExternalNameSyncState = .{},
+    console_font_logged: bool = false,
     base_font_h: i16 = 0,
     base_font_w: i16 = 0,
     base_font_face: [32]u16 = std.mem.zeroes([32]u16),
@@ -470,6 +471,9 @@ pub var g_dev_saved_console_palette: [16]DWORD = std.mem.zeroes([16]DWORD);
 pub var g_dev_saved_console_attr: WORD = 0x0007;
 pub var g_dev_saved_console_font: CONSOLE_FONT_INFOEX = undefined;
 
+pub const ISSUE_441 = true;
+pub const DEFAULT_CONSOLE_FONT = if (ISSUE_441) "Nordwand Mono" else "JetBrainsMono NFM";
+
 pub const DEFAULT_DEV_THEME_JSON =
     \\{
     \\  "theme_revision": 11,
@@ -478,7 +482,9 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "title_font": "Segoe UI",
     \\    "subtitle_font": "Segoe UI",
     \\    "close_font": "Segoe UI",
-    \\    "console_font": "JetBrainsMono NFM",
+    \\    "console_font": "
+++ DEFAULT_CONSOLE_FONT ++
+    \\",
     \\    "title_height": 16,
     \\    "subtitle_height": 14,
     \\    "close_height": 14,
@@ -595,8 +601,15 @@ pub const DEV_CONSOLE_FONTS = [_][]const u8{
     "FiraCode Nerd Font Mono",
     "FiraCode Nerd Font Mono SemBd",
     "Hack Nerd Font Mono",
+    "Nordwand Mono",
 };
-pub var g_dev_font_idx: usize = 2;
+pub const DEFAULT_CONSOLE_FONT_IDX = blk: {
+    for (DEV_CONSOLE_FONTS, 0..) |face, i| {
+        if (std.mem.eql(u8, face, DEFAULT_CONSOLE_FONT)) break :blk i;
+    }
+    unreachable;
+};
+pub var g_dev_font_idx: usize = DEFAULT_CONSOLE_FONT_IDX;
 pub const DEV_CONSOLE_SIZES = [_]i32{ 14, 16, 18, 20, 22 };
 pub var g_dev_size_idx: usize = 2;
 pub var g_dev_font_hud: bool = false;

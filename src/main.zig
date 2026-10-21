@@ -7639,6 +7639,9 @@ pub fn main(init: std.process.Init) void {
         return;
     }
 
+    var console_fonts = @import("console.zig").registerBundledConsoleFonts();
+    defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
+
     _ = SetErrorMode(SSH_ERROR_MODE);
     crash_recorder.install(&crashSnapshot, APP_VERSION, IS_DEV);
 
