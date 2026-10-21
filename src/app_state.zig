@@ -1079,7 +1079,6 @@ pub var g_chat_working_applied_len: usize = 0;
 pub var g_chat_raw: [262144]u16 = std.mem.zeroes([262144]u16);
 pub var g_chat_capture_storage: [262144]u16 = @splat(0);
 pub var g_chat_capture: []u16 = &g_chat_capture_storage;
-pub var g_chat_sel_text: [262144]u16 = undefined;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
 pub var g_chat_line_lens: [1400]usize = std.mem.zeroes([1400]usize);
 pub var g_chat_reply: [131072]u8 = @splat(0);

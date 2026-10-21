@@ -2223,9 +2223,12 @@ pub fn chatReplyLatestAgent() void {
 
 fn chatCopyBlockToClipboard(index: usize) void {
     if (index >= app_state.g_chat_block_count) return;
-    const block = app_state.g_chat_blocks[index];
-    const n = chatCopyBlockText(&app_state.g_chat_sel_text, block, block.start, block.start + block.len);
-    chatCopyTextToClipboard(app_state.g_chat_sel_text[0..n]);
+    const text = chatCopyTextAlloc(std.heap.page_allocator, app_state.g_chat_blocks[index]) catch {
+        showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+        return;
+    };
+    defer std.heap.page_allocator.free(text);
+    chatCopyTextToClipboard(text);
 }
 
 fn chatCopyTextToClipboard(text: []const u16) void {
@@ -2234,7 +2237,7 @@ fn chatCopyTextToClipboard(text: []const u16) void {
     } else if (setUnicodeClipboardTextWithRetry(text)) {
         showHeaderNoticeAscii("Copied", 1200, false);
     } else {
-        showHeaderNoticeAscii("Clipboard is busy; try Copy again", 2500, true);
+        showHeaderNoticeAscii("Could not copy to clipboard; try again", 2500, true);
     }
 }
 
@@ -2406,12 +2409,13 @@ pub fn chatSelectAll() void {
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
-fn chatCopyPlainText(out: []u16, text: []const u16) usize {
+fn chatCopyPlainText(out: []u16, text: []const u16) !usize {
     var n: usize = 0;
     var i: usize = 0;
-    while (i < text.len and n < out.len) : (i += 1) {
+    while (i < text.len) : (i += 1) {
+        if (n == out.len) return error.NoSpaceLeft;
         if (text[i] == '\r' or text[i] == '\n') {
-            if (n + 2 > out.len) break;
+            if (n + 2 > out.len) return error.NoSpaceLeft;
             if (text[i] == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
             out[n] = '\r';
             out[n + 1] = '\n';
@@ -2424,9 +2428,9 @@ fn chatCopyPlainText(out: []u16, text: []const u16) usize {
     return n;
 }
 
-fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) usize {
+fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) !usize {
     var storage: [512]chat_markdown.Span = undefined;
-    const spans = if (text.len <= storage.len) storage[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return 0;
+    const spans = if (text.len <= storage.len) storage[0..] else try std.heap.page_allocator.alloc(chat_markdown.Span, text.len);
     defer if (text.len > storage.len) std.heap.page_allocator.free(spans);
     const count = chat_markdown.inlineSpans(text, spans);
     var n: usize = 0;
@@ -2437,7 +2441,7 @@ fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) usize {
             const space = c == ' ' or c == '\n' or c == '\t';
             if (!space) started = true;
             if (!started or i < lo or i >= hi) continue;
-            if (n == out.len) return n;
+            if (n == out.len) return error.NoSpaceLeft;
             out[n] = if (space) ' ' else c;
             n += 1;
         }
@@ -2445,7 +2449,7 @@ fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) usize {
     return n;
 }
 
-fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) usize {
+fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) !usize {
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     const disp = chatBlockDisplayRange(buf, block);
     const text = buf[disp.start .. disp.start + disp.len];
@@ -2453,7 +2457,7 @@ fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) usize {
     const end = @max(@min(hi, disp.start + disp.len), disp.start) - disp.start;
     if (end <= start) return 0;
     if (block.kind == .table) {
-        var table = chat_markdown.parseTable(std.heap.page_allocator, text) catch return 0;
+        var table = try chat_markdown.parseTable(std.heap.page_allocator, text);
         defer table.deinit(std.heap.page_allocator);
         var n: usize = 0;
         var previous_row: ?usize = null;
@@ -2465,10 +2469,10 @@ fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) usize {
                     const high = @min(end, fragment.end);
                     if (high <= low and !(fragment.start == fragment.end and start <= fragment.start and end >= fragment.end)) continue;
                     const separator: []const u16 = if (previous_row != null and previous_row.? != ri) &.{ '\r', '\n' } else if (previous_cell != null and previous_cell.? != ci) &.{'\t'} else if (previous_cell != null) &.{' '} else &.{};
-                    if (n + separator.len > out.len) return n;
+                    if (n + separator.len > out.len) return error.NoSpaceLeft;
                     @memcpy(out[n .. n + separator.len], separator);
                     n += separator.len;
-                    n += chatCopyRichText(out[n..], text[fragment.start..fragment.end], low - fragment.start, high - fragment.start);
+                    n += try chatCopyRichText(out[n..], text[fragment.start..fragment.end], low - fragment.start, high - fragment.start);
                     previous_row = ri;
                     previous_cell = ci;
                 }
@@ -2481,15 +2485,15 @@ fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) usize {
         const prefix = @as(usize, block.prefix);
         var n: usize = 0;
         if (start < prefix) {
-            n = chatCopyPlainText(out, if (prefix == 2) &.{ 0x2022, ' ' } else text[start..@min(end, prefix)]);
+            n = try chatCopyPlainText(out, if (prefix == 2) &.{ 0x2022, ' ' } else text[start..@min(end, prefix)]);
         }
-        if (end > prefix) n += chatCopyRichText(out[n..], text[prefix..], @max(start, prefix) - prefix, end - prefix);
+        if (end > prefix) n += try chatCopyRichText(out[n..], text[prefix..], @max(start, prefix) - prefix, end - prefix);
         return n;
     }
     return chatCopyRichText(out, text, start, end);
 }
 
-fn chatSelectionToClipboard(out: []u16) usize {
+fn chatSelectionToClipboard(out: []u16) !usize {
     const sel = chatSelRange() orelse return 0;
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     var pos: usize = 0;
@@ -2500,22 +2504,51 @@ fn chatSelectionToClipboard(out: []u16) usize {
         const hi = @min(sel.end, disp.start + disp.len);
         if (hi <= lo) continue;
         if (!first) {
-            if (pos + 4 > out.len) break;
+            if (pos + 4 > out.len) return error.NoSpaceLeft;
             out[pos] = '\r';
             out[pos + 1] = '\n';
             out[pos + 2] = '\r';
             out[pos + 3] = '\n';
             pos += 4;
         }
-        pos += chatCopyBlockText(out[pos..], app_state.g_chat_blocks[i], lo, hi);
+        pos += try chatCopyBlockText(out[pos..], app_state.g_chat_blocks[i], lo, hi);
         first = false;
     }
     return pos;
 }
 
+fn chatCopyCapacity(selected_len: usize, block_count: usize) !usize {
+    const text_len = try std.math.mul(usize, selected_len, 2);
+    const joins = try std.math.mul(usize, block_count -| 1, 4);
+    return std.math.add(usize, text_len, joins);
+}
+
+fn chatCopyTextAlloc(allocator: std.mem.Allocator, block: ?ChatBlock) ![]u16 {
+    const selected_len = if (block) |b| b.len else if (chatSelRange()) |sel| sel.end - sel.start else 0;
+    if (selected_len == 0) return allocator.alloc(u16, 0);
+    const capacity = try chatCopyCapacity(selected_len, if (block != null) 1 else app_state.g_chat_block_count);
+    const out = try allocator.alloc(u16, capacity);
+    errdefer allocator.free(out);
+    const n = if (block) |b| try chatCopyBlockText(out, b, b.start, b.start + b.len) else try chatSelectionToClipboard(out);
+    return allocator.realloc(out, n);
+}
+
 pub fn chatCopySelection() void {
-    const n = chatSelectionToClipboard(&app_state.g_chat_sel_text);
-    chatCopyTextToClipboard(app_state.g_chat_sel_text[0..n]);
+    const text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
+        showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+        return;
+    };
+    defer std.heap.page_allocator.free(text);
+    chatCopyTextToClipboard(text);
+}
+
+test "IGSH-404 copy capacity includes expanded newlines and block joins without overflow" {
+    try std.testing.expectEqual(@as(usize, 524400), try chatCopyCapacity(262200, 1));
+    try std.testing.expectEqual(@as(usize, 12), try chatCopyCapacity(4, 2));
+    try std.testing.expectEqual(@as(usize, 0), try chatCopyCapacity(0, 0));
+    try std.testing.expectError(error.Overflow, chatCopyCapacity(std.math.maxInt(usize), 1));
+    try std.testing.expectError(error.Overflow, chatCopyCapacity(1, std.math.maxInt(usize)));
+    try std.testing.expectError(error.Overflow, chatCopyCapacity(std.math.maxInt(usize) / 2, 2));
 }
 
 test "Chat View selection copies displayed ranges with CRLF and block joins" {
@@ -2532,7 +2565,7 @@ test "Chat View selection copies displayed ranges with CRLF and block joins" {
     app_state.g_chat_sel_caret = sample_z.len;
     app_state.g_chat_sel_active = true;
     var out: [256]u16 = undefined;
-    const n = chatSelectionToClipboard(&out);
+    const n = try chatSelectionToClipboard(&out);
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("hello\r\n\r\nworld");
     try std.testing.expectEqualSlices(u16, expected, out[0..n]);
 }
@@ -3101,14 +3134,15 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = AppendMenuW(menu, MF_STRING, 2, L("Select All"));
             const block_at = chatTranscriptBlockAtPoint(GET_Y(lp));
             const copy_target = chatContextCopyTarget(chatSelRange() != null, block_at != null);
-            const selection_n = if (copy_target == .selection) chatSelectionToClipboard(&app_state.g_chat_sel_text) else 0;
-            const selection_text = std.heap.page_allocator.dupe(u16, app_state.g_chat_sel_text[0..selection_n]) catch return 0;
+            const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
+                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+                return 0;
+            };
             defer std.heap.page_allocator.free(selection_text);
-            const message_n = if (block_at) |idx| blk: {
-                const block = app_state.g_chat_blocks[idx];
-                break :blk chatCopyBlockText(&app_state.g_chat_sel_text, block, block.start, block.start + block.len);
-            } else 0;
-            const message_text = std.heap.page_allocator.dupe(u16, app_state.g_chat_sel_text[0..message_n]) catch return 0;
+            const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, app_state.g_chat_blocks[idx]) catch {
+                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+                return 0;
+            } else &.{};
             defer std.heap.page_allocator.free(message_text);
             if (block_at != null) _ = AppendMenuW(menu, MF_STRING, 3, L("Copy Message"));
             var reply_text: ?[]u16 = null;
@@ -3359,11 +3393,11 @@ test "ISSUE-438 table selection copies visible cells without markdown borders" {
         chatSelectionClear();
     }
     var out: [256]u16 = undefined;
-    var n = chatSelectionToClipboard(&out);
+    var n = try chatSelectionToClipboard(&out);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Name\tValue\r\nAlpha\ttwo"), out[0..n]);
     app_state.g_chat_sel_anchor = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Alpha")).?;
     app_state.g_chat_sel_caret = app_state.g_chat_sel_anchor + 5;
-    n = chatSelectionToClipboard(&out);
+    n = try chatSelectionToClipboard(&out);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha"), out[0..n]);
 }
 
@@ -3403,7 +3437,7 @@ test "ISSUE-438 lists and code copy only the selected visible text" {
         chatSelectionClear();
     }
     var out: [128]u16 = undefined;
-    const n = chatSelectionToClipboard(&out);
+    const n = try chatSelectionToClipboard(&out);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("ello world\r\n\r\nconst x = 1;\r\nnext"), out[0..n]);
 }
 
@@ -3490,7 +3524,9 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
         if (selected) {
             chatCopySelection();
             try std.testing.expect(app_state.g_chat_sel_active);
-            try std.testing.expectEqualSlices(u16, text[6..], app_state.g_chat_sel_text[0 .. text.len - 6]);
+            const selected_text = try chatCopyTextAlloc(std.testing.allocator, null);
+            defer std.testing.allocator.free(selected_text);
+            try std.testing.expectEqualSlices(u16, text[6..], selected_text);
         }
         try std.testing.expect(setUnicodeClipboardTextWithRetry(std.unicode.utf8ToUtf16LeStringLiteral("stale")));
         Timer.calls = 0;
@@ -3512,14 +3548,14 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
 test "ISSUE-438 copying preserves empty table columns and rendered rich whitespace" {
     var out: [128]u16 = undefined;
     const rich = std.unicode.utf8ToUtf16LeStringLiteral(" **hello**\r\nworld\t[link](https://example.test)");
-    var n = chatCopyRichText(&out, rich, 0, rich.len);
+    var n = try chatCopyRichText(&out, rich, 0, rich.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello world link"), out[0..n]);
     const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | | C |\n| --- | --- | --- |\n| one | | three |");
     @memcpy(app_state.g_chat_capture[0..text.len], text);
     app_state.g_chat_last_len = text.len;
     defer app_state.g_chat_last_len = 0;
     const block = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .kind = .table, .markdown = true };
-    n = chatCopyBlockText(&out, block, 0, text.len);
+    n = try chatCopyBlockText(&out, block, 0, text.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A\t\tC\r\none\t\tthree"), out[0..n]);
 }
 
