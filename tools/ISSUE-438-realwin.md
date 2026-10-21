@@ -86,7 +86,9 @@ On Windows, each matrix job ran `zig build -Dtarget=x86_64-windows-gnu --summary
 
 Locally, with `ZIG` pointing to Zig 0.16, `nice -n 10 tools/test-windows-wine.sh` exited 0: ARM64 compilation, desktop summary 1433/1433 tests and server summary 747/747 tests. Its Node suites retain pre-existing skips for private-history/public-export checks (three distinct tests, encountered in both desktop and server runs), and seven executed TODO failures in `tools/chat-view-gaps.test.js` (ISSUE-402–407 and ISSUE-376). No skip, TODO, assertion or test filter was added or changed here. A zero command exit is not a claim those pre-existing gaps are fixed.
 
-The independent Windows CI [test run](https://github.com/valentinyeo/multiprompt/actions/runs/39589912943) also passed its test, test-vps and service jobs. Selection-specific Wine evidence is recorded separately after completion.
+The independent Windows CI [test run](https://github.com/valentinyeo/multiprompt/actions/runs/39594711012) also passed its test, test-vps and service jobs.
+
+The separate selection command, `flock /tmp/multiprompt-wine.lock nice -n 10 bash -c '"$ZIG" build -j1 -Dtarget=x86_64-windows-gnu --summary all && node --test tools/chat-select.test.mjs'`, exited 0 after the shared lock became available. The x64 build completed 12/12 steps; the existing ISSUE-438 end-to-end test passed 4/4 assertions, with zero skips, TODOs or failures: drag/Ctrl+C copied the exact cross-message span, right-click Copy copied the whole second message, and right-click inside a selection copied the exact partial span. Native clipboard values above and Wine drag/message values matched.
 
 To reproduce the native driver on an isolated Windows desktop:
 
