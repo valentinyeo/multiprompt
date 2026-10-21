@@ -259,7 +259,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Show All split", .b = "Show or hide All; All stays visible if every split is hidden", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest at the bottom", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Never Show This Session", .b = "Toggle permanent Inbox exclusion for this tab (also right-click tab)", .header = false },
-    .{ .a = "Alt+J / Alt+K", .b = "Next / previous Inbox session", .header = false },
+    .{ .a = "Alt+J / Alt+K", .b = "Next / previous Inbox session, or workspace (including Starred) outside Inbox context", .header = false },
     .{ .a = "Ctrl+Shift+Up / Down", .b = "Move active tab up / down", .header = false },
     .{ .a = "Ctrl+G", .b = "Collapse / expand tab group", .header = false },
     .{ .a = "Alt+; / Ctrl+;", .b = "Use snippets", .header = false },
@@ -267,7 +267,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
     .{ .a = "F2 / double-click", .b = "Rename tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
-    .{ .a = "Alt+1 ... 9", .b = "Switch to workspace 1-9", .header = false },
+    .{ .a = "Alt+1", .b = "Go to Starred workspace", .header = false },
+    .{ .a = "Alt+1 ... 9", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
     .{ .a = "Ctrl+Shift+Y", .b = "Snooze this workspace until a chosen time", .header = false },
     .{ .a = "Ctrl+K -> Workspace: Wake <name>", .b = "Wake a snoozed workspace now and switch to it", .header = false },
     .{ .a = "Ctrl+K -> Workspace: Bring Back All Sessions", .b = "Reopen every recorded tmux session of this workspace", .header = false },
@@ -366,8 +367,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Browser mode", .b = "Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar", .header = false },
     .{ .a = "Alt+Left / Alt+Right (browser focus)", .b = "Browser back / forward", .header = false },
     .{ .a = "Alt+I (browser focus)", .b = "Open Inbox", .header = false },
-    .{ .a = "Alt+1..9 (browser focus)", .b = "Switch workspace", .header = false },
-    .{ .a = "Alt+J / Alt+K (browser focus)", .b = "Next / previous Inbox session", .header = false },
+    .{ .a = "Alt+1..9 (browser focus)", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
+    .{ .a = "Alt+J / Alt+K (browser focus)", .b = "Next / previous Inbox session, or workspace (including Starred) outside Inbox context", .header = false },
     .{ .a = "URL bar \u{2039} / \u{203A}", .b = "Browser back / forward", .header = false },
     .{ .a = "Ctrl+K Auto-suspend", .b = "Toggle idle browser pane suspension", .header = false },
     .{ .a = "Alt+P", .b = "Keep this tab's browser pane awake (exempt from freeze/hibernate)", .header = false },
@@ -1026,7 +1027,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_sysmenu_pending = false;
                     keybd_event(0xFF, 0, 0, 0);
                     keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, kb.vkCode - 0x31, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, @import("workspace_view.zig").fromDigit(kb.vkCode - 0x30).?, 0);
                     return 1;
                 }
             }
@@ -1046,7 +1047,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (wp == WM_SYSKEYDOWN and app_state.g_single_window and !isCtrlDown() and foregroundIsOurs()) {
             if (kb.vkCode >= 0x31 and kb.vkCode <= 0x39) {
                 app_state.g_sysmenu_pending = false;
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, kb.vkCode - 0x31, 0);
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_WORKSPACE, @import("workspace_view.zig").fromDigit(kb.vkCode - 0x30).?, 0);
                 return 1;
             }
             if (kb.vkCode == 0x25 or kb.vkCode == 0x27) {

@@ -2379,7 +2379,15 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
 
     if (app_state.shell_count == 0) {
         app_state.active_shell = 0;
+        if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        saveSession();
+        return;
+    }
+    if (app_state.g_starred_workspace) {
+        if (closing_active) app_state.active_shell = app_state.shell_count;
+        if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
+        @import("workspaces.zig").refreshStarredWorkspace();
         saveSession();
         return;
     }
@@ -2464,6 +2472,13 @@ pub fn switchToShellByUser(idx: u32) void {
 }
 
 pub fn switchToShell(idx: u32) void {
+    if (app_state.g_starred_workspace and idx < app_state.shell_count) {
+        if (@import("workspaces.zig").starredShellVisible(idx)) {
+            app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
+        } else {
+            app_state.g_starred_workspace = false;
+        }
+    }
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != app_state.active_shell);

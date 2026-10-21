@@ -58,7 +58,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+Shift+E: Archive the active tmux tab (press TWICE within 2.5s — the thread band shows the confirm prompt). Kills the remote tmux session (frees VPS RAM), saves {name, tmux session, host, Claude session id, cwd} to archive.json, closes the tab. Resurrect via Ctrl+K: type the archived name -> '\u21A9 <name>' row recreates the tmux session and relaunches `claude --resume <sid>` (or --continue without a stored id). The Claude session id arrives via the SESSION: hook broadcast (v0.28.247). Also available as Ctrl+K 'Archive Session' and in the right-click tab menu (explicit pick = confirmed, no double-press; v0.28.249)
 - Ctrl+Shift+B: Cycle sidebar: open -> collapsed -> hidden (0px focus mode) -> open. Ctrl+K 'Sidebar: Expand/Collapse/Hide' jump to a state directly
 - Ctrl+Shift+O: Toggle the docked Edge browser pane for the active tab (v0.28.264 — owner-docked top-level borderless Edge, per session; console reflows left, pane docks right). Also Ctrl+K 'Browser: Open URL...' and 'Insert browser-control instructions' (pastes the `zsb` usage guide into the shell). Drive the pane from the session via the `zsb` CLI (on each shell's PATH) or browser-cli/Playwriter. NOTE: the Edge extension + native-messaging host load from the `zigshell-browser-pane` repo folder — keep it; deleting it breaks browser CONTROL (the pane still docks). Windows-only; no VPS path yet
-- **Browser-focus escape hatches (v0.28.293):** while the docked Edge pane has FOCUS (the Ctrl+Shift+M isolation state where all keys go to Edge natively), a small set of one-press Alt combos still reach ZigShell — Edge ignores the Alt namespace, so claiming them costs no native browser shortcut. **Alt+I** = jump to Inbox (no Ctrl+Shift+M dance first), **Alt+1..9** = switch workspace, **Alt+J / Alt+K** = cycle workspace (the workspace ones are single-window-mode only, mirroring the shell-focused binds). Everything else still passes to Edge (Alt+Left/Right stay browser back/forward). Mnemonic: Ctrl = Edge, Alt = ZigShell. Implemented in the `keyboardHookProc` browser-focus passthrough block; F1 overview lists the three rows
+- **Browser-focus escape hatches (v0.28.293):** while the docked Edge pane has FOCUS (the Ctrl+Shift+M isolation state where all keys go to Edge natively), a small set of one-press Alt combos still reach ZigShell — Edge ignores the Alt namespace, so claiming them costs no native browser shortcut. **Alt+I** = jump to Inbox (no Ctrl+Shift+M dance first), **Alt+1..9** = switch workspace (1 is Starred; 2-9 are the first eight stored workspaces), **Alt+J / Alt+K** = cycle workspace (the workspace ones are single-window-mode only, mirroring the shell-focused binds). Everything else still passes to Edge (Alt+Left/Right stay browser back/forward). Mnemonic: Ctrl = Edge, Alt = ZigShell. Implemented in the `keyboardHookProc` browser-focus passthrough block; F1 overview lists the three rows
 - Alt+S: Favorite or unfavorite this session. Starred tabs show a small yellow dot and keep it after restart, tmux adoption, or moving tabs. Ctrl+K has `Favorite: Toggle` with its current on/off state; right-click a tab for `Favorite` / `Unfavorite`. Alt+Shift+S still reaches the browser extension.
 - Alt+P: Keep the active tab awake — exempts its docked browser pane from freezing/hibernation (v0.28.635). Also Ctrl+K "Keep Tab Awake: On/Off" and the right-click tab menu. Sidebar shows a pin glyph on awake tabs and "z" on frozen/hibernated panes. See [pane hibernation](../browser/pane-hibernation.md)
 - Ctrl+K → "Hibernate Browser Panes Now": immediately sleep every hidden, unpinned browser pane (v0.28.635)
@@ -68,7 +68,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K → "Token Ladder: Open Dashboard": opens the ladder's usage page in the browser pane.
 - Ctrl+K -> "Inbox: Never Show This Session" / "Inbox: Show This Session Again" (also right-click a tab): permanently exclude or restore that tab in the cross-workspace Inbox, its needs-reply counts, and the inbox button badge. The sidebar blue dot, spinner, and ETA remain unchanged. No dedicated shortcut: Alt+I opens Inbox, Alt+E files a tab temporarily, Alt+U marks it unread, and Ctrl+Shift+U toggles unread-only; an additional modifier chord for this infrequent setting would compete with shell/browser shortcuts.
 - Sidebar inbox button (in the workspace strip): Click to toggle the cross-workspace Inbox. The button shows the local needs-reply count across workspaces and stays clickable to close the Inbox. Alt+I opens the Inbox or selects the ALL split; Ctrl+Shift+I toggles the Inbox too. The `★ Favorites` split immediately after ALL shows starred sessions from every window, in the same order and row style as ALL. The Frequent split comes first, before All and Favorites. It shows sessions you sent input to in the last 24 hours, plus watch-only sessions you explicitly selected and kept in front for ten focused seconds at least three times in six hours. Switches alone, attention stepping, Inbox step-jumps, automatic focus and old usage history do not qualify. Qualifying input determines order, otherwise the newest look does; newest appears at the bottom. The selected split survives migration.
-- Alt+J / Alt+K: Jump to the next / previous Inbox session from Chat View, the terminal, or the docked browser. The old Ctrl+Shift+J/K aliases are retired.
+- Alt+J / Alt+K: Jump to the next / previous Inbox session from Chat View, the terminal, or the docked browser. Outside an Inbox context, cycle workspaces including Starred. The old Ctrl+Shift+J/K aliases are retired.
 - Ctrl+Shift+T: Reopen last closed tab
 - Ctrl+Shift+U: Toggle the GLOBAL unread-only filter (sidebar + inbox, one state, v0.28.227): sidebar shows only blue-dot tabs + the active tab (UNREAD ONLY badge replaces the Ctrl+T hint); inbox filters rows/splits as before. Not persisted. Tab cycling and Ctrl+1-9 skip filtered tabs. Jump-to-next-unread lives on via Alt+J/K and the Ctrl+K "Next unread" row / Ctrl+K+Enter
 - Ctrl+Shift+Up / Ctrl+Shift+Down: Move active tab up/down (blocked at group boundary). When sidebar auto-sort is on, first materializes the displayed order and switches Tab Order to Manual
@@ -81,9 +81,9 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+Shift+Y: Snooze the current workspace (single-window mode). Pick This evening, Tomorrow morning, In 3 days, This weekend, Next week, Someday, or Custom in the same Remind Me picker as a tab. It closes local tabs, keeps remote tmux sessions running, and hides the workspace until its wake time. Ctrl+K "Workspace: Snoozed..." wakes it early and switches to it; right-click a visible workspace pill to snooze that pill. Ctrl+Shift+Y is free; Ctrl+Shift+H already snoozes one tab, Alt+Y is unclaimed but lacks the Ctrl+Shift pattern and could interfere with browser input, and Ctrl+Alt combinations are reserved for AltGr on US-International keyboards. Separate-window workspaces remain available; workspace snooze applies to in-process single-window workspaces.
 - Ctrl+K "Workspace: Wake <name>": one row for every snoozed workspace, listed from the live snooze flags (not only from reminders.json). It wakes the workspace now and switches to it. No dedicated shortcut. The snooze flag is also saved with the workspace in the session file, so a lost wake marker is rebuilt at the next start and the workspace stays reachable.
 - Ctrl+K "Workspace: Bring Back All Sessions": no dedicated shortcut. For the active workspace it reopens, as tabs in that workspace, every tmux session recorded for it (written when the workspace is snoozed, plus its snooze snapshot) that is still running on a VPS and not open as a tab anywhere. Sessions already open are never duplicated.
-- Alt+1..9: Switch in-process workspace (single-window mode). Held Alt chains — Alt+1, 2, 3 without re-pressing (focus defers until Alt release so the synthetic-Alt trick can't cancel the held key)
+- Alt+1..9: Switch in-process workspace (single-window mode): 1 is Starred, and 2-9 are the first eight stored workspaces. Held Alt chains — Alt+1, 2, 3 without re-pressing (focus defers until Alt release so the synthetic-Alt trick can't cancel the held key)
 - Alt+Left / Alt+Right: Cycle prev/next workspace (hold Alt, tap arrows; auto-repeat works). Both Alt shortcuts exit the inbox first if it's open. EXCEPTION (v0.28.286): while the docked browser pane is FOCUSED, Alt+Left/Right = browser back/forward instead (the Alt+Shift chord from .285 was dropped - too alien); shell focus always keeps workspace cycling
-- Alt+J / Alt+K: Cycle next/prev workspace (vim order; hold Alt, tap J/K — same as Alt+arrows)
+- Alt+J / Alt+K: Cycle next/prev workspace including Starred outside an Inbox context (vim order; hold Alt, tap J/K — same as Alt+arrows)
 - Alt+Space: Open the window's system menu (move/size/minimize/maximize/close — e.g. Alt+Space, x = maximize). The menu appears on Alt RELEASE (v0.28.239 — deferred so the foreground claim can't race the held Alt; holding Alt keeps it pending). Hook retargets it to the main window because focus usually sits on the conhost child
 - Win+Left/Right/Up/Down: Snap left/right half, maximize, restore/minimize — retargeted to the main window because focus sits on the conhost child. Pressing Left/Right when already snapped to that edge hops to the adjacent monitor's opposite half (native cycle semantics)
 - Win+Shift+Left/Right: Move the window to the adjacent monitor, preserving maximized state (v0.28.235 — natively these targeted the conhost child and did nothing)
@@ -121,7 +121,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Show All split | Show or hide All; All stays visible if every split is hidden |
 | Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest at the bottom |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |
-| Alt+J / Alt+K | Next / previous Inbox session |
+| Alt+J / Alt+K | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | Ctrl+Shift+Up / Down | Move active tab up / down |
 | Ctrl+G | Collapse / expand tab group |
 | Alt+; / Ctrl+; | Use snippets |
@@ -133,7 +133,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
-| Alt+1 ... 9 | Switch to workspace 1-9 |
+| Alt+1 | Go to Starred workspace |
+| Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
 | Ctrl+Shift+Y | Snooze this workspace until a chosen time |
 | Ctrl+K -&gt; Workspace: Wake &lt;name&gt; | Wake a snoozed workspace now and switch to it |
 | Ctrl+K -&gt; Workspace: Bring Back All Sessions | Reopen every recorded tmux session of this workspace |
@@ -248,8 +249,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Browser mode | Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar |
 | Alt+Left / Alt+Right (browser focus) | Browser back / forward |
 | Alt+I (browser focus) | Open Inbox |
-| Alt+1..9 (browser focus) | Switch workspace |
-| Alt+J / Alt+K (browser focus) | Next / previous Inbox session |
+| Alt+1..9 (browser focus) | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
+| Alt+J / Alt+K (browser focus) | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | URL bar ‹ / › | Browser back / forward |
 | Ctrl+K Auto-suspend | Toggle idle browser pane suspension |
 | Alt+P | Keep this tab's browser pane awake (exempt from freeze/hibernate) |
