@@ -6539,6 +6539,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             handleZsbOpenRequest();
             return 0;
         },
+        @import("win32.zig").WM_APP_ZSB_WORKSPACE => {
+            @import("browser_bridge.zig").handleZsbWorkspaceRequest();
+            return 0;
+        },
         WM_APP_ZSB_WHO => {
             handleZsbWhoRequest();
             return 0;

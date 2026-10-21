@@ -1390,6 +1390,7 @@ pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
 pub var g_pending_chat_id: u64 = 0;
+pub var g_pending_background_workspace: ?u8 = null;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -3174,6 +3175,15 @@ pub const ZsbWorkerCtx = struct {
     req: [ZSB_WIRE_CAP]u8,
     req_len: usize,
 };
+
+pub var g_zsb_workspace_mutex: SpinMutex = .{};
+pub var g_zsb_workspace_pending = false;
+pub var g_zsb_workspace_done = false;
+pub var g_zsb_workspace_args: [11][256]u8 = undefined;
+pub var g_zsb_workspace_arg_lens: [11]usize = undefined;
+pub var g_zsb_workspace_argc: usize = 0;
+pub var g_zsb_workspace_response: [256 * 1024]u8 = undefined;
+pub var g_zsb_workspace_response_len: usize = 0;
 
 pub var g_zsb_who_mutex: SpinMutex = .{};
 pub var g_zsb_who_pending = false;
