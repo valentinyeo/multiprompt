@@ -57,15 +57,19 @@ test('favorite action saves and immediately publishes both true and false states
   assert.match(between('fn inboxRowVisible(', 'fn inboxListTop('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
 });
 
-test('Favorites split follows Frequent and ALL and shares ALL ordering, rows and navigation', () => {
+test('Favorites split follows Frequent and ALL by default and shares configured split navigation', () => {
   const paint = between('fn paintInbox(', 'fn openInbox(');
   assert.ok(paint.indexOf('"Frequent"') < paint.indexOf('"All"'));
   assert.ok(paint.indexOf('"All"') < paint.indexOf('"Favorites"'));
   assert.ok(paint.indexOf('"Favorites"') < paint.indexOf('for (0..g_inbox_ws_count)'));
   assert.match(paint, /if \(g_unread_only\) unread else total/);
   assert.match(paint, /No favorites yet\. Press Alt\+S on a session to add it\./);
-  assert.match(between('fn handleInboxKey(', 'fn '), /while \(t < frequent\.splitCount\(g_inbox_ws_count\) - 1\)/);
-  assert.equal((source.match(/const splits = frequent\.splitCount\(g_inbox_ws_count\)/g) || []).length, 2);
+  const keys = between('fn handleInboxKey(', 'fn ');
+  assert.match(keys, /moveInboxSplit\(wp == 2, false\)/);
+  assert.match(keys, /moveInboxSplit\(wp == 7, true\)/);
+  const navigation = between('fn moveInboxSplit(', 'fn inboxVisibleCount(');
+  assert.match(navigation, /frequent\.builtinSplits\(g_layout_settings orelse \.\{\}\)/);
+  assert.match(navigation, /if \(inboxSplitVisible\(tab\)\)/);
   assert.match(source, /const INBOX_MAX_SPLIT_TABS: usize = INBOX_MAX_WS \+ @import\("frequent.zig"\)\.first_ws_split/);
   assert.match(source, /g_inbox_step_context_tab > frequent\.splitCount\(g_inbox_ws_count\) - 1/);
 });

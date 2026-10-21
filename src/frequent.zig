@@ -9,6 +9,42 @@ pub const first_ws_split: u32 = 3;
 pub const frequent_split: u32 = 0;
 pub const all_split: u32 = 1;
 pub const favorites_split: u32 = 2;
+pub const Settings = struct {
+    frequent: bool = true,
+    favorites: bool = true,
+    all: bool = true,
+    frequent_first: bool = true,
+};
+
+pub const BuiltinSplits = struct {
+    ids: [3]u32 = undefined,
+    len: usize = 0,
+
+    pub fn slice(self: *const BuiltinSplits) []const u32 {
+        return self.ids[0..self.len];
+    }
+};
+
+pub fn builtinSplits(settings: Settings) BuiltinSplits {
+    var result: BuiltinSplits = .{};
+    const order: [3]u32 = if (settings.frequent_first) .{ frequent_split, all_split, favorites_split } else .{ all_split, favorites_split, frequent_split };
+    for (order) |id| {
+        const visible = switch (id) {
+            frequent_split => settings.frequent,
+            favorites_split => settings.favorites,
+            else => settings.all,
+        };
+        if (!visible) continue;
+        result.ids[result.len] = id;
+        result.len += 1;
+    }
+    if (result.len == 0) {
+        result.ids[0] = all_split;
+        result.len = 1;
+    }
+    return result;
+}
+
 pub const SplitKind = union(enum) { all, favorites, frequent, workspace: u32 };
 
 pub fn splitKind(tab: u32) SplitKind {
@@ -232,4 +268,25 @@ test "used Windows clock and stamp throttle unchanged" {
     try std.testing.expect(shouldStamp(1, 60002, true));
     try std.testing.expect(!shouldStamp(60002, 1, true));
     try std.testing.expect(shouldStamp(1, 2, false));
+}
+
+test "ISSUE-423 builtins order hiding and all-hidden fallback for every flag combination" {
+    for (0..16) |bits| {
+        const settings = Settings{ .frequent = bits & 1 != 0, .favorites = bits & 2 != 0, .all = bits & 4 != 0, .frequent_first = bits & 8 != 0 };
+        const actual = builtinSplits(settings);
+        var expected: std.ArrayList(u32) = .empty;
+        defer expected.deinit(std.testing.allocator);
+        if (settings.frequent and settings.frequent_first) try expected.append(std.testing.allocator, frequent_split);
+        if (settings.all) try expected.append(std.testing.allocator, all_split);
+        if (settings.favorites) try expected.append(std.testing.allocator, favorites_split);
+        if (settings.frequent and !settings.frequent_first) try expected.append(std.testing.allocator, frequent_split);
+        if (expected.items.len == 0) try expected.append(std.testing.allocator, all_split);
+        try std.testing.expectEqualSlices(u32, expected.items, actual.slice());
+    }
+    const after_favorites = builtinSplits(.{ .frequent_first = false });
+    try std.testing.expectEqualSlices(u32, &.{ all_split, favorites_split, frequent_split }, after_favorites.slice());
+    const after_all = builtinSplits(.{ .frequent_first = false, .favorites = false });
+    try std.testing.expectEqualSlices(u32, &.{ all_split, frequent_split }, after_all.slice());
+    const fallback = builtinSplits(.{ .frequent = false, .favorites = false, .all = false });
+    try std.testing.expectEqualSlices(u32, &.{all_split}, fallback.slice());
 }

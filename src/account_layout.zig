@@ -33,6 +33,7 @@ pub fn publishNeeded(local: Layout, base: Layout, synced: Layout) bool {
 }
 
 fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
+    if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
     for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
@@ -60,7 +61,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
         try tabs.append(a, tab);
     }
     if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
-    return .{ .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
@@ -81,7 +82,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
         try tabs.insert(a, @min(i, tabs.items.len), t);
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, .{ .name = t.workspace });
     }
-    return .{ .revision = edited.revision, .hosts = edited.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layout {
@@ -158,7 +159,15 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             dest += 1;
         };
     }
-    const result = Layout{ .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    var settings = remote.settings;
+    inline for (std.meta.fields(layout.Settings)) |field| {
+        const value = @field(edited.settings orelse layout.Settings{}, field.name);
+        if (value != @field(base.settings orelse layout.Settings{}, field.name)) {
+            if (settings == null) settings = .{};
+            @field(settings.?, field.name) = value;
+        }
+    }
+    const result = Layout{ .settings = settings, .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
     try layout.validate(result);
     return result;
 }
@@ -264,6 +273,13 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         }
         try value.object.put(a, "name", .{ .string = w.name });
         try workspaces.append(value);
+    }
+    if (remote.settings) |settings| {
+        var value: std.json.Value = .{ .object = .empty };
+        inline for (std.meta.fields(layout.Settings)) |field| try value.object.put(a, field.name, .{ .bool = @field(settings, field.name) });
+        try root.object.put(a, "settings", value);
+    } else {
+        _ = root.object.swapRemove("settings");
     }
     try root.object.put(a, "tabs", .{ .array = records });
     try root.object.put(a, "workspaces", .{ .array = workspaces });
@@ -754,4 +770,80 @@ test "input cache keeps maximum without using Windows epoch or used history" {
     const prepared = try prepareCache(a, "{\"tabs\":[{\"tmux_session\":\"one\",\"tmux_host\":0,\"input\":3000,\"used\":9999}]}", .{ .workspaces = &test_ws, .tabs = &.{remote} });
     const parsed = try std.json.parseFromSlice(std.json.Value, a, prepared, .{});
     try std.testing.expectEqual(@as(u64, 3000), @import("json_reader.zig").uint(parsed.value.object.get("tabs").?.array.items[0], "input"));
+}
+
+test "ISSUE-423 settings rebase merges only locally changed keys including implicit defaults" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    inline for (std.meta.fields(layout.Settings)) |changed| {
+        for ([_]bool{ false, true }) |before| {
+            var base = initial;
+            if (!before) base.settings = .{ .frequent = false, .favorites = false, .all = false, .frequent_first = false };
+            var edited = base;
+            if (edited.settings == null) edited.settings = .{};
+            @field(edited.settings.?, changed.name) = !before;
+            var remote = initial;
+            remote.settings = .{ .frequent = false, .favorites = false, .all = false, .frequent_first = false };
+            const result = try rebase(a, base, edited, remote);
+            inline for (std.meta.fields(layout.Settings)) |field| {
+                const expected = if (eq(u8, changed.name, field.name)) !before else false;
+                try std.testing.expectEqual(expected, @field(result.settings.?, field.name));
+            }
+            const missing = try rebase(a, base, edited, initial);
+            inline for (std.meta.fields(layout.Settings)) |field| {
+                const expected = if (eq(u8, changed.name, field.name)) !before else true;
+                try std.testing.expectEqual(expected, @field(missing.settings orelse layout.Settings{}, field.name));
+            }
+            try std.testing.expect(publishNeeded(edited, base, base));
+        }
+    }
+    var remote = initial;
+    remote.settings = .{ .favorites = false };
+    remote.hosts = &.{.{ .slot = 0, .name = "Host 1", .hostname = "example.com", .port = 22, .user = "owner" }};
+    var rename = initial;
+    var tab = one;
+    tab.name = "Renamed";
+    rename.tabs = &.{ tab, two };
+    const result = try rebase(a, initial, rename, remote);
+    try std.testing.expectEqualDeep(remote.settings, result.settings);
+    try std.testing.expectEqualDeep(remote.hosts, result.hosts);
+    const reset = try rebase(a, remote, initial, remote);
+    try std.testing.expect(reset.settings.?.favorites);
+    const unchanged = try rebase(a, initial, initial, initial);
+    try std.testing.expectEqual(@as(?layout.Settings, null), unchanged.settings);
+}
+
+test "ISSUE-423 settings survive apply held edits cache and layout encoding" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var remote = initial;
+    remote.settings = .{ .frequent = false, .frequent_first = false };
+    remote.hosts = &.{.{ .slot = 0, .name = "Host 1", .hostname = "example.com", .port = 22, .user = "owner" }};
+    const applied = try apply(a, initial, &.{ true, true }, remote, 9, 256);
+    try std.testing.expectEqualDeep(remote.settings, applied.settings);
+    try std.testing.expectEqualDeep(remote.hosts, applied.hosts);
+    const held = try keepHeld(a, initial, remote, &.{});
+    try std.testing.expectEqualDeep(remote.settings, held.settings);
+    try std.testing.expectEqualDeep(remote.hosts, held.hosts);
+    const json = try layout.encode(a, held);
+    const parsed = try layout.parse(a, json);
+    defer parsed.deinit();
+    try std.testing.expectEqualDeep(remote.settings, parsed.value.settings);
+    try std.testing.expectEqualDeep(remote.hosts, parsed.value.hosts);
+    const cache = try prepareCache(a, "{\"tabs\":[],\"settings\":{\"favorites\":false}}", remote);
+    const saved = try std.json.parseFromSlice(std.json.Value, a, cache, .{});
+    defer saved.deinit();
+    try std.testing.expect(!saved.value.object.get("settings").?.object.get("frequent").?.bool);
+    try std.testing.expect(saved.value.object.get("settings").?.object.get("favorites").?.bool);
+    const reset = try prepareCache(a, cache, initial);
+    const defaults = try std.json.parseFromSlice(std.json.Value, a, reset, .{});
+    defer defaults.deinit();
+    try std.testing.expect(!defaults.value.object.contains("settings"));
+    try std.testing.expect(!equal(initial, remote));
+    var explicit_defaults = initial;
+    explicit_defaults.settings = .{};
+    try std.testing.expect(equal(initial, explicit_defaults));
+    try std.testing.expect(!publishNeeded(initial, explicit_defaults, explicit_defaults));
 }

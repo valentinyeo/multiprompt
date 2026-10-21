@@ -650,6 +650,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         pos += hpf.len;
     }
 
+    if (app_state.g_layout_settings) |settings| {
+        const text = std.fmt.bufPrint(json_buf[pos..], ",\"settings\":{{\"frequent\":{},\"favorites\":{},\"all\":{},\"frequent_first\":{}}}", .{ settings.frequent, settings.favorites, settings.all, settings.frequent_first }) catch return false;
+        pos += text.len;
+    }
     const split_state = std.fmt.bufPrint(json_buf[pos..], ",\"inbox_tab\":{d},\"inbox_visits_order\":true", .{app_state.g_inbox_tab}) catch return false;
     pos += split_state.len;
     if (app_state.g_single_window and pos + 256 < json_buf.len) {
@@ -1385,6 +1389,14 @@ pub fn restoreSession() u32 {
             var name: [201]u8 = .{0} ** 201;
             const n = json_reader.copyString(json, key, &name);
             if (n > 0) chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], name[0..n]);
+        }
+    }
+    const saved_settings = json_reader.field(json, "settings");
+    if (saved_settings != .null) {
+        const parsed_settings = std.json.parseFromValue(@import("frequent.zig").Settings, std.heap.page_allocator, saved_settings, .{}) catch null;
+        if (parsed_settings) |settings| {
+            app_state.g_layout_settings = settings.value;
+            settings.deinit();
         }
     }
     app_state.g_inbox_tab = @import("frequent.zig").migrateSplit(@intCast(@min(json_reader.uint(json, "inbox_tab"), std.math.maxInt(u32))), json_reader.boolTrue(json, "inbox_visits_order"));

@@ -17,7 +17,9 @@ pub const Tab = struct {
     tmux_host: u8,
     workspace: []const u8,
 };
+pub const Settings = @import("frequent.zig").Settings;
 pub const Layout = struct {
+    settings: ?Settings = null,
     schema: u32 = 1,
     revision: u64 = 0,
     workspaces: []const Workspace,
@@ -81,6 +83,11 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
     const parsed = try std.json.parseFromSlice(Layout, a, json, .{ .allocate = .alloc_always });
     errdefer parsed.deinit();
     try validate(parsed.value);
+    if (parsed.value.settings == null) {
+        const value = try std.json.parseFromSlice(std.json.Value, a, json, .{});
+        defer value.deinit();
+        if (value.value.object.contains("settings")) return error.InvalidLayout;
+    }
     return parsed;
 }
 
@@ -130,7 +137,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     if (workspaces.items.len > max_workspaces or tabs.items.len > max_tabs) return error.LayoutCapacity;
     const ws = try workspaces.toOwnedSlice(a);
     errdefer a.free(ws);
-    return .{ .revision = server.revision, .hosts = server.hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = server.settings, .revision = server.revision, .hosts = server.hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
 }
 
 fn freeMerge(a: Allocator, layout: Layout) void {
@@ -450,4 +457,51 @@ test "null hosts are omitted from layout JSON while an empty slice is explicit" 
     const present = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, with_hosts, .{});
     defer present.deinit();
     try std.testing.expectEqual(@as(usize, 0), present.value.object.get("hosts").?.array.items.len);
+}
+
+test "ISSUE-423 real layout parser preserves hosts, hides Frequent and defaults missing flags to true" {
+    const frequent = @import("frequent.zig");
+    const parsed = try parse(std.testing.allocator, "{\"schema\":1,\"workspaces\":[],\"tabs\":[],\"settings\":{\"frequent\":false},\"hosts\":[{\"slot\":0,\"name\":\"Host 1\",\"hostname\":\"example.com\",\"port\":22,\"user\":\"owner\"}]}");
+    defer parsed.deinit();
+    const splits = frequent.builtinSplits(parsed.value.settings orelse .{});
+    try std.testing.expectEqualSlices(u32, &.{ frequent.all_split, frequent.favorites_split }, splits.slice());
+    const settings = parsed.value.settings.?;
+    try std.testing.expect(!settings.frequent and settings.favorites and settings.all and settings.frequent_first);
+    const json = try encode(std.testing.allocator, parsed.value);
+    defer std.testing.allocator.free(json);
+    const again = try parse(std.testing.allocator, json);
+    defer again.deinit();
+    try std.testing.expectEqualDeep(parsed.value.settings, again.value.settings);
+    try std.testing.expectEqualStrings("example.com", again.value.hosts.?[0].hostname);
+    const merged = try merge(std.testing.allocator, parsed.value, again.value, 9, 256);
+    defer freeMerge(std.testing.allocator, merged);
+    try std.testing.expectEqualDeep(again.value.settings, merged.settings);
+    try std.testing.expectEqualDeep(again.value.hosts, merged.hosts);
+    for ([_][]const u8{ "{\"workspaces\":[],\"tabs\":[]}", "{\"workspaces\":[],\"tabs\":[],\"settings\":{}}" }) |raw| {
+        const defaults = try parse(std.testing.allocator, raw);
+        defer defaults.deinit();
+        const order = frequent.builtinSplits(defaults.value.settings orelse .{});
+        try std.testing.expectEqualSlices(u32, &.{ frequent.frequent_split, frequent.all_split, frequent.favorites_split }, order.slice());
+    }
+}
+
+test "ISSUE-423 settings reject unknown keys and every nonboolean value through real parse" {
+    for ([_][]const u8{ "null", "[]", "false", "0", "\"settings\"", "{\"extra\":true}", "{\"frequent\":false,\"extra\":false}", "{\"frequent\":true,\"frequent\":false}" }) |settings| {
+        const raw = try std.fmt.allocPrint(std.testing.allocator, "{{\"workspaces\":[],\"tabs\":[],\"settings\":{s}}}", .{settings});
+        defer std.testing.allocator.free(raw);
+        if (parse(std.testing.allocator, raw)) |parsed| {
+            parsed.deinit();
+            return error.ExpectedRejection;
+        } else |_| {}
+    }
+    inline for (std.meta.fields(Settings)) |field| {
+        for ([_][]const u8{ "null", "0", "1", "\"false\"", "[]", "{}" }) |value| {
+            const raw = try std.fmt.allocPrint(std.testing.allocator, "{{\"workspaces\":[],\"tabs\":[],\"settings\":{{\"{s}\":{s}}}}}", .{ field.name, value });
+            defer std.testing.allocator.free(raw);
+            if (parse(std.testing.allocator, raw)) |parsed| {
+                parsed.deinit();
+                return error.ExpectedRejection;
+            } else |_| {}
+        }
+    }
 }
