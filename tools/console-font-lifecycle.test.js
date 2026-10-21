@@ -47,6 +47,9 @@ function creation(name, signature) {
 }
 
 function harness() {
+  const state = read('app_state.zig');
+  const shellIds = state.match(/^pub const SPAWN_TITLE_CAP: usize = \d+;$/m)[0] + '\n' +
+    ['allocateShellId', 'allocateShellIdFrom'].map(name => fn(state, name)).join('\n');
   const core = ['applyThemedConsoleFont', 'applyBlackConsoleBackground', 'applyConsoleThemeToAllShells',
     'mainWindowDpi', 'syncMainWindowDpi', 'baseFont96', 'viewportGrowthNeedsRemoteRedraw',
     'normalizeAttachedConsoleViewport', 'normalizeConsoleFont', 'fontGenStale', 'nextStaleFontShell',
@@ -94,7 +97,7 @@ fn pollFonts() void {
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
-  return prelude + `\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
+  return prelude + `\n${shellIds}\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
 }
 
 const prelude = String.raw`
@@ -342,7 +345,7 @@ fn updateMainWindowTitle() void {}
 fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
 fn prepare() BundledConsoleFonts {
-    shells = @splat(.{}); shell_count = 0; active_shell = 0; next_pid = 2;
+    shells = @splat(.{}); shell_count = 0; active_shell = 0; next_shell_id = 1; next_pid = 2;
     consoles = @splat(.{}); attached = 0; registered_hack = false; registrations = 0; removals = 0;
     event_count = 0; writes = 0; resets = 0; redraws = 0; read_failures = 0;
     fail_set = false; reject_hack = false; fail_attach = false; fail_registration = false; selection_errors = 0;
@@ -542,7 +545,7 @@ test "registration failure cannot masquerade as Hack and mintty bypasses conhost
 
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
   const source = harness();
-  for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel']) {
+  for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel', 'allocateShellId', 'allocateShellIdFrom']) {
     assert.ok(source.includes(`fn ${name}(`), name);
   }
   assert.match(source, /var g_starred_workspace = false/);
