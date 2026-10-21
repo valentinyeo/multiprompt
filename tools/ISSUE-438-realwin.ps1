@@ -83,7 +83,9 @@ try {
     $app = Start-Process "$SourceRoot/zig-out/bin/multiprompt.exe" -ArgumentList '--no-window-restore' -PassThru
     $transcript = Wait-For 'transcript window' { $h=[Desktop438]::Transcript(); if($h -ne [IntPtr]::Zero) { $h } }
     $parent = [Desktop438]::GetParent($transcript)
-    [void][Desktop438]::MoveWindow($parent, 20, 20, 1180, 820, $true)
+    $windowWidth = [Math]::Min(1180, [Desktop438]::GetSystemMetrics(0) - 40)
+    $windowHeight = [Math]::Min(820, [Desktop438]::GetSystemMetrics(1) - 40)
+    [void][Desktop438]::MoveWindow($parent, 20, 20, $windowWidth, $windowHeight, $true)
     [void][Desktop438]::SetForegroundWindow($parent)
     $shellPid = Wait-For 'restored CMD pid' { try { $p=(Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs[0].pid; if($p -gt 0) { $p } } catch {} }
     & "$Output/claude.exe" --start $shellPid
