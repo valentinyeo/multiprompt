@@ -7,3 +7,10 @@
 The optional WebView2 prototype requires Microsoft's WebView2 SDK and runtime, which are not distributed here. Obtain them from Microsoft and follow their license terms.
 
 JavaScript dependencies are installed separately with npm; their packages include their respective licenses. Zig is a separately installed toolchain.
+
+`src/fonts/Hack-Regular.ttf` and `src/fonts/Hack-Bold.ttf` are unmodified upstream [Hack v3.003](https://github.com/source-foundry/Hack/tree/v3.003/build/ttf) by Source Foundry. Source Foundry work is MIT licensed, DejaVu work is public domain, and Bitstream Vera work carries its included license. Complete copyright, trademark, and permission notices are in [src/fonts/LICENSE-Hack.md](src/fonts/LICENSE-Hack.md).
+
+SHA-256 (upstream v3.003):
+
+- Hack-Regular.ttf: `15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125`
+- Hack-Bold.ttf: `5bbf531eff7f8a0c2559c9a0656718e2828a012a9b1f60b5f54006d59a4de8d4`

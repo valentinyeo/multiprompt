@@ -413,8 +413,8 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
 }
 
 pub const BundledConsoleFonts = struct {
-    paths: [4][520]u16 = std.mem.zeroes([4][520]u16),
-    registered: [4]bool = @splat(false),
+    paths: [3][520]u16 = std.mem.zeroes([3][520]u16),
+    registered: [3]bool = @splat(false),
 };
 
 pub fn registerBundledConsoleFonts() BundledConsoleFonts {
@@ -432,10 +432,9 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
     directory[local_len + 15] = 0;
     _ = w.CreateDirectoryW(@ptrCast(&directory), null);
     const files = .{
-        .{ "NordwandMono-Regular.ttf", @embedFile("fonts/NordwandMono-Regular.ttf") },
-        .{ "NordwandMono-Bold.ttf", @embedFile("fonts/NordwandMono-Bold.ttf") },
-        .{ "NordwandMono-SemiBold.ttf", @import("fonts.zig").MONO_SEMIBOLD },
-        .{ "LICENSE-NordwandMono.txt", @embedFile("fonts/LICENSE-NordwandMono.txt") },
+        .{ "Hack-Regular.ttf", @embedFile("fonts/Hack-Regular.ttf") },
+        .{ "Hack-Bold.ttf", @embedFile("fonts/Hack-Bold.ttf") },
+        .{ "LICENSE-Hack.md", @embedFile("fonts/LICENSE-Hack.md") },
     };
     inline for (files, 0..) |file, i| {
         const path = &result.paths[i];
@@ -458,7 +457,10 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
                 _ = CloseHandle(output);
             }
         }
-        if (i < 3 and cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
+        if (i < 2) {
+            if (cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
+            if (!result.registered[i]) debugLog("[consolefont] shell font registration failed");
+        }
     }
     return result;
 }
@@ -469,21 +471,25 @@ pub fn unregisterBundledConsoleFonts(fonts: *const BundledConsoleFonts) void {
     }
 }
 
-fn applyThemedConsoleFont(h: HANDLE, captured: *const CONSOLE_FONT_INFOEX) void {
-    if (!LOOK_UNIFIED) return;
-    ensureDevThemeInitialized();
-    var themed = captured.*;
+fn applyThemedConsoleFont(h: HANDLE, height: i16) bool {
+    var themed = std.mem.zeroes(CONSOLE_FONT_INFOEX);
     themed.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
-    var font_h = app_state.g_dev_theme.console_font_height;
-    if (font_h < 1) font_h = captured.dwFontSize.y;
-    if (font_h > 72) font_h = 72;
-    themed.dwFontSize.x = 0;
-    themed.dwFontSize.y = @intCast(font_h);
-    themed.FontWeight = 600;
-    themed.FaceName = std.mem.zeroes([32]u16);
-    const face = std.mem.span(L(@import("fonts.zig").MONO_FACE));
+    themed.dwFontSize.y = height;
+    themed.FontFamily = 54;
+    themed.FontWeight = @import("fonts.zig").SHELL_WEIGHT;
+    const face = std.mem.span(L(@import("fonts.zig").SHELL_FACE));
     @memcpy(themed.FaceName[0..face.len], face);
-    _ = SetCurrentConsoleFontEx(h, 0, &themed);
+    if (SetCurrentConsoleFontEx(h, 0, &themed) == 0) {
+        debugLog("[consolefont] shell font selection failed");
+        return false;
+    }
+    var actual = std.mem.zeroes(CONSOLE_FONT_INFOEX);
+    actual.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
+    const selected = GetCurrentConsoleFontEx(h, 0, &actual) != 0 and
+        std.mem.eql(u16, std.mem.sliceTo(&actual.FaceName, 0), face) and
+        actual.FontWeight == themed.FontWeight and actual.dwFontSize.y > 0;
+    if (!selected) debugLog("[consolefont] shell font selection failed");
+    return selected;
 }
 
 pub fn applyBlackConsoleBackground(pid: DWORD) void {
@@ -494,7 +500,7 @@ pub fn applyBlackConsoleBackground(pid: DWORD) void {
     const h = GetStdHandle(STD_OUTPUT_HANDLE);
     if (h == null) return;
 
-    var font: CONSOLE_FONT_INFOEX = undefined;
+    var font = std.mem.zeroes(CONSOLE_FONT_INFOEX);
     font.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
     const font_ok = GetCurrentConsoleFontEx(h, 0, &font) != 0;
 
@@ -561,12 +567,13 @@ pub fn applyBlackConsoleBackground(pid: DWORD) void {
         }
     }
 
-    if (LOOK_UNIFIED) {
-        if (font_ok) applyThemedConsoleFont(h, &font);
-    } else if (app_state.g_dev_saved_console_theme_valid) {
-        _ = SetCurrentConsoleFontEx(h, 0, &app_state.g_dev_saved_console_font);
-    } else if (font_ok) {
-        _ = SetCurrentConsoleFontEx(h, 0, &font);
+    ensureDevThemeInitialized();
+    const font_h: i16 = @intCast(std.math.clamp(app_state.g_dev_theme.console_font_height, 1, 72));
+    if (!applyThemedConsoleFont(h, font_h)) {
+        for (0..app_state.shell_count) |si| {
+            if (app_state.shells[si].pid == pid) app_state.shells[si].font_gen = app_state.g_font_gen -% 1;
+        }
+        return;
     }
 
     if (LOOK_UNIFIED) {
@@ -595,9 +602,6 @@ pub fn applyBlackConsoleBackground(pid: DWORD) void {
                         if (app_state.shells[si].pid == pid and app_state.shells[si].base_font_h == 0) {
                             app_state.shells[si].base_font_h = f2.dwFontSize.y;
                             app_state.shells[si].base_font_w = f2.dwFontSize.x;
-                            app_state.shells[si].base_font_face = f2.FaceName;
-                            app_state.shells[si].base_font_family = f2.FontFamily;
-                            app_state.shells[si].base_font_weight = f2.FontWeight;
                             app_state.shells[si].base_font_dpi = @intCast(mainWindowDpi());
                             if (verboseLoggingEnabled()) {
                                 var db: [96]u8 = undefined;
@@ -705,8 +709,7 @@ fn normalizeAttachedConsoleViewport(i: usize, h: HANDLE, font: *const CONSOLE_FO
     }
 
     if (SetConsoleScreenBufferInfoEx(h, &info) == 0) return false;
-    var restored_font = font.*;
-    _ = SetCurrentConsoleFontEx(h, 0, &restored_font);
+    if (!applyThemedConsoleFont(h, font.dwFontSize.y)) return false;
     if (needs_remote_redraw) requestRemoteTmuxPaneRedraw(@intCast(i));
     return true;
 }
@@ -714,8 +717,12 @@ fn normalizeAttachedConsoleViewport(i: usize, h: HANDLE, font: *const CONSOLE_FO
 pub fn normalizeConsoleFont(i: usize, det_pid: DWORD) bool {
     if (det_pid == 0) return false;
     if (i >= app_state.shell_count) return false;
-    if (app_state.shells[i].kind == .gitbash) return false;
+    if (app_state.shells[i].kind == .gitbash) {
+        app_state.shells[i].font_gen = app_state.g_font_gen;
+        return false;
+    }
 
+    app_state.shells[i].font_gen = app_state.g_font_gen -% 1;
     _ = FreeConsole();
     if (AttachConsole(det_pid) == 0) {
         debugLog("[normfont] attach failed");
@@ -734,9 +741,6 @@ pub fn normalizeConsoleFont(i: usize, det_pid: DWORD) bool {
         if (cur.dwFontSize.y <= 0 or cur.dwFontSize.x <= 0) return false;
         app_state.shells[i].base_font_h = cur.dwFontSize.y;
         app_state.shells[i].base_font_w = cur.dwFontSize.x;
-        app_state.shells[i].base_font_face = cur.FaceName;
-        app_state.shells[i].base_font_family = cur.FontFamily;
-        app_state.shells[i].base_font_weight = cur.FontWeight;
         app_state.shells[i].base_font_dpi = @intCast(mainWindowDpi());
         if (verboseLoggingEnabled()) {
             var db0: [96]u8 = undefined;
@@ -758,32 +762,25 @@ pub fn normalizeConsoleFont(i: usize, det_pid: DWORD) bool {
     const target_h: i16 = @intCast(th);
 
     const diff = @as(i32, cur.dwFontSize.y) - @as(i32, target_h);
-    if (diff >= -1 and diff <= 1) return normalizeAttachedConsoleViewport(i, h, &cur);
-
-    if (verboseLoggingEnabled()) {
-        var db: [200]u8 = undefined;
-        const ds = std.fmt.bufPrint(&db, "[normfont] fix i={d} det={d} base={d}@{d}dpi cur_dpi={d} cur={d} target={d}", .{ i, det_pid, app_state.shells[i].base_font_h, app_state.shells[i].base_font_dpi, cur_dpi, cur.dwFontSize.y, target_h }) catch "[normfont fmt]";
-        debugLog(ds);
+    const intended_face = std.mem.span(L(@import("fonts.zig").SHELL_FACE));
+    var changed = false;
+    if (diff < -1 or diff > 1 or
+        !std.mem.eql(u16, std.mem.sliceTo(&cur.FaceName, 0), intended_face) or
+        cur.FontWeight != @import("fonts.zig").SHELL_WEIGHT or cur.FontFamily != 54)
+    {
+        if (!applyThemedConsoleFont(h, target_h)) return false;
+        cur.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
+        if (GetCurrentConsoleFontEx(h, 0, &cur) == 0) return false;
+        changed = true;
     }
-
-    var f: CONSOLE_FONT_INFOEX = undefined;
-    f.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
-    f.nFont = 0;
-    f.dwFontSize.y = target_h;
-    f.dwFontSize.x = 0;
-    f.FaceName = app_state.shells[i].base_font_face;
-    f.FontFamily = app_state.shells[i].base_font_family;
-    f.FontWeight = app_state.shells[i].base_font_weight;
-    _ = SetCurrentConsoleFontEx(h, 0, &f);
-
-    var f2: CONSOLE_FONT_INFOEX = undefined;
-    f2.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
-    if (GetCurrentConsoleFontEx(h, 0, &f2) != 0 and f2.dwFontSize.x > 0) {
-        app_state.g_dev_console_cell_w = @intCast(f2.dwFontSize.x);
-        _ = normalizeAttachedConsoleViewport(i, h, &f2);
-    }
-
-    return true;
+    if (cur.dwFontSize.x > 0) app_state.g_dev_console_cell_w = @intCast(cur.dwFontSize.x);
+    if (normalizeAttachedConsoleViewport(i, h, &cur)) changed = true;
+    cur.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
+    if (GetCurrentConsoleFontEx(h, 0, &cur) != 0 and
+        std.mem.eql(u16, std.mem.sliceTo(&cur.FaceName, 0), intended_face) and
+        cur.FontWeight == @import("fonts.zig").SHELL_WEIGHT)
+        app_state.shells[i].font_gen = app_state.g_font_gen;
+    return changed;
 }
 
 pub fn fontGenStale(shell_gen: u32, global_gen: u32) bool {
@@ -798,7 +795,8 @@ test "font sync: a console is stale only until it has been synced to the current
 }
 
 fn nextStaleFontShell() ?usize {
-    for (0..app_state.shell_count) |k| {
+    for (0..app_state.shell_count) |offset| {
+        const k = (app_state.g_font_sync_done + offset) % app_state.shell_count;
         if (fontGenStale(app_state.shells[k].font_gen, app_state.g_font_gen)) return k;
     }
     return null;
@@ -826,7 +824,6 @@ pub fn fontSyncMarkAllStale(hwnd: HANDLE, reason: []const u8) void {
 
 pub fn fontSyncActiveNow() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    app_state.shells[app_state.active_shell].font_gen = app_state.g_font_gen;
     if (shellProcessAliveForRead(app_state.active_shell)) {
         _ = normalizeConsoleFont(app_state.active_shell, app_state.shells[app_state.active_shell].pid);
     }
@@ -834,8 +831,10 @@ pub fn fontSyncActiveNow() void {
 
 pub fn fontSyncShell(i: usize) bool {
     if (i >= app_state.shell_count) return false;
-    app_state.shells[i].font_gen = app_state.g_font_gen;
-    if (app_state.shells[i].hwnd == null or !shellProcessAliveForRead(i)) return false;
+    if (app_state.shells[i].hwnd == null or !shellProcessAliveForRead(i)) {
+        app_state.shells[i].font_gen = app_state.g_font_gen;
+        return false;
+    }
     const t0 = GetTickCount64();
     const saved_cell_w = app_state.g_dev_console_cell_w;
     const changed = normalizeConsoleFont(i, app_state.shells[i].pid);
@@ -1691,10 +1690,10 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             },
             .gitbash => {
                 if (!appendWideAscii(buf, &pos, "\"C:\\Program Files\\Git\\usr\\bin\\mintty.exe\" --nodaemon")) return null;
+                if (!appendMinttyStringOption(buf, &pos, "Font", std.mem.span(L(@import("fonts.zig").SHELL_FACE)))) return null;
+                if (!appendMinttyDecimalOption(buf, &pos, "FontHeight", minttyFontHeightFromConsoleHeight())) return null;
                 if (devThemeOn()) {
                     ensureDevThemeInitialized();
-                    if (!appendMinttyStringOption(buf, &pos, "Font", &app_state.g_dev_theme.console_font)) return null;
-                    if (!appendMinttyDecimalOption(buf, &pos, "FontHeight", minttyFontHeightFromConsoleHeight())) return null;
                     if (!appendMinttyColorOption(buf, &pos, "BackgroundColour", themeConsoleBg())) return null;
                     if (!appendMinttyColorOption(buf, &pos, "ForegroundColour", themeConsoleFg())) return null;
                     if (!appendMinttyColorOption(buf, &pos, "CursorColour", customColorOr("accent", RGB(79, 168, 255)))) return null;

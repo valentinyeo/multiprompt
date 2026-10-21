@@ -58,7 +58,7 @@ fn resetDevThemeDefaults() void {
     app_state.g_dev_theme.subtitle_weight = 400;
     app_state.g_dev_theme.close_weight = 400;
     app_state.g_dev_theme.console_font_height = 18;
-    app_state.g_dev_theme.console_font_weight = 600;
+    app_state.g_dev_theme.console_font_weight = @import("fonts.zig").SHELL_WEIGHT;
     app_state.g_dev_theme.sidebar_bg = RGB(3, 8, 14);
     app_state.g_dev_theme.shell_bg = RGB(3, 8, 14);
     app_state.g_dev_theme.titlebar_bg = RGB(3, 8, 14);
@@ -382,13 +382,13 @@ fn parseThemeColorField(json: std.json.Value, field: []const u8, out: *DWORD) vo
 }
 
 pub fn parseThemeFontField(json: std.json.Value, field: []const u8, out: *[64]u16) void {
-    var token: [96]u8 = undefined;
-    const value = parseThemeStringField(json, field, &token) orelse return;
     if (std.mem.eql(u8, field, "console_font")) {
         setWideAscii(out, app_state.DEFAULT_CONSOLE_FONT);
-    } else {
-        _ = json_reader.wide(value, out);
+        return;
     }
+    var token: [96]u8 = undefined;
+    const value = parseThemeStringField(json, field, &token) orelse return;
+    _ = json_reader.wide(value, out);
 }
 
 pub fn loadDevThemeFromFile() void {
@@ -416,7 +416,7 @@ pub fn loadDevThemeFromFile() void {
     parseThemeIntField(json, "subtitle_weight", &app_state.g_dev_theme.subtitle_weight);
     parseThemeIntField(json, "close_weight", &app_state.g_dev_theme.close_weight);
     parseThemeIntField(json, "console_font_height", &app_state.g_dev_theme.console_font_height);
-    app_state.g_dev_theme.console_font_weight = 600;
+    app_state.g_dev_theme.console_font_weight = @import("fonts.zig").SHELL_WEIGHT;
     parseThemeColorField(json, "sidebar_bg", &app_state.g_dev_theme.sidebar_bg);
     parseThemeColorField(json, "shell_bg", &app_state.g_dev_theme.shell_bg);
     parseThemeColorField(json, "console_fg", &app_state.g_dev_theme.console_fg);
@@ -687,19 +687,47 @@ pub fn applyTitleBarTheme() void {
 }
 
 test "IGSH-443 shell face and saved font names migrate idempotently" {
-    try std.testing.expectEqualStrings("Nordwand Mono MP SemiBold", app_state.DEFAULT_CONSOLE_FONT);
+    try std.testing.expectEqualStrings("Hack", app_state.DEFAULT_CONSOLE_FONT);
     try std.testing.expect(app_state.DEFAULT_CONSOLE_FONT.len < 32);
     try std.testing.expectEqualStrings(app_state.DEFAULT_CONSOLE_FONT, app_state.DEV_CONSOLE_FONTS[app_state.DEFAULT_CONSOLE_FONT_IDX]);
-    for ([_][]const u8{ "Nordwand Mono", "Nordwand Mono SemiBold", app_state.DEFAULT_CONSOLE_FONT }) |saved| {
-        var source: [128]u8 = undefined;
-        const text = try std.fmt.bufPrint(&source, "{{\"console_font\":\"{s}\",\"console_font_height\":22}}", .{saved});
+    for ([_][]const u8{
+        "{\"console_font\":\"Nordwand Mono\",\"console_font_height\":22}",
+        "{\"console_font\":\"Nordwand Mono SemiBold\",\"console_font_height\":22}",
+        "{\"console_font\":\"Nordwand Mono MP SemiBold\",\"console_font_height\":22}",
+        "{\"console_font\":\"JetBrainsMono NFM\",\"console_font_height\":22}",
+        "{\"console_font\":\"Hack Nerd Font Mono\",\"console_font_height\":22}",
+        "{\"console_font\":\"Unknown stale family\",\"console_font_height\":22}",
+        "{\"console_font\":\"Hack\",\"console_font_height\":22}",
+    }) |text| {
         var parsed = try json_reader.parse(std.testing.allocator, text);
         defer parsed.deinit();
         var face: [64]u16 = @splat(0);
         parseThemeFontField(parsed.value, "console_font", &face);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Nordwand Mono MP SemiBold"), std.mem.sliceTo(&face, 0));
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hack"), std.mem.sliceTo(&face, 0));
         var height: i32 = 18;
         parseThemeIntField(parsed.value, "console_font_height", &height);
         try std.testing.expectEqual(@as(i32, 22), height);
+    }
+}
+
+test "IGSH-456 nested and missing saved faces preserve unrelated settings" {
+    for ([_][]const u8{
+        "{\"fonts\":{\"console_font\":\"old face\",\"console_font_height\":24,\"title_font\":\"IBM Plex Sans\"},\"colors\":{\"shell_bg\":\"#123456\"}}",
+        "{\"console_font\":null,\"console_font_height\":24,\"title_font\":\"IBM Plex Sans\",\"shell_bg\":\"#123456\"}",
+        "{\"console_font_height\":24,\"title_font\":\"IBM Plex Sans\",\"shell_bg\":\"#123456\"}",
+    }) |text| {
+        var parsed = try json_reader.parse(std.testing.allocator, text);
+        defer parsed.deinit();
+        var face: [64]u16 = @splat(0);
+        parseThemeFontField(parsed.value, "console_font", &face);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hack"), std.mem.sliceTo(&face, 0));
+        parseThemeFontField(parsed.value, "title_font", &face);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&face, 0));
+        var height: i32 = 18;
+        parseThemeIntField(parsed.value, "console_font_height", &height);
+        try std.testing.expectEqual(@as(i32, 24), height);
+        var color: DWORD = 0;
+        parseThemeColorField(parsed.value, "shell_bg", &color);
+        try std.testing.expectEqual(RGB(0x12, 0x34, 0x56), color);
     }
 }
