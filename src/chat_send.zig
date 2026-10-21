@@ -1683,6 +1683,7 @@ pub fn sshDisconnect(idx: u32, reason: []const u8) void {
     var buf: [224]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect disconnect id={d} reason={s} exit_code={d} known={} phase={s}", .{ shell.shell_id, reason, exit_code, got_code, @tagName(shell.ssh_reconnect.phase) }) catch "ssh-reconnect disconnect log-overflow");
     if (!shell.disconnected) sshRequestSessionProbe();
+    shell.ssh_reconnect.confirmDisconnect(GetTickCount64(), reason, shell.process != null and shellProcessAliveForRead(idx));
     markSshTabDisconnected(idx);
 }
 
@@ -1745,6 +1746,9 @@ pub fn sshAutoReconnectTick() void {
     }
     sshProbeStart();
     armSshReconnectTimerIfNeeded();
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected) {
+        @import("drawing.zig").invalidateReconnectContent(app_state.active_shell);
+    }
 }
 
 fn sshReconnectOk(idx: u32) void {

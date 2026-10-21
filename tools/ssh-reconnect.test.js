@@ -45,7 +45,8 @@ var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
 fn sshRequestSessionProbe() void { ssh_probe_next_tick = 0; }
-fn invalidateReconnectContent(_: u32) void {}
+var content_invalidations: usize = 0;
+fn invalidateReconnectContent(_: u32) void { content_invalidations += 1; }
 var ssh_probe_misses: [256]u8 = @splat(0);
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
@@ -89,7 +90,8 @@ fn debugLog(line: []const u8) void {
     if (std.mem.indexOf(u8, line, "reason=timeout") != null) timeout_logs += 1;
 }
 fn logSessionAuditAlways(_: []const u8) void {}
-fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+var header_notices: usize = 0;
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { header_notices += 1; }
 fn invalidateSidebar() void {}
 fn saveSession() void {}
 fn repositionActive() void {}
@@ -676,4 +678,57 @@ test "ISSUE-511 bounded probe wait" {
     try std.testing.expect(!shells[0].ssh_reconnect.awaiting_probe);
 }
 `), 'ISSUE-511 bounded probe');
+});
+
+
+test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', () => {
+  zig(runtime(`
+test "ISSUE-512 recovered tab has no stale global notice" {
+    shells[0].locked = true;
+    markSshTabDisconnected(0);
+    try std.testing.expectEqual(@as(usize, 0), header_notices);
+    shells[0].ssh_reconnect.ok();
+    shells[0].disconnected = false;
+    try std.testing.expectEqual(@as(usize, 0), header_notices);
+}
+`), 'ISSUE-512');
+});
+
+test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', () => {
+  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
+  const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
+  const paint = body('paintDisconnectedNotice', drawing);
+  assert.match(paint, /shells\[app_state\.active_shell\]/);
+  assert.match(paint, /ssh_reconnect\.noticeReason\(now, shell\.disconnected\)/);
+  assert.match(paint, /disconnected: \{s\} - Ctrl\+Shift\+R to reconnect/);
+  assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
+});
+
+test('ISSUE-512 debounced warnings refresh through quiet content invalidation and stop after recovery', () => {
+  zig(runtime(`
+test "ISSUE-512 quiet warning refresh" {
+    shells[0].process = null;
+    shells[0].disconnected = true;
+    shells[0].ssh_reconnect = .{ .phase = .disconnected, .attempts = 1, .next_tick = 60000 };
+    shells[0].ssh_reconnect.confirmDisconnect(0, "process-exit-event", false);
+    fake_now = 9999;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), content_invalidations);
+    try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, true) == null);
+    fake_now = 10000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 2), content_invalidations);
+    try std.testing.expectEqualStrings("SSH exited", shells[0].ssh_reconnect.noticeReason(fake_now, true).?);
+    shells[0].ssh_reconnect.ok();
+    shells[0].disconnected = false;
+    shells[0].process = @ptrFromInt(1);
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 2), content_invalidations);
+    try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, false) == null);
+}
+`), 'ISSUE-512 quiet');
+  assert.match(body('sshAutoReconnectTick'), /if \(app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.disconnected\) \{\s*@import\("drawing\.zig"\)\.invalidateReconnectContent\(app_state\.active_shell\);/);
+  assert.doesNotMatch(body('sshAutoReconnectTick'), /InvalidateRect\(/);
+  const paint = body('paintDisconnectedNotice', fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8'));
+  assert.match(paint, /const text = if \(shell\.ssh_reconnect\.phase == \.ended\)\s*"Session ended"\s*else if \(shell\.ssh_reconnect\.noticeReason/);
 });

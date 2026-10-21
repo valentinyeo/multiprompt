@@ -191,9 +191,13 @@ test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the 
   fs.writeFileSync(fixture, JSON.stringify({ type: 'assistant', timestamp: '2026-10-03T12:34:00Z', message: { role: 'assistant', id: 'message-1', content: [ { type: 'text', text: 'Before the tool.' }, { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/work/a.txt' } }, { type: 'text', text: 'After the tool.' } ] } }) + '\n');
   const script = `import importlib.util,json,sys
 from pathlib import Path
+if sys.platform == 'win32': sys.modules['pwd'] = type(sys)('pwd')
 spec=importlib.util.spec_from_file_location('reader',sys.argv[1])
 r=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
+if sys.platform == 'win32':
+    assert r.conversation_owner(str(Path.home() / 'work')) is None
+    assert r.tmux_owner_process('claude','term-1',None) is None
 r.resolve_response_path=lambda *args: ('claude','sid',Path(sys.argv[2]),None)
 q=dict(id=1,codex=False,sid='sid',tmux='term-1',cwd='/work',cached_sid='',inode=0,offset=0,start=0,before=0,mtime=0,probe='',source_offsets=True)
 wire=r.response(q)

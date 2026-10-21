@@ -2239,6 +2239,7 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (k != .vps and k != .vps2 and k != .tmux) return;
     if (app_state.shells[idx].ssh_reconnect.phase == .closed or app_state.shells[idx].ssh_reconnect.phase == .ended) return;
     const state_changed = !app_state.shells[idx].disconnected;
+    app_state.shells[idx].ssh_reconnect.confirmDisconnect(GetTickCount64(), "console-missing", app_state.shells[idx].process != null and shellProcessAliveForRead(idx));
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
