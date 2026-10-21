@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.788", .items = &.{
+        .{ .text = "Links with non-English letters in Chat View now open the correct address.", .ticket = "IGSH-403" },
+        .{ .text = "Android crash reports can be read newest first with device names, UTC timestamps, and full stack traces.", .ticket = "IGSH-429" },
+        .{ .text = "A tab that fails to come back after a restart now shows Disconnected and reconnects by itself instead of staying blank.", .ticket = "IGSH-501" },
+        .{ .text = "Close all browser panes across every workspace from Ctrl+K while keeping their saved URLs.", .ticket = "IGSH-503" },
+    } },
     .{ .ver = "0.28.787", .items = &.{
         .{ .text = "Multiprompt opens straight to your saved chat and sidebar, without a progress bar.", .ticket = "IGSH-502" },
         .{ .text = "Connections, other tabs, the browser and sign-in checks load after the window appears.", .ticket = "IGSH-502" },
