@@ -44,7 +44,7 @@ for (const run of runs) {
     if (job.conclusion === 'skipped' || !job.started_at || !job.completed_at || job.status !== 'completed') continue;
     const queue = seconds(job.created_at || run.created_at, job.started_at);
     const duration = seconds(job.started_at, job.completed_at);
-    const testSteps = job.steps.filter(step => /^(Run tests|Run server tool tests|Run session restore fixtures)$/.test(step.name));
+    const testSteps = job.steps.filter(step => /^(Run tests|Run server tool tests|Run session restore fixtures|Sweep real zsb.exe command help|Build the account Worker|Run account Worker tests)$/.test(step.name));
     const test = testSteps.reduce((sum, step) => sum + (step.started_at && step.completed_at ? seconds(step.started_at, step.completed_at) : 0), 0);
     const sample = { run: run.id, workflow, job: job.name, push: pushKey(run), duration, queue, test, overhead: duration - test, conclusion: job.conclusion };
     samples.push(sample);
@@ -68,7 +68,8 @@ for (const [key, values] of [...rows].filter(([key]) => /^Job\|test.yml \/ test-
   const pair = field => `${fmt(percentile(values.map(item => item[field]), 0.5))} / ${fmt(percentile(values.map(item => item[field]), 0.9))}`;
   console.log(`| ${key.slice(4)} | ${pair('duration')} | ${pair('overhead')} | ${pair('test')} |`);
 }
-const successful = samples.filter(item => item.conclusion === 'success' && item.test > 0);
+const originalRuns = new Set(runs.filter(run => run.jobs.filter(job => /^test-windows \(\d+\)$/.test(job.name)).length === 8 && run.jobs.filter(job => /^test-vps \(\d+\)$/.test(job.name)).length === 3).map(run => run.id));
+const successful = samples.filter(item => originalRuns.has(item.run) && item.conclusion === 'success' && item.test > 0);
 const stats = (platform, group, field, p) => percentile(successful.filter(item => item.workflow === 'test.yml' && item.job === `test-${platform} (${group})`).map(item => item[field]), p);
 const plans = [
   [8, 3, [[1], [2], [3], [4], [5], [6], [7], [8]], [[1], [2], [3]]],
@@ -82,7 +83,7 @@ if ([1, 2, 3, 4, 5, 6, 7, 8].every(group => stats('windows', group, 'test', 0.9)
   const jobP90 = (workflow, name) => percentile(samples.filter(item => item.conclusion === 'success' && item.workflow === workflow && item.job === name).map(item => item.duration), 0.9) || 0;
   const routing = jobP90('test.yml', 'changes') + jobP90('test.yml', 'test');
   const arm64 = Math.max(jobP90('release.yml', 'build-arm64'), jobP90('test.yml', 'build-arm64'));
-  console.log(`\nShard model: successful non-STAMP samples only; sum test-step percentiles within each merged group plus maximum group setup/teardown percentile. Active Tests model adds ${routing}s routing/aggregate and the ${arm64}s arm64 critical path. Summed percentiles are conservative estimates, not a measured percentile of merged jobs. No queue prediction: fewer occupied slots are a proxy, not a causal queue estimate.`);
+  console.log(`\nHistorical 8+3 shard model: successful non-STAMP samples from original 8-Windows/3-VPS runs only; sum test-step percentiles within each merged group plus maximum group setup/teardown percentile. Active Tests model adds ${routing}s routing/aggregate and the ${arm64}s arm64 critical path. Summed percentiles are conservative estimates, not a measured percentile of merged jobs. No queue prediction: fewer occupied slots are a proxy, not a causal queue estimate.`);
   console.log('\n| Windows + VPS | Shard job-min p50 | Slowest shard p90 model (s) | Tests active p90 model (s) | Slots / 20 | Groups (Windows; VPS) |');
   console.log('|---|---:|---:|---:|---:|---|');
   for (const [windows, vps, winGroups, vpsGroups] of plans) {
