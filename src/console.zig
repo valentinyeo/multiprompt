@@ -413,8 +413,8 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
 }
 
 pub const BundledConsoleFonts = struct {
-    paths: [3][520]u16 = std.mem.zeroes([3][520]u16),
-    registered: [3]bool = .{ false, false, false },
+    paths: [4][520]u16 = std.mem.zeroes([4][520]u16),
+    registered: [4]bool = @splat(false),
 };
 
 pub fn registerBundledConsoleFonts() BundledConsoleFonts {
@@ -434,6 +434,7 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
     const files = .{
         .{ "NordwandMono-Regular.ttf", @embedFile("fonts/NordwandMono-Regular.ttf") },
         .{ "NordwandMono-Bold.ttf", @embedFile("fonts/NordwandMono-Bold.ttf") },
+        .{ "NordwandMono-SemiBold.ttf", @import("fonts.zig").MONO_SEMIBOLD },
         .{ "LICENSE-NordwandMono.txt", @embedFile("fonts/LICENSE-NordwandMono.txt") },
     };
     inline for (files, 0..) |file, i| {
@@ -457,7 +458,7 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
                 _ = CloseHandle(output);
             }
         }
-        if (i < 2 and cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
+        if (i < 3 and cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
     }
     return result;
 }
@@ -478,15 +479,10 @@ fn applyThemedConsoleFont(h: HANDLE, captured: *const CONSOLE_FONT_INFOEX) void 
     if (font_h > 72) font_h = 72;
     themed.dwFontSize.x = 0;
     themed.dwFontSize.y = @intCast(font_h);
-    var font_w = app_state.g_dev_theme.console_font_weight;
-    if (font_w < 100) font_w = @intCast(@min(captured.FontWeight, @as(UINT, 1000)));
-    if (font_w > 1000) font_w = 1000;
-    themed.FontWeight = @intCast(font_w);
+    themed.FontWeight = 600;
     themed.FaceName = std.mem.zeroes([32]u16);
-    var i: usize = 0;
-    while (i < themed.FaceName.len - 1 and i < app_state.g_dev_theme.console_font.len and app_state.g_dev_theme.console_font[i] != 0) : (i += 1) {
-        themed.FaceName[i] = app_state.g_dev_theme.console_font[i];
-    }
+    const face = std.mem.span(L(@import("fonts.zig").MONO_FACE));
+    @memcpy(themed.FaceName[0..face.len], face);
     _ = SetCurrentConsoleFontEx(h, 0, &themed);
 }
 

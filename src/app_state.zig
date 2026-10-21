@@ -472,16 +472,16 @@ pub var g_dev_saved_console_attr: WORD = 0x0007;
 pub var g_dev_saved_console_font: CONSOLE_FONT_INFOEX = undefined;
 
 pub const ISSUE_441 = true;
-pub const DEFAULT_CONSOLE_FONT = if (ISSUE_441) "Nordwand Mono" else "JetBrainsMono NFM";
+pub const DEFAULT_CONSOLE_FONT = @import("fonts.zig").MONO_FACE;
 
 pub const DEFAULT_DEV_THEME_JSON =
     \\{
     \\  "theme_revision": 11,
     \\  "name": "Dev Blue",
     \\  "fonts": {
-    \\    "title_font": "Segoe UI",
-    \\    "subtitle_font": "Segoe UI",
-    \\    "close_font": "Segoe UI",
+    \\    "title_font": "IBM Plex Sans",
+    \\    "subtitle_font": "IBM Plex Sans",
+    \\    "close_font": "IBM Plex Sans",
     \\    "console_font": "
 ++ DEFAULT_CONSOLE_FONT ++
     \\",
@@ -492,7 +492,7 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "subtitle_weight": 400,
     \\    "close_weight": 400,
     \\    "console_font_height": 18,
-    \\    "console_font_weight": 700
+    \\    "console_font_weight": 600
     \\  },
     \\  "colors": {
     \\    "sidebar_bg": "#03080E",
@@ -593,16 +593,7 @@ pub const DEV_LETTER_SPACING: i32 = 0;
 pub const DEV_SHELL_COLS: i32 = 100;
 pub const DEV_TOP_PAD: i32 = 10;
 
-pub const DEV_CONSOLE_FONTS = [_][]const u8{
-    "CaskaydiaCove NFM",
-    "CaskaydiaCove NFM SemiBold",
-    "JetBrainsMono NFM",
-    "JetBrainsMono NFM SemiBold",
-    "FiraCode Nerd Font Mono",
-    "FiraCode Nerd Font Mono SemBd",
-    "Hack Nerd Font Mono",
-    "Nordwand Mono",
-};
+pub const DEV_CONSOLE_FONTS = [_][]const u8{DEFAULT_CONSOLE_FONT};
 pub const DEFAULT_CONSOLE_FONT_IDX = blk: {
     for (DEV_CONSOLE_FONTS, 0..) |face, i| {
         if (std.mem.eql(u8, face, DEFAULT_CONSOLE_FONT)) break :blk i;
@@ -1074,8 +1065,6 @@ pub var g_chat_composer_scroll_shown: bool = false;
 pub var g_chat_font_pt: i32 = CHAT_FONT_DEFAULT_PT;
 pub const CHAT_FONT_DEFAULT_PT: i32 = 14;
 pub var g_chat_font: HANDLE = null;
-pub var g_chat_font_family_checked: bool = false;
-pub var g_chat_font_family_ok: bool = false;
 pub var g_chat_bg_brush: HANDLE = null;
 pub var g_chat_input_brush: HANDLE = null;
 pub var g_chat_bg_color: DWORD = 0;
@@ -2315,8 +2304,6 @@ pub const ChatViewLayout = struct {
     attach_btn: RECT,
     stop_btn: RECT,
 };
-
-pub const chat_font_bytes = @embedFile("fonts/IBMPlexSans-Regular.ttf");
 
 pub const CHAT_SUMMARY_VERBS = [_][]const u8{
     "searched for", "read", "ran", "edited", "wrote", "listed", "fetched", "updated", "created", "found",

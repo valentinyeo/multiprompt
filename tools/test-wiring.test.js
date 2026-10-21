@@ -111,3 +111,41 @@ for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
     }
   });
 }
+test('the public audit propagates its selected compiler to bare Zig child commands', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-toolchain-'));
+  try {
+    const selected = path.join(dir, 'selected');
+    const older = path.join(dir, 'older');
+    fs.mkdirSync(selected);
+    fs.mkdirSync(older);
+    const zig = path.join(selected, 'zig');
+    fs.writeFileSync(zig, '#!/bin/sh\nprintf "0.16.0\\n"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(older, 'zig'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    const result = spawnSync('python3', ['-c', `
+import importlib.util, os, pathlib, shutil, sys
+spec = importlib.util.spec_from_file_location('audit', sys.argv[1])
+audit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(audit)
+audit.ROOT = pathlib.Path(sys.argv[2]) / 'tree'
+for folder in ['src', 'tools', 'service/node_modules', 'docs-site/node_modules']:
+    (audit.ROOT / folder).mkdir(parents=True, exist_ok=True)
+calls = []
+def run(args, cwd=None):
+    assert os.environ.get('ZIG_EXE') == sys.argv[3]
+    assert shutil.which('zig') == sys.argv[3]
+    calls.append(args)
+audit.run = run
+audit.verify()
+assert calls[0] == [sys.argv[3], 'build', '-Dtarget=x86_64-windows-gnu']
+assert len(calls) > 5
+print('AUDIT_TOOLCHAIN_PASS')
+`, path.join(root, 'tools/public_audit.py'), dir, zig], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /AUDIT_TOOLCHAIN_PASS/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -89,8 +89,7 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
-const AddFontMemResourceEx = @import("win32.zig").AddFontMemResourceEx;
+const CreateFontW = @import("fonts.zig").create;
 const Sleep = @import("win32.zig").Sleep;
 const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
 const CloseHandle = @import("win32.zig").CloseHandle;
@@ -152,7 +151,6 @@ const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibil
 const paneFocusInset = @import("browser_pane.zig").paneFocusInset;
 const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
-const chat_font_bytes = @import("app_state.zig").chat_font_bytes;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
@@ -387,18 +385,9 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
     return 0;
 }
 
-pub fn ensureChatFontFamilyRegistered() void {
-    if (app_state.g_chat_font_family_checked) return;
-    app_state.g_chat_font_family_checked = true;
-    var count: DWORD = 0;
-    const handle = AddFontMemResourceEx(chat_font_bytes.ptr, @intCast(chat_font_bytes.len), null, &count);
-    app_state.g_chat_font_family_ok = handle != null and count > 0;
-}
-
 pub fn ensureChatFont() HANDLE {
     if (app_state.g_chat_font == null) {
-        ensureChatFontFamilyRegistered();
-        const face = if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI");
+        const face = L(@import("fonts.zig").UI_FACE);
         app_state.g_chat_font = CreateFontW(-uiScaled(app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, face);
     }
     return app_state.g_chat_font;
@@ -557,6 +546,7 @@ fn ensureChatControls() bool {
     }
     if (app_state.g_chat_status_hwnd == null) {
         app_state.g_chat_status_hwnd = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, app_state.g_main_hwnd, null, null, null);
+        @import("fonts.zig").setControlFont(app_state.g_chat_status_hwnd);
         if (app_state.g_chat_status_hwnd == null) return false;
         _ = SetWindowLongPtrW(app_state.g_chat_status_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&@import("chat_render.zig").chatStatusWndProc)));
     }
@@ -1049,6 +1039,7 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
         chatDropFiles(@ptrFromInt(wp));
         return 0;
