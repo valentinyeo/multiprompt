@@ -382,6 +382,7 @@ pub const MSG = extern struct {
     pt: POINT,
 };
 pub const RECT = extern struct { left: LONG, top: LONG, right: LONG, bottom: LONG };
+pub const WINDOWPOS = extern struct { hwnd: HANDLE, hwndInsertAfter: HANDLE, x: i32, y: i32, cx: i32, cy: i32, flags: UINT };
 pub const SYSTEMTIME = extern struct {
     year: WORD,
     month: WORD,

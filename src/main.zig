@@ -270,6 +270,7 @@ const POINT = @import("win32.zig").POINT;
 const TRACKMOUSEEVENT = @import("win32.zig").TRACKMOUSEEVENT;
 const MSG = @import("win32.zig").MSG;
 const RECT = @import("win32.zig").RECT;
+const WINDOWPOS = @import("win32.zig").WINDOWPOS;
 const PAINTSTRUCT = @import("win32.zig").PAINTSTRUCT;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
 const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
@@ -515,6 +516,7 @@ const hookWatchdog = @import("shortcuts.zig").hookWatchdog;
 const DRAG_MATERIALIZE_THRESH = @import("app_state.zig").DRAG_MATERIALIZE_THRESH;
 const armBrowserVisibilitySettle = @import("browser_pane.zig").armBrowserVisibilitySettle;
 const armConsoleGeometrySettle = @import("console.zig").armConsoleGeometrySettle;
+const windowPosChangeMovesGeometry = @import("console.zig").windowPosChangeMovesGeometry;
 const armStartupConsoleGeometrySettle = @import("console.zig").armStartupConsoleGeometrySettle;
 const settleConsoleGeometry = @import("console.zig").settleConsoleGeometry;
 const BROWSER_EDGE_MASK_COUNT = @import("app_state.zig").BROWSER_EDGE_MASK_COUNT;
@@ -1472,7 +1474,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return DefWindowProcW(hwnd, msg, wp, lp);
             }
             updateBrowserVisibility();
-            armConsoleGeometrySettle(hwnd);
+            const pos: *const WINDOWPOS = @ptrFromInt(@as(usize, @bitCast(lp)));
+            if (windowPosChangeMovesGeometry(pos.flags)) armConsoleGeometrySettle(hwnd);
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {

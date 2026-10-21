@@ -19,6 +19,8 @@ const SWP_FRAMECHANGED = @import("win32.zig").SWP_FRAMECHANGED;
 const SWP_NOZORDER = @import("win32.zig").SWP_NOZORDER;
 const SWP_NOMOVE = @import("win32.zig").SWP_NOMOVE;
 const SWP_NOSIZE = @import("win32.zig").SWP_NOSIZE;
+const SWP_SHOWWINDOW = @import("win32.zig").SWP_SHOWWINDOW;
+const SWP_HIDEWINDOW = @import("win32.zig").SWP_HIDEWINDOW;
 const CREATE_NEW_CONSOLE = @import("win32.zig").CREATE_NEW_CONSOLE;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const SW_HIDE = @import("win32.zig").SW_HIDE;
@@ -244,6 +246,11 @@ const shellProcessAliveForRead = @import("shell_poll.zig").shellProcessAliveForR
 
 pub fn isRemoteShellKind(kind: ShellKind) bool {
     return kind == .vps or kind == .vps2 or kind == .tmux;
+}
+
+pub fn windowPosChangeMovesGeometry(flags: u32) bool {
+    if (flags & (SWP_SHOWWINDOW | SWP_HIDEWINDOW | SWP_FRAMECHANGED) != 0) return true;
+    return flags & (SWP_NOMOVE | SWP_NOSIZE) != (SWP_NOMOVE | SWP_NOSIZE);
 }
 
 pub fn armConsoleGeometrySettle(hwnd: HANDLE) void {

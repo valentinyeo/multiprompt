@@ -3085,6 +3085,17 @@ fn paneFocusCornerR() i32 {
     return uiScaled(8);
 }
 
+pub fn paneRingState() u8 {
+    if (!foregroundIsOurs()) return 1;
+    return if (activeBrowserHasForegroundFocus()) 3 else 2;
+}
+
+pub fn paneRingRepaintNeeded(last: *u8, state: u8) bool {
+    const changed = last.* != state;
+    last.* = state;
+    return changed;
+}
+
 pub fn activePaneBorderOn() bool {
     return browserPaneActive() and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native;
 }
