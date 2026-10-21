@@ -41,7 +41,9 @@ var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
 const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
-var g_ssh_reconnect_timer_on = false;
+var g_ssh_reconnect_timer_ms: u32 = 0;
+var ssh_probe_job: ?*anyopaque = null;
+const UINT = u32;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
 const TIMER_SSH_RECONNECT = 1;
@@ -116,7 +118,7 @@ test "ISSUE-501 link exit" {
     fake_now += 100;
     markSshTabDisconnected(0);
     try std.testing.expectEqual(due, shells[0].ssh_reconnect.next_tick);
-    try std.testing.expect(g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms != 0);
     fake_now = due;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 1), spawns);
@@ -187,7 +189,7 @@ test "ISSUE-501 ${trigger[0]}" {
     try std.testing.expectEqual(@as(usize, 0), kills);
     try std.testing.expect(!shells[0].disconnected);
     try std.testing.expectEqual(@as(u64, 0), ssh_probe_next_tick);
-    try std.testing.expect(g_ssh_reconnect_timer_on);
+    try std.testing.expect(g_ssh_reconnect_timer_ms != 0);
     alive = false;
     ${trigger[1].replace('var setting =', 'setting =')}
     try std.testing.expect(shells[0].disconnected);
