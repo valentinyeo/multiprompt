@@ -210,7 +210,8 @@ export default {
         fail(400, 'unsupported_grant');
       }
       if (!url.pathname.startsWith('/v1/')) return json({ error: 'not_found' }, 404);
-      const sessionEmail = request.headers.get('Authorization') ? null : await sessionAccount(request, env, auth);
+      const keyRoute = url.pathname === '/v1/device-key' || url.pathname === '/v1/device-keys' || /^\/v1\/device-keys\/[^/]+\/(approve|deny)$/.test(url.pathname);
+      const sessionEmail = keyRoute || request.headers.get('Authorization') ? null : await sessionAccount(request, env, auth);
       const device = sessionEmail ? { id: null, account: sessionEmail } : await authenticate(request, db);
       if (sessionEmail && request.method !== 'GET') {
         sameOrigin(request, env);
@@ -221,6 +222,38 @@ export default {
         const row = await db.prepare('SELECT updated,status FROM usage WHERE account=?').bind(device.account).first();
         return row ? json({ updated: row.updated, status: JSON.parse(row.status) }) : json({ error: 'no_usage' }, 404);
       }
+      if (url.pathname === '/v1/device-key' && request.method === 'PUT') {
+        const b = await body(request, 1024 * 1024, 'invalid_key');
+        if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || typeof b.public_key !== 'string' || b.public_key.length > 200 ||
+            !/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(b.public_key) || /\s$/.test(b.public_key)) fail(400, 'invalid_key');
+        const encoded = b.public_key.slice(12);
+        let decoded;
+        try { decoded = atob(encoded); } catch { fail(400, 'invalid_key'); }
+        if (btoa(decoded) !== encoded || decoded.length !== 51 || decoded.slice(0, 19) !== '\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20') fail(400, 'invalid_key');
+        const result = await db.batch([
+          db.prepare("INSERT INTO device_keys (device_id,account,public_key,status,requested) SELECT ?,?,?,'pending',? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key,status='pending',requested=excluded.requested,decided=NULL,decided_by=NULL WHERE device_keys.public_key<>excluded.public_key AND device_keys.status<>'revoked' AND device_keys.account=excluded.account AND EXISTS (SELECT 1 FROM devices WHERE id=excluded.device_id AND account=excluded.account AND revoked=0)").bind(device.id, device.account, b.public_key, now(), device.id, device.account),
+          db.prepare('SELECT k.status FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.device_id=? AND k.account=? AND d.account=k.account AND d.revoked=0').bind(device.id, device.account)
+        ]);
+        if (!result[1].results.length) fail(401, 'device_required');
+        return json({ status: result[1].results[0].status });
+      }
+      if (url.pathname === '/v1/device-keys' && request.method === 'GET') {
+        const result = await db.prepare('SELECT k.device_id,d.name,k.public_key,k.status,k.requested,k.decided FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.account=? ORDER BY k.requested,k.device_id').bind(device.account).all();
+        return json({ device_id: device.id, keys: result.results });
+      }
+      const decision = url.pathname.match(/^\/v1\/device-keys\/([^/]+)\/(approve|deny)$/);
+      if (decision && request.method === 'POST') {
+        const row = await db.prepare('SELECT device_id FROM device_keys WHERE device_id=? AND account=?').bind(decision[1], device.account).first();
+        if (!row) fail(404, 'not_found');
+        if (row.device_id === device.id) fail(403, 'self_approval');
+        const status = decision[2] === 'approve' ? 'approved' : 'denied';
+        const result = await db.prepare("UPDATE device_keys SET status=?,decided=?,decided_by=? WHERE device_id=? AND account=? AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) AND EXISTS (SELECT 1 FROM devices WHERE id=device_keys.device_id AND account=device_keys.account AND revoked=0)").bind(status, now(), device.id, row.device_id, device.account, device.id, device.account).run();
+        if (!result.meta.changes) {
+          if (!await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
+          fail(409, 'not_pending');
+        }
+        return json({ status });
+      }
       if (url.pathname === '/v1/devices' && request.method === 'GET') {
         const result = await db.prepare('SELECT id,name,created,last_seen,revoked FROM devices WHERE account=? ORDER BY created,id').bind(device.account).all();
         return json({ device_id: device.id, devices: result.results });
@@ -229,6 +262,7 @@ export default {
         const id = url.pathname.slice('/v1/devices/'.length);
         const result = await db.batch([
           db.prepare('UPDATE devices SET revoked=1 WHERE id=? AND account=?').bind(id, device.account),
+          db.prepare("UPDATE device_keys SET status='revoked' WHERE device_id IN (SELECT id FROM devices WHERE id=? AND account=?)").bind(id, device.account),
           db.prepare('DELETE FROM crash_reports WHERE device_id IN (SELECT id FROM devices WHERE id=? AND account=?)').bind(id, device.account)
         ]);
         return result[0].meta.changes ? json({ revoked: true }) : json({ error: 'not_found' }, 404);

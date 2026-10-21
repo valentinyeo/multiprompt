@@ -185,6 +185,7 @@ const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPRO
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
+const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
 const SEARCH_SKILLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SKILLS_MENU_OFFSET;
 const SEARCH_SKILLS_BACK_OFFSET = @import("app_state.zig").SEARCH_SKILLS_BACK_OFFSET;
 const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET;
@@ -2212,7 +2213,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
-                    const is_sync_status = result_idx == SEARCH_SYNC_STATUS_OFFSET or is_layout_pull;
+                    const is_approve_devices = result_idx == SEARCH_APPROVE_DEVICES_OFFSET;
+                    const is_sync_status = result_idx == SEARCH_SYNC_STATUS_OFFSET or is_layout_pull or is_approve_devices;
                     const is_addfavicon = !is_chat_action and !is_sync_signout and !is_sync_status and result_idx >= SEARCH_ADDFAVICON_OFFSET and result_idx < SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_mobile_toggle = !is_chat_action and !is_addfavicon and !is_sync_signout and !is_sync_status and result_idx >= SEARCH_MOBILE_OFFSET and result_idx < SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_session_overview_menu = result_idx == SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
@@ -3160,7 +3162,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var sync_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_layout_pull) L("Sync: Pull Now") else if (is_sync_signout) L("Account: Sign Out") else L("Account: Devices"), -1, &sync_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (is_approve_devices) L("Account: Approve devices") else if (is_layout_pull) L("Sync: Pull Now") else if (is_sync_signout) L("Account: Sign Out") else L("Account: Devices"), -1, &sync_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sync_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
