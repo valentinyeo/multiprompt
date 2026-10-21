@@ -6539,39 +6539,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
-                if (app_state.shells[idx].disconnected and app_state.shells[idx].process == null) return 0;
+                var exit_code: DWORD = std.math.maxInt(DWORD);
+                const got_code = app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
+                if (app_state.shells[idx].ssh_reconnect.phase == .closed or
+                    (app_state.shells[idx].disconnected and app_state.shells[idx].process == null))
+                {
+                    var exit_log: [160]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
+                    return 0;
+                }
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
                 const is_ssh_kind = (k == .vps or k == .vps2 or k == .tmux);
-                {
-                    const knames = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
-                    var lbuf: [128]u8 = undefined;
-                    var ll: usize = 0;
-                    const t = "WM_APP_SHELL_EXITED kind=";
-                    @memcpy(lbuf[0..t.len], t);
-                    ll = t.len;
-                    const kn = knames[@intFromEnum(k)];
-                    @memcpy(lbuf[ll .. ll + kn.len], kn);
-                    ll += kn.len;
-                    const t2 = " idx=";
-                    @memcpy(lbuf[ll .. ll + t2.len], t2);
-                    ll += t2.len;
-                    appendDecimal(&lbuf, &ll, idx);
-                    const t3 = " in_window=";
-                    @memcpy(lbuf[ll .. ll + t3.len], t3);
-                    ll += t3.len;
-                    lbuf[ll] = if (in_resume_window) '1' else '0';
-                    ll += 1;
-                    const t4 = " window_remaining_ms=";
-                    @memcpy(lbuf[ll .. ll + t4.len], t4);
-                    ll += t4.len;
-                    const remaining: u64 = if (app_state.g_resume_until_tick > now) app_state.g_resume_until_tick - now else 0;
-                    appendDecimal(&lbuf, &ll, remaining);
-                    debugLog(lbuf[0..ll]);
-                }
-                var exit_code: DWORD = 0;
-                const got_code = is_ssh_kind and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
                 const loader_failure = got_code and exit_code == 0xC0000139;
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
@@ -6581,6 +6561,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
                     return 0;
                 }
+                var exit_log: [192]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} kind={s} reason={s} exit_code={d} known={}", .{ exited_id, @tagName(k), @tagName(action), exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                 switch (action) {
                     .respawn => {
                         if (!respawnShellInPlace(idx, false)) {
@@ -6600,6 +6582,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         closeShell(idx);
                     },
                 }
+            } else {
+                var exit_log: [160]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=removed-or-detached exit_code=unknown", .{exited_id}) catch "WM_APP_SHELL_EXITED log-overflow");
             }
             return 0;
         },

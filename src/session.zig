@@ -854,6 +854,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     app_state.shells[idx] = shell;
     restoreBrowserStateFromSavedTab(idx, tab);
     app_state.shell_count += 1;
+    @import("chat_send.zig").sshDisconnect(idx, "restore-spawn-failed");
     var name_utf8: [192]u8 = undefined;
     debugLog2("restoreSession: preserved failed remote tab: ", json_reader.utf8(tab.name[0..tab.name_len], &name_utf8));
     return idx;

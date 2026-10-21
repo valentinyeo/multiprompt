@@ -32,7 +32,7 @@ function handler(name, next, signature) {
 
 function creation(name, signature) {
   const body = fn(consoleSource, name);
-  const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(');
+  const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(').replace('    if (cmd_hwnd != null) {\n', '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
     var si = std.mem.zeroes(STARTUPINFOW);
