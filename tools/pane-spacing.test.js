@@ -315,6 +315,7 @@ test('overlay backdrop and active border use the current primary pane rather tha
   const backdrop = sidebar.slice(start, sidebar.indexOf('clampSidebarScroll();', start));
   assert.match(backdrop, /activePaneRects\(client_rc\)\.primary/);
   assert.doesNotMatch(backdrop, /DEV_TOP_PAD/);
+  assert.match(sidebar, /const threadTitleHeight = @import\("browser_pane\.zig"\)\.threadTitleHeight;/);
   assert.throws(() => assert.doesNotMatch(backdrop + 'by = DEV_TOP_PAD;', /DEV_TOP_PAD/));
   const border = fn(browser, 'paintActivePaneBorder');
   assert.match(border, /activePaneRects\(rc\)\.primary/);

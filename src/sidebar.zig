@@ -348,6 +348,7 @@ const uiFontStatusCard = @import("drawing.zig").uiFontStatusCard;
 const uiFontClose = @import("drawing.zig").uiFontClose;
 const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
 const paintThreadTitle = @import("drawing.zig").paintThreadTitle;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const paintWorkspaceStrip = @import("drawing.zig").paintWorkspaceStrip;
 const paintSidebarStickyStatusCard = @import("telemetry_panel.zig").paintSidebarStickyStatusCard;
 const stopSpinnerTimerIfIdle = @import("clipboard.zig").stopSpinnerTimerIfIdle;

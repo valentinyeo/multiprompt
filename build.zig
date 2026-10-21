@@ -250,6 +250,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_browser_corner_tests.step);
     vps_test_step.dependOn(&run_browser_corner_tests.step);
     const browser_corner_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-corners.test.js" });
+    browser_corner_source.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&browser_corner_source.step);
     vps_test_step.dependOn(&browser_corner_source.step);
     const browser_onscreen_tests = b.addTest(.{ .root_module = b.createModule(.{

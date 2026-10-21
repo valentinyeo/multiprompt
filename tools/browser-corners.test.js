@@ -72,6 +72,7 @@ test('IGSH-496 Chat View and browser share the scaled radius, border width and t
   assert.match(bitmap, /@import\("app_state.zig"\).CHAT_BUBBLE_RADIUS \* scale/);
   assert.match(bitmap, /100, 150/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  assert.match(build, /browser_corner_source\.setEnvironmentVariable\("ZIG", b\.graph\.zig_exe\)/);
   assert.match(build, /b.path\("src\/browser_corners.zig"\)/);
   assert.match(build, /vps_test_step.dependOn\(&run_browser_corner_tests.step\)/);
   assert.match(build, /test_step.dependOn\(&run_browser_corner_tests.step\)/);
@@ -88,6 +89,7 @@ test('production corner geometry and alpha rasterizer execute at both scales', (
     assert.ok(radius);
     fs.writeFileSync(path.join(dir, 'app_state.zig'), radius[0]);
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', path.join(dir, 'browser_corners.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     console.log(result.stderr.trim());
