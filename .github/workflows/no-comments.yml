@@ -1,4 +1,4 @@
-name: No code comments
+name: PR checks
 
 on:
   pull_request:
@@ -8,16 +8,36 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   no-comments:
     name: no-comments
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Test the comment checker
         run: node --test tools/strip-comments.test.js
       - name: Fail on any code comment
         run: node tools/strip-comments.mjs --check
+
+  extension-version:
+    name: extension-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test the checker
+        run: node --test tools/check-extension-version.test.js
+      - name: Fail when the extension changed without a version bump
+        if: github.event_name == 'pull_request'
+        run: node tools/check-extension-version.mjs origin/${{ github.base_ref }}

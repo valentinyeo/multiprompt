@@ -15,7 +15,21 @@ permissions:
   contents: write
 
 jobs:
+  pr-build:
+    name: build-arm64
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Build release executables for arm64
+        run: zig build -Dtarget=aarch64-windows-gnu
+
   prepare:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}

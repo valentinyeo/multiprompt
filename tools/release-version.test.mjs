@@ -100,6 +100,42 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
 });
 
+test('PR release coverage is one arm64 build without release preparation or packaging', () => {
+  const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
+  assert.match(jobs['pr-build'], /if: github.event_name == 'pull_request'/);
+  assert.match(jobs['pr-build'], /name: build-arm64/);
+  assert.match(jobs['pr-build'], /run: zig build -Dtarget=aarch64-windows-gnu/);
+  assert.doesNotMatch(jobs['pr-build'], /needs:|upload-artifact|setup-node|Package/);
+  assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
+  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.release, /needs: \[prepare, build\]/);
+});
+
+test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {
+  for (const file of ['gitleaks', 'no-comments', 'docs-site', 'verify']) {
+    const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
+    assert.match(text, /^  pull_request:/m, file);
+    assert.match(text, /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
+  }
+  const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
+  assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
+  assert.match(scan, /^  schedule:/m);
+  assert.match(scan, /^  workflow_dispatch:/m);
+});
+
+test('one lightweight workflow preserves both check names and checker suites', () => {
+  const checks = fs.readFileSync(path.join(root, '.github/workflows/no-comments.yml'), 'utf8');
+  assert.match(checks, /^  push:\n    branches: \[master\]/m);
+  for (const name of ['no-comments', 'extension-version']) assert.match(checks, new RegExp(`^    name: ${name}$`, 'm'));
+  for (const command of [
+    'node --test tools/strip-comments.test.js',
+    'node tools/strip-comments.mjs --check',
+    'node --test tools/check-extension-version.test.js',
+    'node tools/check-extension-version.mjs origin/${{ github.base_ref }}',
+  ]) assert(checks.includes(command), command);
+  assert(!fs.existsSync(path.join(root, '.github/workflows/extension-version.yml')));
+});
+
 for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
   test(`workflow resolves ${event} version from the built commit`, { skip: process.platform === 'win32' }, t => {
     const f = fixture(t);
