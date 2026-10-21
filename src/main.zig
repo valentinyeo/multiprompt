@@ -29,7 +29,6 @@ const WM_ACTIVATEAPP = @import("win32.zig").WM_ACTIVATEAPP;
 const WM_SETTINGCHANGE = @import("win32.zig").WM_SETTINGCHANGE;
 const WM_THEMECHANGED = @import("win32.zig").WM_THEMECHANGED;
 const WM_SETFOCUS = @import("win32.zig").WM_SETFOCUS;
-const WM_MOUSEACTIVATE: UINT = 0x0021;
 const WM_DESTROY = @import("win32.zig").WM_DESTROY;
 const WM_MOVE = @import("win32.zig").WM_MOVE;
 const WM_WINDOWPOSCHANGED = @import("win32.zig").WM_WINDOWPOSCHANGED;
@@ -1242,6 +1241,7 @@ comptime {
 }
 
 const std = @import("std");
+const WM_MOUSEACTIVATE: UINT = 0x0021;
 const json_reader = @import("json_reader.zig");
 const link_detect = @import("link_detect.zig");
 const tmux_identity = @import("tmux_identity.zig");

@@ -116,6 +116,7 @@ fn pollFonts() void {
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
+    .replaceAll('@import("focus.zig").parkMainWindowBeforeActiveShellRemoval', 'parkMainWindowBeforeActiveShellRemoval')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
@@ -388,6 +389,8 @@ fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn updateBrowserVisibility() void {}
 fn focusActiveShell() void {}
+fn captureWorkspaceFocus() void {}
+fn parkMainWindowBeforeActiveShellRemoval(_: usize) bool { return false; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) BOOL { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn openChatView() void { g_chat_active = true; }
