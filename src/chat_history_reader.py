@@ -7,7 +7,10 @@ import hashlib
 import json
 import mmap
 import os
-import pwd
+try:
+    import pwd
+except ImportError:
+    pwd = None
 import re
 import subprocess
 import sys
@@ -48,6 +51,8 @@ def claude_config_dirs(home):
     return ([Path(configured).expanduser()] if configured else []) + [home / ".claude", home / ".config/claude"]
 
 def conversation_owner(cwd):
+    if pwd is None:
+        return None
     parts = Path(cwd).parts
     if (len(parts) < 4 or parts[:2] != ("/", "home") or ".." in parts or
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", parts[2])):
@@ -236,7 +241,8 @@ def local_ssh_process_table(root=Path("/proc")):
     return link_local_ssh(table, connections)
 
 def tmux_owner_process(agent, name, source):
-
+    if pwd is None:
+        return None
     try:
         panes = subprocess.run(["tmux", "list-panes", "-t", "=" + name, "-F", "#{pane_pid}"],
                                capture_output=True, text=True, timeout=3, check=False)
@@ -1364,7 +1370,7 @@ elif __name__ == "__main__":
 
         if "--discover" in sys.argv[2:]:
             pid = agent_pid_for_panes(query["panes"], local_ssh_process_table(), query["agent"])
-            user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid) if pid is not None else None
+            user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid) if pid is not None and pwd is not None else None
             print(json.dumps(dict(pid=pid, user=user.pw_name) if user else None))
         else:
             handler = settle_response if query.get("op") == "settle" else response

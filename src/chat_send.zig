@@ -1678,6 +1678,7 @@ pub fn sshDisconnect(idx: u32, reason: []const u8) void {
     const got_code = shell.process != null and GetExitCodeProcess(shell.process, &exit_code) != 0;
     var buf: [224]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect disconnect id={d} reason={s} exit_code={d} known={} phase={s}", .{ shell.shell_id, reason, exit_code, got_code, @tagName(shell.ssh_reconnect.phase) }) catch "ssh-reconnect disconnect log-overflow");
+    shell.ssh_reconnect.confirmDisconnect(GetTickCount64(), reason, shell.process != null and shellProcessAliveForRead(idx));
     markSshTabDisconnected(idx);
 }
 

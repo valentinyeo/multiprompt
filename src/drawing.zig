@@ -940,9 +940,15 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
     const old_font = SelectObject(hdc, uiFontSubtitle());
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, customColorOr("warning", if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70)));
-    var buf: [96]u8 = undefined;
-    const seconds = (shell.ssh_reconnect.next_tick -| GetTickCount64() + 999) / 1000;
-    const text = if (shell.ssh_reconnect.phase == .reconnecting) "Disconnected. Reconnecting..." else std.fmt.bufPrint(&buf, "Disconnected. Reconnecting in {d}s", .{seconds}) catch "Disconnected. Reconnecting...";
+    var buf: [192]u8 = undefined;
+    const now = GetTickCount64();
+    const seconds = (shell.ssh_reconnect.next_tick -| now + 999) / 1000;
+    const text = if (shell.ssh_reconnect.noticeReason(now, shell.disconnected)) |reason|
+        std.fmt.bufPrint(&buf, "{s} disconnected: {s} - Ctrl+Shift+R to reconnect", .{ if (shell.locked) "Locked session" else if (shell.pinned_top) "Pinned session" else "Session", reason }) catch "Reconnecting..."
+    else if (shell.ssh_reconnect.phase == .reconnecting)
+        "Reconnecting..."
+    else
+        std.fmt.bufPrint(&buf, "Reconnecting in {d}s", .{seconds}) catch "Reconnecting...";
     var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
     drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));

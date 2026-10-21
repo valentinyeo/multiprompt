@@ -84,7 +84,8 @@ fn debugLog(line: []const u8) void {
     if (std.mem.indexOf(u8, line, "reason=timeout") != null) timeout_logs += 1;
 }
 fn logSessionAuditAlways(_: []const u8) void {}
-fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+var header_notices: usize = 0;
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { header_notices += 1; }
 fn invalidateSidebar() void {}
 fn saveSession() void {}
 fn repositionActive() void {}
@@ -518,4 +519,28 @@ test "ISSUE-501 worker releases abandoned allocation" {
 }
 `;
   zig(code, 'ISSUE-501 worker');
+});
+
+
+test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', () => {
+  zig(runtime(`
+test "ISSUE-512 recovered tab has no stale global notice" {
+    shells[0].locked = true;
+    markSshTabDisconnected(0);
+    try std.testing.expectEqual(@as(usize, 0), header_notices);
+    shells[0].ssh_reconnect.ok();
+    shells[0].disconnected = false;
+    try std.testing.expectEqual(@as(usize, 0), header_notices);
+}
+`), 'ISSUE-512');
+});
+
+test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', () => {
+  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
+  const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
+  const paint = body('paintDisconnectedNotice', drawing);
+  assert.match(paint, /shells\[app_state\.active_shell\]/);
+  assert.match(paint, /ssh_reconnect\.noticeReason\(now, shell\.disconnected\)/);
+  assert.match(paint, /disconnected: \{s\} - Ctrl\+Shift\+R to reconnect/);
+  assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
 });
