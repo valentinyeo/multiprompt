@@ -255,16 +255,13 @@ pub fn clone(allocator: std.mem.Allocator, source_path: []const u8, destination_
     if (source_attributes & directory == 0 or source_attributes & reparse_point != 0) return error.InvalidSource;
     const lock = try join(allocator, source, std.unicode.utf8ToUtf16LeStringLiteral("lockfile"));
     defer allocator.free(lock);
-    const probe = CreateFileW(lock, 0x80000000, 0, null, 3, 0x80, null);
+    var probe = CreateFileW(lock, 0x80000000, 0, null, 3, 0x80, null);
     if (probe == invalid_handle) {
-        switch (GetLastError()) {
-            2 => {},
-            else => return error.Browser_running,
-        }
+        if (GetLastError() != 2) return error.Browser_running;
+        probe = CreateFileW(lock, 0x80010000, 0, null, 1, 0x04000100, null);
+        if (probe == invalid_handle) return error.Browser_running;
     }
-    defer if (probe != invalid_handle) {
-        _ = CloseHandle(probe);
-    };
+    defer _ = CloseHandle(probe);
     try @import("browser_workspace_profile.zig").requireSourceClosed(allocator, source_path);
     try validate(allocator, source);
     var preflight = Walk{ .allocator = allocator, .options = options };

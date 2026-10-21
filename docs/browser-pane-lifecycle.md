@@ -311,15 +311,17 @@ there is no automatic profile deletion. Retained directories can be backed up
 or recovered separately, without following a workspace display-name path.
 
 Before launching, a background worker prepares a missing profile. The shared
-source must have no running browser process. Its existing lock is held for the
-copy; process checks also cover a missing lock. Migration preflights the retained
+source must have no running browser process. Its process lock is held for the
+whole copy. When absent, a temporary delete-on-close lock is created atomically
+and removed on exit; no durable seed data changes. Process checks also run
+before and after copying. Migration preflights the retained
 bytes plus 1 GiB, copies into `.partial`, validates Local State and at least one
 profile Preferences file, writes a completion marker, and atomically renames.
 Incomplete destinations never launch. A fresh install with no seed initializes
 a minimal complete profile without creating a shared seed. Interrupted partial
 copies are retried, not adopted. Service Worker registrations are retained;
 CacheStorage, ScriptCache, HTTP/code/GPU caches, component/model downloads,
-crash reports, and process locks are not copied. The source is never edited.
+crash reports, and process locks are not copied. Durable source files are never edited.
 
 The native host reads its Chromium ancestor's actual `--user-data-dir`, validates
 it against the local workspace profile root, and registers only the matching
