@@ -969,8 +969,8 @@ pub var g_browser_url_poll_result_len: u32 = 0;
 
 pub var g_urlbar_hwnd: HANDLE = null;
 pub var g_urlbar_class_registered: bool = false;
-pub const BROWSER_EDGE_MASK_COUNT: usize = 6;
-pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bottom = 3, controls = 4, control_hit = 5 };
+pub const BROWSER_EDGE_MASK_COUNT: usize = 10;
+pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bottom = 3, controls = 4, control_hit = 5, top_left = 6, top_right = 7, bottom_left = 8, bottom_right = 9 };
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;

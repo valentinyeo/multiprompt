@@ -241,6 +241,17 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(session_layout_tests).step);
+    const browser_corner_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/browser_corners.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    }) });
+    const run_browser_corner_tests = b.addRunArtifact(browser_corner_tests);
+    test_step.dependOn(&run_browser_corner_tests.step);
+    vps_test_step.dependOn(&run_browser_corner_tests.step);
+    const browser_corner_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-corners.test.js" });
+    test_step.dependOn(&browser_corner_source.step);
+    vps_test_step.dependOn(&browser_corner_source.step);
     const browser_onscreen_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/browser_onscreen.zig"),
         .target = target,

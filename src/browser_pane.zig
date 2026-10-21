@@ -3247,6 +3247,40 @@ fn browserFwdBtnHit(x: i32, y: i32) bool {
     return browserNavButtonHit(x, y, true);
 }
 
+const browser_corners = @import("browser_corners.zig");
+var browser_corner_paints: [4]?browser_corners.Paint = .{null} ** 4;
+
+fn browserMaskCorner(side: BrowserEdgeMaskSide) ?browser_corners.Corner {
+    return switch (side) {
+        .top_left => .top_left,
+        .top_right => .top_right,
+        .bottom_left => .bottom_left,
+        .bottom_right => .bottom_right,
+        else => null,
+    };
+}
+
+fn updateBrowserCorner(hw: HANDLE, corner: browser_corners.Corner, paint: browser_corners.Paint, x: i32, y: i32, width: i32, height: i32) bool {
+    const w = @import("win32.zig");
+    const screen = w.GetDC(null) orelse return false;
+    defer _ = w.ReleaseDC(null, screen);
+    const dc = w.CreateCompatibleDC(screen) orelse return false;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(screen, &info, 0, &bits, null, 0) orelse return false;
+    defer _ = w.DeleteObject(bitmap);
+    const old = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old);
+    const pixels: [*]u32 = @ptrCast(@alignCast(bits orelse return false));
+    browser_corners.render(pixels[0..@intCast(width * height)], corner, paint);
+    const destination = POINT{ .x = x, .y = y };
+    const size = w.SIZE{ .cx = width, .cy = height };
+    const origin = POINT{ .x = 0, .y = 0 };
+    const blend = w.BLENDFUNCTION{};
+    return w.UpdateLayeredWindow(hw, screen, &destination, &size, dc, &origin, 0, &blend, w.ULW_ALPHA) != 0;
+}
+
 fn browserEdgeMaskFrameColor() DWORD {
     if (app_state.g_amoled_theme) return RGB(0, 0, 0);
     if (app_state.g_multiprompt_theme) return multipromptColorOr("browser_cover", RGB(0, 0, 0));
@@ -3261,8 +3295,8 @@ fn browserEdgeMaskBottomColor() DWORD {
 
 fn browserEdgeMaskColor(side: BrowserEdgeMaskSide) DWORD {
     return switch (side) {
-        .left, .top, .right, .controls, .control_hit => browserEdgeMaskFrameColor(),
-        .bottom => browserEdgeMaskBottomColor(),
+        .left, .top, .right, .controls, .control_hit, .top_left, .top_right => browserEdgeMaskFrameColor(),
+        .bottom, .bottom_left, .bottom_right => browserEdgeMaskBottomColor(),
     };
 }
 
@@ -3318,14 +3352,45 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
             var rc: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &rc);
             const side = browserEdgeMaskSideForHwnd(hwnd) orelse .right;
+            if (browserMaskCorner(side) != null) return 0;
             const br = CreateSolidBrush(browserEdgeMaskColor(side));
             if (br != null) {
                 _ = FillRect(hdc, &rc, br);
                 _ = DeleteObject(br);
             }
+            const style = @import("window_layout.zig");
+            const bw = style.chatSurfaceBorderW();
+            const radius = style.chatSurfaceRadius();
+            const border_rc: ?RECT = switch (side) {
+                .left => .{ .left = rc.right - bw, .top = uiScaled(3) + radius, .right = rc.right, .bottom = rc.bottom - browserEdgeBottomMaskH() - radius },
+                .right => .{ .left = 0, .top = uiScaled(3) + radius, .right = bw, .bottom = rc.bottom - browserEdgeBottomMaskH() - radius },
+                .top => .{ .left = uiScaled(8) + radius, .top = rc.bottom - bw, .right = rc.right - uiScaled(8) - radius, .bottom = rc.bottom },
+                .bottom => .{ .left = uiScaled(8) + radius, .top = 0, .right = rc.right - uiScaled(8) - radius, .bottom = bw },
+                else => null,
+            };
+            if (border_rc) |line| {
+                const border_brush = CreateSolidBrush(style.chatSurfaceBorderColor());
+                if (border_brush != null) {
+                    _ = FillRect(hdc, &line, border_brush);
+                    _ = DeleteObject(border_brush);
+                }
+            }
+            if (side == .controls) {
+                const right = rc.right - uiScaled(2) - uiScaled(8);
+                const top = uiScaled(2) + uiScaled(3);
+                const lines = [_]RECT{
+                    .{ .left = 0, .top = top, .right = right - radius, .bottom = top + bw },
+                    .{ .left = right - bw, .top = top + radius, .right = right, .bottom = rc.bottom },
+                };
+                const border_brush = CreateSolidBrush(style.chatSurfaceBorderColor());
+                if (border_brush != null) {
+                    for (lines) |line| _ = FillRect(hdc, &line, border_brush);
+                    _ = DeleteObject(border_brush);
+                }
+            }
             if (side == .bottom and paneRingBottomLineOnMask()) {
-                const bw = paneFocusBorderW();
-                var line_rc = RECT{ .left = 0, .top = paneFocusContentGap() - bw, .right = rc.right, .bottom = paneFocusContentGap() };
+                const ring_width = paneFocusBorderW();
+                var line_rc = RECT{ .left = 0, .top = paneFocusContentGap() + bw - ring_width, .right = rc.right, .bottom = paneFocusContentGap() + bw };
                 if (line_rc.top < 0) line_rc.top = 0;
                 const lb = CreateSolidBrush(paneFocusRingColor());
                 if (lb != null) {
@@ -3367,7 +3432,7 @@ fn ensureBrowserEdgeMaskWindows() void {
         app_state.g_browser_edge_mask_hwnds[i] = null;
         const side: BrowserEdgeMaskSide = @enumFromInt(i);
         var ex_style: DWORD = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
-        if (side == .control_hit) ex_style |= WS_EX_LAYERED;
+        if (side == .control_hit or browserMaskCorner(side) != null) ex_style |= WS_EX_LAYERED;
         const hw = CreateWindowExW(
             ex_style,
             L("ZigShellBrowserEdgeMask"),
@@ -3384,6 +3449,7 @@ fn ensureBrowserEdgeMaskWindows() void {
         );
         if (hw == null) continue;
         app_state.g_browser_edge_mask_hwnds[i] = hw;
+        if (browserMaskCorner(side) != null) browser_corner_paints[i - 6] = null;
         if (side == .control_hit) _ = SetLayeredWindowAttributes(hw, 0, 1, LWA_ALPHA);
         _ = SetWindowLongPtrW(hw, GWLP_HWNDPARENT, @as(LONG_PTR, @bitCast(@intFromPtr(app_state.g_main_hwnd))));
         _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -3441,6 +3507,10 @@ pub fn refreshBrowserEdgeMasks() void {
         return;
     };
     positionBrowserEdgeMasks(layout);
+    for (0..BROWSER_EDGE_MASK_COUNT) |i| {
+        if (browserMaskCorner(@enumFromInt(i)) == null and app_state.g_browser_edge_mask_shown[i])
+            _ = InvalidateRect(app_state.g_browser_edge_mask_hwnds[i], null, 0);
+    }
 }
 
 pub fn armBrowserEdgeMaskRaise() void {
@@ -3475,6 +3545,27 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
     if (hw == null or IsWindow(hw) == 0) return;
     const prev = app_state.g_browser_edge_mask_rects[idx];
     const same_rect = prev.left == x and prev.top == y and prev.right == w and prev.bottom == h;
+    if (browserMaskCorner(side)) |corner| {
+        const style = @import("window_layout.zig");
+        const radius = style.chatSurfaceRadius();
+        const paint = browser_corners.Paint{ .radius = radius, .border = style.chatSurfaceBorderW(), .background = browserEdgeMaskColor(side), .arc_background = browserEdgeMaskFrameColor(), .border_color = style.chatSurfaceBorderColor(), .inset_x = w - radius, .inset_y = h - radius };
+        const cached = browser_corner_paints[idx - 6];
+        const need_bitmap = cached == null or !std.meta.eql(cached.?, paint) or !app_state.g_browser_edge_mask_shown[idx];
+        if (same_rect and !need_bitmap) return;
+        if (need_bitmap) {
+            if (!updateBrowserCorner(hw, corner, paint, x, y, w, h)) {
+                _ = ShowWindow(hw, SW_HIDE);
+                app_state.g_browser_edge_mask_shown[idx] = false;
+                return;
+            }
+            browser_corner_paints[idx - 6] = paint;
+        }
+        _ = SetWindowPos(hw, null, x, y, w, h, SWP_NOACTIVATE | SWP_NOREDRAW);
+        if (!app_state.g_browser_edge_mask_shown[idx]) _ = ShowWindow(hw, SW_SHOWNOACTIVATE);
+        app_state.g_browser_edge_mask_rects[idx] = RECT{ .left = x, .top = y, .right = w, .bottom = h };
+        app_state.g_browser_edge_mask_shown[idx] = true;
+        return;
+    }
     if (same_rect and app_state.g_browser_edge_mask_shown[idx]) {
         browserTrace("mask skip (noop)");
         return;
@@ -3540,13 +3631,23 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
     const hit_bleed_right = uiScaled(2);
     const hit_w = controls_w;
     const hit_h = @min(edge_h + hit_bleed_top, uiScaled(56));
-    browserTrace("posMasks move 6");
-    moveBrowserEdgeMask(.left, edge_x, edge_y, left_w, edge_h);
-    moveBrowserEdgeMask(.top, edge_x, edge_y, edge_w, top_h);
-    moveBrowserEdgeMask(.right, edge_x + edge_w - right_w, edge_y, right_w, edge_h);
-    moveBrowserEdgeMask(.bottom, edge_x, edge_y + edge_h - bottom_h, edge_w, bottom_h);
+    const style = @import("window_layout.zig");
+    const border = style.chatSurfaceBorderW();
+    browserTrace("posMasks move 10");
+    moveBrowserEdgeMask(.left, edge_x, edge_y, left_w + border, edge_h);
+    moveBrowserEdgeMask(.top, edge_x, edge_y, edge_w, top_h + border);
+    moveBrowserEdgeMask(.right, edge_x + edge_w - right_w - border, edge_y, right_w + border, edge_h);
+    moveBrowserEdgeMask(.bottom, edge_x, edge_y + edge_h - bottom_h - border, edge_w, bottom_h + border);
     moveBrowserEdgeMask(.control_hit, edge_x + edge_w - hit_w, edge_y - hit_bleed_top, hit_w + hit_bleed_right, hit_h);
     moveBrowserEdgeMask(.controls, edge_x + edge_w - controls_w, edge_y - controls_bleed_top, controls_w + controls_bleed_right, controls_h);
+    const browser = RECT{ .left = edge_x, .top = edge_y, .right = edge_x + edge_w, .bottom = edge_y + edge_h };
+    for ([_]BrowserEdgeMaskSide{ .top_left, .top_right, .bottom_left, .bottom_right }) |side| {
+        const corner = browserMaskCorner(side).?;
+        const bottom = side == .bottom_left or side == .bottom_right;
+        const paint = browser_corners.Paint{ .radius = style.chatSurfaceRadius(), .border = border, .background = browserEdgeMaskColor(side), .arc_background = browserEdgeMaskFrameColor(), .border_color = style.chatSurfaceBorderColor(), .inset_x = if (side == .top_right or side == .bottom_right) right_w else left_w, .inset_y = if (bottom) bottom_h else top_h };
+        const rc = browser_corners.rect(browser, corner, paint);
+        moveBrowserEdgeMask(side, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+    }
 }
 
 fn ensureUrlBarWindow() void {
