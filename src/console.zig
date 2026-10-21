@@ -2209,6 +2209,7 @@ pub fn markSshTabDisconnected(idx: u32) void {
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
     if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
+    app_state.shells[idx].ssh_reconnect.confirmDisconnect(GetTickCount64(), "console-missing", app_state.shells[idx].process != null and shellProcessAliveForRead(idx));
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
@@ -2229,7 +2230,6 @@ pub fn markSshTabDisconnected(idx: u32) void {
     debugLog(std.fmt.bufPrint(&reconnect_log, "ssh-reconnect scheduled id={d} attempt={d} delay_ms={d}", .{ app_state.shells[idx].shell_id, app_state.shells[idx].ssh_reconnect.attempts +| 1, app_state.shells[idx].ssh_reconnect.delay_ms }) catch "ssh-reconnect scheduled");
     armSshReconnectTimerIfNeeded();
     if (app_state.shells[idx].locked or app_state.shells[idx].pinned_top) {
-        showHeaderNoticeAscii(if (app_state.shells[idx].locked) "Locked session disconnected - Ctrl+Shift+R to reconnect" else "Pinned session disconnected - Ctrl+Shift+R to reconnect", 8000, true);
         logSessionAuditAlways(if (app_state.shells[idx].locked) "locked-session-disconnected-preserved" else "pinned-session-disconnected-preserved");
     }
     repositionActive();

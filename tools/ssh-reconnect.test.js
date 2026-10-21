@@ -534,3 +534,13 @@ test "ISSUE-512 recovered tab has no stale global notice" {
 }
 `), 'ISSUE-512');
 });
+
+test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', () => {
+  zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
+  const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
+  const paint = body('paintDisconnectedNotice', drawing);
+  assert.match(paint, /shells\[app_state\.active_shell\]/);
+  assert.match(paint, /ssh_reconnect\.noticeReason\(now, shell\.disconnected\)/);
+  assert.match(paint, /disconnected: \{s\} - Ctrl\+Shift\+R to reconnect/);
+  assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
+});
