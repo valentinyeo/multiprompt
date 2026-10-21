@@ -1,5 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const draft_model = @import("chat_drafts.zig");
 const skill_model = @import("skills.zig");
 const chat_complete = @import("chat_complete.zig");
 const chat_reply = @import("chat_reply.zig");
@@ -98,6 +99,7 @@ const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const DeleteFileW = @import("win32.zig").DeleteFileW;
 const CreateFileW = @import("win32.zig").CreateFileW;
 const FlushFileBuffers = @import("win32.zig").FlushFileBuffers;
+const WriteFile = @import("win32.zig").WriteFile;
 const GENERIC_WRITE = @import("win32.zig").GENERIC_WRITE;
 const CREATE_ALWAYS = @import("win32.zig").CREATE_ALWAYS;
 const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
@@ -1418,6 +1420,9 @@ test "ISSUE-373 overridden console is visible during restore and after tab switc
     try std.testing.expect(!shellConsoleShouldBeVisible(0));
 }
 
+var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
+var chat_draft_loading = false;
+
 fn chatDraftSafeName(id: []const u8, out: []u8) []const u8 {
     var h: u32 = 2166136261;
     for (id) |c| h = (h ^ c) *% 16777619;
@@ -1448,53 +1453,183 @@ fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 {
     return buf[0 .. n + ext.len];
 }
 
-fn chatDraftWriteFile(path: []const u8, bytes: []const u8) void {
+fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
     var dir_end: usize = path.len;
     while (dir_end > 0 and path[dir_end - 1] != '\\') dir_end -= 1;
     if (dir_end > 1) win32MakePath(path[0 .. dir_end - 1]);
     var tmp_buf: [580]u8 = undefined;
-    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return;
+    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
     var wbuf: [600]u16 = undefined;
-    const tmp_w = win32WidePath(&wbuf, tmp) orelse return;
+    const tmp_w = win32WidePath(&wbuf, tmp) orelse return false;
     const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-    if (h == INVALID_HANDLE_VALUE_PTR) return;
-    win32WriteAll(h, bytes);
-    _ = FlushFileBuffers(h);
+    if (h == INVALID_HANDLE_VALUE_PTR) return false;
+    var written: DWORD = 0;
+    const complete = WriteFile(h, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
+    const flushed = FlushFileBuffers(h) != 0;
     _ = CloseHandle(h);
-    _ = win32MoveReplace(tmp, path);
+    return complete and flushed and win32MoveReplace(tmp, path);
+}
+
+pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
+    if (idx >= app_state.shell_count) return buf[0..0];
+    const sh = &app_state.shells[idx];
+    if (sh.chat_id == 0) {
+        var io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer io.deinit();
+        while (sh.chat_id == 0) {
+            io.io().random(std.mem.asBytes(&sh.chat_id));
+            sh.chat_id &= (1 << 53) - 1;
+        }
+        saveSession();
+    }
+    return std.fmt.bufPrint(buf, "session:#{x:0>16}", .{sh.chat_id}) catch buf[0..0];
+}
+
+fn chatDraftLoad(id: []const u8) void {
+    if (id.len == 0 or chat_drafts.entries.contains(id)) return;
+    var text: [16384]u16 = undefined;
+    var len: usize = 0;
+    var dirty = false;
+    var path_buf: [560]u8 = undefined;
+    const path = getChatDraftPath(id, &path_buf) orelse return;
+    if (readFileAllocWin32(path, 65536)) |bytes| {
+        defer std.heap.page_allocator.free(bytes);
+        len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch return;
+    } else {
+        var wbuf: [600]u16 = undefined;
+        const w = win32WidePath(&wbuf, path) orelse return;
+        if (GetFileAttributesW(w.ptr) != 0xFFFF_FFFF) return;
+        for (0..app_state.shell_count) |idx| {
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            if (!std.mem.eql(u8, id, chatDraftKeyForShell(@intCast(idx), &key_buf))) continue;
+            var old_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            var legacy_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const candidates = [_][]const u8{ chatOutboxKeyForShell(@intCast(idx), &old_buf), chatOutboxLegacyKeyForShell(@intCast(idx), &legacy_buf) };
+            for (candidates) |candidate| {
+                if (candidate.len == 0) continue;
+                var matches: usize = 0;
+                for (0..app_state.shell_count) |other| {
+                    var other_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                    var other_legacy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                    if (std.mem.eql(u8, candidate, chatOutboxKeyForShell(@intCast(other), &other_buf)) or
+                        std.mem.eql(u8, candidate, chatOutboxLegacyKeyForShell(@intCast(other), &other_legacy))) matches += 1;
+                }
+                if (matches != 1) continue;
+                var old_path_buf: [560]u8 = undefined;
+                const old_path = getChatDraftPath(candidate, &old_path_buf) orelse continue;
+                const bytes = readFileAllocWin32(old_path, 65536) orelse continue;
+                defer std.heap.page_allocator.free(bytes);
+                len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch continue;
+                dirty = !chatDraftWriteFile(path, bytes);
+                if (!dirty) {
+                    if (win32WidePath(&wbuf, old_path)) |old_w| _ = DeleteFileW(old_w.ptr);
+                }
+                break;
+            }
+            break;
+        }
+    }
+    chat_drafts.set(id, text[0..len], dirty) catch {};
+}
+
+pub fn chatDraftHasForShell(idx: u32) bool {
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &buf);
+    chatDraftLoad(id);
+    return chat_drafts.hasDraft(id);
 }
 
 pub fn chatDraftFlush() void {
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
-    if (!app_state.g_chat_draft_dirty) return;
+    if (app_state.g_chat_draft_dirty) chatDraftNoteEdit();
     app_state.g_chat_draft_dirty = false;
-    if (app_state.g_chat_draft_owner_len == 0 or app_state.g_chat_composer_hwnd == null) return;
-    var path_buf: [560]u8 = undefined;
-    const path = getChatDraftPath(app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], &path_buf) orelse return;
-    var text: [16400]u16 = undefined;
-    const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
-    const n: usize = if (n_i > 0) @intCast(n_i) else 0;
-    var blank = true;
-    for (text[0..n]) |c| {
-        if (c != ' ' and c != '\t' and c != '\r' and c != '\n') {
-            blank = false;
-            break;
+    var it = chat_drafts.entries.iterator();
+    while (it.next()) |entry| {
+        const draft = entry.value_ptr;
+        if (!draft.dirty) {
+            if (draft.evict) {
+                chat_drafts.remove(entry.key_ptr.*);
+                it = chat_drafts.entries.iterator();
+            }
+            continue;
+        }
+        var path_buf: [560]u8 = undefined;
+        const path = getChatDraftPath(entry.key_ptr.*, &path_buf) orelse {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
+        const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, draft.text) catch {
+            app_state.g_chat_draft_dirty = true;
+            continue;
+        };
+        defer std.heap.page_allocator.free(utf8);
+        if (chatDraftWriteFile(path, utf8)) draft.dirty = false;
+        if (draft.dirty) {
+            app_state.g_chat_draft_dirty = true;
+        } else if (draft.evict) {
+            chat_drafts.remove(entry.key_ptr.*);
+            it = chat_drafts.entries.iterator();
         }
     }
-    if (blank) {
-        var wbuf: [600]u16 = undefined;
-        if (win32WidePath(&wbuf, path)) |w| _ = DeleteFileW(w.ptr);
-        return;
+    if (app_state.g_main_hwnd != null) {
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
+        if (app_state.g_chat_draft_dirty) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
     }
-    const utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text[0..n]) catch return;
-    defer std.heap.page_allocator.free(utf8);
-    chatDraftWriteFile(path, utf8);
 }
 
 fn chatDraftNoteEdit() void {
-    if (app_state.g_chat_draft_owner_len == 0 or app_state.g_main_hwnd == null) return;
+    if (chat_draft_loading or app_state.g_chat_draft_owner_len == 0 or app_state.g_chat_composer_hwnd == null) return;
+    var text: [16400]u16 = undefined;
+    const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
+    const n: usize = if (n_i > 0) @intCast(n_i) else 0;
+    const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    chat_drafts.set(id, text[0..n], true) catch return;
     app_state.g_chat_draft_dirty = true;
-    _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    if (app_state.g_main_hwnd != null) {
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    }
+}
+
+pub fn chatDraftCloseForShell(idx: u32) void {
+    if (idx >= app_state.shell_count or app_state.shells[idx].chat_id == 0) return;
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &buf);
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) chatDraftNoteEdit();
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = true;
+    chatDraftFlush();
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
+        app_state.g_chat_draft_owner_len = 0;
+        chat_draft_loading = true;
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+        chat_draft_loading = false;
+    }
+}
+
+pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
+    if (id.len == 0) return;
+    for (0..app_state.shell_count) |idx| {
+        if (app_state.shells[idx].chat_id == 0) continue;
+        var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        if (std.mem.eql(u8, id, chatDraftKeyForShell(@intCast(idx), &buf))) break;
+    } else {
+        return;
+    }
+    chatDraftLoad(id);
+    chat_drafts.append(id, text) catch return;
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) and app_state.g_chat_composer_hwnd != null) {
+        var out: [16400]u16 = undefined;
+        const draft = chat_drafts.entries.get(id).?.text;
+        @memcpy(out[0..draft.len], draft);
+        out[draft.len] = 0;
+        chat_draft_loading = true;
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&out));
+        chat_draft_loading = false;
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, draft.len, @intCast(draft.len));
+        chatComposerAutoGrow();
+    }
+    chatDraftFlush();
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
 pub fn chatDraftBindToActive() void {
@@ -1511,8 +1646,9 @@ pub fn chatDraftBindToActive() void {
     };
     if (app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var id_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-    const id = chatOutboxKeyForShell(app_state.active_shell, &id_buf);
+    const id = chatDraftKeyForShell(app_state.active_shell, &id_buf);
     if (id.len == 0) return;
+    if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = false;
     if (app_state.g_chat_draft_owner_len == id.len and std.mem.eql(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], id)) return;
     if (app_state.g_chat_draft_owner_len > 0 and app_state.g_chat_reply_len > 0) {
         const a = std.heap.page_allocator;
@@ -1558,45 +1694,16 @@ pub fn chatDraftBindToActive() void {
         app_state.g_chat_skill_body_len = SkillStash.body_len;
         SkillStash.owner_len = 0;
     }
+    chatDraftLoad(id);
     var text: [16400]u16 = undefined;
-    var len: usize = 0;
-    var migrated = false;
-    var path_buf: [560]u8 = undefined;
-    if (getChatDraftPath(id, &path_buf)) |path| {
-        if (readFileAllocWin32(path, 65536)) |bytes| {
-            defer std.heap.page_allocator.free(bytes);
-            len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch 0;
-        } else {
-            var path_wbuf: [600]u16 = undefined;
-            if (win32WidePath(&path_wbuf, path)) |path_w| {
-                if (GetFileAttributesW(path_w.ptr) == 0xFFFF_FFFF) {
-                    var legacy_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-                    const legacy = chatOutboxLegacyKeyForShell(app_state.active_shell, &legacy_buf);
-                    if (legacy.len > 0 and chatOutboxShellForKey(legacy) == app_state.active_shell) {
-                        if (getChatDraftPath(legacy, &path_buf)) |legacy_path| {
-                            if (readFileAllocWin32(legacy_path, 65536)) |bytes| {
-                                defer std.heap.page_allocator.free(bytes);
-                                if (std.unicode.utf8ToUtf16Le(text[0..16383], bytes)) |n| {
-                                    len = n;
-                                    migrated = true;
-                                    var wbuf: [600]u16 = undefined;
-                                    if (win32WidePath(&wbuf, legacy_path)) |w| _ = DeleteFileW(w.ptr);
-                                } else |_| {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    text[len] = 0;
+    const draft = chat_drafts.entries.get(id);
+    const value: []const u16 = if (draft) |d| d.text else &.{};
+    @memcpy(text[0..value.len], value);
+    text[value.len] = 0;
+    chat_draft_loading = true;
     _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&text));
-    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, len, @intCast(len));
-    app_state.g_chat_draft_dirty = migrated;
-    if (app_state.g_main_hwnd != null) {
-        _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
-        if (migrated) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
-    }
+    chat_draft_loading = false;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, value.len, @intCast(value.len));
     chatComposerAutoGrow();
     layoutChatControls();
 }

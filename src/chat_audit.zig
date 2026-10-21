@@ -41,7 +41,7 @@ fn visible(a: std.mem.Allocator, h: history.History, user: ?bool, plain: bool) !
             if (is_user != (block.role == .user or block.role == .injected)) continue;
         }
         const content = h.text.items[block.start..][0..block.len];
-        if (plain and block.role != .code) {
+        if (plain and block.role != .code and block.role != .user) {
             const spans = try a.alloc(md.Span, content.len + 1);
             const count = md.inlineSpans(content, spans);
             for (spans[0..count]) |span| try text.appendSlice(a, content[span.text.start..span.text.end]);

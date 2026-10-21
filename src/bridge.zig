@@ -30,6 +30,7 @@ const PIPE_NOWAIT: windows.DWORD = 0x00000001;
 const PIPE_UNLIMITED_INSTANCES: windows.DWORD = 255;
 const ERROR_FILE_NOT_FOUND: windows.DWORD = 2;
 const ERROR_PIPE_BUSY: windows.DWORD = 231;
+const ERROR_NO_DATA: windows.DWORD = 232;
 const ERROR_PIPE_CONNECTED: windows.DWORD = 535;
 const SOCKET = usize;
 const INVALID_SOCKET: SOCKET = ~@as(SOCKET, 0);
@@ -399,19 +400,25 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var tab: ?[]const u8 = null;
         if (std.mem.eql(u8, first, "--tab")) {
             tab = args.next() orelse badArgs(command);
+            if (std.mem.startsWith(u8, tab.?, "--")) badArgs(command);
             first = args.next() orelse badArgs(command);
         }
         const keys = std.mem.eql(u8, first, "--keys");
         if (keys) first = args.next() orelse badArgs(command);
-        const second = args.next();
-        const text = try joinRemainingArgs(allocator, &args, second orelse first);
-        defer allocator.free(text);
+        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
+        defer allocator.free(parsed.text);
+        if (tab != null and parsed.tab != null) badArgs(command);
+        if (parsed.tab) |target| tab = target;
+        const text = parsed.text[parsed.second_offset orelse 0 ..];
 
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
-        if (second != null) {
+        if (parsed.second_offset) |offset| {
             try fields.appendSlice("\"selector\":");
-            try appendJsonString(&fields, first);
+            try appendJsonString(&fields, parsed.text[0 .. offset - 1]);
             try fields.appendSlice(",");
         }
         try fields.appendSlice("\"text\":");
@@ -627,9 +634,9 @@ const usage_text =
     \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
     \\  find <text> [--tab <id|match>] Find text snippets across frames
     \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
-    \\  type <text>                    Type trusted text at the focused editable
-    \\  type <selector> <text>         Click a selector and replace it with trusted text
-    \\  type --keys [selector] <text>  Type individual keys for keyboard-driven typeaheads
+    \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable
+    \\  type <selector> <text> [--tab <id|match>]  Click a selector and replace it with trusted text
+    \\  type --keys [selector] <text> [--tab <id|match>]  Type individual keys for keyboard-driven typeaheads
     \\  insert <text>                  Insert trusted text at the page cursor
     \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
     \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
@@ -2024,10 +2031,51 @@ fn runPipeServer(allocator: std.mem.Allocator, context: *HostContext, command_pi
 fn waitForPipeClient(pipe: windows.HANDLE) !void {
     if (ConnectNamedPipe(pipe, null) == 0) {
         switch (GetLastError()) {
-            ERROR_PIPE_CONNECTED => return,
+            ERROR_PIPE_CONNECTED, ERROR_NO_DATA => return,
             else => return error.PipeConnectFailed,
         }
     }
+}
+
+test "ISSUE-394 reply pipe reads a message after the client has closed" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var name_buf: [128]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buf, "\\\\.\\pipe\\multiprompt-issue-394-{d}-{d}", .{ GetCurrentProcessId(), GetTickCount64() });
+    const server = CreateNamedPipeA(
+        name.ptr,
+        PIPE_ACCESS_INBOUND,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        4096,
+        4096,
+        0,
+        null,
+    );
+    try std.testing.expect(server != INVALID_HANDLE_VALUE);
+    defer _ = CloseHandle(server);
+
+    const message = "{\"ok\":true,\"result\":\"fast reply\"}";
+    {
+        const client = CreateFileA(
+            name.ptr,
+            GENERIC_WRITE,
+            0,
+            null,
+            OPEN_EXISTING,
+            0,
+            null,
+        );
+        try std.testing.expect(client != INVALID_HANDLE_VALUE);
+        defer _ = CloseHandle(client);
+        try writeAll(client, message);
+    }
+
+    try waitForPipeClient(server);
+    const reply = try readPipeMessage(allocator, server);
+    defer allocator.free(reply);
+    try std.testing.expectEqualStrings(message, reply);
 }
 
 fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
@@ -2318,24 +2366,31 @@ fn parseOnlyTabArg(args: anytype) !?[]const u8 {
 const TextTabArgs = struct {
     text: []u8,
     tab: ?[]const u8 = null,
+    second_offset: ?usize = null,
 };
 
 fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8) !TextTabArgs {
     var text = std.array_list.Managed(u8).init(allocator);
     errdefer text.deinit();
     var tab: ?[]const u8 = null;
+    var text_count: usize = 0;
+    var second_offset: ?usize = null;
     var current: ?[]const u8 = first;
     while (current) |arg| : (current = args.next()) {
         if (std.mem.eql(u8, arg, "--tab")) {
             if (tab != null) return error.InvalidArguments;
             tab = args.next() orelse return error.InvalidArguments;
+            if (std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
         } else {
-            if (text.items.len > 0) try text.append(' ');
+            if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
+            if (text_count > 0) try text.append(' ');
+            if (text_count == 1) second_offset = text.items.len;
+            text_count += 1;
             try text.appendSlice(arg);
         }
     }
     if (text.items.len == 0) return error.InvalidArguments;
-    return .{ .text = try text.toOwnedSlice(), .tab = tab };
+    return .{ .text = try text.toOwnedSlice(), .tab = tab, .second_offset = second_offset };
 }
 
 fn appendTabTargetField(fields: *std.array_list.Managed(u8), target: []const u8) !void {

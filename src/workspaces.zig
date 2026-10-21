@@ -2170,14 +2170,15 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
 
 pub fn reopenLastClosedShell() void {
     if (app_state.g_closed_count == 0) return;
-    app_state.g_closed_count -= 1;
-    const entry = app_state.g_closed_history[app_state.g_closed_count];
+    const entry = app_state.g_closed_history[app_state.g_closed_count - 1];
 
     const ts: ?[]const u8 = if (entry.tmux_session_len > 0) entry.tmux_session[0..entry.tmux_session_len] else null;
     const cwd: ?[]const u8 = if (entry.cached_cwd_len > 0) entry.cached_cwd[0..entry.cached_cwd_len] else null;
 
     app_state.g_pending_tmux_host = entry.tmux_host;
     defer app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_chat_id = entry.chat_id;
+    defer app_state.g_pending_chat_id = 0;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
         if (entry.group) |saved| {
             const new_idx = app_state.shell_count - 1;
@@ -2201,6 +2202,7 @@ pub fn reopenLastClosedShell() void {
             }
             if (gi) |idx| app_state.shells[new_idx].group_id = app_state.groups[idx].id;
         }
+        app_state.g_closed_count -= 1;
         if ((entry.was_manual or entry.was_sem) and entry.name_len > 0) {
             const new_idx = app_state.shell_count - 1;
             @memcpy(app_state.shells[new_idx].name[0..entry.name_len], entry.name[0..entry.name_len]);

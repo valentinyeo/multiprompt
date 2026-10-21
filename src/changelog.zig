@@ -53,6 +53,28 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.795", .items = &.{
+        .{ .text = "Unsent Chat View drafts now stay with their own session across switches and restarts, with a DRAFT label in the sidebar.", .ticket = "IGSH-498" },
+        .{ .text = "The shell view is back to its old maximum width, while full width still fills the window.", .ticket = "IGSH-508" },
+        .{ .text = "Tab activity notifications no longer repeatedly refresh terminal status bars.", .ticket = "IGSH-514" },
+    } },
+    .{ .ver = "0.28.794", .items = &.{
+        .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
+        .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },
+        .{ .text = "Multiprompt redraws as fast as before and keeps its smoother edges.", .ticket = "IGSH-444" },
+    } },
+    .{ .ver = "0.28.793", .items = &.{
+        .{ .text = "Taking a browser screenshot with Ctrl+Shift+S keeps the message box focused with the cursor after the link and one space, without opening the window menu.", .ticket = "IGSH-509" },
+    } },
+    .{ .ver = "0.28.792", .items = &.{
+        .{ .text = "Chat View sends waiting messages one at a time and keeps their order after restarting.", .ticket = "IGSH-460" },
+        .{ .text = "Messages that cannot be confirmed show Send again instead of staying queued forever.", .ticket = "IGSH-460" },
+    } },
+    .{ .ver = "0.28.791", .items = &.{
+        .{ .text = "The Chat View find box now correctly types symbols and accented letters with your keyboard layout.", .ticket = "IGSH-407" },
+        .{ .text = "Disconnected tabs use less CPU while waiting to reconnect.", .ticket = "IGSH-513" },
+        .{ .text = "Remote tab activity notifications now use terminal events instead of repeatedly scanning every tab.", .ticket = "IGSH-514" },
+    } },
     .{ .ver = "0.28.790", .items = &.{
         .{ .text = "Browser commands wait for the connection to become ready and no longer lose fast replies.", .ticket = "IGSH-394" },
         .{ .text = "Compare chat switching performance between two releases with repeatable benchmark reports.", .ticket = "IGSH-507" },

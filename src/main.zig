@@ -270,6 +270,7 @@ const POINT = @import("win32.zig").POINT;
 const TRACKMOUSEEVENT = @import("win32.zig").TRACKMOUSEEVENT;
 const MSG = @import("win32.zig").MSG;
 const RECT = @import("win32.zig").RECT;
+const WINDOWPOS = @import("win32.zig").WINDOWPOS;
 const PAINTSTRUCT = @import("win32.zig").PAINTSTRUCT;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
 const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
@@ -515,6 +516,7 @@ const hookWatchdog = @import("shortcuts.zig").hookWatchdog;
 const DRAG_MATERIALIZE_THRESH = @import("app_state.zig").DRAG_MATERIALIZE_THRESH;
 const armBrowserVisibilitySettle = @import("browser_pane.zig").armBrowserVisibilitySettle;
 const armConsoleGeometrySettle = @import("console.zig").armConsoleGeometrySettle;
+const windowPosChangeMovesGeometry = @import("console.zig").windowPosChangeMovesGeometry;
 const armStartupConsoleGeometrySettle = @import("console.zig").armStartupConsoleGeometrySettle;
 const settleConsoleGeometry = @import("console.zig").settleConsoleGeometry;
 const BROWSER_EDGE_MASK_COUNT = @import("app_state.zig").BROWSER_EDGE_MASK_COUNT;
@@ -1261,7 +1263,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.790";
+pub const APP_VERSION = "0.28.795";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1472,13 +1474,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return DefWindowProcW(hwnd, msg, wp, lp);
             }
             updateBrowserVisibility();
-            armConsoleGeometrySettle(hwnd);
+            const pos: *const WINDOWPOS = @ptrFromInt(@as(usize, @bitCast(lp)));
+            if (windowPosChangeMovesGeometry(pos.flags)) armConsoleGeometrySettle(hwnd);
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
-            resetPaintBackbuffer();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
+                resetPaintBackbuffer();
                 if (app_state.g_power_minimized_since_tick == 0) app_state.g_power_minimized_since_tick = GetTickCount64();
             } else if (app_state.g_power_minimized_since_tick != 0) {
                 exitDeepIdleNow(hwnd);
@@ -1530,14 +1533,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (saved_dc != 0) {
                 _ = IntersectClipRect(mem_dc, paint_rc.left, paint_rc.top, paint_rc.right, paint_rc.bottom);
             }
-            var canvas = @import("smooth.zig").Canvas.init(mem_dc);
+            const canvas = @import("drawing.zig").beginPaintCanvas();
             paintSidebar(mem_dc);
             paintChatView(mem_dc);
             @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
             paintActivePaneBorder(mem_dc);
-            canvas.deinit();
+            canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
             _ = EndPaint(hwnd, &ps);
@@ -6562,6 +6565,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             handleZsbOpenRequest();
             return 0;
         },
+        @import("win32.zig").WM_APP_ZSB_WORKSPACE => {
+            @import("browser_bridge.zig").handleZsbWorkspaceRequest();
+            return 0;
+        },
         WM_APP_ZSB_WHO => {
             handleZsbWhoRequest();
             return 0;
@@ -7541,6 +7548,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
                             app_state.active_shell = app_state.shell_count - 1;
+                            @import("chat_composer.zig").chatDraftBindToActive();
                             ensureActiveVisible();
                             _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_COPYDATA");
                             repositionActive();

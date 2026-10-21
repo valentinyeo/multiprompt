@@ -62,11 +62,36 @@ test('ISSUE-444 big rounded fills use GDI interiors and only small corner paths'
   assert.match(fill, /self\.fill\(corners, color\)/);
   assert.doesNotMatch(fill.slice(fill.indexOf('const api')), /self\.fill\(path/);
   assert.match(source('smooth.zig'), /paint_hdc == hdc/);
-  assert.match(source('main.zig'), /Canvas\.init\(mem_dc\)/);
+  assert.match(source('main.zig'), /beginPaintCanvas\(\)/);
   assert.match(source('chat_render.zig'), /Canvas\.init\(mem_dc\)/);
 });
 
 test('ISSUE-444 raw call oracle catches qualified calls and whitespace', () => {
   assert.equal(rawCalls('RoundRect(dc); w.Ellipse (dc); api.Polygon\n(dc); Pie(dc);').length, 4);
   assert.equal(rawCalls('drawRoundRect(dc); drawEllipse(dc); fillPolygon(dc);').length, 0);
+});
+
+test('ISSUE-444 main graphics live with the backbuffer rather than each paint', () => {
+  const drawing = source('drawing.zig');
+  const ensure = body(drawing, 'ensurePaintBackbuffer');
+  const begin = body(drawing, 'beginPaintCanvas');
+  const reset = body(drawing, 'resetPaintBackbuffer');
+  assert.match(ensure, /g_paint_w >= w and app_state\.g_paint_h >= h/);
+  assert.equal((ensure.match(/Canvas\.init\(mem_dc\)/g) || []).length, 1);
+  assert.match(ensure, /paint_canvas\.deactivate\(\)/);
+  assert.match(begin, /paint_canvas\.activate\(\)/);
+  assert.doesNotMatch(begin, /Canvas\.init/);
+  assert.ok(reset.indexOf('paint_canvas.deinit()') >= 0);
+  assert.ok(reset.indexOf('paint_canvas.deinit()') < reset.indexOf('DeleteObject'));
+  assert.doesNotMatch(source('main.zig'), /Canvas\.init\(mem_dc\)/);
+});
+
+test('ISSUE-444 main and transcript backbuffers expose DIB pixels to the shared graphics', () => {
+  const main = body(source('drawing.zig'), 'ensurePaintBackbuffer');
+  const transcript = body(source('chat_render.zig'), 'chatTranscriptWndProc');
+  for (const paint of [main, transcript]) {
+    assert.match(paint, /CreateDIBSection/);
+    assert.match(paint, /\.height = -(?:h|height)\b/);
+    assert.doesNotMatch(paint, /CreateCompatibleBitmap/);
+  }
 });

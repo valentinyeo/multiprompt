@@ -14,6 +14,9 @@ function body(name) {
 const harness = `
 const std = @import("std");
 const skill_model = @import("skills.zig");
+const draft_model = @import("chat_drafts.zig");
+var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
+var chat_draft_loading = false;
 const HANDLE = ?*anyopaque;
 var g_chat_composer_hwnd: HANDLE = @ptrFromInt(1);
 var g_main_hwnd: HANDLE = @ptrFromInt(2);
@@ -43,7 +46,8 @@ fn KillTimer(_: HANDLE, _: usize) i32 { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn chatDraftFlush() void {}
 fn chatComposerAutoGrow() void {}
-fn chatOutboxKeyForShell(idx: u32, out: []u8) []const u8 { return std.fmt.bufPrint(out, "tmux:0:tab-{d}", .{idx}) catch unreachable; }
+fn chatDraftKeyForShell(idx: u32, out: []u8) []const u8 { return std.fmt.bufPrint(out, "session:#{d}", .{idx}) catch unreachable; }
+fn chatDraftLoad(id: []const u8) void { chat_drafts.set(id, std.unicode.utf8ToUtf16LeStringLiteral("ordinary question for tab B"), false) catch unreachable; }
 fn getChatDraftPath(_: []const u8, _: *[560]u8) ?[]const u8 { return "draft.txt"; }
 fn readFileAllocWin32(_: []const u8, _: usize) ?[]u8 { return std.heap.page_allocator.dupe(u8, "ordinary question for tab B") catch unreachable; }
 const CHAT_DRAFT_SAVE_MS = 1;
@@ -56,7 +60,7 @@ fn chatOutboxShellForKey(_: []const u8) ?u32 { return null; }
 `;
 const acceptance = `
 test "ISSUE-399 skill and ISSUE-419 reply stay with their tabs across draft switches" {
-    const owner = "tmux:0:tab-0";
+    const owner = "session:#0";
     @memcpy(g_chat_draft_owner[0..owner.len], owner);
     g_chat_draft_owner_len = owner.len;
     @memcpy(g_chat_reply[0..11], "first quote");
@@ -91,7 +95,7 @@ test "ISSUE-399 skill and ISSUE-419 reply stay with their tabs across draft swit
 test('ISSUE-399 a picked skill is cleared in another tab and restored in its own tab', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh399-skill-tab-'));
   try {
-    copyZig(['skills.zig'], dir);
+    copyZig(['skills.zig', 'chat_drafts.zig'], dir);
     fs.writeFileSync(path.join(dir, 'repro.zig'), harness + body('selectChatSkill') + '\n' + body('chatDraftBindToActive') + acceptance);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'repro.zig'), '--test-filter', 'ISSUE-399'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);

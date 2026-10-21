@@ -264,6 +264,7 @@ pub const WM_APP_CHAT_COPY_SELECTION: u32 = WM_APP + 148;
 pub const WM_APP_CHAT_SELECT_ALL: u32 = WM_APP + 149;
 pub const WM_APP_VOICE_REPLAY: u32 = WM_APP + 142;
 pub const WM_APP_LADDER_DONE: u32 = WM_APP + 180;
+pub const WM_APP_ZSB_WORKSPACE: u32 = WM_APP + 153;
 pub const WM_APP_ZSB_WHO: u32 = WM_APP + 151;
 pub const WM_APP_BROWSER_DOCKED: u32 = WM_APP + 152;
 pub const WM_APP_LAYOUT_READY: u32 = WM_APP + 150;
@@ -382,6 +383,7 @@ pub const MSG = extern struct {
     pt: POINT,
 };
 pub const RECT = extern struct { left: LONG, top: LONG, right: LONG, bottom: LONG };
+pub const WINDOWPOS = extern struct { hwnd: HANDLE, hwndInsertAfter: HANDLE, x: i32, y: i32, cx: i32, cy: i32, flags: UINT };
 pub const SYSTEMTIME = extern struct {
     year: WORD,
     month: WORD,
