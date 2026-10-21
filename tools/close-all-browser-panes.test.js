@@ -33,7 +33,7 @@ function harness() {
   const row = block(palette, 'if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes"', '    ');
   const declaration = state.match(new RegExp(`pub const ${offset}: usize = \\d+;`));
   assert.ok(declaration, 'Missing Close All Browser Panes command offset');
-  const production = ['closeBrowserForShell', 'closeWebView2', 'webView2OwnsShell', 'webView2OwnsActiveShell']
+  const production = ['closeBrowserForShell', 'closeWebView2', 'webView2OwnsShell', 'webView2OwnsActiveShell', 'shellZsbSessionKey']
     .map(name => fn(browser, name)).join('\n\n');
   const matching = ['u16ToLower', 'asciiContainsQueryInsensitive', 'labelsMatchQuery'].map(name => fn(palette, name)).join('\n\n');
   return `const std = @import("std");
@@ -83,6 +83,8 @@ var window_closes: [8]u32 = @splat(0);
 var hidden: [8]bool = @splat(false);
 var id_deleted: [7]u32 = @splat(0);
 var files_removed: [7]u32 = @splat(0);
+var key_files_removed: [7]u32 = @splat(0);
+var webview_key_files_removed: [7]u32 = @splat(0);
 var webview_releases: u32 = 0;
 var webview_files_removed: u32 = 0;
 var webview_hidden = false;
@@ -103,6 +105,16 @@ fn PostMessageW(hwnd: HANDLE, msg: u32, _: usize, _: isize) i32 {
 }
 fn deleteBrowserWindowIdFile(sid: u32) void { id_deleted[sid - 1] += 1; }
 fn removePaneSessionFilesForShell(idx: u32) void { files_removed[idx] += 1; }
+fn removePaneShellKeyFileForShell(idx: u32) void { key_files_removed[idx] += 1; }
+fn appendDecimal(out: []u8, pos: *usize, value: u32) void {
+    const text = std.fmt.bufPrint(out[pos.*..], "{d}", .{value}) catch unreachable;
+    pos.* += text.len;
+}
+fn removeWebView2SessionFile(session: []const u8) void {
+    std.debug.assert(std.mem.startsWith(u8, session, "zss-"));
+    const sid = std.fmt.parseInt(u32, session[4..], 10) catch unreachable;
+    webview_key_files_removed[sid - 1] += 1;
+}
 fn KillTimer(_: HANDLE, _: usize) i32 { return 1; }
 fn setWebViewVisible(value: i32) void { std.debug.assert(value == 0); webview_hidden = true; }
 fn releaseWebView() void { std.debug.assert(webview_hidden); webview_releases += 1; }
@@ -173,6 +185,8 @@ fn prepare(webview_owner: u32) void {
     hidden = @splat(false);
     id_deleted = @splat(0);
     files_removed = @splat(0);
+    key_files_removed = @splat(0);
+    webview_key_files_removed = @splat(0);
     webview_releases = 0;
     webview_files_removed = 0;
     webview_hidden = false;
@@ -207,11 +221,16 @@ test "production palette handler closes every session through native teardown an
             try std.testing.expectEqual(before[i].keep_awake, shell.keep_awake);
             if (before[i].browser_hwnd) |hwnd| try std.testing.expectEqual(@as(u32, 1), window_closes[hwnd]);
             const expected: u32 = if (before[i].browser_window_id != 0) 1 else 0;
-            try std.testing.expectEqual(expected, id_deleted[i]);
+            try std.testing.expectEqual(@as(u32, 1), id_deleted[i]);
+            try std.testing.expectEqual(@as(u32, 1), key_files_removed[i]);
+            try std.testing.expectEqual(@as(u32, 1), webview_key_files_removed[i]);
             try std.testing.expectEqual(expected, files_removed[i]);
         }
         try std.testing.expectEqualDeep(before[6], shells[6]);
         try std.testing.expectEqual(@as(u32, 0), cancelled[6]);
+        try std.testing.expectEqual(@as(u32, 0), id_deleted[6]);
+        try std.testing.expectEqual(@as(u32, 0), key_files_removed[6]);
+        try std.testing.expectEqual(@as(u32, 0), webview_key_files_removed[6]);
         try std.testing.expectEqual(@as(u32, 0), window_closes[7]);
         try std.testing.expectEqual(@as(u32, @intFromBool(owner != 0)), webview_releases);
         try std.testing.expectEqual(webview_releases, webview_files_removed);
