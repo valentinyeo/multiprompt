@@ -1,8 +1,6 @@
 name: Verify SSH reconnect
 
 on:
-  push:
-    branches: [ceo/IGSH-511-verify]
   workflow_dispatch:
     inputs:
       exe_source:
@@ -24,7 +22,6 @@ permissions:
 
 jobs:
   reconnect:
-    if: github.event_name != 'push'
     runs-on: windows-latest
     timeout-minutes: 20
     env:
