@@ -51,12 +51,16 @@ test('font cache uses Unicode local app data paths and skips same-sized files', 
 test('all saved indices migrate to the only bundled SemiBold face without changing size', () => {
   assert.match(state, /DEV_CONSOLE_FONTS = \[_\]\[\]const u8\{DEFAULT_CONSOLE_FONT\}/);
   assert.match(state, /DEFAULT_CONSOLE_FONT = @import\("fonts\.zig"\)\.MONO_FACE/);
-  assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono SemiBold"/);
+  assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono MP SemiBold"/);
   const restore = read('src/session.zig');
   assert.match(restore, /app_state\.g_dev_font_idx = app_state\.DEFAULT_CONSOLE_FONT_IDX/);
   assert.doesNotMatch(restore, /font < DEV_CONSOLE_FONTS\.len/);
   assert.match(restore, /size >= 8 and size <= 40/);
-  assert.match(read('src/themes.zig'), /setWideAscii\(&app_state\.g_dev_theme\.console_font, app_state\.DEFAULT_CONSOLE_FONT\)/);
+  assert.match(read('src/themes.zig'), /parseThemeFontField\(json, "console_font", &app_state\.g_dev_theme\.console_font\)/);
+  assert.match(read('src/themes.zig'), /setWideAscii\(out, app_state\.DEFAULT_CONSOLE_FONT\)/);
+  assert.match(read('src/themes.zig'), /test "IGSH-443/);
+  assert.match(read('build.zig'), /vps_test_step\.dependOn\(&run_shell_font_migration_tests\.step\)/);
+  assert.match(read('build.zig'), /test_step\.dependOn\(&run_shell_font_migration_tests\.step\)/);
 });
 
 test('the embedded theme names only bundled fonts and preserves its console height', () => {
@@ -65,9 +69,9 @@ test('the embedded theme names only bundled fonts and preserves its console heig
   const parts = expression.split('++ DEFAULT_CONSOLE_FONT ++').map(part => part.split('\n')
     .filter(line => /^\s*\\\\/.test(line)).map(line => line.replace(/^\s*\\\\/, '')).join('\n'));
   assert.equal(parts.length, 2);
-  const theme = JSON.parse(parts.join('Nordwand Mono SemiBold'));
+  const theme = JSON.parse(parts.join('Nordwand Mono MP SemiBold'));
   for (const key of ['title_font', 'subtitle_font', 'close_font']) assert.equal(theme.fonts[key], 'IBM Plex Sans');
-  assert.equal(theme.fonts.console_font, 'Nordwand Mono SemiBold');
+  assert.equal(theme.fonts.console_font, 'Nordwand Mono MP SemiBold');
   assert.equal(theme.fonts.console_font_height, 18);
   assert.equal(theme.fonts.console_font_weight, 600);
 });

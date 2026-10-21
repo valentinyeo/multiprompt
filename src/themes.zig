@@ -384,7 +384,11 @@ fn parseThemeColorField(json: std.json.Value, field: []const u8, out: *DWORD) vo
 pub fn parseThemeFontField(json: std.json.Value, field: []const u8, out: *[64]u16) void {
     var token: [96]u8 = undefined;
     const value = parseThemeStringField(json, field, &token) orelse return;
-    _ = json_reader.wide(value, out);
+    if (std.mem.eql(u8, field, "console_font")) {
+        setWideAscii(out, app_state.DEFAULT_CONSOLE_FONT);
+    } else {
+        _ = json_reader.wide(value, out);
+    }
 }
 
 pub fn loadDevThemeFromFile() void {
@@ -404,7 +408,7 @@ pub fn loadDevThemeFromFile() void {
     setWideAscii(&app_state.g_dev_theme.title_font, @import("fonts.zig").UI_FACE);
     setWideAscii(&app_state.g_dev_theme.subtitle_font, @import("fonts.zig").UI_FACE);
     setWideAscii(&app_state.g_dev_theme.close_font, @import("fonts.zig").UI_FACE);
-    setWideAscii(&app_state.g_dev_theme.console_font, app_state.DEFAULT_CONSOLE_FONT);
+    parseThemeFontField(json, "console_font", &app_state.g_dev_theme.console_font);
     parseThemeIntField(json, "title_height", &app_state.g_dev_theme.title_height);
     parseThemeIntField(json, "subtitle_height", &app_state.g_dev_theme.subtitle_height);
     parseThemeIntField(json, "close_height", &app_state.g_dev_theme.close_height);
@@ -679,5 +683,23 @@ pub fn applyTitleBarTheme() void {
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
         const border_color: DWORD = if (app_state.g_amoled_theme) RGB(0, 0, 0) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(104, 104, 104) else RGB(86, 86, 86);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_BORDER_COLOR, @ptrCast(&border_color), @sizeOf(DWORD));
+    }
+}
+
+test "IGSH-443 shell face and saved font names migrate idempotently" {
+    try std.testing.expectEqualStrings("Nordwand Mono MP SemiBold", app_state.DEFAULT_CONSOLE_FONT);
+    try std.testing.expect(app_state.DEFAULT_CONSOLE_FONT.len < 32);
+    try std.testing.expectEqualStrings(app_state.DEFAULT_CONSOLE_FONT, app_state.DEV_CONSOLE_FONTS[app_state.DEFAULT_CONSOLE_FONT_IDX]);
+    for ([_][]const u8{ "Nordwand Mono", "Nordwand Mono SemiBold", app_state.DEFAULT_CONSOLE_FONT }) |saved| {
+        var source: [128]u8 = undefined;
+        const text = try std.fmt.bufPrint(&source, "{{\"console_font\":\"{s}\",\"console_font_height\":22}}", .{saved});
+        var parsed = try json_reader.parse(std.testing.allocator, text);
+        defer parsed.deinit();
+        var face: [64]u16 = @splat(0);
+        parseThemeFontField(parsed.value, "console_font", &face);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Nordwand Mono MP SemiBold"), std.mem.sliceTo(&face, 0));
+        var height: i32 = 18;
+        parseThemeIntField(parsed.value, "console_font_height", &height);
+        try std.testing.expectEqual(@as(i32, 22), height);
     }
 }
