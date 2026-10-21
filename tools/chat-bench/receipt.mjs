@@ -16,7 +16,7 @@ export function checkReceipt(run, expectedSha256) {
   } catch (error) {
     reasons.push(`cannot recompute verdict: ${error.message}`);
   }
-  for (const [key, file] of Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' })) {
+  for (const [key, file] of Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c', ssh: 'ssh-fixture.c' })) {
     if (key === 'browser' && !Object.hasOwn(run?.runnerHashes || {}, key)) continue;
     try {
       if (run?.runnerHashes?.[key] !== hash(new URL(file, import.meta.url))) reasons.push(`stale or missing runnerHashes.${key}`);

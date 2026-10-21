@@ -91,9 +91,11 @@ export function generate(root, config = defaults) {
     tabs.push({ index: i, provider, sid, file, initialBytes: bytes, targetBytes: target, turns, browser: config.browserTabs ? ["none", "pending", "docked"][i % 3] : "none" });
   }
   const instances = Array.from({ length: config.windows }, (_, index) => {
-    const appdata = path.join(root, `appdata-${index}`), mailbox = path.join(root, `mailbox-${index}`);
+    const appdata = path.join(root, `appdata-${index}`), mailbox = path.join(root, `mailbox-${index}`), sshDir = path.join(root, `ssh-${index}`);
     fs.mkdirSync(path.join(appdata, 'ZigShell'), { recursive: true });
     fs.mkdirSync(mailbox, { recursive: true });
+    fs.mkdirSync(sshDir, { recursive: true });
+    atomic(path.join(appdata, 'ZigShell/ssh-path.txt'), winPath(path.join(root, 'ssh-fixture.exe')));
     const owned = tabs.filter(t => t.index % config.windows === index).sort((a, b) => a.initialBytes - b.initialBytes);
     const session = { hide_pills: false, active_tab: 0, single_window: false, chat_view_mode: 'everywhere', chat_active: true, tabs: owned.map(t => ({
       kind: t.file ? 'tmux' : 'cmd', name: `Bench ${t.sid}`, manual: true, cv: true, cwd: 'C:\\', pid: 0,
@@ -101,7 +103,7 @@ export function generate(root, config = defaults) {
     })) };
     atomic(path.join(appdata, 'ZigShell/session.json'), JSON.stringify(session));
     atomic(path.join(appdata, `ZigShell/session-bench-${index}.json`), JSON.stringify(session));
-    return { index, appdata, mailbox, tabs: owned };
+    return { index, appdata, mailbox, sshDir, tabs: owned };
   });
   const manifest = { home, tabs, instances };
   atomic(path.join(root, 'fixtures.json'), JSON.stringify(manifest, null, 2));

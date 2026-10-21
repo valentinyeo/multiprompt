@@ -45,9 +45,10 @@ class Host {
     this.buffer = Buffer.alloc(0);
     this.stderr = '';
     this.exit = once(this.child, 'exit');
+    const deadline = Date.now() + 15000;
     let timer;
     this.ready = new Promise((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(`host startup timed out: ${this.stderr}`)), 5000);
+      timer = setTimeout(() => reject(new Error(`host startup timed out: ${this.stderr}`)), 15000);
       this.child.once('error', reject);
       this.child.once('exit', code => reject(new Error(`host exited ${code}: ${this.stderr}`)));
       this.child.stdout.on('data', data => {
@@ -71,6 +72,17 @@ class Host {
           }
         }
       });
+    }).then(async () => {
+      if (process.platform !== 'win32') return;
+      const pipe = args[0] === legacyOrigin ? 'zigshell-browser' : `multiprompt-browser-isolated${profile ? `-${profile}` : ''}`;
+      while (Date.now() < deadline) {
+        if (this.child.exitCode !== null || this.child.signalCode !== null) {
+          throw new Error(`host exited before pipe readiness: ${this.stderr}`);
+        }
+        if ((await fs.promises.readdir('\\\\.\\pipe\\')).includes(pipe)) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(`host pipe startup timed out (${pipe}): ${this.stderr}`);
     }).finally(() => clearTimeout(timer));
     this.child.stderr.on('data', data => { this.stderr += data; });
   }
