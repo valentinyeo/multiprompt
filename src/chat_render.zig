@@ -1846,6 +1846,8 @@ pub fn shotFocusTick() void {
     debugLog(std.fmt.bufPrint(&log, "[paste-focus] attach foreground={} target={}", .{ attached_fg, attached_target }) catch "[paste-focus] attach");
     keybd_event(VK_MENU, 0, 0, 0);
     const foreground_ok = if (chat) SetForegroundWindow(app_state.g_main_hwnd) else activateConsoleForeground(target);
+    keybd_event(0xFF, 0, 0, 0);
+    keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
     keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     _ = SetFocus(target);
     const landed = if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == (if (chat) app_state.g_main_hwnd else target) and GetFocus() == target;

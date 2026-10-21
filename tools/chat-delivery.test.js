@@ -29,6 +29,7 @@ const CHAT_OUTBOX_MAX_PER_KEY = 20;
 const CHAT_OUTBOX_TOTAL_MAX = 400;
 const CHAT_OUTBOX_MSG_CAP = 16384;
 const CHAT_OUTBOX_KEY_CAP = 256;
+const CHAT_OUTBOX_LOAD_LIMIT = 16 * 1024 * 1024;
 const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
@@ -48,11 +49,12 @@ var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 var g_chat_tmux_send_job: ?u8 = null;
-fn chatTmuxSendEligible(_: u32) bool { return false; }
+var channel_enabled = false;
+fn chatTmuxSendEligible(_: u32) bool { return channel_enabled; }
 var channel_starts: usize = 0;
 var delivery_polls: usize = 0;
 fn chatTmuxSendStart(_: u32, _: []const u16, id: u64, retry: bool) bool {
-    std.debug.assert(retry);
+    _ = retry;
     channel_starts += 1;
     if (chatOutboxIndexById(id)) |i| g_chat_outbox.items[i].channel_pending = true;
     return true;
@@ -91,6 +93,10 @@ var input_held: ?bool = null;
 fn chatPromptStillInInputBox(_: u32, _: []const u16) ?bool { return input_held; }
 fn chatLinkLooksDown(idx: u32) bool { return shells[idx].disconnected; }
 var persisted: ?[]u8 = null;
+fn getChatOutboxPath(_: *[512]u8) ?[]const u8 { return "outbox.json"; }
+fn readFileAllocWin32(_: []const u8, _: usize) ?[]u8 {
+    return std.heap.page_allocator.dupe(u8, persisted orelse return null) catch null;
+}
 var persist_ok = true;
 var paste_ok = true;
 fn saveChatOutbox() bool {
@@ -119,7 +125,9 @@ fn clear() void {
     writes = 0;
     enters = 0;
     input_held = null;
+    input_idle = true;
     g_chat_verify_echo_id = 0;
+    channel_enabled = false;
     channel_starts = 0;
     delivery_polls = 0;
     g_chat_tmux_send_job = null;
@@ -147,7 +155,7 @@ var g_chat_histories = struct { items: []*HistoryEntry }{ .items = &history_entr
 fn nowFileTime() u64 { return @as(u64, @intCast(fake_now_ms)) * 10000 + 116444736000000000; }
 fn chatEchoLoadedMs() i64 { return fake_loaded_ms; }
 fn chatEchoWindowFull() bool { return false; }
-fn chatEchoAnchorNow(_: u32) chat_echo.Anchor { return .{ .after_ms = 1000, .sent_ms = 1500, .counted = true, .user_count = 1 }; }
+fn chatEchoAnchorNow(_: u32) chat_echo.Anchor { return .{ .after_ms = 1000, .sent_ms = fake_now_ms, .counted = true, .user_count = 1 }; }
 fn chatShouldUseDirectInput(_: u32) bool { return true; }
 fn chatSendForceBracketed(_: u32) bool { return true; }
 fn chatSendEnterDelayMs(_: u8) u32 { return 0; }
@@ -164,24 +172,42 @@ fn sendEnterToShell(_: u32) bool { enters += 1; return true; }
 fn chatArmSendVerify(_: u32, _: []const u16, id: u64) bool { g_chat_verify_echo_id = id; return true; }
 fn chatVerifyClear() void { g_chat_verify_echo_id = 0; }
 fn chatOutboxChanged() void { g_chat_outbox_revision +%= 1; }
-fn chatOutboxInputRowIdle(_: u32) bool { return true; }
+var input_idle = true;
+fn chatOutboxInputRowIdle(_: u32) bool { return input_idle; }
+`;
+const pendingStart = source.indexOf('    g_chat_echo_layout_count = 0;\n    if (active_shell < shell_count)');
+assert.ok(pendingStart >= 0, 'production pending layout');
+const pendingLayout = `
+const RECT = struct { left: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
+var g_chat_echo_layout_count: usize = 0;
+var g_chat_echo_layout: [20]RECT = undefined;
+var g_chat_echo_layout_ids: [20]u64 = undefined;
+var g_chat_content_left: i32 = 0;
+var g_chat_content_h: i32 = 0;
+fn chatBlockGapBefore(_: bool, _: enum { user }, _: bool, _: enum { single }) i32 { return 1; }
+fn chatMeasureEchoRect(_: u8, _: []const u16, _: i32, y: i32) RECT { return .{ .bottom = y + 10 }; }
+fn uiScaled(n: i32) i32 { return n; }
+fn layoutPending() void {
+    const hdc: u8 = 0;
+    const width: i32 = 100;
+    var y: i32 = 0;
+${source.slice(pendingStart, source.indexOf('\n}', pendingStart))}
+}
 `;
 const acceptance = `
 fn enqueue(text: []const u16, state: ChatEchoState) !void {
     try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "test", text, state));
     g_chat_outbox.items[g_chat_outbox.items.len - 1].anchor = chatEchoAnchorNow(0);
+    g_chat_outbox.items[g_chat_outbox.items.len - 1].anchor.sent_ms = 1500;
     g_chat_outbox.items[g_chat_outbox.items.len - 1].sent_tick_ms = 1500;
     g_chat_outbox.items[g_chat_outbox.items.len - 1].write_started = state != .queued;
     g_chat_outbox_revision +%= 1;
 }
 fn reload() !void {
-    const bytes = try std.heap.page_allocator.dupe(u8, persisted.?);
-    defer std.heap.page_allocator.free(bytes);
-    for (g_chat_outbox.items) |e| std.heap.page_allocator.free(e.text);
-    g_chat_outbox.clearRetainingCapacity();
     g_chat_confirmed.clearRetainingCapacity();
-    chatOutboxParseJson(&g_chat_outbox, std.heap.page_allocator, bytes);
+    loadChatOutbox();
 }
+
 fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_hash +%= 1;
     g_chat_capture = text;
@@ -500,7 +526,7 @@ test "delivery: legacy delivered entries without a timestamp cannot stay queued 
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
-test "delivery: restored delivered outbox uses a fresh monotonic budget and keeps late matching" {
+test "delivery: restored delivered outbox preserves its deadline and keeps late matching" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("older persisted message");
     try enqueue(text, .delivered);
@@ -639,6 +665,158 @@ test "ISSUE-501 reattach flushes FIFO exactly once through confirmed outbox stat
     try std.testing.expectEqual(@as(usize, 2), writes);
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
+test "ISSUE-460 pending Chat View IDs equal the ordered outbox across save and reload" {
+    defer clear();
+    for ([_]ChatEchoState{ .queued, .delivered, .not_sent }) |state| {
+        try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("pending request"), state);
+    }
+    try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "other", std.unicode.utf8ToUtf16LeStringLiteral("other session"), .queued));
+    for (0..2) |_| {
+        layoutPending();
+        try std.testing.expectEqual(@as(usize, 3), g_chat_echo_layout_count);
+        for (g_chat_outbox.items[0..3], g_chat_echo_layout_ids[0..g_chat_echo_layout_count]) |entry, id| {
+            try std.testing.expectEqual(entry.id, id);
+        }
+        try std.testing.expectEqual(chat_echo.Label.waiting_to_send, chat_echo.pendingLabel(.offline_queue, false, false));
+        try std.testing.expect(saveChatOutbox());
+        try reload();
+    }
+}
+test "ISSUE-460 failed initial persistence never accepts or displays an undurable message" {
+    defer clear();
+    persist_ok = false;
+    try std.testing.expectEqual(@as(?usize, null), chatEchoEnqueueForShell(0, std.unicode.utf8ToUtf16LeStringLiteral("unsaved request"), .queued));
+    layoutPending();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_echo_layout_count);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
+test "ISSUE-460 channel never appends over a message already held in the shell input" {
+    defer clear();
+    channel_enabled = true;
+    input_idle = false;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("waiting request"), .queued);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 0), channel_starts);
+    input_idle = true;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+}
+test "ISSUE-460 Send again preserves late matching anchors and persists its own deadline" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("late request");
+    try enqueue(text, .not_sent);
+    shells[0].activity = .active;
+    fake_now_ms = 700000;
+    chatEchoSendAgain(g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(i64, 1500), g_chat_outbox.items[0].anchor.sent_ms);
+    const deadline = g_chat_outbox.items[0].expires_ms;
+    try reload();
+    try std.testing.expectEqual(deadline, g_chat_outbox.items[0].expires_ms);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
+    transcript(text, 2000);
+    shells[0].activity = .idle;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
+test "ISSUE-460 production reload retains unmatched sessions and does not overwrite malformed persistence" {
+    defer clear();
+    try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "missing", std.unicode.utf8ToUtf16LeStringLiteral("restored request"), .queued));
+    try std.testing.expect(saveChatOutbox());
+    try reload();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqualStrings("missing", g_chat_outbox.items[0].key[0..g_chat_outbox.items[0].key_len]);
+    std.heap.page_allocator.free(persisted.?);
+    persisted = try std.heap.page_allocator.dupe(u8, "{invalid");
+    try reload();
+    try std.testing.expectEqualStrings("{invalid", persisted.?);
+}
+test "ISSUE-460 partial timeout budget survives repeated production reloads" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("offline request");
+    _ = chatEchoEnqueueForShell(0, text, .queued) orelse return error.EnqueueFailed;
+    shells[0].disconnected = true;
+    const deadline = g_chat_outbox.items[0].expires_ms;
+    for ([_]i64{ 100000, 300000, deadline - 1 }) |now_ms| {
+        fake_now_ms = now_ms;
+        try reload();
+        chatOutboxTick();
+        try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
+        try std.testing.expectEqual(deadline, g_chat_outbox.items[0].expires_ms);
+    }
+    fake_now_ms = deadline;
+    try reload();
+    chatOutboxTick();
+    try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
+test "ISSUE-460 queued evidence cannot release the next message into the input" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .queued);
+    g_chat_outbox.items[0].transcript_queued = true;
+    try std.testing.expect(!chatOutboxTrySendEntry(0, 1));
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000);
+    chatOutboxTick();
+    try std.testing.expectEqualSlices(u16, &.{'s'}, written_order[0..writes]);
+}
+test "ISSUE-460 busy channel holds both messages until ready then confirms in order" {
+    defer clear();
+    channel_enabled = true;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .queued);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .queued);
+    shells[0].activity = .active;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 0), channel_starts);
+    shells[0].activity = .idle;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    g_chat_outbox.items[0].channel_pending = false;
+    g_chat_outbox.items[0].state = .delivered;
+    g_chat_outbox.items[0].transcript_queued = true;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    transcript(std.unicode.utf8ToUtf16LeStringLiteral("first request"), 2000);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 2), channel_starts);
+}
+test "ISSUE-460 offline busy and unconfirmed queues all fail within fifteen minutes" {
+    defer clear();
+    for ([_]ChatEchoState{ .queued, .sending, .delivered }) |state| {
+        try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("waiting request"), state);
+    }
+    g_chat_outbox.items[1].channel_pending = true;
+    g_chat_outbox.items[2].transcript_queued = true;
+    shells[0].activity = .active;
+    shells[0].disconnected = true;
+    fake_now_ms = 901500;
+    chatOutboxTick();
+    for (g_chat_outbox.items) |entry| {
+        try std.testing.expectEqual(ChatEchoState.not_sent, entry.state);
+        try std.testing.expect(chat_echo.pendingActions(entry.state).send_again);
+        try std.testing.expect(!entry.transcript_queued);
+    }
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
+test "ISSUE-460 restart preserves elapsed timeout and FIFO without duplicate writes" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .queued);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .queued);
+    try std.testing.expect(saveChatOutbox());
+    fake_now_ms = 901500;
+    try reload();
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("first request"), g_chat_outbox.items[0].text);
+    for (g_chat_outbox.items) |entry| try std.testing.expectEqual(ChatEchoState.not_sent, entry.state);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    try reload();
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
 test "ISSUE-460 two messages queued busy then idle reach the session in order" {
     defer clear();
     const first = std.unicode.utf8ToUtf16LeStringLiteral("first queued request");
@@ -775,8 +953,8 @@ test "ISSUE-460 both saved laptop entries stay failed until positive background 
 }
 
 `;
-const names = ['chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxTrySendEntry'];
-const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order'].map(name => {
+const names = ['loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxTrySendEntry'];
+const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n}', start) + 2);
@@ -800,7 +978,7 @@ function runHarness(control = false) {
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + acceptance + sourceOutboxTests);
+    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -813,6 +991,13 @@ test('cache timestamp oracle rejects the actual integration omission (positive c
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 0, found 1/);
 });
+test('composer always persists through the same outbox before delivery', () => {
+  const send = body('sendChatPrompt');
+  assert.match(send, /chatEchoEnqueueForShell\(active_shell, send_text, \.queued\)/);
+  assert.match(send, /chatOutboxTick\(\)/);
+  assert.doesNotMatch(send, /sendTextToActiveShellVerified|chatEchoConfirm/);
+});
+
 test('retry UI delegates to evidence-safe resend and pending bubbles never say Sent', () => {
   assert.match(body('chatEchoRetryAt'), /chatEchoSendAgain\(id\)/);
   assert.match(body('chatEchoSendAgain'), /chatEchoTryMatchEntry/);
@@ -842,7 +1027,7 @@ test('stuck-refusal oracle rejects ignored delivery evidence (positive control)'
 
 test('ISSUE-460 production outbox regression tests', () => {
   const result = runHarness('issue460');
-  if (process.env.ISSUE_460_FILTER) process.stdout.write(result.stdout + result.stderr);
+  process.stdout.write(result.stdout + result.stderr);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 

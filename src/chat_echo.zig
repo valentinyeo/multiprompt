@@ -200,7 +200,7 @@ pub fn sameText(a: []const u16, b: []const u16) bool {
     }
 }
 
-pub const OutboxState = enum(u8) { queued, sending, not_sent, delivered };
+pub const OutboxState = enum(u8) { queued = 0, sending = 1, not_sent = 2, delivered = 3 };
 
 pub const ISSUE_349_ORPHAN_SENDING_SETTLES = true;
 
@@ -269,6 +269,10 @@ pub fn represented(text: []const u16, blocks: []const UserBlock) ?usize {
 pub fn expiredSent(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
     return state == .delivered and sent_ms > 0 and now_ms >= sent_ms and
         now_ms - sent_ms >= 10 * 60 * 1000;
+}
+
+pub fn pendingExpired(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
+    return state != .not_sent and now_ms >= sent_ms and now_ms - sent_ms >= 600_000;
 }
 
 pub const SETTLE_GRACE_MS: i64 = 20_000;
@@ -906,4 +910,15 @@ test "IGSH-442 idle plus fresh transcript grace can fail without retransmission"
         try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, 620_001, 620_001, .none));
         try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, false, 620_002, 620_002, .none));
     }
+}
+
+test "ISSUE-460 all pending states have a hard deadline independent of busy and transcript evidence" {
+    for ([_]OutboxState{ .queued, .sending, .delivered }) |state| {
+        try std.testing.expect(!pendingExpired(state, 1000, 600999));
+        try std.testing.expect(pendingExpired(state, 1000, 601000));
+        try std.testing.expect(!pendingExpired(state, 1000, 999));
+        try std.testing.expect(pendingExpired(state, -600000, 0));
+    }
+    try std.testing.expect(!pendingExpired(.not_sent, 1000, 901000));
+    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(OutboxState.not_sent));
 }

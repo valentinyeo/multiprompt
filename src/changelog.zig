@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.792", .items = &.{
+        .{ .text = "Chat View sends waiting messages one at a time and keeps their order after restarting.", .ticket = "IGSH-460" },
+        .{ .text = "Messages that cannot be confirmed show Send again instead of staying queued forever.", .ticket = "IGSH-460" },
+    } },
     .{ .ver = "0.28.791", .items = &.{
         .{ .text = "The Chat View find box now correctly types symbols and accented letters with your keyboard layout.", .ticket = "IGSH-407" },
         .{ .text = "Disconnected tabs use less CPU while waiting to reconnect.", .ticket = "IGSH-513" },
