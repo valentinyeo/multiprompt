@@ -484,7 +484,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
-    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js" });
+    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
     vps_test_step.dependOn(&ssh_reconnect_tests.step);

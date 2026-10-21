@@ -1,0 +1,81 @@
+name: Verify SSH reconnect
+
+on:
+  workflow_dispatch:
+    inputs:
+      exe_source:
+        description: build or a release tag such as v0.28.788
+        required: true
+        default: build
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/verify-reconnect.yml
+      - tools/verify-reconnect/**
+      - tools/verify-reconnect.test.js
+      - src/ssh_reconnect.zig
+      - src/chat_send.zig
+      - src/console.zig
+
+permissions:
+  contents: read
+
+jobs:
+  reconnect:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      EXE_SOURCE: ${{ inputs.exe_source || 'build' }}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install pinned Windows Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Acquire real app and compile boundary stand-in
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:EXE_SOURCE -eq 'build') {
+            zig build -Dtarget=x86_64-windows-gnu --summary all
+            if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          } else {
+            if ($env:EXE_SOURCE -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected build or a release tag' }
+            gh release download $env:EXE_SOURCE --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir bin
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            $line = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+            if ($line.Count -ne 1) { throw 'Missing unique executable checksum' }
+            $expected = ($line[0] -split '\s+')[0].ToLower()
+            if ((Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Release checksum mismatch' }
+            Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+            Copy-Item bin/SHA256SUMS.txt evidence/
+          }
+          zig cc -target x86_64-windows-gnu -O2 tools/verify-reconnect/fake-ssh.c -o bin/ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Stand-in compile failed' }
+          @{exe_source=$env:EXE_SOURCE; revision=(git rev-parse HEAD); run_id=$env:GITHUB_RUN_ID; run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; exe_sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower()} | ConvertTo-Json | Set-Content evidence/provenance.json
+      - name: Drive real Windows desktop
+        shell: pwsh
+        run: ./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+      - name: Reconnect production logic tests on Windows
+        if: env.EXE_SOURCE == 'build'
+        run: node --test --test-concurrency=1 tools/ssh-clock-standby.test.js tools/ssh-reconnect.test.js tools/ssh-probe-511.test.js
+      - name: Source-only contract checks
+        if: always()
+        run: node tools/verify-reconnect.test.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: verify-reconnect-${{ env.EXE_SOURCE }}
+          path: evidence
+          if-no-files-found: error
