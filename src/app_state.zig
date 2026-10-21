@@ -972,6 +972,7 @@ pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bott
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
+pub var g_pane_ring_state: u8 = 0;
 pub var g_browser_edge_mask_rects: [BROWSER_EDGE_MASK_COUNT]RECT = [_]RECT{std.mem.zeroes(RECT)} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_shown: [BROWSER_EDGE_MASK_COUNT]bool = [_]bool{false} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_nextunread_count: u32 = 0;
@@ -1389,6 +1390,7 @@ pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
 pub var g_pending_chat_id: u64 = 0;
+pub var g_pending_background_workspace: ?u8 = null;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -2640,7 +2642,7 @@ pub var g_chat_echo_layout_ids: [CHAT_OUTBOX_MAX_PER_KEY]u64 = @splat(0);
 pub var g_chat_echo_layout_count: usize = 0;
 pub var g_chat_scroll_bottom_pending: bool = false;
 pub var g_chat_outbox_timer_on: bool = false;
-pub var g_ssh_reconnect_timer_on: bool = false;
+pub var g_ssh_reconnect_timer_ms: u32 = 0;
 
 pub var g_chat_outbox_revision: u64 = 0;
 
@@ -3173,6 +3175,15 @@ pub const ZsbWorkerCtx = struct {
     req: [ZSB_WIRE_CAP]u8,
     req_len: usize,
 };
+
+pub var g_zsb_workspace_mutex: SpinMutex = .{};
+pub var g_zsb_workspace_pending = false;
+pub var g_zsb_workspace_done = false;
+pub var g_zsb_workspace_args: [11][256]u8 = undefined;
+pub var g_zsb_workspace_arg_lens: [11]usize = undefined;
+pub var g_zsb_workspace_argc: usize = 0;
+pub var g_zsb_workspace_response: [256 * 1024]u8 = undefined;
+pub var g_zsb_workspace_response_len: usize = 0;
 
 pub var g_zsb_who_mutex: SpinMutex = .{};
 pub var g_zsb_who_pending = false;

@@ -53,6 +53,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.795", .items = &.{
+        .{ .text = "Unsent Chat View drafts now stay with their own session across switches and restarts, with a DRAFT label in the sidebar.", .ticket = "IGSH-498" },
+        .{ .text = "The shell view is back to its old maximum width, while full width still fills the window.", .ticket = "IGSH-508" },
+        .{ .text = "Tab activity notifications no longer repeatedly refresh terminal status bars.", .ticket = "IGSH-514" },
+    } },
     .{ .ver = "0.28.794", .items = &.{
         .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
         .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },

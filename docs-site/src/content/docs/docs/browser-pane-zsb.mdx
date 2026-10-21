@@ -112,9 +112,28 @@ multiprompt-browser doctor
 multiprompt-browser sidebar
 ```
 
+## Workspace and tmux session commands
+
+These app-level commands work through the same reverse SSH bridge (port 19548 by default), without a browser pane, browser extension, current tmux session, or `ZSB_SESSION`. Both `zsb` and `multiprompt-browser` accept them:
+
+```bash
+zsb workspace-list
+zsb session-open --workspace "Research" --group "Ops" --host "remote-1" --tmux "runner-7" --name "Runner 7"
+zsb workspace-list --help
+zsb session-open --help
+```
+
+`workspace-list` returns `{"ok":true,"hosts":[...],"workspaces":[...]}`. Every workspace has a numeric slot `id`, `name`, `active`, `groups`, and `tabs`. Each group has its saved `id`, `name`, and workspace-local `tabs`; the workspace's own `tabs` array contains ungrouped tabs. Group definitions are shared by the app, so empty groups are included as valid destinations. Each tab has a stable `id`, `title`, SSH host alias in `host` (or `null` for local shells), `tmux` session name (or `null`), and `active`. Inactive workspaces and collapsed groups are included.
+
+`session-open` requires all five flags, in any order. Workspace, group, and host names match exactly; use the names and SSH aliases returned by `workspace-list`. It attaches to an **existing** remote tmux session using the normal SSH/tmux tab path; it does not create a remote session. The tab opens in the background without changing the current tab, workspace, group expansion, or foreground window. Its manual title and group placement are saved like a hand-made tab. There is no activation flag.
+
+A new tab returns `{"ok":true,"created":true,"tab":42}`. If that host and tmux session already have a tab in any workspace, it returns `{"ok":true,"existing":true,"tab":42,"workspace":"Research"}` with that tab's workspace name, without renaming, moving, or activating it. Session identity is global across workspaces.
+
+Unknown names return `{"ok":false,"error":"unknown_workspace"|"unknown_group"|"unknown_host","valid_names":[...]}` and a nonzero exit status. A tmux name must be 1–63 ASCII letters, digits, `-`, `_`, or `.`. A title must be 1–63 UTF-16 units with no control characters; spaces and Unicode are supported. Missing, repeated, or unknown flags are rejected. Transport failures still report tunnel errors; no keys or tokens are needed in these commands.
+
 ## Routing Rule
 
-multiprompt-browser must target the browser pane owned by the current shell’s exact session.
+Browser-control commands must target the browser pane owned by the current shell’s exact session. The app-level `workspace-list` and `session-open` commands above do not route through a browser pane.
 
 It must never steal a pane from another active agent just because a browser exists elsewhere. If no matching pane is bound, multiprompt-browser should return a useful status/error or trigger a rebind flow.
 

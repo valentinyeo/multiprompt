@@ -40,6 +40,13 @@ print_help() {
         return
         ;;
       navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)'; return ;;
+      workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)'; return ;;
+      session-open) echo 'usage: zsb session-open --workspace <name> --group <name> --host <host name> --tmux <session> --name <tab title>'
+        echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
+        echo '  --tmux accepts 1-63 letters, digits, hyphens, underscores or dots.'
+        echo '  --name accepts 1-63 UTF-16 units, without control characters.'
+        echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
+        return ;;
       selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)'; return ;;
       pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)'; return ;;
       extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)'; return ;;
@@ -58,6 +65,9 @@ print_help() {
 usage: zsb <command> [args] (also: multiprompt-browser)
 
 Commands and flags:
+  workspace-list                    List workspaces, groups, tabs and host names as JSON
+  session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE
+                                    Attach a remote tmux tab in the background, idempotently
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -110,7 +120,9 @@ esac
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ -n "${TMUX:-}" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ]; then
+  sess="workspace"
+elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
 fi
 if [ -z "$sess" ]; then
@@ -341,9 +353,29 @@ def fail(code, message, reply=None):
     sys.exit(1)
 
 
+if args[0] == "workspace-list":
+    if len(args) != 1:
+        fail("bad_args", "usage: zsb workspace-list")
+elif args[0] == "session-open":
+    flags = {"--workspace", "--group", "--host", "--tmux", "--name"}
+    values = {}
+    if len(args) != 11:
+        fail("bad_args", "session-open requires --workspace, --group, --host, --tmux and --name")
+    for flag, value in zip(args[1::2], args[2::2]):
+        if flag not in flags or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+            fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
+        values[flag] = value
+    tmux = values["--tmux"]
+    if len(tmux) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in tmux):
+        fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+    if len(values["--name"].encode("utf-16-le")) // 2 > 63:
+        fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
+    if any(len(value.encode()) > 256 for value in values.values()):
+        fail("bad_args", "session-open argument too long")
+
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 try:
-    sock = socket.create_connection(("localhost", int(port)), timeout=5)
+    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=5)
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
@@ -388,7 +420,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane."
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

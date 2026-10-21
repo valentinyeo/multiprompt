@@ -109,10 +109,9 @@ test("remote requests and signed URLs are carried without silent truncation", ()
 });
 
 test("type supports focused text and selector replacement through trusted input", () => {
-  assert.match(nativeHost, /const second = args\.next\(\);/);
-  assert.match(nativeHost, /second orelse first/);
-  assert.match(nativeHost, /if \(second != null\)/);
-  assert.match(nativeHost, /type <text>\s+Type trusted text/);
+  assert.match(nativeHost, /const text = parsed\.text\[parsed\.second_offset orelse 0 \.\.\]/);
+  assert.match(nativeHost, /if \(parsed\.second_offset\) \|offset\|/);
+  assert.match(nativeHost, /type <text> \[--tab <id\|match>\]\s+Type trusted text/);
 
   const type = functionBody(extension, "typeAction", "insertAction");
   assert.match(type, /if \(selector\)/);

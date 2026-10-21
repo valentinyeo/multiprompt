@@ -211,7 +211,7 @@ pub fn build(b: *std.Build) void {
     const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
     test_step.dependOn(&chat_bench_ab_summary_tests.step);
     vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
-    const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js" });
+    const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js", "tools/chat-bench/receipt.test.mjs" });
     vps_test_step.dependOn(&chat_bench_linux_tests.step);
     const install_guard_tests = b.addSystemCommand(&.{ "node", "--test", "tools/install-guard.test.js" });
     vps_test_step.dependOn(&install_guard_tests.step);
@@ -506,11 +506,18 @@ pub fn build(b: *std.Build) void {
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);
     vps_test_step.dependOn(&console_font_lifecycle_tests.step);
+    const window_flicker_tests = b.addSystemCommand(&.{ "node", "--test", "tools/window-flicker.test.js" });
+    window_flicker_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&window_flicker_tests.step);
+    vps_test_step.dependOn(&window_flicker_tests.step);
     const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/chat-view-console-return.test.js", "tools/full-width-chat.test.js" });
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
+    const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
+    test_step.dependOn(&zsb_session_open_tests.step);
+    vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
