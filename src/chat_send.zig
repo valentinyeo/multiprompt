@@ -1735,6 +1735,7 @@ pub fn sshAutoReconnectTick() void {
             sshReconnectOk(@intCast(i));
         }
         if (shell.disconnected and shell.ssh_reconnect.phase == .connected) sshReconnectArm(@intCast(i), "link-disconnected");
+        if (shell.ssh_reconnect.awaiting_probe and now -| shell.spawn_tick >= 45_000) shell.ssh_reconnect.awaiting_probe = false;
         const host = shell.tmux_host;
         if (!attempted[host] and shell.ssh_reconnect.due(now)) {
             if (sshNetworkVeto(@intCast(i), now)) continue;
@@ -1768,7 +1769,7 @@ fn sshSessionEnded(idx: u32) void {
     const shell = &app_state.shells[idx];
     if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
-    if (shell.hwnd != null) _ = @import("win32.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
+    if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
     shell.hwnd = null;
     if (shell.pid != 0) @import("console.zig").killProcessTree(shell.pid);
     if (shell.process != null) _ = CloseHandle(shell.process);
@@ -1900,7 +1901,7 @@ fn sshProbeFinish() void {
             sshSessionEnded(idx);
             continue;
         }
-        if (job.healthy[item.host]) shell.ssh_reconnect.awaiting_probe = false;
+        shell.ssh_reconnect.awaiting_probe = false;
         if (app_state.shells[idx].process == null) {
             sshDisconnect(idx, "probe-process-missing");
         } else if (!job.healthy[item.host]) {

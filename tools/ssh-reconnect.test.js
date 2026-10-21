@@ -100,7 +100,7 @@ function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("win32.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
 test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', () => {
   if (modern) {
@@ -446,6 +446,11 @@ test "ISSUE-501 event exits" {
                 const attempts_before = spawns;
                 fake_now = shells[0].ssh_reconnect.next_tick;
                 sshAutoReconnectTick();
+                if (shells[0].ssh_reconnect.awaiting_probe) {
+                    try std.testing.expectEqual(attempts_before, spawns);
+                    fake_now = shells[0].spawn_tick + 45_000;
+                    sshAutoReconnectTick();
+                }
                 try std.testing.expectEqual(attempts_before + 1, spawns);
                 shells[0].ssh_reconnect.close();
                 _ = dispatchExit(42);
@@ -625,4 +630,50 @@ test "ISSUE-521 confirmed gone stops and restarts" {
     try std.testing.expect(shells[0].ssh_reconnect.create_session);
 }
 `), 'ISSUE-521 confirmed');
+});
+
+test('ISSUE-511 failed or session-present probes release the attach exit pause', () => {
+  zig(probeRuntime(`
+test "ISSUE-511 completed probe releases retry" {
+    for ([_]bool{ false, true }) |healthy| {
+        fake_now = 10000;
+        shells[0] = .{ .spawn_tick = fake_now - 1 };
+        fake_exit_code = 1;
+        sshDisconnect(0, "process-exit-event");
+        try std.testing.expect(shells[0].ssh_reconnect.awaiting_probe);
+        const before = spawns;
+        fake_now += 3000;
+        sshAutoReconnectTick();
+        try std.testing.expectEqual(before, spawns);
+        const job = ssh_probe_job orelse return error.MissingProbe;
+        job.healthy[0] = healthy;
+        job.items[0].attached = true;
+        job.finished.store(true, .release);
+        _ = job.owners.fetchSub(1, .acq_rel);
+        sshAutoReconnectTick();
+        try std.testing.expect(!shells[0].ssh_reconnect.awaiting_probe);
+        try std.testing.expectEqual(before + 1, spawns);
+        ssh_probe_next_tick = 0;
+    }
+}
+`), 'ISSUE-511 completed probe');
+});
+
+test('ISSUE-511 an unavailable probe cannot pause attach exit retries indefinitely', () => {
+  zig(runtime(`
+test "ISSUE-511 bounded probe wait" {
+    fake_now = 10000;
+    shells[0] = .{ .spawn_tick = fake_now - 1 };
+    fake_exit_code = 1;
+    sshDisconnect(0, "process-exit-event");
+    fake_now = shells[0].spawn_tick + 44_999;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expect(shells[0].ssh_reconnect.awaiting_probe);
+    fake_now += 1;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), spawns);
+    try std.testing.expect(!shells[0].ssh_reconnect.awaiting_probe);
+}
+`), 'ISSUE-511 bounded probe');
 });

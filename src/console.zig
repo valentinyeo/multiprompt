@@ -2173,6 +2173,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .diag_event_count = saved_diag_event_count,
     };
     registerShellExitWait(idx);
+    if (idx == app_state.active_shell) {
+        app_state.g_front_period.selected = null;
+        if (@import("drawing.zig").reconnectTabVisible(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "respawnShellInPlace");
+    }
 
     {
         const knames = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
