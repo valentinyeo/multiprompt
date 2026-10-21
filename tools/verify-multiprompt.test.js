@@ -93,6 +93,15 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
   assert.match(read('src/session.zig'), /fn startupRestoreWorker\([^\n]*\) void \{\s*_ = @import\("console\.zig"\)\.resolveSshPath\(false\);/);
   assert.match(read('src/main.zig'), /listener_status\.load\(\.acquire\)[\s\S]*?\.pending => return false/);
+  const links = main.slice(main.indexOf('        .links => {'), main.indexOf('        .tabs => {'));
+  const listenerBeforeRestore = /startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/;
+  assert.match(links, listenerBeforeRestore);
+  assert.doesNotMatch(links.replace('startTunnelInboundListener();', ''), listenerBeforeRestore);
+  const account = read('src/account_desktop.zig');
+  const worker = account.slice(account.indexOf('fn layoutSyncWorker('), account.indexOf('fn accountPrepareRestore('));
+  const discoveryBeforeResume = /resolveSshPath\(false\);[\s\S]*?accountResumeJob\(\.startup\)/;
+  assert.match(worker, discoveryBeforeResume);
+  assert.doesNotMatch(worker.replace('resolveSshPath(false)', 'unresolvedSshPath()'), discoveryBeforeResume);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
@@ -228,4 +237,62 @@ test('chat table journey waits for the Chat View tab to be saved before recordin
   assert.match(table, /Press @\(0x12, 0x43\) 'Alt\+C: open formatted Chat View'\s+Wait-Until/);
   assert.doesNotMatch(table.replace('Wait-Until { $state = Read-Session;', 'Write-Output { $state = Read-Session;'), ready);
   assert.doesNotMatch(table.replace('$state.active_tab -lt @($state.tabs).Count', '$true'), ready);
+});
+
+test('IGSH-376 Chat View keeps desktop toggle evidence separate from native received-message proof', () => {
+  const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
+  assert.ok(chat.length > 0);
+  assert.match(control, /ValidateSet\([^\n)]*'chat-view'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-view'/);
+  const chord = control.slice(control.indexOf('    public static void Chord('), control.indexOf('    public static void Text('));
+  assert.match(chord, /Input\[\] inputs = new Input\[keys\.Length \* 2\]/);
+  assert.match(chord, /inputs\[i\]\.data\.keyboard = new Keyboard \{ key = \(ushort\)keys\[i\] \}/);
+  assert.match(chord, /inputs\[keys\.Length \+ i\]\.data\.keyboard = new Keyboard \{ key = \(ushort\)keys\[keys\.Length - i - 1\], flags = 2 \}/);
+  assert.equal((chord.match(/SendInput\(/g) || []).length, 1);
+  assert.doesNotMatch(chord, /\bKey\(/);
+  assert.match(workflow, /git config --global core\.autocrlf false[\s\S]*?uses: actions\/checkout@/);
+  assert.match(workflow, /MULTIPROMPT_CHAT_RENDER_PROOF: '1'/);
+  assert.match(workflow, /zig build test-main --summary all/);
+  assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Native desktop rendering tests failed' \}/);
+  assert.match(workflow, /evidence\/chat-markdown-render\.png/);
+  assert.equal((chat.match(/Press @\(0x12, 0x43\)/g) || []).length, 3);
+  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = (\d+)/)[1]);
+  const waits = [...chat.matchAll(/AddMilliseconds\((\d+)\)/g)];
+  assert.equal(waits.length, 2);
+  for (const wait of waits) assert.ok(Number(wait[1]) > debounce);
+  assert.equal((chat.match(/Wait-Until \{ \[DateTime\]::UtcNow -ge \$toggleReady \}/g) || []).length, 2);
+  assert.match(chat, /ClassNameProperty, 'ZigShellChatTranscript'/);
+  assert.match(chat, /-not \$_\.Current.IsOffscreen/);
+  assert.match(chat, /\.cv -eq \$true/);
+  assert.match(chat, /\.cv -eq \$false/);
+  assert.match(chat, /\$after.active_tab -ne \$baseline.active_tab/);
+  assert.match(chat, /liveDeliveryVerified = \$false/);
+  for (const shot of ['action', 'closed', 'after']) assert.ok(chat.includes(`Snapshot '${shot}'`));
+  for (const state of ['before', 'opened', 'closed', 'after']) assert.ok(chat.includes(`'session-${state}.json'`));
+  assert.doesNotMatch(chat, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
+  const map = read(skill + 'features/chat-view.md');
+  assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), [
+    'Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas',
+  ]);
+  assert.match(read(skill + 'features/README.md'), /\[Chat View\]\(chat-view.md\)/);
+  assert.match(map, /not a screenshot of live delivery/);
+});
+
+test('IGSH-376 Chat View persists baseline through real UI before requiring saved startup state', () => {
+  const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
+  const resetBeforeSavedBaseline = /Palette 'interface'[\s\S]*?Press @\(0x28\)[\s\S]*?Press @\(0x28\)[\s\S]*?Press @\(0x0D\) 'Enter: persist default UI size before Chat View'[\s\S]*?'saved initial tab before Chat View'[\s\S]*?\$baseline = Read-Session/;
+  assert.match(chat, resetBeforeSavedBaseline);
+  assert.doesNotMatch(chat.replace("'Enter: persist default UI size before Chat View'", "'No reset'"), resetBeforeSavedBaseline);
+  assert.match(chat, /\$baseline\.ui_scale -ne 100/);
+});
+
+test('IGSH-376 browser journey retains upstream focus and scratch preparation contracts', () => {
+  const open = control.slice(control.indexOf('function Open-BrowserPane('), control.indexOf('function Assert-ConnectedPaneStaysVisible('));
+  const settledBeforeForeground = /\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s+Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s+return \$pane/;
+  assert.match(open, settledBeforeForeground);
+  assert.doesNotMatch(open.replace('Focus-BrowserPaneOwner $Step $pane.browser_connection_id', ''), settledBeforeForeground);
+  const prepareBeforeCopy = /\$stopped = \$job.Stop\(\)[\s\S]*?Prepare-ScratchEvidence \$scratch[\s\S]*?Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/;
+  assert.match(control, prepareBeforeCopy);
+  assert.doesNotMatch(control.replace('Prepare-ScratchEvidence $scratch', ''), prepareBeforeCopy);
+  assert.doesNotMatch(control, /robocopy/);
 });

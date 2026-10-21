@@ -250,7 +250,7 @@ const link_detect = @import("link_detect.zig");
 const HANDLE = usize;
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
 const SIZE = struct { cx: i32, cy: i32 };
-const ChatHit = struct { x: i32, y: i32, char: ?*usize = null };
+const ChatHit = struct { x: i32, y: i32, char: ?*usize = null, find: ?struct { position: usize, y: *i32 } = null };
 const DT_CALCRECT = 1;
 const DT_SINGLELINE = 2;
 const DT_NOPREFIX = 4;

@@ -300,13 +300,15 @@ test "IGSH-403 click preserves Unicode in a detected transcript link" {
 });
 
 test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', (t) => {
-  const production = ['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
+  const production = ['chatReceivedBlocks', 'chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
     .replaceAll('std.heap.page_allocator', 'copy_allocator');
   const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
 var copy_allocator = std.testing.allocator;
+var chat_received_parses: usize = 0;
+var g_chat_received: chat_markdown.BlockCache = .{};
 var g_chat_capture: [262200]u16 = @splat('x');
 var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
@@ -343,6 +345,7 @@ fn chatComposerFocusAllowed() bool { return false; }
 fn SetFocus(_: ?usize) ?usize { return null; }
 ` + production + String.raw`
 test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestly" {
+    defer g_chat_received.deinit(copy_allocator);
     g_chat_capture[g_chat_capture.len - 2] = 0xd83d;
     g_chat_capture[g_chat_capture.len - 1] = 0xde00;
     chatSelectAll();
@@ -501,19 +504,30 @@ test('ISSUE-406 sync audit recognizes literal Markdown in user bubbles', (t) => 
   assert.deepEqual(rows, [{probe: 0, present: true}], run.stdout);
 });
 
-test('ISSUE-376 received agent messages use the normal Markdown layout path', { todo: 'ISSUE-376' }, (t) => {
-  const run = execute(t, 'render-injected', `
+test('ISSUE-376 received agent messages use the normal Markdown layout path', (t) => {
+  const run = execute(t, 'render-injected', String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
+const transcript = @import("chat_transcript.zig");
 const ChatBlock = chat_markdown.Block;
 const HANDLE = usize;
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 100, bottom: i32 = 100 };
-const ChatHit = struct {};
+const ChatHit = struct { x: i32 = 0, y: i32 = 0, char: ?*usize = null };
 const link_detect = struct { const Range = struct { start: usize, end: usize }; };
 const DT_SINGLELINE: u32 = 1;
 const DT_NOPREFIX: u32 = 2;
 var g_chat_tables: chat_markdown.TableCache = .{};
-var rich_calls: usize = 0;
+var chat_received_parses: usize = 0;
+var g_chat_received: chat_markdown.BlockCache = .{};
+const CallKind = enum { rich, code, plain, table };
+const Call = struct { text: []const u16, kind: CallKind, level: u3 = 0, offset: usize, area: RECT, paint: bool };
+var calls: [1024]Call = undefined;
+var call_count: usize = 0;
+fn record(text: []const u16, kind: CallKind, level: u3, area: RECT, paint: bool, offset: usize, height: ?*i32) void {
+    calls[call_count] = .{ .text = text, .kind = kind, .level = level, .area = area, .paint = paint, .offset = offset };
+    call_count += 1;
+    if (height) |h| h.* = 20;
+}
 fn ensureChatCodeFont() HANDLE { return 1; }
 fn ensureChatFont() HANDLE { return 1; }
 fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return 1; }
@@ -521,29 +535,91 @@ fn chatTextWidth(_: HANDLE, _: []const u16) i32 { return 8; }
 fn GetTickCount64() u64 { return 0; }
 fn chatPerf(_: []const u8, _: u64, _: usize) void {}
 fn debugLog(_: []const u8) void {}
-fn chatFlowTable(_: HANDLE, _: []const u16, _: RECT, _: bool, _: ?ChatHit, _: usize, _: ?*i32) ?link_detect.Range { return null; }
-fn chatFlowText(_: HANDLE, _: []const u16, _: RECT, _: bool, _: bool, _: ?ChatHit, _: usize, _: ?*i32, _: ?[]const usize) ?link_detect.Range { return null; }
-fn chatRichText(_: HANDLE, _: []const u16, _: RECT, _: u3, _: bool, _: ?ChatHit, _: usize, _: ?*i32, _: bool) ?link_detect.Range { rich_calls += 1; return null; }
+fn chatFlowTable(_: HANDLE, text: []const u16, area: RECT, paint: bool, _: ?ChatHit, offset: usize, height: ?*i32) ?link_detect.Range {
+    record(text, .table, 0, area, paint, offset, height); return null;
+}
+fn chatFlowText(_: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, _: ?ChatHit, offset: usize, height: ?*i32, _: ?[]const usize) ?link_detect.Range {
+    record(text, if (code) .code else .plain, 0, area, paint, offset, height); return null;
+}
+fn chatRichText(_: HANDLE, text: []const u16, area: RECT, level: u3, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, _: bool) ?link_detect.Range {
+    record(text, .rich, level, area, paint, offset, height);
+    if (hit) |pt| {
+        if (pt.char) |out| { out.* = offset; return null; }
+        return .{ .start = offset, .end = offset + text.len };
+    }
+    return null;
+}
 fn uiScaled(n: i32) i32 { return n; }
 fn customColorOr(_: []const u8, n: u32) u32 { return n; }
 fn themeConsoleFg() u32 { return 0; }
 fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }
+${body('chatReceivedBlocks')}
 ${body('chatFlowBlock')}
 test "AUDIT injected agent Markdown reaches the same rich layout as assistant prose" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("**bold**");
-    var blocks: [8]ChatBlock = undefined;
-    _ = chat_markdown.blocks(text, 0, .prose, &blocks);
-    _ = chatFlowBlock(1, text, blocks[0], .{}, false, null, 0, null);
-    try std.testing.expectEqual(@as(usize, 1), rich_calls);
-    rich_calls = 0;
-    _ = chat_markdown.blocks(text, 0, .injected, &blocks);
-    _ = chatFlowBlock(1, text, blocks[0], .{}, false, null, 0, null);
-    try std.testing.expectEqual(@as(usize, 1), rich_calls);
+    @setEvalBranchQuota(10000);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("# Heading\n\n**bold** and [docs](https://example.test) with \u{0060}code\u{0060}\n\n- First\n  - Nested\n1. Numbered\n\n| A | B |\n| --- | --- |\n| one | two |\n\n\u{0060}\u{0060}\u{0060}text\nC:\\work\\file\n\u{0060}\u{0060}\u{0060}");
+    const offset = 37;
+    var parts: [64]ChatBlock = undefined;
+    const count = chat_markdown.blocks(text, offset, .prose, &parts);
+    try std.testing.expectEqual(@as(usize, 7), count);
+    for ([_]bool{ false, true }) |paint| {
+        call_count = 0;
+        var total: i32 = 0;
+        for (parts[0..count], 0..) |part, i| {
+            if (i > 0) total += 6;
+            var h: i32 = 0;
+            _ = chatFlowBlock(1, text[part.start - offset..][0..part.len], part, .{ .top = total }, paint, null, part.start, &h);
+            total += h;
+        }
+        const expected = calls;
+        const expected_count = call_count;
+        call_count = 0;
+        var blocks: [8]ChatBlock = undefined;
+        try std.testing.expectEqual(@as(usize, 1), chat_markdown.blocks(text, offset, .injected, &blocks));
+        var h: i32 = 0;
+        _ = chatFlowBlock(1, text, blocks[0], .{}, paint, null, offset, &h);
+        try std.testing.expectEqual(expected_count, call_count);
+        try std.testing.expectEqual(total, h);
+        for (expected[0..expected_count], calls[0..call_count]) |want, got| try std.testing.expectEqualDeep(want, got);
+    }
+    call_count = 0;
+    const heading = w("## [docs](https://example.test)");
+    const injected = ChatBlock{ .start = offset, .len = heading.len, .role = .injected, .markdown = true };
+    const hit = chatFlowBlock(1, heading, injected, .{}, false, .{}, offset, null).?;
+    try std.testing.expectEqual(offset + 3, hit.start);
+    try std.testing.expectEqual(offset + heading.len, hit.end);
+    const selected_text = w("**first**\n\n**second**");
+    const selected_block = ChatBlock{ .start = 0, .len = selected_text.len, .role = .injected, .markdown = true };
+    var caret: usize = 999;
+    _ = chatFlowBlock(1, selected_text, selected_block, .{}, false, .{ .y = 1, .char = &caret }, 0, null);
+    try std.testing.expectEqual(@as(usize, 0), caret);
+    _ = chatFlowBlock(1, selected_text, selected_block, .{}, false, .{ .y = 27, .char = &caret }, 0, null);
+    try std.testing.expectEqual(@as(usize, 11), caret);
+    var wide: [256]u16 = undefined;
+    var envelope: [8]ChatBlock = undefined;
+    const parsed = try transcript.messageBlocks("<cross-session-message from-name='Agent Blue'>**Ready** &amp; linked</cross-session-message>", &wide, 0, .user, &envelope);
+    try std.testing.expectEqual(@as(usize, 1), parsed.count);
+    try std.testing.expectEqualSlices(u16, w("Agent Blue"), std.mem.sliceTo(&envelope[0].sender, 0));
+    try std.testing.expectEqualSlices(u16, w("**Ready** & linked"), wide[0..parsed.len]);
+    call_count = 0;
+    _ = chatFlowBlock(1, wide[0..parsed.len], envelope[0], .{}, false, null, 0, null);
+    try std.testing.expectEqual(CallKind.rich, calls[0].kind);
+    call_count = 0;
+    _ = chatFlowBlock(1, text, .{ .start = 0, .len = text.len, .role = .user, .markdown = true }, .{}, false, null, 0, null);
+    try std.testing.expectEqual(@as(usize, 1), call_count);
+    try std.testing.expectEqual(CallKind.plain, calls[0].kind);
+    const long = w("**one**\n\n" ** 300);
+    call_count = 0;
+    _ = chatFlowBlock(1, long, .{ .start = 0, .len = long.len, .role = .injected, .markdown = true }, .{}, false, null, 0, null);
+    try std.testing.expectEqual(@as(usize, 300), call_count);
 }
-`, ['chat_markdown.zig'], 'AUDIT');
+`, ['chat_markdown.zig', 'chat_transcript.zig'], 'AUDIT');
   assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(body('chatPaintBlock'), /if \(block\.role == \.injected\) chatInjectedBubbleColor\(\)/);
+  assert.match(body('chatPaintTime'), /block\.sender/);
 });
 
 function findKeyboard(t, name, assertions) {

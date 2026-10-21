@@ -581,6 +581,55 @@ pub const TableLayout = struct {
     }
 };
 
+pub const BlockCache = struct {
+    const Entry = struct { hash: u64, storage: []Block, count: usize, retained: bool = false };
+    entries: std.AutoHashMapUnmanaged(usize, Entry) = .empty,
+    builds: usize = 0,
+
+    pub fn get(self: *BlockCache, a: std.mem.Allocator, text: []const u16, offset: usize) ![]const Block {
+        const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+        if (self.entries.get(offset)) |entry| {
+            if (entry.hash == hash) return entry.storage[0..entry.count];
+        }
+        const storage = try a.alloc(Block, std.mem.count(u16, text, &.{'\n'}) + 1);
+        errdefer a.free(storage);
+        const count = blocks(text, offset, .prose, storage);
+        const slot = try self.entries.getOrPut(a, offset);
+        if (slot.found_existing) a.free(slot.value_ptr.storage);
+        slot.value_ptr.* = .{ .hash = hash, .storage = storage, .count = count };
+        self.builds += 1;
+        return storage[0..count];
+    }
+
+    pub fn retain(self: *BlockCache, a: std.mem.Allocator, current: []const Block) void {
+        for (current) |block| {
+            if (block.role != .injected or !block.markdown) continue;
+            if (self.entries.getPtr(block.start)) |entry| entry.retained = true;
+        }
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.retained) {
+                entry.value_ptr.retained = false;
+                continue;
+            }
+            const offset = entry.key_ptr.*;
+            a.free(entry.value_ptr.storage);
+            _ = self.entries.remove(offset);
+        }
+    }
+
+    pub fn clear(self: *BlockCache, a: std.mem.Allocator) void {
+        var it = self.entries.valueIterator();
+        while (it.next()) |entry| a.free(entry.storage);
+        self.entries.clearRetainingCapacity();
+    }
+
+    pub fn deinit(self: *BlockCache, a: std.mem.Allocator) void {
+        self.clear(a);
+        self.entries.deinit(a);
+    }
+};
+
 pub const TableCache = struct {
     const Entry = struct { hash: u64, key: TableKey, layout: TableLayout };
     entries: std.AutoHashMapUnmanaged(usize, Entry) = .empty,
@@ -615,7 +664,41 @@ pub const TableCache = struct {
         }
     }
 
-    pub fn refresh(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block) void {
+    pub fn refreshReceived(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block, before_text: []const u16, after_text: []const u16, received: *BlockCache, tracked: ?*usize) void {
+        var expanded: [2]std.ArrayList(Block) = .{ .empty, .empty };
+        defer for (&expanded) |*list| list.deinit(a);
+        const snapshots = [2][]const Block{ before, after };
+        const texts = [2][]const u16{ before_text, after_text };
+        for (snapshots, texts, &expanded) |snapshot, capture, *list| {
+            for (snapshot) |block| {
+                list.append(a, block) catch {
+                    self.clear(a);
+                    return;
+                };
+                if (block.role != .injected or !block.markdown) continue;
+                const parts = received.get(a, capture[block.start..][0..block.len], block.start) catch {
+                    self.clear(a);
+                    return;
+                };
+                for (parts) |part| {
+                    if (part.kind != .table) continue;
+                    var table = part;
+                    table.first = false;
+                    table.source_offset = block.source_offset;
+                    table.source_end = block.source_end;
+                    table.segment = block.segment;
+                    list.append(a, table) catch {
+                        self.clear(a);
+                        return;
+                    };
+                }
+            }
+        }
+        self.refresh(a, expanded[0].items, expanded[1].items, tracked);
+    }
+
+    pub fn refresh(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block, tracked: ?*usize) void {
+        const old_tracked: ?usize = if (tracked) |offset| offset.* else null;
         const Identity = struct { message: u64, segment: u64, table: usize };
         var identities: std.AutoHashMapUnmanaged(Identity, usize) = .empty;
         defer identities.deinit(a);
@@ -650,7 +733,10 @@ pub const TableCache = struct {
             }
             if (block.kind != .table) continue;
             if (identities.get(.{ .message = message, .segment = block.segment, .table = ordinal })) |old_offset| {
-                if (self.entries.fetchRemove(old_offset)) |entry| retained.putAssumeCapacity(block.start, entry.value);
+                if (self.entries.fetchRemove(old_offset)) |entry| {
+                    retained.putAssumeCapacity(block.start, entry.value);
+                    if (old_tracked == old_offset) tracked.?.* = block.start;
+                }
             }
             ordinal += 1;
         }
@@ -977,11 +1063,11 @@ test "ISSUE-458 table offsets survive refresh prepend and resize without mixing 
         const layout = try cache.layout(a, text, block.start, key, {}, Measure.cell);
         layout.scroll = @intCast(100 + i * 50);
     }
-    cache.refresh(a, &before, &before);
+    cache.refresh(a, &before, &before, null);
     try std.testing.expectEqual(@as(i32, 100), cache.entries.getPtr(10).?.layout.scroll);
     var after = before;
     for (&after) |*block| block.start += 300;
-    cache.refresh(a, &before, &after);
+    cache.refresh(a, &before, &after, null);
     for (after, 0..) |block, i| {
         const layout = try cache.layout(a, text, block.start, key, {}, Measure.cell);
         try std.testing.expectEqual(@as(i32, @intCast(100 + i * 50)), layout.scroll);
@@ -995,7 +1081,7 @@ test "ISSUE-458 table offsets survive refresh prepend and resize without mixing 
     const narrow = try cache.layout(a, text, 310, key, {}, Measure.cell);
     try std.testing.expectEqual(@as(i32, 0), narrow.scroll);
     try std.testing.expect(narrow.scrollbar(16, 24) == null);
-    cache.refresh(a, &after, &.{});
+    cache.refresh(a, &after, &.{}, null);
     try std.testing.expectEqual(@as(u32, 0), cache.entries.count());
 }
 
@@ -1195,4 +1281,57 @@ test "IGSH-436 unchanged table hits cache and every geometry or content key rebu
     const before = calls;
     _ = try cache.layout(a, w("| A | B |\n|---|---|\n| new | two |"), 0, key, &calls, Measure.cell);
     try std.testing.expectEqual(before + 4, calls);
+}
+
+test "IGSH-376 received block cache reuses unchanged messages and expires changed or removed bodies" {
+    const a = std.testing.allocator;
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    var cache: BlockCache = .{};
+    defer cache.deinit(a);
+    const first = try cache.get(a, w("# Ready"), 17);
+    try std.testing.expectEqual(Kind.heading, first[0].kind);
+    for (0..8) |_| {
+        const again = try cache.get(a, w("# Ready"), 17);
+        try std.testing.expectEqual(first.ptr, again.ptr);
+    }
+    try std.testing.expectEqual(@as(usize, 1), cache.builds);
+    const changed = try cache.get(a, w("- Ready"), 17);
+    try std.testing.expectEqual(Kind.list, changed[0].kind);
+    try std.testing.expectEqual(@as(usize, 2), cache.builds);
+    const moved = try cache.get(a, w("- Ready"), 37);
+    try std.testing.expectEqual(@as(usize, 37), moved[0].start);
+    cache.retain(a, &.{.{ .start = 37, .len = 7, .role = .injected, .markdown = true }});
+    try std.testing.expectEqual(@as(usize, 1), cache.entries.count());
+    cache.retain(a, &.{});
+    try std.testing.expectEqual(@as(usize, 0), cache.entries.count());
+}
+
+test "IGSH-376 inactive received tables retain independent scroll across refresh" {
+    const a = std.testing.allocator;
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("| Long heading | Other heading |\n|---|---|\n| first | value |");
+    const prefixed = w("Earlier\n| Long heading | Other heading |\n|---|---|\n| first | value |\n\nNew content");
+    var cache: TableCache = .{};
+    defer cache.deinit(a);
+    var received: BlockCache = .{};
+    defer received.deinit(a);
+    const Measure = struct {
+        fn cell(_: void, part: []const u16, _: bool) TableSize {
+            return .{ .width = @as(i32, @intCast(part.len)) * 20, .height = 20 };
+        }
+    };
+    const key = TableKey{ .view_w = 100, .font_pt = 13, .scale = 1024, .pad_x = 10, .pad_y = 6 };
+    const layout = try cache.layout(a, text, 0, key, {}, Measure.cell);
+    layout.scroll = 73;
+    const before = Block{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .first = true, .source_offset = 900, .source_end = 1000 };
+    var after = before;
+    after.start = w("Earlier\n").len;
+    after.len = prefixed.len - after.start;
+    cache.refreshReceived(a, &.{before}, &.{after}, text, prefixed, &received, null);
+    const retained = cache.entries.getPtr(after.start) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 73), retained.layout.scroll);
+    try std.testing.expectEqual(@as(usize, 1), cache.builds);
+    try std.testing.expectEqual(@as(u32, 1), cache.entries.count());
+    cache.refreshReceived(a, &.{after}, &.{}, prefixed, &.{}, &received, null);
+    try std.testing.expectEqual(@as(u32, 0), cache.entries.count());
 }

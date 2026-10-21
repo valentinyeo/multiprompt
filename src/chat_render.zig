@@ -362,6 +362,9 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var token: ?chat_code.Token = if (code) syntax.next() else null;
     while (pos < text.len) {
         if (text[pos] == '\r' or text[pos] == '\n') {
+            if (hit) |pt| if (pt.find) |find| {
+                if (find.position == offset + pos) find.y.* = area.top + y;
+            };
             if (hit) |pt| if (pt.char != null) nearest.consider(pt.x, pt.y, area.left + x, area.top + y, area.left + x, area.top + y + line_h, offset + pos);
             if (text[pos] == '\r' and pos + 1 < text.len and text[pos + 1] == '\n') pos += 1;
             pos += 1;
@@ -400,12 +403,15 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             const w = chatTextWidth(hdc, segment);
             const rect = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
             if (hit) |pt| {
+                if (pt.find) |find| {
+                    if (find.position >= offset + pos and find.position < offset + pos + count) find.y.* = rect.top;
+                }
                 if (pt.char != null) {
                     const at = pos + (if (pt.y >= rect.top and pt.y < rect.bottom) chatCharAtX(hdc, segment, pt.x - rect.left) else if (pt.y < rect.top or pt.x <= rect.left) @as(usize, 0) else segment.len);
                     const source = if (source_map) |map| (if (at < map.len) map[at] else map[map.len - 1] + 1) else at;
                     nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + source);
                 }
-                if (in_link and pointInRect(rect, pt.x, pt.y)) return .{ .start = offset + (if (source_map) |map| map[link.?.start] else link.?.start), .end = offset + (if (source_map) |map| map[link.?.end - 1] + 1 else link.?.end) };
+                if (pt.find == null and in_link and pointInRect(rect, pt.x, pt.y)) return .{ .start = offset + (if (source_map) |map| map[link.?.start] else link.?.start), .end = offset + (if (source_map) |map| map[link.?.end - 1] + 1 else link.?.end) };
             }
             if (in_link) {
                 if (paint) {
@@ -494,6 +500,9 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                 continue;
             }
             if (text[pos] == '\n' or text[pos] == ' ' or text[pos] == '\t') {
+                if (hit) |pt| if (pt.find) |find| {
+                    if (find.position == offset + pos) find.y.* = area.top + y;
+                };
                 if (x > 0) {
                     if (hit) |pt| if (pt.char != null) nearest.consider(pt.x, pt.y, area.left + x, area.top + y, area.left + x + space_w, area.top + y + line_h, offset + pos + @intFromBool(pt.x - area.left - x >= @divTrunc(space_w + 1, 2)));
                     if (paint) chatPaintSelectionRun(hdc, &.{' '}, offset + pos, area.left + x, area.top + y, line_h);
@@ -529,11 +538,14 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);
                 var rc = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
                 if (hit) |pt| {
+                    if (pt.find) |find| {
+                        if (find.position >= offset + pos and find.position < offset + pos + count) find.y.* = rc.top;
+                    }
                     if (pt.char != null) {
                         const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, pt.x - rc.left) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
                         nearest.consider(pt.x, pt.y, rc.left, rc.top, rc.right, rc.bottom, offset + pos + at);
                     }
-                    if (pointInRect(rc, pt.x, pt.y)) {
+                    if (pt.find == null and pointInRect(rc, pt.x, pt.y)) {
                         if (target) |t| return .{ .start = offset + t.start, .end = offset + t.end };
                     }
                 }
@@ -559,6 +571,48 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     }
     if (height) |h| h.* = y + line_h;
     return null;
+}
+
+fn chatRichSize(hdc: HANDLE, text: []const u16, bold: bool, level: u3) chat_markdown.TableSize {
+    const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, level));
+    defer _ = SelectObject(hdc, old);
+    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    var buf: [512]chat_markdown.Span = undefined;
+    const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
+    defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
+    const n = chat_markdown.inlineSpans(text, spans);
+    var width: i32 = 0;
+    for (spans[0..n]) |span| {
+        var style = span.style;
+        style.bold = style.bold or bold;
+        _ = SelectObject(hdc, chatRichFont(style, level));
+        const space_w = chatTextWidth(hdc, &.{' '});
+        var pos = span.text.start;
+        while (pos < span.text.end) {
+            if (text[pos] == '\r') {
+                pos += 1;
+                continue;
+            }
+            if (text[pos] == '\n' or text[pos] == ' ' or text[pos] == '\t') {
+                if (width > 0) width += space_w;
+                pos += 1;
+                continue;
+            }
+            var end = pos + 1;
+            while (end < span.text.end and text[end] != ' ' and text[end] != '\t' and text[end] != '\r' and text[end] != '\n') : (end += 1) {}
+            width += chatTextWidth(hdc, text[pos..end]);
+            pos = end;
+        }
+        height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+    }
+    return .{ .width = width, .height = height };
+}
+
+pub fn chatTableRefresh(after: []const ChatBlock, text: []const u16) void {
+    const before = app_state.g_chat_received.builds;
+    app_state.g_chat_tables.refreshReceived(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], after, app_state.g_chat_capture[0..app_state.g_chat_last_len], text, &app_state.g_chat_received, if (chat_table_drag) |*drag| &drag.offset else null);
+    chat_received_parses += app_state.g_chat_received.builds - before;
 }
 
 const TableMeasureBackend = struct {
@@ -590,6 +644,31 @@ pub fn resetTableMetrics() void {
     table_metrics = .{};
 }
 
+fn chatBlockNaturalWidth(hdc: HANDLE, text: []const u16, block: ChatBlock, offset: usize, max_width: i32) i32 {
+    if (block.markdown and block.role == .injected) {
+        const parts = chatReceivedBlocks(text, offset) catch return max_width;
+        var width: i32 = 0;
+        for (parts) |part| width = @max(width, chatBlockNaturalWidth(hdc, text[part.start - offset ..][0..part.len], part, part.start, max_width));
+        return width;
+    }
+    if (block.kind == .table) {
+        const table = chatTableLayout(hdc, text, offset, max_width) orelse return max_width;
+        return table.content_w;
+    }
+    if (block.role == .code) {
+        const old = SelectObject(hdc, ensureChatCodeFont());
+        defer _ = SelectObject(hdc, old);
+        var width: i32 = 0;
+        var lines = std.mem.splitScalar(u16, text, '\n');
+        while (lines.next()) |line| width = @max(width, chatTextWidth(hdc, std.mem.trimEnd(u16, line, &.{'\r'})));
+        return width;
+    }
+    const list = block.kind == .list;
+    const body = if (list) text[block.prefix..] else text;
+    const size = chatRichSize(hdc, body, false, if (list) 0 else @intCast(block.level));
+    return size.width + (if (list) uiScaled(30) + @as(i32, block.level) * uiScaled(22) else @as(i32, 0));
+}
+
 fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*chat_markdown.TableLayout {
     const start = GetTickCount64();
     const before = app_state.g_chat_tables.builds;
@@ -611,6 +690,10 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     const scrollbar = layout.scrollbar(uiScaled(16), uiScaled(24));
     if (height) |h| h.* = total_h + (if (scrollbar) |bar| bar.bar_h else @as(i32, 0));
     if (!paint and hit == null) return null;
+    if (hit) |pt| if (pt.find) |find| {
+        if (find.position >= offset and find.position < offset + text.len) find.y.* = area.top + layout.rowY(find.position - offset);
+        return null;
+    };
     if (hit) |pt| if (pt.char == null and (pt.x < area.left or pt.x >= area.right or pt.y < area.top or pt.y >= area.top + total_h)) return null;
     var cell_nearest = chat_hit.Nearest{ .char = 0 };
     if (hit) |pt| if (pt.char != null) {
@@ -680,9 +763,40 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     return null;
 }
 
+var chat_received_parses: usize = 0;
+
+fn chatReceivedBlocks(text: []const u16, offset: usize) ![]const ChatBlock {
+    const before = app_state.g_chat_received.builds;
+    const parts = try app_state.g_chat_received.get(std.heap.page_allocator, text, offset);
+    chat_received_parses += app_state.g_chat_received.builds - before;
+    return parts;
+}
+
 fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32) ?link_detect.Range {
+    if (block.markdown and block.role == .injected) {
+        const parts = chatReceivedBlocks(text, offset) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null);
+        var total: i32 = 0;
+        for (parts, 0..) |part, i| {
+            if (i > 0) total += uiScaled(6);
+            var row = area;
+            row.top += total;
+            var part_h: i32 = 0;
+            const start = part.start - offset;
+            const part_text = text[start..][0..part.len];
+            if (hit) |pt| if (pt.char != null) {
+                _ = chatFlowBlock(hdc, part_text, part, row, false, null, part.start, &part_h);
+                if (pt.y < row.top + part_h or i + 1 == parts.len) return chatFlowBlock(hdc, part_text, part, row, paint, hit, part.start, height);
+                total += part_h;
+                continue;
+            };
+            if (chatFlowBlock(hdc, part_text, part, row, paint, hit, part.start, &part_h)) |link| return link;
+            total += part_h;
+        }
+        if (height) |h| h.* = total;
+        return null;
+    }
     if (block.kind == .table) return chatFlowTable(hdc, text, area, paint, hit, offset, height);
-    if (!block.markdown or block.role == .code or block.role == .user or block.role == .injected) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null);
+    if (!block.markdown or block.role == .code or block.role == .user) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null);
     if (block.kind == .list) {
         var body = area;
         const indent = @as(i32, block.level) * uiScaled(22);
@@ -743,9 +857,10 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
             const max_text_w = @max(1, chat_style.bubbleMaxWidth(width) - 2 * pad);
             var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
             const old_font = SelectObject(hdc, ensureChatFont());
-            _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            if (block.role != .injected or !block.markdown) _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             _ = SelectObject(hdc, old_font);
-            var bubble_w = chat_style.bubbleWidth(width, calc.right, pad);
+            const natural_w = if (block.role == .injected and block.markdown) chatBlockNaturalWidth(hdc, text, block, disp.start, max_text_w) else calc.right;
+            var bubble_w = chat_style.bubbleWidth(width, natural_w, pad);
             var shown = ChatImgLayout{};
             if (imgs != null) {
                 shown = chatImgMeasure(text, chat_style.bubbleMaxWidth(width) - 2 * pad);
@@ -812,6 +927,371 @@ fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32) RECT 
     _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null);
     const bubble_h = flow_h + 2 * pad + uiScaled(CHAT_STATUS_H);
     return .{ .left = width - bubble_w, .top = y, .right = width, .bottom = y + bubble_h };
+}
+
+test "IGSH-376 top-level table cell sizes match master bytes" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const Master = struct {
+        fn cell(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.TableSize {
+            const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, 0));
+            defer _ = SelectObject(hdc, old);
+            var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+            var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+            var buf: [512]chat_markdown.Span = undefined;
+            const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
+            defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
+            const n = chat_markdown.inlineSpans(text, spans);
+            var width: i32 = 0;
+            for (spans[0..n]) |span| {
+                var style = span.style;
+                style.bold = style.bold or bold;
+                _ = SelectObject(hdc, chatRichFont(style, 0));
+                width += chatTextWidth(hdc, text[span.text.start..span.text.end]);
+                height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+            }
+            return .{ .width = width, .height = height };
+        }
+    };
+    var metrics: TableMeasurer.Metrics = .{};
+    var measure = TableMeasurer{ .backend = .{ .hdc = dc }, .metrics = &metrics };
+    defer measure.deinit();
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ w("one  two"), w("one\ttwo"), w("one\ntwo"), w("**bold** and `code`"), w("[docs](https://example.test) 中文😀") }) |text| {
+        for ([_]bool{ false, true }) |bold| {
+            const expected = Master.cell(dc, text, bold);
+            const actual = measure.cell(text, bold);
+            try std.testing.expectEqualSlices(u8, std.mem.asBytes(&expected), std.mem.asBytes(&actual));
+        }
+    }
+}
+
+test "IGSH-376 short list bubble fits the visible word exactly" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = w("- Done");
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const old = SelectObject(dc, chatRichFont(.{}, 0));
+    defer _ = SelectObject(dc, old);
+    const natural = chatTextWidth(dc, w("Done")) + uiScaled(30);
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    var one_line: i32 = 0;
+    _ = chatRichText(dc, w("Done"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
+    var actual: i32 = 0;
+    _ = chatFlowBlock(dc, text, block, .{ .left = 0, .top = 0, .right = rect.right - rect.left - 2 * pad, .bottom = 0 }, false, null, 0, &actual);
+    try std.testing.expectEqual(one_line, actual);
+}
+
+test "IGSH-376 short heading bubble fits the visible word exactly" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = w("# Ready");
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const old = SelectObject(dc, chatRichFont(.{}, 1));
+    defer _ = SelectObject(dc, old);
+    const natural = chatTextWidth(dc, w("Ready")) + uiScaled(0);
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    var one_line: i32 = 0;
+    _ = chatRichText(dc, w("Ready"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 1, false, null, 0, &one_line, false);
+    var actual: i32 = 0;
+    _ = chatFlowBlock(dc, text, block, .{ .left = 0, .top = 0, .right = rect.right - rect.left - 2 * pad, .bottom = 0 }, false, null, 0, &actual);
+    try std.testing.expectEqual(one_line, actual);
+}
+
+test "IGSH-376 short link bubble fits the visible word exactly" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = w("[docs](https://example.test/a/very/long/address)");
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const old = SelectObject(dc, chatRichFont(.{}, 0));
+    defer _ = SelectObject(dc, old);
+    const natural = chatTextWidth(dc, w("docs")) + uiScaled(0);
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    var one_line: i32 = 0;
+    _ = chatRichText(dc, w("docs"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
+    var actual: i32 = 0;
+    _ = chatFlowBlock(dc, text, block, .{ .left = 0, .top = 0, .right = rect.right - rect.left - 2 * pad, .bottom = 0 }, false, null, 0, &actual);
+    try std.testing.expectEqual(one_line, actual);
+}
+
+test "IGSH-376 repeated received paints hover caret and copy parse once" {
+    app_state.g_chat_received.clear(std.heap.page_allocator);
+    defer app_state.g_chat_received.clear(std.heap.page_allocator);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("# Ready\n\n- Done\n\n```text\nalpha\n```");
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const area = RECT{ .left = 0, .top = 0, .right = 600, .bottom = 400 };
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    defer app_state.g_chat_last_len = 0;
+    const before = chat_received_parses;
+    for (0..4) |_| {
+        _ = chatFlowBlock(dc, text, block, area, true, null, 0, null);
+        _ = chatFlowBlock(dc, text, block, area, false, .{ .x = 1, .y = 1 }, 0, null);
+        var caret: usize = 0;
+        _ = chatFlowBlock(dc, text, block, area, false, .{ .x = 1, .y = 1, .char = &caret }, 0, null);
+        var copied: [256]u16 = undefined;
+        const n = try chatCopyBlockText(&copied, block, 0, text.len);
+        try std.testing.expect(n > 0);
+    }
+    try std.testing.expectEqual(@as(usize, 1), chat_received_parses - before);
+}
+
+test "IGSH-376 received fenced code find uses its full layout" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("# Ready\n\n```text\nalpha\nneedle\nomega\n```\n\nAfter");
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    defer {
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+    }
+    app_state.g_chat_layout_rects[0] = chatMeasureBlockRect(dc, text, app_state.g_chat_blocks[0], .single, 752, 37, null);
+    var heading_h: i32 = 0;
+    _ = chatRichText(dc, w("Ready"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, 1, false, null, 2, &heading_h, false);
+    var line_h: i32 = 0;
+    _ = chatFlowText(dc, w("alpha"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, true, false, null, 0, &line_h, null);
+    const at = std.mem.indexOf(u16, text, w("needle")).?;
+    try std.testing.expectEqual(37 + uiScaled(CHAT_BUBBLE_PAD) + heading_h + uiScaled(6) + line_h, chatFindY(0, at));
+}
+
+test "IGSH-376 received table supports track drag and Shift wheel" {
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("received table"), 0, 0, 0, 458, 500, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_scroll = app_state.g_chat_scroll_y;
+    const old_left = app_state.g_chat_content_left;
+    const old_find = app_state.g_chat_find_open;
+    defer {
+        _ = ReleaseCapture();
+        chat_table_drag = null;
+        app_state.g_chat_tables.clear(std.heap.page_allocator);
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_content_left = old_left;
+        app_state.g_chat_find_open = old_find;
+    }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("# Ready\n\n| A very long heading with enough words to overflow the narrow chat column | Another very long heading with even more words in the last column |\n|---|---|\n| first | needle |");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    app_state.g_chat_blocks[0] = block;
+    app_state.g_chat_scroll_y = 13;
+    app_state.g_chat_content_left = 17;
+    app_state.g_chat_find_open = false;
+    const dc = GetDC(hwnd) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(hwnd, dc);
+    const rc = chatMeasureBlockRect(dc, text, block, .single, 420, 41, null);
+    app_state.g_chat_layout_rects[0] = rc;
+    var parts: [8]ChatBlock = undefined;
+    const count = chat_markdown.blocks(text, 0, .prose, &parts);
+    try std.testing.expectEqual(@as(usize, 2), count);
+    const table = app_state.g_chat_tables.entries.getPtr(parts[1].start).?;
+    const bar = table.layout.scrollbar(uiScaled(16), uiScaled(24)).?;
+    var heading_h: i32 = 0;
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    _ = chatFlowBlock(dc, text[parts[0].start..][0..parts[0].len], parts[0], .{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * pad, .bottom = 0 }, false, null, parts[0].start, &heading_h);
+    const left = app_state.g_chat_content_left + rc.left + pad;
+    const top = rc.top - app_state.g_chat_scroll_y + pad + heading_h + uiScaled(6);
+    const y = top + table.layout.bodyHeight() + uiScaled(4);
+    const hit = chatTableAt(left + 1, y) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(parts[1].start, hit.offset);
+    try std.testing.expectEqual(chat_markdown.TableScrollHit.thumb, hit.hit);
+    try std.testing.expect(chatTableAt(left - 1, y) == null);
+    try std.testing.expect(chatTableMouseDown(hwnd, left + bar.view_w - 1, y));
+    try std.testing.expect(table.layout.scroll > 0);
+    table.layout.scroll = 0;
+    try std.testing.expect(chatTableMouseDown(hwnd, left + 1, y));
+    try std.testing.expect(chatTableMouseMove(hwnd, left + bar.view_w));
+    try std.testing.expectEqual(table.layout.content_w - table.layout.view_w, table.layout.scroll);
+    chat_table_drag = null;
+    _ = ReleaseCapture();
+    table.layout.scroll = 0;
+    var point = POINT{ .x = left + 2, .y = top + 2 };
+    try std.testing.expect(w.ClientToScreen(hwnd, &point) != 0);
+    const coords: LPARAM = (@as(LPARAM, @as(u16, @bitCast(@as(i16, @intCast(point.y))))) << 16) | @as(u16, @bitCast(@as(i16, @intCast(point.x))));
+    const wheel: WPARAM = (@as(WPARAM, @as(u16, @bitCast(@as(i16, -120)))) << 16) | 0x0004;
+    try std.testing.expect(chatTableWheel(hwnd, WM_MOUSEWHEEL, wheel, coords));
+    try std.testing.expect(table.layout.scroll > 0);
+    const at = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("needle")).?;
+    try std.testing.expectEqual(rc.top + pad + heading_h + uiScaled(6) + table.layout.rowY(at - parts[1].start), chatFindY(0, at));
+}
+
+test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
+    @setEvalBranchQuota(10000);
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("received table"), 0, 0, 0, 458, 500, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_scroll = app_state.g_chat_scroll_y;
+    const old_left = app_state.g_chat_content_left;
+    const old_find = app_state.g_chat_find_open;
+    defer {
+        _ = ReleaseCapture();
+        chat_table_drag = null;
+        app_state.g_chat_tables.clear(std.heap.page_allocator);
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_content_left = old_left;
+        app_state.g_chat_find_open = old_find;
+    }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("# Ready\n\n| A very long heading with enough words to overflow the narrow chat column | Another very long heading with even more words in the last column |\n|---|---|\n| first | needle |");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .first = true, .source_offset = 900, .source_end = 1000 };
+    app_state.g_chat_blocks[0] = block;
+    app_state.g_chat_scroll_y = 13;
+    app_state.g_chat_content_left = 17;
+    app_state.g_chat_find_open = false;
+    const dc = GetDC(hwnd) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(hwnd, dc);
+    const rc = chatMeasureBlockRect(dc, text, block, .single, 420, 41, null);
+    app_state.g_chat_layout_rects[0] = rc;
+    var parts: [8]ChatBlock = undefined;
+    const count = chat_markdown.blocks(text, 0, .prose, &parts);
+    try std.testing.expectEqual(@as(usize, 2), count);
+    const table = app_state.g_chat_tables.entries.getPtr(parts[1].start).?;
+    const bar = table.layout.scrollbar(uiScaled(16), uiScaled(24)).?;
+    var heading_h: i32 = 0;
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    _ = chatFlowBlock(dc, text[parts[0].start..][0..parts[0].len], parts[0], .{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * pad, .bottom = 0 }, false, null, parts[0].start, &heading_h);
+    const left = app_state.g_chat_content_left + rc.left + pad;
+    const top = rc.top - app_state.g_chat_scroll_y + pad + heading_h + uiScaled(6);
+    const y = top + table.layout.bodyHeight() + uiScaled(4);
+    const hit = chatTableAt(left + 1, y) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(parts[1].start, hit.offset);
+    try std.testing.expectEqual(chat_markdown.TableScrollHit.thumb, hit.hit);
+    try std.testing.expect(chatTableAt(left - 1, y) == null);
+    try std.testing.expect(chatTableMouseDown(hwnd, left + bar.view_w - 1, y));
+    try std.testing.expect(table.layout.scroll > 0);
+    table.layout.scroll = 0;
+    try std.testing.expect(chatTableMouseDown(hwnd, left + 1, y));
+    try std.testing.expect(chatTableMouseMove(hwnd, left + bar.view_w));
+    const scrolled = table.layout.scroll;
+    try std.testing.expect(scrolled > 0);
+    const after_text = std.unicode.utf8ToUtf16LeStringLiteral("# Ready\n\n| A very long heading with enough words to overflow the narrow chat column | Another very long heading with even more words in the last column |\n|---|---|\n| first | needle |\n\nNew transcript content");
+    var after = block;
+    after.len = after_text.len;
+    chatTableRefresh(&.{after}, after_text);
+    const refreshed = app_state.g_chat_tables.entries.getPtr(parts[1].start) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(scrolled, refreshed.layout.scroll);
+    try std.testing.expect(chat_table_drag != null);
+    try std.testing.expect(chatTableMouseMove(hwnd, left + 1));
+    try std.testing.expectEqual(@as(i32, 0), refreshed.layout.scroll);
+    @memcpy(app_state.g_chat_capture[0..after_text.len], after_text);
+    app_state.g_chat_last_len = after_text.len;
+    app_state.g_chat_blocks[0] = after;
+    const prefixed = std.unicode.utf8ToUtf16LeStringLiteral("Earlier transcript content\n# Ready\n\n| A very long heading with enough words to overflow the narrow chat column | Another very long heading with even more words in the last column |\n|---|---|\n| first | needle |\n\nNew transcript content");
+    const prefix_len = prefixed.len - after_text.len;
+    after.start = prefix_len;
+    const earlier = ChatBlock{ .start = 0, .len = prefix_len, .role = .prose, .first = true, .source_offset = 800, .source_end = 900 };
+    chatTableRefresh(&.{ earlier, after }, prefixed);
+    const moved_offset = parts[1].start + prefix_len;
+    const moved = app_state.g_chat_tables.entries.getPtr(moved_offset) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 0), moved.layout.scroll);
+    try std.testing.expectEqual(moved_offset, chat_table_drag.?.offset);
+    try std.testing.expect(chatTableMouseMove(hwnd, left + bar.view_w));
+    try std.testing.expectEqual(scrolled, moved.layout.scroll);
+    try std.testing.expect(!app_state.g_chat_tables.entries.contains(parts[1].start));
+
+}
+
+test "IGSH-376 received Markdown keeps blue sender layout selection and copied text" {
+    defer app_state.g_chat_tables.clear(std.heap.page_allocator);
+    const w = @import("win32.zig");
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 800;
+    const height = 1000;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    var wide: [2048]u16 = undefined;
+    var blocks: [8]ChatBlock = undefined;
+    const parsed = try @import("chat_transcript.zig").messageBlocks("<cross-session-message from-name='Agent Blue'># Progress\n\n**Ready** with `inline code` and [docs](https://example.test).\n\n- First item\n- Second item\n\n| Item | Status |\n| --- | --- |\n| Build | Ready |\n\n```text\nC:\\work\\file\n```</cross-session-message>", &wide, 0, .user, &blocks);
+    try std.testing.expectEqual(@as(usize, 1), parsed.count);
+    try std.testing.expectEqual(ChatBlockRole.injected, blocks[0].role);
+    const text = wide[0..parsed.len];
+    var rc = chatMeasureBlockRect(dc, text, blocks[0], .single, width - 48, 24, null);
+    try std.testing.expect(rc.bottom > 200 and rc.bottom < height - 24);
+    rc.left += 24;
+    rc.right += 24;
+    var background = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const brush = CreateSolidBrush(themeConsoleBg());
+    defer _ = DeleteObject(brush);
+    _ = FillRect(dc, &background, brush);
+    chatPaintBlock(dc, text, blocks[0], .single, rc);
+    const area = RECT{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * uiScaled(CHAT_BUBBLE_PAD), .bottom = height };
+    var caret: usize = text.len;
+    _ = chatFlowBlock(dc, text, blocks[0], area, false, .{ .x = 0, .y = 1, .char = &caret }, 0, null);
+    try std.testing.expect(caret < 12);
+    const old_len = app_state.g_chat_last_len;
+    const saved = try std.testing.allocator.dupe(u16, app_state.g_chat_capture[0..old_len]);
+    defer std.testing.allocator.free(saved);
+    defer {
+        @memcpy(app_state.g_chat_capture[0..old_len], saved);
+        app_state.g_chat_last_len = old_len;
+    }
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    var copied: [2048]u16 = undefined;
+    const n = try chatCopyBlockText(&copied, blocks[0], 0, text.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Progress\r\nReady with inline code and docs.\r\n\u{2022} First item\r\n\u{2022} Second item\r\nItem\tStatus\r\nBuild\tReady\r\nC:\\work\\file"), copied[0..n]);
+    const ready = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Ready")).?;
+    const selected = try chatCopyBlockText(&copied, blocks[0], ready, ready + 5);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Ready"), copied[0..selected]);
+    var short_y = rc.bottom + 12;
+    for ([_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("- Done"),
+        std.unicode.utf8ToUtf16LeStringLiteral("# Ready"),
+        std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test/a/very/long/address)"),
+    }) |short| {
+        var received = blocks[0];
+        received.len = short.len;
+        const short_rc = chatMeasureBlockRect(dc, short, received, .single, width - 24, short_y, null);
+        chatPaintBlock(dc, short, received, .single, short_rc);
+        try std.testing.expect(short_rc.bottom < height - 12);
+        short_y = short_rc.bottom + 12;
+    }
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+        const Gdi = struct { extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL; };
+        _ = Gdi.GdiFlush();
+        const pixels = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
+        var header: [54]u8 = @splat(0);
+        @memcpy(header[0..2], "BM");
+        std.mem.writeInt(u32, header[2..6], 54 + width * height * 4, .little);
+        std.mem.writeInt(u32, header[10..14], 54, .little);
+        @memcpy(header[14..54], std.mem.asBytes(&info.header));
+        const file = w.CreateFileW(L("chat-markdown-proof.bmp"), 0x40000000, 0, null, 2, 0x80, null);
+        try std.testing.expect(file != null and file != @as(HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+        defer _ = w.CloseHandle(file);
+        var written: u32 = 0;
+        try std.testing.expect(w.WriteFile(file, &header, header.len, &written, null) != 0 and written == header.len);
+        try std.testing.expect(w.WriteFile(file, pixels.ptr, @intCast(pixels.len), &written, null) != 0 and written == pixels.len);
+    }
 }
 
 test "Chat View GDI layout keeps bubble width and avatar space consistent" {
@@ -900,6 +1380,13 @@ pub fn chatFindY(index: usize, position: ?usize) i32 {
     if (block.kind == .table) {
         const table = chatTableLayout(dc, app_state.g_chat_capture[block.start..][0..block.len], block.start, area.right) orelse return rect.top;
         return rect.top + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + uiScaled(CHAT_CODE_PAD) + table.rowY(at - block.start);
+    }
+    if (block.role == .injected and block.markdown) {
+        const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
+        const body = app_state.g_chat_capture[disp.start..][0..disp.len];
+        var match_y: i32 = 0;
+        _ = chatFlowBlock(dc, body, block, area, false, .{ .x = 0, .y = 0, .find = .{ .position = at, .y = &match_y } }, disp.start, null);
+        return rect.top + pad + match_y;
     }
     const text = app_state.g_chat_capture[start..at];
     if (detail) {
@@ -2521,13 +3008,23 @@ fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) !usize 
     return n;
 }
 
-fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) !usize {
+fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) error{ OutOfMemory, NoSpaceLeft, InvalidTable }!usize {
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     const disp = chatBlockDisplayRange(buf, block);
     const text = buf[disp.start .. disp.start + disp.len];
     const start = @min(@max(lo, disp.start), disp.start + disp.len) - disp.start;
     const end = @max(@min(hi, disp.start + disp.len), disp.start) - disp.start;
     if (end <= start) return 0;
+    if (block.markdown and block.role == .injected) {
+        const parts = try chatReceivedBlocks(text, disp.start);
+        var n: usize = 0;
+        for (parts) |part| {
+            if (hi <= part.start or lo >= part.start + part.len) continue;
+            if (n > 0) n += try chatCopyPlainText(out[n..], &.{'\n'});
+            n += try chatCopyBlockText(out[n..], part, lo, hi);
+        }
+        return n;
+    }
     if (block.kind == .table) {
         var table = try chat_markdown.parseTable(std.heap.page_allocator, text);
         defer table.deinit(std.heap.page_allocator);
@@ -2552,7 +3049,7 @@ fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) !usize 
         }
         return n;
     }
-    if (!block.markdown or block.role == .code or block.role == .user or block.role == .injected) return chatCopyPlainText(out, text[start..end]);
+    if (!block.markdown or block.role == .code or block.role == .user) return chatCopyPlainText(out, text[start..end]);
     if (block.kind == .list) {
         const prefix = @as(usize, block.prefix);
         var n: usize = 0;
@@ -2883,16 +3380,36 @@ fn chatTableAt(x: i32, y: i32) ?struct { offset: usize, left: i32, top: i32, lay
     if (app_state.g_chat_find_open and y < uiScaled(app_state.CHAT_FIND_TOP_H)) return null;
     const index = chatTranscriptBlockAtPoint(y) orelse return null;
     const block = app_state.g_chat_blocks[index];
-    if (block.kind != .table) return null;
     const rc = app_state.g_chat_layout_rects[index];
-    const pad = uiScaled(CHAT_CODE_PAD);
+    const received = block.role == .injected and block.markdown;
+    if (block.kind != .table and !received) return null;
+    const pad = uiScaled(if (received) CHAT_BUBBLE_PAD else CHAT_CODE_PAD);
     const left = app_state.g_chat_content_left + rc.left + pad;
-    const top = rc.top - app_state.g_chat_scroll_y + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + pad;
-    const table = app_state.g_chat_tables.entries.getPtr(block.start) orelse return null;
+    var top = rc.top - app_state.g_chat_scroll_y + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + pad;
+    var offset = block.start;
+    if (received) {
+        const dc = GetDC(app_state.g_chat_transcript_hwnd) orelse return null;
+        defer _ = ReleaseDC(app_state.g_chat_transcript_hwnd, dc);
+        const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
+        const text = app_state.g_chat_capture[disp.start..][0..disp.len];
+        const parts = chatReceivedBlocks(text, disp.start) catch return null;
+        const found = for (parts, 0..) |part, i| {
+            if (i > 0) top += uiScaled(6);
+            var part_h: i32 = 0;
+            _ = chatFlowBlock(dc, text[part.start - disp.start ..][0..part.len], part, .{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * pad, .bottom = 0 }, false, null, part.start, &part_h);
+            if (part.kind == .table and y >= top and y < top + part_h) {
+                offset = part.start;
+                break true;
+            }
+            top += part_h;
+        } else false;
+        if (!found) return null;
+    }
+    const table = app_state.g_chat_tables.entries.getPtr(offset) orelse return null;
     const bar = table.layout.scrollbar(uiScaled(16), uiScaled(24)) orelse return null;
     const hit = bar.hit(x - left, y - top);
     if (hit == .outside) return null;
-    return .{ .offset = block.start, .left = left, .top = top, .layout = &table.layout, .bar = bar, .hit = hit };
+    return .{ .offset = offset, .left = left, .top = top, .layout = &table.layout, .bar = bar, .hit = hit };
 }
 
 fn chatTableSetScroll(hwnd: HANDLE, offset: usize, scroll: i32) void {
@@ -2901,7 +3418,8 @@ fn chatTableSetScroll(hwnd: HANDLE, offset: usize, scroll: i32) void {
     table.layout.scroll = scroll;
     app_state.g_chat_hover_link = null;
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
-        if (block.kind != .table or block.start != offset) continue;
+        const contains = block.role == .injected and offset >= block.start and offset < block.start + block.len;
+        if (!(block.kind == .table and block.start == offset) and !contains) continue;
         var rc = app_state.g_chat_layout_rects[index];
         rc.left += app_state.g_chat_content_left;
         rc.right += app_state.g_chat_content_left;

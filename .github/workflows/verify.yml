@@ -73,6 +73,8 @@ jobs:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
@@ -84,7 +86,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view')) { throw 'Unknown feature map' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
@@ -136,6 +138,17 @@ jobs:
           @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Render received Markdown with the real Windows painter
+        if: env.FEATURE == 'chat-view' && env.RELEASE_TAG == ''
+        shell: powershell
+        env:
+          MULTIPROMPT_CHAT_RENDER_PROOF: '1'
+        run: |
+          zig build test-main --summary all
+          if ($LASTEXITCODE -ne 0) { throw 'Native desktop rendering tests failed' }
+          Add-Type -AssemblyName System.Drawing
+          $image = [Drawing.Bitmap]::FromFile("$pwd/chat-markdown-proof.bmp")
+          try { $image.Save("$pwd/evidence/chat-markdown-render.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
       - name: Launch Doctor Drive Evidence Cleanup
         shell: powershell
         run: |
