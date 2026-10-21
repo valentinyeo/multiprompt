@@ -387,6 +387,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        const saved_id = std.fmt.bufPrint(json_buf[pos..], ",\"shell_id\":{d}", .{app_state.shells[i].shell_id}) catch return false;
+        pos += saved_id.len;
         if (app_state.shells[i].last_active != 0) {
             const la_pre = ",\"la\":";
             @memcpy(json_buf[pos .. pos + la_pre.len], la_pre);
@@ -677,6 +679,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += widl;
             json_buf[pos] = '"';
             pos += 1;
+            const last_shell = std.fmt.bufPrint(json_buf[pos..], ",\"last_shell\":{d}", .{app_state.g_ws_last_shell[wi]}) catch return false;
+            pos += last_shell.len;
             if (app_state.g_ws_snoozed[wi]) {
                 const sn = ",\"snoozed\":true";
                 @memcpy(json_buf[pos .. pos + sn.len], sn);
@@ -1246,6 +1250,39 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     return true;
 }
 
+fn seedActiveWorkspaceLastShell(shells: []const app_state.Shell, active_shell: u32, last_shell: []u32) void {
+    if (active_shell >= shells.len) return;
+    const shell = shells[active_shell];
+    if (last_shell[shell.workspace] == 0) last_shell[shell.workspace] = shell.shell_id;
+}
+
+test "ISSUE-439 restore seeds missing active workspace memory without replacing saved choices" {
+    var shells = [_]app_state.Shell{ empty_shell, empty_shell, empty_shell };
+    shells[0].workspace = 1;
+    shells[0].shell_id = 41;
+    shells[0].last_active = 10;
+    shells[1].workspace = 1;
+    shells[1].shell_id = 99;
+    shells[1].last_active = 1000;
+    shells[2].workspace = 0;
+    shells[2].shell_id = 42;
+    var last_shell = [_]u32{0} ** MAX_LWS;
+
+    seedActiveWorkspaceLastShell(&shells, shells.len, &last_shell);
+    seedActiveWorkspaceLastShell(shells[0..0], 0, &last_shell);
+    try std.testing.expectEqual(@as(u32, 0), last_shell[1]);
+
+    seedActiveWorkspaceLastShell(&shells, 0, &last_shell);
+    try std.testing.expectEqual(@as(u32, 41), last_shell[1]);
+    try std.testing.expectEqual(@as(u32, 0), last_shell[0]);
+    try std.testing.expectEqual(@as(?u32, 0), @import("workspaces.zig").pickWorkspaceTarget(&shells, 1, last_shell[1]));
+
+    seedActiveWorkspaceLastShell(&shells, 2, &last_shell);
+    try std.testing.expectEqual(@as(u32, 42), last_shell[0]);
+    seedActiveWorkspaceLastShell(&shells, 1, &last_shell);
+    try std.testing.expectEqual(@as(u32, 41), last_shell[1]);
+}
+
 pub fn restoreSession() u32 {
     if (app_state.g_account_locked) return 0;
     app_state.g_restored_valid_session = false;
@@ -1382,6 +1419,8 @@ pub fn restoreSession() u32 {
     }
     app_state.g_hide_pills = json_reader.boolean(json_reader.field(json, "hide_pills"), app_state.g_hide_pills);
 
+    var saved_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
+    app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     var restored_active_ws: u8 = 0;
     if (json_reader.boolTrue(json, "single_window")) app_state.g_single_window = true;
     if (app_state.g_single_window) {
@@ -1398,6 +1437,7 @@ pub fn restoreSession() u32 {
             if (wid_cap > 0) @memcpy(app_state.g_ws_ids[wi][0..wid_cap], wid_tmp[0..wid_cap]);
             app_state.g_ws_id_len[wi] = wid_cap;
             app_state.g_ws_snoozed[wi] = json_reader.boolTrue(obj, "snoozed");
+            saved_last_shell[wi] = @intCast(@min(json_reader.uint(obj, "last_shell"), std.math.maxInt(u32)));
         }
     }
 
@@ -1443,6 +1483,7 @@ pub fn restoreSession() u32 {
     debugLog("restoreSession: starting restore");
     var spawned: u32 = 0;
     var restored_active_shell_id: u32 = 0;
+    var restored_shell_ids: [MAX_SHELLS]u32 = [_]u32{0} ** MAX_SHELLS;
     for (0..tab_count) |t| {
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
         if (app_state.g_startup_progress) drawStartupProgress(@intCast(t), tab_count, tabs[t].name[0..tabs[t].name_len]);
@@ -1450,6 +1491,7 @@ pub fn restoreSession() u32 {
         if (ok) {
             const idx = app_state.shell_count - 1;
             app_state.active_shell = idx;
+            restored_shell_ids[t] = app_state.shells[idx].shell_id;
             if (restored_active_tab != null and restored_active_tab.? == t) {
                 restored_active_shell_id = app_state.shells[idx].shell_id;
             }
@@ -1458,6 +1500,7 @@ pub fn restoreSession() u32 {
             debugLog("restoreSession: spawn FAILED");
             if (preserveFailedRemoteSavedTab(&tabs[t])) |idx| {
                 app_state.active_shell = idx;
+                restored_shell_ids[t] = app_state.shells[idx].shell_id;
                 if (restored_active_tab != null and restored_active_tab.? == t) {
                     restored_active_shell_id = app_state.shells[idx].shell_id;
                 }
@@ -1466,6 +1509,11 @@ pub fn restoreSession() u32 {
         }
     }
 
+    for (tabs[0..tab_count], 0..) |tab, t| {
+        if (tab.shell_id != 0 and saved_last_shell[tab.workspace] == tab.shell_id) {
+            app_state.g_ws_last_shell[tab.workspace] = restored_shell_ids[tmux_identity.restoreWinner(tabs[0..tab_count], t)];
+        }
+    }
     if (restored_active_shell_id != 0) {
         if (findShellById(restored_active_shell_id)) |idx| app_state.active_shell = idx;
     }
@@ -1501,6 +1549,8 @@ pub fn restoreSession() u32 {
             }
         }
     }
+
+    seedActiveWorkspaceLastShell(app_state.shells[0..app_state.shell_count], app_state.active_shell, &app_state.g_ws_last_shell);
 
     if (spawned > 0 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "restoreSession");
