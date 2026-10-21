@@ -2418,6 +2418,21 @@ pub const CHAT_CODE_HEADER = 28;
 pub const GpStatus = i32;
 pub const GdipStartupInput = extern struct { version: u32, debug_cb: ?*anyopaque, suppress_thread: BOOL, suppress_codecs: BOOL };
 pub const GdipApi = struct {
+    reset_clip: *const fn (HANDLE) callconv(WINAPI) GpStatus,
+    set_clip_hrgn: *const fn (HANDLE, HANDLE, i32) callconv(WINAPI) GpStatus,
+    set_pixel_offset: *const fn (HANDLE, i32) callconv(WINAPI) GpStatus,
+    add_path_line: *const fn (HANDLE, f32, f32, f32, f32) callconv(WINAPI) GpStatus,
+    add_path_rectangle: *const fn (HANDLE, f32, f32, f32, f32) callconv(WINAPI) GpStatus,
+    add_path_ellipse: *const fn (HANDLE, f32, f32, f32, f32) callconv(WINAPI) GpStatus,
+    add_path_polygon: *const fn (HANDLE, [*]const POINT, i32) callconv(WINAPI) GpStatus,
+    add_path_pie: *const fn (HANDLE, f32, f32, f32, f32, f32, f32) callconv(WINAPI) GpStatus,
+    start_figure: *const fn (HANDLE) callconv(WINAPI) GpStatus,
+    create_pen: *const fn (u32, f32, i32, *HANDLE) callconv(WINAPI) GpStatus,
+    delete_pen: *const fn (HANDLE) callconv(WINAPI) GpStatus,
+    set_pen_caps: *const fn (HANDLE, i32, i32, i32) callconv(WINAPI) GpStatus,
+    set_pen_join: *const fn (HANDLE, i32) callconv(WINAPI) GpStatus,
+    draw_path: *const fn (HANDLE, HANDLE, HANDLE) callconv(WINAPI) GpStatus,
+
     create_from_hdc: *const fn (HANDLE, *HANDLE) callconv(WINAPI) GpStatus,
     delete_graphics: *const fn (HANDLE) callconv(WINAPI) GpStatus,
     set_smoothing: *const fn (HANDLE, i32) callconv(WINAPI) GpStatus,

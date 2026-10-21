@@ -1,3 +1,4 @@
+const smooth = @import("smooth.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const DWORD = @import("win32.zig").DWORD;
@@ -23,8 +24,6 @@ const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
 const CreateFontW = @import("fonts.zig").create;
-const Ellipse = @import("win32.zig").Ellipse;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const MoveToEx = @import("win32.zig").MoveToEx;
 const LineTo = @import("win32.zig").LineTo;
@@ -102,6 +101,8 @@ pub fn drawAsciiLong(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void 
 }
 
 pub fn drawModalShadow(hdc: HANDLE, x: i32, y: i32, w: i32, h: i32, radius: i32) void {
+    var canvas = smooth.Canvas.init(hdc);
+    defer canvas.deinit();
     if (w <= 0 or h <= 0) return;
 
     const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -125,7 +126,7 @@ pub fn drawModalShadow(hdc: HANDLE, x: i32, y: i32, w: i32, h: i32, radius: i32)
         const pen = CreatePen(0, spec.width, spec.color);
         if (pen == null) continue;
         const old_pen = SelectObject(hdc, pen);
-        _ = RoundRect(hdc, x + spec.offset, y + spec.offset, x + w + spec.offset, y + h + spec.offset, radius, radius);
+        _ = canvas.drawRoundRect(x + spec.offset, y + spec.offset, x + w + spec.offset, y + h + spec.offset, radius, radius);
         _ = SelectObject(hdc, old_pen);
         _ = DeleteObject(pen);
     }
@@ -351,14 +352,13 @@ pub fn browserInboxState(shell: *const Shell) u8 {
     return if (browserPaneLive(shell)) 2 else 1;
 }
 
-fn drawNativeLine(hdc: HANDLE, pen: HANDLE, x1: i32, y1: i32, x2: i32, y2: i32) void {
-    const old_pen = SelectObject(hdc, pen);
-    _ = MoveToEx(hdc, x1, y1, null);
-    _ = LineTo(hdc, x2, y2);
-    _ = SelectObject(hdc, old_pen);
+fn drawNativeLine(canvas: *smooth.Canvas, pen: HANDLE, x1: i32, y1: i32, x2: i32, y2: i32) void {
+    canvas.strokePenLine(pen, x1, y1, x2, y2);
 }
 
 pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
+    var canvas = smooth.Canvas.init(hdc);
+    defer canvas.deinit();
     const cx = @divTrunc(rc.left + rc.right, 2);
     const cy = @divTrunc(rc.top + rc.bottom, 2);
     const pulse = if (active) app_state.g_spinner_frame % 4 else 0;
@@ -378,21 +378,21 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
             else => RGB(207, 214, 230),
         };
         const outer_pen = CreatePen(0, uiScaled(1), cursor_ink);
-        drawNativeLine(hdc, outer_pen, cx, cy - 7, cx + 7, cy);
-        drawNativeLine(hdc, outer_pen, cx + 7, cy, cx, cy + 7);
-        drawNativeLine(hdc, outer_pen, cx, cy + 7, cx - 7, cy);
-        drawNativeLine(hdc, outer_pen, cx - 7, cy, cx, cy - 7);
-        drawNativeLine(hdc, outer_pen, cx, cy - 7, cx, cy - 3);
-        drawNativeLine(hdc, outer_pen, cx + 7, cy, cx + 3, cy);
-        drawNativeLine(hdc, outer_pen, cx, cy + 7, cx, cy + 3);
-        drawNativeLine(hdc, outer_pen, cx - 7, cy, cx - 3, cy);
+        drawNativeLine(&canvas, outer_pen, cx, cy - 7, cx + 7, cy);
+        drawNativeLine(&canvas, outer_pen, cx + 7, cy, cx, cy + 7);
+        drawNativeLine(&canvas, outer_pen, cx, cy + 7, cx - 7, cy);
+        drawNativeLine(&canvas, outer_pen, cx - 7, cy, cx, cy - 7);
+        drawNativeLine(&canvas, outer_pen, cx, cy - 7, cx, cy - 3);
+        drawNativeLine(&canvas, outer_pen, cx + 7, cy, cx + 3, cy);
+        drawNativeLine(&canvas, outer_pen, cx, cy + 7, cx, cy + 3);
+        drawNativeLine(&canvas, outer_pen, cx - 7, cy, cx - 3, cy);
         _ = DeleteObject(outer_pen);
 
         const core_pen = CreatePen(0, uiScaled(1), cursor_core);
-        drawNativeLine(hdc, core_pen, cx, cy - 3, cx + 3, cy);
-        drawNativeLine(hdc, core_pen, cx + 3, cy, cx, cy + 3);
-        drawNativeLine(hdc, core_pen, cx, cy + 3, cx - 3, cy);
-        drawNativeLine(hdc, core_pen, cx - 3, cy, cx, cy - 3);
+        drawNativeLine(&canvas, core_pen, cx, cy - 3, cx + 3, cy);
+        drawNativeLine(&canvas, core_pen, cx + 3, cy, cx, cy + 3);
+        drawNativeLine(&canvas, core_pen, cx, cy + 3, cx - 3, cy);
+        drawNativeLine(&canvas, core_pen, cx - 3, cy, cx, cy - 3);
         _ = DeleteObject(core_pen);
         return;
     }
@@ -415,7 +415,7 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
         _ = SetTextColor(hdc, grok_ink);
         _ = DrawTextW(hdc, L("G"), -1, rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
         const orbit_pen = CreatePen(0, uiScaled(1), grok_blue);
-        drawNativeLine(hdc, orbit_pen, cx + 1, cy - 6, cx + 6, cy - 2);
+        drawNativeLine(&canvas, orbit_pen, cx + 1, cy - 6, cx + 6, cy - 2);
         _ = DeleteObject(orbit_pen);
         return;
     }
@@ -435,8 +435,8 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
             else => RGB(69, 221, 221),
         };
         const chevron_pen = CreatePen(0, uiScaled(2), hax_orange);
-        drawNativeLine(hdc, chevron_pen, cx - 6, cy - 5, cx - 1, cy);
-        drawNativeLine(hdc, chevron_pen, cx - 1, cy, cx - 6, cy + 5);
+        drawNativeLine(&canvas, chevron_pen, cx - 6, cy - 5, cx - 1, cy);
+        drawNativeLine(&canvas, chevron_pen, cx - 1, cy, cx - 6, cy + 5);
         _ = DeleteObject(chevron_pen);
 
         const cursor_brush = CreateSolidBrush(hax_cyan);
@@ -455,16 +455,16 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
             else => RGB(115, 178, 255),
         };
         const mark_pen = CreatePen(0, uiScaled(2), kimi_ink);
-        drawNativeLine(hdc, mark_pen, cx - 4, cy - 5, cx - 4, cy + 5);
-        drawNativeLine(hdc, mark_pen, cx - 4, cy, cx + 3, cy - 5);
-        drawNativeLine(hdc, mark_pen, cx - 4, cy, cx + 3, cy + 5);
+        drawNativeLine(&canvas, mark_pen, cx - 4, cy - 5, cx - 4, cy + 5);
+        drawNativeLine(&canvas, mark_pen, cx - 4, cy, cx + 3, cy - 5);
+        drawNativeLine(&canvas, mark_pen, cx - 4, cy, cx + 3, cy + 5);
         _ = DeleteObject(mark_pen);
 
         const dot_brush = CreateSolidBrush(kimi_blue);
         const dot_pen = CreatePen(0, 1, kimi_blue);
         const old_brush = SelectObject(hdc, dot_brush);
         const old_pen = SelectObject(hdc, dot_pen);
-        _ = Ellipse(hdc, cx + 3, cy - 7, cx + 7, cy - 3);
+        _ = canvas.drawEllipse(cx + 3, cy - 7, cx + 7, cy - 3);
         _ = SelectObject(hdc, old_pen);
         _ = SelectObject(hdc, old_brush);
         _ = DeleteObject(dot_pen);
@@ -516,16 +516,16 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
             else => 5,
         };
         const pen = CreatePen(0, uiScaled(2), orange);
-        drawNativeLine(hdc, pen, cx - ray, cy, cx + ray, cy);
-        drawNativeLine(hdc, pen, cx, cy - ray, cx, cy + ray);
-        drawNativeLine(hdc, pen, cx - diagonal, cy - diagonal, cx + diagonal, cy + diagonal);
-        drawNativeLine(hdc, pen, cx - diagonal, cy + diagonal, cx + diagonal, cy - diagonal);
+        drawNativeLine(&canvas, pen, cx - ray, cy, cx + ray, cy);
+        drawNativeLine(&canvas, pen, cx, cy - ray, cx, cy + ray);
+        drawNativeLine(&canvas, pen, cx - diagonal, cy - diagonal, cx + diagonal, cy + diagonal);
+        drawNativeLine(&canvas, pen, cx - diagonal, cy + diagonal, cx + diagonal, cy - diagonal);
         _ = DeleteObject(pen);
         const br = CreateSolidBrush(orange);
         const dot_pen = CreatePen(0, 1, orange);
         const old_br = SelectObject(hdc, br);
         const old_pen = SelectObject(hdc, dot_pen);
-        _ = Ellipse(hdc, cx - 2, cy - 2, cx + 2, cy + 2);
+        _ = canvas.drawEllipse(cx - 2, cy - 2, cx + 2, cy + 2);
         _ = SelectObject(hdc, old_pen);
         _ = SelectObject(hdc, old_br);
         _ = DeleteObject(dot_pen);
@@ -691,6 +691,8 @@ pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
 }
 
 pub fn paintInboxButton(hdc: HANDLE, in_overlay: bool) void {
+    var canvas = smooth.Canvas.init(hdc);
+    defer canvas.deinit();
     const r = inboxButtonRect(in_overlay);
     const bg = if (in_overlay) themeConsoleBg() else themeSidebarBg();
     const button_bg = tintColor(bg, customColorOr("accent", RGB(80, 150, 255)), if (app_state.g_inbox_button_hover) 2 else 1, if (app_state.g_inbox_button_hover) 8 else 16);
@@ -698,23 +700,29 @@ pub fn paintInboxButton(hdc: HANDLE, in_overlay: bool) void {
     const pen = CreatePen(0, 1, button_bg);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
-    _ = RoundRect(hdc, r.left, r.top, r.right, r.bottom, uiScaled(7), uiScaled(7));
+    _ = @import("smooth.zig").drawRoundRect(hdc, r.left, r.top, r.right, r.bottom, uiScaled(7), uiScaled(7));
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);
     _ = DeleteObject(pen);
 
-    const glyph = CreatePen(0, @max(1, uiScaled(2)), customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    const glyph = customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225));
+    const width: f32 = @floatFromInt(@max(1, uiScaled(2)));
     const cx = @divTrunc(r.left + r.right, 2);
     const cy = @divTrunc(r.top + r.bottom, 2);
-    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy - uiScaled(4), cx + uiScaled(7), cy - uiScaled(4));
-    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy - uiScaled(4), cx - uiScaled(7), cy + uiScaled(5));
-    _ = drawNativeLine(hdc, glyph, cx - uiScaled(7), cy + uiScaled(5), cx + uiScaled(7), cy + uiScaled(5));
-    _ = drawNativeLine(hdc, glyph, cx + uiScaled(7), cy + uiScaled(5), cx + uiScaled(7), cy - uiScaled(4));
-    _ = drawNativeLine(hdc, glyph, cx - uiScaled(4), cy + uiScaled(1), cx - uiScaled(2), cy + uiScaled(3));
-    _ = drawNativeLine(hdc, glyph, cx - uiScaled(2), cy + uiScaled(3), cx + uiScaled(2), cy + uiScaled(3));
-    _ = drawNativeLine(hdc, glyph, cx + uiScaled(2), cy + uiScaled(3), cx + uiScaled(4), cy + uiScaled(1));
-    _ = DeleteObject(glyph);
+    canvas.strokePolyline(&.{
+        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
+        .{ .x = cx + uiScaled(7), .y = cy - uiScaled(4) },
+        .{ .x = cx + uiScaled(7), .y = cy + uiScaled(5) },
+        .{ .x = cx - uiScaled(7), .y = cy + uiScaled(5) },
+        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
+    }, glyph, width);
+    canvas.strokePolyline(&.{
+        .{ .x = cx - uiScaled(4), .y = cy + uiScaled(1) },
+        .{ .x = cx - uiScaled(2), .y = cy + uiScaled(3) },
+        .{ .x = cx + uiScaled(2), .y = cy + uiScaled(3) },
+        .{ .x = cx + uiScaled(4), .y = cy + uiScaled(1) },
+    }, glyph, width);
 
     var count: u32 = 0;
     for (0..app_state.shell_count) |i| {
@@ -777,7 +785,7 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
         const pen = CreatePen(0, 1, pill_bg);
         const ob = SelectObject(hdc, br);
         const op = SelectObject(hdc, pen);
-        _ = RoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
+        _ = @import("smooth.zig").drawRoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
         _ = SelectObject(hdc, ob);
         _ = SelectObject(hdc, op);
         _ = DeleteObject(br);
@@ -799,7 +807,7 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
         const pen = CreatePen(0, 1, add_bg);
         const ob = SelectObject(hdc, br);
         const op = SelectObject(hdc, pen);
-        _ = RoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
+        _ = @import("smooth.zig").drawRoundRect(hdc, x, WS_PILL_TOP, x + WS_PILL_W, WS_PILL_TOP + WS_PILL_H, 7, 7);
         _ = SelectObject(hdc, ob);
         _ = SelectObject(hdc, op);
         _ = DeleteObject(br);
@@ -819,4 +827,80 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     _ = FillRect(hdc, &line_rc, line_br);
     _ = DeleteObject(line_br);
     paintInboxButtonTooltip(hdc, false);
+}
+
+test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 percent" {
+    const w = @import("win32.zig");
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    app_state.g_main_monitor_dpi = 96;
+    const saved_count = app_state.shell_count;
+    const saved_hover = app_state.g_inbox_button_hover;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.shell_count = saved_count;
+    defer app_state.g_inbox_button_hover = saved_hover;
+    app_state.shell_count = 0;
+    app_state.g_inbox_button_hover = false;
+    const dc = w.CreateCompatibleDC(null);
+    try std.testing.expect(dc != null);
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 1024, .height = -256 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0);
+    try std.testing.expect(bitmap != null);
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    for ([_]u32{ 100, 150 }) |scale| {
+        app_state.g_ui_scale = scale;
+        const rc = inboxButtonRect(false);
+        const bg = themeSidebarBg();
+        const button_bg = tintColor(bg, customColorOr("accent", RGB(80, 150, 255)), 1, 16);
+        const brush = w.CreateSolidBrush(bg);
+        defer _ = w.DeleteObject(brush);
+        const area = RECT{ .left = 0, .top = 0, .right = 1024, .bottom = 256 };
+        _ = w.FillRect(dc, &area, brush);
+        paintInboxButton(dc, false);
+        var blended_edge: usize = 0;
+        var y = rc.top;
+        while (y < rc.top + uiScaled(4)) : (y += 1) {
+            var x = rc.left;
+            while (x < rc.left + uiScaled(4)) : (x += 1) {
+                const pixel = w.GetPixel(dc, x, y);
+                var between = true;
+                for ([_]u5{ 0, 8, 16 }) |shift| {
+                    const channel = (pixel >> shift) & 0xff;
+                    const a = (bg >> shift) & 0xff;
+                    const b = (button_bg >> shift) & 0xff;
+                    between = between and channel >= @min(a, b) and channel <= @max(a, b);
+                }
+                if (between and pixel != bg and pixel != button_bg) blended_edge += 1;
+            }
+        }
+        if (blended_edge == 0) std.debug.print("ISSUE-444 inbox edge: scale={d}, blended pixels=0\n", .{scale});
+        try std.testing.expect(blended_edge > 0);
+        const glyph = customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225));
+        const cx = @divTrunc(rc.left + rc.right, 2);
+        const cy = @divTrunc(rc.top + rc.bottom, 2);
+        var blended_glyph: usize = 0;
+        y = cy;
+        while (y <= cy + uiScaled(4)) : (y += 1) {
+            var x = cx - uiScaled(5);
+            while (x < cx + uiScaled(5)) : (x += 1) {
+                const pixel = w.GetPixel(dc, x, y);
+                var between = true;
+                for ([_]u5{ 0, 8, 16 }) |shift| {
+                    const channel = (pixel >> shift) & 0xff;
+                    const a = (button_bg >> shift) & 0xff;
+                    const b = (glyph >> shift) & 0xff;
+                    between = between and channel >= @min(a, b) and channel <= @max(a, b);
+                }
+                if (between and pixel != button_bg and pixel != glyph) blended_glyph += 1;
+            }
+        }
+        try std.testing.expect(blended_glyph > 0);
+        try std.testing.expectEqual(bg, w.GetPixel(dc, rc.right, rc.top));
+        try std.testing.expectEqual(bg, w.GetPixel(dc, rc.left, rc.bottom));
+    }
 }

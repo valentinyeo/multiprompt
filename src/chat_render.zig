@@ -85,7 +85,6 @@ const GetTextExtentExPointW = @import("win32.zig").GetTextExtentExPointW;
 const CreateFontW = @import("fonts.zig").create;
 const CHAT_QUALITY = @import("fonts.zig").CHAT_QUALITY;
 const chatLineHeight = @import("fonts.zig").chatLineHeight;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreateCompatibleDC = @import("win32.zig").CreateCompatibleDC;
 const CreateCompatibleBitmap = @import("win32.zig").CreateCompatibleBitmap;
 const BitBlt = @import("win32.zig").BitBlt;
@@ -964,74 +963,9 @@ pub fn chatScrollBy(delta_px: i32) void {
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
-fn gdipProc(comptime T: type, module: HANDLE, name: [*:0]const u8) ?T {
-    const addr = GetProcAddress(module, name) orelse return null;
-    return @ptrCast(@alignCast(addr));
-}
-
-fn gdipLoad() bool {
-    if (app_state.g_gdip_state != 0) return app_state.g_gdip_state == 1;
-    app_state.g_gdip_state = 2;
-    const module = LoadLibraryA("gdiplus.dll");
-    if (module == null) return false;
-    const StartupFn = *const fn (*usize, *const GdipStartupInput, ?*anyopaque) callconv(WINAPI) GpStatus;
-    const startup = gdipProc(StartupFn, module, "GdiplusStartup") orelse return false;
-    var api: GdipApi = undefined;
-    api.create_from_hdc = gdipProc(@TypeOf(api.create_from_hdc), module, "GdipCreateFromHDC") orelse return false;
-    api.delete_graphics = gdipProc(@TypeOf(api.delete_graphics), module, "GdipDeleteGraphics") orelse return false;
-    api.set_smoothing = gdipProc(@TypeOf(api.set_smoothing), module, "GdipSetSmoothingMode") orelse return false;
-    api.create_path = gdipProc(@TypeOf(api.create_path), module, "GdipCreatePath") orelse return false;
-    api.delete_path = gdipProc(@TypeOf(api.delete_path), module, "GdipDeletePath") orelse return false;
-    api.add_path_arc = gdipProc(@TypeOf(api.add_path_arc), module, "GdipAddPathArc") orelse return false;
-    api.close_figure = gdipProc(@TypeOf(api.close_figure), module, "GdipClosePathFigure") orelse return false;
-    api.create_fill = gdipProc(@TypeOf(api.create_fill), module, "GdipCreateSolidFill") orelse return false;
-    api.delete_brush = gdipProc(@TypeOf(api.delete_brush), module, "GdipDeleteBrush") orelse return false;
-    api.fill_path = gdipProc(@TypeOf(api.fill_path), module, "GdipFillPath") orelse return false;
-    const input = GdipStartupInput{ .version = 1, .debug_cb = null, .suppress_thread = 0, .suppress_codecs = 0 };
-    if (startup(&app_state.g_gdip_token, &input, null) != 0) return false;
-    app_state.g_gdip_api = api;
-    app_state.g_gdip_state = 1;
-    return true;
-}
-
-fn gdipFillRoundRect(hdc: HANDLE, rc: RECT, radius: i32, color: DWORD) bool {
-    if (!gdipLoad()) return false;
-    const api = &app_state.g_gdip_api;
-    var graphics: HANDLE = null;
-    if (api.create_from_hdc(hdc, &graphics) != 0 or graphics == null) return false;
-    defer _ = api.delete_graphics(graphics);
-    _ = api.set_smoothing(graphics, 4);
-    var path: HANDLE = null;
-    if (api.create_path(0, &path) != 0 or path == null) return false;
-    defer _ = api.delete_path(path);
-    var brush: HANDLE = null;
-    if (api.create_fill(chat_style.argb(color), &brush) != 0 or brush == null) return false;
-    defer _ = api.delete_brush(brush);
-    const l: f32 = @floatFromInt(rc.left);
-    const t: f32 = @floatFromInt(rc.top);
-    const r: f32 = @floatFromInt(rc.right);
-    const b: f32 = @floatFromInt(rc.bottom);
-    const d: f32 = @floatFromInt(2 * radius);
-    _ = api.add_path_arc(path, l, t, d, d, 180, 90);
-    _ = api.add_path_arc(path, r - d, t, d, d, 270, 90);
-    _ = api.add_path_arc(path, r - d, b - d, d, d, 0, 90);
-    _ = api.add_path_arc(path, l, b - d, d, d, 90, 90);
-    _ = api.close_figure(path);
-    return api.fill_path(graphics, brush, path) == 0;
-}
-
-pub fn fillRoundRectAA(hdc: HANDLE, rc: RECT, radius: i32, color: DWORD) void {
-    if (rc.right <= rc.left or rc.bottom <= rc.top) return;
-    const r = chat_style.cornerRadius(rc.right - rc.left, rc.bottom - rc.top, radius);
-    if (r > 0 and gdipFillRoundRect(hdc, rc, r, color)) return;
-    const brush = CreateSolidBrush(color);
-    const old_brush = SelectObject(hdc, brush);
-    const old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 2 * r, 2 * r);
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(brush);
-}
+const gdipProc = @import("smooth.zig").gdipProc;
+const gdipLoad = @import("smooth.zig").gdipLoad;
+pub const fillRoundRectAA = @import("smooth.zig").fillRoundRect;
 
 fn fillBubbleAA(hdc: HANDLE, rc: RECT, radius: i32, color: DWORD, round_top: bool, round_bottom: bool) void {
     if (round_top and round_bottom) return fillRoundRectAA(hdc, rc, radius, color);
@@ -2182,7 +2116,7 @@ fn chatPaintCodeHeader(hdc: HANDLE, rc: RECT, block: ChatBlock) void {
     const brush = CreateSolidBrush(if (hovered) chatUserBubbleColor() else chatCodePanelColor());
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    _ = RoundRect(hdc, button.left, button.top, button.right, button.bottom, uiScaled(6), uiScaled(6));
+    _ = @import("smooth.zig").drawRoundRect(hdc, button.left, button.top, button.right, button.bottom, uiScaled(6), uiScaled(6));
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);
@@ -2846,6 +2780,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer _ = DeleteObject(bmp);
             const old_bmp = SelectObject(mem_dc, bmp);
             defer _ = SelectObject(mem_dc, old_bmp);
+            var canvas = @import("smooth.zig").Canvas.init(mem_dc);
+            defer canvas.deinit();
             const bg_brush = CreateSolidBrush(themeConsoleBg());
             _ = FillRect(mem_dc, &client_rc, bg_brush);
             _ = DeleteObject(bg_brush);
@@ -2898,6 +2834,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 }
             }
             @import("chat_find_ui.zig").paint(mem_dc, w);
+            canvas.deinit();
             painted = BitBlt(hdc, 0, 0, w, h, mem_dc, 0, 0, GDI_SRCCOPY) != 0;
             return 0;
         },

@@ -60,12 +60,17 @@ test('the Wine runner propagates the selected compiler to native child tests', {
     const older = path.join(dir, 'older');
     fs.mkdirSync(selected);
     fs.mkdirSync(older);
+    const gdiplus = path.join(dir, 'gdiplus');
+    fs.mkdirSync(gdiplus);
+    fs.writeFileSync(path.join(gdiplus, 'gdiplus.dll'), 'mock renderer');
+    const prefix = path.join(dir, 'wine-prefix');
+    fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
     const zig = path.join(selected, 'zig');
     fs.writeFileSync(zig, '#!/bin/sh\nprintf \'{"selected":"%s","resolved":"%s","exe":"%s","step":"%s"}\\n\' "$ZIG" "$(command -v zig)" "${ZIG_EXE:-}" "$2"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(older, 'zig'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
     const result = spawnSync('bash', ['tools/test-windows-wine.sh'], {
       cwd: root, encoding: 'utf8', timeout: 120000,
-      env: { ...process.env, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock') },
+      env: { ...process.env, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix, DISPLAY: ':mock' },
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const calls = result.stdout.trim().split('\n').map(line => JSON.parse(line));
@@ -80,7 +85,7 @@ for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
   test(`the Wine runner handles ${scenario} display configuration`, { skip: process.platform === 'win32' }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wine-display-'));
     try {
-      for (const name of ['git', 'dirname', 'flock', 'mktemp', 'rm', 'nice']) {
+      for (const name of ['git', 'dirname', 'flock', 'mktemp', 'rm', 'nice', 'mkdir', 'cp']) {
         const resolved = spawnSync('which', [name], { encoding: 'utf8' });
         assert.equal(resolved.status, 0, resolved.stderr);
         fs.symlinkSync(resolved.stdout.trim(), path.join(dir, name));
@@ -92,7 +97,12 @@ for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
       if (scenario !== 'missing') {
         fs.writeFileSync(path.join(dir, 'xvfb-run'), '#!/bin/sh\n[ "$1" = -a ] || exit 99\nshift\nDISPLAY=:test exec "$@"\n', { mode: 0o755 });
       }
-      const env = { ...process.env, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock') };
+      const gdiplus = path.join(dir, 'gdiplus');
+      fs.mkdirSync(gdiplus);
+      fs.writeFileSync(path.join(gdiplus, 'gdiplus.dll'), 'mock renderer');
+      const prefix = path.join(dir, 'wine-prefix');
+      fs.mkdirSync(path.join(prefix, 'drive_c/windows/system32'), { recursive: true });
+      const env = { ...process.env, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock'), MP_WINE_GDIPLUS_DIR: gdiplus, MP_WINE_TEST_PREFIX: prefix };
       delete env.DISPLAY;
       if (scenario === 'empty') env.DISPLAY = '';
       if (scenario === 'existing') env.DISPLAY = ':existing';
@@ -148,4 +158,13 @@ print('AUDIT_TOOLCHAIN_PASS')
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('ISSUE-444 Wine rendering checks require native GDI+ instead of accepting its no-op smoothing setter', () => {
+  const script = fs.readFileSync(path.join(root, 'tools/test-windows-wine.sh'), 'utf8');
+  assert.match(script, /MP_WINE_GDIPLUS_DIR/);
+  assert.match(script, /gdiplus\.dll.*\]\]; then/);
+  assert.match(script, /export WINEDLLOVERRIDES=.*gdiplus=n/);
+  assert.match(script, /export WINEPREFIX=\$\{MP_WINE_TEST_PREFIX:/);
+  assert.match(script, /cp --remove-destination.*gdiplus\.dll/);
 });

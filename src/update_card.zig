@@ -17,7 +17,6 @@ const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const GetModuleFileNameW = @import("win32.zig").GetModuleFileNameW;
 const CloseHandle = @import("win32.zig").CloseHandle;
@@ -245,7 +244,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const pen = CreatePen(0, 1, btn_color);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
-    _ = RoundRect(hdc, btn.left, btn.top, btn.right, btn.bottom, uiScaled(6), uiScaled(6));
+    _ = @import("smooth.zig").drawRoundRect(hdc, btn.left, btn.top, btn.right, btn.bottom, uiScaled(6), uiScaled(6));
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);

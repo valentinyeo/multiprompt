@@ -118,7 +118,6 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreateRectRgn = @import("win32.zig").CreateRectRgn;
 const SetWindowRgn = @import("win32.zig").SetWindowRgn;
 const CreatePen = @import("win32.zig").CreatePen;
@@ -3105,7 +3104,7 @@ pub fn paintActivePaneBorder(hdc: HANDLE) void {
         const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
         const old_pen = SelectObject(hdc, pen);
         const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        _ = RoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
+        _ = @import("smooth.zig").drawRoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
         _ = SelectObject(hdc, old_brush);
         _ = SelectObject(hdc, old_pen);
         _ = DeleteObject(pen);
@@ -3129,7 +3128,7 @@ pub fn paintActivePaneBorder(hdc: HANDLE) void {
     const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
     const old_pen = SelectObject(hdc, pen);
     const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    _ = RoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
+    _ = @import("smooth.zig").drawRoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(pen);
@@ -3199,7 +3198,7 @@ fn paintBrowserUrlBarLayout(hdc: HANDLE, layout: BrowserLayout) void {
     const box_pen = CreatePen(0, 1, box_border);
     const old_brush = SelectObject(hdc, box_br);
     const old_pen = SelectObject(hdc, box_pen);
-    _ = RoundRect(hdc, layout.urlbar_x + pad_x, layout.urlbar_y + pad_y, layout.urlbar_x + layout.urlbar_w - pad_x, layout.urlbar_y + layout.urlbar_h - pad_y, 6, 6);
+    _ = @import("smooth.zig").drawRoundRect(hdc, layout.urlbar_x + pad_x, layout.urlbar_y + pad_y, layout.urlbar_x + layout.urlbar_w - pad_x, layout.urlbar_y + layout.urlbar_h - pad_y, 6, 6);
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(box_br);

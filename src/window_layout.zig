@@ -31,7 +31,6 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const CreateFontW = @import("fonts.zig").create;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreateRoundRectRgn = @import("win32.zig").CreateRoundRectRgn;
 const SetWindowRgn = @import("win32.zig").SetWindowRgn;
 const CreatePen = @import("win32.zig").CreatePen;
@@ -189,7 +188,7 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
     const radius = uiScaled(8);
-    _ = RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);
@@ -326,6 +325,8 @@ fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
 }
 
 pub fn paintChatView(hdc: HANDLE) void {
+    var canvas = @import("smooth.zig").Canvas.init(hdc);
+    defer canvas.deinit();
     if (!chatViewOwnsInput()) return;
     const layout = chatViewLayout();
     refreshChatBrushes();
@@ -405,5 +406,50 @@ pub fn invalidateSpinnerRects() void {
             .bottom = threadTitleTop() + threadTitleHeight(),
         };
         _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
+    }
+}
+
+test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
+    const w = @import("win32.zig");
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    app_state.g_main_monitor_dpi = 96;
+    const dc = w.CreateCompatibleDC(null);
+    try std.testing.expect(dc != null);
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 128, .height = -128 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0);
+    try std.testing.expect(bitmap != null);
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const area = RECT{ .left = 0, .top = 0, .right = 128, .bottom = 128 };
+    const background: DWORD = 0x112233;
+    const brush = w.CreateSolidBrush(background);
+    defer _ = w.DeleteObject(brush);
+    for ([_]u32{ 100, 150 }) |scale| {
+        app_state.g_ui_scale = scale;
+        const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(28) };
+        for ([_]bool{ false, true }) |enabled| {
+            _ = w.FillRect(dc, &area, brush);
+            paintChatButton(dc, rc, enabled);
+            const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
+            const fill = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
+            var blended: usize = 0;
+            var y = rc.top;
+            while (y < rc.top + uiScaled(4)) : (y += 1) {
+                var x = rc.left;
+                while (x < rc.left + uiScaled(4)) : (x += 1) {
+                    const pixel = w.GetPixel(dc, x, y);
+                    if (pixel != fill and pixel != background and pixel != 0xffffffff) blended += 1;
+                }
+            }
+            try std.testing.expect(blended > 0);
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.right, rc.top));
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.bottom));
+        }
     }
 }

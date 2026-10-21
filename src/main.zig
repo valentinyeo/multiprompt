@@ -343,7 +343,6 @@ const SetBkColor = @import("win32.zig").SetBkColor;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const CreateFontW = @import("fonts.zig").create;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const BitBlt = @import("win32.zig").BitBlt;
 const IntersectClipRect = @import("win32.zig").IntersectClipRect;
@@ -1217,6 +1216,7 @@ comptime {
         _ = @import("rename.zig");
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
+        _ = @import("smooth.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("clipboard.zig");
         _ = @import("notifications.zig");
@@ -1494,10 +1494,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const client_h = client_rc.bottom - client_rc.top;
             const mem_dc = ensurePaintBackbuffer(hdc, client_w, client_h);
             if (mem_dc == null) {
+                var canvas = @import("smooth.zig").Canvas.init(hdc);
                 paintSidebar(hdc);
                 paintChatView(hdc);
                 paintBrowserPlaceholder(hdc);
                 paintBrowserSplitter(hdc);
+                canvas.deinit();
                 _ = EndPaint(hwnd, &ps);
                 return 0;
             }
@@ -1505,11 +1507,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (saved_dc != 0) {
                 _ = IntersectClipRect(mem_dc, paint_rc.left, paint_rc.top, paint_rc.right, paint_rc.bottom);
             }
+            var canvas = @import("smooth.zig").Canvas.init(mem_dc);
             paintSidebar(mem_dc);
             paintChatView(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
             paintActivePaneBorder(mem_dc);
+            canvas.deinit();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
             _ = EndPaint(hwnd, &ps);
@@ -7574,7 +7578,7 @@ pub fn drawStartupProgress(done: u32, total: u32, name: []const u16) void {
     if (tr_br != null and tr_pen != null) {
         const ob = SelectObject(hdc, tr_br);
         const op = SelectObject(hdc, tr_pen);
-        _ = RoundRect(hdc, tx, ty, tx + tw, ty + th, th, th);
+        _ = @import("smooth.zig").drawRoundRect(hdc, tx, ty, tx + tw, ty + th, th, th);
         _ = SelectObject(hdc, ob);
         _ = SelectObject(hdc, op);
     }
@@ -7590,7 +7594,7 @@ pub fn drawStartupProgress(done: u32, total: u32, name: []const u16) void {
             if (fl_br != null and fl_pen != null) {
                 const ob2 = SelectObject(hdc, fl_br);
                 const op2 = SelectObject(hdc, fl_pen);
-                _ = RoundRect(hdc, tx, ty, tx + fw, ty + th, th, th);
+                _ = @import("smooth.zig").drawRoundRect(hdc, tx, ty, tx + fw, ty + th, th, th);
                 _ = SelectObject(hdc, ob2);
                 _ = SelectObject(hdc, op2);
             }
