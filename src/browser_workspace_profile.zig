@@ -203,3 +203,12 @@ test "IGSH-224 profile routing qualifies commands without changing Windows quoti
     defer std.testing.allocator.free(profile);
     try std.testing.expectEqualStrings("C:\\Local Space\\profile", profile);
 }
+
+test "IGSH-224 native profile discovery reads a real Windows command line with limited query access" {
+    const process = OpenProcess(0x1000, 0, GetCurrentProcessId()) orelse return error.ProcessUnavailable;
+    defer _ = CloseHandle(process);
+    const line = try processCommandLine(std.testing.allocator, process);
+    defer std.testing.allocator.free(line);
+    try std.testing.expect(line.len > 0);
+    try std.testing.expect(std.mem.indexOfScalar(u8, line, 0) == null);
+}
