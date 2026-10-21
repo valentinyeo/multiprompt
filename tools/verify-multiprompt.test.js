@@ -161,6 +161,21 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
 });
 
+test('audit verification is isolated from unchanged desktop journeys and retains fixture evidence', () => {
+  const auditJob = workflow.slice(workflow.indexOf('  chat-sync-audit:'), workflow.indexOf('  verify:'));
+  assert.match(auditJob, /if: inputs\.feature == 'chat-sync-audit'/);
+  assert.match(auditJob, /runs-on: ubuntu-latest/);
+  assert.match(auditJob, /run: zig build chat-audit/);
+  assert.match(auditJob, /set -o pipefail/);
+  assert.match(auditJob, /python3 tools\/chat-sync-audit\.test\.py -v 2>&1 \| tee evidence\/fixtures\.log/);
+  assert.match(auditJob, /git rev-parse HEAD > evidence\/revision\.txt/);
+  assert.match(auditJob, /if: always\(\)/);
+  assert.match(auditJob, /name: verify-chat-sync-audit/);
+  assert.match(workflow, /  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest/);
+  assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(chat-sync-audit.md\)/);
+  assert.match(read(skill + 'features/chat-sync-audit.md'), /not a Windows desktop journey/);
+});
+
 test('maintained verification code contains no removable code comments', async () => {
   const { strip } = await import('./strip-comments.mjs');
   for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript']]) {

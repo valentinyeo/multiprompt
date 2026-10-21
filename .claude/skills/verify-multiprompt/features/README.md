@@ -22,6 +22,10 @@ Require `result.json` status `passed`, a successful cleanup, before/action/after
 
 A passing selected journey does not cover all listed entry points or every sub-feature of Multiprompt. Record the exact entry path actually exercised. Missing shells, inaccessible windows, unmatched selections and missing saved values fail; do not replace them with mocks or skip them. Map entries below describe runnable journeys, not a historical claim that each has already passed.
 
+## Diagnostic verification
+
+- [Chat sync audit](chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
+
 ## Features
 
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.

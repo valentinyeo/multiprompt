@@ -43,6 +43,8 @@ def pane_candidates(capture):
             continue
         if re.match(r'^(?:Running \d+ shell commands?\b|Compacted while idle\b|Background command "|Monitor event:)', text):
             continue
+        if re.match(r'^Build in progress \(~?\d+(?:\.\d+)? min\); ', text):
+            continue
         if re.fullmatch(r'[A-Z][a-z]+ing \d+ [^,…]+(?:(?:, [a-z]+ing \d+ [^,…]+)+…?|…)', text):
             continue
         text = normalize(text)
@@ -69,10 +71,12 @@ def transcript_evidence(reader, path, wire, finding):
                 continue
             event = json.loads(line)
             messages = [row for row in reader.conversation_rows(event, fields[9], at) if row['role'] in ('user', 'assistant')]
+            record = 'conversation'
             if not messages:
                 fact = reader.settlement_event(event, fields[9])
                 messages = [fact] if fact else []
-            record = 'conversation'
+                if fact and fact['settlement']['content'].lstrip().startswith('<task-notification>'):
+                    record = 'task_notification'
             matches = False
             for message in messages:
                 content = message.get('settlement', {}).get('content', message['text'])
