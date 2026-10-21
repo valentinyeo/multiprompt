@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.785", .items = &.{
+        .{ .text = "Tabs that lose their connection, including after sleep or a time zone change, now show Disconnected, reconnect by themselves, and then send any queued messages.", .ticket = "IGSH-501" },
+    } },
     .{ .ver = "0.28.784", .items = &.{
         .{ .text = "Chat text is lighter so bold words stand out, and its edges look smoother.", .ticket = "IGSH-453" },
     } },
