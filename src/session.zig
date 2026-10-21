@@ -1151,15 +1151,17 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         };
     }
 
-    const kind_names = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
-    debugLog2("restoreSession: kind=", kind_names[@intFromEnum(tabs[t].kind)]);
-    if (tab_cwd) |cwd| {
-        debugLog2("restoreSession: cwd=", cwd);
-    } else {
-        debugLog("restoreSession: cwd=<none>");
-    }
-    if (startup_cmd) |cmd| {
-        debugLog2("restoreSession: startup_cmd=", cmd);
+    if (!@import("launch_cache.zig").pending) {
+        const kind_names = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
+        debugLog2("restoreSession: kind=", kind_names[@intFromEnum(tabs[t].kind)]);
+        if (tab_cwd) |cwd| {
+            debugLog2("restoreSession: cwd=", cwd);
+        } else {
+            debugLog("restoreSession: cwd=<none>");
+        }
+        if (startup_cmd) |cmd| {
+            debugLog2("restoreSession: startup_cmd=", cmd);
+        }
     }
 
     var reclaimed = false;
@@ -1374,7 +1376,7 @@ pub fn restoreSession() u32 {
     app_state.g_restored_valid_session = false;
     app_state.g_restoring = true;
     defer {
-        logSessionAudit("restoreSession:after-spawn-before-save");
+        if (!@import("launch_cache.zig").pending) logSessionAudit("restoreSession:after-spawn-before-save");
         ensureOtherWorkspaceSlot();
         app_state.g_restoring = false;
         saveSession();
@@ -1409,11 +1411,13 @@ pub fn restoreSession() u32 {
     const active = json_reader.uintDefault(json, "active_tab", std.math.maxInt(u32));
     if (active < tab_count) restored_active_tab = @intCast(active);
     if (json_reader.boolTrue(json, "sound_enabled")) app_state.g_sound_enabled = true;
-    loadGlobalTheme();
-    loadBrowserEngineConfig();
-    loadEdgeProfileConfig();
-    loadEdgeExeConfig();
-    loadChromeExeConfig();
+    if (!prepared) {
+        loadGlobalTheme();
+        loadBrowserEngineConfig();
+        loadEdgeProfileConfig();
+        loadEdgeExeConfig();
+        loadChromeExeConfig();
+    }
     if (IS_DEV) {
         ensureDevThemeInitialized();
         app_state.g_dev_font_idx = app_state.DEFAULT_CONSOLE_FONT_IDX;
@@ -1513,7 +1517,7 @@ pub fn restoreSession() u32 {
             if (app_state.g_single_window and winner != at) app_state.g_active_workspace = tabs[winner].workspace;
         }
     }
-    logSavedTabsAudit("restoreSession:parsed-session-file", tabs[0..tab_count]);
+    if (!prepared) logSavedTabsAudit("restoreSession:parsed-session-file", tabs[0..tab_count]);
 
     app_state.group_count = 0;
     app_state.next_group_id = 1;

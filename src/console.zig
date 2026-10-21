@@ -1195,10 +1195,15 @@ pub fn sshSpawnFailed() void {
 }
 
 pub fn appendSshExe(buf: anytype, pos: *usize) bool {
-    if (!resolveSshPath(false)) return false;
-    while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    if (@import("launch_cache.zig").pending) {
+        if (!app_state.g_ssh_mutex.tryLock()) return false;
+    } else {
+        if (!resolveSshPath(false)) return false;
+        while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    }
     defer app_state.g_ssh_mutex.unlock();
     const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
+    if (path.len == 0) return false;
     if (@TypeOf(buf[0]) == u16) {
         var wide: [520]u16 = undefined;
         const wpath = win32WidePath(&wide, path) orelse return false;
@@ -1747,6 +1752,9 @@ pub fn notifyTabCapReached() void {
 }
 
 pub const WM_STARTUP_SHELL_READY = 0x8000 + 543;
+pub const TIMER_STARTUP_SHELL = 0x544;
+var startup_completed: ?*StartupShell = null;
+var startup_completed_tail: ?*StartupShell = null;
 
 pub const StartupShell = struct {
     shell_id: u32,
@@ -1760,6 +1768,7 @@ pub const StartupShell = struct {
     process: HANDLE = null,
     pid: DWORD = 0,
     hwnd: HANDLE = null,
+    next: ?*StartupShell = null,
 };
 
 fn startupShellWorker(job: *StartupShell) void {
@@ -1811,6 +1820,25 @@ fn discardStartupShell(job: *StartupShell) void {
         _ = CloseHandle(job.process);
     }
     std.heap.page_allocator.destroy(job);
+}
+
+pub fn queueStartupShell(job: *StartupShell) void {
+    if (startup_completed_tail) |tail| tail.next = job else startup_completed = job;
+    startup_completed_tail = job;
+    _ = @import("win32.zig").SetTimer(job.owner, TIMER_STARTUP_SHELL, 10, null);
+}
+
+pub fn startupShellTick(hwnd: HANDLE) void {
+    const job = startup_completed orelse {
+        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
+        return;
+    };
+    startup_completed = job.next;
+    if (startup_completed == null) {
+        startup_completed_tail = null;
+        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
+    }
+    finishStartupShell(job);
 }
 
 pub fn finishStartupShell(job: *StartupShell) void {
@@ -1867,7 +1895,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     var cmd_buf: [2048]u16 = undefined;
     const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, title_id) orelse return false;
 
-    {
+    if (!@import("launch_cache.zig").pending) {
         var cmd_u8: [2048]u8 = undefined;
         var ci: usize = 0;
         while (ci < cmd_buf.len - 1 and cmd_buf[ci] != 0) : (ci += 1) {

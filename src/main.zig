@@ -1326,7 +1326,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (!app_state.g_account_locked and @import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (msg == @import("console.zig").WM_STARTUP_SHELL_READY) {
-        @import("console.zig").finishStartupShell(@ptrFromInt(@as(usize, @bitCast(lp))));
+        @import("console.zig").queueStartupShell(@ptrFromInt(@as(usize, @bitCast(lp))));
+        return 0;
+    }
+    if (msg == WM_TIMER and wp == @import("console.zig").TIMER_STARTUP_SHELL) {
+        @import("console.zig").startupShellTick(hwnd);
         return 0;
     }
     if (msg == launch_cache.WM_DEFERRED) {
@@ -3630,7 +3634,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_wheel_remainder = 0;
             app_state.g_tmux_fetch_tick = 0;
             fetchTmuxSessions();
-            reconcileWorkspaceRegistry(false);
+            _ = reconcileWorkspaceRegistry(false);
             refreshNextUnreadCache();
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
@@ -4655,7 +4659,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_WORKSPACES_MENU_OFFSET) {
-                    reconcileWorkspaceRegistry(true);
+                    _ = reconcileWorkspaceRegistry(true);
                     app_state.g_search_workspace_mode = true;
                     app_state.g_search_workspace_delete_mode = false;
                     app_state.g_search_workspace_delete_confirm = null;
@@ -4668,7 +4672,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_WORKSPACE_DELETE_MENU_OFFSET) {
-                    reconcileWorkspaceRegistry(true);
+                    _ = reconcileWorkspaceRegistry(true);
                     app_state.g_search_workspace_mode = true;
                     app_state.g_search_workspace_delete_mode = true;
                     app_state.g_search_workspace_delete_confirm = null;
@@ -7885,7 +7889,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .workspace_registry => {
             migrateWorkspacesFromSessionFiles();
-            reconcileWorkspaceRegistry(true);
+            if (!reconcileWorkspaceRegistry(true)) return false;
         },
         .browser_config => {
             loadBrowserEngineConfig();
@@ -8091,7 +8095,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             _ = EnumWindows(&enumCloseStrayZspane, 0);
         },
         .publish => {
-            syncInProcessWorkspacesToRegistry();
+            if (!reconcileWorkspaceRegistry(false)) return false;
             publishInboxState();
         },
         .updates => {
@@ -8114,10 +8118,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             fetchTmuxSessions();
         },
         .theme => {
-            if (LOOK_UNIFIED) {
-                applyConsoleThemeToAllShells();
-                repositionActive();
-            }
+            if (LOOK_UNIFIED) repositionActive();
         },
         .focus => {
             if (app_state.shell_count > 0) {

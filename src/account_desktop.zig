@@ -799,7 +799,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
 }
-fn layoutSyncWorker(job: AccountJob) void {
+fn layoutSyncWorker(submitted: AccountJob) void {
+    const job = if (submitted.kind == .startup and submitted.base == null and submitted.edited == null) accountResumeJob(.startup) else submitted;
     const a = std.heap.page_allocator;
     const reply = a.create(LayoutReply) catch {
         accountJobFree(job);
@@ -1367,7 +1368,7 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     if (app_state.g_account_bypass) return true;
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
-    startAccountJob(accountResumeJob(.startup));
+    startAccountJob(.{ .kind = .startup });
     _ = SetTimer(hwnd, TIMER_ACCOUNT, 20000, null);
     return true;
 }

@@ -469,7 +469,7 @@ fn lockWorkspaceRegistry() HANDLE {
     var wide: [96]u16 = std.mem.zeroes([96]u16);
     for (name, 0..) |c, i| wide[i] = c;
     const mutex = CreateMutexW(null, 0, @ptrCast(&wide)) orelse return null;
-    const result = WaitForSingleObject(mutex, 5000);
+    const result = WaitForSingleObject(mutex, if (app_state.g_main_hwnd != null and @import("launch_cache.zig").pending) 0 else 5000);
     if (result != 0 and result != 0x80) {
         _ = CloseHandle(mutex);
         return null;
@@ -989,8 +989,8 @@ pub fn removeMyHostedEntriesAndSave() void {
     if (removed) writeWorkspaceRegistryFile();
 }
 
-pub fn reconcileWorkspaceRegistry(force_scan: bool) void {
-    const registry_lock = lockWorkspaceRegistry() orelse return;
+pub fn reconcileWorkspaceRegistry(force_scan: bool) bool {
+    const registry_lock = lockWorkspaceRegistry() orelse return false;
     defer unlockWorkspaceRegistry(registry_lock);
     mergeWorkspaceRegistryFromDisk();
     scanLiveWorkspaceWindows(force_scan);
@@ -1033,6 +1033,7 @@ pub fn reconcileWorkspaceRegistry(force_scan: bool) void {
     syncCurrentWorkspaceToRegistry();
     upsertMySlotEntries();
     writeWorkspaceRegistryFile();
+    return true;
 }
 
 fn inferWorkspaceNameFromSessionFile(id: []const u8, out: *[64]u8) u32 {
@@ -4138,5 +4139,5 @@ fn collapseOtherWindowsIntoThis() void {
         Sleep(150);
         if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("collapse: absorb failed for ", id);
     }
-    reconcileWorkspaceRegistry(true);
+    _ = reconcileWorkspaceRegistry(true);
 }

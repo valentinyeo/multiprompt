@@ -45,6 +45,13 @@ function responsiveOrdering(main, consoleSource, session) {
   assert.match(prepare, /readSessionBytes/);
   assert.match(prepare, /json_reader\.parse/);
   assert.match(prepare, /startup_ready\.store\(true, \.release\)/);
+  const postedShell = dispatch.slice(dispatch.indexOf('if (msg == @import("console.zig").WM_STARTUP_SHELL_READY)'), dispatch.indexOf('if (msg == WM_TIMER and wp == @import("console.zig").TIMER_STARTUP_SHELL)'));
+  assert.match(postedShell, /queueStartupShell/);
+  assert.doesNotMatch(postedShell, /finishStartupShell/);
+  const tick = body(consoleSource, 'startupShellTick');
+  assert.match(tick, /startup_completed = job\.next/);
+  assert.doesNotMatch(tick, /while|for \(/);
+  assert.match(tick, /finishStartupShell\(job\)/);
 }
 
 function taskbarOrdering(browser) {
@@ -85,8 +92,9 @@ test('ISSUE-543 account validation stays optimistic and cannot reconcile over ca
   const account = read('src/account_desktop.zig');
   const bootstrap = body(account, 'accountBootstrap');
   assert.match(bootstrap, /g_account_locked = false/);
-  assert.match(bootstrap, /startAccountJob/);
-  assert.doesNotMatch(bootstrap, /readDpapiFile|WaitFor|Sleep\(/);
+  assert.match(bootstrap, /startAccountJob\(\.\{ \.kind = \.startup \}\)/);
+  assert.doesNotMatch(bootstrap, /readDpapiFile|accountResumeJob|WaitFor|Sleep\(/);
+  assert.match(body(account, 'layoutSyncWorker'), /accountResumeJob\(\.startup\)/);
   const reply = body(account, 'handleLayoutReply');
   assert.match(reply, /!reply\.unauthorized and !reply\.signed_out and reply\.job\.kind == \.startup/);
   assert.ok(reply.indexOf('startup_reply = lp') < reply.indexOf('applyServerLayout'));
@@ -101,6 +109,15 @@ test('ISSUE-543 late console completions bind by stable identity and discard clo
   assert.match(complete, /idx == app_state\.active_shell/);
   const session = body(read('src/session.zig'), 'restoreSession');
   assert.match(session, /shell\.chat_id == selected_chat/);
+});
+
+test('ISSUE-543 startup retries contested registry ownership without waiting on the UI thread', () => {
+  const registry = read('src/workspaces.zig');
+  assert.match(body(registry, 'lockWorkspaceRegistry'), /WaitForSingleObject\(mutex, if \(app_state\.g_main_hwnd != null and @import\("launch_cache.zig"\)\.pending\) 0 else 5000\)/);
+  assert.match(body(registry, 'reconcileWorkspaceRegistry'), /lockWorkspaceRegistry\(\) orelse return false/);
+  const initialize = body(read('src/main.zig'), 'initializeDeferred');
+  assert.match(initialize, /if \(!reconcileWorkspaceRegistry\(true\)\) return false/);
+  assert.match(initialize, /if \(!reconcileWorkspaceRegistry\(false\)\) return false/);
 });
 
 if (process.env.STARTUP_BEFORE_REF) {
