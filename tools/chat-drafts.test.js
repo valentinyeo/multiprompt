@@ -129,7 +129,8 @@ test "ISSUE-498 late result is bound to its start session" {
 
 test('ISSUE-498 DRAFT marker is shown for a draft and removed by send or clear', () => {
   const sidebar = fs.readFileSync('src/sidebar.zig', 'utf8');
-  assert.ok(/chatDraftHasForShell\(i\)/.test(sidebar), "DRAFT predicate missing");
+  const sidebarLookup = sidebar.match(/chatDraftHasForShell\((?:@intCast\()?i\)?\)/);
+  assert.ok(sidebarLookup, "DRAFT predicate missing");
   assert.match(sidebar, /DrawTextW\(hdc, L\("DRAFT"\)/);
   const send = body('sendChatPrompt');
   assert.match(send, /SetWindowTextW\(g_chat_composer_hwnd, L\(""\)\)[^]*chatDraftFlush\(\)/);
@@ -138,14 +139,15 @@ test('ISSUE-498 DRAFT marker is shown for a draft and removed by send or clear',
   const sent = send.slice(clearStart, clearEnd).replace('L("")', 'std.unicode.utf8ToUtf16LeStringLiteral("")');
 
   execute(production() + `
+fn sidebarHasDraft(i: usize) bool { return ${sidebarLookup[0]}; }
 test "ISSUE-498 draft presence follows edit and clear" {
-    chatDraftBindToActive(); try std.testing.expect(!chatDraftHasForShell(0));
-    edit(std.unicode.utf8ToUtf16LeStringLiteral("unsent")); try std.testing.expect(chatDraftHasForShell(0));
-    try std.testing.expect(!chatDraftHasForShell(1));
+    chatDraftBindToActive(); try std.testing.expect(!sidebarHasDraft(0));
+    edit(std.unicode.utf8ToUtf16LeStringLiteral("unsent")); try std.testing.expect(sidebarHasDraft(0));
+    try std.testing.expect(!sidebarHasDraft(1));
     ${sent}
-    try std.testing.expect(!chatDraftHasForShell(0));
-    edit(std.unicode.utf8ToUtf16LeStringLiteral("again")); try std.testing.expect(chatDraftHasForShell(0));
-    edit(std.unicode.utf8ToUtf16LeStringLiteral("")); chatDraftFlush(); try std.testing.expect(!chatDraftHasForShell(0));
+    try std.testing.expect(!sidebarHasDraft(0));
+    edit(std.unicode.utf8ToUtf16LeStringLiteral("again")); try std.testing.expect(sidebarHasDraft(0));
+    edit(std.unicode.utf8ToUtf16LeStringLiteral("")); chatDraftFlush(); try std.testing.expect(!sidebarHasDraft(0));
 }
 `);
 });

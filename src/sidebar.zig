@@ -1770,7 +1770,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const sw = SIDEBAR_W();
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
-                if (chatDraftHasForShell(i)) kind_rc.bottom -= uiScaled(14);
+                if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
                 if (app_state.shells[i].disconnected) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
                 } else if (app_state.shells[i].needs_attention) {
@@ -1782,7 +1782,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     _ = SetTextColor(hdc, if (isRemoteShellKind(app_state.shells[i].kind)) RGB(230, 140, 40) else RGB(150, 150, 150));
                     _ = DrawTextW(hdc, L("\u{2022}"), -1, &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
                 }
-                if (chatDraftHasForShell(i)) {
+                if (chatDraftHasForShell(@intCast(i))) {
                     _ = SelectObject(hdc, font_subtitle);
                     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160)));
                     var draft_rc = RECT{ .left = 0, .top = y + tabRowH() - uiScaled(14), .right = sw, .bottom = y + tabRowH() };
@@ -1833,7 +1833,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         text_right -= eta_num_w + 6;
                     }
                 }
-                if (chatDraftHasForShell(i)) {
+                if (chatDraftHasForShell(@intCast(i))) {
                     _ = SelectObject(hdc, font_subtitle);
                     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160)));
                     var draft_rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
@@ -1939,7 +1939,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     text_left += 18;
                 }
                 var text_right = SIDEBAR_W() - 32 - (if (app_state.shells[i].favorite) FAVORITE_DOT_D + 4 else 0);
-                if (chatDraftHasForShell(i)) {
+                if (chatDraftHasForShell(@intCast(i))) {
                     _ = SelectObject(hdc, font_subtitle);
                     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160)));
                     var draft_rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
