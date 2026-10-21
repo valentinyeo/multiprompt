@@ -3,10 +3,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { defaults, hash, evaluate } from './lib.mjs';
 
+export const isDefaultConfig = config => isDeepStrictEqual(config, defaults);
+
 export function checkReceipt(run, expectedSha256) {
   const reasons = [];
   if (run?.status !== 'PASS' || run?.pass !== true || !Array.isArray(run?.failures) || run.failures.length !== 0) reasons.push('stored verdict is not a clean PASS');
-  if (!isDeepStrictEqual(run?.config, defaults)) reasons.push('config does not match defaults');
+  if (run?.installable === false) reasons.push('smoke run is NOT INSTALLABLE; install-laptop1.sh only accepts default-config receipts');
+  if (!isDefaultConfig(run?.config)) reasons.push('config does not match defaults');
   try {
     const verdict = evaluate(run, run.config);
     if (verdict.pass !== true || !isDeepStrictEqual(verdict.failures, run.failures)) reasons.push('recomputed verdict is not a matching PASS');

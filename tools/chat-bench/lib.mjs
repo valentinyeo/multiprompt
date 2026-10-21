@@ -8,6 +8,30 @@ export const atomic = (file, data) => { fs.writeFileSync(`${file}.tmp`, data); f
 export const winPath = file => `Z:${path.resolve(file).replaceAll('/', '\\')}`;
 export const percentile = (values, p) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
 
+export function parseArgs(argv, override = {}) {
+  const options = { smoke: false };
+  for (let i = 0; i < argv.length; i++) {
+    const key = argv[i];
+    if (key === '--smoke') { options.smoke = true; continue; }
+    if (!['--exe', '--minutes', '--out', '--config'].includes(key) || !argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error('Usage: node tools/chat-bench/run.mjs --exe <path> [--smoke] [--minutes N] [--out dir] [--config file]');
+    options[key.slice(2)] = argv[++i];
+  }
+  if (!options.smoke && (options.minutes || options.config)) throw new Error('--minutes and --config require --smoke; install-laptop1.sh only accepts default-config receipts');
+  const config = { ...defaults, ...override, rules: { ...defaults.rules, ...override.rules }, capacity: { ...defaults.capacity, ...override.capacity } };
+  if (options.minutes) config.minutes = Number(options.minutes);
+  for (const key of ['minutes', 'tabs', 'windows', 'width', 'height', 'warmupSeconds', 'switchSeconds', 'idleSettleSeconds', 'idleSeconds', 'appendSeconds', 'sampleMs', 'hangSeconds', 'startupSeconds']) {
+    if (!Number.isFinite(config[key]) || config[key] <= 0) throw new Error(`Invalid config ${key}`);
+  }
+  for (const [key, value] of Object.entries(config.rules)) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid rule ${key}`);
+  }
+  for (const [key, value] of Object.entries(config.capacity)) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid capacity ${key}`);
+  }
+  if (![config.tabs, config.windows, config.width, config.height].every(Number.isInteger) || config.windows > config.tabs) throw new Error('Invalid fixture dimensions');
+  return { options, config, installable: !options.smoke };
+}
+
 export function capacity(loadavgText, meminfoText, cores, config) {
   const load = Number(loadavgText.trim().split(/\s+/)[0]);
   const memAvailableMiB = Number(meminfoText.match(/^MemAvailable:\s+(\d+)\s+kB$/m)?.[1]) / 1024;
