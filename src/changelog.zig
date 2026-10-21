@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.778", .items = &.{
+        .{ .text = "Approve a new device with one tap to let it reach your servers, and remove its access when you revoke it.", .ticket = "IGSH-448" },
+    } },
     .{ .ver = "0.28.777", .items = &.{
         .{ .text = "The inbox icon, Send button, rounded panels and small symbols now have smoother edges at every display scale.", .ticket = "IGSH-444" },
     } },
