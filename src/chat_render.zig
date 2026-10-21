@@ -1741,7 +1741,7 @@ pub fn chatAttachPick() void {
     var ofn = std.mem.zeroes(OPENFILENAMEW);
     ofn.lStructSize = @sizeOf(OPENFILENAMEW);
     ofn.hwndOwner = app_state.g_main_hwnd;
-    ofn.lpstrFilter = L("Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00All files\x00*.*\x00");
+    ofn.lpstrFilter = L("All files\x00*.*\x00Images\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\x00");
     ofn.nFilterIndex = 1;
     ofn.lpstrFile = &file_buf;
     ofn.nMaxFile = file_buf.len;

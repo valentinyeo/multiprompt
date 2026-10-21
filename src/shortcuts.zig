@@ -327,7 +327,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
     .{ .a = "Alt+C", .b = "Toggle formatted Chat View for this tab; screen copy remains the fallback", .header = false },
-    .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach images: pick, drop, or paste copied image files; links go in at the caret (Ctrl+K Chat View: Attach Image)", .header = false },
+    .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message above your reply; click × or press Esc with an empty composer to cancel", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the model and context header; also click the header", .header = false },

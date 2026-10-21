@@ -86,14 +86,20 @@ test('non-images use server uploads, the cap is visible, and existing help/searc
   assert.match(attach, /chatSendStartFiles\(selected.files\[0\.\.selected.file_count\]\)/);
   assert.match(attach, /if \(selected.refused_too_many > 0 and sending\)/);
   assert.match(attach, /up to 10 images and sent up to 10 files/);
-  assert.match(read('src/shortcuts.zig'), /pick, drop, or paste copied image files/);
-  assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /copy image files in Explorer and paste with Ctrl\+V/);
+  assert.match(read('src/shortcuts.zig'), /Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret/);
+  assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /copy files in Explorer and paste with Ctrl\+V/);
   assert.match(read('src/command_palette.zig'), /SEARCH_CHAT_ATTACH_OFFSET => "[^"\n]*drop drag"/);
   assert.match(read('src/command_palette.zig'), /"ctrl v", "drop", "drag"/);
   assert.match(read('build.zig'), /"src\/chat_image_insert.zig", "src\/chat_drop.zig"/);
   for (const name of ['DragAcceptFiles', 'DragQueryFileW', 'DragFinish']) assert.match(read('src/win32.zig'), new RegExp(`extern "shell32" fn ${name}\\(`));
   assert.match(read('src/win32.zig'), /extern "user32" fn ChangeWindowMessageFilterEx\(/);
   for (const name of ['exe', 'dev_exe']) assert.ok(read('build.zig').includes(`${name}.root_module.linkSystemLibrary("shell32", .{});`));
+});
+
+test('attachment picker defaults to all files and retains the image filter', () => {
+  const picker = body(render, 'chatAttachPick');
+  assert.ok(picker.includes('ofn.lpstrFilter = L("All files\\x00*.*\\x00Images\\x00*.png;*.jpg;*.jpeg;*.gif;*.webp\\x00");'));
+  assert.match(picker, /ofn\.nFilterIndex = 1;/);
 });
 
 test('executed production worker preserves order across errors and deletes only temporary files; queried paths are owned copies', () => {
