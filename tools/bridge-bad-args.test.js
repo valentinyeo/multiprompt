@@ -232,3 +232,27 @@ test('profile-clone is standalone and publishes exact JSON with durable bytes on
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test('IGSH-228: type rejects trailing flags without typing anything', () => {
+  for (const args of [
+    ['type', '#composer', 'hello', '--unknown'],
+    ['type', 'hello', '--unknown'],
+    ['type', '--keys', '#composer', 'hello', '--unknown'],
+    ['type', '#composer', 'hello', '--tab'],
+    ['type', 'hello', '--tab'],
+    ['type', '#composer', 'hello', '--tab', '1', '--tab', '2'],
+    ['type', '--tab', '1', '#composer', 'hello', '--tab', '2'],
+    ['type', '#composer', 'hello', '--tab', '--unknown'],
+    ['type', '--tab', '--unknown', '#composer', 'hello'],
+    ['type', '#composer', 'hello', '--tab', '1', '--unknown'],
+  ]) {
+    const result = run(args);
+    assert.equal(result.status, 2, JSON.stringify(args) + ': ' + result.stdout + result.stderr);
+    assert.match(result.stdout, /^[^\r\n]+\r?\n$/);
+    const reply = JSON.parse(result.stdout);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error, 'bad_args');
+    assert.equal(reply.typed, undefined);
+    assert.equal(reply.result, undefined);
+  }
+});
