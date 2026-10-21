@@ -6,8 +6,6 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { stampTree, fixHint } from './version-stamp.mjs';
-import { defaults, hash } from './chat-bench/lib.mjs';
-import { goodRun } from './chat-bench/good-run.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
@@ -145,7 +143,7 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
 
 test('build, CI, installer and documentation use the stamp contract', () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
-  assert.match(build, /const version_stamp_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/version-stamp\.test\.mjs" \}\);/);
+  assert.match(build, /const version_stamp_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/version-stamp\.test\.mjs", "tools\/release-version\.test\.mjs" \}\);/);
   for (const step of ['test_step', 'vps_test_step']) assert.ok(build.includes(`${step}.dependOn(&version_stamp_tests.step);`));
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   for (const job of workflow.split(/\n  test(?:-vps)?:\n/).slice(1)) {
@@ -159,9 +157,13 @@ test('build, CI, installer and documentation use the stamp contract', () => {
   assert.equal((workflow.match(/- name: Install Zig 0\.16\.0\n        if: steps\.rule\.outputs\.kind != 'STAMP'/g) || []).length, 2);
   assert.doesNotMatch(workflow, /Compile stamp/);
   const install = fs.readFileSync(path.join(root, 'tools/install-laptop1.sh'), 'utf8');
-  assert.ok(install.indexOf('Measure-Object).Count') < install.indexOf('Rename-Item'));
-  assert.ok(install.includes("? Name -ne 'README.md'"));
-  assert.ok(install.includes('source has unstamped changelog.d fragments; run node tools/version-stamp.mjs release and build from the stamped origin/master'));
+  assert.doesNotMatch(install, /Measure-Object|unstamped changelog/);
+  assert.ok(install.includes('gh release download'));
+  assert.ok(install.includes('releases/tags/$release'));
+  assert.ok(install.indexOf('receipt.mjs') < install.indexOf('Rename-Item'));
+  const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
+  assert.match(release, /branches: \[master\]/);
+  assert.match(release, /node tools\/release-version\.mjs/);
   assert.ok(fs.readFileSync(path.join(root, 'tools/gates/no-version-bump.mjs'), 'utf8').includes(fixHint));
   const readme = fs.readFileSync(path.join(root, 'changelog.d/README.md'), 'utf8');
   assert.ok(readme.trim().split('\n').length <= 6);
@@ -200,30 +202,17 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   assert.equal(r.git('ls-tree', '-r', '--name-only', 'origin/master', '--', 'changelog.d'), 'changelog.d/README.md');
 });
 
-test('installer blocks pending fragments before writes and skips the guard for extension-only', { skip: process.platform === 'win32' }, t => {
+test('installer rejects obsolete PC source directory usage without consulting gh or lh', { skip: process.platform === 'win32' }, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'version-install-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(dir, 'lh'), `#!${process.execPath}\nimport fs from 'node:fs';\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.LH_LOG, JSON.stringify(args) + '\\n');\nif (args[1].includes('Measure-Object).Count')) console.log(process.env.FRAGMENT_COUNT);\nelse process.exit(37);\n`, { mode: 0o755 });
-  const log = path.join(dir, 'log');
-  const exe = path.join(dir, 'benched.exe');
-  const pe = Buffer.alloc(256);
-  pe.write('MZ'); pe.writeUInt32LE(0x80, 0x3c); pe.write('PE\0\0', 0x80); pe.writeUInt16LE(0x8664, 0x84);
-  fs.writeFileSync(exe, pe);
-  const bench = path.join(dir, 'results.json');
-  const hashes = Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py' }).map(([key, file]) => [key, hash(path.join(root, 'tools/chat-bench', file))]));
-  fs.writeFileSync(bench, JSON.stringify({ ...goodRun(), status: 'PASS', pass: true, failures: [], config: defaults, exe, binary: { version: '0.28.735', exeSha256: hash(exe) }, runnerHashes: hashes }));
-  const run = (count, args = ['--bench', bench]) => {
-    fs.writeFileSync(log, '');
-    return spawnSync('bash', [path.join(root, 'tools/install-laptop1.sh'), ...args], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LH_LOG: log, FRAGMENT_COUNT: count } });
-  };
-  const blocked = run('2');
-  assert.equal(blocked.status, 1);
-  assert.match(blocked.stderr, /source has unstamped changelog\.d fragments/);
-  assert.equal(fs.readFileSync(log, 'utf8').trim().split('\n').length, 1);
-  assert.equal(run('0').status, 37);
-  assert.match(fs.readFileSync(log, 'utf8'), /bench-upload/);
-  assert.equal(run('2', ['--extension-only']).status, 37);
-  assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /Measure-Object|Rename-Item/);
+  const log = path.join(dir, 'calls');
+  for (const name of ['gh', 'lh']) fs.writeFileSync(path.join(dir, name), `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.INSTALL_LOG, 'unexpected call'); process.exit(37);\n`, { mode: 0o755 });
+  const result = spawnSync('bash', [path.join(root, 'tools/install-laptop1.sh'), '--extension-only', '--release', 'v0.28.735', 'C:\\source'], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, INSTALL_LOG: log },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unknown argument/);
+  assert.equal(fs.existsSync(log), false);
 });
 
 test('existing no-version-bump gate retains its behavior and supplies the fix', t => {
