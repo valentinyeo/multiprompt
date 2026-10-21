@@ -14,6 +14,7 @@ Create a workspace in the same desktop window and switch away and back while ret
 - Alt+1 selects Starred; Alt+2 through Alt+9 select the first eight stored workspaces.
 - Alt+Left / Alt+Right cycle workspaces; Alt+J / Alt+K also cycle outside an Inbox context.
 - Workspace pills are mouse entry points. Ctrl+K `Open Workspace` opens stored workspaces; `Sort Workspaces` orders pills. These are alternative paths, not exercised here.
+- Agents use `zsb workspace-list` to discover workspace, group and host names, then `zsb session-open --workspace <name> --group <name> --host <reported host> --tmux <session> --name <title>` to open a background tmux tab without switching the active workspace or tab. See [Session open](session-open.md) for that separate CLI journey and its SSH boundary.
 
 ## Driving it with control.ps1
 

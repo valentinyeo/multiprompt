@@ -683,6 +683,7 @@ pub const HitTarget = union(enum) {
 };
 
 pub const ClosedShell = struct {
+    chat_id: u64 = 0,
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
@@ -958,6 +959,8 @@ pub var g_browser_adopt_fg_locked: bool = false;
 pub var g_browser_pending_activate_sid: u32 = 0;
 pub var g_browser_settle_ticks: i32 = 0;
 pub var g_console_geometry_settle_ticks: i32 = 0;
+pub var g_last_browser_tab_url: [512]u8 = @splat(0);
+pub var g_last_browser_tab_url_len: usize = 0;
 pub var g_browser_url_poll_pending: bool = false;
 pub var g_browser_url_poll_shell_id: u32 = 0;
 pub var g_browser_url_poll_window_id: i64 = 0;
@@ -971,6 +974,7 @@ pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bott
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
+pub var g_pane_ring_state: u8 = 0;
 pub var g_browser_edge_mask_rects: [BROWSER_EDGE_MASK_COUNT]RECT = [_]RECT{std.mem.zeroes(RECT)} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_shown: [BROWSER_EDGE_MASK_COUNT]bool = [_]bool{false} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_nextunread_count: u32 = 0;
@@ -1307,6 +1311,7 @@ pub const SEARCH_CHAT_SELECT_ALL_OFFSET: usize = 6364;
 pub const SEARCH_CHAT_AC_OFFSET: usize = 6356;
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
+pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
 pub const SEARCH_CHAT_QUEUE_CLEAR_OFFSET: usize = 6366;
 pub const SEARCH_CHAT_RETRY_UNSENT_OFFSET: usize = 6367;
 pub const SEARCH_CHAT_DISCARD_UNSENT_OFFSET: usize = 6368;
@@ -1367,6 +1372,7 @@ pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;
 pub const SEARCH_TABCTX_CHAT_ALLOW: usize = 7180;
 pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
+pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -1387,6 +1393,8 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_chat_id: u64 = 0;
+pub var g_pending_background_workspace: ?u8 = null;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -1566,6 +1574,8 @@ pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
 pub var g_dictation_transcript_len: usize = 0;
+pub var g_dictation_draft_owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+pub var g_dictation_draft_owner_len: usize = 0;
 pub var g_dictation_error: [160]u16 = std.mem.zeroes([160]u16);
 pub var g_dictation_error_len: usize = 0;
 pub var g_pending_tmux_cmd: [1024]u8 = std.mem.zeroes([1024]u8);
@@ -2636,7 +2646,7 @@ pub var g_chat_echo_layout_ids: [CHAT_OUTBOX_MAX_PER_KEY]u64 = @splat(0);
 pub var g_chat_echo_layout_count: usize = 0;
 pub var g_chat_scroll_bottom_pending: bool = false;
 pub var g_chat_outbox_timer_on: bool = false;
-pub var g_ssh_reconnect_timer_on: bool = false;
+pub var g_ssh_reconnect_timer_ms: u32 = 0;
 
 pub var g_chat_outbox_revision: u64 = 0;
 
@@ -3049,6 +3059,7 @@ pub var g_favorite_chord_held: bool = false;
 pub var g_browser_focus_chord_held: bool = false;
 pub var g_palette_chord_held: bool = false;
 pub var g_screenshot_chord_held: bool = false;
+pub var g_tab_url_chord_held: bool = false;
 pub var g_dictation_toggle_chord_held: bool = false;
 pub var g_browser_toggle_last_handled_event_time: u32 = 0;
 pub const BROWSER_TOGGLE_DEBOUNCE_MS: u32 = 1500;
@@ -3169,6 +3180,15 @@ pub const ZsbWorkerCtx = struct {
     req: [ZSB_WIRE_CAP]u8,
     req_len: usize,
 };
+
+pub var g_zsb_workspace_mutex: SpinMutex = .{};
+pub var g_zsb_workspace_pending = false;
+pub var g_zsb_workspace_done = false;
+pub var g_zsb_workspace_args: [11][256]u8 = undefined;
+pub var g_zsb_workspace_arg_lens: [11]usize = undefined;
+pub var g_zsb_workspace_argc: usize = 0;
+pub var g_zsb_workspace_response: [256 * 1024]u8 = undefined;
+pub var g_zsb_workspace_response_len: usize = 0;
 
 pub var g_zsb_who_mutex: SpinMutex = .{};
 pub var g_zsb_who_pending = false;

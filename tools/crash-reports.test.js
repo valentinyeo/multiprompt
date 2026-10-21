@@ -184,8 +184,6 @@ test('existing CI runs this test through the Linux test-vps build step', () => {
   const workflow = readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(build, /const crash_reports_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/crash-reports\.test\.js" \}\);/);
   assert.match(build, /vps_test_step\.dependOn\(&crash_reports_tests\.step\);/);
-  const vps = workflow.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
-  assert.match(vps, /targets: [^\n]*\btest-vps-group-3\b/);
-  assert.match(vps, /zig build \$\{\{ matrix.targets \}\} --summary all/);
+  assert.match(workflow, /zig build test-vps --summary all/);
   assert.match(workflow, /python-version: '3\.12'/);
 });

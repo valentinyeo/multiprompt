@@ -17,6 +17,7 @@ on:
     paths:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
+      - tools/verify-multiprompt.test.js
 
 permissions:
   contents: read
@@ -36,11 +37,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Check verification contracts
+        run: node --test tools/verify-multiprompt.test.js
       - name: Validate journey and syntax
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open')) { throw 'Unknown feature map' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null

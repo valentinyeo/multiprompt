@@ -23,3 +23,15 @@ Output contains one JSON summary and a human result line. Every step has `pass:t
 Durable identity is tmux session plus host, never a display name. Runtime duplicate resolution prefers the active tab, then a visible pane, then the greatest last-viewed timestamp. Restore keeps only the most recently viewed complete record and its name for each identity; different hosts and empty identities are not merged. Opens and adoptions refuse duplicate identities.
 
 Executable coverage: `tools/zsb-selftest.test.js`, `tools/zsb-explicit-tab.test.js`, `tools/zsb-extension-reload.test.js`, `src/tmux_identity.zig`, and `extension/bridge-routing.test.js`.
+
+## Workspace and tmux tabs
+
+`zsb workspace-list` lists every workspace (`id`, `name`, `active`), its shared group definitions (`id`, `name`, `tabs`), and ungrouped `tabs` as JSON. Each tab has `id`, `title`, `host` (SSH alias or null), `tmux` (session name or null), and `active`; top-level `hosts` lists valid SSH aliases. Workspace ids are numeric slots, while tab ids are stable shell ids.
+
+```bash
+zsb session-open --workspace "Research" --group "Ops" --host "remote-1" --tmux "runner-7" --name "Runner 7"
+```
+
+All flags are required in any order and names match exactly. This reuses the normal SSH/tmux attachment path for an existing remote session, opens in the background, preserves focus and group expansion, and saves the manual title and group placement. An existing tab for the same host/session in any workspace returns `{"ok":true,"existing":true,"tab":42,"workspace":"Research"}` with its current workspace name and without changes; a new tab returns `{"ok":true,"created":true,"tab":42}`. Session identity stays global across workspaces. Unknown workspace, group or host names return `ok:false`, the corresponding `unknown_workspace`, `unknown_group` or `unknown_host` error, and `valid_names`.
+
+Tmux names accept 1–63 ASCII letters, digits, hyphens, underscores and dots. Tab titles accept 1–63 UTF-16 units and no control characters. Both app-level commands use the existing reverse SSH bridge, need no current tmux session, `ZSB_SESSION`, browser pane or extension, and support per-command `--help`. Browser-control commands retain their exact-session binding rules. Regression coverage: `tools/zsb-session-open.test.js` and the unit tests in `src/browser_bridge.zig` and `src/tmux_identity.zig`.

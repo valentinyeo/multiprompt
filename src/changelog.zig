@@ -53,6 +53,22 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.796", .items = &.{
+        .{ .text = "Chat sync checks now recognize user messages containing literal Markdown characters instead of incorrectly reporting them as missing.", .ticket = "IGSH-406" },
+        .{ .text = "Benchmark results from GitHub can be verified for installation from Linux regardless of checkout line endings.", .ticket = "IGSH-513" },
+        .{ .text = "Healthy remote tabs check their connection less often while idle, while disconnected tabs still retry promptly.", .ticket = "IGSH-513" },
+        .{ .text = "The window no longer flickers when other programs open or switch browser windows.", .ticket = "IGSH-521" },
+    } },
+    .{ .ver = "0.28.795", .items = &.{
+        .{ .text = "Unsent Chat View drafts now stay with their own session across switches and restarts, with a DRAFT label in the sidebar.", .ticket = "IGSH-498" },
+        .{ .text = "The shell view is back to its old maximum width, while full width still fills the window.", .ticket = "IGSH-508" },
+        .{ .text = "Tab activity notifications no longer repeatedly refresh terminal status bars.", .ticket = "IGSH-514" },
+    } },
+    .{ .ver = "0.28.794", .items = &.{
+        .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
+        .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },
+        .{ .text = "Multiprompt redraws as fast as before and keeps its smoother edges.", .ticket = "IGSH-444" },
+    } },
     .{ .ver = "0.28.793", .items = &.{
         .{ .text = "Taking a browser screenshot with Ctrl+Shift+S keeps the message box focused with the cursor after the link and one space, without opening the window menu.", .ticket = "IGSH-509" },
     } },

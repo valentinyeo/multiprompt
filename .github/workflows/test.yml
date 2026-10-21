@@ -73,13 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - group: 1
-            targets: test-group-1 test-group-5 test-group-6
-          - group: 2
-            targets: test-group-2 test-group-3 test-group-8
-          - group: 3
-            targets: test-group-4 test-group-7
+        group: [1, 2, 3, 4]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -137,7 +131,10 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build ${{ matrix.targets }} --summary all -Dcpu=x86_64_v3
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Sweep real zsb.exe command help
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 4
+        run: node --test tools/zsb-help.test.js
 
   test-vps:
     name: test-vps (${{ matrix.group }})
@@ -148,11 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - group: 1
-            targets: test-vps-group-1 test-vps-group-2
-          - group: 2
-            targets: test-vps-group-3
+        group: [1, 2]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -204,10 +197,17 @@ jobs:
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build ${{ matrix.targets }} --summary all -Dcpu=x86_64_v3
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
+      - name: Build the account Worker
+        if: matrix.group == 1
+        working-directory: service
+        run: npm ci && npx wrangler deploy --dry-run --outdir .build
+      - name: Run account Worker tests
+        if: matrix.group == 1
+        run: node --test service/test/infra.test.js service/test/worker.test.js
 
   build-arm64:
     name: build-arm64
@@ -224,26 +224,9 @@ jobs:
       - name: Build release executables for arm64
         run: zig build -Dtarget=aarch64-windows-gnu
 
-  service:
-    name: service
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Build the account Worker
-        working-directory: service
-        run: npm ci && npx wrangler deploy --dry-run --outdir .build
-      - name: Run account Worker tests
-        run: node --test service/test/infra.test.js service/test/worker.test.js
-
   test-result:
     name: test
-    needs: [changes, test, test-vps, service, build-arm64]
+    needs: [changes, test, test-vps, build-arm64]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -254,26 +237,24 @@ jobs:
           HEAVY: ${{ needs.changes.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
-          SERVICE: ${{ needs.service.result }}
           ARM64: ${{ github.event_name == 'pull_request' && needs.build-arm64.result || 'success' }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1
             case "$2" in
               false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] && [ "$6" = success ] ;;
+              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
               *) return 1 ;;
             esac
           }
-          require_jobs success true success success success success
-          require_jobs success false skipped skipped skipped skipped
+          require_jobs success true success success success
+          require_jobs success false skipped skipped skipped
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success success success; then exit 1; fi
-            if require_jobs success true success "$result" success success; then exit 1; fi
-            if require_jobs success true success success "$result" success; then exit 1; fi
-            if require_jobs success true success success success "$result"; then exit 1; fi
+            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success success; then exit 1; fi
+            if require_jobs success true success "$result" success; then exit 1; fi
+            if require_jobs success true success success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success success success; then exit 1; fi
+          if require_jobs success invalid success success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$SERVICE" "$ARM64"
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$ARM64"

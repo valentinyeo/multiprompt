@@ -109,15 +109,22 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, service, build-arm64\]/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
 });
 
-test('three Windows and two VPS jobs retain every original test group exactly once', () => {
+test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  const targets = [...tests.matchAll(/^            targets: (.+)$/gm)].map(match => match[1].split(' '));
-  assert.deepEqual(targets.slice(0, 3).flat().sort(), Array.from({ length: 8 }, (_, index) => `test-group-${index + 1}`));
-  assert.deepEqual(targets.slice(3).flat().sort(), Array.from({ length: 3 }, (_, index) => `test-vps-group-${index + 1}`));
-  assert.equal((tests.match(/run: zig build \$\{\{ matrix.targets \}\} --summary all -Dcpu=x86_64_v3/g) || []).length, 2);
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
+  assert.deepEqual(matrices, [[1, 2, 3, 4], [1, 2]]);
+  assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
+  assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
+  assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
+  assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
+  const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
+  assert.match(vps, /name: Build the account Worker\n        if: matrix.group == 1/);
+  assert.match(vps, /name: Run account Worker tests\n        if: matrix.group == 1/);
+  assert.match(tests, /name: Sweep real zsb.exe command help[\s\S]*run: node --test tools\/zsb-help.test.js/);
 });
 
 test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {

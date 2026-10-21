@@ -172,6 +172,7 @@ const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELEC
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
+const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
 const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_CLEAR_OFFSET;
 const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
 const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
@@ -224,6 +225,7 @@ const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALL
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -531,6 +533,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
+    if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -723,6 +726,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_STOP_OFFSET => if (app_state.ISSUE_265_WORKING_BAR) "chat view stop the agent interrupt" else "stop agent",
         SEARCH_CHAT_QUEUE_SEND_OFFSET => "chat view send queued messages now offline outbox",
         SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat clear bubbles cache",
+        SEARCH_CHAT_TAB_URL_OFFSET => "chat view insert browser tab url link ctrl shift x",
         SEARCH_CHAT_QUEUE_CLEAR_OFFSET => "chat view clear offline queue discard queued messages",
         SEARCH_CHAT_RETRY_UNSENT_OFFSET => "chat view retry unsent messages not sent resend",
         SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "chat view discard unsent messages not sent",
@@ -1872,6 +1876,12 @@ pub fn updateSearchResults() void {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BROWSER;
                 app_state.g_search_result_count += 1;
             }
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
+            app_state.g_search_result_count += 1;
         }
         if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
@@ -3482,6 +3492,12 @@ pub fn updateSearchResults() void {
             }
         }
 
+        if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TAB_URL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
         if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
         {
