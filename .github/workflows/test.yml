@@ -69,7 +69,7 @@ jobs:
       matrix:
         group: [1, 2, 3, 4]
     env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
@@ -129,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
