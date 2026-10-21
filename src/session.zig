@@ -1316,7 +1316,11 @@ fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
             defer std.heap.page_allocator.free(tabs);
             const count = json_reader.sessionTabs(parsed.value, tabs, MAX_LWS);
             for (tabs[0..count]) |tab| {
-                if (tab.pid != 0 and !tab.keep_alive) killProcessTree(tab.pid);
+                if (tab.pid == 0 or tab.keep_alive) continue;
+                const orphan = OpenProcess(PROCESS_TERMINATE, 0, tab.pid) orelse continue;
+                defer _ = CloseHandle(orphan);
+                var exit_code: DWORD = 0;
+                if (GetExitCodeProcess(orphan, &exit_code) != 0 and exit_code == STILL_ACTIVE) killProcessTree(tab.pid);
             }
         }
     }
@@ -1554,6 +1558,7 @@ pub fn restoreSession() u32 {
     var restored_active_shell_id: u32 = 0;
     var restored_shell_ids: [MAX_SHELLS]u32 = [_]u32{0} ** MAX_SHELLS;
     for (0..tab_count) |t| {
+        if (@import("launch_cache.zig").closedDuringStartup(tabs[t].chat_id)) continue;
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
         const ok = if (chatBenchEnabled() and isRemoteShellKind(tabs[t].kind)) false else spawnSavedTab(&tabs[t], .continue_latest);
         if (ok) {
@@ -1626,6 +1631,13 @@ pub fn restoreSession() u32 {
                 app_state.g_active_workspace = shell.workspace;
                 break;
             }
+        }
+    }
+    const selected_live = @import("launch_cache.zig").selected_live_shell_id;
+    if (@import("launch_cache.zig").pending and selected_live != 0) {
+        if (findShellById(selected_live)) |idx| {
+            app_state.active_shell = idx;
+            app_state.g_active_workspace = app_state.shells[idx].workspace;
         }
     }
     seedActiveWorkspaceLastShell(app_state.shells[0..app_state.shell_count], app_state.active_shell, &app_state.g_ws_last_shell);

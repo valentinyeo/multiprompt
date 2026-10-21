@@ -1773,7 +1773,8 @@ pub const StartupShell = struct {
 
 fn startupShellWorker(job: *StartupShell) void {
     const win = @import("win32.zig");
-    defer _ = win.FreeEnvironmentStringsW(job.environment);
+    const environment = job.environment;
+    defer _ = win.FreeEnvironmentStringsW(environment);
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     si.lpTitle = SPAWN_TITLES[job.shell_id];

@@ -111,6 +111,20 @@ test('ISSUE-543 late console completions bind by stable identity and discard clo
   assert.match(session, /shell\.chat_id == selected_chat/);
 });
 
+test('ISSUE-543 cached clicks survive restoration without consuming a new title range on every launch', () => {
+  const cache = read('src/launch_cache.zig');
+  const deferred = body(cache, 'deferred');
+  assert.match(deferred, /selected_chat_id = state\.shells\[state\.active_shell\]\.chat_id/);
+  assert.match(deferred, /closed_chats\[closed_count\] = chat/);
+  assert.match(deferred, /state\.next_shell_id = 1/);
+  assert.match(deferred, /state\.shells\[kept\] = shell/);
+  assert.match(deferred, /state\.shell_count = kept/);
+  const restore = body(read('src/session.zig'), 'restoreSession');
+  assert.match(restore, /closedDuringStartup\(tabs\[t\]\.chat_id\)/);
+  assert.match(restore, /findShellById\(selected_live\)/);
+  assert.ok(body(cache, 'bindRestoredChat').indexOf('entry.history.text.items.len != 0') < body(cache, 'bindRestoredChat').indexOf('appendSlice'));
+});
+
 test('ISSUE-543 startup retries contested registry ownership without waiting on the UI thread', () => {
   const registry = read('src/workspaces.zig');
   assert.match(body(registry, 'lockWorkspaceRegistry'), /WaitForSingleObject\(mutex, if \(app_state\.g_main_hwnd != null and @import\("launch_cache.zig"\)\.pending\) 0 else 5000\)/);

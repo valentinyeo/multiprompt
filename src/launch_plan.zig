@@ -56,3 +56,9 @@ test "ISSUE-543 first accepted input excludes paint timers and synthetic focus" 
     for ([_]u32{ 0x0100, 0x0102, 0x0104, 0x0201, 0x020A }) |message| try std.testing.expect(isInput(message));
     for ([_]u32{ 0x0007, 0x000F, 0x0113, 0x0200, 0x8000 + 502 }) |message| try std.testing.expect(!isInput(message));
 }
+
+test "ISSUE-543 cleanup precedes worker console publication and browser follows local restore" {
+    try std.testing.expect(@intFromEnum(Deferred.links) < @intFromEnum(Deferred.tabs));
+    try std.testing.expect(@intFromEnum(Deferred.cleanup) < @intFromEnum(Deferred.tabs));
+    try std.testing.expect(@intFromEnum(Deferred.tabs) < @intFromEnum(Deferred.browser));
+}

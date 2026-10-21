@@ -16,6 +16,12 @@ var started: i64 = 0;
 var frequency: i64 = 1;
 var chat_id: u64 = 0;
 pub var selected_chat_id: u64 = 0;
+pub var selected_live_shell_id: u32 = 0;
+var cached_ids: [state.MAX_SHELLS]u32 = @splat(0);
+var cached_chat_ids: [state.MAX_SHELLS]u64 = @splat(0);
+var cached_count: usize = 0;
+var closed_chats: [state.MAX_SHELLS]u64 = @splat(0);
+var closed_count: usize = 0;
 var sidebar_painted = false;
 var chat_painted = false;
 var announced = false;
@@ -80,7 +86,9 @@ pub fn restore() void {
     for (s.rows, 0..) |row, i| {
         var shell = state.empty_shell;
         shell.shell_id = row.id;
-        state.next_shell_id = @max(state.next_shell_id, row.id + 1);
+        state.next_shell_id = @max(state.next_shell_id, row.id +| 1);
+        cached_ids[i] = row.id;
+        cached_chat_ids[i] = row.chat_id;
         shell.chat_id = row.chat_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
@@ -116,6 +124,7 @@ pub fn restore() void {
         @import("chat_composer.zig").openChatView();
         @import("chat_composer.zig").layoutChatControls();
     }
+    cached_count = s.rows.len;
     cached = true;
     debugLog("launch snapshot-restored");
     var log_buf: [128]u8 = undefined;
@@ -137,17 +146,49 @@ pub fn deferred() void {
     var buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "launch deferred-start ms={d}", .{elapsed()}) catch return);
     if (cached) {
+        const selected_id = if (state.active_shell < state.shell_count) state.shells[state.active_shell].shell_id else 0;
         if (state.active_shell < state.shell_count) selected_chat_id = state.shells[state.active_shell].chat_id;
-        state.shell_count = 0;
+        for (cached_ids[0..cached_count], cached_chat_ids[0..cached_count]) |id, chat| {
+            var present = false;
+            for (state.shells[0..state.shell_count]) |shell| {
+                if (shell.shell_id == id) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present and chat != 0) {
+                closed_chats[closed_count] = chat;
+                closed_count += 1;
+            }
+        }
+        var kept: u32 = 0;
+        state.next_shell_id = 1;
+        for (0..state.shell_count) |i| {
+            const shell = state.shells[i];
+            if (std.mem.indexOfScalar(u32, cached_ids[0..cached_count], shell.shell_id) != null) continue;
+            state.shells[kept] = shell;
+            if (shell.shell_id == selected_id) selected_live_shell_id = shell.shell_id;
+            state.next_shell_id = @max(state.next_shell_id, shell.shell_id +| 1);
+            kept += 1;
+        }
+        state.shell_count = kept;
         state.active_shell = 0;
         state.group_count = 0;
     }
+}
+
+pub fn closedDuringStartup(chat: u64) bool {
+    return pending and chat != 0 and std.mem.indexOfScalar(u64, closed_chats[0..closed_count], chat) != null;
 }
 
 pub fn bindRestoredChat() void {
     if (!cached or !state.g_chat_active or state.active_shell >= state.shell_count or state.shells[state.active_shell].chat_id != chat_id) return;
     if (chat_id == 0) return;
     const entry = @import("chat_session.zig").chatHistoryEntry(@import("chat_session.zig").chatFileIdentity()) orelse return;
+    if (entry.history.text.items.len != 0 or entry.history.blocks.items.len != 0) {
+        state.g_chat_cache_shell_id = state.shells[state.active_shell].shell_id;
+        return;
+    }
     const a = std.heap.page_allocator;
     entry.history.text.appendSlice(a, state.g_chat_capture[0..state.g_chat_last_len]) catch return;
     entry.history.blocks.appendSlice(a, state.g_chat_blocks[0..state.g_chat_block_count]) catch return;
