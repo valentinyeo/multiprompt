@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.779", .items = &.{
+        .{ .text = "Chat View no longer hides agent replies that start with words like Ready, Searching or Editing.", .ticket = "IGSH-401" },
+    } },
     .{ .ver = "0.28.778", .items = &.{
         .{ .text = "Approve a new device with one tap to let it reach your servers, and remove its access when you revoke it.", .ticket = "IGSH-448" },
     } },
