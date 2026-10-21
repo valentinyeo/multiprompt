@@ -481,7 +481,6 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     };
     var x: i32 = 0;
     var y: i32 = 0;
-    var raw_link = link_detect.next(text, 0);
     for (spans[0..n]) |span| {
         var style = span.style;
         style.bold = style.bold or force_bold;
@@ -504,18 +503,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             }
             var end = pos + 1;
             while (end < span.text.end and text[end] != ' ' and text[end] != '\t' and text[end] != '\r' and text[end] != '\n') : (end += 1) {}
-            var target = span.target;
-            if (target == null) {
-                if (raw_link != null and raw_link.?.start < pos) raw_link = link_detect.next(text, pos);
-                if (raw_link) |link| {
-                    if (link.start == pos) {
-                        target = .{ .start = link.start, .end = link.end };
-                        end = @min(end, link.end);
-                    } else if (link.start > pos and link.start < end) {
-                        end = link.start;
-                    }
-                }
-            }
+            const target = span.target;
             if (x > 0 and chatTextWidth(hdc, text[pos..end]) > max_w - x) {
                 x = 0;
                 y += line_h;
@@ -827,6 +815,30 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);
+}
+
+test "IGSH-537 clicking either side of a URL underscore opens the exact address" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = w("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv");
+    const old_font = SelectObject(dc, chatRichFont(.{}, 0));
+    defer _ = SelectObject(dc, old_font);
+    const prefix_w = chatTextWidth(dc, w("https://claude.ai/code/session_"));
+    var calc = RECT{ .left = 0, .top = 0, .right = 100, .bottom = 0 };
+    const line_h = chatLineHeight(DrawTextW(dc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    for ([_]struct { width: i32, x: i32, y: i32 }{
+        .{ .width = 4096, .x = 2, .y = 2 },
+        .{ .width = 4096, .x = prefix_w + 2, .y = 2 },
+        .{ .width = prefix_w, .x = 2, .y = line_h + 2 },
+    }) |point| {
+        const target = chatRichText(dc, text, .{ .left = 0, .top = 0, .right = point.width, .bottom = 100 }, 0, false, .{ .x = point.x, .y = point.y }, 17, null, false) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(usize, 17), target.start);
+        try std.testing.expectEqual(@as(usize, 17 + text.len), target.end);
+        var bytes: [256]u8 = undefined;
+        const len = clickedLinkUrl(text[target.start - 17 .. target.end - 17], &bytes).?;
+        try std.testing.expectEqualStrings("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv", bytes[0..len]);
+    }
 }
 
 pub fn chatFindY(index: usize, position: ?usize) i32 {

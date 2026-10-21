@@ -1,4 +1,6 @@
 const std = @import("std");
+const link_detect = @import("link_detect.zig");
+const unicode = @import("chat_markdown_unicode.zig");
 
 pub const Role = enum(u8) { user, prose, code, injected, tool };
 pub const ToolStatus = enum { running, ok, @"error" };
@@ -252,17 +254,112 @@ pub fn cells(text: []const u16, out: []Range) usize {
     return n;
 }
 
+const InlineAtom = struct { span: Span, end: usize };
+
+fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
+    if (text[pos] == '`') {
+        var content = pos + 1;
+        while (content < text.len and text[content] == '`') : (content += 1) {}
+        var end = content;
+        while (end < text.len) {
+            if (text[end] != '`') {
+                end += 1;
+                continue;
+            }
+            var stop = end + 1;
+            while (stop < text.len and text[stop] == '`') : (stop += 1) {}
+            if (stop - end == content - pos) return .{ .span = .{ .text = .{ .start = content, .end = end }, .style = .{ .code = true } }, .end = stop };
+            end = stop;
+        }
+    }
+    if (text[pos] == '[') {
+        if (std.mem.indexOfScalarPos(u16, text, pos + 1, ']')) |label_end| {
+            if (label_end + 1 < text.len and text[label_end + 1] == '(') {
+                if (std.mem.indexOfScalarPos(u16, text, label_end + 2, ')')) |url_end| {
+                    const url = text[label_end + 2 .. url_end];
+                    const http = std.unicode.utf8ToUtf16LeStringLiteral("http://");
+                    const https = std.unicode.utf8ToUtf16LeStringLiteral("https://");
+                    if (std.mem.startsWith(u16, url, http) or std.mem.startsWith(u16, url, https)) {
+                        return .{ .span = .{ .text = .{ .start = pos + 1, .end = label_end }, .target = .{ .start = label_end + 2, .end = url_end } }, .end = url_end + 1 };
+                    }
+                }
+            }
+        }
+    }
+    if (text[pos] == '<') {
+        if (std.mem.indexOfScalarPos(u16, text, pos + 1, '>')) |end| {
+            const url = text[pos + 1 .. end];
+            if (link_detect.scheme(url)) {
+                for (url) |c| if (!link_detect.isUrlChar(c)) return null;
+                return .{ .span = .{ .text = .{ .start = pos + 1, .end = end }, .target = .{ .start = pos + 1, .end = end } }, .end = end + 1 };
+            }
+        }
+    }
+    if (link_detect.scheme(text[pos..])) {
+        if (link_detect.next(text, pos)) |url| {
+            if (url.start == pos) return .{ .span = .{ .text = .{ .start = url.start, .end = url.end }, .target = .{ .start = url.start, .end = url.end } }, .end = url.end };
+        }
+    }
+    return null;
+}
+
+fn underscoreFlanking(text: []const u16, start: usize, end: usize) struct { open: bool, close: bool } {
+    var before: u21 = if (start == 0) ' ' else text[start - 1];
+    if (start >= 2 and before >= 0xDC00 and before <= 0xDFFF) before = std.unicode.utf16DecodeSurrogatePair(text[start - 2 .. start]) catch before;
+    var after: u21 = if (end == text.len) ' ' else text[end];
+    if (end + 1 < text.len and after >= 0xD800 and after <= 0xDBFF) after = std.unicode.utf16DecodeSurrogatePair(text[end .. end + 2]) catch after;
+    const before_space = unicode.whitespace(before);
+    const after_space = unicode.whitespace(after);
+    const before_punct = unicode.punctuation(before);
+    const after_punct = unicode.punctuation(after);
+    const left = !after_space and (!after_punct or before_space or before_punct);
+    const right = !before_space and (!before_punct or after_space or after_punct);
+    return .{ .open = left and (!right or before_punct), .close = right and (!left or after_punct) };
+}
+
+fn emphasisEnd(text: []const u16, start: usize, len: usize) ?usize {
+    const c = text[start];
+    var run_end = start + len;
+    if (c == '_') {
+        while (run_end < text.len and text[run_end] == c) : (run_end += 1) {}
+        if (!underscoreFlanking(text, start, run_end).open) return null;
+    }
+    var pos = start + len;
+    while (pos < text.len) {
+        if (text[pos] == '\\' and pos + 1 < text.len) {
+            pos += 2;
+            continue;
+        }
+        if (inlineAtom(text, pos)) |atom| {
+            pos = atom.end;
+            continue;
+        }
+        if (text[pos] == c and std.mem.startsWith(u16, text[pos..], text[start .. start + len])) {
+            if (c != '_') return pos;
+            var end = pos + len;
+            while (end < text.len and text[end] == c) : (end += 1) {}
+            if (pos >= run_end and underscoreFlanking(text, pos, end).close) return pos;
+            pos = end;
+            continue;
+        }
+        if (text[pos] == '`') {
+            while (pos < text.len and text[pos] == '`') : (pos += 1) {}
+        } else pos += 1;
+    }
+    return null;
+}
+
 pub fn inlineSpans(text: []const u16, out: []Span) usize {
     var n: usize = 0;
     var pos: usize = 0;
     var style: Style = .{};
-    var closes: [3]?usize = .{ null, null, null };
+    var closes: [2]?usize = .{ null, null };
     while (pos < text.len) {
         var handled = false;
-        for (0..3) |k| {
+        for (0..2) |k| {
             if (closes[k] != null and closes[k].? == pos) {
                 pos += if (k == 0) @as(usize, 2) else 1;
-                if (k == 0) style.bold = false else if (k == 1) style.italic = false else style.code = false;
+                if (k == 0) style.bold = false else style.italic = false;
                 closes[k] = null;
                 handled = true;
                 break;
@@ -277,32 +374,23 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
             pos += 2;
             continue;
         }
-        if (!style.code and text[pos] == '[') {
-            if (std.mem.indexOfScalarPos(u16, text, pos + 1, ']')) |label_end| {
-                if (label_end + 1 < text.len and text[label_end + 1] == '(') {
-                    if (std.mem.indexOfScalarPos(u16, text, label_end + 2, ')')) |url_end| {
-                        const url = text[label_end + 2 .. url_end];
-                        const http = std.unicode.utf8ToUtf16LeStringLiteral("http://");
-                        const https = std.unicode.utf8ToUtf16LeStringLiteral("https://");
-                        if (std.mem.startsWith(u16, url, http) or std.mem.startsWith(u16, url, https)) {
-                            out[n] = .{ .text = .{ .start = pos + 1, .end = label_end }, .style = style, .target = .{ .start = label_end + 2, .end = url_end } };
-                            n += 1;
-                            pos = url_end + 1;
-                            continue;
-                        }
-                    }
-                }
-            }
+        if (inlineAtom(text, pos)) |atom| {
+            out[n] = atom.span;
+            out[n].style.bold = style.bold;
+            out[n].style.italic = style.italic;
+            n += 1;
+            pos = atom.end;
+            continue;
         }
         const c = text[pos];
-        if (c == '`' or (!style.code and (c == '*' or c == '_'))) {
-            const double = c != '`' and pos + 1 < text.len and text[pos + 1] == c;
-            const k: usize = if (c == '`') 2 else if (double) 0 else 1;
+        if (c == '*' or c == '_') {
+            const double = pos + 1 < text.len and text[pos + 1] == c;
+            const k: usize = if (double) 0 else 1;
             const len: usize = if (double) 2 else 1;
             if (closes[k] == null) {
-                if (std.mem.indexOfPos(u16, text, pos + len, text[pos .. pos + len])) |end| {
+                if (emphasisEnd(text, pos, len)) |end| {
                     closes[k] = end;
-                    if (k == 0) style.bold = true else if (k == 1) style.italic = true else style.code = true;
+                    if (k == 0) style.bold = true else style.italic = true;
                     pos += len;
                     continue;
                 }
@@ -310,8 +398,9 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
         }
         const start = pos;
         pos += 1;
+        if (c == '_' or c == '`') while (pos < text.len and text[pos] == c) : (pos += 1) {};
         while (pos < text.len and text[pos] != '*' and text[pos] != '_' and text[pos] != '`' and text[pos] != '[' and text[pos] != '\\' and
-            (closes[0] == null or closes[0].? != pos) and (closes[1] == null or closes[1].? != pos) and (closes[2] == null or closes[2].? != pos)) : (pos += 1)
+            (closes[0] == null or closes[0].? != pos) and (closes[1] == null or closes[1].? != pos) and inlineAtom(text, pos) == null) : (pos += 1)
         {}
         out[n] = .{ .text = .{ .start = start, .end = pos }, .style = style };
         n += 1;
@@ -920,4 +1009,162 @@ test "ISSUE-421 rich cells retain Unicode code pipes empty cells and separator-l
         const fragment = table.rows.items[1 + i / 2].cells[i % 2].fragments.items[0];
         try std.testing.expectEqualSlices(u16, expected, text[fragment.start..fragment.end]);
     }
+}
+
+test "IGSH-537 exact reply preserves the full link target and literal code" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("Your link had a slash where an underscore belongs. The working link is https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv (with `session_`, not `session/`).");
+    const url = w("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv");
+    var out: [80]Span = undefined;
+    const n = inlineSpans(text, &out);
+    var links: usize = 0;
+    var codes: usize = 0;
+    for (out[0..n]) |span| {
+        try std.testing.expect(!span.style.italic);
+        if (span.target) |target| {
+            links += 1;
+            try std.testing.expectEqualSlices(u16, url, text[target.start..target.end]);
+            try std.testing.expectEqualSlices(u16, url, text[span.text.start..span.text.end]);
+        }
+        if (span.style.code) {
+            try std.testing.expectEqualSlices(u16, if (codes == 0) w("session_") else w("session/"), text[span.text.start..span.text.end]);
+            codes += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), links);
+    try std.testing.expectEqual(@as(usize, 2), codes);
+}
+
+test "IGSH-537 code spans bind before emphasis and retain session_ and escapes" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_]struct { text: []const u16, code: []const u16 }{
+        .{ .text = w("`session_`"), .code = w("session_") },
+        .{ .text = w("_before `session_` after_"), .code = w("session_") },
+        .{ .text = w("`a\\*b_`"), .code = w("a\\*b_") },
+        .{ .text = w("``session_`_*``"), .code = w("session_`_*") },
+        .{ .text = w("`https://example.test/a_b_c`"), .code = w("https://example.test/a_b_c") },
+    };
+    for (cases) |case| {
+        var out: [32]Span = undefined;
+        const n = inlineSpans(case.text, &out);
+        var codes: usize = 0;
+        for (out[0..n]) |span| {
+            if (!span.style.code) continue;
+            codes += 1;
+            try std.testing.expect(span.target == null);
+            try std.testing.expectEqualSlices(u16, case.code, case.text[span.text.start..span.text.end]);
+        }
+        try std.testing.expectEqual(@as(usize, 1), codes);
+    }
+}
+
+test "IGSH-537 snake_case_word stays plain while real underscore emphasis stays italic" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_]struct { text: []const u16, visible: []const u16, italic: bool }{
+        .{ .text = w("snake_case_word"), .visible = w("snake_case_word"), .italic = false },
+        .{ .text = w("foo_bar"), .visible = w("foo_bar"), .italic = false },
+        .{ .text = w("foo__bar__baz"), .visible = w("foo__bar__baz"), .italic = false },
+        .{ .text = w("_real emphasis_"), .visible = w("real emphasis"), .italic = true },
+        .{ .text = w("_foo_bar_baz_"), .visible = w("foo_bar_baz"), .italic = true },
+        .{ .text = w("_ two_"), .visible = w("_ two_"), .italic = false },
+        .{ .text = w("_two _"), .visible = w("_two _"), .italic = false },
+        .{ .text = w("a_!b!_c"), .visible = w("a_!b!_c"), .italic = false },
+        .{ .text = w("中文_词_中文"), .visible = w("中文_词_中文"), .italic = false },
+        .{ .text = w("_\u{A0}word_"), .visible = w("_\u{A0}word_"), .italic = false },
+    };
+    for (cases) |case| {
+        var out: [32]Span = undefined;
+        const n = inlineSpans(case.text, &out);
+        var visible: [64]u16 = undefined;
+        var len: usize = 0;
+        for (out[0..n]) |span| {
+            try std.testing.expectEqual(case.italic, span.style.italic);
+            try std.testing.expect(!span.style.bold and !span.style.code and span.target == null);
+            const part = case.text[span.text.start..span.text.end];
+            @memcpy(visible[len..][0..part.len], part);
+            len += part.len;
+        }
+        try std.testing.expectEqualSlices(u16, case.visible, visible[0..len]);
+    }
+}
+
+test "IGSH-537 atomic URLs retain two underscores and trim trailing punctuation" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const url = w("https://example.test/a_b_c");
+    for ([_][]const u16{
+        w("https://example.test/a_b_c)"),
+        w("https://example.test/a_b_c."),
+        w("(https://example.test/a_b_c)."),
+        w("<https://example.test/a_b_c>"),
+        w("www.example.test/a_b_c."),
+    }, 0..) |text, i| {
+        var out: [32]Span = undefined;
+        const n = inlineSpans(text, &out);
+        var links: usize = 0;
+        for (out[0..n]) |span| {
+            try std.testing.expect(!span.style.italic);
+            if (span.target) |target| {
+                links += 1;
+                const expected = if (i == 4) w("www.example.test/a_b_c") else url;
+                try std.testing.expectEqualSlices(u16, expected, text[target.start..target.end]);
+                try std.testing.expectEqualSlices(u16, expected, text[span.text.start..span.text.end]);
+            }
+        }
+        try std.testing.expectEqual(@as(usize, 1), links);
+    }
+    const angle = w("<https://example.test/a_b_c.>");
+    var out: [8]Span = undefined;
+    try std.testing.expectEqual(@as(usize, 1), inlineSpans(angle, &out));
+    const target = out[0].target.?;
+    try std.testing.expectEqualSlices(u16, w("https://example.test/a_b_c."), angle[target.start..target.end]);
+}
+
+test "IGSH-537 emphasis searches skip atomic code and links without changing stars" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ w("*before `*` after*"), w("_before `session_` after_") }) |text| {
+        var out: [32]Span = undefined;
+        const n = inlineSpans(text, &out);
+        for (out[0..n]) |span| try std.testing.expect(span.style.italic);
+        try std.testing.expect(out[n - 1].text.end == text.len - 1);
+    }
+    const text = w("_before https://example.test/a_b_c after_");
+    var out: [32]Span = undefined;
+    const n = inlineSpans(text, &out);
+    var links: usize = 0;
+    for (out[0..n]) |span| {
+        try std.testing.expect(span.style.italic);
+        if (span.target) |target| {
+            links += 1;
+            try std.testing.expectEqualSlices(u16, w("https://example.test/a_b_c"), text[target.start..target.end]);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 1), links);
+    const stars = w("*italic* **bold** a*b*c");
+    const count = inlineSpans(stars, &out);
+    try std.testing.expectEqual(@as(usize, 6), count);
+    try std.testing.expect(out[0].style.italic);
+    try std.testing.expect(out[2].style.bold);
+    try std.testing.expect(out[4].style.italic);
+    const bold = w("__real emphasis__");
+    try std.testing.expectEqual(@as(usize, 1), inlineSpans(bold, &out));
+    try std.testing.expect(out[0].style.bold);
+}
+
+test "IGSH-537 underscore flanking recognizes Unicode punctuation and symbols" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ w("«_word_»"), w("😀_word_😀"), w("_word_。") }) |text| {
+        var out: [16]Span = undefined;
+        const n = inlineSpans(text, &out);
+        var italics: usize = 0;
+        for (out[0..n]) |span| {
+            if (!span.style.italic) continue;
+            italics += 1;
+            try std.testing.expectEqualSlices(u16, w("word"), text[span.text.start..span.text.end]);
+        }
+        try std.testing.expectEqual(@as(usize, 1), italics);
+    }
+    const text = w("word_词_word");
+    var out: [16]Span = undefined;
+    const n = inlineSpans(text, &out);
+    for (out[0..n]) |span| try std.testing.expect(!span.style.italic);
 }
