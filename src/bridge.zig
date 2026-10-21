@@ -28,6 +28,8 @@ const PIPE_READMODE_MESSAGE: windows.DWORD = 0x00000002;
 const PIPE_WAIT: windows.DWORD = 0x00000000;
 const PIPE_NOWAIT: windows.DWORD = 0x00000001;
 const PIPE_UNLIMITED_INSTANCES: windows.DWORD = 255;
+const ERROR_FILE_NOT_FOUND: windows.DWORD = 2;
+const ERROR_PIPE_BUSY: windows.DWORD = 231;
 const ERROR_PIPE_CONNECTED: windows.DWORD = 535;
 const SOCKET = usize;
 const INVALID_SOCKET: SOCKET = ~@as(SOCKET, 0);
@@ -88,6 +90,8 @@ extern "kernel32" fn CreateFileA(
     hTemplateFile: ?windows.HANDLE,
 ) callconv(.winapi) windows.HANDLE;
 
+extern "kernel32" fn WaitNamedPipeA(lpNamedPipeName: [*:0]const u8, nTimeOut: windows.DWORD) callconv(.winapi) BOOL;
+extern "kernel32" fn FlushFileBuffers(hFile: windows.HANDLE) callconv(.winapi) BOOL;
 extern "kernel32" fn CloseHandle(hObject: windows.HANDLE) callconv(.winapi) BOOL;
 
 extern "kernel32" fn CreateMutexA(lpMutexAttributes: ?*anyopaque, bInitialOwner: BOOL, lpName: [*:0]const u8) callconv(.winapi) ?windows.HANDLE;
@@ -1785,18 +1789,28 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
 
     var pipe_name_buf: [128]u8 = undefined;
     const command_pipe_name = try isolatedPipeName(&pipe_name_buf, g_profile_token);
-    const command_pipe = CreateFileA(
-        command_pipe_name.ptr,
-        GENERIC_WRITE,
-        0,
-        null,
-        OPEN_EXISTING,
-        0,
-        null,
-    );
-    if (command_pipe == INVALID_HANDLE_VALUE) {
-        return error.PipeUnavailable;
-    }
+    const command_pipe = blk: {
+        const until = @min(deadline orelse std.math.maxInt(u64), GetTickCount64() + 1500);
+        while (true) {
+            const pipe = CreateFileA(
+                command_pipe_name.ptr,
+                GENERIC_WRITE,
+                0,
+                null,
+                OPEN_EXISTING,
+                0,
+                null,
+            );
+            if (pipe != INVALID_HANDLE_VALUE) break :blk pipe;
+            const err = GetLastError();
+            if (err != ERROR_FILE_NOT_FOUND and err != ERROR_PIPE_BUSY) return error.PipeUnavailable;
+            const remaining = until -| GetTickCount64();
+            if (remaining == 0) return error.PipeUnavailable;
+            if (WaitNamedPipeA(command_pipe_name.ptr, @intCast(@min(50, remaining))) == 0) {
+                Sleep(@intCast(@min(10, until -| GetTickCount64())));
+            }
+        }
+    };
     defer _ = CloseHandle(command_pipe);
 
     try writeAll(command_pipe, request);
@@ -2041,6 +2055,7 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
     defer _ = CloseHandle(pipe);
 
     try writeAll(pipe, payload);
+    if (FlushFileBuffers(pipe) == 0) return error.WriteFailed;
     return true;
 }
 

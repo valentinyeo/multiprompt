@@ -45,7 +45,9 @@ class Host {
     this.buffer = Buffer.alloc(0);
     this.stderr = '';
     this.exit = once(this.child, 'exit');
+    let timer;
     this.ready = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`host startup timed out: ${this.stderr}`)), 5000);
       this.child.once('error', reject);
       this.child.once('exit', code => reject(new Error(`host exited ${code}: ${this.stderr}`)));
       this.child.stdout.on('data', data => {
@@ -69,7 +71,7 @@ class Host {
           }
         }
       });
-    });
+    }).finally(() => clearTimeout(timer));
     this.child.stderr.on('data', data => { this.stderr += data; });
   }
 
@@ -170,6 +172,37 @@ test('issue: real host pipes isolate profiles, preserve default, and serialize d
   } finally {
     for (const value of hosts) await value.close();
   }
+});
+
+test('CLI waits for a delayed profile pipe and handles immediate replies', { timeout: 15000 }, async () => {
+  const token = `pipe-ready-${process.pid}`;
+  const pending = cli(['--profile', token, 'tabs']);
+  await new Promise(resolve => setTimeout(resolve, 750));
+  const host = new Host(token, 'delayed');
+  try {
+    await host.ready;
+    const first = await pending;
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(JSON.parse(first.stdout).ok, true, first.stdout);
+    for (let index = 0; index < 20; index++) {
+      const result = await cli(['--profile', token, 'tabs']);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(result.stdout).result?.profile, 'delayed', result.stdout);
+    }
+    assert.equal(host.requests.length, 21);
+  } finally {
+    await pending;
+    await host.close();
+  }
+});
+
+test('transport waits within its deadline and drains replies before closing the client', () => {
+  const request = source.slice(source.indexOf('fn requestBrowser('), source.indexOf('fn saveScreenshotResponse('));
+  assert.match(request, /const until = @min\(deadline orelse std\.math\.maxInt\(u64\), GetTickCount64\(\) \+ 1500\)/);
+  assert.match(request, /if \(remaining == 0\) return error\.PipeUnavailable/);
+  assert.match(request, /WaitNamedPipeA\(command_pipe_name\.ptr, @intCast\(@min\(50, remaining\)\)\)/);
+  const reply = source.slice(source.indexOf('fn routeReplyPipe('), source.indexOf('fn readPipeMessage('));
+  assert.match(reply, /defer _ = CloseHandle\(pipe\);[\s\S]*try writeAll\(pipe, payload\);\s*if \(FlushFileBuffers\(pipe\) == 0\) return error\.WriteFailed/);
 });
 
 test('issue: source preserves token-only lifetime mutex and shared pipe resolver', () => {

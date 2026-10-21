@@ -1,0 +1,92 @@
+name: Test repeat
+run-name: test-repeat ${{ inputs.test }} x${{ inputs.count }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: A tools/*.test.js path
+        required: true
+        default: tools/bridge-profile-pipes.test.js
+        type: string
+      count:
+        description: Number of independent runs (1 to 20)
+        required: true
+        default: '10'
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.matrix.outputs.runs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate inputs and create matrix
+        id: matrix
+        env:
+          TEST: ${{ inputs.test }}
+          COUNT: ${{ inputs.count }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const { TEST, COUNT, GITHUB_OUTPUT } = process.env;
+          if (!/^tools\/[a-zA-Z0-9._-]+\.test\.js$/.test(TEST) || !fs.statSync(TEST).isFile()) {
+            throw new Error('test must name an existing tools/*.test.js file');
+          }
+          if (!/^(?:[1-9]|1[0-9]|20)$/.test(COUNT)) {
+            throw new Error('count must be an integer from 1 to 20');
+          }
+          fs.appendFileSync(GITHUB_OUTPUT, `runs=${JSON.stringify(Array.from({ length: Number(COUNT) }, (_, index) => index + 1))}\n`);
+          NODE
+
+  repeat:
+    name: repeat ${{ matrix.run }}
+    needs: plan
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(needs.plan.outputs.runs) }}
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build test executables
+        run: zig build --summary all
+      - name: Run selected test
+        env:
+          TEST: ${{ inputs.test }}
+        shell: pwsh
+        run: |
+          $env:BRIDGE_EXE = Join-Path $env:GITHUB_WORKSPACE 'zig-out/bin/zigshell-bridge.exe'
+          $env:ZIG_EXE = (Get-Command zig).Source
+          node --test $env:TEST
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
