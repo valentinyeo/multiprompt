@@ -1789,10 +1789,10 @@ fn startupShellWorker(job: *StartupShell) void {
         if (job.job != null) _ = AssignProcessToJobObject(job.job, pi.hProcess);
         for (0..50) |attempt| {
             if (job.kind == .gitbash) {
-                job.hwnd = findWindowByClassAndPid(job.pid, "mintty");
+                job.hwnd = findWindowByClassAndPid(job.pid, "mintty") orelse null;
             } else {
                 job.hwnd = FindWindowW(null, SPAWN_TITLES[job.shell_id]);
-                if (job.hwnd == null and attempt >= 5) job.hwnd = findConsoleWindowByPid(job.pid);
+                if (job.hwnd == null and attempt >= 5) job.hwnd = findConsoleWindowByPid(job.pid) orelse null;
             }
             if (job.hwnd != null) break;
             if (WaitForSingleObject(job.process, 100) == 0) break;

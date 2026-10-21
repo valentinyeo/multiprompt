@@ -257,8 +257,8 @@ function startupRuntime(tests) {
   const start = spawn.indexOf('    if (CreateProcessW(');
   const end = spawn.indexOf('    var style = GetWindowLongPtrW(', start);
   assert.ok(start >= 0 && end > start);
-  const acquisition = spawn.slice(start, end).replace('    if (cmd_hwnd != null) {\n', '');
-  const registrationStart = spawn.indexOf('    registerShellExitWait(idx);');
+  const acquisition = spawn.slice(start, end).replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
+  const registrationStart = spawn.indexOf('    if (!asynchronous) {');
   const registrationEnd = spawn.indexOf('\n\n    if (!', registrationStart);
   assert.ok(registrationStart >= 0 && registrationEnd > registrationStart);
   const registration = spawn.slice(registrationStart, registrationEnd).replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect');
@@ -288,6 +288,8 @@ fn spawnStartup(kind: ShellKind) bool {
     const title_id: usize = 0;
     const cmd_ptr = null;
     const cwd_ptr = null;
+    const asynchronous = false;
+    var cmd_hwnd: HANDLE = null;
     var si: STARTUPINFOW = .{};
     var pi: PROCESS_INFORMATION = .{};
 ${acquisition}

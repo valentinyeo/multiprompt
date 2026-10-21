@@ -218,6 +218,7 @@ var g_account_keys_cache: struct {
 } = .{};
 var g_account_key_prompt_active = false;
 var g_account_pending_device_keys: ?[]u8 = null;
+var startup_reply: LPARAM = 0;
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -1064,8 +1065,6 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     startAccountJob(.{ .kind = .decide_keys, .edited = encoded });
     submitted = app_state.g_account_busy;
 }
-
-var startup_reply: LPARAM = 0;
 
 pub fn resumeStartupReply() void {
     const reply = startup_reply;

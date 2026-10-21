@@ -86,7 +86,8 @@ test("ISSUE-502 deferred startup installs the keyboard hook after session restor
     "the UI hook must not sit blocked while dozens of consoles restore");
   assert.match(source.slice(ready), /forceReinstallHooks\(\)/);
   const dispatch = source.slice(source.indexOf("if (msg == launch_cache.WM_DEFERRED)"));
-  assert.match(dispatch, /launch_cache\.deferred\(\);\s*initializeDeferred\(hwnd\);/);
+  assert.match(dispatch, /SetTimer\(hwnd, launch_cache\.TIMER_STARTUP/);
+  assert.match(dispatch, /if \(msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP\)[\s\S]*?initializeDeferred\(hwnd\)/);
   const mainStart = source.indexOf("pub fn main(init: std.process.Init) void");
   const loop = source.indexOf("var msg: MSG = std.mem.zeroes(MSG);", mainStart);
   assert.ok(loop > mainStart && loop < deferred, "the message loop must exist before deferred restore");
