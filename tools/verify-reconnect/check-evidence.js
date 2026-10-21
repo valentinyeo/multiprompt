@@ -1,0 +1,68 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+assert.ok(root, 'usage: node tools/verify-reconnect/check-evidence.js EVIDENCE_ROOT');
+function load(mode) {
+  const dir = path.join(root, mode);
+  const json = file => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+  const text = file => fs.readFileSync(path.join(dir, file), 'utf8');
+  const summary = json('summary.json');
+  assert.deepEqual(summary.map(s => s.case), ['A', 'B']);
+  const provenance = json('provenance.json');
+  const run = json('run.json');
+  assert.equal(run.event, 'workflow_dispatch');
+  assert.equal(run.headSha, provenance.revision);
+  assert.equal(String(run.databaseId), provenance.run_id);
+  assert.equal(run.url, provenance.run_url);
+  assert.equal(provenance.exe_source, mode);
+  assert.match(provenance.exe_sha256, /^[a-f0-9]{64}$/);
+  assert.ok(!fs.existsSync(path.join(dir, 'error.txt')), 'infrastructure error is not a regression');
+  const doctor = json('doctor.json');
+  assert.equal(doctor.focus[0], doctor.main);
+  assert.equal(doctor.focus[1], doctor.composer);
+  assert.equal(doctor.two_transports, true);
+  const cleanup = json('cleanup.json');
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.evidence_preserved, true);
+  const a = text('case-A.log');
+  const b = text('case-B.log');
+  const reposition = a.split('\n').filter(l => /\[reposition\]|posBrowser|posMasks/.test(l)).length;
+  const focus = json('focus.json');
+  assert.ok(focus.samples.length > 1);
+  const changed = focus.samples.some(s => s.foreground !== focus.before[0] || s.focus !== focus.before[1]);
+  assert.equal(summary[0].reposition_lines, reposition);
+  assert.equal(summary[0].focus_changed, changed);
+  assert.equal(summary[0].reconnected, true);
+  assert.match(a, /respawnShellInPlace ok kind=tmux idx=1 new_id=\d+/);
+  assert.match(a, /ssh-reconnect ok id=\d+/);
+  assert.equal(summary[0].pass, reposition === 0 && !changed);
+  const gone = [...b.matchAll(/ssh-reconnect ended id=(\d+) reason=session-gone/g)];
+  assert.equal(summary[1].session_gone_count, gone.length);
+  const id = gone.length ? gone[0][1] : '\\d+';
+  const attempts = [...text('after-gone.log').matchAll(new RegExp(`ssh-reconnect attempt=\\d+ id=${id}\\b`, 'g'))].length;
+  assert.equal(summary[1].attempts_after_gone, attempts);
+  assert.ok(summary[1].observed_seconds >= 60);
+  assert.equal(summary[1].pass, gone.length === 1 && attempts === 0);
+  for (const shot of ['before.png', 'case-A.png', 'case-B-session-ended.png', 'final.png']) {
+    const png = fs.readFileSync(path.join(dir, shot));
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.ok(png.length > 10000);
+  }
+  for (const action of ['A', 'B']) assert.ok(json(`action-${action}.json`).pid > 0);
+  assert.ok(text('debug.log').length >= a.length);
+  return { summary, run, provenance };
+}
+const green = load('build');
+const red = load('v0.28.788');
+assert.equal(green.run.conclusion, 'success');
+assert.equal(red.run.conclusion, 'failure');
+assert.equal(green.provenance.revision, red.provenance.revision, 'same harness revision required');
+assert.ok(green.summary.every(s => s.pass));
+assert.ok(red.summary.some(s => !s.pass));
+assert.ok(red.summary[0].reposition_lines > 0 || red.summary[0].focus_changed || red.summary[1].session_gone_count !== 1 || red.summary[1].attempts_after_gone > 0);
+for (const run of [green, red]) {
+  console.log(run.run.url);
+  for (const s of run.summary) console.log(`${s.pass ? 'PASS' : 'FAIL'} case=${s.case} reposition_lines=${s.reposition_lines} focus_changed=${s.focus_changed} session_gone_count=${s.session_gone_count} attempts_after_gone=${s.attempts_after_gone}`);
+}
+console.log('GitHub green/red evidence verified');
