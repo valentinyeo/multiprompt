@@ -574,6 +574,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     const old_ids = app_state.g_ws_ids;
     const old_id_len = app_state.g_ws_id_len;
     const old_snoozed = app_state.g_ws_snoozed;
+    const old_last_shell = app_state.g_ws_last_shell;
+    app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     const old_ws_count = app_state.g_lws_count;
     app_state.g_single_window = true;
     app_state.g_lws_count = @intCast(@max(desired.workspaces.len, 1));
@@ -590,6 +592,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             app_state.g_ws_ids[wi] = old_ids[oi];
             app_state.g_ws_id_len[wi] = old_id_len[oi];
             app_state.g_ws_snoozed[wi] = old_snoozed[oi];
+            app_state.g_ws_last_shell[wi] = old_last_shell[oi];
             break;
         }
         ensureWorkspaceSlotId(@intCast(wi));
@@ -607,6 +610,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_ws_ids[slot] = old_ids[oi];
         app_state.g_ws_id_len[slot] = old_id_len[oi];
         app_state.g_ws_snoozed[slot] = true;
+        app_state.g_ws_last_shell[slot] = old_last_shell[oi];
         app_state.g_lws_count += 1;
     }
     for (desired.tabs, 0..) |tab, dest| {

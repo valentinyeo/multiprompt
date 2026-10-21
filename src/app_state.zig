@@ -635,6 +635,7 @@ pub var g_ws_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
 pub var g_ws_name_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
 pub var g_ws_ids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
 pub var g_ws_id_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
+pub var g_ws_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
 pub var g_ws_snoozed: [MAX_LWS]bool = [_]bool{false} ** MAX_LWS;
 
 pub const WS_STRIP_H: i32 = 34;
@@ -1851,6 +1852,7 @@ pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
 
 pub const SavedTab = struct {
+    shell_id: u32 = 0,
     chat_id: u64 = 0,
     sync_owned: bool = false,
     kind: ShellKind,

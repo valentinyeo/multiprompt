@@ -147,3 +147,42 @@ test("duplicate reserved workspaces merge sessions before removing their slots",
   const rename = functionBody("commitRename", "appendWorkspaceMoveMenuItems");
   assert.match(rename, /paletteWideTextMatchRank\(buf\[0\.\.ulen\], L\("Other"\)\[0\.\.5\]\) == 4/);
 });
+
+test("ISSUE-439 focus memory is updated centrally without view-mode guards", () => {
+  const focus = functionBody("switchToShell", "nthVisibleShell");
+  const assignment = focus.indexOf("active_shell = idx;");
+  const remember = focus.indexOf("g_ws_last_shell[shells[idx].workspace] = shells[idx].shell_id;");
+  assert.ok(assignment >= 0 && remember > assignment);
+  const guard = focus.slice(assignment, remember);
+  assert.match(guard, /if \(!g_restoring and idx < shell_count/);
+  assert.doesNotMatch(guard, /g_single_window|g_chat_active|full_width|chat_shell_override/);
+  const select = functionBody("switchToWorkspace", "copyBlueDotHookInstructions");
+  assert.match(select, /pickWorkspaceTarget\(shells\[0\.\.shell_count\], ws, g_ws_last_shell\[ws\]\)/);
+});
+
+test("ISSUE-439 workspace moves carry or clear the last focused stable id", () => {
+  const compact = functionBody("compactWorkspaceSlots", "mergeDuplicateOtherWorkspaces");
+  assert.match(compact, /g_ws_last_shell\[new_count\] = g_ws_last_shell\[ws\]/);
+  assert.match(compact, /g_ws_last_shell\[t\] = 0/);
+  const remove = functionBody("removeWorkspaceSlot", "swapWorkspaceSlots");
+  assert.match(remove, /g_ws_last_shell\[ws\] = g_ws_last_shell\[ws \+ 1\]/);
+  assert.match(remove, /g_ws_last_shell\[g_lws_count\] = 0/);
+  const swap = functionBody("swapWorkspaceSlots", "workspaceModeOrderPath");
+  assert.match(swap, /std\.mem\.swap\(u32, &g_ws_last_shell\[a\], &g_ws_last_shell\[b\]\)/);
+  const layout = functionBody("applyServerLayout", "accountDevices");
+  assert.match(layout, /g_ws_last_shell\[wi\] = old_last_shell\[oi\]/);
+  assert.match(layout, /g_ws_last_shell\[slot\] = old_last_shell\[oi\]/);
+});
+
+test("ISSUE-439 restore and absorption remap saved ids rather than reusing another shell's id", () => {
+  const restore = functionBody("restoreSession", "enumWindowsCallback");
+  assert.match(restore, /saved_last_shell\[wi\] = .*json_reader\.uint\(obj, "last_shell"\)/);
+  assert.match(restore, /restored_shell_ids\[t\] = shells\[idx\]\.shell_id/);
+  assert.match(restore, /g_ws_last_shell\[tab\.workspace\] = restored_shell_ids\[tmux_identity\.restoreWinner/);
+  const exported = functionBody("exportSlotSessionFile", "hibernateWorkspaceShell");
+  assert.match(exported, /\\"last_shell\\":\{d\}[^]*g_ws_last_shell\[slot\]/);
+  assert.match(exported, /\\"shell_id\\":\{d\}[^]*shells\[i\]\.shell_id/);
+  const absorb = functionBody("absorbWorkspaceIntoSlots", "collapseOtherWindowsIntoThis");
+  assert.match(absorb, /saved\.shell_id == src_last_shell\[src_ws\]/);
+  assert.match(absorb, /g_ws_last_shell\[slot\] = shells\[idx\]\.shell_id/);
+});
