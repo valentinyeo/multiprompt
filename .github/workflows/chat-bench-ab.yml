@@ -100,6 +100,8 @@ jobs:
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
           echo '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz' | sha256sum -c -
           tar -xf zig.tar.xz
+          export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
+          "$ZIG" cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows tooling/tools/chat-bench/browser-fixture.c -o browser-fixture.exe -luser32
           test "$(cat /proc/1/comm)" = systemd
           loginctl enable-linger root
           systemctl start user@0.service
