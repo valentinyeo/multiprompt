@@ -4013,7 +4013,7 @@ pub fn updateSearchResults() void {
         }
     }
 
-    appendGroupPaletteResults();
+    if (app_state.g_search_len > 0) appendGroupPaletteResults();
     sortSearchResultsByRank();
 
     if (app_state.g_search_len == 0) {

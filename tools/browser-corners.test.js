@@ -76,3 +76,22 @@ test('IGSH-496 Chat View and browser share the scaled radius, border width and t
   assert.match(build, /vps_test_step.dependOn\(&run_browser_corner_tests.step\)/);
   assert.match(build, /test_step.dependOn\(&run_browser_corner_tests.step\)/);
 });
+
+test('production corner geometry and alpha rasterizer execute at both scales', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-corners-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'browser_corners.zig'), source('browser_corners.zig'));
+    fs.writeFileSync(path.join(dir, 'win32.zig'), 'pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };');
+    const radius = source('app_state.zig').match(/pub const CHAT_BUBBLE_RADIUS[^;]+;/);
+    assert.ok(radius);
+    fs.writeFileSync(path.join(dir, 'app_state.zig'), radius[0]);
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', path.join(dir, 'browser_corners.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All \d+ tests passed/);
+    console.log(result.stderr.trim());
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

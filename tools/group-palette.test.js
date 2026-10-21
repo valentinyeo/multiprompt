@@ -10,6 +10,9 @@ const state = read('app_state');
 const sidebar = read('sidebar');
 const rename = read('rename');
 const session = read('session');
+const workspaces = read('workspaces');
+const reminders = read('reminders');
+const palette = read('command_palette');
 function fn(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -31,15 +34,19 @@ function decl(name) {
   return match[0];
 }
 function harness() {
+  const closedCapture = read('console').slice(read('console').indexOf('        var entry: ClosedShell ='), read('console').indexOf('        app_state.g_closed_count += 1;') + '        app_state.g_closed_count += 1;'.length);
+  const reminderRead = reminders.slice(reminders.indexOf('        e.group_id = @intCast(json_reader.uint'), reminders.indexOf('        e.pinned_top ='));
   const migration = block(session, 'for (json_reader.array(json_reader.field(json, "groups")))');
   const saving = block(session, 'if (app_state.groups[gi].color_set)');
   const railStart = sidebar.lastIndexOf('        if (!app_state.g_sidebar_collapsed) {', sidebar.indexOf('for (rows_arr[0..row_count], 0..) |row, ri|'));
   const rails = block(sidebar.slice(railStart), 'if (!app_state.g_sidebar_collapsed)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(read('command_palette'), 'appendGroupPaletteResults')].join('\n').replaceAll('@import("rename.zig").', '');
+  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '');
   return `const std = @import("std");
 const json_reader = @import("json_reader.zig");
+const archive_rules = @import("archive_rules.zig");
+const BROWSER_SPLIT_DEFAULT_PERMILLE = 350;
 const app_state = @This();
 const HANDLE = ?usize;
 const DWORD = u32;
@@ -55,7 +62,66 @@ var g_search_groupctx_mode = false;
 var g_groupctx_gid: u32 = 0;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
-var shells = [_]struct { group_id: u32 = 1 }{.{}, .{}, .{}, .{}};
+const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
+${block(state, 'pub const ClosedShell = struct')};
+${block(state, 'pub const ReminderEntry = struct')};
+${block(state, 'const SavedTab = struct')};
+const Shell = struct {
+    group_id: u32 = 1, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
+    name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
+    tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
+};
+var shells = [_]Shell{.{}, .{}, .{}, .{}};
+var g_closed_count: u32 = 0;
+var g_closed_history: [10]ClosedShell = undefined;
+var g_pending_tmux_host: u8 = 0;
+fn GetTickCount64() u64 { return 1; }
+fn spawnShellWithSession(_: ShellKind, _: ?[]const u8, _: ?[]const u8, _: ?usize) bool {
+    shells[shell_count] = .{};
+    shell_count += 1;
+    return true;
+}
+fn captureClosed(idx: u32) void {
+${closedCapture}
+}
+fn captureReminder(idx: u32) ReminderEntry {
+    var e = ReminderEntry{};
+${block(fn(reminders, 'reminderFromShell'), 'if (findGroupIdx(app_state.shells[idx].group_id))')}
+    return e;
+}
+fn saveReminder(e: ReminderEntry, json_buf: *[256]u8) []const u8 {
+    var pos: usize = 0;
+${block(fn(reminders, 'saveReminders'), 'if (e.group_id != 0)')}
+    return json_buf[0..pos];
+}
+fn loadReminder(obj: std.json.Value) ReminderEntry {
+    var e = ReminderEntry{};
+${reminderRead}
+    return e;
+}
+fn restoreReminderGroup(e: ReminderEntry) void {
+    var gi: ?u32 = null;
+${block(fn(reminders, 'restoreReminderEntry').slice(fn(reminders, 'restoreReminderEntry').lastIndexOf('if (gi == null and app_state.group_count < MAX_GROUPS)')), 'if (gi == null and app_state.group_count < MAX_GROUPS)')}
+}
+fn saveWorkspaceColor(gi: usize, json_buf: *[256]u8) []const u8 {
+    var pos: usize = 0;
+${block(workspaces, 'if (app_state.groups[gi].color_set)')}
+    return json_buf[0..pos];
+}
+fn restoreSnapshotColor(value: std.json.Value) void {
+    const group = &groups[0];
+${block(fn(reminders, 'wakeSnapshotWorkspace'), 'if (json_reader.boolTrue(value, "color_set"))')}
+}
+fn appendRootGroups() void {
+${palette.match(/    if \(app_state\.g_search_len > 0\) appendGroupPaletteResults\(\);/)[0]}
+}
+fn appendContextGroups() void {
+${block(fn(palette, 'updateSearchResults'), 'if (app_state.g_search_groupctx_mode)')}
+}
+fn keepSearchSelectionVisible() void {}
+var g_search_sel: u32 = 0;
+var g_search_scroll: u32 = 0;
+
 var g_pending_new_tab_group: u32 = 0;
 var g_single_window = true;
 var g_lws_count: u32 = 3;
@@ -104,6 +170,8 @@ var rail_rects: [16]RECT = undefined;
 var rail_count: usize = 0;
 fn uiScaled(px: i32) i32 { return px; }
 fn tabRowH() i32 { return 38; }
+${fn(read('inbox'), 'writeUintTo')}
+fn appendJsonEscapedWide(buf: *const *[256]u8, pos: *usize, text: []const u16) void { for (text) |wc| { buf.*[pos.*] = @intCast(wc); pos.* += 1; } }
 fn CreateSolidBrush(_: DWORD) HANDLE { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }
 fn FillRect(_: HANDLE, rc: *RECT, _: HANDLE) i32 { rail_rects[rail_count] = rc.*; rail_count += 1; return 1; }
@@ -114,6 +182,111 @@ fn paintRails(rows_arr: []const Row) void {
     ${rails}
 }
 ${production}
+test "split persistence leaves minimum pane widths to the shared geometry clamp" {
+    for ([_]u32{0, 40, 350, 960, 1000, 5000}) |split| {
+        var buf: [256]u8 = undefined;
+        const json = try std.fmt.bufPrint(&buf, "{{\\"tabs\\":[{{\\"kind\\":\\"cmd\\",\\"name\\":\\"T\\",\\"bsplit\\":{d}}}]}}", .{split});
+        var parsed = try json_reader.parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        var tabs: [1]SavedTab = undefined;
+        try std.testing.expectEqual(@as(u32, 1), json_reader.sessionTabs(parsed.value, &tabs, 16));
+        try std.testing.expectEqual(@as(u16, @intCast(@min(split, 1000))), tabs[0].bsplit_permille);
+    }
+}
+test "empty root excludes group rows while context and typed search include them" {
+    group_count = 0;
+    next_group_id = 1;
+    _ = createGroup(&.{'A'});
+    shells[0].group_id = groups[0].id;
+    active_shell = 0;
+    shell_count = 1;
+    g_search_len = 0;
+    g_search_result_count = 0;
+    g_search_groupctx_mode = false;
+    appendRootGroups();
+    try std.testing.expectEqual(@as(u32, 0), g_search_result_count);
+    g_search_groupctx_mode = true;
+    g_groupctx_gid = groups[0].id;
+    appendContextGroups();
+    try std.testing.expect(g_search_result_count > 0);
+    g_search_groupctx_mode = false;
+    g_search_result_count = 0;
+    g_search_len = 6;
+    @memcpy(g_search_buf[0..6], &[_]u16{'R','e','n','a','m','e'});
+    appendRootGroups();
+    try std.testing.expectEqual(@as(u32, 1), g_search_result_count);
+    g_search_len = 0;
+    g_search_result_count = 0;
+}
+test "picked colors survive closed tab reopen, reminders and layout export import including palette zero" {
+    for ([_]u8{0, 4, 7}) |color| {
+        for ([_]bool{false, true}) |picked| {
+            group_count = 0;
+            next_group_id = 1;
+            shell_count = 1;
+            _ = createGroup(&.{'G'});
+            groups[0].color = if (picked) color else 7;
+            groups[0].color_set = picked;
+            groups[0].collapsed = true;
+            shells[0].group_id = groups[0].id;
+            g_closed_count = 0;
+            captureClosed(0);
+            const reminder = captureReminder(0);
+            var buf: [256]u8 = undefined;
+            const color_json = saveWorkspaceColor(0, &buf);
+            var layout_buf: [512]u8 = undefined;
+            const layout_json = try std.fmt.bufPrint(&layout_buf, "{{\\"groups\\":[{{\\"id\\":1,\\"name\\":\\"G\\"{s}}}]}}", .{color_json});
+            group_count = 0;
+            var tabs = [_]SavedTab{std.mem.zeroes(SavedTab)};
+            tabs[0].group_id = 1;
+            try std.testing.expect(importWorkspaceGroups(layout_json, &tabs));
+            try std.testing.expectEqual(picked, groups[0].color_set);
+            try std.testing.expectEqual(if (picked) color else @as(u8, 7), groups[0].color);
+            try std.testing.expectEqual(groups[0].id, tabs[0].group_id);
+            group_count = 0;
+            reopenLastClosedShell();
+            try std.testing.expectEqual(@as(u32, 1), group_count);
+            try std.testing.expectEqual(picked, groups[0].color_set);
+            try std.testing.expectEqual(if (picked) color else @as(u8, 7), groups[0].color);
+            try std.testing.expectEqual(groups[0].id, shells[1].group_id);
+            try std.testing.expect(groups[0].collapsed);
+            const reminder_fields = saveReminder(reminder, &buf);
+            var reminder_buf: [512]u8 = undefined;
+            const reminder_json = try std.fmt.bufPrint(&reminder_buf, "{{\\"unused\\":0{s}}}", .{reminder_fields});
+            var parsed = try json_reader.parse(std.testing.allocator, reminder_json);
+            defer parsed.deinit();
+            const loaded = loadReminder(parsed.value);
+            group_count = 0;
+            restoreReminderGroup(loaded);
+            try std.testing.expectEqual(picked, groups[0].color_set);
+            try std.testing.expectEqual(if (picked) color else @as(u8, 7), groups[0].color);
+            var snapshot = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, if (picked) "{\\"color\\":0,\\"color_set\\":true}" else "{\\"color\\":4}", .{});
+            defer snapshot.deinit();
+            groups[0].color = 7;
+            groups[0].color_set = false;
+            restoreSnapshotColor(snapshot.value);
+            try std.testing.expectEqual(picked, groups[0].color_set);
+            try std.testing.expectEqual(if (picked) @as(u8,0) else 7, groups[0].color);
+        }
+    }
+    var legacy = try json_reader.parse(std.testing.allocator, "{\\"groups\\":[{\\"id\\":1,\\"name\\":\\"Old\\",\\"color\\":4}]}");
+    defer legacy.deinit();
+    group_count = 0;
+    var tabs = [_]SavedTab{std.mem.zeroes(SavedTab)};
+            tabs[0].group_id = 1;
+    try std.testing.expect(importWorkspaceGroups("{\\"groups\\":[{\\"id\\":1,\\"name\\":\\"Old\\",\\"color\\":4}]}", &tabs));
+    try std.testing.expect(!groups[0].color_set);
+    try std.testing.expectEqual(@as(u8, 7), groups[0].color);
+    var old_reminder = try json_reader.parse(std.testing.allocator, "{\\"group_id\\":1,\\"group_color\\":4}");
+    defer old_reminder.deinit();
+    const old = loadReminder(old_reminder.value);
+    try std.testing.expect(!old.group_color_set);
+    try std.testing.expectEqual(@as(u8, 7), old.group_color);
+    group_count = 0;
+    shell_count = 1;
+    g_search_len = 0;
+    g_search_result_count = 0;
+}
 test "rails span header and all members exactly once, excluding ungrouped rows" {
     group_count = 0;
     next_group_id = 1;
@@ -245,6 +418,21 @@ test('extracted production group default, migration, explicit colors and palette
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     console.log(result.stderr.trim());
+    for (const [name, mutate] of [
+      ['empty root group rows', text => text.replace('if (app_state.g_search_len > 0) appendGroupPaletteResults();', 'appendGroupPaletteResults();')],
+      ['closed tab color loss', text => text.replace('app_state.groups[idx].color_set = saved.color_set;', 'app_state.groups[idx].color_set = false;')],
+      ['zero color export loss', text => text.replace('if (app_state.groups[gi].color_set)', 'if (app_state.groups[gi].color != 0)')],
+      ['reminder color loss', text => text.replace('.color_set = e.group_color_set', '.color_set = false')],
+    ]) {
+      const original = harness();
+      const mutated = mutate(original);
+      assert.notEqual(mutated, original, name);
+      fs.writeFileSync(file, mutated);
+      const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+      assert.notEqual(bad.status, 0, name);
+      assert.match(bad.stderr, /FAIL/, name);
+      console.log(`${name} rejected`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -256,7 +444,7 @@ test('group palette is painted and dispatched before open-ended palette bands', 
   assert.ok(sidebar.indexOf('if (result_idx >= app_state.SEARCH_GROUPCTX_BASE') < sidebar.indexOf('} else if (is_addfavicon)'));
   assert.match(main, /openGroupContextPalette\(hwnd, gidx\)/);
   assert.doesNotMatch(rename, /TrackPopupMenu\(/);
-  assert.match(read('command_palette'), /appendGroupPaletteResults\(\);\n    sortSearchResultsByRank/);
+  assert.match(read('command_palette'), /if \(app_state\.g_search_len > 0\) appendGroupPaletteResults\(\);\n    sortSearchResultsByRank/);
   assert.match(fn(rename, 'openGroupContextPalette'), /g_search_groupctx_mode = true/);
   assert.match(read('shortcuts'), /Right-click group \/ Ctrl\+K/);
 });

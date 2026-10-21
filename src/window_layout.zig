@@ -91,6 +91,11 @@ pub const PaneRects = struct {
     splitter: RECT,
 };
 
+pub fn clampPaneSplitWidth(available: i32, width: i32) i32 {
+    const min_side = @min(uiScaled(200), @divTrunc(available, 2));
+    return std.math.clamp(width, min_side, available - min_side);
+}
+
 pub fn paneRects(client: RECT, sidebar_w: i32, browser: bool, split_permille: u32, burn_h: i32) PaneRects {
     const margin = paneOuterMargin();
     const gap = paneGap();
@@ -100,8 +105,7 @@ pub fn paneRects(client: RECT, sidebar_w: i32, browser: bool, split_permille: u3
     var splitter = browser_rect;
     if (browser) {
         const available = @max(0, primary.right - primary.left - gap);
-        const min_side = @min(uiScaled(200), @divTrunc(available, 2));
-        const width = std.math.clamp(@divTrunc(available * @as(i32, @intCast(split_permille)), 1000), min_side, available - min_side);
+        const width = clampPaneSplitWidth(available, @divTrunc(available * @as(i32, @intCast(split_permille)), 1000));
         primary.right = primary.left + width;
         browser_rect.left = primary.right + gap;
         splitter.left = primary.right;
@@ -159,24 +163,6 @@ pub fn repositionActive() void {
     }
     if (LOOK_UNIFIED) {
         ensureDevThemeInitialized();
-        if (browserSlotReserved()) {
-            const layout = calcBrowserLayout() orelse return;
-            const shb = app_state.shells[app_state.active_shell].hwnd;
-            var stb = GetWindowLongPtrW(shb, GWL_STYLE);
-            stb &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
-            _ = SetWindowLongPtrW(shb, GWL_STYLE, stb);
-            _ = SetWindowRgn(shb, null, 1);
-            const inset: i32 = 0;
-            const cx = layout.console_x + inset;
-            const cy = layout.console_y + inset;
-            const cw = layout.console_w - 2 * inset;
-            const ch = layout.console_h - 2 * inset;
-            if (nudge) _ = SetWindowPos(shb, null, cx, cy, cw, ch - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
-            _ = SetWindowPos(shb, null, cx, cy, cw, ch, SWP_FRAMECHANGED | SWP_NOZORDER);
-            verifyShellWindowSize(shb, cx, cy, cw, ch);
-            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
-            return;
-        }
         const pane = activePaneRects(rc).primary;
         const con_top = pane.top + threadTitleHeight();
         const h = pane.bottom - con_top;
@@ -184,12 +170,17 @@ pub fn repositionActive() void {
         var st = GetWindowLongPtrW(sh, GWL_STYLE);
         st &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
         _ = SetWindowLongPtrW(sh, GWL_STYLE, st);
-        const w = pane.right - pane.left;
-        const left = pane.left;
+        const col = centeredConsoleColumn(pane.right, pane.left, 0, consoleCellW());
+        const full_width = app_state.shells[app_state.active_shell].full_width;
+        const w = if (full_width) pane.right - pane.left else col.width;
+        const left = if (full_width) pane.left else col.left;
         _ = SetWindowRgn(sh, null, 1);
         if (nudge) _ = SetWindowPos(sh, null, left, con_top, w, h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
         _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
         verifyShellWindowSize(sh, left, con_top, w, h);
+        if (browserSlotReserved()) {
+            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+        }
         return;
     }
     const pad: i32 = SHELL_PAD;

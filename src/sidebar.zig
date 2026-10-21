@@ -1624,10 +1624,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             if (blit_w > region_w) blit_w = region_w;
                         }
                     } else if (LOOK_UNIFIED) {
-                        const avail = right_rc.right - SIDEBAR_W();
-                        bx = SIDEBAR_W() + @divTrunc(avail - draw_w, 2);
-                        if (bx < SIDEBAR_W()) bx = SIDEBAR_W();
-                        by = DEV_TOP_PAD;
+                        const pane = @import("window_layout.zig").activePaneRects(client_rc).primary;
+                        blit_w = @min(blit_w, pane.right - pane.left);
+                        bx = pane.left + @divTrunc(pane.right - pane.left - blit_w, 2);
+                        by = pane.top + threadTitleHeight();
                     }
                     _ = BitBlt(hdc, bx, by, blit_w, draw_h, src_dc, 0, 0, GDI_SRCCOPY);
                 }

@@ -724,15 +724,9 @@ test "browserSlotReservedPure reserves for any enabled or WebView2-owned tab" {
     try std.testing.expect(!browserSlotReservedPure(false, true, true));
 }
 
-fn clampBrowserSplitPermille(v: u32) u16 {
-    if (v < 50) return 50;
-    if (v > 950) return 950;
-    return @intCast(v);
-}
-
 pub fn browserSplitPermilleForActiveShell() u16 {
     if (app_state.active_shell >= app_state.shell_count) return BROWSER_SPLIT_DEFAULT_PERMILLE;
-    return clampBrowserSplitPermille(app_state.shells[app_state.active_shell].browser_split_permille);
+    return @min(app_state.shells[app_state.active_shell].browser_split_permille, 1000);
 }
 
 pub fn activeBrowserHwndLive() ?HANDLE {
@@ -891,14 +885,13 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
                     if (calcBrowserLayout()) |layout| {
                         var pt = POINT{ .x = layout.browser_x, .y = layout.browser_y };
                         if (ClientToScreen(app_state.g_main_hwnd, &pt) != 0) {
-                            const inset = paneFocusInset();
-                            const target_w = @max(@as(i32, 400), layout.browser_w - 2 * inset);
-                            const target_h = @max(@as(i32, 300), layout.browser_h - 2 * inset + browserNativeBottomOverrun());
+                            const target_w = @max(@as(i32, 1), layout.browser_w);
+                            const target_h = @max(@as(i32, 1), layout.browser_h);
                             var bounds_buf: [128]u8 = undefined;
                             const bounds = std.fmt.bufPrint(
                                 &bounds_buf,
                                 " --window-position={d},{d} --window-size={d},{d}",
-                                .{ pt.x + inset, pt.y + inset, target_w, target_h },
+                                .{ pt.x, pt.y, target_w, target_h },
                             ) catch "";
                             appendBrowserWideAscii(&params, &pos, bounds);
                             placed_at_pane = true;
@@ -1305,21 +1298,13 @@ pub fn setBrowserSplitFromMouse(x: i32) void {
     if (app_state.g_main_hwnd == null) return;
     var rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_main_hwnd, &rc);
-    const px = SIDEBAR_W();
-    const pw = rc.right - px;
-    if (pw <= BROWSER_SPLIT_W + 20) return;
-    var min_side: i32 = 200;
-    if (pw < min_side * 2 + BROWSER_SPLIT_W) {
-        min_side = @max(@as(i32, 40), @divTrunc(pw - BROWSER_SPLIT_W, 2));
-    }
-    var split_x = x;
-    const min_split = px + min_side;
-    const max_split = rc.right - min_side;
-    if (split_x < min_split) split_x = min_split;
-    if (split_x > max_split) split_x = max_split;
+    const style = @import("window_layout.zig");
+    const pane = style.paneRects(rc, SIDEBAR_W(), false, 0, 0).primary;
+    const available = @max(0, pane.right - pane.left - style.paneGap());
+    if (available == 0) return;
+    const width = style.clampPaneSplitWidth(available, x - pane.left - @divTrunc(style.paneGap(), 2));
     if (app_state.active_shell < app_state.shell_count) {
-        const raw_permille: u32 = @intCast(@divTrunc((split_x - px) * 1000 + @divTrunc(pw, 2), pw));
-        app_state.shells[app_state.active_shell].browser_split_permille = clampBrowserSplitPermille(raw_permille);
+        app_state.shells[app_state.active_shell].browser_split_permille = @intCast(@divTrunc(width * 1000 + @divTrunc(available, 2), available));
     }
 }
 
@@ -2464,12 +2449,11 @@ pub fn positionActiveBrowser() void {
     var pt = POINT{ .x = layout.browser_x, .y = layout.browser_y };
     if (ClientToScreen(app_state.g_main_hwnd, &pt) == 0) return;
     if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) {
-        const inset = paneFocusInset();
-        const target_w = @max(@as(i32, 1), layout.browser_w - 2 * inset);
-        const target_h = @max(@as(i32, 1), layout.browser_h - 2 * inset + browserNativeBottomOverrun());
-        browserTraceN("posBrowser SWP native x=", pt.x + inset);
-        const target_x = pt.x + inset;
-        const target_y = pt.y + inset;
+        const target_w = @max(@as(i32, 1), layout.browser_w);
+        const target_h = @max(@as(i32, 1), layout.browser_h);
+        browserTraceN("posBrowser SWP native x=", pt.x);
+        const target_x = pt.x;
+        const target_y = pt.y;
         if (browserWindowNeedsPosition(bh, target_x, target_y, target_w, target_h)) {
             setBrowserWindowPosAsync(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             browserTrace("posBrowser moved");
@@ -3078,12 +3062,9 @@ pub fn paintActivePaneBorder(hdc: HANDLE) void {
     if (!foregroundIsOurs()) return;
     if (chatViewOwnsInput() and !(activePaneBorderOn() and activeBrowserHasForegroundFocus())) {
         if (!browserSlotReserved()) return;
-        var slot = chatViewLayout().pane;
-        if (threadTitleHeight() > 0) slot.top = @min(slot.top, DEV_TOP_PAD);
-        if (calcBrowserLayout()) |bl| {
-            slot.top = bl.browser_y;
-            slot.bottom = bl.browser_y + bl.browser_h;
-        }
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(app_state.g_main_hwnd, &rc);
+        const slot = @import("window_layout.zig").activePaneRects(rc).primary;
         const pad = paneFocusRingPad();
         const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
         const old_pen = SelectObject(hdc, pen);
@@ -3609,11 +3590,10 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
         return;
     }
 
-    const inset = paneFocusInset();
-    const edge_x = pt.x + inset;
-    const edge_y = pt.y + inset;
-    const edge_w = layout.browser_w - 2 * inset;
-    const edge_h = layout.browser_h - 2 * inset + browserNativeBottomOverrun();
+    const edge_x = pt.x;
+    const edge_y = pt.y;
+    const edge_w = layout.browser_w;
+    const edge_h = layout.browser_h;
     if (edge_w <= 0 or edge_h <= 0) {
         hideBrowserEdgeMasks();
         return;
@@ -3908,12 +3888,11 @@ pub fn positionWebView2() void {
     if (!webView2OwnsActiveShell() or app_state.g_main_hwnd == null) return;
     const set_bounds = app_state.g_webview2_set_bounds orelse return;
     const layout = calcBrowserLayout() orelse return;
-    const inset = paneFocusInset();
     set_bounds(
-        layout.browser_x + inset,
-        layout.browser_y + inset,
-        @max(@as(i32, 1), layout.browser_w - 2 * inset),
-        @max(@as(i32, 1), layout.browser_h - 2 * inset),
+        layout.browser_x,
+        layout.browser_y,
+        @max(@as(i32, 1), layout.browser_w),
+        @max(@as(i32, 1), layout.browser_h),
     );
 }
 

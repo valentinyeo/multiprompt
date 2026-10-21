@@ -690,6 +690,7 @@ pub const ClosedShell = struct {
     was_manual: bool,
     was_sem: bool,
     closed_at: u64,
+    group: ?TabGroup = null,
     tmux_host: u8 = 0,
 };
 pub const MAX_CLOSED_HISTORY = 10;
@@ -2044,7 +2045,8 @@ pub const ReminderEntry = struct {
     group_id: u32 = 0,
     group_name: [64]u16 = std.mem.zeroes([64]u16),
     group_name_len: u32 = 0,
-    group_color: u8 = 0,
+    group_color: u8 = 7,
+    group_color_set: bool = false,
     group_collapsed: bool = false,
     pinned_top: bool = false,
     favorite: bool = false,
