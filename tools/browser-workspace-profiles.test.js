@@ -53,3 +53,10 @@ test('IGSH-224 finishing a seed copy cannot retain foreground authority after th
   const ready = pane.slice(start, pane.indexOf('\nfn launchBrowserForShellEx(', start));
   assert.match(ready, /job\.user_initiated and idx == app_state\.active_shell and foregroundIsOurs\(\) and !browserChromeHiddenForOverlay\(\)/);
 });
+
+test('IGSH-224 profile completion has its own native message ID', () => {
+  const declarations = [...(read('src/win32.zig') + '\n' + read('src/app_state.zig')).matchAll(/pub const (WM_APP_\w+): u32 = WM_APP \+ (\d+);/g)];
+  const profile = declarations.find(value => value[1] === 'WM_APP_BROWSER_PROFILE_READY');
+  assert.ok(profile);
+  assert.deepEqual(declarations.filter(value => value[2] === profile[2]).map(value => value[1]), ['WM_APP_BROWSER_PROFILE_READY']);
+});
