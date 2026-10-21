@@ -375,7 +375,7 @@ elif args[0] == "session-open":
 
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 try:
-    sock = socket.create_connection(("localhost", int(port)), timeout=5)
+    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=5)
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:

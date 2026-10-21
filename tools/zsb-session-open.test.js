@@ -13,14 +13,26 @@ function cli(argv, port) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [wrapper, ...argv], {
       env: { ...process.env, TMUX: '', ZSB_SESSION: '', ZSB_PORT: String(port) },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
+    let timedOut = false;
     child.stdout.on('data', chunk => stdout += chunk);
     child.stderr.on('data', chunk => stderr += chunk);
-    child.on('error', reject);
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-    child.on('close', code => {
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 30000);
+    child.once('error', error => {
       clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut || signal) {
+        reject(new Error(`zsb ${argv[0]} ${timedOut ? 'timed out' : `received ${signal}`}: stdout=${stdout} stderr=${stderr}`));
+        return;
+      }
       resolve({ code, stdout, stderr });
     });
   });
@@ -66,6 +78,11 @@ test('global and per-command help document workspace commands without session co
     assert.match(result.stdout, new RegExp(`usage: zsb ${command}`));
     if (command === 'session-open') assert.match(result.stdout, /background/);
   }
+});
+
+test('CLI transport connects directly to the IPv4 bridge without localhost address fallback', () => {
+  const source = fs.readFileSync(wrapper, 'utf8');
+  assert.match(source, /socket\.create_connection\(\("127\.0\.0\.1", int\(port\)\), timeout=5\)/);
 });
 
 test('workspace-list sends a session-independent app request and preserves the complete JSON result', async () => {
