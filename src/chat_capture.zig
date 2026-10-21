@@ -193,11 +193,20 @@ fn chatLineIsToolActivity(line: []const u16) bool {
     if (chatWideStartsWithAscii(body, "Task Output(")) return true;
     if (!has_marker) return false;
     const tool_prefixes = [_][]const u8{
-        "Read",     "Bash",   "Write",   "Edit",     "Glob",    "Grep",     "Task",      "Search",
-        "Searched", "Listed", "Explore", "Explored", "Monitor", "WebFetch", "WebSearch", "Called",
+        "Read",   "Bash",     "Write",  "Edit",    "Edited",   "Glob",    "Grep",     "Task",
+        "Search", "Searched", "Listed", "Explore", "Explored", "Monitor", "WebFetch", "WebSearch",
+        "Called",
     };
     for (tool_prefixes) |prefix| {
-        if (chatWideStartsWithAscii(body, prefix)) return true;
+        if (chatWideStartsWithAscii(body, prefix) and
+            (body.len == prefix.len or body[prefix.len] == '(' or body[prefix.len] == ' ' or body[prefix.len] == ':')) return true;
+    }
+    const progress_prefixes = [_][]const u8{ "Searching", "Reading", "Listing", "Editing", "Writing" };
+    for (progress_prefixes) |prefix| {
+        if (!chatWideStartsWithAscii(body, prefix)) continue;
+        const rest = body[prefix.len..];
+        const count_start: usize = if (chatWideStartsWithAscii(rest, " for ")) 5 else if (chatWideStartsWithAscii(rest, " ")) 1 else continue;
+        if (rest.len > count_start and rest[count_start] >= '0' and rest[count_start] <= '9') return true;
     }
     return false;
 }
