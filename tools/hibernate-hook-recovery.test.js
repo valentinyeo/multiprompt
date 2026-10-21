@@ -77,14 +77,17 @@ test("a dedicated input thread repairs stale hooks independently of window activ
     "the UI thread must force-cycle a non-null stale hook on sentinel evidence");
 });
 
-test("startup installs the keyboard hook only after synchronous session restoration", () => {
-  const mainStart = source.indexOf("pub fn main(init: std.process.Init) void");
-  const restore = source.indexOf("const restored = restoreSession();", mainStart);
+test("ISSUE-502 deferred startup installs the keyboard hook after session restoration", () => {
+  const deferred = source.indexOf("fn initializeDeferred(");
+  const restore = source.indexOf("const restored = restoreSession();", deferred);
   const ready = source.indexOf("if (shell_count > 0) {", restore);
-  const loop = source.indexOf("var msg: MSG = std.mem.zeroes(MSG);", ready);
-  assert.ok(mainStart >= 0 && restore > mainStart && ready > restore && loop > ready);
-  assert.doesNotMatch(source.slice(mainStart, restore), /\binstallHook\(\)/,
+  assert.ok(deferred >= 0 && restore > deferred && ready > restore);
+  assert.doesNotMatch(source.slice(deferred, restore), /\binstallHook\(\)/,
     "the UI hook must not sit blocked while dozens of consoles restore");
-  assert.match(source.slice(ready, loop), /forceReinstallHooks\(\)/,
-    "startup must force-cycle any stale handle immediately before the message loop");
+  assert.match(source.slice(ready), /forceReinstallHooks\(\)/);
+  const dispatch = source.slice(source.indexOf("if (msg == launch_cache.WM_DEFERRED)"));
+  assert.match(dispatch, /launch_cache\.deferred\(\);\s*initializeDeferred\(hwnd\);/);
+  const mainStart = source.indexOf("pub fn main(init: std.process.Init) void");
+  const loop = source.indexOf("var msg: MSG = std.mem.zeroes(MSG);", mainStart);
+  assert.ok(loop > mainStart && loop < deferred, "the message loop must exist before deferred restore");
 });

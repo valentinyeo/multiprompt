@@ -25,9 +25,54 @@ tools/install-laptop1.sh --release vX.Y.Z --bench <results.json>
 tools/install-laptop1.sh --extension-only --release vX.Y.Z
 ```
 
-The installer downloads assets from `valentinyeo/multiprompt`, verifies GitHub asset digests and `SHA256SUMS.txt`, validates the bench receipt, then uploads and hashes the PC copies. It trusts the published version tag; no source checkout is needed on the PC. The running exe is renamed aside with the existing backup retention, not restarted. The extension ZIP is expanded into the app's extension folder without replacing `themes/current`. A running Zig process before or after installation fails the install; a successful install prints `NO_ZIG_ON_LAPTOP <tag>` and `EXTENSION_OK`.
+The installer downloads assets from `valentinyeo/multiprompt`, verifies GitHub asset digests and `SHA256SUMS.txt`, validates the bench receipt, then uploads and hashes the PC copies. It trusts the published version tag; no source checkout is needed on the PC. Before uploading, it reads the installed exe’s `MPVERSION` marker (falling back to file version, then embedded title) and refuses equal, older, or unreadable versions unless `--allow-downgrade` is passed; `--extension-only` skips this check. The running exe is renamed aside with the existing backup retention, not restarted. The extension ZIP is expanded into the app's extension folder without replacing `themes/current`. A running Zig process before or after installation fails the install; a successful install prints `NO_ZIG_ON_LAPTOP <tag>` and `EXTENSION_OK`.
 
 The bridge now makes the running extension reload itself when it sees the installed bridge's newer version; the installer falls back to `extension-reload` and polling only if the first check fails.
+
+### Get a GitHub bench receipt for a release
+
+The chat bench runs on GitHub Actions, using Linux/Wine in WSL2 on `windows-latest`, not native Windows acceptance. Dispatch both A/B slots for the release you want to install. One run per slot is enough for an installable receipt: each run uses the full default config, not smoke settings.
+
+```sh
+tag=v0.28.789
+gh workflow run chat-bench-ab.yml --repo valentinyeo/multiprompt --ref master -f tag_a="$tag" -f tag_b="$tag" -f runs=1
+gh run list --repo valentinyeo/multiprompt --workflow chat-bench-ab.yml --event workflow_dispatch --limit 5
+```
+
+Take the run ID matching your dispatch, then watch and download its evidence:
+
+```sh
+run_id=<run-id>
+gh run watch "$run_id" --repo valentinyeo/multiprompt --interval 60 --exit-status
+gh run download "$run_id" --repo valentinyeo/multiprompt --name chat-bench-ab --dir "bench-$tag"
+```
+
+A successful workflow or A/B summary does not guarantee a PASS receipt. Use the artifact's manifest to find a clean PASS `results.json` for the requested tag:
+
+```sh
+node --input-type=module - "bench-$tag" "$tag" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+const [dir, tag] = process.argv.slice(2);
+const passes = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'))
+  .filter(entry => entry.tag === tag)
+  .map(entry => path.join(dir, entry.path))
+  .filter(file => {
+    const run = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return run.binary?.version === tag.slice(1) && run.status === 'PASS' && run.pass === true && Array.isArray(run.failures) && run.failures.length === 0;
+  });
+if (!passes.length) throw new Error(`No clean PASS receipt for ${tag}`);
+console.log(passes.join('\n'));
+NODE
+```
+
+Install with a printed path, for example:
+
+```sh
+tools/install-laptop1.sh --release "$tag" --bench "bench-$tag/runs/A-$tag-1/results.json"
+```
+
+If only B passed, use its printed path instead. The installer validates the receipt against the release executable it downloaded and SHA-checked, not the GitHub runner's recorded executable path. It leaves the original receipt unchanged and still rejects mismatched executable hashes, non-default configs, stale runner hashes, invalid PE files and failed or incomplete verdicts. The artifact records its bench tooling revision in `tooling-commit.txt`; if bench tooling changes, obtain a fresh receipt rather than weakening runner-hash checks.
 
 ### Wine rendering prerequisite
 

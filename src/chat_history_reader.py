@@ -7,7 +7,10 @@ import hashlib
 import json
 import mmap
 import os
-import pwd
+try:
+    import pwd
+except ImportError:
+    pwd = None
 import re
 import subprocess
 import sys
@@ -48,6 +51,8 @@ def claude_config_dirs(home):
     return ([Path(configured).expanduser()] if configured else []) + [home / ".claude", home / ".config/claude"]
 
 def conversation_owner(cwd):
+    if pwd is None:
+        return None
     parts = Path(cwd).parts
     if (len(parts) < 4 or parts[:2] != ("/", "home") or ".." in parts or
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", parts[2])):
@@ -236,7 +241,8 @@ def local_ssh_process_table(root=Path("/proc")):
     return link_local_ssh(table, connections)
 
 def tmux_owner_process(agent, name, source):
-
+    if pwd is None:
+        return None
     try:
         panes = subprocess.run(["tmux", "list-panes", "-t", "=" + name, "-F", "#{pane_pid}"],
                                capture_output=True, text=True, timeout=3, check=False)
@@ -593,6 +599,31 @@ def tool_events(event, agent, search=False):
     return rows
 
 
+def conversation_rows(event, agent, offset=0, search=False):
+    message = conversation_event(event, agent)
+    tools = tool_events(event, agent, search=search)
+    if not tools or agent != "claude" or event.get("type") != "assistant":
+        return ([message] if message else []) + tools
+    content = event["message"]["content"]
+    rows = []
+    start = 0
+    for index in range(len(content) + 1):
+        part_event = dict(event, message=dict(event["message"], content=content[index:index + 1]))
+        tools = tool_events(part_event, agent, search=search) if index < len(content) else []
+        if index < len(content) and not tools:
+            continue
+        text_event = dict(event, message=dict(event["message"], content=content[start:index]))
+        text = conversation_event(text_event, agent)
+        if text:
+            text["segment"] = start
+            if rows or not text["id"]:
+                text["id"] = f"{text['id']}:text:{offset}:{start}"
+            rows.append(text)
+        rows.extend(tools)
+        start = index + 1
+    return rows
+
+
 def pair_tool_rows(rows):
     calls = {row["id"]: row for row in rows if row["role"] == "tool"}
     inputs = {identity: row["detail"] for identity, row in calls.items()}
@@ -667,16 +698,11 @@ def read_tail(source, size, agent, captured=None):
     offset = base
     for raw in reversed(older.splitlines(keepends=True)):
         offset -= len(raw)
-        message = conversation_event(json.loads(raw), agent)
-        if message is None:
-            shown += sum(len(wire_row(row)) + 1 for row in tool_events(json.loads(raw), agent))
-            if shown > TAIL_BYTES:
-                break
-            continue
-        shown += sum(len(wire_row(row)) + 1 for row in [message, *tool_events(json.loads(raw), agent)])
+        messages = conversation_rows(json.loads(raw), agent, offset)
+        shown += sum(len(wire_row(row)) + 1 for row in messages)
         if shown > TAIL_BYTES:
             break
-        if message.get("role") == "user":
+        if any(row["role"] == "user" for row in messages):
             return offset, end, older[offset - start:] + data
     return base, end, data
 
@@ -940,13 +966,12 @@ def search_response(q, path, agent, sid):
                         event = json.loads(raw)
                     except (ValueError, UnicodeError):
                         continue
-                    message = conversation_event(event, agent)
-                    if message and needle in message["text"].casefold():
-                        selected.add(offset)
-                    for row in tool_events(event, agent, search=True):
-                        if needle not in (row["text"] + "\n" + row["detail"]).casefold():
+                    for row in conversation_rows(event, agent, offset, search=True):
+                        if needle not in (row["text"] + "\n" + row.get("detail", "")).casefold():
                             continue
                         selected.add(offset)
+                        if not row["role"].startswith("tool"):
+                            continue
                         identity = row["id"]
                         if not identity.isascii() or any(ord(char) < 32 or char in '"\\/' for char in identity):
                             token = b""
@@ -993,8 +1018,7 @@ def search_response(q, path, agent, sid):
             except (ValueError, UnicodeError):
                 offset = end
                 continue
-            message = conversation_event(event, agent)
-            rows = ([message] if message else []) + tool_events(event, agent, search=True)
+            rows = conversation_rows(event, agent, offset, search=True)
             for row in rows:
                 text = row.get("text", "")
                 if row["role"] == "tool":
@@ -1028,6 +1052,8 @@ def search_response(q, path, agent, sid):
                 start = max(0, match - 60)
                 hit = dict(offset=offset, end=end, role="tool" if row["role"].startswith("tool") else row["role"],
                            timestamp=row["timestamp"], snippet=text[start:start + 160])
+                if "segment" in row:
+                    hit["segment"] = row["segment"]
                 hits.append(hit)
                 if row["role"] == "tool":
                     calls[row["id"]].update(hit=hit, match_end=match + len(query))
@@ -1110,7 +1136,8 @@ def response(q, source=None, as_owner=False):
         consumed = base
         for raw in data.splitlines(keepends=True):
             event = json.loads(raw)
-            message = conversation_event(event, agent)
+            messages = conversation_rows(event, agent, consumed)
+            message = next((row for row in messages if row["role"] in ("user", "assistant")), None)
             if ISSUE_349_QUEUED_STAMP_FROM_QUEUE and agent == "claude" and isinstance(event, dict):
                 attachment = event.get("attachment") or {}
                 queued = event.get("type") == "attachment" and isinstance(attachment, dict) and attachment.get("type") == "queued_command"
@@ -1128,8 +1155,9 @@ def response(q, source=None, as_owner=False):
                     elif operation in ("enqueue", "remove") and stamp >= previous[0]:
                         queue_stamps[content] = (stamp, timestamp)
             if message is None and q.get("settlement"):
-                message = settlement_event(event, agent)
-            messages = ([message] if message else []) + tool_events(event, agent)
+                fact = settlement_event(event, agent)
+                if fact:
+                    messages.insert(0, fact)
             if q.get("source_offsets"):
                 for row in messages:
                     row.update(offset=consumed, end=consumed + len(raw))
@@ -1342,7 +1370,7 @@ elif __name__ == "__main__":
 
         if "--discover" in sys.argv[2:]:
             pid = agent_pid_for_panes(query["panes"], local_ssh_process_table(), query["agent"])
-            user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid) if pid is not None else None
+            user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid) if pid is not None and pwd is not None else None
             print(json.dumps(dict(pid=pid, user=user.pw_name) if user else None))
         else:
             handler = settle_response if query.get("op") == "settle" else response
