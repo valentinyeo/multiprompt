@@ -32,10 +32,12 @@ function responsiveOrdering(main, consoleSource, session) {
   const spawn = body(consoleSource, 'spawnShellWithSession');
   const asyncStart = spawn.indexOf('if (asynchronous) {');
   assert.notEqual(asyncStart, -1);
-  const asyncPath = spawn.slice(asyncStart, spawn.indexOf('\n    } else {', asyncStart));
+  const asyncPath = spawn.slice(asyncStart, spawn.indexOf('\n    }\n', asyncStart));
   assert.match(asyncPath, /Thread\.spawn\([\s\S]*startupShellWorker/);
   assert.match(asyncPath, /GetEnvironmentStringsW/);
   assert.doesNotMatch(asyncPath, /CreateProcessW|Sleep\(|WaitFor|FindWindowW/);
+  assert.match(spawn, /if \(!asynchronous and CreateProcessW/);
+  assert.match(spawn, /while \(!asynchronous and attempts < 50\)/);
   const worker = body(consoleSource, 'startupShellWorker');
   assert.match(worker, /CreateProcessW/);
   assert.match(worker, /WaitForSingleObject/);

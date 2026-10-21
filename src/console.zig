@@ -1751,128 +1751,6 @@ pub fn notifyTabCapReached() void {
     showHeaderNoticeAscii("Tab limit reached (256) - close a tab", 4000, true);
 }
 
-pub const WM_STARTUP_SHELL_READY = 0x8000 + 543;
-pub const TIMER_STARTUP_SHELL = 0x544;
-pub var startup_inflight = std.atomic.Value(u32).init(0);
-var startup_completed: ?*StartupShell = null;
-var startup_completed_tail: ?*StartupShell = null;
-
-pub const StartupShell = struct {
-    shell_id: u32,
-    kind: ShellKind,
-    owner: HANDLE,
-    job: HANDLE,
-    command: [2048]u16,
-    cwd: [512]u16,
-    has_cwd: bool,
-    environment: [*:0]u16,
-    process: HANDLE = null,
-    pid: DWORD = 0,
-    hwnd: HANDLE = null,
-    next: ?*StartupShell = null,
-};
-
-fn startupShellWorker(job: *StartupShell) void {
-    const win = @import("win32.zig");
-    const environment = job.environment;
-    defer _ = win.FreeEnvironmentStringsW(environment);
-    var si = std.mem.zeroes(STARTUPINFOW);
-    si.cb = @sizeOf(STARTUPINFOW);
-    si.lpTitle = SPAWN_TITLES[job.shell_id];
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = @intCast(SW_HIDE);
-    var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    if (CreateProcessW(null, @ptrCast(&job.command), null, null, 0, CREATE_NEW_CONSOLE | 0x400, @ptrCast(job.environment), if (job.has_cwd) @ptrCast(&job.cwd) else null, &si, &pi) != 0) {
-        _ = CloseHandle(pi.hThread);
-        job.process = pi.hProcess;
-        job.pid = pi.dwProcessId;
-        if (job.job != null) _ = AssignProcessToJobObject(job.job, pi.hProcess);
-        for (0..50) |attempt| {
-            if (job.kind == .gitbash) {
-                job.hwnd = findWindowByClassAndPid(job.pid, "mintty") orelse null;
-            } else {
-                job.hwnd = FindWindowW(null, SPAWN_TITLES[job.shell_id]);
-                if (job.hwnd == null and attempt >= 5) job.hwnd = findConsoleWindowByPid(job.pid) orelse null;
-            }
-            if (job.hwnd != null) break;
-            if (WaitForSingleObject(job.process, 100) == 0) break;
-        }
-        if (job.hwnd != null) {
-            _ = ShowWindow(job.hwnd, SW_HIDE);
-            _ = SetParent(job.hwnd, job.owner);
-            var style = GetWindowLongPtrW(job.hwnd, GWL_STYLE);
-            style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
-            style |= @as(isize, @intCast(WS_CHILD));
-            _ = SetWindowLongPtrW(job.hwnd, GWL_STYLE, style);
-            _ = SetWindowPos(job.hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
-        }
-    }
-    if (job.hwnd == null and job.process != null and !isRemoteShellKind(job.kind)) {
-        _ = TerminateProcess(job.process, 1);
-        _ = CloseHandle(job.process);
-        job.process = null;
-        job.pid = 0;
-    }
-    if (PostMessageW(job.owner, WM_STARTUP_SHELL_READY, 0, @bitCast(@intFromPtr(job))) == 0) {
-        discardStartupShell(job);
-        _ = startup_inflight.fetchSub(1, .acq_rel);
-    }
-}
-
-fn discardStartupShell(job: *StartupShell) void {
-    if (job.process != null) {
-        _ = TerminateProcess(job.process, 1);
-        _ = CloseHandle(job.process);
-    }
-    std.heap.page_allocator.destroy(job);
-}
-
-pub fn queueStartupShell(job: *StartupShell) void {
-    if (startup_completed_tail) |tail| tail.next = job else startup_completed = job;
-    startup_completed_tail = job;
-    _ = @import("win32.zig").SetTimer(job.owner, TIMER_STARTUP_SHELL, 10, null);
-}
-
-pub fn startupShellTick(hwnd: HANDLE) void {
-    const job = startup_completed orelse {
-        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
-        return;
-    };
-    startup_completed = job.next;
-    if (startup_completed == null) {
-        startup_completed_tail = null;
-        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
-    }
-    finishStartupShell(job);
-}
-
-pub fn finishStartupShell(job: *StartupShell) void {
-    defer _ = startup_inflight.fetchSub(1, .acq_rel);
-    const idx = findShellById(job.shell_id) orelse {
-        discardStartupShell(job);
-        return;
-    };
-    if (app_state.g_app_closing or app_state.g_account_locked) {
-        discardStartupShell(job);
-        return;
-    }
-    defer std.heap.page_allocator.destroy(job);
-    app_state.shells[idx].process = job.process;
-    app_state.shells[idx].pid = job.pid;
-    app_state.shells[idx].hwnd = job.hwnd;
-    if (job.process != null) registerShellExitWait(idx);
-    if (job.hwnd == null) {
-        if (isRemoteShellKind(job.kind)) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
-        return;
-    }
-    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);
-    if (idx == app_state.active_shell) {
-        _ = showShellConsole(idx, SW_SHOW, "startup-shell-ready");
-        repositionActive();
-    }
-    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-}
-
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
     if (app_state.g_account_locked) return false;
     if (tmux_session) |session| {
@@ -1946,7 +1824,6 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     }
 
     const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying;
-    var cmd_hwnd: HANDLE = null;
     if (asynchronous) {
         const job = std.heap.page_allocator.create(StartupShell) catch return false;
         const environment = @import("win32.zig").GetEnvironmentStringsW() orelse {
@@ -1962,56 +1839,58 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             return false;
         };
         thread.detach();
-        app_state.next_shell_id += 1;
-    } else {
-        if (CreateProcessW(null, cmd_ptr, null, null, 0, CREATE_NEW_CONSOLE, null, cwd_ptr, &si, &pi) == 0) {
-            if (isRemoteShellKind(kind)) sshSpawnFailed();
-            debugLog("spawnShell: CreateProcessW FAILED");
-            return false;
-        }
+    }
+
+    if (!asynchronous and CreateProcessW(null, cmd_ptr, null, null, 0, CREATE_NEW_CONSOLE, null, cwd_ptr, &si, &pi) == 0) {
+        if (isRemoteShellKind(kind)) sshSpawnFailed();
+        debugLog("spawnShell: CreateProcessW FAILED");
+        return false;
+    }
+    if (!asynchronous) {
         _ = CloseHandle(pi.hThread);
         if (app_state.g_job != null) _ = AssignProcessToJobObject(app_state.g_job, pi.hProcess);
-        app_state.next_shell_id += 1;
+    }
+    app_state.next_shell_id += 1;
 
-        var attempts: u32 = 0;
-        while (attempts < 50) : (attempts += 1) {
-            Sleep(100);
-            if (kind == .gitbash) {
-                if (findWindowByClassAndPid(pi.dwProcessId, "mintty")) |found| {
+    var cmd_hwnd: HANDLE = null;
+    var attempts: u32 = 0;
+    while (!asynchronous and attempts < 50) : (attempts += 1) {
+        Sleep(100);
+        if (kind == .gitbash) {
+            if (findWindowByClassAndPid(pi.dwProcessId, "mintty")) |found| {
+                cmd_hwnd = found;
+                break;
+            }
+        } else {
+            cmd_hwnd = FindWindowW(null, SPAWN_TITLES[title_id]);
+            if (cmd_hwnd != null) break;
+            if (attempts >= 5) {
+                if (findConsoleWindowByPid(pi.dwProcessId)) |found| {
                     cmd_hwnd = found;
                     break;
                 }
-            } else {
-                cmd_hwnd = FindWindowW(null, SPAWN_TITLES[title_id]);
-                if (cmd_hwnd != null) break;
-                if (attempts >= 5) {
-                    if (findConsoleWindowByPid(pi.dwProcessId)) |found| {
-                        cmd_hwnd = found;
-                        break;
-                    }
-                }
             }
         }
+    }
 
-        if (cmd_hwnd == null and !isRemoteShellKind(kind)) {
-            _ = TerminateProcess(pi.hProcess, 1);
-            _ = CloseHandle(pi.hProcess);
-            return false;
-        }
+    if (!asynchronous and cmd_hwnd == null and !isRemoteShellKind(kind)) {
+        _ = TerminateProcess(pi.hProcess, 1);
+        _ = CloseHandle(pi.hProcess);
+        return false;
+    }
 
-        if (cmd_hwnd != null and kind != .gitbash) {
-            applyBlackConsoleBackground(pi.dwProcessId);
-        }
+    if (cmd_hwnd != null and kind != .gitbash) {
+        applyBlackConsoleBackground(pi.dwProcessId);
+    }
 
-        if (cmd_hwnd != null) {
-            _ = ShowWindow(cmd_hwnd, SW_HIDE);
-            _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
-            var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
-            style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
-            style |= @as(isize, @intCast(WS_CHILD));
-            _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
-            _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
-        }
+    if (cmd_hwnd != null) {
+        _ = ShowWindow(cmd_hwnd, SW_HIDE);
+        _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
+        var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
+        style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
+        style |= @as(isize, @intCast(WS_CHILD));
+        _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
+        _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
     }
 
     app_state.shells[idx] = .{
@@ -2064,10 +1943,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
     if (!app_state.g_restoring) app_state.shells[idx].last_active = nowFileTime();
-    if (!asynchronous) {
-        registerShellExitWait(idx);
-        if (cmd_hwnd == null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
-    }
+    registerShellExitWait(idx);
+    if (cmd_hwnd == null and pi.hProcess != null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
 
     if (!app_state.g_restoring) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
@@ -2782,4 +2659,126 @@ pub fn nthVisibleShell(n: u32) ?u32 {
         count += 1;
     }
     return null;
+}
+
+pub const WM_STARTUP_SHELL_READY = 0x8000 + 543;
+pub const TIMER_STARTUP_SHELL = 0x544;
+pub var startup_inflight = std.atomic.Value(u32).init(0);
+var startup_completed: ?*StartupShell = null;
+var startup_completed_tail: ?*StartupShell = null;
+
+pub const StartupShell = struct {
+    shell_id: u32,
+    kind: ShellKind,
+    owner: HANDLE,
+    job: HANDLE,
+    command: [2048]u16,
+    cwd: [512]u16,
+    has_cwd: bool,
+    environment: [*:0]u16,
+    process: HANDLE = null,
+    pid: DWORD = 0,
+    hwnd: HANDLE = null,
+    next: ?*StartupShell = null,
+};
+
+fn startupShellWorker(job: *StartupShell) void {
+    const win = @import("win32.zig");
+    const environment = job.environment;
+    defer _ = win.FreeEnvironmentStringsW(environment);
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    si.lpTitle = SPAWN_TITLES[job.shell_id];
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = @intCast(SW_HIDE);
+    var pi = std.mem.zeroes(PROCESS_INFORMATION);
+    if (CreateProcessW(null, @ptrCast(&job.command), null, null, 0, CREATE_NEW_CONSOLE | 0x400, @ptrCast(job.environment), if (job.has_cwd) @ptrCast(&job.cwd) else null, &si, &pi) != 0) {
+        _ = CloseHandle(pi.hThread);
+        job.process = pi.hProcess;
+        job.pid = pi.dwProcessId;
+        if (job.job != null) _ = AssignProcessToJobObject(job.job, pi.hProcess);
+        for (0..50) |attempt| {
+            if (job.kind == .gitbash) {
+                job.hwnd = findWindowByClassAndPid(job.pid, "mintty") orelse null;
+            } else {
+                job.hwnd = FindWindowW(null, SPAWN_TITLES[job.shell_id]);
+                if (job.hwnd == null and attempt >= 5) job.hwnd = findConsoleWindowByPid(job.pid) orelse null;
+            }
+            if (job.hwnd != null) break;
+            if (WaitForSingleObject(job.process, 100) == 0) break;
+        }
+        if (job.hwnd != null) {
+            _ = ShowWindow(job.hwnd, SW_HIDE);
+            _ = SetParent(job.hwnd, job.owner);
+            var style = GetWindowLongPtrW(job.hwnd, GWL_STYLE);
+            style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
+            style |= @as(isize, @intCast(WS_CHILD));
+            _ = SetWindowLongPtrW(job.hwnd, GWL_STYLE, style);
+            _ = SetWindowPos(job.hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+        }
+    }
+    if (job.hwnd == null and job.process != null and !isRemoteShellKind(job.kind)) {
+        _ = TerminateProcess(job.process, 1);
+        _ = CloseHandle(job.process);
+        job.process = null;
+        job.pid = 0;
+    }
+    if (PostMessageW(job.owner, WM_STARTUP_SHELL_READY, 0, @bitCast(@intFromPtr(job))) == 0) {
+        discardStartupShell(job);
+        _ = startup_inflight.fetchSub(1, .acq_rel);
+    }
+}
+
+fn discardStartupShell(job: *StartupShell) void {
+    if (job.process != null) {
+        _ = TerminateProcess(job.process, 1);
+        _ = CloseHandle(job.process);
+    }
+    std.heap.page_allocator.destroy(job);
+}
+
+pub fn queueStartupShell(job: *StartupShell) void {
+    if (startup_completed_tail) |tail| tail.next = job else startup_completed = job;
+    startup_completed_tail = job;
+    _ = @import("win32.zig").SetTimer(job.owner, TIMER_STARTUP_SHELL, 10, null);
+}
+
+pub fn startupShellTick(hwnd: HANDLE) void {
+    const job = startup_completed orelse {
+        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
+        return;
+    };
+    startup_completed = job.next;
+    if (startup_completed == null) {
+        startup_completed_tail = null;
+        _ = @import("win32.zig").KillTimer(hwnd, TIMER_STARTUP_SHELL);
+    }
+    finishStartupShell(job);
+}
+
+pub fn finishStartupShell(job: *StartupShell) void {
+    defer _ = startup_inflight.fetchSub(1, .acq_rel);
+    const idx = findShellById(job.shell_id) orelse {
+        discardStartupShell(job);
+        return;
+    };
+    if (app_state.g_app_closing or app_state.g_account_locked) {
+        discardStartupShell(job);
+        return;
+    }
+    defer std.heap.page_allocator.destroy(job);
+    app_state.shells[idx].process = job.process;
+    app_state.shells[idx].pid = job.pid;
+    app_state.shells[idx].hwnd = job.hwnd;
+    if (job.process != null) registerShellExitWait(idx);
+    if (job.hwnd == null) {
+        if (isRemoteShellKind(job.kind)) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
+        return;
+    }
+    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);
+    if (idx == app_state.active_shell) {
+        _ = showShellConsole(idx, SW_SHOW, "startup-shell-ready");
+        repositionActive();
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }

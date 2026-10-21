@@ -254,11 +254,11 @@ fn sshProbeThread(_: *SshProbeJob) void {}
 
 function startupRuntime(tests) {
   const spawn = body('spawnShellWithSession');
-  const start = spawn.indexOf('    if (CreateProcessW(');
+  const start = spawn.indexOf('    if (!asynchronous and CreateProcessW(');
   const end = spawn.indexOf('    var style = GetWindowLongPtrW(', start);
   assert.ok(start >= 0 && end > start);
   const acquisition = spawn.slice(start, end).replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
-  const registrationStart = spawn.indexOf('    if (!asynchronous) {');
+  const registrationStart = spawn.indexOf('    registerShellExitWait(idx);');
   const registrationEnd = spawn.indexOf('\n\n    if (!', registrationStart);
   assert.ok(registrationStart >= 0 && registrationEnd > registrationStart);
   const registration = spawn.slice(registrationStart, registrationEnd).replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect');
@@ -289,7 +289,6 @@ fn spawnStartup(kind: ShellKind) bool {
     const cmd_ptr = null;
     const cwd_ptr = null;
     const asynchronous = false;
-    var cmd_hwnd: HANDLE = null;
     var si: STARTUPINFOW = .{};
     var pi: PROCESS_INFORMATION = .{};
 ${acquisition}

@@ -33,13 +33,14 @@ function handler(name, next, signature) {
 
 function creation(name, signature) {
   const body = fn(consoleSource, name);
-  const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(').replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
+  const start = name === 'spawnShellWithSession' ? '    if (!asynchronous and CreateProcessW(' : '    if (CreateProcessW(';
+  const block = between(body, start, '    var style = GetWindowLongPtrW(').replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
     var si = std.mem.zeroes(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     const cmd_ptr = L("shell");
-    ${name === 'spawnShellWithSession' ? 'const cwd_ptr = null; var cmd_hwnd: HANDLE = null;' : ''}
+    ${name === 'spawnShellWithSession' ? 'const cwd_ptr = null; const asynchronous = false;' : ''}
     ${block}
     installConsole(pi.dwProcessId, kind, slot);
     return true;
