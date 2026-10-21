@@ -28,12 +28,14 @@ function harness() {
     setTimeout(callback, ms) { const id = ++timerId; timers.set(id, { callback, ms }); return id; },
     clearTimeout(id) { timers.delete(id); },
     rememberTargetWindow: async () => {},
-    getTargetTab: async () => ({ id: 7, windowId: 42 }),
+    getRememberedZsbTargetTab: async () => ({ id: 7, windowId: 42, active: false }),
+    isExtensionTab: () => false,
+    isPaneBeaconTab: () => false,
     compactTab: tab => tab,
     messageWindowId: message => message.windowId ?? null,
     stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     chrome: {
-      tabs: { query: async () => [{ id: 7, windowId: 42 }] },
+      tabs: { query: async () => [{ id: 7, windowId: 42 }], get: async id => ({ id, windowId: 42, active: false }) },
       windows: { WINDOW_ID_NONE: -1 },
       debugger: {
         attach: async () => { calls.push('attach'); },
@@ -61,6 +63,7 @@ function harness() {
     section(extension, 'function withTimeout(', 'async function handleCreatedNavigationTarget(') +
     section(extension, 'function clearScreenshotCdpDetachTimer(', 'async function tryAcceptPendingDialog(') +
     section(extension, 'async function sendCdp(', 'async function consoleAction(') +
+    section(extension, 'async function getTargetTab(', 'function rememberZsbTargetTab(') +
     '\nglobalThis.api = { withCdpSession, handleHostMessage, dispatch, connect };', context);
   const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
   return { context, calls, replies, ports, timers, api: context.api, flush,
@@ -81,6 +84,7 @@ test('ISSUE-154 a hung CDP request cannot queue later commands, including its ow
   h.context.chrome.debugger.sendCommand = async (_, method) => method === 'Runtime.evaluate' ? never() : {};
   const first = h.api.handleHostMessage({ id: 'hung', method: 'cdp', cdpMethod: 'Runtime.evaluate', windowId: 42 });
   await h.flush();
+  vm.runInContext('focusEmulatedTabs.clear()', h.context);
   const next = h.api.handleHostMessage({ id: 'next', method: 'activeTab', windowId: 42 });
   await h.flush();
   assert.equal(h.replies.find(reply => reply.id === 'next')?.ok, true);
@@ -250,4 +254,55 @@ test('ISSUE-154 real Windows CLI times out a missing CDP reply while another req
   assert.equal(expired.signal, null, 'native client must time out without the test killing it');
   assert.equal(JSON.parse(expired.stdout).ok, false);
   assert.match(JSON.parse(expired.stdout).error, /deadline exceeded.*zsb reset/);
+});
+
+test('ISSUE-154 native host still answers ping when a reply-pipe client never reads', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
+  const sockets = new Set();
+  const pipe = `\\.\pipe\multiprompt-deadline-unread-${process.pid}`;
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    socket.pause();
+    socket.on('error', () => {});
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise(resolve => server.listen(pipe, resolve));
+  const child = spawn(process.env.BRIDGE_EXE || path.join(root, 'zig-out/bin/zigshell-bridge.exe'), ['--profile', `unread-${process.pid}`, 'native']);
+  let buffer = Buffer.alloc(0), stderr = '';
+  const waiters = [];
+  child.stderr.on('data', data => stderr += data);
+  child.stdout.on('data', data => {
+    buffer = Buffer.concat([buffer, data]);
+    while (buffer.length >= 4 && buffer.length >= buffer.readUInt32LE(0) + 4) {
+      const size = buffer.readUInt32LE(0);
+      const message = JSON.parse(buffer.subarray(4, size + 4));
+      buffer = buffer.subarray(size + 4);
+      const waiter = waiters.find(item => item.matches(message));
+      if (waiter) { clearTimeout(waiter.timer); waiter.resolve(message); waiters.splice(waiters.indexOf(waiter), 1); }
+    }
+  });
+  const waitFor = matches => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`native host stopped answering: ${stderr}`)), 4000);
+    waiters.push({ matches, resolve, timer });
+  });
+  const exited = new Promise(resolve => child.once('close', resolve));
+  t.after(async () => {
+    for (const waiter of waiters) clearTimeout(waiter.timer);
+    child.stdin.end();
+    const kill = setTimeout(() => child.kill('SIGKILL'), 1000);
+    await exited;
+    clearTimeout(kill);
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const send = message => {
+    const bytes = Buffer.from(JSON.stringify(message));
+    const header = Buffer.alloc(4);
+    header.writeUInt32LE(bytes.length);
+    child.stdin.write(Buffer.concat([header, bytes]));
+  };
+  await waitFor(message => Boolean(message.bridgeVersion));
+  send({ id: 'unread', replyPipe: pipe, ok: true, result: 'x'.repeat(1024 * 1024) });
+  const ping = waitFor(message => message.id === 'ping');
+  send({ id: 'ping', method: 'ping' });
+  assert.equal((await ping).result.pong, true);
 });
