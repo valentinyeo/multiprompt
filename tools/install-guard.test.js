@@ -68,6 +68,7 @@ else if (command.includes("-ArgumentList 'tabs'")) {
   const mode = process.env.LH_TEST_EXTENSION;
   console.log(JSON.stringify({ extensionVersion: mode === 'stuck' || (mode === 'fallback' && !reloaded) || (mode === 'healed-after-first' && firstTabs) ? '1.0.98' : '1.0.99' }));
 }
+else if (command === '$env:USERPROFILE') console.log('C:\\\\Users\\\\tester');
 else if (command.includes('manifest.json')) console.log('1.0.99');
 else if (!/release-upload|Rename-Item|extension-reload/.test(command)) process.exit(2);
 `, { mode: 0o755 });
@@ -275,6 +276,7 @@ test('installer downloads latest, uploads bounded chunks, hashes every asset and
   assert.match(install, /Copy-Item "\$s\\zigshell-bridge-x64\.exe"/);
   assert.match(install, /multiprompt-stable-\$v-\$t\.exe/);
   assert.match(install, /Select -Skip 5/);
+  assert.ok(install.includes("$b='C:\\Users\\tester\\Documents\\GitHub\\zigshell\\zig-out\\bin'"));
   const expand = result.calls.find(args => args[1].includes('Expand-Archive'))[1];
   assert.match(expand, /themes\\current/);
   assert.equal(result.calls.filter(args => args[1].includes('Get-Process zig')).length, 2);
