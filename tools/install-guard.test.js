@@ -195,6 +195,26 @@ for (const mode of ['failed', 'invalid', 'missing', 'different-binary']) {
   });
 }
 
+for (const matchingHash of [true, false]) {
+  test(`IGSH-530 GitHub receipt ${matchingHash ? 'accepts the verified release' : 'rejects a different release hash'}`, async t => {
+    const f = await setup(t);
+    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multiprompt.exe';
+    if (!matchingHash) f.run.binary.exeSha256 = '0'.repeat(64);
+    f.save();
+    const original = fs.readFileSync(f.receipt, 'utf8');
+    const result = f.install(['--release', 'v0.28.739', '--bench', f.receipt]);
+    assert.equal(result.status, matchingHash ? 0 : 1, result.stderr);
+    assert.equal(fs.readFileSync(f.receipt, 'utf8'), original);
+    if (matchingHash) {
+      assert.match(result.stdout, /RECEIPT_OK/);
+      assert(result.calls.some(call => call[1]?.includes('Rename-Item')));
+    } else {
+      assert.match(result.stderr, /expected executable SHA-256 does not match receipt/);
+      assert.deepEqual(result.calls, []);
+    }
+  });
+}
+
 for (const name of ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip', 'SHA256SUMS.txt']) {
   test(`installer refuses GitHub digest mismatch for ${name}`, async t => {
     const f = await setup(t);
