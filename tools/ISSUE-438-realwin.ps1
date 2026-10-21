@@ -54,7 +54,7 @@ function Shot([string]$Name) {
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Key([ushort]$Code) { [Desktop438]::Key($Code, $false); [Desktop438]::Key($Code, $true); Start-Sleep -Milliseconds 150 }
-function Move([int]$X, [int]$Y) { [Desktop438]::Mouse($X, $Y, 0); Start-Sleep -Milliseconds 150 }
+function Move-Pointer([int]$X, [int]$Y) { [Desktop438]::Mouse($X, $Y, 0); Start-Sleep -Milliseconds 150 }
 function Wait-For([string]$Description, [scriptblock]$Check) {
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 250 } while ([DateTime]::UtcNow -lt $deadline)
@@ -129,10 +129,10 @@ try {
     if ($targetClass -ne 'ZigShellChatTranscript') { throw 'Mouse target is not transcript' }
     Key 0x1B
     Set-Clipboard 'UNCHANGED-drag'
-    Move $start[0] $start[1]
+    Move-Pointer $start[0] $start[1]
     [Desktop438]::Mouse($start[0],$start[1],2)
     $points=@(@(([int]$amber.left - 2),$start[1]),@(($rect.Right - 27),$start[1]),@(($rect.Left + 25),([int]$closing.top + [int]$closing.height + 3)),@(($rect.Left + 100),[int](([int]$closing.top + [int]$closing.height + [int]$secondStart.top)/2)),(Point $secondStart),@(([int]$meadow.left - 2),(Point $meadow)[1]),$end)
-    foreach($point in $points) { Move $point[0] $point[1] }
+    foreach($point in $points) { Move-Pointer $point[0] $point[1] }
     Shot 'during'
     [Desktop438]::Mouse($end[0],$end[1],4)
     Start-Sleep -Milliseconds 300
@@ -144,7 +144,7 @@ try {
     Key 0x1B
     Set-Clipboard 'UNCHANGED-message'
     $p=Point $secondStart
-    Move $p[0] $p[1]
+    Move-Pointer $p[0] $p[1]
     [Desktop438]::Mouse($p[0],$p[1],8); [Desktop438]::Mouse($p[0],$p[1],16)
     Start-Sleep -Milliseconds 300
     Shot 'copy-menu'
