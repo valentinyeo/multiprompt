@@ -330,3 +330,37 @@ test('browser emulation map drives the real native CLI and extension only on Git
   assert.match(read(skill + 'features/README.md'), /\[Browser emulation\]\(browser-emulation\.md\)/);
 
 });
+
+function assertsWorkspaceFocusHandoff(text) {
+  const start = text.indexOf('pub fn switchToWorkspace(');
+  const end = text.indexOf('\npub fn copyBlueDotHookInstructions(', start);
+  assert.ok(start >= 0 && end > start);
+  const switching = text.slice(start, end);
+  assert.match(switching, /if \(target\) \|idx\| \{\s*if \(app_state\.g_focus_user_action_tick != 0\) [^\n]*switchToShell\(idx\);\s*if \(!app_state\.g_restoring and !app_state\.g_account_applying and @import\("focus\.zig"\)\.foregroundIsOurs\(\)\) \{\s*app_state\.g_focus_authorized_hwnd = if \(app_state\.g_chat_active\) app_state\.g_chat_composer_hwnd else app_state\.shells\[idx\]\.hwnd;\s*app_state\.g_focus_authorized_until = GetTickCount64\(\) \+ 1500;\s*app_state\.g_focus_browser_shell_id = 0;\s*\}\s*focusActiveShell\(\);/);
+  assert.doesNotMatch(switching, /g_focus_(?:user_action|input)_tick\s*=/);
+}
+
+test('IGSH-522: workspace return grants a bounded owned-input handoff, never background or pane authority', () => {
+  const switching = read('src/workspaces.zig');
+  assertsWorkspaceFocusHandoff(switching);
+  for (const [before, after] of [
+    ['!app_state.g_restoring and ', ''],
+    ['!app_state.g_account_applying and ', ''],
+    ['@import("focus.zig").foregroundIsOurs()', 'true'],
+    ['app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd', 'app_state.shells[idx].browser_hwnd'],
+    ['GetTickCount64() + 1500', 'GetTickCount64() + 60000'],
+    ['app_state.g_focus_browser_shell_id = 0;', ''],
+    ['        focusActiveShell();\n    } else {', '        app_state.g_focus_user_action_tick = GetTickCount64();\n        focusActiveShell();\n    } else {'],
+  ]) {
+    const broken = switching.replace(before, after);
+    assert.notEqual(broken, switching);
+    assert.throws(() => assertsWorkspaceFocusHandoff(broken));
+  }
+  const focusJourney = control.slice(control.indexOf("        'workspace-focus' {"), control.indexOf("        'inbox' {"));
+  const returning = focusJourney.slice(focusJourney.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
+  assert.ok(returning.includes("Type-Text 'workspace-focus-chat'"));
+  assert.ok(returning.includes("$expectedText = 'before-workspace-focus-chat'"));
+  assert.match(returning, /EditText\(\[IntPtr\]\$composerHandle\) -ceq \$expectedText/);
+  assert.match(returning, /NativeWindowHandle -ne \$composerHandle/);
+  assert.doesNotMatch(returning, /SetForegroundWindow|SetFocus|\.SetFocus\(|Click.*(?:composer|typing box)/i);
+});

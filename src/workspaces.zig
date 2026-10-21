@@ -2729,6 +2729,11 @@ pub fn switchToWorkspace(ws_in: u32) void {
 
     if (target) |idx| {
         if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+        if (!app_state.g_restoring and !app_state.g_account_applying and @import("focus.zig").foregroundIsOurs()) {
+            app_state.g_focus_authorized_hwnd = if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd;
+            app_state.g_focus_authorized_until = GetTickCount64() + 1500;
+            app_state.g_focus_browser_shell_id = 0;
+        }
         focusActiveShell();
     } else {
         if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
