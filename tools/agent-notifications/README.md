@@ -10,13 +10,16 @@ or remote server. No configured servers or live session data are included.
 | Grok Build | `UserPromptSubmit` command | `Stop` command | Resume in a new process |
 | Cursor CLI | `beforeSubmitPrompt` command | `stop` command | Resume in a new process; behavior depends on the installed CLI emitting these hooks |
 | Pi | `agent_start` listener | `agent_settled` listener | Run `/reload` or resume in a new process |
-| Hax | VPS terminal activity watcher | Debounced terminal inactivity | Inferred completion, not an exact agent event |
+| Hax | tmux activity hook | tmux silence hook | Inferred completion, not an exact agent event |
 
 Hax has no documented lifecycle-hook interface, so it gets the estimate rule in its system prompt instead of a hook (see below). Its fallback can mistake a long
 quiet thinking period for completion. It needs an upstream completion event to
-match the precision of the other integrations. The watcher checks visible text
-every three seconds, requires two changed samples to infer work, and ten seconds
-of stable text to infer completion. Processing time adds to those intervals.
+match the precision of the other integrations. On tmux 3.4, native activity hooks
+require output at least three seconds apart before inferring work, resend ACTIVE
+at most every 15 seconds, and infer completion after ten seconds without output.
+Unlike the old visible-text samples, invisible repaints count as output; a single
+brief burst does not infer work. Claude's fresh full-lifecycle markers suppress
+heuristic ACTIVE, and fresh matching agent markers suppress heuristic DONE.
 
 The scripts make no model calls and write no hook output or context messages.
 Claude's `Notification` hook sends `NOTIFICATION:<tab>` only for a real
@@ -52,7 +55,29 @@ Files installed:
 - `~/.grok/hooks/zigshell.json`.
 - `~/.cursor/hooks.json`.
 - `~/.pi/agent/extensions/zigshell.ts`.
-- Existing VPS `~/.local/bin/zigshell-watcher.sh` and Claude script entrypoints.
+- On Linux, `~/.local/share/zigshell/tmux_notify.py` and `tmux-notifications.conf`,
+  sourced from `~/.tmux.conf` and applied to a running tmux server.
+- Existing Claude script entrypoints.
+
+The installer stops and disables `zigshell-watcher.service`, backs up and removes
+its old user unit and script, and preserves unrelated tmux hooks using index 514.
+The tmux snippet enables activity and ten-second silence monitoring, with
+`activity-action any` and `silence-action any`: tmux's default `other` misses the
+current window even when attached. These options also enable tmux's normal alert
+bells or messages. Detached alert flags are cleared to rearm monitoring.
+
+The existing relay hosts one blocking FIFO reader; no new service or pane-output
+stream is used. Native tmux one-shot timers debounce and throttle events before a shell
+builtin queues a bounded, NUL-framed record in the relay's private directory.
+One shared Python sender detects agents directly through `/proc`, reads titles only
+on title/attach events using the exact hook socket and pane, applies semantic
+marker and title rules, then sends the unchanged TCP messages to localhost:19548,
+one per connection with no newline. Session creation detects the agent;
+client attachment resends AGENT and semantic TITLE, replacing periodic rebroadcast.
+There is no periodic agent reclassification; activity and silence events detect
+the current process again before applying marker suppression. Activity monitoring
+is disabled between native rearm timers, so short bursts wholly inside a resend
+window can be coalesced, including after completion. Silence still sees all output.
 
 The installer enables the user service and writes
 `~/.local/state/multiprompt/relay-v1` after it starts. Browser (ZSB) requests
@@ -139,15 +164,15 @@ never changes delivery.
 ## Verification
 
 ```sh
-python3 -m unittest discover -s . -p 'test_*.py'
-bash -n zigshell-watcher.sh
+python3 -m unittest test_watcher.py
+python3 -m unittest test_install.py
 ```
 
 The tests cover exact pane routing, headless rejection, protocol delimiters,
 agent events, installation, silent Claude warm-up, command framing, plugin
-selection, and frontmatter. Run the Python suite on each VPS after installation;
-Windows skips Bash-only watcher tests. The repository test graph includes this
-suite on systems with a `python` command.
+selection, and frontmatter. Run these targeted checks after installation;
+Windows skips Linux-only FIFO and tmux-install checks. GitHub runs the full
+Python suite through the Linux and Windows test graphs.
 
 ## Time estimates (mp-eta)
 
