@@ -32,3 +32,14 @@ test('local command help reuses command syntax and includes CDP examples', () =>
   assert.match(help, /Runtime\.evaluate.*expression/);
   assert.doesNotMatch(help, /sendBrowserRequest|runNativeHost|resolveWindowFromEnv|CreateFile/);
 });
+
+test('native help sweep shares the shard that installs the bridge executable', () => {
+  const root = path.resolve(__dirname, '..');
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  assert.match(build, /bridge_bad_args_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  const routing = build.slice(build.indexOf('for (test_step.dependencies.items)'), build.indexOf('test_step.dependencies.clearRetainingCapacity()'));
+  assert.doesNotMatch(routing, /dependency == &bridge_bad_args_tests\.step/);
+  assert.match(routing, /else\s*2;\s*test_groups\[group\]\.dependOn\(dependency\)/);
+  assert.match(workflow, /name: Sweep real zsb\.exe command help\n\s*if: [^\n]*matrix\.group == 3\n\s*run: node --test tools\/zsb-help\.test\.js/);
+});
