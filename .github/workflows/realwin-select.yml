@@ -48,6 +48,14 @@ jobs:
       - name: Exercise native desktop input
         shell: pwsh
         run: ./driver/tools/ISSUE-438-realwin.ps1 -SourceRoot "$PWD/app" -Output "$PWD/evidence" -Label '${{ matrix.label }}'
+      - name: Request 150 percent scaling and measure effective DPI
+        if: always()
+        shell: pwsh
+        run: |
+          Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name LogPixels -Type DWord -Value 144
+          Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Win8DpiScaling -Type DWord -Value 1
+          Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name LogPixels,Win8DpiScaling
+          ./driver/tools/ISSUE-438-realwin.ps1 -SourceRoot "$PWD/app" -Output "$PWD/evidence/scaling-request" -Label '${{ matrix.label }}-requested150'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
