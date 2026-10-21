@@ -54,6 +54,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.772", .items = &.{
+        .{ .text = "IBM Plex Sans now appears throughout the desktop, with real bold and italic text.", .ticket = "IGSH-443" },
+        .{ .text = "Shells and Chat View code use Nordwand Mono SemiBold at the same size as before.", .ticket = "IGSH-443" },
+    } },
     .{ .ver = "0.28.771", .items = &.{
         .{ .text = "Hide the Frequent, Favorites or All split from Ctrl+K, or place Frequent after Favorites; your choices follow your account to your phone.", .ticket = "IGSH-423" },
     } },
