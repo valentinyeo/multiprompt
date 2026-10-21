@@ -174,19 +174,19 @@ pub fn needsPublish(local: []const Host, remote: []const Host) bool {
 const fixture = Host{ .slot = 0, .name = "Host 1", .hostname = "203.0.113.5", .port = 22, .user = "owner" };
 
 test "hosts ssh -G parse ignores identity lines and rejects incomplete or unsafe output" {
-    const parsed = parseSshConfig("host vps\r\nuser owner\r\nhostname 203.0.113.5\r\nport 2222\r\nidentityfile ~/.ssh/id_rsa\r\n").?;
+    const parsed = parseSshConfig("host remote-1\r\nuser owner\r\nhostname 203.0.113.5\r\nport 2222\r\nidentityfile ~/.ssh/id_rsa\r\n").?;
     try std.testing.expectEqualStrings(fixture.hostname, parsed.hostname);
     try std.testing.expectEqualStrings(fixture.user, parsed.user);
     try std.testing.expectEqual(@as(u16, 2222), parsed.port);
-    for ([_][]const u8{ "hostname vps\n", "hostname bad/host\nuser root\nport 22", "hostname vps\nuser root\nport 0", "hostname vps\nuser root\nport 65536" }) |bad| try std.testing.expect(parseSshConfig(bad) == null);
+    for ([_][]const u8{ "hostname remote-1\n", "hostname bad/host\nuser root\nport 22", "hostname remote-1\nuser root\nport 0", "hostname remote-1\nuser root\nport 65536" }) |bad| try std.testing.expect(parseSshConfig(bad) == null);
 }
 
 test "hosts config block is append only and never contains IdentityFile or private key material" {
-    const block = try configBlock(std.testing.allocator, "vps", fixture);
+    const block = try configBlock(std.testing.allocator, "remote-1", fixture);
     defer std.testing.allocator.free(block);
-    try std.testing.expectEqualStrings("\r\nHost vps\r\n  HostName 203.0.113.5\r\n  Port 22\r\n  User owner\r\n", block);
+    try std.testing.expectEqualStrings("\r\nHost remote-1\r\n  HostName 203.0.113.5\r\n  Port 22\r\n  User owner\r\n", block);
     try std.testing.expect(std.mem.indexOf(u8, block, "IdentityFile") == null);
-    try std.testing.expectError(error.InvalidHosts, configBlock(std.testing.allocator, "vps\nIdentityFile bad", fixture));
+    try std.testing.expectError(error.InvalidHosts, configBlock(std.testing.allocator, "remote-1\nIdentityFile bad", fixture));
 }
 
 test "hosts known hosts lines use bracketed names only for nonstandard ports" {
@@ -200,8 +200,8 @@ test "hosts known hosts lines use bracketed names only for nonstandard ports" {
 }
 
 test "hosts skip configured alias including different local server" {
-    try std.testing.expect(shouldImport("vps", parseSshConfig("hostname vps\nport 22\nuser root").?));
-    try std.testing.expect(!shouldImport("vps", parseSshConfig("hostname different.example\nport 22\nuser root").?));
+    try std.testing.expect(shouldImport("remote-1", parseSshConfig("hostname remote-1\nport 22\nuser root").?));
+    try std.testing.expect(!shouldImport("remote-1", parseSshConfig("hostname different.example\nport 22\nuser root").?));
 }
 
 test "hosts key lookup accepts hashed names deduplicates and excludes secrets and markers" {
