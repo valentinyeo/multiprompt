@@ -609,6 +609,7 @@ def conversation_rows(event, agent, offset=0, search=False):
         text_event = dict(event, message=dict(event["message"], content=content[start:index]))
         text = conversation_event(text_event, agent)
         if text:
+            text["segment"] = start
             if rows or not text["id"]:
                 text["id"] = f"{text['id']}:text:{offset}:{start}"
             rows.append(text)
@@ -1045,6 +1046,8 @@ def search_response(q, path, agent, sid):
                 start = max(0, match - 60)
                 hit = dict(offset=offset, end=end, role="tool" if row["role"].startswith("tool") else row["role"],
                            timestamp=row["timestamp"], snippet=text[start:start + 160])
+                if "segment" in row:
+                    hit["segment"] = row["segment"]
                 hits.append(hit)
                 if row["role"] == "tool":
                     calls[row["id"]].update(hit=hit, match_end=match + len(query))

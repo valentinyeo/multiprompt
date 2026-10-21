@@ -593,6 +593,29 @@ class HistoryReaderTest(unittest.TestCase):
                     self.assertEqual(hits[-1]['snippet'], 'needle after')
                     self.assertTrue(all(hit['offset'] == 0 for hit in hits))
 
+    def test_igsh402_identical_text_and_tables_have_stable_search_segments(self):
+        table = '| needle wide heading | Other heading |\n|---|---|\n| cell | value |'
+        for text in ('needle', table):
+            for identity in ('', 'reply-402'):
+                with self.subTest(text=text, identity=identity):
+                    event = self.tool_call(name='Read', value={})
+                    event['message'].update(id=identity, content=[dict(type='text', text=text),
+                        *event['message']['content'], dict(type='text', text=text)])
+                    self.write(event)
+                    self.query.update(cached_sid='', offset=0, source_offsets=True)
+                    _, rows = self.read()
+                    messages = [row for row in rows if row['role'] == 'assistant']
+                    _, hits = self.search('needle')
+                    self.assertEqual(len(hits), 2)
+                    self.assertEqual([row['segment'] for row in messages], [0, 2])
+                    self.assertEqual([hit['segment'] for hit in hits], [0, 2])
+                    for hit, message in zip(hits, messages):
+                        matches = [row for row in messages if (row['offset'], row['segment']) ==
+                                   (hit['offset'], hit['segment'])]
+                        self.assertEqual(matches, [message])
+                    replay = reader.response(dict(self.query, cached_sid='', offset=0)).splitlines()[1:-1]
+                    self.assertEqual(replay, [reader.wire_row(row) for row in rows])
+
     def test_igsh402_hidden_events_and_disabled_tools_keep_previous_contract(self):
         event = self.tool_call()
         event['message'].update(id='reply-402', content=[dict(type='text', text='Before'),
