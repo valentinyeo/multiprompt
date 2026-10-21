@@ -101,7 +101,15 @@ jobs:
           echo '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz' | sha256sum -c -
           tar -xf zig.tar.xz
           export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
-          "$ZIG" cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows tooling/tools/chat-bench/browser-fixture.c -o browser-fixture.exe -luser32
+          export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
+          export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
+          cd tooling
+          node -e 'const fs = require("fs"); for (const r of JSON.parse(fs.readFileSync("../results/manifest.json"))) console.log([r.label, r.path].join("\t"))' > ../results/plan.tsv
+          while IFS=$'\t' read -r label result; do
+            out="/opt/chat-bench/results/$(dirname "$result")"
+            mkdir -p "$out"
+            "$ZIG" cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows "$PWD/tools/chat-bench/browser-fixture.c" -o "$out/browser-fixture.exe" -luser32
+          done < ../results/plan.tsv
           test "$(cat /proc/1/comm)" = systemd
           loginctl enable-linger root
           systemctl start user@0.service
@@ -110,7 +118,7 @@ jobs:
           systemd-run --user --scope --quiet true
           node --version
           wine --version
-          printf 'Linux/Wine in WSL2 on windows-latest; not native Windows acceptance.\n' > results/environment.txt
+          printf 'Linux/Wine in WSL2 on windows-latest; not native Windows acceptance.\n' > ../results/environment.txt
       - name: Run default config in A B order
         shell: wsl-bash {0}
         working-directory: tooling
@@ -119,9 +127,10 @@ jobs:
           trap 'cp -r /opt/chat-bench/results/. "$destination/"' EXIT
           cd /opt/chat-bench/tooling
           export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
+          export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
+          export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
           export XDG_RUNTIME_DIR=/run/user/0
           export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
-          node -e 'const fs = require("fs"); for (const r of JSON.parse(fs.readFileSync("../results/manifest.json"))) console.log([r.label, r.path].join("\t"))' > ../plan.tsv
           while IFS=$'\t' read -r label result; do
             out="/opt/chat-bench/results/$(dirname "$result")"
             mkdir -p "$out"
@@ -135,7 +144,7 @@ jobs:
               exit "$code"
             fi
             test -f "$out/results.json"
-          done < ../plan.tsv
+          done < ../results/plan.tsv
       - name: Write A/B summary
         if: always()
         run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
