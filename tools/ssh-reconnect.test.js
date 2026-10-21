@@ -44,6 +44,7 @@ const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
+var ssh_probe_misses: [256]u8 = @splat(0);
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
 const DWORD = u32;
@@ -196,7 +197,7 @@ test "ISSUE-501 live ssh silent detach" {
     const probe = try std.heap.page_allocator.create(SshProbeJob);
     probe.* = .{};
     probe.count = 1;
-    probe.items[0] = .{ .id = 42, .host = 0, .session = @splat(0), .len = 0, .attached = false };
+    probe.items[0] = .{ .id = 42, .host = 0, .session = @splat(0), .len = 1, .spawn_tick = 1, .attached = false };
     probe.healthy[0] = true;
     probe.finished.store(true, .release);
     ${body('sshProbeFinish').includes('owners.fetchSub') ? '_ = probe.owners.fetchSub(1, .acq_rel);' : ''}
@@ -417,7 +418,7 @@ test('ISSUE-501 exit events reconnect every remote kind for clean and failed exi
   const end = main.indexOf('        @import("win32.zig").WM_TIMECHANGE => {', start);
   assert.ok(start >= 0 && end > start);
   const handler = main.slice(start, end).replace('WM_APP_SHELL_EXITED => {', 'fn dispatchExit(wp: usize) u32 {')
-    .replace(/},\s*$/, '}').replaceAll('app_state.', '').replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect');
+    .replace(/},\s*$/, '}').replaceAll('app_state.', '').replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect').replaceAll('@import("win32.zig").STILL_ACTIVE', '259');
   zig(runtime('') + `
 const ISSUE_350_KEEP_TMUX_TABS = true;
 const g_resume_until_tick: u64 = 0;
@@ -449,7 +450,15 @@ test "ISSUE-501 event exits" {
         }
     }
 }
-`, 'ISSUE-501 event');
+test "ISSUE-511 reused id ignores late exit for live replacement" {
+    shells[0] = .{};
+    fake_exit_code = 259;
+    const before = kills;
+    _ = dispatchExit(42);
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(before, kills);
+}
+`, '');
 });
 
 test('ISSUE-501 production probe worker handles host indices BatchMode failure and abandoned ownership', () => {
@@ -466,21 +475,21 @@ const probeConsole = struct {
     fn tmuxSshTarget(host: u8) []const u8 { return if (host == 1) "1" else "0"; }
 };
 const probeVps = struct {
-    fn sshOneShotCaptureInput(cmd: []const u8, output: []u8, _: ?*anyopaque, timeout: u32) struct { len: usize, success: bool } {
+    fn sshOneShotCaptureInput(cmd: []const u8, output: []u8, _: ?*anyopaque, timeout: u32) struct { len: usize, success: bool, exit_code: u32 } {
         std.debug.assert(std.mem.indexOf(u8, cmd, "-o BatchMode=yes") != null);
         std.debug.assert(std.mem.indexOf(u8, cmd, "-o ConnectTimeout=5") != null);
         std.debug.assert(timeout == 10000);
         capture_count += 1;
         const result = if (capture_ok) "session\\n@@MP_LIVE@@\\n" else "Permission denied";
         @memcpy(output[0..result.len], result);
-        return .{ .len = result.len, .success = capture_ok };
+        return .{ .len = result.len, .success = capture_ok, .exit_code = if (capture_ok) 0 else 255 };
     }
 };
 fn workerJob() !*SshProbeJob {
     const job = try std.heap.page_allocator.create(SshProbeJob);
     job.* = .{};
     job.count = 2;
-    job.items[0] = .{ .id = 42, .host = 1, .session = @splat(0), .len = 7 };
+    job.items[0] = .{ .id = 42, .host = 1, .session = @splat(0), .len = 7, .spawn_tick = 1 };
     @memcpy(job.items[0].session[0..7], "session");
     job.items[1] = job.items[0];
     ssh_probe_job = job;
@@ -489,6 +498,8 @@ fn workerJob() !*SshProbeJob {
 test "ISSUE-501 worker hosts and failure" {
     fake_now = 10000;
     shells[0].tmux_host = 1;
+    shells[0].tmux_session_len = 7;
+    @memcpy(shells[0].tmux_session[0..7], "session");
     const good = try workerJob();
     sshProbeThread(good);
     try std.testing.expect(good.finished.load(.acquire));
@@ -502,9 +513,40 @@ test "ISSUE-501 worker hosts and failure" {
     const bad = try workerJob();
     sshProbeThread(bad);
     sshProbeFinish();
-    try std.testing.expect(shells[0].disconnected);
+    try std.testing.expect(!shells[0].disconnected);
     try std.testing.expect(ssh_probe_job == null);
-    try std.testing.expect(shells[0].ssh_reconnect.next_tick > fake_now);
+    try std.testing.expectEqual(@as(u8, 1), ssh_probe_misses[1]);
+    for (0..2) |_| {
+        const retry = try workerJob();
+        sshProbeThread(retry);
+        sshProbeFinish();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(@as(u8, 3), ssh_probe_misses[1]);
+    alive = false;
+    const dead = try workerJob();
+    sshProbeThread(dead);
+    sshProbeFinish();
+    try std.testing.expect(shells[0].disconnected);
+}
+test "ISSUE-511 worker requires three misses on a dead transport and ignores stale incarnations" {
+    shells[0] = .{ .tmux_host = 1, .tmux_session_len = 7 };
+    @memcpy(shells[0].tmux_session[0..7], "session");
+    ssh_probe_misses = @splat(0);
+    capture_ok = false;
+    alive = false;
+    for (0..3) |miss| {
+        const job = try workerJob();
+        sshProbeThread(job);
+        sshProbeFinish();
+        try std.testing.expectEqual(miss == 2, shells[0].disconnected);
+    }
+    shells[0] = .{ .tmux_host = 1, .tmux_session_len = 7, .spawn_tick = 2 };
+    @memcpy(shells[0].tmux_session[0..7], "session");
+    const stale = try workerJob();
+    sshProbeThread(stale);
+    sshProbeFinish();
+    try std.testing.expect(!shells[0].disconnected);
 }
 test "ISSUE-501 worker releases abandoned allocation" {
     const old = try workerJob();
@@ -517,5 +559,24 @@ test "ISSUE-501 worker releases abandoned allocation" {
     try std.testing.expectEqual(before, capture_count);
 }
 `;
-  zig(code, 'ISSUE-501 worker');
+  zig(code, 'worker');
+});
+
+
+test('ISSUE-511 forty restored tabs start once per host per second without waiting for older attaches', () => {
+  const code = runtime(`
+test "ISSUE-511 forty restored tabs" {
+    for (&shells) |*shell| {
+        shell.* = .{ .process = null, .disconnected = true, .tmux_host = 1 };
+        shell.ssh_reconnect.manual(fake_now);
+    }
+    for (0..40) |tick| {
+        sshAutoReconnectTick();
+        try std.testing.expectEqual(tick + 1, spawns);
+        fake_now += 1000;
+    }
+}
+`).replace('var shells = [_]Shell{.{}};', 'var shells: [40]Shell = @splat(.{});')
+    .replace('var shell_count: u32 = 1;', 'var shell_count: u32 = 40;');
+  zig(code, 'ISSUE-511 forty');
 });

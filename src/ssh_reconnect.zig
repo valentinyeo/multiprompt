@@ -64,6 +64,33 @@ pub fn attached(output: []const u8, session: []const u8) bool {
     return false;
 }
 
+pub fn probeMisses(previous: u8, ok: bool) u8 {
+    return if (ok) 0 else previous +| 1;
+}
+
+pub fn probeUnreachable(misses: u8, process_alive: bool) bool {
+    return misses >= 3 and !process_alive;
+}
+
+test "ISSUE-511 probe misses count per result reset on success and saturate" {
+    var misses: u8 = 0;
+    for (1..4) |expected| {
+        misses = probeMisses(misses, false);
+        try std.testing.expectEqual(@as(u8, @intCast(expected)), misses);
+    }
+    try std.testing.expectEqual(@as(u8, 0), probeMisses(misses, true));
+    try std.testing.expectEqual(@as(u8, 1), probeMisses(probeMisses(misses, true), false));
+    try std.testing.expectEqual(std.math.maxInt(u8), probeMisses(std.math.maxInt(u8), false));
+}
+
+test "ISSUE-511 failed probes never override a live transport and require three misses" {
+    for (0..256) |count| {
+        const misses: u8 = @intCast(count);
+        try std.testing.expect(!probeUnreachable(misses, true));
+        try std.testing.expectEqual(count >= 3, probeUnreachable(misses, false));
+    }
+}
+
 test "ISSUE-501 backoff grows caps bounds jitter and resets after success" {
     const bases = [_]u64{ 1000, 2000, 4000, 8000, 16000, 30000, 30000 };
     for (bases, 0..) |base, i| {

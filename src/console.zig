@@ -382,6 +382,10 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
         return false;
     }
 
+    const shell_id = app_state.allocateShellId() orelse {
+        _ = CloseHandle(proc);
+        return false;
+    };
     const idx = app_state.shell_count;
     app_state.shell_count += 1;
 
@@ -390,8 +394,7 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
     app_state.shells[idx].process = proc;
     app_state.shells[idx].pid = pid;
     app_state.shells[idx].kind = kind;
-    app_state.shells[idx].shell_id = app_state.next_shell_id;
-    app_state.next_shell_id += 1;
+    app_state.shells[idx].shell_id = shell_id;
 
     if (kind != .gitbash) {
         applyBlackConsoleBackground(pid);
@@ -1761,9 +1764,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         notifyTabCapReached();
         return false;
     }
-    if (@as(usize, @intCast(app_state.next_shell_id)) >= SPAWN_TITLES.len) return false;
+    const title_id = app_state.allocateShellId() orelse return false;
     const idx = app_state.shell_count;
-    const title_id = app_state.next_shell_id;
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
@@ -1826,7 +1828,6 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     }
     _ = CloseHandle(pi.hThread);
     if (app_state.g_job != null) _ = AssignProcessToJobObject(app_state.g_job, pi.hProcess);
-    app_state.next_shell_id += 1;
 
     var cmd_hwnd: HANDLE = null;
     var attempts: u32 = 0;
@@ -1914,7 +1915,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             app_state.shells[idx].tmux_session_len = session_len;
         }
     }
-    setDefaultName(&app_state.shells[idx], kind, app_state.next_shell_id);
+    setDefaultName(&app_state.shells[idx], kind, title_id);
     if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
@@ -1939,8 +1940,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (idx >= app_state.shell_count) return false;
     const kind = app_state.shells[idx].kind;
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
-    if (@as(usize, @intCast(app_state.next_shell_id)) >= SPAWN_TITLES.len) return false;
+    const title_id = app_state.allocateShellId() orelse return false;
 
+    const saved_chat_id = app_state.shells[idx].chat_id;
+    const saved_wake_id = app_state.shells[idx].wake_id;
     const saved_sync_owned = app_state.shells[idx].sync_owned;
     const saved_name = app_state.shells[idx].name;
     const saved_name_len = app_state.shells[idx].name_len;
@@ -2023,8 +2026,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     }
     app_state.shells[idx].pid = 0;
 
-    const title_id = app_state.next_shell_id;
-
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     si.lpTitle = SPAWN_TITLES[title_id];
@@ -2045,7 +2046,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     }
     _ = CloseHandle(pi.hThread);
     if (app_state.g_job != null) _ = AssignProcessToJobObject(app_state.g_job, pi.hProcess);
-    app_state.next_shell_id += 1;
 
     var cmd_hwnd: HANDLE = null;
     var attempts: u32 = 0;
@@ -2082,6 +2082,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 
     if (app_state.shells[idx].kind != .tmux) chatHistoryForget(app_state.shells[idx].shell_id);
     app_state.shells[idx] = .{
+        .chat_id = saved_chat_id,
+        .wake_id = saved_wake_id,
         .sync_owned = saved_sync_owned,
         .hwnd = cmd_hwnd,
         .process = pi.hProcess,

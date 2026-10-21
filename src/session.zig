@@ -797,10 +797,9 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     const idx = app_state.shell_count;
     var shell = empty_shell;
     shell.kind = tab.kind;
-    shell.shell_id = app_state.next_shell_id;
+    shell.shell_id = app_state.allocateShellId() orelse return null;
     shell.wake_id = tab.wake_id;
     shell.chat_id = tab.chat_id;
-    app_state.next_shell_id += 1;
     for (0..tab.name_len) |j| shell.name[j] = @intCast(tab.name[j]);
     shell.name_len = tab.name_len;
     shell.name_source = if (tab.manual) .manual else if (tab.sem) .semantic else .default;
@@ -854,7 +853,11 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     app_state.shells[idx] = shell;
     restoreBrowserStateFromSavedTab(idx, tab);
     app_state.shell_count += 1;
-    @import("chat_send.zig").sshDisconnect(idx, "restore-spawn-failed");
+    if (app_state.g_restoring) {
+        @import("chat_send.zig").sshDisconnect(idx, "restore-pending");
+    } else {
+        @import("chat_send.zig").sshDisconnect(idx, "restore-spawn-failed");
+    }
     var name_utf8: [192]u8 = undefined;
     debugLog2("restoreSession: preserved failed remote tab: ", json_reader.utf8(tab.name[0..tab.name_len], &name_utf8));
     return idx;
@@ -1176,6 +1179,8 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     defer app_state.g_pending_tmux_host = 0;
     const ok = if (reclaimed)
         true
+    else if (app_state.g_restoring and isRemoteShellKind(tabs[t].kind))
+        preserveFailedRemoteSavedTab(tab) != null
     else if (tmux_name != null)
         spawnShellWithSession(tabs[t].kind, tmux_name, null, null)
     else
