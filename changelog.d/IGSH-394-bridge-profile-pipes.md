@@ -1,1 +1,1 @@
-Windows browser profile checks wait for the browser connection to be ready before sending commands.
+Browser commands no longer fail at random when the browser answers very fast.
