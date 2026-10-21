@@ -44,8 +44,11 @@ function Save-Update([string]$Target, [string]$Version, [string]$Architecture) {
     Invoke-WebRequest $asset.browser_download_url -Headers $headers -UseBasicParsing -TimeoutSec 30 -OutFile "$dir/download.exe"
     Invoke-WebRequest $sums.browser_download_url -Headers $headers -UseBasicParsing -TimeoutSec 15 -OutFile "$dir/SHA256SUMS.txt"
     Assert-Update "$dir/download.exe" "$dir/SHA256SUMS.txt" $name $Target
+    $marker = "MPVERSION=$($release.tag_name.TrimStart('v'));"
+    if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$dir/download.exe")).Contains($marker)) { throw 'Release executable version mismatch' }
     Move-Item -LiteralPath "$dir/download.exe" -Destination "$dir/next.exe" -Force
-    [IO.File]::WriteAllText("$dir/ready.txt", "MPVERSION=$($release.tag_name.TrimStart('v'));$name")
+    [IO.File]::WriteAllText("$dir/ready.tmp", "MPVERSION=$($release.tag_name.TrimStart('v'));$name")
+    Move-Item -LiteralPath "$dir/ready.tmp" -Destination "$dir/ready.txt" -Force
     return $true
 }
 

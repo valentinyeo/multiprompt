@@ -782,7 +782,7 @@ pub const AgentSessionBreakdown = struct {
     }
 };
 
-pub const UPDATE_CARD_H: i32 = 54;
+pub const UPDATE_CARD_H: i32 = 76;
 pub const UPDATE_CHECK_MS: u32 = 30000;
 pub var g_update_watch_stop: HANDLE = null;
 pub var g_update_watch_thread: ?std.Thread = null;

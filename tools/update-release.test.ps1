@@ -14,6 +14,7 @@ New-Item -ItemType Directory -Path $root | Out-Null
 try {
     Add-Type -TypeDefinition 'using System; using System.Threading; class UpdateOld { static void Main(string[] args) { System.IO.File.AppendAllText(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName + ".starts", "start\n"); if (args.Length == 2) { using (var e = EventWaitHandle.OpenExisting(args[1])) { e.Set(); } Thread.Sleep(2500); } } }' -OutputAssembly "$root/old.exe" -OutputType ConsoleApplication
     Add-Type -TypeDefinition 'class UpdateBroken { static int Main() { return 1; } }' -OutputAssembly "$root/broken.exe" -OutputType ConsoleApplication
+    [IO.File]::AppendAllText("$root/broken.exe", "MPVERSION=1.10.0;")
     Copy-Item "$root/old.exe" "$root/app.exe"
     $target = "$root/app.exe"
     $dir = "$target.update"

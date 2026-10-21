@@ -6,6 +6,7 @@ const update_check = @import("update_check.zig");
 const mp_version_marker = @import("main.zig").mp_version_marker;
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
+const DT_WORDBREAK = @import("win32.zig").DT_WORDBREAK;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
 const DT_VCENTER = @import("win32.zig").DT_VCENTER;
 const DT_CENTER = @import("win32.zig").DT_CENTER;
@@ -245,8 +246,8 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const text = std.fmt.bufPrint(&text_buf, "Update ready: restart to get v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
     _ = SelectObject(hdc, font_title);
     _ = SetTextColor(hdc, bright);
-    var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(25) };
-    drawAscii(hdc, text, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(46) };
+    drawAscii(hdc, text, &text_rc, DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
 
     _ = SelectObject(hdc, font_subtitle);
     var close_rc = updateCardCloseRect(card);
