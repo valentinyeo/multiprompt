@@ -1753,6 +1753,7 @@ pub fn notifyTabCapReached() void {
 
 pub const WM_STARTUP_SHELL_READY = 0x8000 + 543;
 pub const TIMER_STARTUP_SHELL = 0x544;
+pub var startup_inflight = std.atomic.Value(u32).init(0);
 var startup_completed: ?*StartupShell = null;
 var startup_completed_tail: ?*StartupShell = null;
 
@@ -1812,7 +1813,10 @@ fn startupShellWorker(job: *StartupShell) void {
         job.process = null;
         job.pid = 0;
     }
-    if (PostMessageW(job.owner, WM_STARTUP_SHELL_READY, 0, @bitCast(@intFromPtr(job))) == 0) discardStartupShell(job);
+    if (PostMessageW(job.owner, WM_STARTUP_SHELL_READY, 0, @bitCast(@intFromPtr(job))) == 0) {
+        discardStartupShell(job);
+        _ = startup_inflight.fetchSub(1, .acq_rel);
+    }
 }
 
 fn discardStartupShell(job: *StartupShell) void {
@@ -1843,6 +1847,7 @@ pub fn startupShellTick(hwnd: HANDLE) void {
 }
 
 pub fn finishStartupShell(job: *StartupShell) void {
+    defer _ = startup_inflight.fetchSub(1, .acq_rel);
     const idx = findShellById(job.shell_id) orelse {
         discardStartupShell(job);
         return;
@@ -1949,7 +1954,9 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             return false;
         };
         job.* = .{ .shell_id = title_id, .kind = kind, .owner = app_state.g_main_hwnd, .job = app_state.g_job, .command = cmd_buf, .cwd = cwd_wide, .has_cwd = cwd_ptr != null, .environment = environment };
+        _ = startup_inflight.fetchAdd(1, .acq_rel);
         const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, startupShellWorker, .{job}) catch {
+            _ = startup_inflight.fetchSub(1, .acq_rel);
             _ = @import("win32.zig").FreeEnvironmentStringsW(environment);
             std.heap.page_allocator.destroy(job);
             return false;

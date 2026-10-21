@@ -52,6 +52,7 @@ function responsiveOrdering(main, consoleSource, session) {
   assert.match(tick, /startup_completed = job\.next/);
   assert.doesNotMatch(tick, /while|for \(/);
   assert.match(tick, /finishStartupShell\(job\)/);
+  assert.match(initialize, /startup_inflight\.load\(\.acquire\) != 0\) return false/);
 }
 
 function taskbarOrdering(browser) {

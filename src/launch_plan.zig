@@ -16,9 +16,9 @@ pub const Deferred = enum {
     power,
     telemetry,
     links,
-    cleanup,
     tabs,
     chat,
+    cleanup,
     publish,
     updates,
     browser,
@@ -57,8 +57,8 @@ test "ISSUE-543 first accepted input excludes paint timers and synthetic focus" 
     for ([_]u32{ 0x0007, 0x000F, 0x0113, 0x0200, 0x8000 + 502 }) |message| try std.testing.expect(!isInput(message));
 }
 
-test "ISSUE-543 cleanup precedes worker console publication and browser follows local restore" {
+test "ISSUE-543 cleanup follows reclaim and browser follows local restore" {
     try std.testing.expect(@intFromEnum(Deferred.links) < @intFromEnum(Deferred.tabs));
-    try std.testing.expect(@intFromEnum(Deferred.cleanup) < @intFromEnum(Deferred.tabs));
+    try std.testing.expect(@intFromEnum(Deferred.tabs) < @intFromEnum(Deferred.cleanup));
     try std.testing.expect(@intFromEnum(Deferred.tabs) < @intFromEnum(Deferred.browser));
 }

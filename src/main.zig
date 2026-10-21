@@ -8088,6 +8088,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             updateMainWindowTitle();
         },
         .cleanup => {
+            if (@import("console.zig").startup_inflight.load(.acquire) != 0) return false;
             cleanupStaleWindows();
 
             cleanupStalePanewinFiles();
