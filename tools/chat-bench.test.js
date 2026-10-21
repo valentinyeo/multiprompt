@@ -122,6 +122,10 @@ test('real-format synthetic Claude/Codex fixtures include tool, image, injected 
   try {
     const result = generate(root, { ...defaults, tabs: 5, windows: 2 });
     assert.equal(result.tabs.length, 5);
+    for (const instance of result.instances) {
+      assert.equal(fs.readFileSync(path.join(instance.appdata, 'ZigShell/ssh-path.txt'), 'utf8'), `Z:${path.join(root, 'ssh-fixture.exe').replaceAll('/', '\\')}`);
+      assert.deepEqual(fs.readdirSync(instance.sshDir), []);
+    }
     const claude = records('claude', 'claude-test', 0);
     assert(claude.some(e => e.message.content.some(p => p.type === 'image')));
     assert(claude.some(e => e.message.content.some(p => p.type === 'tool_use')));
@@ -372,7 +376,7 @@ test('documented smoke receipts are rejected even with default config and a clea
   fs.writeFileSync(exe, pe);
   const run = { ...goodRun(), config: structuredClone(defaults), status: 'PASS', pass: true, failures: [], exe,
     binary: { exeSha256: hash(exe) },
-    runnerHashes: Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' }).map(([key, file]) => [key, hash(path.join(__dirname, 'chat-bench', file))])) };
+    runnerHashes: Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c', ssh: 'ssh-fixture.c' }).map(([key, file]) => [key, hash(path.join(__dirname, 'chat-bench', file))])) };
   for (const installable of [undefined, true, false]) {
     if (installable === undefined) delete run.installable;
     else run.installable = installable;
@@ -380,4 +384,7 @@ test('documented smoke receipts are rejected even with default config and a clea
     assert.equal(result.ok, installable !== false, result.reasons.join('; '));
     if (installable === false) assert.deepEqual(result.reasons, ['smoke run is NOT INSTALLABLE; install-laptop1.sh only accepts default-config receipts']);
   }
+  run.installable = true;
+  delete run.runnerHashes.ssh;
+  assert.deepEqual(checkReceipt(run, run.binary.exeSha256).reasons, ['stale or missing runnerHashes.ssh']);
 });
