@@ -36,6 +36,8 @@ Before first use, seed `layouts` with your configured account email, revision `1
 
 For self-hosted desktop sync, change the public service origin in `src/account_client.zig`. `MULTIPROMPT_NO_LOGIN=1` skips account login and cloud sync for local development. This does not bypass Worker authentication.
 
+Read Android crashes newest first with `python3 service/crash-reports.py --limit 20` using `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; use `--database NAME` to override `multiprompt-account` or `--json` for raw rows.
+
 ## Tests and API
 
 `npm test` bundles the Worker first, then runs it against local D1 through Miniflare. Device flows sign in through Better Auth with email codes captured from mocked outbound mail; no test-auth bypass is deployed. Passkey re-confirm uses `/signin?fresh=1&next=%2F%3Fpasskey%3Dadd` on either host, preserving the 15-minute fresh-session requirement.

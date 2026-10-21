@@ -47,7 +47,9 @@ test('pure argument decision executes native Zig tests, including Windows quotin
 
 test('collector dispatch returns before all UI, instance, workspace, Inbox, tray and crash startup', () => {
   const entry = body(main, 'main');
-  assert.match(entry, /^\s*const args = init\.minimal\.args\.toSlice\(init\.arena\.allocator\(\)\) catch return;\s*if \(usage_telemetry_mode\.isRequested\(args\)\) \{\s*usage_telemetry\.main\(init\) catch \{\};\s*return;\s*\}/);
+  assert.match(entry, /^\s*launch_cache\.begin\(\);\s*const args = init\.minimal\.args\.toSlice\(init\.arena\.allocator\(\)\) catch return;\s*if \(usage_telemetry_mode\.isRequested\(args\)\) \{\s*usage_telemetry\.main\(init\) catch \{\};\s*return;\s*\}/);
+  const clock = body(fs.readFileSync(path.join(root, 'src/launch_cache.zig'), 'utf8'), 'begin');
+  assert.doesNotMatch(clock, /debugLog|CreateWindow|spawn|readFile|writeFile/);
   assert.ok(entry.indexOf('usage_telemetry.main(init)') < entry.indexOf('update_check.runRelaunchHelperIfRequested()'));
   const launch = body(main, 'ensureUsageTelemetryCollector');
   assert.match(launch, /GetModuleFileNameW/);

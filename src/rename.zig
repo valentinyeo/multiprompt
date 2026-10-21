@@ -169,6 +169,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
 }
 
 pub fn startWindowRename() void {
+    if (app_state.g_starred_workspace) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);

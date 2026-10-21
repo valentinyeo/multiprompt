@@ -1,5 +1,6 @@
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
+const launch_cache = @import("launch_cache.zig");
 const WINAPI = @import("win32.zig").WINAPI;
 const DWORD = @import("win32.zig").DWORD;
 const UINT = @import("win32.zig").UINT;
@@ -553,6 +554,7 @@ const SEARCH_CLOSEWIN_OFFSET = @import("app_state.zig").SEARCH_CLOSEWIN_OFFSET;
 const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET;
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
+const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -627,6 +629,7 @@ const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET
 const SEARCH_CRASH_REPORTS_OFFSET = @import("app_state.zig").SEARCH_CRASH_REPORTS_OFFSET;
 const SEARCH_CRASH_NOW_OFFSET = @import("app_state.zig").SEARCH_CRASH_NOW_OFFSET;
 const SEARCH_HIBERNATE_NOW_OFFSET = @import("app_state.zig").SEARCH_HIBERNATE_NOW_OFFSET;
+const SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET = @import("app_state.zig").SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
 const SEARCH_INBOX_EXCLUDE_OFFSET = @import("app_state.zig").SEARCH_INBOX_EXCLUDE_OFFSET;
 const SEARCH_REMIND_PRESET_OFFSET = @import("app_state.zig").SEARCH_REMIND_PRESET_OFFSET;
 const SEARCH_GROUPMOVE_GROUP_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_GROUP_OFFSET;
@@ -1172,6 +1175,7 @@ const openInboxFilter = @import("inbox.zig").openInboxFilter;
 const closeInboxFilter = @import("inbox.zig").closeInboxFilter;
 const toggleInbox = @import("inbox.zig").toggleInbox;
 const armInboxStepContext = @import("inbox.zig").armInboxStepContext;
+const jumpToInboxRow = @import("inbox.zig").jumpToInboxRow;
 const inboxJump = @import("inbox.zig").inboxJump;
 const inboxStepJump = @import("inbox.zig").inboxStepJump;
 const refreshNextUnreadCache = @import("inbox.zig").refreshNextUnreadCache;
@@ -1187,6 +1191,8 @@ comptime {
         _ = @import("power.zig");
         _ = @import("monitor.zig");
         _ = @import("startup.zig");
+        _ = @import("launch_plan.zig");
+        _ = @import("launch_snapshot.zig");
         _ = @import("console.zig");
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
@@ -1255,7 +1261,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.786";
+pub const APP_VERSION = "0.28.790";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1293,7 +1299,7 @@ pub fn sessionFrontChanged() void {
 }
 
 fn updateSessionFront(user: bool) void {
-    const allowed = app_state.g_main_hwnd != null and !app_state.g_account_locked and !app_state.g_restoring and !app_state.g_startup_progress and !app_state.g_account_applying;
+    const allowed = !launch_cache.pending and app_state.g_main_hwnd != null and !app_state.g_account_locked and !app_state.g_restoring and !app_state.g_startup_progress and !app_state.g_account_applying;
     const visible = !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active;
     const sid: ?u32 = if (allowed and app_state.active_shell < app_state.shell_count and (!app_state.g_single_window or app_state.shells[app_state.active_shell].workspace == app_state.g_active_workspace)) app_state.shells[app_state.active_shell].shell_id else null;
     if (!app_state.g_front_period.select(sid, user, visible and foregroundIsOurs(), frequent.unixMs(@import("inbox.zig").nowFileTime() / 10_000), GetTickCount64())) return;
@@ -1319,6 +1325,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (!app_state.g_account_locked and @import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
+    if (msg == launch_cache.WM_DEFERRED) {
+        if (!launch_cache.pending) return 0;
+        launch_cache.deferred();
+        initializeDeferred(hwnd);
+        launch_cache.pending = false;
+        saveSession();
+        launch_cache.changed();
+        return 0;
+    }
+    if (msg == WM_TIMER and wp == launch_cache.TIMER_SAVE) {
+        launch_cache.save();
+        return 0;
+    }
     if (msg == WM_APP_LAYOUT_READY) {
         handleLayoutReply(lp);
         return 0;
@@ -1504,6 +1523,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 paintBrowserSplitter(hdc);
                 canvas.deinit();
                 _ = EndPaint(hwnd, &ps);
+                launch_cache.painted(false);
                 return 0;
             }
             const saved_dc = SaveDC(mem_dc);
@@ -1521,6 +1541,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
             _ = EndPaint(hwnd, &ps);
+            launch_cache.painted(false);
             return 0;
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
@@ -1832,6 +1853,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const target = hitTestSidebar(logical_my);
                 switch (target) {
+                    .inbox => |ri| {
+                        jumpToInboxRow(ri);
+                        return 0;
+                    },
                     .section => |tier| {
                         toggleSidebarSectionCollapsed(tier);
                         return 0;
@@ -2009,6 +2034,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
+            if (app_state.g_workspace_hover != null) {
+                app_state.g_workspace_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_inbox_button_hover) {
                 app_state.g_inbox_button_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2027,6 +2056,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = TrackMouseEvent(&tracking);
                     }
                 }
+            }
+            const ws_hover = workspaceStripHitTest(GET_X(lp), GET_Y(lp));
+            if (ws_hover != app_state.g_workspace_hover) {
+                app_state.g_workspace_hover = ws_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (ws_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
             }
             const hovered = inboxButtonHitTest(GET_X(lp), GET_Y(lp));
             if (hovered != app_state.g_inbox_button_hover) {
@@ -2348,7 +2386,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const my = GET_Y(lp);
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (workspaceStripHitTest(mx, my)) |ws| {
-                    if (ws != WS_NEW_PILL) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
+                    if (ws < app_state.g_lws_count) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
@@ -2835,14 +2873,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CYCLE_WORKSPACE => {
             if (app_state.g_inbox_active) closeInbox(hwnd);
-            if (app_state.g_single_window and app_state.g_lws_count > 1) {
-                const cur: u32 = app_state.g_active_workspace;
-                const cnt: u32 = app_state.g_lws_count;
+            if (app_state.g_single_window) {
+                const cur: u32 = if (app_state.g_starred_workspace) 0 else @as(u32, app_state.g_active_workspace) + 1;
+                const cnt: u32 = @as(u32, app_state.g_lws_count) + 1;
                 var step: u32 = 1;
                 while (step < cnt) : (step += 1) {
                     const next: u32 = if (wp == 1) (cur + step) % cnt else (cur + cnt - step) % cnt;
-                    if (!app_state.g_ws_snoozed[next]) {
-                        switchToWorkspace(next);
+                    if (next == 0 or !app_state.g_ws_snoozed[next - 1]) {
+                        switchToWorkspace(if (next == 0) @import("workspace_view.zig").starred else next - 1);
                         break;
                     }
                 }
@@ -2851,6 +2889,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_INBOX_STEP => {
+            if (app_state.g_single_window and !app_state.g_inbox_active and (app_state.g_starred_workspace or !app_state.g_inbox_step_context_active)) {
+                _ = SendMessageW(hwnd, WM_APP_CYCLE_WORKSPACE, wp, 0);
+                return 0;
+            }
             inboxStepJump(if (wp == 1) 1 else -1);
             return 0;
         },
@@ -3686,6 +3728,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
+            if (wp == 0 and app_state.g_starred_workspace) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -5312,6 +5355,28 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (crash_now) crash_recorder.crashNow() else crash_recorder.openFolder();
                     return 0;
                 }
+                if (target == SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_browser_focus_mode = false;
+                    app_state.g_shell_focused = true;
+                    app_state.g_browser_shortcut_open_guard_until = 0;
+                    clearSearchBackdrop();
+                    discardBrowserUrlBarEdit();
+                    closeWebView2();
+                    for (0..app_state.shell_count) |i| {
+                        app_state.shells[i].browser_enabled = false;
+                        closeBrowserForShell(@intCast(i));
+                    }
+                    showActiveShellAfterOverlay();
+                    updateBrowserVisibility();
+                    repositionActive();
+                    syncMouseHookForUrlClicks();
+                    invalidateSidebar();
+                    saveSession();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (target == SEARCH_HIBERNATE_NOW_OFFSET) {
                     const hib_count = hibernateAllParkedBrowserPanesNow();
                     var hib_buf: [64]u8 = undefined;
@@ -5525,6 +5590,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_CLOSEWIN_OFFSET) {
                     app_state.g_search_active = false;
                     clearSearchBackdrop();
+                    if (app_state.g_starred_workspace) {
+                        showActiveShellAfterOverlay();
+                        return 0;
+                    }
                     if (app_state.g_single_window and app_state.g_lws_count > 1) {
                         app_state.g_shell_focused = true;
                         showActiveShellAfterOverlay();
@@ -5589,6 +5658,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_tab = frequent.frequent_split;
                     openInbox(hwnd);
                     app_state.g_inbox_sel = 0;
+                    return 0;
+                }
+                if (target == SEARCH_STARRED_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    app_state.g_search_from_inbox = false;
+                    if (app_state.g_inbox_active) closeInbox(hwnd);
+                    switchToWorkspace(@import("workspace_view.zig").starred);
                     return 0;
                 }
                 if (target == SEARCH_GOINBOX_OFFSET) {
@@ -6547,39 +6625,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
-                if (app_state.shells[idx].disconnected and app_state.shells[idx].process == null) return 0;
+                var exit_code: DWORD = std.math.maxInt(DWORD);
+                const got_code = app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
+                if (app_state.shells[idx].ssh_reconnect.phase == .closed or
+                    (app_state.shells[idx].disconnected and app_state.shells[idx].process == null))
+                {
+                    var exit_log: [160]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
+                    return 0;
+                }
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
                 const is_ssh_kind = (k == .vps or k == .vps2 or k == .tmux);
-                {
-                    const knames = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
-                    var lbuf: [128]u8 = undefined;
-                    var ll: usize = 0;
-                    const t = "WM_APP_SHELL_EXITED kind=";
-                    @memcpy(lbuf[0..t.len], t);
-                    ll = t.len;
-                    const kn = knames[@intFromEnum(k)];
-                    @memcpy(lbuf[ll .. ll + kn.len], kn);
-                    ll += kn.len;
-                    const t2 = " idx=";
-                    @memcpy(lbuf[ll .. ll + t2.len], t2);
-                    ll += t2.len;
-                    appendDecimal(&lbuf, &ll, idx);
-                    const t3 = " in_window=";
-                    @memcpy(lbuf[ll .. ll + t3.len], t3);
-                    ll += t3.len;
-                    lbuf[ll] = if (in_resume_window) '1' else '0';
-                    ll += 1;
-                    const t4 = " window_remaining_ms=";
-                    @memcpy(lbuf[ll .. ll + t4.len], t4);
-                    ll += t4.len;
-                    const remaining: u64 = if (app_state.g_resume_until_tick > now) app_state.g_resume_until_tick - now else 0;
-                    appendDecimal(&lbuf, &ll, remaining);
-                    debugLog(lbuf[0..ll]);
-                }
-                var exit_code: DWORD = 0;
-                const got_code = is_ssh_kind and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
                 const loader_failure = got_code and exit_code == 0xC0000139;
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
@@ -6589,6 +6647,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
                     return 0;
                 }
+                var exit_log: [192]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} kind={s} reason={s} exit_code={d} known={}", .{ exited_id, @tagName(k), @tagName(action), exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                 switch (action) {
                     .respawn => {
                         if (!respawnShellInPlace(idx, false)) {
@@ -6608,6 +6668,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         closeShell(idx);
                     },
                 }
+            } else {
+                var exit_log: [160]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=removed-or-detached exit_code=unknown", .{exited_id}) catch "WM_APP_SHELL_EXITED log-overflow");
             }
             return 0;
         },
@@ -7301,6 +7364,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (app_state.g_starred_workspace and !app_state.g_inbox_active) {
+                    loadInboxModel();
+                    @import("workspaces.zig").refreshStarredWorkspace();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (!app_state.g_inbox_active) {
                     _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
                     return 0;
@@ -7530,6 +7599,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_workspace_restore_exclusive = false;
 
             saveSession();
+            launch_cache.finish();
             saveWorkspaceRegistry();
             gcDefaultNamedWindowOnClose();
             removeMyHostedEntriesAndSave();
@@ -7609,113 +7679,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     }
 }
 
-pub fn drawStartupProgress(done: u32, total: u32, name: []const u16) void {
-    if (app_state.g_main_hwnd == null) return;
-    const hdc = GetDC(app_state.g_main_hwnd);
-    if (hdc == null) return;
-    defer _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-
-    var cr: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &cr);
-    const cw = cr.right;
-    const ch = cr.bottom;
-
-    if (app_state.g_startup_paint_first) {
-        app_state.g_startup_paint_first = false;
-        const bg = CreateSolidBrush(RGB(36, 36, 36));
-        if (bg != null) {
-            _ = FillRect(hdc, &cr, bg);
-            _ = DeleteObject(bg);
-        }
-    }
-
-    const bw: i32 = 420;
-    const bh: i32 = 80;
-    const bx: i32 = @divTrunc(cw - bw, 2);
-    const by: i32 = @divTrunc(ch - bh, 2);
-    var band: RECT = .{ .left = bx, .top = by, .right = bx + bw, .bottom = by + bh };
-    const band_bg = CreateSolidBrush(RGB(36, 36, 36));
-    if (band_bg != null) {
-        _ = FillRect(hdc, &band, band_bg);
-        _ = DeleteObject(band_bg);
-    }
-
-    const tw: i32 = 240;
-    const th: i32 = 10;
-    const tx: i32 = bx + @divTrunc(bw - tw, 2);
-    const ty: i32 = by + 24;
-    const tr_br = CreateSolidBrush(RGB(104, 104, 112));
-    const tr_pen = CreatePen(0, 1, RGB(104, 104, 112));
-    if (tr_br != null and tr_pen != null) {
-        const ob = SelectObject(hdc, tr_br);
-        const op = SelectObject(hdc, tr_pen);
-        _ = @import("smooth.zig").drawRoundRect(hdc, tx, ty, tx + tw, ty + th, th, th);
-        _ = SelectObject(hdc, ob);
-        _ = SelectObject(hdc, op);
-    }
-    if (tr_br != null) _ = DeleteObject(tr_br);
-    if (tr_pen != null) _ = DeleteObject(tr_pen);
-
-    if (total > 0) {
-        const raw: u64 = @as(u64, @intCast(tw)) * @as(u64, @min(done, total)) / @as(u64, total);
-        const fw: i32 = @intCast(@min(raw, @as(u64, @intCast(tw))));
-        if (fw >= th) {
-            const fl_br = CreateSolidBrush(RGB(56, 56, 60));
-            const fl_pen = CreatePen(0, 1, RGB(56, 56, 60));
-            if (fl_br != null and fl_pen != null) {
-                const ob2 = SelectObject(hdc, fl_br);
-                const op2 = SelectObject(hdc, fl_pen);
-                _ = @import("smooth.zig").drawRoundRect(hdc, tx, ty, tx + fw, ty + th, th, th);
-                _ = SelectObject(hdc, ob2);
-                _ = SelectObject(hdc, op2);
-            }
-            if (fl_br != null) _ = DeleteObject(fl_br);
-            if (fl_pen != null) _ = DeleteObject(fl_pen);
-        }
-    }
-
-    const hfont = CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L(@import("fonts.zig").UI_FACE));
-    const old_font: HANDLE = if (hfont != null) SelectObject(hdc, hfont) else null;
-    defer {
-        if (hfont != null) {
-            _ = SelectObject(hdc, old_font);
-            _ = DeleteObject(hfont);
-        }
-    }
-    _ = SetBkMode(hdc, TRANSPARENT);
-    _ = SetTextColor(hdc, RGB(120, 120, 128));
-
-    var lb: [64]u8 = undefined;
-    var lp: usize = 0;
-    const pf = "Restoring sessions - ";
-    @memcpy(lb[0..pf.len], pf);
-    lp = pf.len;
-    appendDecimal(&lb, &lp, done);
-    const mf = " of ";
-    @memcpy(lb[lp .. lp + mf.len], mf);
-    lp += mf.len;
-    appendDecimal(&lb, &lp, total);
-    var lw: [80]u16 = std.mem.zeroes([80]u16);
-    for (lb[0..lp], 0..) |c, i| lw[i] = c;
-    var r1: RECT = .{ .left = bx, .top = ty + 22, .right = bx + bw, .bottom = ty + 38 };
-    _ = DrawTextW(hdc, @ptrCast(&lw), @intCast(lp), &r1, DT_CENTER | DT_SINGLELINE);
-
-    const nc = @min(name.len, 48);
-    if (nc > 0) {
-        var nw: [64]u16 = std.mem.zeroes([64]u16);
-        for (name[0..nc], 0..) |c, i| nw[i] = c;
-        var r2: RECT = .{ .left = bx, .top = ty + 40, .right = bx + bw, .bottom = ty + 56 };
-        _ = DrawTextW(hdc, @ptrCast(&nw), @intCast(nc), &r2, DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
-}
-
 pub fn main(init: std.process.Init) void {
+    launch_cache.begin();
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return;
     if (usage_telemetry_mode.isRequested(args)) {
         usage_telemetry.main(init) catch {};
         return;
     }
 
+    debugLog("launch process-start version=" ++ APP_VERSION);
     if (update_check.runRelaunchHelperIfRequested()) return;
 
     defer @import("fonts.zig").unregister();
@@ -7829,10 +7801,8 @@ pub fn main(init: std.process.Init) void {
     if (!loadWorkspaceRegistry()) {
         addOrUpdateWorkspace(getInstanceName(), defaultWorkspaceName(getInstanceName()), true);
     }
-    migrateWorkspacesFromSessionFiles();
     selectStartupWorkspaceFromRegistry();
     ensureCurrentWorkspaceRegistered();
-    reconcileWorkspaceRegistry(true);
 
     if (!app_state.g_empty_workspace and app_state.g_adopt_hwnd == null) {
         const cur_id = getInstanceName();
@@ -7854,17 +7824,6 @@ pub fn main(init: std.process.Init) void {
     initNtdll();
     initShellIcons();
     loadGlobalTheme();
-    loadBrowserEngineConfig();
-    loadEdgeProfileConfig();
-    loadEdgeExeConfig();
-    loadChromeExeConfig();
-    loadEdgeExtensionPathConfig();
-    writeCurrentThemeManifest();
-    if (app_state.g_browser_engine == .chrome) _ = ensureChromeNativeMessagingRegistration();
-    loadSidebarStatusCard();
-    ensureCapacityPolicyStarter();
-    loadCapacityPolicy();
-
     const hInst = GetModuleHandleW(null);
 
     const wc = WNDCLASSEXW{
@@ -7891,7 +7850,7 @@ pub fn main(init: std.process.Init) void {
         0,
         L("ZigShell"),
         if (IS_DEV) L("multiprompt v" ++ APP_VERSION ++ " [DEV]") else L("multiprompt v" ++ APP_VERSION),
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         1000,
@@ -7912,7 +7871,42 @@ pub fn main(init: std.process.Init) void {
         _ = ReleaseMutex(app_state.g_account_instance_mutex);
         _ = CloseHandle(app_state.g_account_instance_mutex);
     };
-    if (!accountBootstrap(hwnd)) return;
+    if (!@import("account_desktop.zig").accountClaim(hwnd)) return;
+    _ = syncMainWindowDpi(hwnd, 0);
+    applyTitleBarTheme();
+    launch_cache.restore();
+    _ = ShowWindow(hwnd, SW_SHOW);
+    _ = InvalidateRect(hwnd, null, 1);
+    _ = @import("win32.zig").UpdateWindow(hwnd);
+    if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+
+    var msg: MSG = std.mem.zeroes(MSG);
+    while (GetMessageW(&msg, null, 0, 0) > 0) {
+        _ = TranslateMessage(&msg);
+        _ = DispatchMessageW(&msg);
+    }
+}
+
+fn initializeDeferred(hwnd: HANDLE) void {
+    const hInst = GetModuleHandleW(null);
+    launch_cache.step(.account);
+    if (!accountBootstrap(hwnd)) {
+        _ = DestroyWindow(hwnd);
+        return;
+    }
+    migrateWorkspacesFromSessionFiles();
+    reconcileWorkspaceRegistry(true);
+    loadBrowserEngineConfig();
+    loadEdgeProfileConfig();
+    loadEdgeExeConfig();
+    loadChromeExeConfig();
+    loadEdgeExtensionPathConfig();
+    writeCurrentThemeManifest();
+    if (app_state.g_browser_engine == .chrome) _ = ensureChromeNativeMessagingRegistration();
+    loadSidebarStatusCard();
+    ensureCapacityPolicyStarter();
+    loadCapacityPolicy();
+
     if (!app_state.g_account_bypass) {
         app_state.g_single_window = true;
         app_state.g_adopt_hwnd = null;
@@ -7966,9 +7960,11 @@ pub fn main(init: std.process.Init) void {
     registerPowerNotifications(hwnd);
     applyPowerProfile(hwnd);
     setCoalescableTimerInterval(hwnd, TIMER_POWER_IDLE, 30_000);
+    launch_cache.step(.telemetry);
     ensureUsageTelemetryCollector();
     requestAiPaceRefresh();
 
+    launch_cache.step(.links);
     if (std.Thread.spawn(.{}, notifyListenerThread, .{})) |notify_thread| {
         notify_thread.detach();
     } else |_| {}
@@ -7980,6 +7976,7 @@ pub fn main(init: std.process.Init) void {
     _ = resolveSshPath(false);
     maintainTunnelKeepers();
 
+    launch_cache.step(.tabs);
     app_state.g_startup_progress = true;
     debugLog("main: checking adopt mode");
     if (app_state.g_adopt_hwnd) |adopt_hwnd_val| {
@@ -8066,6 +8063,7 @@ pub fn main(init: std.process.Init) void {
             }
         }
     }
+    launch_cache.bindRestoredChat();
     if (app_state.active_shell < app_state.shell_count and
         chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_view_restore_on, true))
     {
@@ -8092,6 +8090,7 @@ pub fn main(init: std.process.Init) void {
     restoreRegisteredWorkspaceWindows();
     checkDueReminders();
     app_state.g_startup_progress = false;
+    launch_cache.step(.browser);
     relaunchActiveRestoredBrowserPane();
     updateBrowserVisibility();
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
@@ -8126,10 +8125,4 @@ pub fn main(init: std.process.Init) void {
     }
 
     if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
-
-    var msg: MSG = std.mem.zeroes(MSG);
-    while (GetMessageW(&msg, null, 0, 0) > 0) {
-        _ = TranslateMessage(&msg);
-        _ = DispatchMessageW(&msg);
-    }
 }

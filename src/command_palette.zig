@@ -58,6 +58,7 @@ const SEARCH_CLOSEWIN_OFFSET = @import("app_state.zig").SEARCH_CLOSEWIN_OFFSET;
 const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET;
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
+const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -132,6 +133,7 @@ const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET
 const SEARCH_CRASH_REPORTS_OFFSET = @import("app_state.zig").SEARCH_CRASH_REPORTS_OFFSET;
 const SEARCH_CRASH_NOW_OFFSET = @import("app_state.zig").SEARCH_CRASH_NOW_OFFSET;
 const SEARCH_HIBERNATE_NOW_OFFSET = @import("app_state.zig").SEARCH_HIBERNATE_NOW_OFFSET;
+const SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET = @import("app_state.zig").SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
 const SEARCH_INBOX_EXCLUDE_OFFSET = @import("app_state.zig").SEARCH_INBOX_EXCLUDE_OFFSET;
 const SEARCH_REMIND_PRESET_OFFSET = @import("app_state.zig").SEARCH_REMIND_PRESET_OFFSET;
 const SEARCH_GROUPMOVE_GROUP_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_GROUP_OFFSET;
@@ -654,6 +656,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_RECONNECT_OFFSET => "reconnect tab",
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
+        SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
         SEARCH_GOINBOX_OFFSET => "go to inbox",
         SEARCH_SHOW_FREQUENT_OFFSET => "show frequent split",
         SEARCH_FREQUENT_FIRST_OFFSET => "frequent as first tab",
@@ -748,6 +751,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser auto suspend",
         SEARCH_KEEPAWAKE_OFFSET => "keep tab awake",
         SEARCH_HIBERNATE_NOW_OFFSET => "hibernate browser panes now",
+        SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET => "close all browser panes",
         SEARCH_CRASH_REPORTS_OFFSET => "crash reports open folder",
         SEARCH_CRASH_NOW_OFFSET => "debug crash now",
         SEARCH_CHANGELOG_OFFSET => "changelog",
@@ -2662,6 +2666,13 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{ "Go to Starred workspace", "favorites", "alt 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_STARRED_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_goinbox = (app_state.g_search_len == 0);
         if (!show_goinbox) {
@@ -3779,6 +3790,11 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIBERNATE_NOW_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes", "close all browsers", "close browser windows", "free browser memory" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Crash Reports: Open Folder", "crash reports", "crash log", "crashes" }, app_state.g_search_buf[0..app_state.g_search_len])) {

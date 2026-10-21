@@ -130,3 +130,38 @@ test('tool lines toggle before links and selection and expose all palette surfac
   assert.match(src, /L\("Chat View: Open or fold all tool steps"\)/);
   assert.match(docs, /Chat View: Open or fold all tool steps/);
 });
+
+
+test('IGSH-404 every Chat View copy path owns selection-sized storage and reports failures', () => {
+  assert.doesNotMatch(src, /g_chat_sel_text/);
+  assert.match(body('chatCopyCapacity'), /std\.math\.mul\(usize, selected_len, 2\)/);
+  assert.match(body('chatCopyCapacity'), /block_count -\| 1, 4/);
+  const allocate = body('chatCopyTextAlloc');
+  assert.match(allocate, /try chatCopyCapacity\(selected_len/);
+  assert.match(allocate, /try allocator\.alloc\(u16, capacity\)/);
+  assert.match(allocate, /errdefer allocator\.free\(out\)/);
+  assert.match(allocate, /try chatCopyBlockText/);
+  assert.match(allocate, /try chatSelectionToClipboard/);
+  assert.match(allocate, /allocator\.realloc\(out, n\)/);
+  for (const name of ['chatCopySelection', 'chatCopyBlockToClipboard']) {
+    const copy = body(name);
+    assert.match(copy, /chatCopyTextAlloc\(std\.heap\.page_allocator,/);
+    assert.match(copy, /catch \{\s*showHeaderNoticeAscii\("Could not copy text; try again", 2500, true\);\s*return;/);
+    assert.match(copy, /defer std\.heap\.page_allocator\.free\(text\)/);
+    assert.match(copy, /chatCopyTextToClipboard\(text\)/);
+  }
+  const menu = body('chatTranscriptWndProc');
+  assert.match(menu, /const selection_text = chatCopyTextAlloc/);
+  assert.match(menu, /const message_text: \[\]u16 = if \(block_at\) \|idx\| chatCopyTextAlloc/);
+  assert.match(menu, /defer std\.heap\.page_allocator\.free\(selection_text\)/);
+  assert.match(menu, /defer std\.heap\.page_allocator\.free\(message_text\)/);
+  assert.match(body('chatCopyTextToClipboard'), /else if \(setUnicodeClipboardTextWithRetry\(text\)\) \{\s*showHeaderNoticeAscii\("Copied"/);
+  assert.match(body('chatCopyTextToClipboard'), /else \{\s*showHeaderNoticeAscii\("Could not copy to clipboard; try again", 2500, true\)/);
+  assert.match(body('chatCopyRichText'), /else try std\.heap\.page_allocator\.alloc/);
+  assert.match(body('chatCopyBlockText'), /try chat_markdown\.parseTable/);
+  for (const name of ['chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatSelectionToClipboard']) {
+    assert.match(body(name), /error\.NoSpaceLeft/);
+  }
+  assert.match(build, /"node", "--test", "tools\/chat-view-gaps\.test\.js"/);
+  assert.match(build, /test_step\.dependOn\(&chat_view_gaps_tests\.step\)/);
+});

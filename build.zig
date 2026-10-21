@@ -210,6 +210,9 @@ pub fn build(b: *std.Build) void {
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);
+    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
+    test_step.dependOn(&chat_bench_ab_summary_tests.step);
+    vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
     const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js" });
     vps_test_step.dependOn(&chat_bench_linux_tests.step);
     const install_guard_tests = b.addSystemCommand(&.{ "node", "--test", "tools/install-guard.test.js" });
@@ -217,6 +220,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_usage_telemetry_tests.step);
+    const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
+    test_step.dependOn(&launch_regression.step);
+    vps_test_step.dependOn(&launch_regression.step);
     const usage_mode_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_single_exe.test.js" });
     test_step.dependOn(&usage_mode_regression.step);
     const usage_mode_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -226,13 +232,15 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.graph.host,
             .optimize = .Debug,
         }) });
-        account_test_step.dependOn(&b.addRunArtifact(tests).step);
+        const run_tests = b.addRunArtifact(tests);
+        account_test_step.dependOn(&run_tests.step);
+        if (std.mem.eql(u8, source, "src/workspace_view.zig")) test_step.dependOn(&run_tests.step);
     }
     vps_test_step.dependOn(account_test_step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -420,6 +428,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&console_font_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
     test_step.dependOn(&palette_rows_tests.step);
+    const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
+    test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js" });
@@ -427,6 +437,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
     test_step.dependOn(&chat_rich_tests.step);
+    test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js" });
     test_step.dependOn(&chat_autocomplete_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });
@@ -540,6 +551,8 @@ pub fn build(b: *std.Build) void {
     chat_drop_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drop_tests.step);
     vps_test_step.dependOn(&chat_drop_tests.step);
+    const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
+    vps_test_step.dependOn(&crash_reports_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
         "node",                                   "--test",                              "--test-concurrency=4",
         "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",

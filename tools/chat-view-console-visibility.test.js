@@ -28,7 +28,9 @@ function audit(text) {
   assert.match(helper, /if \(!shellConsoleShouldBeVisible\(idx\)\)/);
   assert.match(helper, /IsWindowVisible[^]*return ShowWindowAsync\(shells\[idx\]\.hwnd, SW_HIDE\);/);
   assert.match(helper, /verboseLoggingEnabled\(\)[^]*\[chatview\] suppressed console show shell=\{d\} from=\{s\}/);
-  const outside = text.replace(helper, '');
+  const main = fn(text, 'main');
+  assert.match(main, /const hwnd = CreateWindowExW\(\s*0,\s*L\("ZigShell"\)/);
+  const outside = text.replace(helper, '').replace(main, main.replace('_ = ShowWindow(hwnd, SW_SHOW);', ''));
   for (const call of outside.matchAll(/(?<![.\w])ShowWindow\(([^,\n]+), (SW_\w+)\)/g)) {
     if (call[2] === 'SW_HIDE') continue;
     assert.ok(['g_urlbar_hwnd', 'hw', 'g_chat_transcript_hwnd', 'g_chat_composer_hwnd', 'target', 'hwnd', 'owner_hwnd'].includes(call[1]), `unguarded reveal: ${call[0]}`);
@@ -68,6 +70,8 @@ test('every console reveal is guarded; a new HWND alias bypass are rejected', ()
   audit(source);
   assert.throws(() => audit(source + '\nfn leakedRepair() void { verifyShellWindowSize(hwnd, 0, 0, 1, 1); }'));
   assert.throws(() => audit(source + '\nfn leakedConsole() void { _ = ShowWindow(console_alias, SW_SHOW); }'));
+  assert.throws(() => audit(source + '\nfn leakedConsole(hwnd: HANDLE) void { _ = ShowWindow(hwnd, SW_SHOW); }'));
+  assert.throws(() => audit(source.replace('const hwnd = CreateWindowExW(\n        0,\n        L("ZigShell")', 'const hwnd = CreateWindowExW(\n        0,\n        L("ConsoleWindowClass")')));
   assert.throws(() => audit(source.replace('if (!shellConsoleShouldBeVisible(active_shell)) return;', '')));
 
 });
