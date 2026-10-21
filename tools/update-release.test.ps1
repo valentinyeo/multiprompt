@@ -16,7 +16,7 @@ try {
     Add-Type -TypeDefinition 'class UpdateBroken { static int Main() { return 1; } }' -OutputAssembly "$root/broken.exe" -OutputType ConsoleApplication
     [IO.File]::AppendAllText("$root/broken.exe", "MPVERSION=1.10.0;")
     Copy-Item "$root/old.exe" "$root/app.exe"
-    $target = "$root/app.exe"
+    $target = [IO.Path]::GetFullPath("$root/app.exe")
     $dir = "$target.update"
     New-Item -ItemType Directory -Path $dir | Out-Null
     $oldHash = (Get-FileHash $target).Hash
