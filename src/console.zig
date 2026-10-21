@@ -412,6 +412,62 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
     return true;
 }
 
+pub const BundledConsoleFonts = struct {
+    paths: [3][520]u16 = std.mem.zeroes([3][520]u16),
+    registered: [3]bool = .{ false, false, false },
+};
+
+pub fn registerBundledConsoleFonts() BundledConsoleFonts {
+    var result: BundledConsoleFonts = .{};
+    if (!app_state.ISSUE_441) return result;
+    const w = @import("win32.zig");
+    var directory: [520]u16 = undefined;
+    const local_len = w.GetEnvironmentVariableW(L("LOCALAPPDATA"), &directory, directory.len);
+    if (local_len == 0 or local_len + 80 >= directory.len) return result;
+    const suffix = L("\\ZigShell\\fonts");
+    @memcpy(directory[local_len..][0..15], suffix[0..15]);
+    directory[local_len + 9] = 0;
+    _ = w.CreateDirectoryW(@ptrCast(&directory), null);
+    directory[local_len + 9] = '\\';
+    directory[local_len + 15] = 0;
+    _ = w.CreateDirectoryW(@ptrCast(&directory), null);
+    const files = .{
+        .{ "NordwandMono-Regular.ttf", @embedFile("fonts/NordwandMono-Regular.ttf") },
+        .{ "NordwandMono-Bold.ttf", @embedFile("fonts/NordwandMono-Bold.ttf") },
+        .{ "LICENSE-NordwandMono.txt", @embedFile("fonts/LICENSE-NordwandMono.txt") },
+    };
+    inline for (files, 0..) |file, i| {
+        const path = &result.paths[i];
+        @memcpy(path[0 .. local_len + 15], directory[0 .. local_len + 15]);
+        path[local_len + 15] = '\\';
+        const name_len = std.unicode.utf8ToUtf16Le(path[local_len + 16 ..], file[0]) catch unreachable;
+        path[local_len + 16 + name_len] = 0;
+        var cached = false;
+        const existing = w.CreateFileW(@ptrCast(path), w.GENERIC_READ, w.FILE_SHARE_READ, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+        if (existing != w.INVALID_HANDLE_VALUE_PTR) {
+            var size: i64 = 0;
+            cached = w.GetFileSizeEx(existing, &size) != 0 and size == file[1].len;
+            _ = CloseHandle(existing);
+        }
+        if (!cached) {
+            const output = w.CreateFileW(@ptrCast(path), w.GENERIC_WRITE, 0, null, w.CREATE_ALWAYS, w.FILE_ATTRIBUTE_NORMAL, null);
+            if (output != w.INVALID_HANDLE_VALUE_PTR) {
+                var written: DWORD = 0;
+                cached = w.WriteFile(output, file[1], file[1].len, &written, null) != 0 and written == file[1].len;
+                _ = CloseHandle(output);
+            }
+        }
+        if (i < 2 and cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
+    }
+    return result;
+}
+
+pub fn unregisterBundledConsoleFonts(fonts: *const BundledConsoleFonts) void {
+    for (fonts.registered, 0..) |registered, i| {
+        if (registered) _ = @import("win32.zig").RemoveFontResourceExW(@ptrCast(&fonts.paths[i]), 0, null);
+    }
+}
+
 fn applyThemedConsoleFont(h: HANDLE, captured: *const CONSOLE_FONT_INFOEX) void {
     if (!LOOK_UNIFIED) return;
     ensureDevThemeInitialized();
@@ -520,23 +576,40 @@ pub fn applyBlackConsoleBackground(pid: DWORD) void {
     if (LOOK_UNIFIED) {
         var f2: CONSOLE_FONT_INFOEX = undefined;
         f2.cbSize = @sizeOf(CONSOLE_FONT_INFOEX);
-        if (GetCurrentConsoleFontEx(h, 0, &f2) != 0 and f2.dwFontSize.x > 0) {
-            app_state.g_dev_console_cell_w = @intCast(f2.dwFontSize.x);
-            if (f2.dwFontSize.y > 0) {
-                for (0..app_state.shell_count) |si| {
-                    if (app_state.shells[si].pid == pid and app_state.shells[si].base_font_h == 0) {
-                        app_state.shells[si].base_font_h = f2.dwFontSize.y;
-                        app_state.shells[si].base_font_w = f2.dwFontSize.x;
-                        app_state.shells[si].base_font_face = f2.FaceName;
-                        app_state.shells[si].base_font_family = f2.FontFamily;
-                        app_state.shells[si].base_font_weight = f2.FontWeight;
-                        app_state.shells[si].base_font_dpi = @intCast(mainWindowDpi());
-                        if (verboseLoggingEnabled()) {
-                            var db: [96]u8 = undefined;
-                            const ds = std.fmt.bufPrint(&db, "[fontbase] i={d} h={d} dpi={d}", .{ si, app_state.shells[si].base_font_h, app_state.shells[si].base_font_dpi }) catch "[fontbase]";
-                            debugLog(ds);
+        if (GetCurrentConsoleFontEx(h, 0, &f2) != 0) {
+            var log_font = true;
+            for (0..app_state.shell_count) |si| {
+                if (app_state.shells[si].pid == pid) {
+                    log_font = !app_state.shells[si].console_font_logged;
+                    if (log_font) app_state.shells[si].console_font_logged = true;
+                    break;
+                }
+            }
+            if (log_font) {
+                var face_buf: [96]u8 = undefined;
+                const face_len = std.unicode.utf16LeToUtf8(&face_buf, std.mem.sliceTo(&f2.FaceName, 0)) catch 0;
+                var font_log: [160]u8 = undefined;
+                const font_line = std.fmt.bufPrint(&font_log, "[consolefont] pid={d} face={s} h={d}", .{ pid, face_buf[0..face_len], f2.dwFontSize.y }) catch "[consolefont]";
+                debugLog(font_line);
+            }
+            if (f2.dwFontSize.x > 0) {
+                app_state.g_dev_console_cell_w = @intCast(f2.dwFontSize.x);
+                if (f2.dwFontSize.y > 0) {
+                    for (0..app_state.shell_count) |si| {
+                        if (app_state.shells[si].pid == pid and app_state.shells[si].base_font_h == 0) {
+                            app_state.shells[si].base_font_h = f2.dwFontSize.y;
+                            app_state.shells[si].base_font_w = f2.dwFontSize.x;
+                            app_state.shells[si].base_font_face = f2.FaceName;
+                            app_state.shells[si].base_font_family = f2.FontFamily;
+                            app_state.shells[si].base_font_weight = f2.FontWeight;
+                            app_state.shells[si].base_font_dpi = @intCast(mainWindowDpi());
+                            if (verboseLoggingEnabled()) {
+                                var db: [96]u8 = undefined;
+                                const ds = std.fmt.bufPrint(&db, "[fontbase] i={d} h={d} dpi={d}", .{ si, app_state.shells[si].base_font_h, app_state.shells[si].base_font_dpi }) catch "[fontbase]";
+                                debugLog(ds);
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
             }

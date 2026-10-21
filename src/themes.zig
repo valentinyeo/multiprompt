@@ -50,7 +50,7 @@ fn resetDevThemeDefaults() void {
     setWideAscii(&app_state.g_dev_theme.title_font, "Segoe UI");
     setWideAscii(&app_state.g_dev_theme.subtitle_font, "Segoe UI");
     setWideAscii(&app_state.g_dev_theme.close_font, "Segoe UI");
-    setWideAscii(&app_state.g_dev_theme.console_font, "JetBrainsMono NFM");
+    setWideAscii(&app_state.g_dev_theme.console_font, app_state.DEFAULT_CONSOLE_FONT);
     app_state.g_dev_theme.title_height = 16;
     app_state.g_dev_theme.subtitle_height = 14;
     app_state.g_dev_theme.close_height = 14;

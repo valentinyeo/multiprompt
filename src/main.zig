@@ -1249,7 +1249,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.765";
+pub const APP_VERSION = "0.28.766";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -2494,7 +2494,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_TOGGLE_FULLWIDTH => {
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].full_width = !app_state.shells[app_state.active_shell].full_width;
-                if (app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+                if (@import("chat_composer.zig").fullWidthShouldResizeConsole(app_state.g_chat_active) and app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
                 repositionActive();
                 saveSession();
                 _ = InvalidateRect(hwnd, null, 0);
@@ -7638,6 +7638,9 @@ pub fn main(init: std.process.Init) void {
         sendNotify(payload);
         return;
     }
+
+    var console_fonts = @import("console.zig").registerBundledConsoleFonts();
+    defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
 
     _ = SetErrorMode(SSH_ERROR_MODE);
     crash_recorder.install(&crashSnapshot, APP_VERSION, IS_DEV);
