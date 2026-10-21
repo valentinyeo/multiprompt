@@ -93,14 +93,13 @@ class Installation(unittest.TestCase):
         for event in ("alert-activity", "alert-silence", "pane-title-changed", "session-created", "client-attached"):
             self.assertEqual(config.count("set-hook -g " + event + "[514]"), 1)
         for delay in (3, 15):
-            self.assertIn(f'run-shell -bd {delay} "tmux -S #{{q:socket_path}} set-environment -h', config)
+            self.assertIn(f'run-shell -bCd {delay} "set-environment -h -t #{{session_id}} MULTIPROMPT_NOTIFY_READY 1;', config)
         self.assertIn("set-environment -gh MULTIPROMPT_NOTIFY_STATE 0", config)
         self.assertIn("set-environment -gh MULTIPROMPT_NOTIFY_READY 1", config)
-        self.assertIn("#{&&:#{window_active},#{==:#{MULTIPROMPT_NOTIFY_READY},1}}", config)
+        self.assertIn("if-shell -F '#{MULTIPROMPT_NOTIFY_READY}' { if-shell -F '#{window_active}'", config)
         self.assertIn("set-environment -h MULTIPROMPT_NOTIFY_READY 0", config)
-        self.assertIn("set-environment -h MULTIPROMPT_NOTIFY_STATE 0", config)
-        self.assertIn("set-environment -h MULTIPROMPT_NOTIFY_STATE 1", config)
-        self.assertIn("set-environment -h MULTIPROMPT_NOTIFY_STATE 2", config)
+        for state in (0, 1, 2):
+            self.assertIn(f"set-environment -h MULTIPROMPT_NOTIFY_STATE {state}", config)
         self.assertNotIn("capture-pane", config)
         self.assertNotIn("pgrep", config)
         self.assertNotIn("python", config)
@@ -115,34 +114,13 @@ class Installation(unittest.TestCase):
         for option in ("visual-activity", "visual-silence"):
             self.assertIn(f"set-option -g {option} off", config)
         self.assertIn("if-shell -F '#{==:#{session_attached},0}' { kill-session -C }", hooks)
-        rearm = json.JSONDecoder().raw_decode(config.split("run-shell -bd 3 ", 1)[1])[0]
-        self.assertIn("if-shell -F -t '#{session_id}:' '##{==:##{session_attached},0}' 'kill-session -C -t #{session_id}'", rearm)
+        for delay in (3, 15):
+            rearm = json.JSONDecoder().raw_decode(config.split(f"run-shell -bCd {delay} ", 1)[1])[0]
+            self.assertIn("set-environment -h -t #{session_id} MULTIPROMPT_NOTIFY_READY 1", rearm)
+            self.assertIn("if-shell -F -t #{session_id}: '##{==:##{session_attached},0}' { kill-session -C -t #{session_id} }", rearm)
+            self.assertNotIn("set-option", rearm)
+            self.assertNotIn("tmux -S", rearm)
         self.assertEqual(hooks.count("kill-session -C"), 3)
-        self.assertTrue(rearm.endswith(">/dev/null 2>&1 || :"))
-        self.assertNotIn("run-shell -bC", hooks)
-
-    @unittest.skipIf(os.name == "nt", "tmux rearm runs on Linux")
-    def test_rearm_pins_socket_preserves_live_condition_and_ignores_deleted_session(self):
-        import shlex
-
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            executable = directory / "tmux"
-            executable.write_text('#!/bin/sh\nprintf \'%s\\0\' "$@" > "$REARM_ARGS"\nexit 1\n', encoding="utf-8")
-            executable.chmod(0o755)
-            config = installer.tmux_config(directory / "events")
-            rearm = json.JSONDecoder().raw_decode(config.split("run-shell -bd 3 ", 1)[1])[0]
-            rearm = rearm.replace("#{q:socket_path}", shlex.quote("/tmp/socket with spaces"))
-            rearm = rearm.replace("#{session_id}", "$7").replace("##{", "#{")
-            log = directory / "args"
-            result = self.real_run(["/bin/sh", "-c", rearm], capture_output=True, text=True, timeout=2,
-                                   env={**os.environ, "PATH": str(directory), "REARM_ARGS": str(log)})
-            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-            self.assertEqual(log.read_bytes().split(b"\0"), [
-                b"-S", b"/tmp/socket with spaces", b"set-environment", b"-h", b"-t", b"$7",
-                b"MULTIPROMPT_NOTIFY_READY", b"1", b";", b"if-shell", b"-F", b"-t", b"$7:",
-                b"#{==:#{session_attached},0}", b"kill-session -C -t $7", b"",
-            ])
 
     @unittest.skipIf(os.name == "nt", "tmux hooks are installed on Linux")
     def test_no_running_tmux_still_saves_persistent_hooks(self):

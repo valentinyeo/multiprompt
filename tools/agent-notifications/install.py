@@ -118,17 +118,16 @@ def tmux_config(fifo):
 
     clear = "if-shell -F '#{==:#{session_attached},0}' { kill-session -C }"
     rearm = (
-        "tmux -S #{q:socket_path} set-environment -h -t '#{session_id}' MULTIPROMPT_NOTIFY_READY 1 \\; "
-        "if-shell -F -t '#{session_id}:' '##{==:##{session_attached},0}' 'kill-session -C -t #{session_id}' "
-        ">/dev/null 2>&1 || :"
+        "set-environment -h -t #{session_id} MULTIPROMPT_NOTIFY_READY 1; "
+        "if-shell -F -t #{session_id}: '##{==:##{session_attached},0}' { kill-session -C -t #{session_id} }"
     )
     activity = (
-        "if-shell -F '#{&&:#{window_active},#{==:#{MULTIPROMPT_NOTIFY_READY},1}}' { "
+        "if-shell -F '#{MULTIPROMPT_NOTIFY_READY}' { if-shell -F '#{window_active}' { "
         "set-environment -h MULTIPROMPT_NOTIFY_READY 0; "
         "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},0}' { set-environment -h MULTIPROMPT_NOTIFY_STATE 1; "
-        "run-shell -bd 3 " + json.dumps(rearm) + " } { "
+        "run-shell -bCd 3 " + json.dumps(rearm) + " } { "
         "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},1}' { set-environment -h MULTIPROMPT_NOTIFY_STATE 2 }; " + emit("activity") + "; "
-        "run-shell -bd 15 " + json.dumps(rearm) + " } }"
+        "run-shell -bCd 15 " + json.dumps(rearm) + " } } }"
     )
     silence = (
         "if-shell -F '#{&&:#{window_active},#{!=:#{MULTIPROMPT_NOTIFY_STATE},0}}' { " + clear + "; "

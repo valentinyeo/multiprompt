@@ -72,11 +72,12 @@ Attached current windows do not latch these flags.
 The existing relay hosts one blocking FIFO reader; no new service or pane-output
 stream is used. Hidden session environment variables hold debounce/readiness state;
 monitoring stays enabled. Native three-second debounce and fifteen-second rearm
-timers launch a socket-pinned tmux command to restore readiness and clear flags only
-if the session is still detached. The attachment check is evaluated when the timer
-fires, not when it is scheduled. A shell-backed one-shot is intentional:
-`run-shell -bC` queues commands on a client and can lose rearming when that client
-disconnects. Deleted sessions exit silently. There is no periodic rearm process.
+timers restore readiness and clear flags only if the session is still detached.
+The attachment check is evaluated when the timer fires, not when it is scheduled.
+Rearming uses `run-shell -bC`, with no shell or tmux client process. As in the
+previous design, tmux 3.4 can lose a native timer's commands if the client owning
+its command queue disconnects before it fires. A shell-backed rearm survived that
+case in scratch experiments but exceeded the CPU budget; it is not used here.
 A shell builtin queues each bounded, NUL-framed event in the relay's private directory.
 One shared Python sender detects agents directly through `/proc`, reads titles only
 on title/attach events using the exact hook socket and pane, applies semantic
@@ -107,6 +108,34 @@ seconds. Baseline, hidden-environment writes, and native environment-only timers
 ran six status jobs each; window-option writes ran 60, user-option writes 49,
 and alert clearing 15. Even repeatedly setting `bell-action none` ran 54 jobs:
 changing another option is not a redraw-free workaround.
+
+### Scratch measurements and remaining CPU limit
+
+Tmux 3.4, isolated socket `igsh514b`, 47 real PTY-attached clients in separate
+sessions, eight panes producing output at 5 Hz in 24-second bursts every 50 seconds,
+and 39 idle panes. Each sample lasted 60 seconds after a 20-second warmup, with
+`status-interval 15` and `status-right '#(printf . >> MARKER; printf marker) %H:%M'`.
+The marker replaces the expensive RSS pipeline to expose hook CPU rather than
+hide it in status-job noise. CPU is the server's user/system time plus waited
+children and the FIFO sender thread; message delivery was captured locally.
+The two off/on pairs below were separate sequential experiments.
+
+| Design | Status jobs/min, off / on | CPU s/min, off / on |
+| --- | ---: | ---: |
+| Previous hooks | 188 / 431 | 3.83 / 7.88 |
+| Environment-gated native timers | 206 / 197 | 4.11 / 6.10 |
+
+The redraw amplification is eliminated, but **the under-0.5 CPU s/min target is
+not met** at this load: remaining overhead is about 1.98 CPU s/min, mostly in the
+server, while native activity alerts still dispatch on every output. A
+shell-backed rearm also removed status amplification but added process overhead
+and failed the same CPU target. Meeting that budget at this output rate needs a
+further change to activity observation, not more option or environment tuning.
+
+With the original RSS `ps | head | awk` status job plus a marker, an earlier
+47-client sample reproduced 237 jobs/min with hooks off and 566 with the previous
+hooks; an environment-only native-timer candidate ran 236. These are scratch
+measurements, not a claim about production CPU or a live rollout.
 
 The installer enables the user service and writes
 `~/.local/state/multiprompt/relay-v1` after it starts. Browser (ZSB) requests
