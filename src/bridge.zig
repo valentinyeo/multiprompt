@@ -147,7 +147,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer args.deinit();
 
     _ = args.next();
-    g_window_id = resolveWindowFromEnv(allocator);
     var command = args.next() orelse "native";
     var profile_override: ?[]const u8 = null;
     while (true) {
@@ -162,6 +161,26 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         command = args.next() orelse badArgs(command);
     }
+
+    var help_args = args;
+    if (help_args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return commandHelp(command);
+        if ((std.mem.eql(u8, command, "tab") and std.mem.eql(u8, arg, "close")) or
+            (std.mem.eql(u8, command, "tabs") and std.mem.eql(u8, arg, "--close")))
+        {
+            if (help_args.next()) |flag| {
+                if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) {
+                    return commandHelp(if (std.mem.eql(u8, command, "tab")) "tab close" else "tabs --close");
+                }
+            }
+        }
+    }
+    if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
+        if (args.next() != null) badArgs(command);
+        return usage();
+    }
+
+    if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
 
     if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
 
@@ -582,9 +601,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try fields.print("\"ownerPid\":{d}", .{pid});
         }
         try sendBrowserRequest(allocator, "resolveWindow", fields.items, null);
-    } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
-        if (args.next() != null) badArgs(command);
-        return usage();
     } else if (std.mem.eql(u8, command, "manifest")) {
         const exe_path = args.next() orelse badArgs(command);
         const extension_id = args.next() orelse badArgs(command);
@@ -2210,8 +2226,41 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     return makeErrorResponse(allocator, id, "unknown method");
 }
 
+fn commandLookup(command: []const u8) []const u8 {
+    return if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+}
+
+fn commandHelp(command: []const u8) !void {
+    const lookup = commandLookup(command);
+    if (std.mem.eql(u8, lookup, "cdp")) {
+        return writeStdout(
+            \\usage: zsb cdp <method> [params-json]
+            \\Send a Chrome DevTools Protocol command. Params must be a JSON object.
+            \\
+            \\Examples:
+            \\  zsb cdp Page.enable
+            \\  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+            \\
+        );
+    }
+    var lines = std.mem.splitScalar(u8, usage_text, '\n');
+    var found = false;
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "  ")) continue;
+        const candidate = line[2..];
+        if (!std.mem.startsWith(u8, candidate, lookup) or
+            (candidate.len > lookup.len and candidate[lookup.len] != ' ')) continue;
+        try writeStdout("usage: ");
+        try writeStdout(if (std.mem.eql(u8, command, "tab")) "tab close" else command);
+        try writeStdout(candidate[lookup.len..]);
+        try writeStdout("\n");
+        found = true;
+    }
+    if (!found) badArgs(command);
+}
+
 fn badArgs(command: []const u8) noreturn {
-    const lookup = if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+    const lookup = commandLookup(command);
     var usage_line: ?[]const u8 = null;
     var lines = std.mem.splitScalar(u8, usage_text, '\n');
     var commands = false;

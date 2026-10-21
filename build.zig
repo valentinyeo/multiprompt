@@ -440,6 +440,8 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
+    const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
+    test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/tmux_identity.zig"),
         .target = target,
@@ -492,11 +494,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
-    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js" });
+    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
     vps_test_step.dependOn(&ssh_reconnect_tests.step);
-    const screenshot_pipeline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/screenshot-pipeline.test.js", "tools/screenshot-caret.test.js", "extension/screenshot-shortcut.test.js", "tools/issue-509-screenshot-system-menu.test.js" });
+    const screenshot_pipeline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/screenshot-pipeline.test.js", "tools/screenshot-caret.test.js", "extension/screenshot-shortcut.test.js", "tools/issue-509-screenshot-system-menu.test.js", "tools/issue-493-tab-url-shortcut.test.js" });
     test_step.dependOn(&screenshot_pipeline_tests.step);
     const paste_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/paste-focus.test.js" });
     test_step.dependOn(&paste_focus_tests.step);
@@ -575,68 +577,55 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop and telemetry tests"),
-        b.step("test-group-2", "Run Chat View regression fixtures"),
-        b.step("test-group-3", "Run compiler-backed integration tests"),
-        b.step("test-group-4", "Run portable modules and source regressions"),
-        b.step("test-group-5", "Run SSH reconnect fixtures"),
-        b.step("test-group-6", "Run sync protocol tests"),
-        b.step("test-group-7", "Run desktop interaction fixtures"),
-        b.step("test-group-8", "Run Chat View CPU fixtures"),
+        b.step("test-group-1", "Run desktop, telemetry and compiler-backed integration tests"),
+        b.step("test-group-2", "Run Chat View regression and CPU fixtures"),
+        b.step("test-group-3", "Run portable modules, source regressions and SSH fixtures"),
+        b.step("test-group-4", "Run sync protocol and desktop interaction fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
-        const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step)
-            0
-        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step)
-            1
-        else if (dependency == &ssh_reconnect_tests.step)
-            4
-        else if (dependency == &run_sync_protocol_tests.step)
-            5
-        else if (dependency == &chat_switch_tests.step or
-            dependency == &frequent_integration_tests.step or dependency == &chat_drop_tests.step or
-            dependency == &reply_quote_tests.step or
+        const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
+            dependency == &chat_switch_tests.step or dependency == &frequent_integration_tests.step or
+            dependency == &chat_drop_tests.step or dependency == &reply_quote_tests.step or
             dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
-            2
-        else if (dependency == &version_stamp_tests.step or dependency == &launch_regression.step or
-            dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
-            dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step)
-            6
-        else if (dependency == &chat_cpu_regression.step)
-            7
+            0
+        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &chat_cpu_regression.step)
+            1
+        else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
+            dependency == &launch_regression.step or dependency == &chat_table_tests.step or
+            dependency == &screenshot_pipeline_tests.step or dependency == &chat_view_console_visibility_tests.step or
+            dependency == &zsb_interaction_tests.step)
+            3
         else
-            3;
+            2;
         test_groups[group].dependOn(dependency);
     }
     test_step.dependencies.clearRetainingCapacity();
-    const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-8)");
+    const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-4)");
     if (selected_group) |group| {
-        if (group < 1 or group > test_groups.len) @panic("test-group must be between 1 and 8");
+        if (group < 1 or group > test_groups.len) @panic("test-group must be between 1 and 4");
         test_step.dependOn(test_groups[group - 1]);
     } else {
         for (test_groups) |group| test_step.dependOn(group);
     }
 
     const vps_groups = [_]*std.Build.Step{
-        b.step("test-vps-group-1", "Run Chat View and server fixtures"),
-        b.step("test-vps-group-2", "Run compiler-backed server integration tests"),
-        b.step("test-vps-group-3", "Run portable server modules and source regressions"),
+        b.step("test-vps-group-1", "Run Chat View, server and compiler-backed integration fixtures"),
+        b.step("test-vps-group-2", "Run portable server modules and source regressions"),
     };
     for (vps_test_step.dependencies.items) |dependency| {
-        const group: usize = if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &server_tool_tests.step)
-            0
-        else if (dependency == &ssh_reconnect_tests.step or dependency == &chat_switch_tests.step or
+        const group: usize = if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
+            dependency == &server_tool_tests.step or dependency == &ssh_reconnect_tests.step or dependency == &chat_switch_tests.step or
             dependency == &frequent_integration_tests.step or dependency == &chat_drop_tests.step or
             dependency == &reply_quote_tests.step or dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
-            1
+            0
         else
-            2;
+            1;
         vps_groups[group].dependOn(dependency);
     }
     vps_test_step.dependencies.clearRetainingCapacity();
-    const selected_vps_group = b.option(u8, "test-vps-group", "Run one server test group (1-3)");
+    const selected_vps_group = b.option(u8, "test-vps-group", "Run one server test group (1-2)");
     if (selected_vps_group) |group| {
-        if (group < 1 or group > vps_groups.len) @panic("test-vps-group must be between 1 and 3");
+        if (group < 1 or group > vps_groups.len) @panic("test-vps-group must be between 1 and 2");
         vps_test_step.dependOn(vps_groups[group - 1]);
     } else {
         for (vps_groups) |group| vps_test_step.dependOn(group);

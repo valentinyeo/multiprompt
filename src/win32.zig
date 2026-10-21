@@ -271,6 +271,7 @@ pub const WM_APP_LAYOUT_READY: u32 = WM_APP + 150;
 pub const WM_APP_FAVORITE_TOGGLE: u32 = WM_APP + 200;
 pub const WM_APP_UPDATE_CHANGED: u32 = WM_APP + 201;
 pub const WM_APP_CHAT_PERMISSION: u32 = WM_APP + 203;
+pub const WM_APP_CHAT_TAB_URL: u32 = WM_APP + 205;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;

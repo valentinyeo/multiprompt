@@ -82,6 +82,7 @@ const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OPEN;
 const WM_APP_ARCHIVE_ARM = @import("win32.zig").WM_APP_ARCHIVE_ARM;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
+const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
 const WM_APP_MARK_ACTIVE_UNREAD = @import("win32.zig").WM_APP_MARK_ACTIVE_UNREAD;
 const WM_APP_SNIPPET_DELETE = @import("win32.zig").WM_APP_SNIPPET_DELETE;
 const WM_APP_ALL_SESSIONS_FILTER_OPEN = @import("win32.zig").WM_APP_ALL_SESSIONS_FILTER_OPEN;
@@ -361,6 +362,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+W", .b = "Open a URL in a new pane tab and focus the browser", .header = false },
     .{ .a = "Alt+A", .b = "Toggle the Edge browser pane for this tab", .header = false },
     .{ .a = "Ctrl+Shift+S", .b = "Screenshot browser tab, paste link + space, focus Chat View composer or shell", .header = false },
+    .{ .a = "Ctrl+Shift+X", .b = "Insert current browser tab URL (or most recent) + space at the Chat View caret; never send", .header = false },
     .{ .a = "Ctrl+Shift+L / Ctrl+L", .b = "Focus browser address bar", .header = false },
     .{ .a = "Alt+Q", .b = "Jump between shell and browser pane", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser engine", .b = "Switch every pane between dedicated Edge and dedicated Chrome profiles", .header = false },
@@ -635,6 +637,10 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = claimBrowserFocusPress(false, &app_state.g_screenshot_chord_held);
             return 1;
         }
+        if (kb.vkCode == 0x58 and (wp == WM_KEYUP or wp == WM_SYSKEYUP) and app_state.g_tab_url_chord_held) {
+            _ = claimBrowserFocusPress(false, &app_state.g_tab_url_chord_held);
+            return 1;
+        }
         if (kb.vkCode == 0x4B and (wp == WM_KEYUP or wp == WM_SYSKEYUP) and app_state.g_palette_chord_held) {
             _ = claimBrowserFocusPress(false, &app_state.g_palette_chord_held);
             return 1;
@@ -699,6 +705,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         {
             if (claimBrowserFocusPress(true, &app_state.g_screenshot_chord_held))
                 _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_SHOTURL, 0, 0);
+            return 1;
+        }
+
+        if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and !app_state.g_win_held and
+            kb.vkCode == 0x58 and isCtrlDown() and !isAltDown(kb.flags) and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0 and foregroundIsOurs())
+        {
+            if (claimBrowserFocusPress(true, &app_state.g_tab_url_chord_held))
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_TAB_URL, 0, 0);
             return 1;
         }
 
