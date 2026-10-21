@@ -192,4 +192,5 @@ jobs:
         with:
           name: verify-${{ env.FEATURE }}
           path: evidence/
+          include-hidden-files: true
           if-no-files-found: error
