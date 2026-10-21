@@ -755,17 +755,46 @@ try {
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
         }
         'workspace-focus' {
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+            } 'initial CMD session saved' 60
             $initial = Read-Session
             if ($initial.active_workspace -ne 0) { throw 'Expected first stored workspace' }
             $initialTab = $initial.active_tab
-            Press @(0x12, 0x43) 'Alt+C: open Chat View and focus typing box'
+            Palette 'per tab'
+            Press @(0x0D) 'Enter: Chat View per tab'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and -not ($state.PSObject.Properties.Name -contains 'chat_view_mode')
+            } 'per-session Chat View mode saved'
+            $tab = (Read-Session).tabs[$initialTab]
+            if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
+                Press @(0x12, 0x43) 'Alt+C: enable Chat View for the test session'
+            }
+            Wait-Until { (Read-Session).tabs[$initialTab].cv } 'test session Chat View enabled'
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+            $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+            Wait-Until {
+                $candidate = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                $null -ne $candidate -and $candidate.Current.ProcessId -eq $process.Id -and -not $candidate.Current.IsOffscreen -and $candidate.Current.NativeWindowHandle -ne 0
+            } 'owned Chat View typing box visible' 30
+            $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+            $composerHandle = $composer.Current.NativeWindowHandle
+            if ([VerifyNative]::GetAncestor([IntPtr]$composerHandle, 2) -ne $script:window) { throw 'Chat View typing box is not in the owned window' }
+            Record 'Setup: foreground owned Chat View before focus regression'
+            [void][VerifyNative]::ShowWindow($script:window, 9)
+            [void][VerifyNative]::SetForegroundWindow($script:window)
+            Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'foreground Chat View frame'
             Wait-Until {
                 $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-                $focused.Current.ProcessId -eq $process.Id -and $focused.Current.ClassName -eq 'Edit'
+                $focused.Current.ProcessId -eq $process.Id -and $focused.Current.NativeWindowHandle -eq $composerHandle
             } 'owned Chat View typing box focused'
-            $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
-            $composerHandle = $composer.Current.NativeWindowHandle
             Type-Text 'before-'
+            Wait-Until {
+                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $value.Current.Value -ceq 'before-'
+            } 'initial text landed in Chat View typing box'
             Snapshot 'action'
             Press @(0x11, 0x4E) 'Ctrl+N: create second workspace'
             Wait-Until { (Read-Session).workspace_count -eq $initial.workspace_count + 1 } 'second workspace saved'

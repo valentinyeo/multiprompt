@@ -34,7 +34,7 @@ Preconditions:
 
 Dispatch `gh workflow run verify.yml -f feature=workspace-focus`; Windows selects `control.ps1 -Feature workspace-focus`. Pull requests run this alongside the unchanged appearance journey.
 
-- In workspace 1, press Alt+C to open Chat View. Require the owned native Edit control to have focus, remember its HWND, and type `before-`.
+- Wait for workspace 1's CMD session to be saved. Use Ctrl+K `per tab` to select per-session Chat View, then Alt+C if that session's Chat View is off. Wait for the saved enabled state and the owned frame's visible native Edit child. Restore and foreground the frame, wait for that exact Edit HWND to have focus, then type `before-` and require its exact value before switching. All waits have timeouts; CMD supports this without Claude or an account.
 - Create workspace 2 with Ctrl+N, return with Alt+2, then switch away with Alt+Right and back with Alt+Left.
 - Without clicking or issuing another focus command, type `workspace-focus-chat`. Read the original Edit control's UI Automation ValuePattern and require exactly `before-workspace-focus-chat`, the same focused HWND, the same selected session and saved workspace focus `chat`.
 - Press Alt+C to return to the shell. Type `echo workspace-focus-shell` without Enter, switch away and back with Alt+Right / Alt+Left, then append redirection to the isolated `workspace-focus-shell.txt` and press Enter without clicking.

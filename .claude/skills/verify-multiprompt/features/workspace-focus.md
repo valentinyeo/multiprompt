@@ -17,4 +17,4 @@ Run `gh workflow run verify.yml -f feature=workspace-focus`. The workflow invoke
 
 ## Gotchas
 
-No clicks, UI Automation focus setters, seeded state or private app messages are used. Local CMD needs no account or agent. This journey verifies workspace switching, not application restart; persisted focus round trips are covered by Zig tests.
+Setup uses Ctrl+K `per tab` and Alt+C to enable Chat View for the local CMD session, waits for saved state and the visible owned Edit child, then foregrounds the frame and waits for that exact control's focus and initial text. An embedded console can remain foreground after Alt+C even though its ancestor is the app frame. No foreground repair or control-focus setter is allowed after workspace switching; only the workspace-pill tests click, never the typing box. No seeded state or private app messages are used. Local CMD needs no account or agent. This journey verifies workspace switching, not application restart; persisted focus round trips are covered by Zig tests.
