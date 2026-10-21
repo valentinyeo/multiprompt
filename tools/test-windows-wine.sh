@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+if [[ "${GITHUB_ACTIONS:-}" != true && "${MULTIPROMPT_ALLOW_LOCAL_HEAVY:-}" != 1 ]]; then
+    printf '%s\n' 'runs on GitHub Actions only; push and read gh pr checks, or set MULTIPROMPT_ALLOW_LOCAL_HEAVY=1 on a machine you own' >&2
+    exit 2
+fi
+
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

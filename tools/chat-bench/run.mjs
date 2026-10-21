@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+if (process.env.GITHUB_ACTIONS !== 'true' && process.env.MULTIPROMPT_ALLOW_LOCAL_HEAVY !== '1') {
+  console.error('runs on GitHub Actions only; push and read gh pr checks, or set MULTIPROMPT_ALLOW_LOCAL_HEAVY=1 on a machine you own');
+  process.exit(2);
+}
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
