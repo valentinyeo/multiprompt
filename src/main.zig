@@ -2494,7 +2494,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_TOGGLE_FULLWIDTH => {
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].full_width = !app_state.shells[app_state.active_shell].full_width;
-                if (app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+                if (@import("chat_composer.zig").fullWidthShouldResizeConsole(app_state.g_chat_active) and app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
                 repositionActive();
                 saveSession();
                 _ = InvalidateRect(hwnd, null, 0);
