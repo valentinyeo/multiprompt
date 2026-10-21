@@ -58,7 +58,9 @@ try {
     Assert (Test-Path "$dir/ready.txt") 'Background check did not publish readiness'
     Write-Host 'no automatic restart while running passed'
 
-    Refuses { Install-Update $target 'x64' '' } 'Broken update reported success'
+    Refuses { Install-Update $target 'x64' '' '2.0.0' } 'Stale staged downgrade accepted'
+    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Stale update modified installation'
+    Refuses { Install-Update $target 'x64' '' '1.9.0' } 'Broken update reported success'
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Previous executable not restored'
     Assert ((Get-FileHash "$target.previous.exe").Hash -eq $oldHash) 'Previous executable not retained'
     Assert ((Get-FileHash "$dir/failed.exe").Hash -eq $brokenHash) 'Failed executable not quarantined'

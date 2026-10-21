@@ -72,12 +72,13 @@ function Start-UpdatedApp([string]$Target) {
     }
 }
 
-function Install-Update([string]$Target, [string]$Architecture, [string]$Pids) {
+function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [string]$Version) {
     $dir = "$Target.update"
     $ready = Get-Content -LiteralPath "$dir/ready.txt" -Raw
     if ($ready -notmatch '^MPVERSION=(\d+\.\d+\.\d+);(multiprompt-(x64|arm64)\.exe)$' -or $Matches[3] -cne $Architecture) { throw 'Invalid staged update' }
     $tag = 'v' + $Matches[1]
     $name = $Matches[2]
+    if ((Get-ReleaseVersion $tag) -le (Get-ReleaseVersion $Version)) { throw 'Staged update is not newer' }
     Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" $name $Target
     $processes = @($Pids.Split(',') | Where-Object { $_ -match '^\d+$' } | ForEach-Object { Get-Process -Id ([int]$_) -ErrorAction SilentlyContinue })
     if ($AcceptedEvent) {
@@ -111,7 +112,7 @@ try {
     if ($Mode -eq 'Check') {
         if (Save-Update $Exe $Current $Arch) { exit 42 }
     } else {
-        Install-Update $Exe $Arch $WaitPids
+        Install-Update $Exe $Arch $WaitPids $Current
     }
 } catch {
     Write-Error $_ -ErrorAction Continue

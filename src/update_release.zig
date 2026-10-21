@@ -49,7 +49,7 @@ fn initialize() bool {
 fn architecture() []const u8 {
     var process_machine: u16 = 0;
     var native_machine: u16 = 0;
-    if (IsWow64Process2(win.GetCurrentProcess(), &process_machine, &native_machine) != 0 and native_machine == 0xaa64) return "arm64";
+    if (IsWow64Process2(GetCurrentProcess(), &process_machine, &native_machine) != 0 and native_machine == 0xaa64) return "arm64";
     return if (builtin.cpu.arch == .aarch64) "arm64" else "x64";
 }
 
@@ -112,7 +112,7 @@ pub fn poll() ?[]const u8 {
         checker = spawn("Check", &.{}, "");
     }
     const version = update_check.scanFileForVersion(&staged, &version_buf) orelse return null;
-    return version;
+    return if (update_check.versionNewer(APP_VERSION, version)) version else null;
 }
 
 var version_buf: [update_check.MAX_VERSION_LEN]u8 = undefined;
@@ -156,3 +156,5 @@ extern "kernel32" fn OpenEventW(u32, i32, [*:0]const u16) callconv(.winapi) win.
 extern "kernel32" fn GetCommandLineW() callconv(.winapi) [*:0]const u16;
 
 extern "kernel32" fn IsWow64Process2(win.HANDLE, *u16, *u16) callconv(.winapi) i32;
+
+extern "kernel32" fn GetCurrentProcess() callconv(.winapi) win.HANDLE;
