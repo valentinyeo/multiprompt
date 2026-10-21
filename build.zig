@@ -136,6 +136,15 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
+    const table_bench = b.addTest(.{ .filters = &.{"IGSH-436 table build benchmark"}, .root_module = b.createModule(.{
+        .root_source_file = b.path("src/chat_table_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .link_libc = true,
+    }) });
+    table_bench.root_module.addOptions("build_config", stable_opts);
+    inline for (.{ "winhttp", "winmm", "crypt32", "bcrypt", "credui", "wininet", "comdlg32", "shell32" }) |library| table_bench.root_module.linkSystemLibrary(library, .{});
+    b.step("bench-chat-tables", "Measure real GDI table builds").dependOn(&b.addRunArtifact(table_bench).step);
     const main_test_step = b.step("test-main", "Run desktop module tests");
     main_test_step.dependOn(&run_exe_tests.step);
 

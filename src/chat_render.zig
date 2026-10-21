@@ -584,11 +584,17 @@ const TableMeasureBackend = struct {
 };
 
 const TableMeasurer = @import("chat_table_measure.zig").Measurer(TableMeasureBackend);
+var table_metrics: TableMeasurer.Metrics = .{};
+
+pub fn resetTableMetrics() void {
+    table_metrics = .{};
+}
 
 fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*chat_markdown.TableLayout {
     const start = GetTickCount64();
     const before = app_state.g_chat_tables.builds;
-    var measure = TableMeasurer{ .backend = .{ .hdc = hdc } };
+    table_metrics.invalidate(app_state.g_chat_font_pt, uiScaled(1024));
+    var measure = TableMeasurer{ .backend = .{ .hdc = hdc }, .metrics = &table_metrics };
     defer measure.deinit();
     const table = app_state.g_chat_tables.layout(std.heap.page_allocator, text, offset, .{ .view_w = @max(1, width), .font_pt = app_state.g_chat_font_pt, .scale = uiScaled(1024), .pad_x = uiScaled(10), .pad_y = uiScaled(6) }, &measure, TableMeasurer.cell) catch return null;
     if (app_state.g_chat_tables.builds != before) {

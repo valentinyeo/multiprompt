@@ -1,0 +1,58 @@
+name: Chat table bench
+on:
+  pull_request:
+    paths:
+      - src/chat_render.zig
+      - src/chat_markdown.zig
+      - src/chat_table_measure.zig
+      - src/chat_table_bench.zig
+      - tools/chat-table-bench/**
+      - .github/workflows/chat-table-bench.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bench:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: after
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'master' }}
+          path: before
+      - name: Install pinned Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Measure original and proposed production table measurers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $benchmark = Get-Content after/tools/chat-table-bench/benchmark.zig -Raw
+          Copy-Item after/build.zig before/build.zig
+          Copy-Item after/src/chat_table_bench.zig before/src/chat_table_bench.zig
+          foreach ($revision in @('before', 'after')) {
+            git -C $revision rev-parse HEAD | Set-Content "evidence/$revision-revision.txt"
+            Add-Content "$revision/src/chat_render.zig" "`n$benchmark"
+            $env:APPDATA = Join-Path $pwd "evidence/$revision"
+            $env:ZIGSHELL_DEBUG = '1'
+            New-Item -ItemType Directory -Force "$env:APPDATA/ZigShell" | Out-Null
+            Push-Location $revision
+            zig build bench-chat-tables --summary all 2>&1 | Tee-Object "../evidence/$revision-build.log"
+            if ($LASTEXITCODE -ne 0) { throw "Table benchmark failed for $revision" }
+            Pop-Location
+          }
+          node after/tools/chat-table-bench/summary.js evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: chat-table-bench
+          path: evidence/
