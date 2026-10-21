@@ -159,3 +159,39 @@ test('mintty requests the shell font outside the developer theme too', () => {
   assert.ok(launch.indexOf('"Font", std.mem.span(L(@import("fonts.zig").SHELL_FACE))') < launch.indexOf('if (devThemeOn())'));
   assert.ok(launch.includes('"FontHeight", minttyFontHeightFromConsoleHeight()'));
 });
+
+test('ISSUE-508 shell cap preserves the pre-Hack effective width', () => {
+  const pane = read('src/browser_pane.zig');
+  const column = pane.slice(pane.indexOf('pub fn centeredConsoleColumn('), pane.indexOf('\ntest "centeredConsoleColumn'));
+  const cap = Number(column.match(/var w = @min\(DEV_SHELL_COLS \* cell_w, uiScaled\((\d+)\)\) \+ 4;/)?.[1]);
+  const cols = Number(state.match(/pub const DEV_SHELL_COLS: i32 = (\d+);/)[1]);
+  const height = Number(state.match(/"console_font_height": (\d+)/)[1]);
+  const bytes = fs.readFileSync(path.join(root, 'src/fonts/NordwandMono-SemiBold.ttf'));
+  const tables = {};
+  for (let i = 0; i < bytes.readUInt16BE(4); i++) {
+    const record = 12 + i * 16;
+    tables[bytes.toString('ascii', record, record + 4)] = bytes.readUInt32BE(record + 8);
+  }
+  const advance = bytes.readUInt16BE(tables.hmtx);
+  const cellHeight = bytes.readUInt16BE(tables['OS/2'] + 74) + bytes.readUInt16BE(tables['OS/2'] + 76);
+  const oldCellWidth = Math.round(height * advance / cellHeight);
+  assert.equal(oldCellWidth, 8);
+  assert.equal(cap, cols * oldCellWidth);
+  assert.equal(cap + 4, 804);
+  assert.match(column, /const avail = client_right - sidebar_w - edge_pad \* 2;/);
+  assert.match(column, /if \(w > avail\) w = avail;/);
+  assert.match(column, /sidebar_w \+ edge_pad \+ @divTrunc\(avail - w, 2\)/);
+});
+
+test('ISSUE-508 full width remains per-session and bypasses the shell cap without changing Chat View', () => {
+  const layout = read('src/window_layout.zig');
+  const full = layout.indexOf('if (app_state.shells[app_state.active_shell].full_width)');
+  const centered = layout.indexOf('const col = centeredConsoleColumn(', full);
+  assert.ok(full >= 0 && centered > full);
+  const branch = layout.slice(full, centered);
+  assert.match(branch, /const fw_w = rc.right - SIDEBAR_W\(\);/);
+  assert.match(branch, /verifyShellWindowSize\(sh0, SIDEBAR_W\(\), fw_top, fw_w, fw_h\);\s*return;/);
+  const chat = read('src/chat_composer.zig');
+  assert.match(chat, /const full_width = app_state\.ISSUE_440_FULL_WIDTH_CHAT and app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.full_width;/);
+  assert.match(chat, /if \(full_width\) col\.width else uiScaled\(760\)/);
+});
