@@ -11,6 +11,11 @@ import { checkReceipt, sourceHash } from './receipt.mjs';
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const sources = { run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' };
 
+test('ISSUE-513 new benchmark checkouts emit LF runner hashes on every platform', () => {
+  const attributes = fs.readFileSync(new URL('../../.gitattributes', import.meta.url), 'utf8');
+  assert.match(attributes, /^tools\/chat-bench\/\*\* text eol=lf$/m);
+});
+
 test('ISSUE-513 runner hashes normalize CRLF without changing binary hashes', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'receipt-lines-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
