@@ -18,7 +18,7 @@ function execute(code) {
   try {
     if (fs.existsSync('src/chat_drafts.zig')) copyZig(['chat_drafts.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1'], {
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '-fllvm'], {
       cwd: dir, encoding: 'utf8', timeout: 120000,
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
