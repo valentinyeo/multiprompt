@@ -36,3 +36,12 @@ test('IGSH-224 moving a browser tab cannot retain or route through the previous 
   assert.match(pane, /workspaceProfileIdentityForShell\(idx, &app_state\.shells\[idx\]\.browser_profile_token\)/);
   assert.match(bridge, /reconcileBrowserWorkspace\(ti\)/);
 });
+
+test('IGSH-224 local CLI reads one atomic window and profile binding instead of falling back to the shared pipe', () => {
+  const bridge = read('src/bridge.zig');
+  const pane = read('src/browser_pane.zig');
+  assert.match(bridge, /g_window_binding_profile/);
+  assert.match(bridge, /g_window_binding_required/);
+  assert.match(pane, /writeFileAtomicW\(path, s\)/);
+  assert.match(pane, /"\{d\}\\n\{s\}\\n"/);
+});

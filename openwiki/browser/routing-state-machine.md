@@ -36,3 +36,9 @@ First-use migration completes off the UI thread before launch/adoption starts.
 See [the lifecycle contract](../../docs/browser-pane-lifecycle.md#workspace-browser-profiles)
 for source-closed checks, exclusions, incomplete-copy handling and the default-on
 one-line `IGSH_224` rollback switch.
+
+Local CLI callers inherit `BROWSER_CLI_WINDOW_FILE`; its atomically replaced
+contents now pair the window ID with the workspace token. They are read together,
+not as separate potentially mismatched mappings. In default-on mode an absent,
+invalid, or legacy numeric-only binding refuses host commands rather than using
+the shared pipe. Explicit `--profile` remains an intentional override.

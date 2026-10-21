@@ -12,8 +12,8 @@ const version = JSON.parse(fs.readFileSync(path.join(root, 'extension/manifest.j
 const legacyOrigin = 'chrome-extension://eakdogphfehclpdnjecifppkcnfjnheh/';
 const isolatedOrigin = 'chrome-extension://fgclkhodglfogcckilgnihofmlpmiiao/';
 
-function launch(args, profile) {
-  const env = { ...process.env, WINEDEBUG: '-all' };
+function launch(args, profile, extraEnv = {}) {
+  const env = { ...process.env, WINEDEBUG: '-all', ...extraEnv };
   delete env.MULTIPROMPT_BROWSER_PROFILE;
   if (profile !== undefined) env.MULTIPROMPT_BROWSER_PROFILE = profile;
   return spawn(process.platform === 'win32' ? exe : 'wine', process.platform === 'win32' ? args : [exe, ...args], {
@@ -21,8 +21,8 @@ function launch(args, profile) {
   });
 }
 
-async function cli(args, profile) {
-  const child = launch(args, profile);
+async function cli(args, profile, extraEnv) {
+  const child = launch(args, profile, extraEnv);
   let stdout = '', stderr = '';
   child.stdout.on('data', data => { stdout += data; });
   child.stderr.on('data', data => { stderr += data; });
@@ -256,4 +256,41 @@ test('IGSH-224 workspace registrations reject duplicates and never route an unkn
   }
   const stale = await cli(['tabs'], token);
   assert.equal(JSON.parse(stale.stdout).ok, false);
+});
+
+test('IGSH-224 local CLI snapshots the bound window and profile and rejects incomplete bindings', { timeout: 30000 }, async () => {
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh224-local-binding-'));
+  const binding = path.join(dir, 'window.txt');
+  const token = `e-${process.pid.toString(16).padStart(30, '1')}`;
+  const otherToken = `c-${process.pid.toString(16).padStart(30, '1')}`;
+  const first = new Host(token, 'local-workspace');
+  const other = new Host(otherToken, 'other-local-workspace');
+  const env = { BROWSER_CLI_WINDOW_FILE: binding, BROWSER_CLI_WINDOW: '' };
+  try {
+    await Promise.all([first.ready, other.ready]);
+    fs.writeFileSync(binding, `42\n${token}\n`);
+    const firstReply = await cli(['tabs'], undefined, env);
+    assert.equal(JSON.parse(firstReply.stdout).result.profile, 'local-workspace');
+    assert.equal(JSON.parse(firstReply.stdout).result.windowId, 42);
+    fs.writeFileSync(binding, `42\n${otherToken}\n`);
+    const secondReply = await cli(['tabs'], undefined, env);
+    assert.equal(JSON.parse(secondReply.stdout).result.profile, 'other-local-workspace');
+    for (const invalid of ['42\n', '42\nInvalid\n', `0\n${token}\n`, 'partial']) {
+      fs.writeFileSync(binding, invalid);
+      const result = await cli(['tabs'], undefined, env);
+      assert.notEqual(result.status, 0);
+      assert.equal(JSON.parse(result.stdout).ok, false);
+      assert.match(JSON.parse(result.stdout).error, /workspace profile binding/);
+    }
+    fs.rmSync(binding);
+    const missing = await cli(['tabs'], undefined, env);
+    assert.notEqual(missing.status, 0);
+    assert.equal(first.requests.length, 1);
+    assert.equal(other.requests.length, 1);
+  } finally {
+    await first.close();
+    await other.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

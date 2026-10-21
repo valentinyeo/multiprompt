@@ -1561,14 +1561,18 @@ pub fn browserWinFilePathA(buf: *[640]u8, shell_id: u32) ?[]const u8 {
 fn writeBrowserWindowIdFile(shell_id: u32, wid: i64) void {
     var pbuf: [640]u8 = undefined;
     const path = browserWinFilePathA(&pbuf, shell_id) orelse return;
-    const h = win32OpenWrite(path) orelse return;
-    var numbuf: [24]u8 = undefined;
-    const s = std.fmt.bufPrint(&numbuf, "{d}\n", .{wid}) catch {
-        _ = CloseHandle(h);
-        return;
-    };
-    win32WriteAll(h, s);
-    _ = CloseHandle(h);
+    const idx = findShellById(shell_id) orelse return;
+    var token_buf: [32]u8 = undefined;
+    const profile = workspaceProfileForShell(idx, &token_buf) catch return;
+    var numbuf: [80]u8 = undefined;
+    const s = if (browser_workspace_profile.IGSH_224)
+        std.fmt.bufPrint(&numbuf, "{d}\n{s}\n", .{ wid, profile }) catch return
+    else
+        std.fmt.bufPrint(&numbuf, "{d}\n", .{wid}) catch return;
+    if (!@import("file_io.zig").writeFileAtomicW(path, s)) {
+        deleteBrowserWindowIdFile(shell_id);
+        debugLog("browser local window/profile binding could not be published atomically");
+    }
 }
 
 fn deleteBrowserWindowIdFile(shell_id: u32) void {

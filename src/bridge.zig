@@ -14,6 +14,8 @@ const browser_request_attempts = 4;
 
 var g_window_id: ?i64 = null;
 var g_profile_token: []const u8 = "";
+var g_window_binding_profile: [32]u8 = std.mem.zeroes([32]u8);
+var g_window_binding_required = false;
 
 const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
@@ -201,6 +203,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     defer if (profile_env) |token| allocator.free(token);
     g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
+    if (!is_native_host and profile_override == null and profile_env == null and g_window_binding_profile[0] != 0) {
+        g_profile_token = &g_window_binding_profile;
+    }
+    const needs_host = !std.mem.eql(u8, command, "open") and !std.mem.eql(u8, command, "sidebar") and
+        !std.mem.eql(u8, command, "status") and !std.mem.eql(u8, command, "doctor") and
+        !std.mem.eql(u8, command, "version") and !std.mem.eql(u8, command, "manifest") and
+        !std.mem.eql(u8, command, "help") and !std.mem.eql(u8, command, "--help") and !std.mem.eql(u8, command, "-h");
+    if (!is_native_host and needs_host and profile_override == null and profile_env == null and g_window_binding_required and g_window_binding_profile[0] == 0) {
+        const response = try makeBridgeCliErrorResponse(allocator, command, "workspace profile binding is missing or stale; reopen this exact tab's browser pane", null);
+        defer allocator.free(response);
+        try writeStdout(response);
+        try writeStdout("\n");
+        std.process.exit(2);
+    }
     var parent_token: [32]u8 = undefined;
     if (is_native_host and !is_legacy_host) {
         const parent = try workspace_profile.nativeParentToken(allocator, &parent_token);
@@ -1153,41 +1169,32 @@ fn sendSidebarNotify() !void {
 
 fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     _ = allocator;
-    var buf: [256]u8 = undefined;
-
+    var buf: [1024]u8 = undefined;
+    var override: ?i64 = null;
     if (getEnvVar(&buf, "BROWSER_CLI_WINDOW")) |val| {
-        const trimmed = std.mem.trim(u8, val, " \t\r\n");
-        if (std.fmt.parseInt(i64, trimmed, 10)) |id| {
-            return id;
-        } else |_| {}
+        override = std.fmt.parseInt(i64, std.mem.trim(u8, val, " \t\r\n"), 10) catch null;
     }
-
     if (getEnvVar(&buf, "BROWSER_CLI_WINDOW_FILE")) |path| {
-        var path_buf: [260]u8 = undefined;
-        if (path.len >= path_buf.len) return null;
+        g_window_binding_required = workspace_profile.IGSH_224;
+        var path_buf: [1024]u8 = undefined;
+        if (path.len >= path_buf.len) return override;
         @memcpy(path_buf[0..path.len], path);
         path_buf[path.len] = 0;
-        const file = CreateFileA(
-            @ptrCast(&path_buf),
-            0x80000000,
-            1,
-            null,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            null,
-        );
-        if (file == INVALID_HANDLE_VALUE) return null;
+        const file = CreateFileA(@ptrCast(&path_buf), GENERIC_READ, FILE_SHARE_READ | 4, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+        if (file == INVALID_HANDLE_VALUE) return override;
         defer _ = CloseHandle(file);
-        var file_buf: [64]u8 = undefined;
+        var file_buf: [80]u8 = undefined;
         var read: windows.DWORD = 0;
-        if (ReadFile(file, &file_buf, @intCast(file_buf.len), &read, null) == 0) return null;
-        const trimmed = std.mem.trim(u8, file_buf[0..read], " \t\r\n");
-        if (std.fmt.parseInt(i64, trimmed, 10)) |id| {
-            return id;
-        } else |_| {}
+        if (ReadFile(file, &file_buf, file_buf.len, &read, null) == 0 or read == file_buf.len) return override;
+        var lines = std.mem.splitScalar(u8, file_buf[0..read], '\n');
+        const id_text = std.mem.trim(u8, lines.next() orelse return override, " \t\r");
+        const id = std.fmt.parseInt(i64, id_text, 10) catch return override;
+        if (id <= 0) return override;
+        const profile = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+        if (workspace_profile.isWorkspaceToken(profile)) @memcpy(&g_window_binding_profile, profile);
+        return override orelse id;
     }
-
-    return null;
+    return override;
 }
 
 fn commandDeadline(is_script: bool) void {
@@ -1382,6 +1389,8 @@ fn sendLocalStatus(allocator: std.mem.Allocator) !void {
     } else {
         try response.appendSlice("null,\"pane\":\"unknown\"");
     }
+    try response.appendSlice(",\"profileToken\":");
+    try appendJsonString(&response, g_profile_token);
     try response.appendSlice(",\"hint\":\"For remote multiprompt-browser, reconnect the SSH/tmux session before opening or rebinding the browser pane after a network drop.\"}\n");
     try writeStdout(response.items);
 }
