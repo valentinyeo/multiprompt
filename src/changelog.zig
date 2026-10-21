@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.790", .items = &.{
+        .{ .text = "Browser commands wait for the connection to become ready and no longer lose fast replies.", .ticket = "IGSH-394" },
+        .{ .text = "Compare chat switching performance between two releases with repeatable benchmark reports.", .ticket = "IGSH-507" },
+        .{ .text = "Locked session warnings now wait for a failed reconnect, explain why, and disappear when the tab recovers.", .ticket = "IGSH-512" },
+        .{ .text = "Remote tab activity notifications now use terminal events instead of repeatedly scanning every tab.", .ticket = "IGSH-514" },
+    } },
     .{ .ver = "0.28.789", .items = &.{
         .{ .text = "Locked session warnings now wait for a failed reconnect, explain why, and disappear when the tab recovers.", .ticket = "IGSH-512" },
         .{ .text = "Chat View now keeps reply text before or after each tool step in the correct order.", .ticket = "IGSH-402" },
