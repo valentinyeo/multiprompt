@@ -425,11 +425,11 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
 pub const Phase = enum { offline_queue, sending, delivered, not_sent };
 pub const Label = enum { sending, waiting_connection, waiting_to_send, queued_in_claude, waiting_transcript, not_sent };
 
-pub fn pendingLabel(phase: Phase, link_down: bool, claude_busy: bool) Label {
+pub fn pendingLabel(phase: Phase, link_down: bool, transcript_queued: bool) Label {
     return switch (phase) {
         .sending => .sending,
         .offline_queue => if (link_down) .waiting_connection else .waiting_to_send,
-        .delivered => if (claude_busy) .queued_in_claude else .waiting_transcript,
+        .delivered => if (transcript_queued) .queued_in_claude else .waiting_transcript,
         .not_sent => .not_sent,
     };
 }
