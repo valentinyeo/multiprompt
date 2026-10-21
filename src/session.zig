@@ -1298,14 +1298,15 @@ var startup_ready = std.atomic.Value(bool).init(false);
 pub fn prepareStartupRestore() bool {
     var path_buf: [512]u8 = @splat(0);
     const path = getSessionPath(&path_buf) orelse return false;
-    const thread = std.Thread.spawn(.{}, startupRestoreWorker, .{ path_buf, path.len }) catch return false;
+    const len = if (app_state.g_empty_workspace or app_state.g_adopt_hwnd != null) 0 else path.len;
+    const thread = std.Thread.spawn(.{}, startupRestoreWorker, .{ path_buf, len }) catch return false;
     thread.detach();
     return true;
 }
 
 fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
     _ = @import("console.zig").resolveSshPath(false);
-    startup_bytes = readSessionBytes(path_buf[0..len]);
+    startup_bytes = if (len == 0) null else readSessionBytes(path_buf[0..len]);
     if (startup_bytes) |bytes| {
         startup_parsed = json_reader.parse(std.heap.page_allocator, bytes) catch null;
         if (startup_parsed) |parsed| {
