@@ -5587,7 +5587,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RECONNECT_OFFSET) {
-                    @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_RECONNECT, 0, 0);
+                    _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
                 if (target == SEARCH_SINGLEWIN_OFFSET) {
@@ -5918,7 +5923,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
                         if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {
+                            app_state.g_search_active = false;
+                            app_state.g_search_tabctx_mode = false;
+                            app_state.g_tabctx_sid = 0;
+                            app_state.g_shell_focused = true;
+                            clearSearchBackdrop();
+                            app_state.g_pending_new_tab_group = 0;
+                            showActiveShellAfterOverlay();
+                            _ = InvalidateRect(hwnd, null, 0);
                             @import("chat_send.zig").sshReconnectNow(ti);
+                            switchToShell(ti);
                             return 0;
                         } else if (target == SEARCH_TABCTX_CHAT_ALLOW) {
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .allow);

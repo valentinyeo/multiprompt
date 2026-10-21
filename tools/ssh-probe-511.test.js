@@ -96,11 +96,13 @@ test('ISSUE-511 reused ids cannot apply stale probes and stable outbox identitie
   assert.match(read('main.zig'), /if \(got_code and exit_code == @import\("win32\.zig"\)\.STILL_ACTIVE\) return 0/);
 });
 
-test('ISSUE-521 reconnect paths never relayout the window or steal focus', () => {
+test('ISSUE-521 automatic reconnect paths never relayout the window or steal focus', () => {
   const console = read('console.zig');
-  for (const [name, source] of [['respawnShellInPlace', console], ['markSshTabDisconnected', console], ['sshDisconnect', send], ['sshReconnectOk', send], ['sshAutoReconnectTick', send]]) {
+  const forbidden = /repositionActive\(|invalidateSidebar\(|SetFocus\(|SetForegroundWindow\(|switchToShell\(|showActiveShellAfterOverlay\(|chatOutboxTick\(|showHeaderNoticeAscii\(/;
+  assert.throws(() => assert.doesNotMatch('SetFocus(null);', forbidden), assert.AssertionError);
+  for (const [name, source] of [['respawnShellInPlace', console], ['markSshTabDisconnected', console], ...['sshDisconnect', 'sshReconnectArm', 'sshReconnectAttempt', 'sshReconnectOk', 'sshAutoReconnectTick', 'sshProbeStart', 'sshProbeThread', 'sshProbeFinish', 'sshSessionEnded'].map(name => [name, send])]) {
     const fn = body(name, source);
-    assert.doesNotMatch(fn, /repositionActive\(|invalidateSidebar\(|SetFocus\(|SetForegroundWindow\(|switchToShell\(|chatOutboxTick\(|showHeaderNoticeAscii\(/, name);
+    assert.doesNotMatch(fn, forbidden, name);
     assert.doesNotMatch(fn, /InvalidateRect\([^\n]*null/, name);
   }
   assert.match(body('resolveSshPath', console), /!app_state\.g_ssh_reconnect_timer_on/);
@@ -157,7 +159,40 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.ok(start >= 0);
   const dispatch = main.slice(start, main.indexOf('} else if', start));
   assert.match(dispatch, /sshReconnectNow\(ti\)/);
-  assert.doesNotMatch(dispatch, /switchToShell|showActiveShellAfterOverlay|SetFocus|SetForegroundWindow/);
   assert.match(read('shortcuts.zig'), /Start new session/);
   assert.match(fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8'), /Start new session/);
+});
+
+test('ISSUE-521 user palette reconnect closes the palette and shows the requested tab', () => {
+  const main = read('main.zig');
+  const globalStart = main.indexOf('if (target == SEARCH_RECONNECT_OFFSET) {');
+  assert.ok(globalStart >= 0);
+  const global = main.slice(globalStart, main.indexOf('\n                }', globalStart));
+  assert.match(global, /g_search_active = false;\s*app_state\.g_shell_focused = true;\s*clearSearchBackdrop\(\);\s*showActiveShellAfterOverlay\(\);\s*_ = PostMessageW\(app_state\.g_main_hwnd, WM_APP_RECONNECT, 0, 0\);\s*_ = InvalidateRect\(hwnd, null, 0\);/);
+  const tabStart = main.indexOf('if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {');
+  assert.ok(tabStart >= 0);
+  const tab = main.slice(tabStart, main.indexOf('} else if', tabStart));
+  assert.match(tab, /g_search_active = false;\s*app_state\.g_search_tabctx_mode = false;\s*app_state\.g_tabctx_sid = 0;\s*app_state\.g_shell_focused = true;\s*clearSearchBackdrop\(\);\s*app_state\.g_pending_new_tab_group = 0;\s*showActiveShellAfterOverlay\(\);\s*_ = InvalidateRect\(hwnd, null, 0\);\s*@import\("chat_send\.zig"\)\.sshReconnectNow\(ti\);\s*switchToShell\(ti\);/);
+  assert.match(main, /const tc_sid = if \(target == SEARCH_TABCTX_START_SESSION and app_state\.g_tabctx_sid == 0 and app_state\.active_shell < app_state\.shell_count\) app_state\.shells\[app_state\.active_shell\]\.shell_id else app_state\.g_tabctx_sid;/);
+});
+
+test('ISSUE-521 visible-tab overlay restart does not request focus or switch tabs', () => {
+  const main = read('main.zig');
+  const clickStart = main.indexOf('if (@import("drawing.zig").reconnectButtonRect(client_rc.right)) |button| {');
+  const clickEnd = main.indexOf('\n            if (chatViewOwnsInput()', clickStart);
+  assert.ok(clickStart >= 0 && clickEnd > clickStart);
+  const click = main.slice(clickStart, clickEnd);
+  assert.match(click, /PostMessageW\(hwnd, WM_APP_RECONNECT, 0, 0\);\s*return 0;/);
+  const handlerStart = main.indexOf('        WM_APP_RECONNECT => {');
+  const handlerEnd = main.indexOf('\n        WM_APP_HIDE_TAB_UNTIL_ATTENTION => {', handlerStart);
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
+  const handler = main.slice(handlerStart, handlerEnd);
+  assert.match(handler, /sshReconnectNow\(app_state\.active_shell\)/);
+  const forbidden = /SetFocus\(|SetForegroundWindow\(|switchToShell\(|showActiveShellAfterOverlay\(|repositionActive\(|TIMER_REFOCUS|g_shell_focused\s*=/;
+  for (const source of [click, handler, body('sshReconnectNow', send), body('sshReconnectAttempt', send)]) {
+    assert.doesNotMatch(source, forbidden);
+  }
+  const show = body('showReconnectedConsole', read('console.zig'));
+  assert.match(show, /SWP_NOACTIVATE \| SWP_NOREDRAW/);
+  assert.match(show, /showShellConsole\(idx, SW_SHOWNOACTIVATE/);
 });
