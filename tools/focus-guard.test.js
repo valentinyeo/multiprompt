@@ -32,7 +32,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const start = source.indexOf('const FocusNative = struct {');
     const nativeEnd = source.indexOf('\n};', start) + 3;
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
-    const production = source.slice(nativeEnd, end);
+    const production = source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted');
     const fixture = fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, fixture.replace("fn reset() void {", production + "\nfn reset() void {"));
@@ -153,4 +153,18 @@ test('ISSUE-451 focus forensics cover all loss messages and guard callers even w
     missing[i] = missing[i].replaceAll('focusTrace', 'missingTrace').replaceAll('[focus-trace]', '[missing-trace]');
     assert.throws(() => auditFocusTrace(...missing));
   }
+});
+
+
+test('ISSUE-451 activation and frame-focus repairs use guard authorization rather than UI eligibility alone', () => {
+  const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const repair = main.slice(main.indexOf('        WM_ACTIVATEAPP =>'), main.indexOf('        WM_PARENTNOTIFY =>'));
+  const auditRepair = text => {
+    assert.equal((text.match(/focusGuardComposerRepairAllowed\(\)/g) || []).length, 3);
+    assert.doesNotMatch(text, /chatComposerFocusAllowed\(\)/);
+    assert.match(text, /const allowed = focusGuardComposerRepairAllowed\(\);\s*if \(allowed\) _ = SetFocus/);
+    assert.match(text, /site=setfocus allowed=\{\}[^]*?\.\{ allowed,/);
+  };
+  auditRepair(repair);
+  assert.throws(() => auditRepair(repair.replaceAll('focusGuardComposerRepairAllowed()', 'chatComposerFocusAllowed()')));
 });

@@ -111,6 +111,7 @@ const hideBrowserEdgeMasks = @import("browser_pane.zig").hideBrowserEdgeMasks;
 const suspendBrowserEdgeMaskRaiseForPopup = @import("browser_pane.zig").suspendBrowserEdgeMaskRaiseForPopup;
 const armBrowserEdgeMaskRaise = @import("browser_pane.zig").armBrowserEdgeMaskRaise;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
+const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusAllowed;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const WM_SYSKEYDOWN = @import("app_state.zig").WM_SYSKEYDOWN;
 const keyboardHookProc = @import("shortcuts.zig").keyboardHookProc;
@@ -126,7 +127,7 @@ fn focusGuardPolicy(now: u64, action_tick: u64, same_surface: bool, authorized: 
 
 fn focusGuardActivationAllows(now: u64, until: u64, foreground_owned: bool, target: HANDLE, return_hwnd: HANDLE, main_hwnd: HANDLE, active_console: HANDLE) bool {
     if (target == null or !foreground_owned or now > until) return false;
-    if (return_hwnd != null) return target == return_hwnd or target == main_hwnd;
+    if (return_hwnd != null and return_hwnd != main_hwnd) return target == return_hwnd or target == main_hwnd;
     return target == main_hwnd or target == active_console;
 }
 
@@ -205,10 +206,10 @@ fn focusGuardPasteAllows(target: HANDLE, paste_target: HANDLE, main_hwnd: HANDLE
 }
 
 pub noinline fn focusGuard(target: HANDLE) bool {
-    return focusGuardAt(target, @returnAddress());
+    return focusGuardAt(target, @returnAddress(), false);
 }
 
-fn focusGuardAt(target: HANDLE, caller: usize) bool {
+fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
     focusGuardReadMouse();
     const now = GetTickCount64();
     if (focusGuardPasteAllows(target, app_state.g_focus_paste_target, app_state.g_main_hwnd)) {
@@ -222,7 +223,7 @@ fn focusGuardAt(target: HANDLE, caller: usize) bool {
     const authorized = now <= app_state.g_focus_authorized_until and (target == app_state.g_focus_authorized_hwnd or pane_authorized or
         (target == app_state.g_main_hwnd and app_state.g_focus_authorized_hwnd != null and IsChild(app_state.g_main_hwnd, app_state.g_focus_authorized_hwnd) != 0));
     const same_surface = target != null and (target == app_state.g_focus_return_hwnd or
-        (target == app_state.g_main_hwnd and app_state.g_focus_return_hwnd != null and !focusGuardConsole(app_state.g_focus_return_hwnd) and IsChild(app_state.g_main_hwnd, app_state.g_focus_return_hwnd) != 0));
+        (raise_container and target == app_state.g_main_hwnd and app_state.g_focus_return_hwnd != null and !focusGuardConsole(app_state.g_focus_return_hwnd) and IsChild(app_state.g_main_hwnd, app_state.g_focus_return_hwnd) != 0));
     if (target != null and focusGuardPolicy(now, action_tick, same_surface, authorized, foregroundIsOurs())) {
         if (user_action) {
             app_state.g_focus_authorized_hwnd = target;
@@ -231,7 +232,7 @@ fn focusGuardAt(target: HANDLE, caller: usize) bool {
         focusTrace(.allowed, target, caller);
         return true;
     }
-    if (target != null and focusGuardActivationAllows(now, app_state.g_focus_activation_until, foregroundIsOurs(), target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, focusGuardActivationTarget())) {
+    if ((raise_container or target != app_state.g_main_hwnd or app_state.g_focus_return_hwnd == null or app_state.g_focus_return_hwnd == app_state.g_main_hwnd) and focusGuardActivationAllows(now, app_state.g_focus_activation_until, foregroundIsOurs(), target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, focusGuardActivationTarget())) {
         focusTrace(.activation_refocus, target, caller);
         return true;
     }
@@ -240,14 +241,14 @@ fn focusGuardAt(target: HANDLE, caller: usize) bool {
 }
 
 pub noinline fn SetForegroundWindow(hwnd: HANDLE) BOOL {
-    if (!focusGuardAt(hwnd, @returnAddress())) return 0;
+    if (!focusGuardAt(hwnd, @returnAddress(), true)) return 0;
     const result = FocusNative.SetForegroundWindow(hwnd);
     if (result != 0 and hwnd != app_state.g_main_hwnd) focusGuardLanded(hwnd);
     return result;
 }
 
 pub noinline fn SetFocus(hwnd: HANDLE) HANDLE {
-    if (!focusGuardAt(hwnd, @returnAddress())) return null;
+    if (!focusGuardAt(hwnd, @returnAddress(), false)) return null;
     const result = FocusNative.SetFocus(hwnd);
     if (GetFocus() == hwnd) focusGuardLanded(hwnd);
     return result;
@@ -265,27 +266,27 @@ fn focusGuardLanded(hwnd: HANDLE) void {
 }
 
 pub noinline fn AttachThreadInput(from: DWORD, to: DWORD, attach: BOOL) BOOL {
-    if (attach != 0 and !focusGuardAt(if (app_state.g_focus_authorized_hwnd != null) app_state.g_focus_authorized_hwnd else if (app_state.g_focus_return_hwnd != null) app_state.g_focus_return_hwnd else activeShellHwndForFocusGuard(), @returnAddress())) return 0;
+    if (attach != 0 and !focusGuardAt(if (app_state.g_focus_authorized_hwnd != null) app_state.g_focus_authorized_hwnd else if (app_state.g_focus_return_hwnd != null) app_state.g_focus_return_hwnd else activeShellHwndForFocusGuard(), @returnAddress(), false)) return 0;
     return FocusNative.AttachThreadInput(from, to, attach);
 }
 
 pub noinline fn SwitchToThisWindow(hwnd: HANDLE, alt_tab: BOOL) void {
-    if (focusGuardAt(hwnd, @returnAddress())) FocusNative.SwitchToThisWindow(hwnd, alt_tab);
+    if (focusGuardAt(hwnd, @returnAddress(), false)) FocusNative.SwitchToThisWindow(hwnd, alt_tab);
 }
 
 pub noinline fn AllowSetForegroundWindow(pid: DWORD) BOOL {
-    if (!focusGuardAt(app_state.g_main_hwnd, @returnAddress())) return 0;
+    if (!focusGuardAt(app_state.g_main_hwnd, @returnAddress(), false)) return 0;
     return FocusNative.AllowSetForegroundWindow(pid);
 }
 
 pub noinline fn ShowWindow(hwnd: HANDLE, cmd: i32) BOOL {
     const activating = cmd == SW_SHOW or cmd == SW_RESTORE or cmd == SW_MAXIMIZE;
-    return FocusNative.ShowWindow(hwnd, if (activating and !focusGuardAt(hwnd, @returnAddress())) SW_SHOWNOACTIVATE else cmd);
+    return FocusNative.ShowWindow(hwnd, if (activating and !focusGuardAt(hwnd, @returnAddress(), false)) SW_SHOWNOACTIVATE else cmd);
 }
 
 pub noinline fn ShowWindowAsync(hwnd: HANDLE, cmd: i32) BOOL {
     const activating = cmd == SW_SHOW or cmd == SW_RESTORE or cmd == SW_MAXIMIZE;
-    return FocusNative.ShowWindowAsync(hwnd, if (activating and !focusGuardAt(hwnd, @returnAddress())) SW_SHOWNOACTIVATE else cmd);
+    return FocusNative.ShowWindowAsync(hwnd, if (activating and !focusGuardAt(hwnd, @returnAddress(), false)) SW_SHOWNOACTIVATE else cmd);
 }
 
 pub fn SetWindowPos(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32, h: i32, flags: UINT) BOOL {
@@ -343,7 +344,14 @@ pub fn activeShellHwndForFocusGuard() HANDLE {
     return if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].hwnd else null;
 }
 pub fn focusGuardActivationTarget() HANDLE {
-    return if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
+    if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null) {
+        const focused = GetFocus();
+        return if (chatComposerFocusAllowed() and (focused == null or focused == app_state.g_main_hwnd)) app_state.g_chat_composer_hwnd else null;
+    }
+    return activeShellHwndForFocusGuard();
+}
+pub fn focusGuardComposerRepairAllowed() bool {
+    return app_state.g_chat_composer_hwnd != null and focusGuardActivationTarget() == app_state.g_chat_composer_hwnd and focusGuard(app_state.g_chat_composer_hwnd);
 }
 pub fn installHook() void {
     if (app_state.g_hook == null) {

@@ -49,7 +49,7 @@ function audit(source) {
   assert.match(prompt, /startAccountJob\(\.\{ \.kind = \.decide_keys, \.edited = encoded \}\)/);
   assert.doesNotMatch(prompt, /accountSshOutput|account_client.request/);
   assert.doesNotMatch(section(source, 'accountRequest'), /MessageBoxW/);
-  assert.match(section(source, 'handleLayoutReply'), /accountPromptDeviceKeys\(bytes\)/);
+  assert.match(section(source, 'handleLayoutReply'), /accountPromptDeviceKeys\(bytes, reply.job.kind == \.device_keys\)/);
   assert.match(section(source, 'accountRequest'), /accountSyncDeviceKeys\(access, job, reply\)/);
   assert.match(section(source, 'layoutSyncWorker'), /accountRequest\(job, reply\)/);
   assert.match(section(source, 'startAccountJob'), /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
@@ -122,4 +122,39 @@ test('background keys throttle failed attempts, publish only on change or explic
     assert.ok(desktop.includes(before), before);
     assert.throws(() => auditBackground(desktop.replace(before, after)), before);
   }
+});
+
+test('ISSUE-451 executed production replies keep background approvals non-modal and explicit Cancel quiet', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'account-device-keys-'));
+  try {
+    require('./zig-copy').copyZig(['account_keys.zig'], dir);
+    const prompt = section(desktop, 'accountPromptDeviceKeys');
+    const reply = section(desktop, 'handleLayoutReply');
+    const begin = reply.indexOf('    defer {\n        if (reply.key_error)');
+    const end = reply.indexOf('    if (reply.signed_out)', begin);
+    assert.ok(begin >= 0 && end > begin);
+    const dispatch = reply.slice(begin, end);
+    assert.match(dispatch, /accountPromptDeviceKeys\(bytes, reply.job.kind == \.device_keys\)/);
+    const fixture = read('tools/account-device-keys-fixture.zig');
+    const deliver = `fn deliver(kind: AccountJobKind, payload: []const u8, unauthorized: bool, cancelled: bool) void {
+    g_account_busy = false;
+    if (kind == .decide_keys) g_account_key_prompt_active = false;
+    const reply: LayoutReply = .{ .job = .{ .kind = kind }, .device_keys = payload, .unauthorized = unauthorized, .cancelled = cancelled };
+    ${dispatch}
+}`;
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver).replaceAll('app_state.', ''));
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All 3 tests passed/);
+    const backgroundModal = dispatch.replace('reply.job.kind == .device_keys', 'true');
+    assert.notEqual(backgroundModal, dispatch);
+    fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver.replace(dispatch, backgroundModal)).replaceAll('app_state.', ''));
+    const negative = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    assert.notEqual(negative.status, 0);
+    assert.match(negative.stderr, /background pending device replies[^]*FAIL/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
