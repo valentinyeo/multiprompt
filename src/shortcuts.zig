@@ -373,6 +373,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+P", .b = "Keep this tab's browser pane awake (exempt from freeze/hibernate)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace and keep their saved URLs", .header = false },
     .{ .a = "Ctrl+K \u{2192} Insert browser-control instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
