@@ -191,6 +191,7 @@ test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the 
   fs.writeFileSync(fixture, JSON.stringify({ type: 'assistant', timestamp: '2026-10-03T12:34:00Z', message: { role: 'assistant', id: 'message-1', content: [ { type: 'text', text: 'Before the tool.' }, { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/work/a.txt' } }, { type: 'text', text: 'After the tool.' } ] } }) + '\n');
   const script = `import importlib.util,json,sys
 from pathlib import Path
+sys.modules['pwd']=None
 spec=importlib.util.spec_from_file_location('reader',sys.argv[1])
 r=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)

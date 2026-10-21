@@ -828,15 +828,15 @@ class HistoryReaderTest(unittest.TestCase):
         return types.SimpleNamespace(pw_name=name, pw_uid=uid, pw_dir=home)
 
     def test_owner_is_only_a_nonroot_account_matching_an_unambiguous_home(self):
-        with patch.object(reader.pwd, 'getpwnam', return_value=self.owner()):
+        with patch('pwd.getpwnam', return_value=self.owner()):
             self.assertEqual(reader.conversation_owner('/home/secondary/projects/demo'), ('secondary', Path('/home/secondary')))
             for cwd in ['/work/demo', '/home/secondary/../root/demo', '/home/-root/demo', '/home/secondary']:
                 self.assertIsNone(reader.conversation_owner(cwd))
-        with patch.object(reader.pwd, 'getpwnam', return_value=self.owner(uid=0)):
+        with patch('pwd.getpwnam', return_value=self.owner(uid=0)):
             self.assertIsNone(reader.conversation_owner('/home/secondary/demo'))
-        with patch.object(reader.pwd, 'getpwnam', return_value=self.owner(home='/root')):
+        with patch('pwd.getpwnam', return_value=self.owner(home='/root')):
             self.assertIsNone(reader.conversation_owner('/home/secondary/demo'))
-        with patch.object(reader.pwd, 'getpwnam', side_effect=KeyError):
+        with patch('pwd.getpwnam', side_effect=KeyError):
             self.assertIsNone(reader.conversation_owner('/home/unknown/demo'))
 
     def test_configured_and_xdg_claude_roots_and_safe_symlink_containment(self):
@@ -1187,7 +1187,7 @@ class HistoryReaderTest(unittest.TestCase):
         outputs = [subprocess.CompletedProcess([], 0, '10\n', ''),
                    subprocess.CompletedProcess([], 0, '{"pid":99,"user":"secondary"}', '')]
         with patch.object(reader.subprocess, 'run', side_effect=outputs) as run, \
-                patch.object(reader.pwd, 'getpwnam', return_value=self.owner()):
+                patch('pwd.getpwnam', return_value=self.owner()):
             self.assertEqual(reader.tmux_owner_process('claude', 'remote-3', reader.READER_SOURCE), (99, ('secondary', Path('/home/secondary'))))
         self.assertEqual(run.call_args_list[0].args[0][3], '=remote-3')
         command = run.call_args_list[1].args[0]
@@ -1201,7 +1201,7 @@ class HistoryReaderTest(unittest.TestCase):
             with patch.object(reader.subprocess, 'run', side_effect=[outputs[0], failure]):
                 self.assertIsNone(reader.tmux_owner_process('claude', 'remote-3', reader.READER_SOURCE))
         with patch.object(reader.subprocess, 'run', side_effect=outputs), \
-                patch.object(reader.pwd, 'getpwnam', return_value=self.owner(uid=0)):
+                patch('pwd.getpwnam', return_value=self.owner(uid=0)):
             self.assertIsNone(reader.tmux_owner_process('claude', 'remote-3', reader.READER_SOURCE))
 
     def test_filtering_keeps_queued_prompt_and_plain_text_only(self):
