@@ -113,7 +113,6 @@ const chatEchoMatchActive = @import("chat_send.zig").chatEchoMatchActive;
 const threadTitleNameRectFor = @import("drawing.zig").threadTitleNameRectFor;
 const SetTimer = @import("win32.zig").SetTimer;
 const KillTimer = @import("win32.zig").KillTimer;
-const nowFileTime = @import("inbox.zig").nowFileTime;
 const findShellById = @import("inbox.zig").findShellById;
 
 pub fn chatBenchInit() void {
@@ -831,7 +830,7 @@ pub fn chatFileOnReady() void {
                 entry.history = history;
             }
             entry.before = 0;
-            if (!disk and !history.more) entry.loaded_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+            if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;

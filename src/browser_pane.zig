@@ -602,7 +602,7 @@ pub fn wsStripHeight() i32 {
 }
 
 pub fn threadTitleHeight() i32 {
-    if (!app_state.g_thread_title) return 0;
+    if (!app_state.g_thread_title and !(app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected)) return 0;
     if (app_state.shell_count == 0) return 0;
     return uiScaled(THREAD_TITLE_H);
 }
