@@ -7521,6 +7521,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_workspace_restore_exclusive = false;
 
             saveSession();
+            launch_cache.finish();
             saveWorkspaceRegistry();
             gcDefaultNamedWindowOnClose();
             removeMyHostedEntriesAndSave();

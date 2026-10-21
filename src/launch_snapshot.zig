@@ -67,6 +67,7 @@ fn valid(s: Snapshot) bool {
     for (s.groups) |group| if (group.name.len > 63 or group.color >= 8) return false;
     for (s.workspaces) |name| if (name.len > 31) return false;
     for (s.blocks) |block| {
+        if (block.kind != .list and block.level > 6) return false;
         if (block.start > s.text.len or block.len > s.text.len - block.start or block.prefix > block.len or block.detail_start > s.text.len or block.detail_len > s.text.len - block.detail_start or block.diff_start > s.text.len or block.diff_len > s.text.len - block.diff_start) return false;
     }
     return active;
@@ -103,6 +104,8 @@ test "ISSUE-502 snapshot rejects invalid row identities and unsafe block ranges"
         "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]},{\"id\":1,\"name\":[]}]}",
         "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}],\"blocks\":[{\"start\":1,\"len\":1,\"role\":\"prose\"}]}",
         "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}],\"blocks\":[{\"start\":0,\"len\":0,\"role\":\"tool\",\"detail_len\":1}]}",
+        "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}],\"blocks\":[{\"start\":0,\"len\":0,\"role\":\"prose\",\"kind\":\"heading\",\"level\":7}]}",
+        "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}],\"blocks\":[{\"start\":0,\"len\":0,\"role\":\"prose\",\"level\":255}]}",
     };
     for (invalid) |bytes| try std.testing.expect((try decode(a, bytes)) == null);
     const oversized = try a.alloc(u8, MAX_BYTES + 1);

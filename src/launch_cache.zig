@@ -150,6 +150,13 @@ pub fn changed() void {
     }
 }
 
+pub fn finish() void {
+    if (pending or state.g_account_locked or state.g_restoring) return;
+    while (busy.load(.acquire)) win.Sleep(1);
+    save();
+    while (busy.load(.acquire)) win.Sleep(1);
+}
+
 const Write = struct { path: [560]u8, len: usize, bytes: []u8, hash: u64 };
 
 fn write(job: *Write) void {

@@ -27,7 +27,7 @@ async function until(description, timeout, check) {
     await delay(250);
   } while (Date.now() < deadline);
   const log = path.join(prefix, 'drive_c/ad/ZigShell/debug.log');
-  const decisions = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(line => line.includes('second-launch:')).join('\n') : '';
+  const decisions = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').slice(-120).join('\n') : '';
   assert.fail(`Timed out waiting for ${description}; app pids=${appPids()}, windows=${run('xdotool', ['search', '--name', 'multiprompt']).stdout.trim()}, already-open dialogs=${windows('^multiprompt$')}\n${decisions}`);
 }
 
@@ -93,6 +93,8 @@ beforeEach(() => {
 
 after(() => {
   try {
+    const log = prefix && path.join(prefix, 'drive_c/ad/ZigShell/debug.log');
+    if (process.env.MP_LAUNCH_LOG && log && fs.existsSync(log)) fs.copyFileSync(log, process.env.MP_LAUNCH_LOG);
     if (env && prefix) stopApps();
   } finally {
     for (const child of launches) child.kill('SIGKILL');
@@ -103,7 +105,7 @@ after(() => {
 
 test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
   launch();
-  await until('first app window', 90000, () => windows('^multiprompt v').length);
+  await until('first app window', 90000, () => windows('multiprompt v').length);
   const original = appPids();
   assert.ok(original.length, 'First app has no Unix process');
   for (const pid of original) process.kill(pid, 'SIGSTOP');
@@ -111,7 +113,7 @@ test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
   await until('frozen owner replacement without an already-open dialog', 60000, () => {
     const current = appPids();
     return original.every(pid => !current.includes(pid)) && current.length > 0
-      && windows('^multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
+      && windows('multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
   });
   if (process.env.IGSH308_SHOT) {
     const shot = run('import', ['-window', 'root', process.env.IGSH308_SHOT]);
@@ -121,14 +123,14 @@ test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
 
 test('ISSUE-308 live copy is focused', { timeout: 240000 }, async () => {
   launch();
-  await until('first app window', 90000, () => windows('^multiprompt v').length);
+  await until('first app window', 90000, () => windows('multiprompt v').length);
   const original = appPids();
   assert.ok(original.length, 'First app has no Unix process');
   const second = launch();
   await until('second launch to exit and leave only the live owner without a dialog', 45000, () => {
     const current = appPids();
     return second.exitCode !== null && JSON.stringify(current) === JSON.stringify(original)
-      && windows('^multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
+      && windows('multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
   });
 });
 
@@ -139,9 +141,9 @@ test('ISSUE-502 cached chat and 45 sidebar sessions paint before deferred startu
   fs.mkdirSync(mailbox, { recursive: true });
   const tabs = Array.from({ length: 45 }, (_, i) => ({
     kind: 'tmux', name: `Launch session ${i + 1}`, tmux_session: `launch-${i + 1}`,
-    chat_id: i + 1, cv: true, workspace: 0,
+    chat_id: i + 1, csid: `launch-${i + 1}`, ccwd: '/launch-fixture', cv: true, workspace: 0,
   }));
-  fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ tabs, active_tab: 17 }));
+  fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ tabs, active_tab: 17, chat_view_mode: 'everywhere', chat_active: true }));
   const text = Array.from('Saved launch conversation', c => c.charCodeAt(0));
   const rows = tabs.map((tab, i) => ({ id: i + 1, chat_id: i + 1, name: Array.from(tab.name, c => c.charCodeAt(0)), kind: 3 }));
   const cache = { active: 18, rows, chat: true, text, blocks: [{ start: 0, len: text.length, role: 'prose', markdown: true }] };
@@ -153,7 +155,7 @@ test('ISSUE-502 cached chat and 45 sidebar sessions paint before deferred startu
   launch();
   let windowMs;
   await until('launch first paint', 90000, () => {
-    if (windowMs === undefined && windows('^multiprompt v').length) windowMs = Date.now() - began;
+    if (windowMs === undefined && windows('multiprompt v').length) windowMs = Date.now() - began;
     const output = readLog();
     return process.env.MP_LAUNCH_BASELINE === '1' ? /\[switch\] chat painted/.test(output) : /launch first-paint ms=\d+/.test(output);
   });

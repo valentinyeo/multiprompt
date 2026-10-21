@@ -2,12 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
+const zig = process.env.ZIG || 'zig';
 
 function verifyStartup(main, cache, account, transcript) {
   const entry = main.slice(main.indexOf('pub fn main('), main.indexOf('fn initializeDeferred('));
@@ -52,4 +51,9 @@ test('ISSUE-502 bounded snapshots are synchronously restored and coalesced atomi
   assert.match(cache, /state\.g_chat_last_len -\| first > 32768/);
   assert.match(read('src/session.zig'), /pub fn saveSession\(\) void \{\s*@import\("launch_cache.zig"\)\.changed\(\);/);
   assert.match(read('src/chat_session.zig'), /chatStoreTabCache\(from_file\);\s*@import\("launch_cache.zig"\)\.changed\(\);/);
+  const finish = cache.slice(cache.indexOf('pub fn finish('), cache.indexOf('const Write ='));
+  assert.match(finish, /while \(busy\.load\(\.acquire\)\) win\.Sleep\(1\);\s*save\(\);\s*while \(busy\.load\(\.acquire\)\) win\.Sleep\(1\);/);
+  const main = read('src/main.zig');
+  const close = main.slice(main.lastIndexOf('        WM_CLOSE =>'), main.lastIndexOf('        WM_DESTROY =>'));
+  assert.match(close, /saveSession\(\);\s*launch_cache\.finish\(\);[\s\S]*DestroyWindow\(hwnd\)/);
 });
