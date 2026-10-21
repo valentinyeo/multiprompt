@@ -44,7 +44,7 @@ export function summarize(runs) {
       exceedsWithinTagSpread: Math.abs(delta) > Math.max(a.spread, b.spread),
     }];
   }));
-  return { schema: 1, environment: 'Linux/Wine on a GitHub-hosted Windows runner (WSL2)', groups, difference };
+  return { schema: 1, environment: 'Linux/Wine on a GitHub-hosted Ubuntu 24.04 runner; not native Windows acceptance', groups, difference };
 }
 
 export function markdown(summary) {

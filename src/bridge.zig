@@ -30,6 +30,7 @@ const PIPE_NOWAIT: windows.DWORD = 0x00000001;
 const PIPE_UNLIMITED_INSTANCES: windows.DWORD = 255;
 const ERROR_FILE_NOT_FOUND: windows.DWORD = 2;
 const ERROR_PIPE_BUSY: windows.DWORD = 231;
+const ERROR_NO_DATA: windows.DWORD = 232;
 const ERROR_PIPE_CONNECTED: windows.DWORD = 535;
 const SOCKET = usize;
 const INVALID_SOCKET: SOCKET = ~@as(SOCKET, 0);
@@ -2030,10 +2031,51 @@ fn runPipeServer(allocator: std.mem.Allocator, context: *HostContext, command_pi
 fn waitForPipeClient(pipe: windows.HANDLE) !void {
     if (ConnectNamedPipe(pipe, null) == 0) {
         switch (GetLastError()) {
-            ERROR_PIPE_CONNECTED => return,
+            ERROR_PIPE_CONNECTED, ERROR_NO_DATA => return,
             else => return error.PipeConnectFailed,
         }
     }
+}
+
+test "ISSUE-394 reply pipe reads a message after the client has closed" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var name_buf: [128]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buf, "\\\\.\\pipe\\multiprompt-issue-394-{d}-{d}", .{ GetCurrentProcessId(), GetTickCount64() });
+    const server = CreateNamedPipeA(
+        name.ptr,
+        PIPE_ACCESS_INBOUND,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        4096,
+        4096,
+        0,
+        null,
+    );
+    try std.testing.expect(server != INVALID_HANDLE_VALUE);
+    defer _ = CloseHandle(server);
+
+    const message = "{\"ok\":true,\"result\":\"fast reply\"}";
+    {
+        const client = CreateFileA(
+            name.ptr,
+            GENERIC_WRITE,
+            0,
+            null,
+            OPEN_EXISTING,
+            0,
+            null,
+        );
+        try std.testing.expect(client != INVALID_HANDLE_VALUE);
+        defer _ = CloseHandle(client);
+        try writeAll(client, message);
+    }
+
+    try waitForPipeClient(server);
+    const reply = try readPipeMessage(allocator, server);
+    defer allocator.free(reply);
+    try std.testing.expectEqualStrings(message, reply);
 }
 
 fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {

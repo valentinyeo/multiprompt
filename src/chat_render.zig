@@ -2914,7 +2914,9 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const mem_dc = CreateCompatibleDC(hdc);
             if (mem_dc == null) return 0;
             defer _ = DeleteDC(mem_dc);
-            const bmp = CreateCompatibleBitmap(hdc, w, h);
+            const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = w, .height = -h } };
+            var bits: ?*anyopaque = null;
+            const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
             if (bmp == null) return 0;
             defer _ = DeleteObject(bmp);
             const old_bmp = SelectObject(mem_dc, bmp);
