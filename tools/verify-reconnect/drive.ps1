@@ -28,6 +28,8 @@ function Shot([string]$Name) {
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Tab([int]$Number) {
+    [ReconnectDesktop]::Click($main)
+    Start-Sleep -Milliseconds 250
     [ReconnectDesktop]::Key(0x11, $false)
     [ReconnectDesktop]::Key([ushort](0x30 + $Number), $false)
     [ReconnectDesktop]::Key([ushort](0x30 + $Number), $true)
@@ -70,10 +72,11 @@ try {
     [void](Wait-For 'two live transports and connected debug lines' {
         $text = Read-Log
         if ((Transport 'verify-one') -and (Transport 'verify-two') -and
-            $text -match 'ssh: selected working executable:' -and
+            $text.Contains("ssh: selected working executable: $Ssh") -and
             ($text -match "session='verify-one'") -and ($text -match "session='verify-two'")) { $true }
     })
     [void][ReconnectDesktop]::SetForegroundWindow($main)
+    Start-Sleep -Seconds 18
     foreach ($number in 1, 2) {
         Tab $number
         $readyOffset = (Read-Log).Length
@@ -126,7 +129,8 @@ try {
     if (!$connected) { throw 'Background tab never completed reconnect' }
     $offsetB = (Read-Log).Length
     $current = Transport 'verify-two'
-    [IO.File]::WriteAllText("$state/sessions.txt", "verify-one`n")
+    [IO.File]::WriteAllText("$state/sessions.next", "verify-one`n")
+    Move-Item "$state/sessions.next" "$state/sessions.txt" -Force
     @{case='B'; action='delete session then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
     Stop-Process -Id $current.Id -Force
     $deadline = [DateTime]::UtcNow.AddSeconds(40)

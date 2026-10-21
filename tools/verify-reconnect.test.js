@@ -27,6 +27,7 @@ assert.match(drive, /ssh-path\.txt/);
 assert.match(desktop, /GetForegroundWindow/);
 assert.match(desktop, /GetGUIThreadInfo/);
 assert.match(desktop, /SendInput/);
+assert.match(read('src/chat_send.zig'), /@import\("focus\.zig"\)\.ShowWindow\(shell\.hwnd/);
 assert.doesNotMatch(drive, /Stop-Process -Name|taskkill \/IM/i);
 assert.match(drive, /remaining_owned_processes/);
 const skill = read('.claude/skills/verify-multiprompt/SKILL.md');

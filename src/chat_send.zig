@@ -1768,7 +1768,7 @@ fn sshSessionEnded(idx: u32) void {
     const shell = &app_state.shells[idx];
     if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
-    if (shell.hwnd != null) _ = @import("win32.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
+    if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
     shell.hwnd = null;
     if (shell.pid != 0) @import("console.zig").killProcessTree(shell.pid);
     if (shell.process != null) _ = CloseHandle(shell.process);
