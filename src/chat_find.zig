@@ -4,6 +4,7 @@ const md = @import("chat_markdown.zig");
 pub const ISSUE_268_CHAT_FIND = true;
 pub const Hit = struct {
     offset: u64,
+    segment: u64 = 0,
     end: u64,
     role: enum { user, assistant, tool },
     timestamp: []const u8,
@@ -71,6 +72,7 @@ pub fn needsOlder(offset: u64, oldest: u64) bool {
 }
 
 pub fn contains(block: md.Block, hit: Hit) bool {
+    if (hit.role != .tool and block.segment != hit.segment) return false;
     if ((hit.role == .tool) != (block.role == .tool)) return false;
     if (hit.role == .user and block.role != .user and block.role != .injected) return false;
     if (hit.role == .assistant and (block.role == .user or block.role == .injected)) return false;

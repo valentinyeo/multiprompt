@@ -16,6 +16,7 @@ const normalize = text => text.replaceAll('pub fn ', 'fn ').replaceAll('app_stat
 const painting = between('    var y: i32 = list_top;', '    _ = SelectObject(hdc, font_subtitle);\n    _ = SetTextColor(hdc, fg_dim);\n    var ft_rc', read('src/inbox.zig'));
 const harness = `const std = @import("std");
 const frequent = @import("frequent.zig");
+const launch_cache = struct { var pending = false; };
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
 const DWORD = u32;
@@ -121,7 +122,7 @@ fn etaElapsedMs(_: u64, _: i64) u64 { return 0; }
   normalize(between('fn stampSessionUse(', 'fn inboxPublishesShell(')) +
   normalize(between('pub fn sessionFrontSelected(', 'fn wndProc(', read('src/main.zig'))) +
   between('fn inboxFrequent(', 'fn loadInboxModel(') +
-  between('fn favoriteSplitMatches(', 'fn toggleFavorite(') +
+  between('const favoriteSplitMatches =', 'fn toggleFavorite(') +
   between('fn inboxRowVisible(', 'test "cached inbox navigation') +
   between('fn inboxVisibleCount(', 'fn rememberInboxRow(') + `
 fn paintRows() void {
@@ -201,6 +202,25 @@ test "v2 production user-only focused dwell resets on loss of focus and switches
     recordFrontVisit();
     try std.testing.expectEqual(@as(usize, 2), visit_publications);
 }
+test "ISSUE-502 v2 cached placeholders cannot record a front visit before deferred restore" {
+    g_front_period = .{};
+    shell_count = 1;
+    shells[0] = .{ .shell_id = 42 };
+    active_shell = 0;
+    fake_tick = 0;
+    focused = true;
+    launch_cache.pending = true;
+    defer launch_cache.pending = false;
+    sessionFrontSelected();
+    fake_tick += 10_000;
+    recordFrontVisit();
+    try std.testing.expectEqual(@as(u8, 0), shells[0].visits.len);
+    launch_cache.pending = false;
+    sessionFrontSelected();
+    fake_tick += 10_000;
+    recordFrontVisit();
+    try std.testing.expectEqual(@as(u8, 1), shells[0].visits.len);
+}
 test "v2 fixture production paint puts beta alpha gamma on screen and gamma at greatest y" {
     const Fixture = struct { now: u64, layout: @import("session_layout.zig").Layout, expected: []const []const u8 };
     const parsed = try std.json.parseFromSlice(Fixture, std.testing.allocator, @embedFile("fixture.json"), .{});
@@ -231,7 +251,7 @@ test "v2 fixture production paint puts beta alpha gamma on screen and gamma at g
 function runHarness(mutate = x => x) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-frequent-'));
   try {
-    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig'], dir);
+    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig'], dir);
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
@@ -251,6 +271,7 @@ test('v2 production input stamps focused user-only dwell and actual painted scre
 test('v2 regressions reject missing focus gating input stamps and reversed on-screen ordering', () => {
   for (const mutate of [
     s => s.replace('foregroundIsOurs(), frequent.unixMs', 'true, frequent.unixMs'),
+    s => s.replace('!launch_cache.pending and ', ''),
     s => s.replace('shells[idx].input = @max(shells[idx].input, now_ms);', ''),
     s => s.replace('return frequent.bottomOrder(ka, kb);', 'return ka > kb;'),
   ]) {

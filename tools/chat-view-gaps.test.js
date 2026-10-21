@@ -185,27 +185,80 @@ test "ordinary assistant replies remain visible" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the history wire', { todo: 'ISSUE-402' }, (t) => {
+test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the history wire', (t) => {
   const dir = prepare(t, 'reader-order');
   const fixture = path.join(dir, 'reader-order.jsonl');
   fs.writeFileSync(fixture, JSON.stringify({ type: 'assistant', timestamp: '2026-10-03T12:34:00Z', message: { role: 'assistant', id: 'message-1', content: [ { type: 'text', text: 'Before the tool.' }, { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/work/a.txt' } }, { type: 'text', text: 'After the tool.' } ] } }) + '\n');
   const script = `import importlib.util,json,sys
 from pathlib import Path
+if sys.platform == 'win32': sys.modules['pwd'] = type(sys)('pwd')
 spec=importlib.util.spec_from_file_location('reader',sys.argv[1])
 r=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
+if sys.platform == 'win32':
+    assert r.conversation_owner(str(Path.home() / 'work')) is None
+    assert r.tmux_owner_process('claude','term-1',None) is None
 r.resolve_response_path=lambda *args: ('claude','sid',Path(sys.argv[2]),None)
 q=dict(id=1,codex=False,sid='sid',tmux='term-1',cwd='/work',cached_sid='',inode=0,offset=0,start=0,before=0,mtime=0,probe='',source_offsets=True)
 wire=r.response(q)
-print(json.dumps([json.loads(line) for line in wire.splitlines()[1:-1] if json.loads(line).get('role')!='status']))
+rows=[json.loads(line) for line in wire.splitlines()[1:-1] if json.loads(line).get('role')!='status']
+fields=wire.splitlines()[0].split('\\t')
+with Path(sys.argv[2]).open('a') as output:
+    output.write(json.dumps(dict(type='user',message=dict(role='user',content=[dict(type='tool_result',tool_use_id='tool-1',content='finished')])))+'\\n')
+q.update(id=2,cached_sid='sid',inode=int(fields[7]),offset=int(fields[6]),start=int(fields[14]),mtime=int(fields[11]),probe=fields[12])
+print(json.dumps(dict(rows=rows,wire=wire,delta=r.response(q))))
 `;
   const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   assert.equal(run.status, 0, run.stdout + run.stderr);
-  const rows = JSON.parse(run.stdout);
+  const { rows, wire, delta } = JSON.parse(run.stdout);
   assert.deepEqual(rows.map(row => ({ role: row.role, text: row.text })), [ { role: 'assistant', text: 'Before the tool.' }, { role: 'tool', text: 'Read a.txt' }, { role: 'assistant', text: 'After the tool.' } ]);
+  assert.equal(rows[0].id, 'message-1');
+  assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
+  const native = execute(t, 'history-order', `
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+fn expectOrder(h: history.History) !void {
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    const expected = [_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("Before the tool."),
+        std.unicode.utf8ToUtf16LeStringLiteral("Read a.txt"),
+        std.unicode.utf8ToUtf16LeStringLiteral("After the tool."),
+    };
+    for (h.blocks.items, expected, 0..) |block, text, index| {
+        try std.testing.expectEqualSlices(u16, text, h.text.items[block.start..][0..block.len]);
+        try std.testing.expectEqual(index == 1, block.role == .tool);
+    }
+}
+test "ISSUE-402 actual reader wire preserves order across suffix delta clone and cache" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "/work");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, ${JSON.stringify(wire)}, 1, key);
+    try expectOrder(h);
+    var next = try h.suffix(a);
+    defer next.deinit(a);
+    try next.apply(a, ${JSON.stringify(delta)}, 2, key);
+    try h.appendParsed(a, &next);
+    try expectOrder(h);
+    try std.testing.expectEqual(.ok, h.blocks.items[1].tool_status);
+    var cloned = try h.clone(a);
+    defer cloned.deinit(a);
+    try expectOrder(cloned);
+    const bytes = try h.encode(a, key);
+    defer a.free(bytes);
+    var restored = try history.History.decode(a, bytes, key);
+    defer restored.deinit(a);
+    try expectOrder(restored);
+    try std.testing.expectEqualSlices(u8, h.rows.items, restored.rows.items);
+}
+`, ['chat_history.zig', 'chat_transcript.zig'], 'ISSUE-402');
+  assert.equal(native.status, 0, native.stdout + native.stderr);
+
 });
 
-test('ISSUE-403 clicked Chat View links preserve their Unicode path', { todo: 'ISSUE-403' }, (t) => {
+test('ISSUE-403 clicked Chat View links preserve their Unicode path', (t) => {
   const run = execute(t, 'render-link', `
 const std = @import("std");
 const links = @import("link_detect.zig");
@@ -220,51 +273,131 @@ fn navigateBrowserPaneWithActivation(_: usize, url: []const u8, _: bool) void {
 fn webView2OwnsActiveShell() bool { return false; }
 fn requestWebView2Focus() void {}
 fn requestNativeBrowserFocus() void {}
+${body('clickedLinkUrl')}
+${source.match(/test "IGSH-403 [\s\S]*?\n}/)[0]}
 ${body('openClickedLink')}
-test "AUDIT click preserves Unicode in a detected transcript link" {
+test "IGSH-403 click preserves Unicode in a detected transcript link" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("see https://example.test/Kraków");
     const link = links.next(text, 0).?;
     openClickedLink(text[link.start..link.end]);
-    try std.testing.expectEqualStrings("https://example.test/Kraków", sent[0..sent_len]);
+    try std.testing.expectEqualStrings("https://example.test/Krak%C3%B3w", sent[0..sent_len]);
+    const oversized: [8193]u16 = @splat('x');
+    sent_len = 0;
+    openClickedLink(&oversized);
+    try std.testing.expectEqual(@as(usize, 0), sent_len);
+    openClickedLink(oversized[0..8192]);
+    try std.testing.expectEqual(@as(usize, 8192), sent_len);
+    const expanded: [4096]u16 = @splat('é');
+    sent_len = 0;
+    openClickedLink(&expanded);
+    try std.testing.expectEqual(@as(usize, 0), sent_len);
 }
-`, ['link_detect.zig'], 'AUDIT');
+`, ['link_detect.zig'], 'IGSH-403', ['-fno-llvm', '-fno-lld']);
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', { todo: 'ISSUE-404' }, (t) => {
-  const run = execute(t, 'render-copy', `
+test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', (t) => {
+  const production = ['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
+    .replaceAll('std.heap.page_allocator', 'copy_allocator');
+  const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
+var copy_allocator = std.testing.allocator;
 var g_chat_capture: [262200]u16 = @splat('x');
 var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
-var g_chat_blocks: [1]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }};
+var g_chat_blocks: [2]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }, .{ .start = 0, .len = 0, .role = .user }};
 var g_chat_sel_active = false;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;
 var g_chat_sel_dragging = false;
 var g_chat_sel_transcript_focus = false;
-var g_chat_sel_text: [262144]u16 = undefined;
 var g_chat_transcript_hwnd: ?usize = null;
 var g_chat_composer_hwnd: ?usize = null;
 var copied: usize = 0;
+var clipboard: [524404]u16 = undefined;
+var clipboard_ok = true;
+var clipboard_calls: usize = 0;
 var notice: [64]u8 = undefined;
 var notice_len: usize = 0;
+var notice_error = false;
 fn chatBlockDisplayRange(_: []const u16, block: ChatBlock) struct { start: usize, len: usize } { return .{ .start = block.start, .len = block.len }; }
 fn InvalidateRect(_: ?usize, _: ?*anyopaque, _: i32) i32 { return 1; }
-fn setUnicodeClipboardTextWithRetry(text: []const u16) bool { copied = text.len; return true; }
-fn showHeaderNoticeAscii(text: []const u8, _: u32, _: bool) void { @memcpy(notice[0..text.len], text); notice_len = text.len; }
+fn setUnicodeClipboardTextWithRetry(text: []const u16) bool {
+    clipboard_calls += 1;
+    if (!clipboard_ok) return false;
+    copied = text.len;
+    @memcpy(clipboard[0..copied], text);
+    return true;
+}
+fn showHeaderNoticeAscii(text: []const u8, _: u32, failed: bool) void {
+    @memcpy(notice[0..text.len], text);
+    notice_len = text.len;
+    notice_error = failed;
+}
 fn chatComposerFocusAllowed() bool { return false; }
 fn SetFocus(_: ?usize) ?usize { return null; }
-${['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection'].map(body).join('\n')}
-test "AUDIT full conversation selection copies every selected character" {
+` + production + String.raw`
+test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestly" {
+    g_chat_capture[g_chat_capture.len - 2] = 0xd83d;
+    g_chat_capture[g_chat_capture.len - 1] = 0xde00;
     chatSelectAll();
     chatCopySelection();
     try std.testing.expectEqualStrings("Copied", notice[0..notice_len]);
-    try std.testing.expectEqual(g_chat_capture.len, copied);
+    try std.testing.expect(!notice_error);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    g_chat_sel_anchor = g_chat_capture.len;
+    g_chat_sel_caret = 0;
+    chatCopySelection();
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    chatCopyBlockToClipboard(0);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, clipboard[0..copied]);
+    const snapshot = try chatCopyTextAlloc(copy_allocator, null);
+    defer std.testing.allocator.free(snapshot);
+    try std.testing.expectEqualSlices(u16, &g_chat_capture, snapshot);
+    clipboard_ok = false;
+    chatCopySelection();
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy to clipboard; try again", notice[0..notice_len]);
+    const calls = clipboard_calls;
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    copy_allocator = failing.allocator();
+    chatCopySelection();
+    try std.testing.expectEqual(calls, clipboard_calls);
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy text; try again", notice[0..notice_len]);
+    var rich_failure = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    copy_allocator = rich_failure.allocator();
+    g_chat_blocks[0].role = .prose;
+    chatCopySelection();
+    try std.testing.expectEqual(calls, clipboard_calls);
+    try std.testing.expect(notice_error);
+    try std.testing.expectEqualStrings("Could not copy text; try again", notice[0..notice_len]);
+    g_chat_blocks[0].role = .user;
+    copy_allocator = std.testing.allocator;
+    clipboard_ok = true;
+    @memset(&g_chat_capture, '\n');
+    chatCopySelection();
+    try std.testing.expectEqual(g_chat_capture.len * 2, copied);
+    for (0..g_chat_capture.len) |i| try std.testing.expectEqualSlices(u16, &.{ '\r', '\n' }, clipboard[i * 2 ..][0..2]);
+    g_chat_last_len = 2;
+    g_chat_capture[0] = 'a';
+    g_chat_capture[1] = 'b';
+    g_chat_block_count = 2;
+    g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .user };
+    g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .user };
+    chatSelectAll();
+    chatCopySelection();
+    try std.testing.expectEqualSlices(u16, &.{ 'a', '\r', '\n', '\r', '\n', 'b' }, clipboard[0..copied]);
+    var small: [1]u16 = undefined;
+    try std.testing.expectError(error.NoSpaceLeft, chatSelectionToClipboard(&small));
+    chatSelectionClear();
+    chatCopySelection();
+    try std.testing.expect(!notice_error);
+    try std.testing.expectEqualStrings("Nothing selected", notice[0..notice_len]);
 }
-`, ['chat_markdown.zig'], 'AUDIT');
+`, ['chat_markdown.zig'], 'IGSH-404');
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 

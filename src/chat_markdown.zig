@@ -27,6 +27,7 @@ pub const Block = struct {
     tool_open: bool = false,
     source_offset: u64 = 0,
     source_end: u64 = 0,
+    segment: u64 = 0,
     result_offset: ?u64 = null,
 };
 pub const Range = struct { start: usize, end: usize };
@@ -524,7 +525,7 @@ pub const TableCache = struct {
     }
 
     pub fn refresh(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block) void {
-        const Identity = struct { message: u64, table: usize };
+        const Identity = struct { message: u64, segment: u64, table: usize };
         var identities: std.AutoHashMapUnmanaged(Identity, usize) = .empty;
         defer identities.deinit(a);
         identities.ensureTotalCapacity(a, self.entries.count()) catch {
@@ -545,7 +546,7 @@ pub const TableCache = struct {
                 ordinal = 0;
             }
             if (block.kind != .table) continue;
-            if (self.entries.contains(block.start)) identities.putAssumeCapacity(.{ .message = message, .table = ordinal }, block.start);
+            if (self.entries.contains(block.start)) identities.putAssumeCapacity(.{ .message = message, .segment = block.segment, .table = ordinal }, block.start);
             ordinal += 1;
         }
         message = 0;
@@ -557,7 +558,7 @@ pub const TableCache = struct {
                 ordinal = 0;
             }
             if (block.kind != .table) continue;
-            if (identities.get(.{ .message = message, .table = ordinal })) |old_offset| {
+            if (identities.get(.{ .message = message, .segment = block.segment, .table = ordinal })) |old_offset| {
                 if (self.entries.fetchRemove(old_offset)) |entry| retained.putAssumeCapacity(block.start, entry.value);
             }
             ordinal += 1;
@@ -878,6 +879,8 @@ test "ISSUE-458 table offsets survive refresh prepend and resize without mixing 
         .{ .start = 10, .len = text.len, .role = .code, .kind = .table, .first = true, .source_offset = 900, .source_end = 1000 },
         .{ .start = 100, .len = text.len, .role = .code, .kind = .table, .source_offset = 900, .source_end = 1000 },
         .{ .start = 200, .len = text.len, .role = .code, .kind = .table, .first = true, .source_offset = 1000, .source_end = 1100 },
+        .{ .start = 300, .len = text.len, .role = .code, .kind = .table, .first = true, .source_offset = 1000, .source_end = 1100, .segment = 2 },
+        .{ .start = 400, .len = text.len, .role = .code, .kind = .table, .source_offset = 1000, .source_end = 1100, .segment = 2 },
     };
     for (before, 0..) |block, i| {
         const layout = try cache.layout(a, text, block.start, key, {}, Measure.cell);

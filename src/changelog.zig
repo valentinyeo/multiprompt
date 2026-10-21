@@ -53,6 +53,22 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.789", .items = &.{
+        .{ .text = "Locked session warnings now wait for a failed reconnect, explain why, and disappear when the tab recovers.", .ticket = "IGSH-512" },
+        .{ .text = "Chat View now keeps reply text before or after each tool step in the correct order.", .ticket = "IGSH-402" },
+        .{ .text = "Copying a very long selection in Chat View now copies all of it and reports when copying fails.", .ticket = "IGSH-404" },
+        .{ .text = "Press Alt+1 to open the new Starred workspace, which automatically mirrors your starred sessions without moving them.", .ticket = "IGSH-457" },
+    } },
+    .{ .ver = "0.28.788", .items = &.{
+        .{ .text = "Links with non-English letters in Chat View now open the correct address.", .ticket = "IGSH-403" },
+        .{ .text = "Android crash reports can be read newest first with device names, UTC timestamps, and full stack traces.", .ticket = "IGSH-429" },
+        .{ .text = "A tab that fails to come back after a restart now shows Disconnected and reconnects by itself instead of staying blank.", .ticket = "IGSH-501" },
+        .{ .text = "Close all browser panes across every workspace from Ctrl+K while keeping their saved URLs.", .ticket = "IGSH-503" },
+    } },
+    .{ .ver = "0.28.787", .items = &.{
+        .{ .text = "Multiprompt opens straight to your saved chat and sidebar, without a progress bar.", .ticket = "IGSH-502" },
+        .{ .text = "Connections, other tabs, the browser and sign-in checks load after the window appears.", .ticket = "IGSH-502" },
+    } },
     .{ .ver = "0.28.786", .items = &.{
         .{ .text = "Wide tables in the chat now have a scrollbar you can drag, click, or scroll with Shift+wheel or a touchpad swipe.", .ticket = "IGSH-458" },
     } },

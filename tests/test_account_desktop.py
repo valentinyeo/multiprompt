@@ -23,16 +23,24 @@ def locked_spawn(source):
 
 
 class AccountDesktop(unittest.TestCase):
-    def test_lock_precedes_all_startup_runtime(self):
+    def test_issue_502_cached_paint_precedes_optimistic_account_startup(self):
         main = function(MAIN, 'main')
-        lock = main.index('if (!accountBootstrap(hwnd)) return;')
+        deferred = function(MAIN, 'initializeDeferred')
+        self.assertIn('launch_cache.restore();', main)
+        self.assertNotIn('accountBootstrap(hwnd)', main)
+        bootstrap_call = deferred.index('if (!accountBootstrap(hwnd)) {')
         for call in ('startStaleAltMouseHookThread();', 'CreateJobObjectW(', 'ensureUsageTelemetryCollector();', 'maintainTunnelKeepers();', 'SetParent(adopt_h', 'restoreSession();', 'restoreRegisteredWorkspaceWindows();'):
-            self.assertLess(lock, main.index(call), call)
+            self.assertLess(bootstrap_call, deferred.index(call), call)
         bootstrap = function(MAIN, 'accountBootstrap')
-        self.assertIn('while (g_account_locked)', bootstrap)
-        self.assertIn('MULTIPROMPT_NO_LOGIN', bootstrap)
-        self.assertIn("len == 1 and env[0] == '1'", bootstrap)
-        self.assertIn('accountPrepareRestore(to_apply)', function(MAIN, 'handleLayoutReply'))
+        self.assertNotIn('while (g_account_locked)', bootstrap)
+        self.assertLess(bootstrap.index('g_account_locked = false;'), bootstrap.index('startAccountJob(accountResumeJob(.startup))'))
+        claim = function(MAIN, 'accountClaim')
+        self.assertIn('MULTIPROMPT_NO_LOGIN', claim)
+        self.assertIn("len == 1 and env[0] == '1'", claim)
+        reply = function(MAIN, 'handleLayoutReply')
+        invalid = reply.split('if (reply.unauthorized) {', 1)[1].split('const bytes =', 1)[0]
+        self.assertIn('if (reply.job.kind == .startup)', invalid)
+        self.assertIn('accountLock();', invalid)
 
     def test_all_spawn_and_restore_paths_fail_closed_with_negative_control(self):
         self.assertTrue(locked_spawn(MAIN))
@@ -122,16 +130,18 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (!g_account_bypass or g_single_window)', spawn)
         self.assertLess(spawn.index('newWorkspace();'), spawn.index('CreateProcessW('))
         self.assertIn('g_account_locked or !g_account_bypass or g_single_window', function(MAIN, 'detachTabToNewWindow'))
-        main = function(MAIN, 'main')
-        bootstrap = main.index('if (!accountBootstrap(hwnd)) return;')
+        main = function(MAIN, 'initializeDeferred')
+        bootstrap = main.index('if (!accountBootstrap(hwnd)) {')
         for flag in ('g_single_window = true;', 'g_adopt_hwnd = null;', 'g_empty_workspace = false;'):
             self.assertLess(main.index(flag, bootstrap), main.index('startStaleAltMouseHookThread();'))
 
     def test_one_process_owns_rotating_credentials_until_exit(self):
-        bootstrap = function(MAIN, 'accountBootstrap')
+        bootstrap = function(MAIN, 'accountClaim')
         acquire = bootstrap.index('WaitForSingleObject(mutex, 0)')
         self.assertLess(bootstrap.index("len == 1 and env[0] == '1'"), acquire)
-        self.assertLess(acquire, bootstrap.index('startAccountJob(accountResumeJob(.startup))'))
+        self.assertIn('startAccountJob(accountResumeJob(.startup))', function(MAIN, 'accountBootstrap'))
+        main = function(MAIN, 'main')
+        self.assertLess(main.index('accountClaim(hwnd)'), main.index('launch_cache.restore();'))
         self.assertIn('result != 0 and result != 0x80', bootstrap)
         self.assertIn('std.hash.Wyhash.hash(0, token_path)', bootstrap)
         self.assertIn('g_account_instance_mutex = mutex;', bootstrap)
@@ -181,7 +191,8 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (renewed) try g_account_access.remember', worker)
         reply = function(MAIN, 'handleLayoutReply')
         invalid = reply.split('if (reply.unauthorized) {', 1)[1].split('const bytes =', 1)[0]
-        self.assertNotIn('accountLock()', invalid)
+        background = invalid.split('} else {', 1)[1]
+        self.assertNotIn('accountLock()', background)
         self.assertIn('g_account_reauth = true;', invalid)
         self.assertIn('Sign in again:', invalid)
         self.assertIn('g_account_locked or g_account_reauth', MAIN)

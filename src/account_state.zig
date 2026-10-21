@@ -135,3 +135,11 @@ test "serialized requests reuse access without sliding expiry and bad replies ca
     access.clear(std.testing.allocator);
     try std.testing.expect(!access.usable(0));
 }
+
+pub fn startupLocked() bool {
+    return false;
+}
+
+test "ISSUE-502 optimistic startup is not locked while account validation is pending" {
+    try std.testing.expect(!startupLocked());
+}

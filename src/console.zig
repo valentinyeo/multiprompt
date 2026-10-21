@@ -1849,23 +1849,25 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         }
     }
 
-    if (cmd_hwnd == null) {
+    if (cmd_hwnd == null and !isRemoteShellKind(kind)) {
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         return false;
     }
 
-    if (kind != .gitbash) {
+    if (cmd_hwnd != null and kind != .gitbash) {
         applyBlackConsoleBackground(pi.dwProcessId);
     }
 
-    _ = ShowWindow(cmd_hwnd, SW_HIDE);
-    _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
-    var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
-    style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
-    style |= @as(isize, @intCast(WS_CHILD));
-    _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
-    _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+    if (cmd_hwnd != null) {
+        _ = ShowWindow(cmd_hwnd, SW_HIDE);
+        _ = SetParent(cmd_hwnd, app_state.g_main_hwnd);
+        var style = GetWindowLongPtrW(cmd_hwnd, GWL_STYLE);
+        style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
+        style |= @as(isize, @intCast(WS_CHILD));
+        _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
+        _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE);
+    }
 
     app_state.shells[idx] = .{
         .hwnd = cmd_hwnd,
@@ -1918,6 +1920,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     app_state.shell_count += 1;
     if (!app_state.g_restoring) app_state.shells[idx].last_active = nowFileTime();
     registerShellExitWait(idx);
+    if (cmd_hwnd == null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
 
     if (!app_state.g_restoring) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
@@ -2058,6 +2061,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         }
     }
     if (cmd_hwnd == null) {
+        var exit_code: DWORD = std.math.maxInt(DWORD);
+        const got_code = GetExitCodeProcess(pi.hProcess, &exit_code) != 0;
+        var exit_log: [192]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&exit_log, "ssh-reconnect exit id={d} reason=respawn-console-missing exit_code={d} known={}", .{ title_id, exit_code, got_code }) catch "ssh-reconnect exit log-overflow");
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
         return false;
@@ -2201,6 +2208,8 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
+    if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
+    app_state.shells[idx].ssh_reconnect.confirmDisconnect(GetTickCount64(), "console-missing", app_state.shells[idx].process != null and shellProcessAliveForRead(idx));
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
@@ -2221,7 +2230,6 @@ pub fn markSshTabDisconnected(idx: u32) void {
     debugLog(std.fmt.bufPrint(&reconnect_log, "ssh-reconnect scheduled id={d} attempt={d} delay_ms={d}", .{ app_state.shells[idx].shell_id, app_state.shells[idx].ssh_reconnect.attempts +| 1, app_state.shells[idx].ssh_reconnect.delay_ms }) catch "ssh-reconnect scheduled");
     armSshReconnectTimerIfNeeded();
     if (app_state.shells[idx].locked or app_state.shells[idx].pinned_top) {
-        showHeaderNoticeAscii(if (app_state.shells[idx].locked) "Locked session disconnected - Ctrl+Shift+R to reconnect" else "Pinned session disconnected - Ctrl+Shift+R to reconnect", 8000, true);
         logSessionAuditAlways(if (app_state.shells[idx].locked) "locked-session-disconnected-preserved" else "pinned-session-disconnected-preserved");
     }
     repositionActive();
@@ -2379,7 +2387,15 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
 
     if (app_state.shell_count == 0) {
         app_state.active_shell = 0;
+        if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        saveSession();
+        return;
+    }
+    if (app_state.g_starred_workspace) {
+        if (closing_active) app_state.active_shell = app_state.shell_count;
+        if (!closing_active and app_state.active_shell > idx) app_state.active_shell -= 1;
+        @import("workspaces.zig").refreshStarredWorkspace();
         saveSession();
         return;
     }
@@ -2465,6 +2481,13 @@ pub fn switchToShellByUser(idx: u32) void {
 }
 
 pub fn switchToShell(idx: u32) void {
+    if (app_state.g_starred_workspace and idx < app_state.shell_count) {
+        if (@import("workspaces.zig").starredShellVisible(idx)) {
+            app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
+        } else {
+            app_state.g_starred_workspace = false;
+        }
+    }
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != app_state.active_shell);

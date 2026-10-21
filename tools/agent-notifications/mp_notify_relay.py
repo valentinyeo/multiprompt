@@ -249,4 +249,14 @@ def serve(directory=None, port=PORT, stop=None):
 
 
 if __name__ == "__main__":
-    sys.exit(serve())
+    from tmux_notify import start_sender
+
+    directory = socket_dir()
+    if not prepare_directory(directory):
+        sys.exit(UNSAFE_DIRECTORY)
+    try:
+        start_sender(directory)
+    except OSError as error:
+        print(f"Unsafe tmux notification FIFO: {error}", file=sys.stderr)
+        sys.exit(UNSAFE_DIRECTORY)
+    sys.exit(serve(directory))
