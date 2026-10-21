@@ -333,6 +333,8 @@ async function dispatch(message) {
       return listTabs(message);
     case "activeTab":
       return compactTab(await getTargetTab(message));
+    case "frames":
+      return framesAction(message);
     case "url":
       return urlAction(message);
     case "activate":
@@ -1767,20 +1769,29 @@ function pageErrorResult(tab, error) {
   };
 }
 
+async function framesAction(message) {
+  const tab = await getTargetTab(message);
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+  return { tab: compactTab(tab), frames: (frames || []).map(({ frameId, parentFrameId, url }) => ({ frameId, parentFrameId, url })) };
+}
+
 async function evalAction(message) {
   const tab = await getTargetTab(message);
-  if (/^data:/i.test(tab.url || "")) {
+  const frameId = message.frameId ?? 0;
+  if (!Number.isInteger(frameId) || frameId < 0) throw new Error("invalid frameId");
+  if (frameId === 0 && /^data:/i.test(tab.url || "")) {
     return runInDataTab(tab.id, evalInPage, [stringOr(message.code, "")]);
   }
   const code = stringOr(message.code, "");
   const blockedByCsp = (error) => /unsafe-eval|content security policy|\bCSP\b/i.test(errorText(error));
   try {
     const [entry] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id, frameIds: [frameId] },
       world: "MAIN",
       func: evalInPage,
       args: [code],
     });
+    if (!entry) throw new Error(`no evaluation result for frame ${frameId}`);
     if (entry?.error) throw new Error(entry.error.message || String(entry.error));
     if (typeof entry?.result !== "string" || !/^EvalError:/i.test(entry.result) || !blockedByCsp(entry.result)) {
       return entry?.result;
@@ -1789,6 +1800,8 @@ async function evalAction(message) {
     if (!blockedByCsp(error)) throw error;
   }
 
+  // Runtime.evaluate without a context targets the top page, never the requested subframe.
+  if (frameId !== 0) throw new Error(`eval in frame ${frameId} blocked by Content Security Policy`);
   return withCdpSession(tab.id, async (debuggee) => {
     const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
       expression: `(${evalInPage.toString()})(${JSON.stringify(code)}, () => { "use strict"; return (${code}); })`,
@@ -1882,19 +1895,34 @@ async function clickAction(message) {
   const tab = await getTargetTab(message);
   await runInTab(tab.id, installCursorApi, [cursorOptionsFrom(message)]).catch(() => {});
   const selector = stringOr(message.selector, "");
-  const target = await locateSelectorAcrossFrames(tab.id, selector, false);
+  let target = await locateSelectorAcrossFrames(tab.id, selector, false);
   const offset = await frameViewportOffset(tab.id, target.frameId);
-  if (!offset) {
-    const fallback = await runInFrame(tab.id, target.frameId, clickSelector, [selector]);
-    return { ...fallback, trusted: false, frameId: target.frameId, via: "frame-dom-fallback" };
+  let reason = "frame coordinates unavailable";
+  if (offset) {
+    // Ancestor scrolling can change the leaf viewport; measure again before dispatch.
+    if (target.frameId !== 0) {
+      target = { ...await runInFrame(tab.id, target.frameId, locateSelectorForTrustedInput, [selector, false, false, false]), frameId: target.frameId };
+    }
+    const x = Number(target.x) + Number(offset.x);
+    const y = Number(target.y) + Number(offset.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error(`invalid cross-frame click coordinates: target=${JSON.stringify(target)} offset=${JSON.stringify(offset)}`);
+    }
+    let inputStarted = false;
+    try {
+      await withCdpSession(tab.id, (debuggee) => {
+        inputStarted = true;
+        return dispatchTrustedClick(debuggee, x, y);
+      });
+      return { clicked: true, trusted: true, selector, text: target.text, frameId: target.frameId, via: "cdp", x, y };
+    } catch (error) {
+      // Never replay a possibly delivered click, including an operation/attach timeout.
+      if (inputStarted || /timed out/i.test(errorText(error))) throw error;
+      reason = `debugger unavailable: ${errorText(error)}`;
+    }
   }
-  const x = Number(target.x) + Number(offset.x);
-  const y = Number(target.y) + Number(offset.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new Error(`invalid cross-frame click coordinates: target=${JSON.stringify(target)} offset=${JSON.stringify(offset)}`);
-  }
-  await withCdpSession(tab.id, (debuggee) => dispatchTrustedClick(debuggee, x, y));
-  return { clicked: true, trusted: true, selector, text: target.text, frameId: target.frameId };
+  const fallback = await runInFrame(tab.id, target.frameId, clickSelector, [selector]);
+  return { ...fallback, trusted: false, frameId: target.frameId, via: "frame-dom-fallback", reason };
 }
 
 async function typeAction(message) {
@@ -1950,7 +1978,16 @@ async function frameViewportOffset(tabId, frameId) {
     visited.add(current.frameId);
     const parent = byId.get(current.parentFrameId);
     if (!parent) return null;
-    const rect = await runInFrame(tabId, parent.frameId, locateChildFrameRect, [current.url]).catch(() => null);
+    // URLs are not identities: redirects, srcdoc and same-URL siblings are common.
+    const token = crypto.randomUUID();
+    let rect = null;
+    try {
+      await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "listen"]);
+      await runInFrame(tabId, current.frameId, signalParentFrame, [token]);
+      rect = await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "rect"]);
+    } catch (_) {
+      await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "cancel"]).catch(() => {});
+    }
     if (!rect) return null;
     x += rect.x;
     y += rect.y;
@@ -2992,7 +3029,7 @@ function getFocusedEditableTarget() {
   return { editable, tag: element?.tagName?.toLowerCase() || "" };
 }
 
-async function locateSelectorForTrustedInput(selector, requireEditable, allowMissing = false) {
+async function locateSelectorForTrustedInput(selector, requireEditable, allowMissing = false, scroll = true) {
   if (!selector) throw new Error("missing selector");
   const element = document.querySelector(selector);
   if (!element) {
@@ -3007,7 +3044,7 @@ async function locateSelectorForTrustedInput(selector, requireEditable, allowMis
     throw new Error(`selector is not editable: ${selector}`);
   }
 
-  element.scrollIntoView({ block: "center", inline: "center" });
+  if (scroll) element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) throw new Error(`selector is not visible: ${selector}`);
   const x = Math.round(rect.left + rect.width / 2);
@@ -3028,17 +3065,45 @@ async function locateSelectorForTrustedInput(selector, requireEditable, allowMis
   return { found: true, x, y, text: text.slice(0, 160) };
 }
 
-function locateChildFrameRect(childUrl) {
-  const frames = Array.from(document.querySelectorAll("iframe,frame"));
-  const wanted = String(childUrl || "");
-  const element = frames.find((frame) => {
-    try { return new URL(frame.src || frame.getAttribute("src") || "", location.href).href === wanted; }
-    catch { return false; }
-  });
-  if (!element) return null;
-  element.scrollIntoView({ block: "nearest", inline: "nearest" });
-  const rect = element.getBoundingClientRect();
-  return { x: rect.left + element.clientLeft, y: rect.top + element.clientTop };
+async function locateChildFrameRect(token, action) {
+  const key = `__zsbFrameRect_${token}`;
+  if (action === "listen") {
+    let finish;
+    const promise = new Promise((resolve) => { finish = resolve; });
+    const receive = (event) => {
+      if (event.data?.zsbFrameToken !== token) return;
+      const element = Array.from(document.querySelectorAll("iframe,frame"))
+        .find((frame) => frame.contentWindow === event.source);
+      if (element) finish(element);
+    };
+    const cleanup = () => {
+      window.removeEventListener("message", receive);
+      clearTimeout(timer);
+      delete window[key];
+      finish(null);
+    };
+    const timer = setTimeout(cleanup, 1500);
+    window[key] = { promise, cleanup };
+    window.addEventListener("message", receive);
+    return true;
+  }
+  const pending = window[key];
+  if (!pending) return null;
+  try {
+    if (action === "cancel") return null;
+    const element = await pending.promise;
+    if (!element?.isConnected) return null;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return { x: rect.left + element.clientLeft, y: rect.top + element.clientTop };
+  } finally {
+    pending.cleanup();
+  }
+}
+
+function signalParentFrame(token) {
+  window.parent.postMessage({ zsbFrameToken: token }, "*");
 }
 
 async function clickSelector(selector) {
@@ -3046,22 +3111,26 @@ async function clickSelector(selector) {
   const element = document.querySelector(selector);
   if (!element) throw new Error(`selector not found: ${selector}`);
 
-  element.scrollIntoView({ block: "center", inline: "center" });
-
+  element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) throw new Error(`selector is not visible: ${selector}`);
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  const common = { bubbles: true, cancelable: true, composed: true, view: window, clientX, clientY, button: 0 };
+  const pointer = { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true };
   const cursor = window.__browserCliCursor;
   if (cursor && !window.__browserCliCursorDisabled) {
-    const rect = element.getBoundingClientRect();
-    const cx = Math.round(rect.left + rect.width / 2);
-    const cy = Math.round(rect.top + rect.height / 2);
-    const moveMs = cursor.moveTo(cx, cy) || 0;
+    const moveMs = cursor.moveTo(clientX, clientY) || 0;
     await new Promise((resolve) => setTimeout(resolve, moveMs + 30));
     cursor.press(true);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    element.click();
-    cursor.press(false);
-  } else {
-    element.click();
   }
+  const pointerDown = element.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1, pressure: 0.5 }));
+  const mouseDown = pointerDown && element.dispatchEvent(new MouseEvent("mousedown", { ...common, buttons: 1 }));
+  if (mouseDown) element.focus({ preventScroll: true });
+  element.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0, pressure: 0 }));
+  if (pointerDown) element.dispatchEvent(new MouseEvent("mouseup", { ...common, buttons: 0 }));
+  element.dispatchEvent(new PointerEvent("click", { ...pointer, buttons: 0, detail: 1 }));
+  if (cursor) cursor.press(false);
 
   const label = (
     element.getAttribute("aria-label") ||

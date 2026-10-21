@@ -189,6 +189,9 @@ jobs:
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Test cross-origin zsb frame input and eval
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node --test tools/zsb-iframe.test.js
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
