@@ -2199,14 +2199,15 @@ pub fn registerShellExitWait(idx: u32) void {
     if (app_state.shells[idx].process == null) return;
     if (app_state.shells[idx].wait_handle != null) return;
     const ctx: ?*anyopaque = @ptrFromInt(@as(usize, app_state.shells[idx].shell_id));
-    _ = RegisterWaitForSingleObject(
+    if (RegisterWaitForSingleObject(
         &app_state.shells[idx].wait_handle,
         app_state.shells[idx].process,
         shellExitCallback,
         ctx,
         0xFFFFFFFF,
         WT_EXECUTEONLYONCE,
-    );
+    ) == 0) debugLog("ssh-reconnect exit-wait-registration-failed; polling enabled");
+    @import("chat_send.zig").armSshReconnectTimerIfNeeded();
 }
 
 pub fn unregisterShellExitWait(idx: u32) void {

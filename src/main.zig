@@ -1499,6 +1499,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 var canvas = @import("smooth.zig").Canvas.init(hdc);
                 paintSidebar(hdc);
                 paintChatView(hdc);
+                @import("drawing.zig").paintDisconnectedShell(hdc);
                 paintBrowserPlaceholder(hdc);
                 paintBrowserSplitter(hdc);
                 canvas.deinit();
@@ -1512,6 +1513,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             var canvas = @import("smooth.zig").Canvas.init(mem_dc);
             paintSidebar(mem_dc);
             paintChatView(mem_dc);
+            @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
             paintActivePaneBorder(mem_dc);
@@ -1542,6 +1544,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDOWN => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+
+            if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
+                var client_rc: RECT = std.mem.zeroes(RECT);
+                _ = GetClientRect(hwnd, &client_rc);
+                if (@import("drawing.zig").reconnectButtonRect(client_rc.right)) |button| {
+                    if (mx >= button.left and mx < button.right and my >= button.top and my < button.bottom) {
+                        _ = PostMessageW(hwnd, WM_APP_RECONNECT, 0, 0);
+                        return 0;
+                    }
+                }
+            }
 
             if (chatViewOwnsInput() and mx >= SIDEBAR_W() and !inboxButtonHitTest(mx, my)) {
                 if (browserSplitterHit(mx, my)) {
@@ -2521,9 +2534,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_RECONNECT => {
             if (app_state.active_shell < app_state.shell_count) {
-                if (respawnShellInPlace(app_state.active_shell, true)) {
-                    switchToShell(app_state.active_shell);
-                }
+                @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
             }
             return 0;
         },
@@ -5842,7 +5853,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.g_pending_new_tab_group = 0;
                             showActiveShellAfterOverlay();
                             _ = InvalidateRect(hwnd, null, 0);
-                            if (respawnShellInPlace(ti, true)) switchToShell(ti);
+                            @import("chat_send.zig").sshReconnectNow(ti);
+                            switchToShell(ti);
                             return 0;
                         } else if (target == SEARCH_TABCTX_CHAT_ALLOW) {
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .allow);
@@ -6509,6 +6521,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
+                if (app_state.shells[idx].disconnected and app_state.shells[idx].process == null) return 0;
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
@@ -6545,7 +6558,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
                 const alive_ms = if (spawn_tick != 0) now -| spawn_tick else std.math.maxInt(u64);
-                switch (decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms)) {
+                const action = decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms);
+                if (is_ssh_kind and action != .close) {
+                    @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
+                    return 0;
+                }
+                switch (action) {
                     .respawn => {
                         if (!respawnShellInPlace(idx, false)) {
                             debugLog("respawnShellInPlace returned false — preserving disconnected SSH/tmux tab");
@@ -7416,6 +7434,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.shells[app_state.shell_count] = new_shell;
                             registerShellExitWait(app_state.shell_count);
                             app_state.shell_count += 1;
+                            @import("chat_send.zig").armSshReconnectTimerIfNeeded();
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
                             app_state.active_shell = app_state.shell_count - 1;

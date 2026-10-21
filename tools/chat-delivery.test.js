@@ -32,7 +32,14 @@ const CHAT_OUTBOX_KEY_CAP = 256;
 const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
-const Shell = struct { shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle };
+const ReconnectState = struct { fn ok(_: *@This()) void {} };
+const Shell = struct { shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const g_main_hwnd: ?*anyopaque = null;
+fn debugLog(_: []const u8) void {}
+fn sshOutboxFlushed(_: u32) void {}
+fn repositionActive() void {}
+fn InvalidateRect(_: anytype, _: ?*anyopaque, _: u32) u32 { return 0; }
+fn saveSession() void {}
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
@@ -82,7 +89,7 @@ var written_order: [32]u16 = @splat(0);
 var enters: usize = 0;
 var input_held: ?bool = null;
 fn chatPromptStillInInputBox(_: u32, _: []const u16) ?bool { return input_held; }
-fn chatLinkLooksDown(_: u32) bool { return false; }
+fn chatLinkLooksDown(idx: u32) bool { return shells[idx].disconnected; }
 var persisted: ?[]u8 = null;
 var persist_ok = true;
 var paste_ok = true;
@@ -123,6 +130,7 @@ fn clear() void {
     persist_ok = true;
     paste_ok = true;
     shells[0].activity = .idle;
+    shells[0].disconnected = false;
     test_outbox_key = "test";
 }
 var test_outbox_key: []const u8 = "test";
@@ -602,6 +610,34 @@ test "delivery: IGSH-442 Send again requeues missing text through the normal out
     try std.testing.expectEqual(@as(usize, 1), writes);
 }
 
+test "ISSUE-501 reattach flushes FIFO exactly once through confirmed outbox states" {
+    defer clear();
+    const first = std.unicode.utf8ToUtf16LeStringLiteral("first offline request");
+    const second = std.unicode.utf8ToUtf16LeStringLiteral("second offline request");
+    try enqueue(first, .queued);
+    try enqueue(second, .queued);
+    shells[0].disconnected = true;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    sshReconnectOk(0);
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    sshReconnectOk(0);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    g_chat_outbox.items[0].state = .delivered;
+    g_chat_verify_echo_id = 0;
+    transcript(first, 2000);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 2), writes);
+    try std.testing.expectEqualSlices(u16, &.{ 'f', 's' }, written_order[0..writes]);
+    g_chat_outbox.items[0].state = .delivered;
+    g_chat_verify_echo_id = 0;
+    transcript(second, 3000);
+    chatOutboxTick();
+    sshReconnectOk(0);
+    try std.testing.expectEqual(@as(usize, 2), writes);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+}
 test "ISSUE-460 two messages queued busy then idle reach the session in order" {
     defer clear();
     const first = std.unicode.utf8ToUtf16LeStringLiteral("first queued request");
@@ -753,6 +789,7 @@ function runHarness(control = false) {
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = names.map(body).join('\n').replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery');
+    functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'settlement') {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
       assert.notEqual(functions, names.map(body).join('\n'));
@@ -763,7 +800,7 @@ function runHarness(control = false) {
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + acceptance + sourceOutboxTests);
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : process.env.ISSUE_460_FILTER || (control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('correctness repeats and unreadable: executed production outbox, write reservation and matching handle restart, busy/idle, repeated text and cache reload', () => {
@@ -812,4 +849,10 @@ test('production Zig outbox capacity and FIFO unit tests', () => {
   const result = runHarness('outbox');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /All 2 tests passed/);
+});
+
+test('ISSUE-501 reconnect flush uses the production reservation confirmation and FIFO pipeline', () => {
+  const result = runHarness('issue501');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /All 1 tests passed/);
 });

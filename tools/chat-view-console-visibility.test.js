@@ -81,7 +81,7 @@ const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
 const ISSUE_373_SHELL_OVERRIDE = true;
 const ChatViewMode = enum { per_session, everywhere, nowhere };
-const Shell = struct { hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_shell_override: bool = false };
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_shell_override: bool = false };
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;

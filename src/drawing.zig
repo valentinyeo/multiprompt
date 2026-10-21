@@ -574,6 +574,10 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const title_top = threadTitleTop();
     const title_bottom = title_top + th;
+    if (reconnectButtonRect(win_w)) |button| {
+        paintDisconnectedNotice(hdc, button, title_top, title_bottom);
+        return;
+    }
     const sw = SIDEBAR_W();
     const band_right = threadTitleBandRightFor(win_w);
     const band_w = band_right - sw;
@@ -903,4 +907,44 @@ test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 perc
         try std.testing.expectEqual(bg, w.GetPixel(dc, rc.right, rc.top));
         try std.testing.expectEqual(bg, w.GetPixel(dc, rc.left, rc.bottom));
     }
+}
+
+pub fn reconnectButtonRect(win_w: i32) ?RECT {
+    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].disconnected) return null;
+    const shell = app_state.shells[app_state.active_shell];
+    if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return null;
+    const right = threadTitleBandRightFor(win_w) - uiScaled(8);
+    return .{ .left = @max(SIDEBAR_W(), right - uiScaled(96)), .top = threadTitleTop() + uiScaled(3), .right = right, .bottom = threadTitleTop() + threadTitleHeight() - uiScaled(3) };
+}
+
+fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) void {
+    const shell = app_state.shells[app_state.active_shell];
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const old_font = SelectObject(hdc, uiFontSubtitle());
+    defer _ = SelectObject(hdc, old_font);
+    _ = SetTextColor(hdc, customColorOr("warning", if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70)));
+    var buf: [96]u8 = undefined;
+    const seconds = (shell.ssh_reconnect.next_tick -| GetTickCount64() + 999) / 1000;
+    const text = if (shell.ssh_reconnect.phase == .reconnecting) "Disconnected. Reconnecting..." else std.fmt.bufPrint(&buf, "Disconnected. Reconnecting in {d}s", .{seconds}) catch "Disconnected. Reconnecting...";
+    var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
+    drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));
+    var rc = button;
+    _ = FillRect(hdc, &rc, brush);
+    _ = DeleteObject(brush);
+    _ = SetTextColor(hdc, themeConsoleFg());
+    _ = DrawTextW(hdc, L("Reconnect"), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+}
+
+pub fn paintDisconnectedShell(hdc: HANDLE) void {
+    if (app_state.g_chat_active or app_state.g_search_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or app_state.g_snippet_create_active) return;
+    var client: RECT = undefined;
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    if (reconnectButtonRect(client.right) == null) return;
+    var rc = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = threadTitleTop() + threadTitleHeight() + uiScaled(40), .right = threadTitleBandRightFor(client.right) - uiScaled(16), .bottom = threadTitleTop() + threadTitleHeight() + uiScaled(100) };
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const old_font = SelectObject(hdc, uiFontTitle());
+    defer _ = SelectObject(hdc, old_font);
+    _ = SetTextColor(hdc, themeConsoleFg());
+    _ = DrawTextW(hdc, L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }

@@ -1960,8 +1960,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_tmux_len = app_state.shells[idx].tmux_session_len;
     const saved_group_id = app_state.shells[idx].group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
-    const saved_ssh_reconnect_attempts = app_state.shells[idx].ssh_reconnect_attempts;
-    const saved_ssh_reconnect_next_tick = app_state.shells[idx].ssh_reconnect_next_tick;
+    if (app_state.shells[idx].ssh_reconnect.phase != .reconnecting) app_state.shells[idx].ssh_reconnect.start();
+    const saved_ssh_reconnect = app_state.shells[idx].ssh_reconnect;
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;
     const saved_chat_view_on = app_state.shells[idx].chat_view_on;
@@ -2128,8 +2128,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .selected = false,
         .tmux_host = saved_tmux_host,
         .spawn_tick = GetTickCount64(),
-        .ssh_reconnect_attempts = saved_ssh_reconnect_attempts,
-        .ssh_reconnect_next_tick = saved_ssh_reconnect_next_tick,
+        .ssh_reconnect = saved_ssh_reconnect,
+        .disconnected = true,
         .full_width = saved_full_width,
         .chat_view_on = saved_chat_view_on,
         .chat_shell_override = saved_chat_shell_override,
@@ -2206,6 +2206,7 @@ pub fn markSshTabDisconnected(idx: u32) void {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
         app_state.shells[idx].hwnd = null;
     }
+    if (app_state.shells[idx].pid != 0) killProcessTree(app_state.shells[idx].pid);
     if (app_state.shells[idx].process != null) {
         _ = CloseHandle(app_state.shells[idx].process);
         app_state.shells[idx].process = null;
@@ -2214,12 +2215,16 @@ pub fn markSshTabDisconnected(idx: u32) void {
     app_state.shells[idx].activity = .idle;
     app_state.shells[idx].needs_attention = false;
     app_state.shells[idx].disconnected = true;
-    debugLog("markSshTabDisconnected: preserving SSH/tmux tab for later reconnect");
-    if (app_state.shells[idx].kind == .tmux) armSshReconnectTimerIfNeeded();
+    app_state.shells[idx].ssh_reconnect.lost(GetTickCount64(), GetTickCount64() ^ app_state.shells[idx].shell_id);
+    debugLog("markSshTabDisconnected: preserving SSH/tmux tab for automatic reconnect");
+    var reconnect_log: [160]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&reconnect_log, "ssh-reconnect scheduled id={d} attempt={d} delay_ms={d}", .{ app_state.shells[idx].shell_id, app_state.shells[idx].ssh_reconnect.attempts +| 1, app_state.shells[idx].ssh_reconnect.delay_ms }) catch "ssh-reconnect scheduled");
+    armSshReconnectTimerIfNeeded();
     if (app_state.shells[idx].locked or app_state.shells[idx].pinned_top) {
         showHeaderNoticeAscii(if (app_state.shells[idx].locked) "Locked session disconnected - Ctrl+Shift+R to reconnect" else "Pinned session disconnected - Ctrl+Shift+R to reconnect", 8000, true);
         logSessionAuditAlways(if (app_state.shells[idx].locked) "locked-session-disconnected-preserved" else "pinned-session-disconnected-preserved");
     }
+    repositionActive();
     invalidateSidebar();
     saveSession();
 }
@@ -2383,6 +2388,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         fetchTmuxSessions();
     }
 
+    app_state.shells[idx].ssh_reconnect.close();
     closeBrowserForShell(idx);
     if (app_state.shells[idx].hwnd != null) _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
     unregisterShellExitWait(idx);
@@ -2499,13 +2505,9 @@ pub fn switchToShell(idx: u32) void {
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
     chatAcClose();
-    if (!defer_browser and idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
-        if (!respawnShellInPlace(idx, false)) {
-            debugLog("switchToShell: remote reconnect retry failed");
-            invalidateSidebar();
-            return;
-        }
-        saveSession();
+    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
+        if (!app_state.shells[idx].disconnected) markSshTabDisconnected(idx);
+        armSshReconnectTimerIfNeeded();
     }
     app_state.g_chat_switch_preparing = defer_browser;
     defer app_state.g_chat_switch_preparing = false;

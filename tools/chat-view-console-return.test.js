@@ -42,7 +42,7 @@ const TIMER_CHAT_REFRESH = 2;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const ISSUE_373_SHELL_OVERRIDE = true;
 const ChatViewMode = enum { per_session, everywhere, nowhere };
-const Shell = struct { hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, chat_view_on: bool = true, chat_shell_override: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, chat_view_on: bool = true, chat_shell_override: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
 var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;

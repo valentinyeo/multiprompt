@@ -334,8 +334,7 @@ pub const Shell = struct {
     eta_desc_len: u32 = 0,
     eta_first_est_s: u32 = 0,
     eta_active_start_tick: u64 = 0,
-    ssh_reconnect_attempts: u8 = 0,
-    ssh_reconnect_next_tick: u64 = 0,
+    ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
 };
 
 pub const empty_shell = Shell{
