@@ -174,6 +174,9 @@ pub fn build(b: *std.Build) void {
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs" });
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
+    const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
+    test_step.dependOn(&smooth_shapes_tests.step);
+    vps_test_step.dependOn(&smooth_shapes_tests.step);
     const root_images_tests = b.addSystemCommand(&.{ "node", "--test", "tools/root-images.test.js" });
     test_step.dependOn(&root_images_tests.step);
     vps_test_step.dependOn(&root_images_tests.step);

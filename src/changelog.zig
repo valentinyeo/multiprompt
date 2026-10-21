@@ -24,7 +24,6 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const IntersectClipRect = @import("win32.zig").IntersectClipRect;
 const SaveDC = @import("win32.zig").SaveDC;
@@ -2232,7 +2231,7 @@ pub fn paintChangelogOverlay(hdc: HANDLE) void {
     const border_pen = CreatePen(0, 1, border_col);
     const old_border_br = SelectObject(hdc, border_br);
     const old_border_pen = SelectObject(hdc, border_pen);
-    _ = RoundRect(hdc, layout.ox - 1, layout.oy - 1, layout.ox + layout.overlay_w + 1, layout.oy + layout.overlay_h + 1, overlay_radius, overlay_radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, layout.ox - 1, layout.oy - 1, layout.ox + layout.overlay_w + 1, layout.oy + layout.overlay_h + 1, overlay_radius, overlay_radius);
     _ = SelectObject(hdc, old_border_br);
     _ = SelectObject(hdc, old_border_pen);
     _ = DeleteObject(border_br);
@@ -2243,7 +2242,7 @@ pub fn paintChangelogOverlay(hdc: HANDLE) void {
     const bg_pen = CreatePen(0, 1, bg_col);
     const old_bg_br = SelectObject(hdc, bg_br);
     const old_bg_pen = SelectObject(hdc, bg_pen);
-    _ = RoundRect(hdc, layout.ox, layout.oy, layout.ox + layout.overlay_w, layout.oy + layout.overlay_h, overlay_radius, overlay_radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, layout.ox, layout.oy, layout.ox + layout.overlay_w, layout.oy + layout.overlay_h, overlay_radius, overlay_radius);
     _ = SelectObject(hdc, old_bg_br);
     _ = SelectObject(hdc, old_bg_pen);
     _ = DeleteObject(bg_br);

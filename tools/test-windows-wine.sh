@@ -10,6 +10,19 @@ lock=${MP_WINE_LOCK:-/tmp/multiprompt-wine.lock}
 exec 9>"$lock"
 flock -w 3600 9
 
+gdiplus_dir=${MP_WINE_GDIPLUS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/gdiplus}
+if [[ ! -f "$gdiplus_dir/gdiplus.dll" ]]; then
+    printf '%s\n' 'Microsoft x64 gdiplus.dll missing: see openwiki/operations/build-and-install.md' >&2
+    exit 2
+fi
+export WINEPREFIX=${MP_WINE_TEST_PREFIX:-${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/wine-tests}
+mkdir -p "$WINEPREFIX"
+if [[ ! -d "$WINEPREFIX/drive_c/windows/system32" ]]; then
+    wineboot -u
+fi
+cp --remove-destination "$gdiplus_dir/gdiplus.dll" "$WINEPREFIX/drive_c/windows/system32/gdiplus.dll"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}gdiplus=n"
+
 shim=$(mktemp -d)
 trap 'rm -rf "$shim"' EXIT
 export PATH="$shim:$PATH"

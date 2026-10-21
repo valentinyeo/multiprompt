@@ -16,3 +16,7 @@ The version is `APP_VERSION` in `src/main.zig`; the title bar and the `MPVERSION
 The release workflow cross-builds x64 and ARM64 artifacts and prepares a draft release. Keep credentials, runtime state, screenshots and build outputs out of commits. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for configuration and checks.
 
 The bridge now makes the running extension reload itself when it sees the installed bridge's newer version; the installer falls back to `extension-reload` and polling only if the first check fails.
+
+### Wine rendering prerequisite
+
+Wine's built-in GDI+ accepts smoothing settings without anti-aliasing shapes. The Windows test runner therefore requires the Microsoft x64 `gdiplus.dll`, available from a licensed Windows installation or Microsoft's redistributable through Winetricks. Put it in `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/gdiplus/gdiplus.dll`, or set `MP_WINE_GDIPLUS_DIR` to its directory. The runner installs that DLL into an isolated `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/wine-tests` prefix, overridable with `MP_WINE_TEST_PREFIX`; it does not alter your normal Wine prefix. No Windows DLL is distributed in this repository. Headless runs also require `xvfb-run`.

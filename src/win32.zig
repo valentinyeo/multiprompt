@@ -598,6 +598,28 @@ pub extern "gdi32" fn AddFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(W
 pub extern "gdi32" fn RemoveFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn RemoveFontMemResourceEx(HANDLE) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn AddFontMemResourceEx(?*const anyopaque, DWORD, ?*anyopaque, *DWORD) callconv(WINAPI) HANDLE;
+pub const LOGBRUSH = extern struct { style: u32, color: DWORD, hatch: usize };
+pub const LOGPEN = extern struct { style: u32, width: POINT, color: DWORD };
+pub extern "gdi32" fn GetCurrentObject(HANDLE, u32) callconv(WINAPI) HANDLE;
+pub extern "gdi32" fn GetObjectW(HANDLE, i32, ?*anyopaque) callconv(WINAPI) i32;
+pub extern "gdi32" fn GetClipRgn(HANDLE, HANDLE) callconv(WINAPI) i32;
+pub const BITMAPINFOHEADER = extern struct {
+    size: u32 = @sizeOf(BITMAPINFOHEADER),
+    width: i32,
+    height: i32,
+    planes: u16 = 1,
+    bit_count: u16 = 32,
+    compression: u32 = 0,
+    size_image: u32 = 0,
+    x_pels_per_meter: i32 = 0,
+    y_pels_per_meter: i32 = 0,
+    clr_used: u32 = 0,
+    clr_important: u32 = 0,
+};
+pub const BITMAPINFO = extern struct { header: BITMAPINFOHEADER, colors: [1]u32 = .{0} };
+pub extern "gdi32" fn CreateDIBSection(HANDLE, *const BITMAPINFO, u32, *?*anyopaque, HANDLE, u32) callconv(WINAPI) HANDLE;
+pub extern "gdi32" fn GetPixel(HANDLE, i32, i32) callconv(WINAPI) DWORD;
+pub extern "gdi32" fn Pie(HANDLE, i32, i32, i32, i32, i32, i32, i32, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn Polygon(HANDLE, [*]const POINT, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn Ellipse(HANDLE, i32, i32, i32, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn RoundRect(HANDLE, i32, i32, i32, i32, i32, i32) callconv(WINAPI) BOOL;

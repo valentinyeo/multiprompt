@@ -236,7 +236,7 @@
   ["app_state.zig", "const CHAT_BUBBLE_PAD"],
   ["chat_render.zig", "fn chatMeasureBlockRect"],
   ["app_state.zig", "const GpStatus"],
-  ["chat_render.zig", "fn gdipProc"],
+  ["chat_render.zig", "const gdipProc"],
   ["main.zig", "const chat_image"],
   ["app_state.zig", "const WM_APP_CHAT_IMAGE_READY"],
   ["chat_render.zig", "fn gdipImgLoad"],

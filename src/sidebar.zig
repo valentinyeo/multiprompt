@@ -29,7 +29,6 @@ const SetTextColor = @import("win32.zig").SetTextColor;
 const SetTextCharacterExtra = @import("win32.zig").SetTextCharacterExtra;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const CreateCompatibleDC = @import("win32.zig").CreateCompatibleDC;
 const BitBlt = @import("win32.zig").BitBlt;
@@ -1555,6 +1554,8 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
+    var canvas = @import("smooth.zig").Canvas.init(hdc);
+    defer canvas.deinit();
     if (app_state.g_main_hwnd == null) return;
 
     const font_title = uiFontTitle();
@@ -1722,7 +1723,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const hl_pen = CreatePen(0, 1, customColorOr("overlay_border", hl));
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
-                _ = RoundRect(hdc, 4, y + 3, sw - 4, y + tabRowH() - 3, 8, 8);
+                _ = @import("smooth.zig").drawRoundRect(hdc, 4, y + 3, sw - 4, y + tabRowH() - 3, 8, 8);
                 _ = SelectObject(hdc, ob);
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
@@ -1741,7 +1742,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const act_pen = CreatePen(0, 1, act_color);
                 const old_br = SelectObject(hdc, act_brush);
                 const old_pn = SelectObject(hdc, act_pen);
-                _ = RoundRect(hdc, pad, tab_top, sw + radius, tab_bot, radius, radius);
+                _ = @import("smooth.zig").drawRoundRect(hdc, pad, tab_top, sw + radius, tab_bot, radius, radius);
                 _ = SelectObject(hdc, old_br);
                 _ = SelectObject(hdc, old_pn);
                 _ = DeleteObject(act_brush);
@@ -1754,7 +1755,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 if (sel_pen != null) {
                     const old_pen = SelectObject(hdc, sel_pen);
                     const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                    _ = RoundRect(hdc, 5, y + 4, SIDEBAR_W() - 5, y + tabRowH() - 4, 9, 9);
+                    _ = @import("smooth.zig").drawRoundRect(hdc, 5, y + 4, SIDEBAR_W() - 5, y + tabRowH() - 4, 9, 9);
                     _ = SelectObject(hdc, old_brush);
                     _ = SelectObject(hdc, old_pen);
                     _ = DeleteObject(sel_pen);
@@ -2093,7 +2094,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const border_pen = CreatePen(0, 1, overlay_border_col);
         const old_brush_b = SelectObject(hdc, border_br);
         const old_pen_b = SelectObject(hdc, border_pen);
-        _ = RoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, overlay_radius, overlay_radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, overlay_radius, overlay_radius);
         _ = SelectObject(hdc, old_brush_b);
         _ = SelectObject(hdc, old_pen_b);
         _ = DeleteObject(border_br);
@@ -2104,7 +2105,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const bg_pen = CreatePen(0, 1, overlay_bg_col);
         const old_brush_i = SelectObject(hdc, bg_br);
         const old_pen_i = SelectObject(hdc, bg_pen);
-        _ = RoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, overlay_radius, overlay_radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, overlay_radius, overlay_radius);
         _ = SelectObject(hdc, old_brush_i);
         _ = SelectObject(hdc, old_pen_i);
         _ = DeleteObject(bg_br);
@@ -4145,7 +4146,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const sc_border_pen = CreatePen(0, 1, sc_border_col);
         const sc_ob_b = SelectObject(hdc, sc_border_br);
         const sc_op_b = SelectObject(hdc, sc_border_pen);
-        _ = RoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, overlay_radius, overlay_radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, overlay_radius, overlay_radius);
         _ = SelectObject(hdc, sc_ob_b);
         _ = SelectObject(hdc, sc_op_b);
         _ = DeleteObject(sc_border_br);
@@ -4156,7 +4157,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const sc_bg_pen = CreatePen(0, 1, sc_bg_col);
         const sc_ob_i = SelectObject(hdc, sc_bg_br);
         const sc_op_i = SelectObject(hdc, sc_bg_pen);
-        _ = RoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, overlay_radius, overlay_radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, overlay_radius, overlay_radius);
         _ = SelectObject(hdc, sc_ob_i);
         _ = SelectObject(hdc, sc_op_i);
         _ = DeleteObject(sc_bg_br);
@@ -4268,7 +4269,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const border_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
         const old_brush_b = SelectObject(hdc, border_br);
         const old_pen_b = SelectObject(hdc, border_pen);
-        _ = RoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, radius, radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, radius, radius);
         _ = SelectObject(hdc, old_brush_b);
         _ = SelectObject(hdc, old_pen_b);
         _ = DeleteObject(border_br);
@@ -4279,7 +4280,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const bg_pen = CreatePen(0, 1, bg_col);
         const old_brush_i = SelectObject(hdc, bg_br);
         const old_pen_i = SelectObject(hdc, bg_pen);
-        _ = RoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, radius, radius);
+        _ = @import("smooth.zig").drawRoundRect(hdc, ox, oy, ox + overlay_w, oy + overlay_h, radius, radius);
         _ = SelectObject(hdc, old_brush_i);
         _ = SelectObject(hdc, old_pen_i);
         _ = DeleteObject(bg_br);

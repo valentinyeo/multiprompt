@@ -30,9 +30,6 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
-const Polygon = @import("win32.zig").Polygon;
-const Ellipse = @import("win32.zig").Ellipse;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const MoveToEx = @import("win32.zig").MoveToEx;
 const LineTo = @import("win32.zig").LineTo;
@@ -1557,15 +1554,7 @@ fn allSessionsKindColor(kind: SessionOverviewKind, blue: DWORD, green: DWORD) DW
 }
 
 pub fn drawAttentionDot(hdc: HANDLE, cx: i32, cy: i32, radius: i32, color: DWORD) void {
-    const dot_br = CreateSolidBrush(color);
-    const dot_pen = CreatePen(0, 1, color);
-    const old_db = SelectObject(hdc, dot_br);
-    const old_dp = SelectObject(hdc, dot_pen);
-    _ = Ellipse(hdc, cx - radius, cy - radius, cx + radius, cy + radius);
-    _ = SelectObject(hdc, old_db);
-    _ = SelectObject(hdc, old_dp);
-    _ = DeleteObject(dot_br);
-    _ = DeleteObject(dot_pen);
+    @import("smooth.zig").fillEllipse(hdc, .{ .left = cx - radius, .top = cy - radius, .right = cx + radius, .bottom = cy + radius }, color);
 }
 
 pub const FAVORITE_DOT_D: i32 = 6;
@@ -1589,7 +1578,7 @@ pub fn drawSessionLockIcon(hdc: HANDLE, cx: i32, cy: i32, color: DWORD) void {
     _ = LineTo(hdc, cx + 3, cy - 4);
     _ = LineTo(hdc, cx + 3, cy - 1);
 
-    _ = RoundRect(hdc, cx - 5, cy - 1, cx + 6, cy + 7, 2, 2);
+    _ = @import("smooth.zig").drawRoundRect(hdc, cx - 5, cy - 1, cx + 6, cy + 7, 2, 2);
     _ = MoveToEx(hdc, cx, cy + 2, null);
     _ = LineTo(hdc, cx, cy + 4);
 

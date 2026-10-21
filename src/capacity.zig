@@ -16,7 +16,6 @@ const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
@@ -647,7 +646,7 @@ pub fn paintSidebarVpsCard(hdc: HANDLE, host: u8, y: i32, font_title: HANDLE, fo
     const pen = CreatePen(0, 1, border);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
-    _ = RoundRect(hdc, card_left, y, card_right, y + card_h, uiScaled(8), uiScaled(8));
+    _ = @import("smooth.zig").drawRoundRect(hdc, card_left, y, card_right, y + card_h, uiScaled(8), uiScaled(8));
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);
@@ -752,7 +751,7 @@ pub fn paintSidebarCardFrame(hdc: HANDLE, rect: RECT) void {
     const pen = CreatePen(0, 1, border);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
-    _ = RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, uiScaled(8), uiScaled(8));
+    _ = @import("smooth.zig").drawRoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, uiScaled(8), uiScaled(8));
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);

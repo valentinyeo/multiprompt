@@ -43,7 +43,6 @@ const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const GetWindowThreadProcessId = @import("win32.zig").GetWindowThreadProcessId;
@@ -581,7 +580,7 @@ pub fn paintSnippetCreateForm(hdc: HANDLE) void {
     const border_pen = CreatePen(0, 1, border_col);
     const old_border_br = SelectObject(hdc, border_br);
     const old_border_pen = SelectObject(hdc, border_pen);
-    _ = RoundRect(hdc, l.ox - 1, l.oy - 1, l.ox + l.w + 1, l.oy + l.h + 1, radius, radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, l.ox - 1, l.oy - 1, l.ox + l.w + 1, l.oy + l.h + 1, radius, radius);
     _ = SelectObject(hdc, old_border_br);
     _ = SelectObject(hdc, old_border_pen);
     _ = DeleteObject(border_br);
@@ -592,7 +591,7 @@ pub fn paintSnippetCreateForm(hdc: HANDLE) void {
     const bg_pen = CreatePen(0, 1, bg_col);
     const old_bg_br = SelectObject(hdc, bg_br);
     const old_bg_pen = SelectObject(hdc, bg_pen);
-    _ = RoundRect(hdc, l.ox, l.oy, l.ox + l.w, l.oy + l.h, radius, radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, l.ox, l.oy, l.ox + l.w, l.oy + l.h, radius, radius);
     _ = SelectObject(hdc, old_bg_br);
     _ = SelectObject(hdc, old_bg_pen);
     _ = DeleteObject(bg_br);
@@ -627,7 +626,7 @@ pub fn paintSnippetCreateForm(hdc: HANDLE) void {
     const cancel_pen = CreatePen(0, 1, btn_border);
     const old_cancel_br = SelectObject(hdc, cancel_br);
     const old_cancel_pen = SelectObject(hdc, cancel_pen);
-    _ = RoundRect(hdc, l.cancel_btn.left, l.cancel_btn.top, l.cancel_btn.right, l.cancel_btn.bottom, btn_radius, btn_radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, l.cancel_btn.left, l.cancel_btn.top, l.cancel_btn.right, l.cancel_btn.bottom, btn_radius, btn_radius);
     _ = SelectObject(hdc, old_cancel_br);
     _ = SelectObject(hdc, old_cancel_pen);
     _ = DeleteObject(cancel_br);
@@ -642,7 +641,7 @@ pub fn paintSnippetCreateForm(hdc: HANDLE) void {
     const save_pen = CreatePen(0, 1, save_bg);
     const old_save_br = SelectObject(hdc, save_br);
     const old_save_pen = SelectObject(hdc, save_pen);
-    _ = RoundRect(hdc, l.save_btn.left, l.save_btn.top, l.save_btn.right, l.save_btn.bottom, btn_radius, btn_radius);
+    _ = @import("smooth.zig").drawRoundRect(hdc, l.save_btn.left, l.save_btn.top, l.save_btn.right, l.save_btn.bottom, btn_radius, btn_radius);
     _ = SelectObject(hdc, old_save_br);
     _ = SelectObject(hdc, old_save_pen);
     _ = DeleteObject(save_br);
