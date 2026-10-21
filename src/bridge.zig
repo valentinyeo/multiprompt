@@ -3202,11 +3202,7 @@ test "IGSH-224 a new installation creates a complete profile without creating a 
 test "IGSH-224 source without a process lock is locked only for the clone transaction" {
     var fixture = try CloneFixture.init();
     defer fixture.deinit();
-    const lock_path = try std.fmt.allocPrint(std.testing.allocator, "{s}\\lockfile", .{fixture.source});
-    defer std.testing.allocator.free(lock_path);
-    const lock_wide = try std.unicode.utf8ToUtf16LeAllocZ(std.testing.allocator, lock_path);
-    defer std.testing.allocator.free(lock_wide);
-    if (windows.kernel32.DeleteFileW(lock_wide) == 0) return error.DeleteFailed;
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/lockfile");
     _ = try browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{});
     try fixture.absent("seed/lockfile");
     try fixture.absent("clone/lockfile");
