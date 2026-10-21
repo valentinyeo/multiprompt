@@ -88,7 +88,7 @@ pub fn uploadCommand(session_dir: []const u8, name: []const u8, expected_size: u
     var name_buf: [80]u8 = undefined;
     const dir = remoteSessionDir(session_dir, &dir_buf);
     const file = remoteSessionDir(name, &name_buf);
-    return std.fmt.bufPrint(out, "sh -c 'set -ef; IFS=; umask 077; d=$HOME/.multiprompt/uploads/{s}; mkdir -p $d; find $d -maxdepth 1 -type d -name .staging.* -mmin +1440 -exec rm -rf -- {{}} +; t=$(mktemp -d $d/.staging.XXXXXXXXXX); p=; trap '\\''[ -z $p ] || kill $p 2>/dev/null || :; rm -rf -- $t'\\'' 0; trap '\\''exit 1'\\'' HUP INT TERM; exec 3<&0; dd bs=65536 status=progress <&3 > $t/data & p=$!; exec 3<&-; wait $p; p=; [ $(wc -c < $t/data) -eq {d} ] || exit 1; f=$d/{s}; n=0; until ln -T -- $t/data $f 2>/dev/null; do [ -e $f ] || [ -L $f ] || exit 1; n=$((n+1)); f=$d/$n-{s}; done; rm -rf -- $t; trap - 0 HUP INT TERM; printf %s\\\\n $f'", .{ dir, expected_size, file, file }) catch "";
+    return std.fmt.bufPrint(out, "sh -c 'set -ef; IFS=; umask 077; d=$HOME/.multiprompt/uploads/{s}; mkdir -p $d; find $d -maxdepth 1 -type d -name .staging.* -mmin +1440 -exec rm -rf -- {{}} +; t=$(mktemp -d $d/.staging.XXXXXXXXXX); p=; trap '\\''[ -z $p ] || kill $p 2>/dev/null || :; rm -rf -- $t'\\'' 0; trap '\\''exit 1'\\'' HUP INT TERM; exec 3<&0; if dd if=/dev/null of=/dev/null status=progress 2>/dev/null; then dd bs=65536 status=progress <&3 > $t/data & else cat <&3 > $t/data & fi; p=$!; exec 3<&-; wait $p; p=; [ $(wc -c < $t/data) -eq {d} ] || exit 1; f=$d/{s}; n=0; until ln -T -- $t/data $f 2>/dev/null; do [ -e $f ] || [ -L $f ] || exit 1; n=$((n+1)); f=$d/$n-{s}; done; rm -rf -- $t; trap - 0 HUP INT TERM; printf %s\\\\n $f'", .{ dir, expected_size, file, file }) catch "";
 }
 
 pub fn hasImageExt(path: []const u16) bool {

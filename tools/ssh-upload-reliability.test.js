@@ -112,6 +112,68 @@ test('server transfer reports real byte progress even after SSH has buffered all
   assert.match(command, /dd bs=65536 status=progress <&3 > \$t\/data/);
 });
 
+test('production remote command falls back to cat when dd rejects status=progress and preserves bytes and upload safety', { skip: process.platform === 'win32' ? 'requires the POSIX server shell' : false }, () => {
+  const { copyZig } = require('./zig-copy');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-upload-fallback-'));
+  try {
+    copyZig(['chat_drop.zig'], dir);
+    const file = path.join(dir, 'command.zig');
+    const payload = Buffer.alloc(131329);
+    for (let i = 0; i < payload.length; i++) payload[i] = i % 256;
+    fs.writeFileSync(file, `
+const std = @import("std");
+const drop = @import("chat_drop.zig");
+pub fn main() void {
+    var buf: [2048]u8 = undefined;
+    std.debug.print("{s}", .{drop.uploadCommand("..session; unsafe", "report; unsafe.bin", ${payload.length}, &buf)});
+}
+`);
+    const generated = spawnSync(process.env.ZIG || 'zig', ['run', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(generated.status, 0, generated.stdout + generated.stderr);
+    const command = generated.stderr;
+    assert.ok(command.startsWith("sh -c '"));
+    assert.ok(!command.includes('"'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'dd'), `#!/bin/sh
+printf '%s\\n' "$*" >> "$DD_CALLS"
+for arg; do
+  if [ "$arg" = status=progress ]; then
+    printf '%s\\n' 'dd: invalid argument status=progress' >&2
+    exit 1
+  fi
+done
+exec /bin/dd "$@"
+`, { mode: 0o755 });
+    const calls = path.join(dir, 'dd-calls');
+    const home = path.join(dir, 'home with spaces');
+    fs.mkdirSync(home);
+    const env = { ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH, DD_CALLS: calls };
+    const send = input => spawnSync('/bin/sh', ['-c', command], { env, input, encoding: 'utf8', timeout: 10000 });
+    const destination = path.join(home, '.multiprompt/uploads/__session__unsafe');
+    for (const name of ['report__unsafe.bin', '1-report__unsafe.bin']) {
+      const result = send(payload);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, '');
+      const uploaded = path.join(destination, name);
+      assert.equal(result.stdout, uploaded + '\n');
+      assert.deepEqual(fs.readFileSync(uploaded), payload);
+      assert.equal(fs.statSync(uploaded).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(destination).mode & 0o777, 0o700);
+      assert.deepEqual(fs.readdirSync(destination).filter(name => name.startsWith('.staging.')), []);
+    }
+    const truncated = send(payload.subarray(0, payload.length - 1));
+    assert.notEqual(truncated.status, 0);
+    assert.equal(truncated.stdout, '');
+    assert.equal(truncated.stderr, '');
+    assert.deepEqual(fs.readdirSync(destination).sort(), ['1-report__unsafe.bin', 'report__unsafe.bin']);
+    assert.deepEqual(fs.readFileSync(path.join(destination, 'report__unsafe.bin')), payload);
+    assert.deepEqual(fs.readFileSync(calls, 'utf8').trimEnd().split('\n'), Array(3).fill('if=/dev/null of=/dev/null status=progress'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('production remote command emits byte progress before stdin closes', { skip: process.platform === 'win32' ? 'requires the POSIX server shell' : false }, async () => {
   const { copyZig } = require('./zig-copy');
   const { spawn } = require('node:child_process');
