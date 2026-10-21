@@ -190,10 +190,12 @@ test('every help command and alias has an executable negative case', () => {
 });
 
 test('only the help branch may call usage and no usageExit remains', () => {
-  const helpBranch = /\} else if \(std\.mem\.eql\(u8, command, "help"\)[\s\S]*?(?=\} else if)/;
+  const helpBranch = /if \(std\.mem\.eql\(u8, command, "help"\)[\s\S]*?(?=\n    \})\n    \}/;
   const match = source.match(helpBranch);
   assert.ok(match, 'Help dispatch branch missing');
   assert.match(match[0], /return usage\(\)/);
+  assert.ok(source.indexOf(match[0]) < source.indexOf('resolveWindowFromEnv(allocator)'));
+  assert.ok(source.indexOf(match[0]) < source.indexOf('const profile_env ='));
   assert.doesNotMatch(source.replace(helpBranch, ''), /return usage\(\)|usageExit\(/);
 });
 

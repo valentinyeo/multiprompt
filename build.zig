@@ -440,6 +440,8 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
+    const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
+    test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/tmux_identity.zig"),
         .target = target,

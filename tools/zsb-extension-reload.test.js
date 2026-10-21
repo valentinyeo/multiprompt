@@ -238,7 +238,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next().?;
-${section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n'}
+${section(bridge, '    var profile_override:', '    var help_args = args;') + '    if (profile_override != null) return error.InvalidArguments;\n'}
     if (${section(bridge, 'std.mem.eql(u8, command, "extension-reload")) {', '    } else if (std.mem.eql(u8, command, "shoturl"))')}
     } else return error.InvalidArguments;
 }
