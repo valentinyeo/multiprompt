@@ -200,6 +200,16 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
+    const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/session_layout.zig", "src/account_layout.zig" }) |source| {
+        const tests = b.addTest(.{ .root_module = b.createModule(.{
+            .root_source_file = b.path(source),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }) });
+        account_test_step.dependOn(&b.addRunArtifact(tests).step);
+    }
+    vps_test_step.dependOn(account_test_step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_layout.zig"),
         .target = target,
@@ -231,6 +241,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(account_state_tests).step);
     const account_desktop_tests = b.addSystemCommand(&.{ "python3", "tests/test_account_desktop.py" });
     test_step.dependOn(&account_desktop_tests.step);
+    account_test_step.dependOn(&account_desktop_tests.step);
     const session_layout_sync_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_layout_sync.zig"),
         .target = target,
@@ -334,7 +345,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
