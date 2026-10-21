@@ -643,6 +643,12 @@ test "ISSUE-513 healthy remote monitoring wakes four times per minute without re
         try std.testing.expectEqual(before, timers);
     }
 }
+test "ISSUE-513 manual reconnect immediately restores one-second monitoring" {
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 15000), timer_ms);
+    sshReconnectNow(0);
+    try std.testing.expectEqual(@as(u32, 1000), timer_ms);
+}
 test "ISSUE-513 pending probes and reconnects keep one-second monitoring and closed tabs stop it" {
     armSshReconnectTimerIfNeeded();
     ssh_probe_job = @ptrFromInt(1);
@@ -670,6 +676,7 @@ test "ISSUE-513 pending probes and reconnects keep one-second monitoring and clo
 test('ISSUE-513 production idle reconnect scheduler coalesces healthy checks but keeps recovery responsive', () => {
   zig(runtime(idleTimerChecks), 'ISSUE-513 healthy');
   zig(runtime(idleTimerChecks), 'ISSUE-513 pending');
+  zig(runtime(idleTimerChecks), 'ISSUE-513 manual');
 });
 
 test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy reconnect timer', () => {

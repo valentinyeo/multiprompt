@@ -1698,6 +1698,7 @@ fn sshReconnectAttempt(idx: u32) void {
     var buf: [160]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect attempt={d} id={d} delay_ms={d}", .{ shell.ssh_reconnect.attempts, shell.shell_id, shell.ssh_reconnect.delay_ms }) catch return);
     if (!respawnShellInPlace(idx, true)) sshDisconnect(idx, "spawn-failed");
+    armSshReconnectTimerIfNeeded();
 }
 
 fn sshNetworkVeto(idx: u32, now: u64) bool {
