@@ -54,6 +54,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.776", .items = &.{
+        .{ .text = "Shell borders and symbols now display correctly even when Nordwand Mono is already installed.", .ticket = "IGSH-443" },
+    } },
     .{ .ver = "0.28.775", .items = &.{
         .{ .text = "Messages with unconfirmed delivery now have Send again and Remove buttons, also available by right-clicking the message.", .ticket = "IGSH-442" },
         .{ .text = "Send again checks whether the message already arrived or is waiting in the terminal before resending it.", .ticket = "IGSH-442" },
