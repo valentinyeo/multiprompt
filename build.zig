@@ -194,7 +194,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&root_images_tests.step);
     const chat_perf_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/chat_perf_test.zig"),
-        .target = b.graph.host,
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
         .optimize = .ReleaseFast,
     }) });
     const run_chat_perf_tests = b.addRunArtifact(chat_perf_tests);
@@ -231,7 +231,7 @@ pub fn build(b: *std.Build) void {
     for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
-            .target = b.graph.host,
+            .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = .Debug,
         }) });
         const run_tests = b.addRunArtifact(tests);
@@ -358,7 +358,7 @@ pub fn build(b: *std.Build) void {
     for ([_][]const u8{ "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
-            .target = b.graph.host,
+            .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = .Debug,
         }) });
         const run = b.addRunArtifact(tests);
@@ -369,7 +369,7 @@ pub fn build(b: *std.Build) void {
     }
     const frequent_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/frequent.zig"),
-        .target = b.graph.host,
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
         .optimize = .Debug,
     }) });
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
@@ -400,7 +400,7 @@ pub fn build(b: *std.Build) void {
     const shell_font_migration_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/themes.zig"),
-            .target = b.graph.host,
+            .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = .Debug,
         }),
         .filters = &.{ "IGSH-443", "IGSH-456" },
