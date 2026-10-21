@@ -1732,8 +1732,7 @@ pub fn pollShellNames() void {
 
         if (captureShellPreview(i, det_pid, &missed_done_recovered)) changed = true;
 
-        if (i == app_state.active_shell) app_state.shells[i].font_gen = app_state.g_font_gen;
-        if (!fontGenStale(app_state.shells[i].font_gen, app_state.g_font_gen)) {
+        if (i == app_state.active_shell or !fontGenStale(app_state.shells[i].font_gen, app_state.g_font_gen)) {
             if (normalizeConsoleFont(i, det_pid)) {
                 if (i == app_state.active_shell) repositionActive();
             }

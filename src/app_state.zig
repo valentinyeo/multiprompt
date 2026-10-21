@@ -297,9 +297,6 @@ pub const Shell = struct {
     console_font_logged: bool = false,
     base_font_h: i16 = 0,
     base_font_w: i16 = 0,
-    base_font_face: [32]u16 = std.mem.zeroes([32]u16),
-    base_font_family: u32 = 0,
-    base_font_weight: u32 = 0,
     base_font_dpi: u16 = 0,
     font_gen: u32 = 0,
     claude_sid: [40]u8 = std.mem.zeroes([40]u8),
@@ -473,7 +470,7 @@ pub var g_dev_saved_console_attr: WORD = 0x0007;
 pub var g_dev_saved_console_font: CONSOLE_FONT_INFOEX = undefined;
 
 pub const ISSUE_441 = true;
-pub const DEFAULT_CONSOLE_FONT = @import("fonts.zig").MONO_FACE;
+pub const DEFAULT_CONSOLE_FONT = @import("fonts.zig").SHELL_FACE;
 
 pub const DEFAULT_DEV_THEME_JSON =
     \\{
@@ -493,7 +490,7 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "subtitle_weight": 400,
     \\    "close_weight": 400,
     \\    "console_font_height": 18,
-    \\    "console_font_weight": 600
+    \\    "console_font_weight": 400
     \\  },
     \\  "colors": {
     \\    "sidebar_bg": "#03080E",

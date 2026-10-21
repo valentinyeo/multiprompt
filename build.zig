@@ -382,7 +382,7 @@ pub fn build(b: *std.Build) void {
             .target = b.graph.host,
             .optimize = .Debug,
         }),
-        .filters = &.{"IGSH-443"},
+        .filters = &.{ "IGSH-443", "IGSH-456" },
     });
     const run_shell_font_migration_tests = b.addRunArtifact(shell_font_migration_tests);
     test_step.dependOn(&run_shell_font_migration_tests.step);
@@ -467,6 +467,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&paste_focus_tests.step);
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
     test_step.dependOn(&shell_focus_tests.step);
+    const console_font_lifecycle_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font-lifecycle.test.js" });
+    console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&console_font_lifecycle_tests.step);
+    vps_test_step.dependOn(&console_font_lifecycle_tests.step);
     const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/chat-view-console-return.test.js", "tools/full-width-chat.test.js" });
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);
