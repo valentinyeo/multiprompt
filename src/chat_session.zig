@@ -203,7 +203,9 @@ pub fn chatBenchTick() void {
                     title_wide[len] = 0;
                     shell.browser_hwnd = FindWindowW(null, @ptrCast(&title_wide));
                 }
-                shell.browser_launch_tick = if (shell.browser_hwnd == null) GetTickCount64() else 0;
+                shell.browser_launch_tick = GetTickCount64();
+                shell.browser_first_launch_tick = 0;
+                shell.browser_open_failed = false;
             }
             switchToShell(idx);
         }

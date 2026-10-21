@@ -310,6 +310,7 @@ pub const Shell = struct {
     browser_pending_url: [BROWSER_PENDING_URL_CAP]u8 = std.mem.zeroes([BROWSER_PENDING_URL_CAP]u8),
     browser_pending_url_len: u32 = 0,
     browser_launch_tick: u64 = 0,
+    browser_first_launch_tick: u64 = 0,
     browser_connection_id: u64 = 0,
     browser_open_failed: bool = false,
     browser_suspended: bool = false,
@@ -2282,7 +2283,7 @@ pub var g_updating_browser_visibility: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 
-pub const BrowserPlaceholder = enum { none, opening, failed };
+pub const BrowserPlaceholder = enum { none, opening, not_open, failed };
 
 pub var g_slot_placeholder_shell_id: u32 = 0;
 pub var g_slot_placeholder_since: u64 = 0;

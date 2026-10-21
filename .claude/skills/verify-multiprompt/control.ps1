@@ -12,6 +12,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Ru
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -55,6 +56,25 @@ public static class VerifyNative {
             Thread.Sleep(30);
         }
         Thread.Sleep(250);
+    }
+    public static void OpenAndCloseBrowserPane() {
+        var inputs = new List<Input>();
+        Action<ushort, uint> key = (code, flags) => {
+            Input input = new Input(); input.type = 1;
+            input.data.keyboard = new Keyboard { key = code, flags = flags };
+            inputs.Add(input);
+        };
+        foreach (string query in new string[] { "open browser", "close browser pane" }) {
+            key(0x11, 0); key(0x4B, 0); key(0x4B, 2); key(0x11, 2);
+            foreach (char c in query) {
+                short mapping = VkKeyScan(c);
+                if (mapping == -1 || (mapping & 0x700) != 0) throw new InvalidOperationException("Batch query requires an unshifted keyboard mapping: " + c);
+                key((ushort)(mapping & 0xff), 0); key((ushort)(mapping & 0xff), 2);
+            }
+            key(0x0D, 0); key(0x0D, 2);
+        }
+        Input[] batch = inputs.ToArray();
+        if (SendInput((uint)batch.Length, batch, Marshal.SizeOf(typeof(Input))) != (uint)batch.Length) throw new InvalidOperationException("SendInput batch failed");
     }
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
@@ -588,11 +608,13 @@ try {
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'palette-close-all'
             if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Close All left a browser pane open' }
-            $third = Open-BrowserPane 'reopen-after-close-all' $second.browser_connection_id
-            Palette 'close browser pane'
-            Press @(0x0D) 'Enter: Close Browser Pane'
+            Doctor
+            Assert-Foreground
+            Record 'reopen-after-close-all: batch palette open then close before adoption timers'
+            [VerifyNative]::OpenAndCloseBrowserPane()
             $closed = Assert-BrowserPane 'closed' 'palette-close-pane'
-            $fourth = Open-BrowserPane 'reopen-after-close-pane' $third.browser_connection_id
+            $fourth = Open-BrowserPane 'reopen-after-close-pane' $second.browser_connection_id
+            if ($fourth.browser_connection_id -le $second.browser_connection_id + 1) { throw 'Palette batch did not open and cancel an intermediate connection' }
             Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
             Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
             $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
