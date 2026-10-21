@@ -46,11 +46,11 @@ pub const Result = struct {
 };
 
 pub const excluded_directories = [_][]const u8{
-    "Cache",         "Code Cache",                          "GPUCache",                                "DawnCache",        "DawnGraphiteCache", "DawnWebGPUCache",
+    "Media Cache",   "Cache",         "Code Cache",                          "GPUCache",                                "DawnCache",        "DawnGraphiteCache", "DawnWebGPUCache",
     "GrShaderCache", "GraphiteDawnCache",                   "ShaderCache",                             "CacheStorage",     "ScriptCache",       "blob_storage",
     "Crashpad",      "optimization_guide_hint_cache_store", "optimization_guide_model_metadata_store", "Download Service", "VideoDecodeStats",  "Shared Dictionary",
 };
-pub const excluded_files = [_][]const u8{ "lockfile", "SingletonLock", "SingletonCookie", "SingletonSocket" };
+pub const excluded_files = [_][]const u8{ "LOCK", "lockfile", "SingletonLock", "SingletonCookie", "SingletonSocket" };
 
 fn equal(name: []const u16, text: []const u8) bool {
     if (name.len != text.len) return false;

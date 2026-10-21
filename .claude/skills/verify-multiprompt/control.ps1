@@ -1135,7 +1135,7 @@ try {
         if (Test-Path $scratch) {
             $deadline = [DateTime]::UtcNow.AddSeconds(20)
             while (Test-Path $scratch) {
-                try { Remove-Item $scratch -Recurse -Force } catch {
+                try { Remove-EvidenceTree $scratch } catch {
                     if ([DateTime]::UtcNow -ge $deadline) { throw }
                     Start-Sleep -Milliseconds 200
                 }
