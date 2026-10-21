@@ -159,9 +159,11 @@ try {
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
     $observeOffset = (Read-Log).Length
-    $observeStart = [DateTime]::UtcNow
+    $observationTimer = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 60
-    $observeSeconds = ([DateTime]::UtcNow - $observeStart).TotalSeconds
+    while ($observationTimer.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 10 }
+    $observationTimer.Stop()
+    $observeSeconds = $observationTimer.Elapsed.TotalSeconds
     $sliceB = (Read-Log).Substring($offsetB)
     $observation = (Read-Log).Substring($observeOffset)
     $goneCount = @([regex]::Matches($sliceB, 'ssh-reconnect ended id=\d+ reason=session-gone')).Count

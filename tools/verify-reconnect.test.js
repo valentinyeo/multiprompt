@@ -19,7 +19,10 @@ for (const signal of ['reposition_lines', 'focus_changed', 'session_gone_count',
 assert.match(drive, /\\\[reposition\\\]\|posBrowser\|posMasks/);
 assert.match(drive, /\$reposition -eq 0 -and !\$changed/);
 assert.match(drive, /\$goneCount -eq 1 -and \$attempts -eq 0/);
+assert.match(drive, /\$observationTimer = \[Diagnostics\.Stopwatch\]::StartNew\(\)/);
 assert.match(drive, /Start-Sleep -Seconds 60/);
+assert.match(drive, /while \(\$observationTimer\.Elapsed\.TotalSeconds -lt 60\) \{ Start-Sleep -Milliseconds 10 \}/);
+assert.match(drive, /\$observeSeconds = \$observationTimer\.Elapsed\.TotalSeconds/);
 assert.match(drive, /ssh-reconnect attempt=/);
 assert.match(drive, /ssh-reconnect ended id=/);
 assert.match(drive, /respawnShellInPlace ok kind=tmux idx=1 new_id=/);
