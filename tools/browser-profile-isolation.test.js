@@ -45,7 +45,7 @@ test("selected isolated Chromium and ordinary Edge cannot share the native comma
     "ordinary Edge needs a compatibility-only pipe");
   assert.match(bridgeSource, /const isolated_pipe_name = "\\\\\\\\\.\\\\pipe\\\\multiprompt-browser-isolated"/,
     "multiprompt Edge or Chrome needs one private selected-engine command pipe");
-  assert.match(bridgeSource, /const command_pipe_name = try isolatedPipeName\(&pipe_name_buf, g_profile_token\);\s+const command_pipe = CreateFileA\(\s+command_pipe_name\.ptr/,
+  assert.match(bridgeSource, /const command_pipe_name = try isolatedPipeName\(&pipe_name_buf, g_profile_token\);\s+const command_pipe = blk: \{[\s\S]*?const pipe = CreateFileA\(\s+command_pipe_name\.ptr/,
     "browser CLI commands must target only the isolated host");
   assert.match(bridgeSource, /runPipeServer,[\s\S]{0,120}?command_pipe_name/,
     "each native host must serve only the pipe selected by its extension origin");
