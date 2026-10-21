@@ -106,8 +106,8 @@ test('spawn and respawn apply the console theme before hiding and parenting the 
 test('Chat View uses the bundled mono face for code and Plex for prose', () => {
   const render = read('src/chat_render.zig');
   assert.match(render, /L\(@import\("fonts\.zig"\)\.MONO_FACE\)/);
-  assert.match(render, /L\(@import\("fonts\.zig"\)\.UI_FACE\)/);
-  assert.match(read('src/chat_composer.zig'), /L\(@import\("fonts\.zig"\)\.UI_FACE\)/);
+  assert.match(render, /L\(@import\("fonts\.zig"\)\.UI_MEDIUM_FACE\)/);
+  assert.match(read('src/chat_composer.zig'), /L\(@import\("fonts\.zig"\)\.UI_MEDIUM_FACE\)/);
 });
 
 test('CI runs the console font regression', () => {

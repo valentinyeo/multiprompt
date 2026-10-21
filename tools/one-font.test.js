@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const allowed = /^(?:IBM Plex Sans(?: (?:SmBld|Regular|Italic|SemiBold|Bold|Bold Italic))?|Nordwand Mono(?: (?:Regular|SemiBold|Bold))?|Segoe UI (?:Symbol|Emoji))$/;
+const allowed = /^(?:IBM Plex Sans(?: (?:Medm|SmBld|Regular|Italic|Medium|Medium Italic|SemiBold|Bold|Bold Italic))?|Nordwand Mono(?: (?:Regular|SemiBold|Bold))?|Segoe UI (?:Symbol|Emoji))$/;
 const knownFace = /^(?:Inter(?: .*)?|Segoe UI(?: .*)?|Consolas(?: .*)?|Cascadia.*|JetBrains.*|Arial(?: .*)?|Calibri(?: .*)?|Tahoma|Verdana|Courier.*|Lucida.*|Caskaydia.*|FiraCode.*|Hack(?: Nerd.*)?|IBM Plex(?: [A-Z][A-Za-z]*){1,4}|Nordwand Mono(?: [A-Z][A-Za-z]*){0,3})$/;
 
 function literals(source) {
@@ -79,11 +79,12 @@ test('scanner rejects literals, UTF-16 names, theme JSON, LOGFONT and unknown GD
     '@memcpy(lf.lfFaceName[0..7], L("Papyrus"));',
   ]) assert.notEqual(violations(source).length, 0, source);
   assert.deepEqual(violations('CreateFontW(18, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, L("IBM Plex Sans SmBld"));'), []);
+  assert.deepEqual(violations('const face = "IBM Plex Sans Medm";'), []);
   assert.deepEqual(violations('L("Segoe UI Symbol"); L("Segoe UI Emoji");'), []);
 });
 
 test('all genuine face files and both OFL licenses ship together', () => {
-  for (const name of ['IBMPlexSans-Regular', 'IBMPlexSans-Italic', 'IBMPlexSans-SemiBold', 'IBMPlexSans-Bold', 'IBMPlexSans-BoldItalic', 'NordwandMono-SemiBold']) {
+  for (const name of ['IBMPlexSans-Regular', 'IBMPlexSans-Italic', 'IBMPlexSans-Medium', 'IBMPlexSans-MediumItalic', 'IBMPlexSans-SemiBold', 'IBMPlexSans-Bold', 'IBMPlexSans-BoldItalic', 'NordwandMono-SemiBold']) {
     const bytes = fs.readFileSync(path.join(root, `src/fonts/${name}.ttf`));
     assert.equal(bytes.readUInt32BE(0), 0x00010000, name);
     assert.match(read('src/fonts.zig'), new RegExp(`@embedFile\\("fonts/${name}\\.ttf"\\)`));
@@ -143,4 +144,30 @@ test('CI includes both structural regressions and authentic Windows GDI selectio
   assert.match(build, /vps_test_step\.dependOn\(&one_font_tests\.step\)/);
   assert.match(build, /b\.path\("src\/fonts\.zig"\)/);
   assert.match(build, /test_step\.dependOn\(&b\.addRunArtifact\(font_tests\)\.step\)/);
+});
+
+test('Chat View uses grayscale Medium body text, real Bold emphasis and unchanged centralized leading', () => {
+  const fonts = read('src/fonts.zig');
+  assert.match(fonts, /UI_MEDIUM_FACE = "IBM Plex Sans Medm"/);
+  assert.match(fonts, /CHAT_QUALITY: w\.DWORD = 4;/);
+  assert.match(fonts, /CHAT_LINE_HEIGHT_PERMILLE: i32 = 1000;/);
+  assert.match(fonts, /medium and weight < 600\) 500/);
+  assert.match(fonts, /actual_weight == 500\) L\(UI_MEDIUM_FACE\)/);
+  for (const file of ['chat_render', 'chat_composer']) {
+    const source = read(`src/${file}.zig`);
+    const requests = source.split('\n').filter(line => line.includes('CreateFontW('));
+    assert.ok(requests.length > 0, file);
+    for (const request of requests) {
+      assert.match(request, /, CHAT_QUALITY, 0, /, request);
+      assert.doesNotMatch(request, /, 400, |CLEARTYPE_QUALITY/, request);
+    }
+    assert.match(source, /const CHAT_QUALITY = @import\("fonts\.zig"\)\.CHAT_QUALITY/);
+    assert.match(source, /const chatLineHeight = @import\("fonts\.zig"\)\.chatLineHeight/);
+    assert.match(source, /L\(@import\("fonts\.zig"\)\.UI_MEDIUM_FACE\)/);
+  }
+  assert.match(read('src/chat_composer.zig'), /CreateFontW\(-uiScaled\(app_state\.g_chat_font_pt\), 0, 0, 0, 500,/);
+  const render = read('src/chat_render.zig');
+  assert.match(render, /if \(style\.bold or level > 0\) 700 else 500/);
+  assert.equal((render.match(/chatLineHeight\(DrawTextW/g) || []).length, 4);
+  assert.match(read('src/chat_composer.zig'), /chatLineHeight\(one\.bottom - one\.top\)/);
 });

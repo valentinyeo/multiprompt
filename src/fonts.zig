@@ -3,20 +3,25 @@ const w = @import("win32.zig");
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
 pub const UI_FACE = "IBM Plex Sans";
+pub const UI_MEDIUM_FACE = "IBM Plex Sans Medm";
+pub const CHAT_QUALITY: w.DWORD = 4;
+pub const CHAT_LINE_HEIGHT_PERMILLE: i32 = 1000;
 pub const UI_SEMIBOLD_FACE = "IBM Plex Sans SmBld";
 pub const MONO_FACE = "Nordwand Mono SemiBold";
 pub const UI_REGULAR = @embedFile("fonts/IBMPlexSans-Regular.ttf");
 pub const UI_ITALIC = @embedFile("fonts/IBMPlexSans-Italic.ttf");
+pub const UI_MEDIUM = @embedFile("fonts/IBMPlexSans-Medium.ttf");
+pub const UI_MEDIUM_ITALIC = @embedFile("fonts/IBMPlexSans-MediumItalic.ttf");
 pub const UI_SEMIBOLD = @embedFile("fonts/IBMPlexSans-SemiBold.ttf");
 pub const UI_BOLD = @embedFile("fonts/IBMPlexSans-Bold.ttf");
 pub const UI_BOLD_ITALIC = @embedFile("fonts/IBMPlexSans-BoldItalic.ttf");
 pub const MONO_SEMIBOLD = @embedFile("fonts/NordwandMono-SemiBold.ttf");
 
-var handles: [6]w.HANDLE = @splat(null);
+var handles: [8]w.HANDLE = @splat(null);
 var control_font: w.HANDLE = null;
 
 pub fn register() bool {
-    const files = .{ UI_REGULAR, UI_ITALIC, UI_SEMIBOLD, UI_BOLD, UI_BOLD_ITALIC, MONO_SEMIBOLD };
+    const files = .{ UI_REGULAR, UI_ITALIC, UI_MEDIUM, UI_MEDIUM_ITALIC, UI_SEMIBOLD, UI_BOLD, UI_BOLD_ITALIC, MONO_SEMIBOLD };
     inline for (files, 0..) |file, i| {
         if (handles[i] == null) {
             var count: w.DWORD = 0;
@@ -36,6 +41,10 @@ pub fn unregister() void {
     }
 }
 
+pub fn chatLineHeight(metric_height: i32) i32 {
+    return @max(1, @divTrunc(metric_height * CHAT_LINE_HEIGHT_PERMILLE, 1000));
+}
+
 pub fn uiWeight(weight: i32) i32 {
     return if (weight >= 700) 700 else if (weight >= 500) 600 else 400;
 }
@@ -48,8 +57,9 @@ pub fn create(height: i32, width: i32, escapement: i32, orientation: i32, weight
     const face = if (requested) |name| std.mem.span(name) else &.{};
     const mono = std.mem.eql(u16, face, L(MONO_FACE));
     const symbol = std.mem.eql(u16, face, L("Segoe UI Symbol")) or std.mem.eql(u16, face, L("Segoe UI Emoji"));
-    const actual_weight = if (mono) 600 else if (symbol) weight else if (italic != 0 and weight >= 500) 700 else uiWeight(weight);
-    const actual_face = if (mono or symbol) requested else uiFace(actual_weight);
+    const medium = std.mem.eql(u16, face, L(UI_MEDIUM_FACE));
+    const actual_weight = if (mono) 600 else if (symbol) weight else if (medium and weight < 600) 500 else if (italic != 0 and weight >= 500) 700 else uiWeight(weight);
+    const actual_face = if (mono or symbol) requested else if (actual_weight == 500) L(UI_MEDIUM_FACE) else uiFace(actual_weight);
     return w.CreateFontW(height, width, escapement, orientation, actual_weight, if (mono) 0 else italic, underline, strikeout, if (mono) 1 else charset, output, clip, quality, pitch, actual_face);
 }
 
@@ -272,6 +282,10 @@ test "GDI selects the authentic embedded face for every text style" {
     defer _ = w.DeleteDC(dc);
     const cases = .{
         .{ UI_FACE, 400, 0, UI_REGULAR },
+        .{ UI_MEDIUM_FACE, 500, 0, UI_MEDIUM },
+        .{ UI_MEDIUM_FACE, 500, 1, UI_MEDIUM_ITALIC },
+        .{ UI_MEDIUM_FACE, 700, 0, UI_BOLD },
+        .{ UI_MEDIUM_FACE, 700, 1, UI_BOLD_ITALIC },
         .{ UI_FACE, 600, 0, UI_SEMIBOLD },
         .{ UI_FACE, 700, 0, UI_BOLD },
         .{ UI_FACE, 400, 1, UI_ITALIC },
@@ -324,4 +338,40 @@ test "owner drawn menu measurement and mnemonics use the active Plex labels" {
     try std.testing.expectEqual(@as(?w.LRESULT, 2 << 16), menuChar('C'));
     labels[0].state = 1;
     try std.testing.expect(menuChar('c') == null);
+}
+
+test "IGSH-445 Chat View requests grayscale Medium body and Bold emphasis" {
+    try std.testing.expectEqual(@as(w.DWORD, 4), CHAT_QUALITY);
+    try std.testing.expectEqualStrings("IBM Plex Sans Medm", UI_MEDIUM_FACE);
+    inline for (.{ @embedFile("chat_render.zig"), @embedFile("chat_composer.zig") }) |source| {
+        var lines = std.mem.splitScalar(u8, source, '\n');
+        var requests: usize = 0;
+        while (lines.next()) |line| {
+            if (std.mem.indexOf(u8, line, "CreateFontW(") == null) continue;
+            requests += 1;
+            try std.testing.expect(std.mem.indexOf(u8, line, ", CHAT_QUALITY, 0, ") != null);
+            try std.testing.expect(std.mem.indexOf(u8, line, ", 400, ") == null);
+        }
+        try std.testing.expect(requests > 0);
+        try std.testing.expect(std.mem.indexOf(u8, source, "L(@import(\"fonts.zig\").UI_MEDIUM_FACE)") != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, @embedFile("chat_render.zig"), "if (style.bold or level > 0) 700 else 500") != null);
+    const medium_os2 = fontTable(UI_MEDIUM, "OS/2");
+    const italic_os2 = fontTable(UI_MEDIUM_ITALIC, "OS/2");
+    try std.testing.expectEqual(@as(u16, 500), std.mem.readInt(u16, medium_os2[4..6], .big));
+    try std.testing.expectEqual(@as(u16, 500), std.mem.readInt(u16, italic_os2[4..6], .big));
+    try std.testing.expectEqual(@as(i32, 700), uiWeight(700));
+}
+
+test "IGSH-445 line height preserves today's metric advance for every chat size" {
+    try std.testing.expectEqual(@as(i32, 1000), CHAT_LINE_HEIGHT_PERMILLE);
+    for (0..256) |height| {
+        try std.testing.expectEqual(@max(1, @as(i32, @intCast(height))), chatLineHeight(@intCast(height)));
+    }
+    const regular = fontTable(UI_REGULAR, "OS/2");
+    inline for (.{ UI_MEDIUM, UI_MEDIUM_ITALIC }) |file| {
+        try std.testing.expectEqualSlices(u8, regular[68..78], fontTable(file, "OS/2")[68..78]);
+        try std.testing.expectEqualSlices(u8, fontTable(UI_REGULAR, "hhea")[4..10], fontTable(file, "hhea")[4..10]);
+        try std.testing.expectEqualSlices(u8, fontTable(UI_REGULAR, "head")[18..20], fontTable(file, "head")[18..20]);
+    }
 }
