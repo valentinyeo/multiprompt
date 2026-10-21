@@ -749,3 +749,141 @@ test('settings invalid PUTs reject unknown keys and non-boolean values without s
   assert.equal(stored.revision, 1);
   assert.deepEqual(JSON.parse(stored.layout), layout);
 });
+
+const crashReport = { id: 'crash-0001', captured_at: 1791738000, app_version: '0.1.213 (100213)', android_version: '15 (SDK 35)', thread: 'main', summary: 'java.lang.IllegalStateException: crash', stack_trace: 'java.lang.IllegalStateException: crash\n\tat dev.multiprompt.Main.run(Main.kt:42)' };
+const sendCrash = (token, report = crashReport, headers = {}) => request('/v1/crash-reports', { ...post(report), headers: { ...post(report).headers, ...auth(token), ...headers } });
+
+test('crash reports: valid report stores authenticated device/account and server receive time; duplicate does not overwrite', async () => {
+  const { token } = await enroll();
+  const before = Math.floor(Date.now() / 1000);
+  const response = await sendCrash(token);
+  assert.equal(response.status, 201); assert.deepEqual(await response.json(), { stored: true });
+  const stored = await db.prepare('SELECT * FROM crash_reports WHERE device_id=?').bind(token.device_id).first();
+  assert.deepEqual(stored, { device_id: token.device_id, report_id: crashReport.id, account: token.account_id, received_at: stored.received_at, ...Object.fromEntries(Object.entries(crashReport).filter(([key]) => key !== 'id')) });
+  assert.ok(stored.received_at >= before && stored.received_at <= Math.floor(Date.now() / 1000));
+  const duplicate = await sendCrash(token, { ...crashReport, summary: 'Changed' });
+  assert.equal(duplicate.status, 200); assert.deepEqual(await duplicate.json(), { stored: false, duplicate: true });
+  assert.deepEqual((await db.prepare('SELECT * FROM crash_reports WHERE device_id=?').bind(token.device_id).all()).results, [stored]);
+});
+
+test('crash reports: simultaneous retries store one row', async () => {
+  const { token } = await enroll();
+  const responses = await Promise.all([sendCrash(token), sendCrash(token)]);
+  assert.deepEqual(responses.map(r => r.status).sort(), [200, 201]);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(token.device_id).first()).n, 1);
+});
+
+test('crash reports: strict fields, types and bounds reject without storing', async () => {
+  const { token } = await enroll();
+  const bad = [null, [], 'report', 1, { ...crashReport, hostname: 'private' }];
+  for (const key of Object.keys(crashReport)) {
+    const omitted = { ...crashReport }; delete omitted[key]; bad.push(omitted);
+    for (const value of [null, true, [], {}]) bad.push({ ...crashReport, [key]: value });
+  }
+  for (const id of ['', 'a'.repeat(7), 'a'.repeat(65), 'crash_001', 'crash 001', 'crash-01\n', 'crash-ä1']) bad.push({ ...crashReport, id });
+  for (const captured_at of ['123', 1.5, Number.MAX_SAFE_INTEGER + 1]) bad.push({ ...crashReport, captured_at });
+  for (const [key, max] of Object.entries({ app_version: 64, android_version: 64, thread: 200, summary: 2000, stack_trace: 16000 })) {
+    bad.push({ ...crashReport, [key]: 'x'.repeat(max + 1) }, { ...crashReport, [key]: 123 });
+  }
+  bad.push({ ...crashReport, stack_trace: '' });
+  for (const report of bad) {
+    const response = await sendCrash(token, report);
+    assert.equal(response.status, 400, JSON.stringify(report)?.slice(0, 100));
+    assert.deepEqual(await response.json(), { error: 'invalid_crash_report' });
+  }
+  for (const body of ['', '{', 'null']) {
+    const response = await request('/v1/crash-reports', { method: 'POST', headers: auth(token), body });
+    assert.equal(response.status, 400); assert.deepEqual(await response.json(), { error: 'invalid_crash_report' });
+  }
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(token.device_id).first()).n, 0);
+});
+
+test('crash reports: inclusive field boundaries allow empty optional text and multiline full stacks', async () => {
+  const { token } = await enroll();
+  for (const report of [
+    { id: 'a'.repeat(8), captured_at: 0, app_version: '', android_version: '', thread: '', summary: '', stack_trace: 'x' },
+    { id: 'Z9-'.repeat(21) + 'Z', captured_at: Number.MAX_SAFE_INTEGER, app_version: 'a'.repeat(64), android_version: 'a'.repeat(64), thread: 'a'.repeat(200), summary: 'a'.repeat(2000), stack_trace: 'a'.repeat(15998) + '\n\t' }
+  ]) {
+    assert.equal((await sendCrash(token, report)).status, 201);
+    const stored = await db.prepare('SELECT stack_trace FROM crash_reports WHERE device_id=? AND report_id=?').bind(token.device_id, report.id).first();
+    assert.equal(stored.stack_trace, report.stack_trace);
+  }
+});
+
+test('crash reports: body limit counts bytes with and without content length and accepts exactly 32 KiB', async () => {
+  const { token } = await enroll();
+  const raw = JSON.stringify(crashReport);
+  const exact = raw + ' '.repeat(32768 - Buffer.byteLength(raw));
+  assert.equal((await request('/v1/crash-reports', { method: 'POST', headers: auth(token), body: exact })).status, 201);
+  for (const body of [exact + ' ', JSON.stringify({ ...crashReport, stack_trace: '界'.repeat(12000) })]) {
+    for (const headers of [auth(token), { ...auth(token), 'Content-Length': String(Buffer.byteLength(body)) }]) {
+      const response = await request('/v1/crash-reports', { method: 'POST', headers, body });
+      assert.equal(response.status, 413); assert.deepEqual(await response.json(), { error: 'too_large' });
+    }
+  }
+});
+
+test('crash reports: missing, invalid and expired device tokens are unauthorized', async () => {
+  for (const headers of [{}, { Authorization: 'Bearer invalid' }, { Authorization: 'Bearer ' + 'z'.repeat(43) }]) {
+    assert.equal((await request('/v1/crash-reports', { ...post(crashReport), headers })).status, 401);
+  }
+  const { token } = await enroll();
+  await db.prepare('UPDATE access_tokens SET expires=0 WHERE hash=?').bind(await hash(token.access_token)).run();
+  assert.equal((await sendCrash(token)).status, 401);
+});
+
+test('crash reports: browser sessions cannot write, even with same-origin dash headers', async () => {
+  const cookie = await emailSignIn();
+  for (const Origin of [base, 'https://evil.example', 'null', undefined]) {
+    const response = await request('/v1/crash-reports', { ...post(crashReport), headers: { Cookie: cookie, 'X-Multiprompt': 'dash', ...(Origin === undefined ? {} : { Origin }) } });
+    assert.equal(response.status, 403); assert.deepEqual(await response.json(), { error: 'cross_origin' });
+  }
+});
+
+test('crash reports: same report id is independent per device', async () => {
+  const { token: a } = await enroll(), { token: b } = await enroll();
+  assert.equal((await sendCrash(a)).status, 201); assert.equal((await sendCrash(b)).status, 201);
+  const rows = (await db.prepare('SELECT device_id,account FROM crash_reports WHERE device_id IN (?,?)').bind(a.device_id, b.device_id).all()).results;
+  assert.deepEqual(rows.sort((x, y) => x.device_id.localeCompare(y.device_id)), [a, b].map(token => ({ device_id: token.device_id, account: token.account_id })).sort((x, y) => x.device_id.localeCompare(y.device_id)));
+});
+
+test('crash reports: 51st report prunes oldest received time, with deterministic arrival-order ties and device isolation', async () => {
+  const { token: a } = await enroll(), { token: b } = await enroll();
+  assert.equal((await sendCrash(b)).status, 201);
+  for (let i = 0; i < 50; i++) assert.equal((await sendCrash(a, { ...crashReport, id: 'report-' + String(i).padStart(3, '0'), captured_at: 100 - i })).status, 201);
+  await db.prepare('UPDATE crash_reports SET received_at=10 WHERE device_id=?').bind(a.device_id).run();
+  await db.prepare('UPDATE crash_reports SET received_at=0 WHERE device_id=? AND report_id=?').bind(a.device_id, 'report-025').run();
+  assert.equal((await sendCrash(a, { ...crashReport, id: 'report-050' })).status, 201);
+  const rows = (await db.prepare('SELECT report_id FROM crash_reports WHERE device_id=?').bind(a.device_id).all()).results;
+  assert.equal(rows.length, 50); assert.ok(!rows.some(row => row.report_id === 'report-025')); assert.ok(rows.some(row => row.report_id === 'report-050'));
+  assert.equal((await sendCrash(a, { ...crashReport, id: 'report-051' })).status, 201);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(a.device_id).first()).n, 50);
+  assert.equal(await db.prepare('SELECT report_id FROM crash_reports WHERE device_id=? AND report_id=?').bind(a.device_id, 'report-000').first(), null);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(b.device_id).first()).n, 1);
+});
+
+test('crash reports: revoke removes only the authorized device reports and rejects future uploads', async () => {
+  const { token: a } = await enroll(), { token: b } = await enroll();
+  assert.equal((await sendCrash(a)).status, 201); assert.equal((await sendCrash(b)).status, 201);
+  await db.prepare('UPDATE devices SET account=? WHERE id=?').bind('another@example.com', b.device_id).run();
+  assert.equal((await request('/v1/devices/' + b.device_id, { method: 'DELETE', headers: auth(a) })).status, 404);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(b.device_id).first()).n, 1);
+  for (const headers of [auth(a), { Cookie: await emailSignIn(), ...origin, 'X-Multiprompt': 'dash' }]) {
+    assert.equal((await request('/v1/devices/' + a.device_id, { method: 'DELETE', headers })).status, 200);
+  }
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(a.device_id).first()).n, 0);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(b.device_id).first()).n, 1);
+  assert.equal((await sendCrash(a)).status, 401);
+});
+
+test('crash reports: dashboard revoke deletes existing reports and preserves a sibling device on the same account', async () => {
+  const { token: a } = await enroll(), { token: b } = await enroll();
+  assert.equal(a.account_id, b.account_id);
+  assert.equal((await sendCrash(a)).status, 201); assert.equal((await sendCrash(b)).status, 201);
+  const response = await request('/v1/devices/' + a.device_id, { method: 'DELETE', headers: { Cookie: await emailSignIn(), ...origin, 'X-Multiprompt': 'dash' } });
+  assert.equal(response.status, 200); assert.deepEqual(await response.json(), { revoked: true });
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(a.device_id).first()).n, 0);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(b.device_id).first()).n, 1);
+  assert.equal((await sendCrash(a)).status, 401);
+  assert.equal((await sendCrash(b, { ...crashReport, id: 'crash-0002' })).status, 201);
+});
