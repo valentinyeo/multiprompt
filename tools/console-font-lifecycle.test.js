@@ -36,6 +36,7 @@ function creation(name, signature) {
   const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(').replace('    if (cmd_hwnd != null) {\n', '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
+    ${name === 'respawnShellInPlace' ? 'const shell_id: u32 = 1;' : ''}
     ${name === 'respawnShellInPlace' ? 'const idx: u32 = @intCast(slot);' : ''}
     var si = std.mem.zeroes(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
@@ -123,7 +124,7 @@ const Shell = struct {
     spawn_tick: u64 = 0,
     ssh_reconnect: struct { awaiting_probe: bool = false } = .{},
     hwnd: HANDLE = null, process: HANDLE = null, pid: u32 = 0, kind: ShellKind = .cmd,
-    shell_id: u32 = 0, full_width: bool = false, console_font_logged: bool = false,
+    shell_id: u32 = 0, title_id: u32 = 0, full_width: bool = false, console_font_logged: bool = false,
     base_font_h: i16 = 0, base_font_w: i16 = 0, base_font_dpi: i32 = 96,
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,

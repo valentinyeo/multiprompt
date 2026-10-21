@@ -16,6 +16,8 @@ pub const State = struct {
     attempts: u8 = 0,
     awaiting_probe: bool = false,
     create_session: bool = false,
+    healthy_attach: bool = false,
+    gone_results: u8 = 0,
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
     veto_until: ?u64 = null,
@@ -90,7 +92,13 @@ pub const State = struct {
 
     pub fn ok(self: *State) void {
         if (self.phase == .closed or self.phase == .ended) return;
-        self.* = .{};
+        self.* = .{ .healthy_attach = true };
+    }
+
+    pub fn observeGone(self: *State, gone: bool, process_alive: bool) bool {
+        const eligible = self.phase != .reconnecting and !self.create_session and self.healthy_attach;
+        self.gone_results = if (gone and eligible and !process_alive) self.gone_results +| 1 else 0;
+        return self.gone_results >= 2;
     }
 
     pub fn end(self: *State) void {
@@ -123,7 +131,7 @@ pub fn sessionExists(output: []const u8, session: []const u8) bool {
 }
 
 pub fn sessionGone(output: []const u8, session: []const u8, ssh_ok: bool, exit_code: u32) bool {
-    return ssh_ok and exit_code == 0 and attached(output, "@@MP_LIVE@@") and !sessionExists(output, session);
+    return ssh_ok and exit_code == 0 and attached(output, "@@MP_LIVE@@") and attached(output, "@@LS_OK@@") and !sessionExists(output, session);
 }
 
 test "ISSUE-521 reconnect effects only invalidate active content and never layout or focus" {
@@ -136,7 +144,7 @@ test "ISSUE-521 reconnect effects only invalidate active content and never layou
 }
 
 test "ISSUE-521 session gone requires successful complete probe and exact session names" {
-    const output = "work\r\n@@S work-long\r\n@@S other\n@@MP_LIVE@@\n";
+    const output = "work\r\n@@S work-long\r\n@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n";
     try std.testing.expect(sessionGone(output, "work", true, 0));
     try std.testing.expect(!sessionGone(output, "work-long", true, 0));
     try std.testing.expect(!sessionGone(output, "work", false, 0));
@@ -144,7 +152,8 @@ test "ISSUE-521 session gone requires successful complete probe and exact sessio
     try std.testing.expect(!sessionGone("@@S other\n", "work", true, 0));
     try std.testing.expect(!sessionGone("banner @@MP_LIVE@@\n", "work", true, 0));
     try std.testing.expect(!sessionGone("", "work", false, 1));
-    try std.testing.expect(sessionGone("@@MP_LIVE@@\n", "work", true, 0));
+    try std.testing.expect(!sessionGone("@@MP_LIVE@@\n", "work", true, 0));
+    try std.testing.expect(sessionGone("@@LS_OK@@\n@@MP_LIVE@@\n", "work", true, 0));
     try std.testing.expect(!sessionGone("@@S work\n@@MP_LIVE@@\n", "work", true, 0));
 }
 
@@ -316,5 +325,26 @@ test "ISSUE-512 confirmed failures explain their cause and manual retry still sk
         state.manual(20_000);
         try std.testing.expect(!state.due(20_000));
         try std.testing.expect(state.noticeReason(20_000, true) == null);
+    }
+}
+
+test "ISSUE-511 gone requires two consecutive results and never overrides a live transport" {
+    var state: State = .{ .healthy_attach = true };
+    try std.testing.expect(!state.observeGone(true, false));
+    try std.testing.expect(!state.observeGone(false, false));
+    try std.testing.expect(!state.observeGone(true, false));
+    try std.testing.expect(!state.observeGone(true, true));
+    try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+    try std.testing.expect(!state.observeGone(true, false));
+    try std.testing.expect(state.observeGone(true, false));
+}
+
+test "ISSUE-511 creating reconnecting and never attached tabs cannot be gone" {
+    for ([_]State{ .{}, .{ .phase = .reconnecting, .healthy_attach = true }, .{ .create_session = true, .healthy_attach = true } }) |initial| {
+        var state = initial;
+        for (0..4) |_| try std.testing.expect(!state.observeGone(true, false));
+        state.ok();
+        try std.testing.expect(!state.observeGone(true, false));
+        try std.testing.expect(state.observeGone(true, false));
     }
 }

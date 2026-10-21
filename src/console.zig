@@ -1766,7 +1766,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         notifyTabCapReached();
         return false;
     }
-    const title_id = app_state.allocateShellId() orelse return false;
+    const shell_id = app_state.allocateShellId() orelse return false;
+    const title_id = app_state.allocateConsoleTitleId() orelse return false;
     const idx = app_state.shell_count;
 
     var si = std.mem.zeroes(STARTUPINFOW);
@@ -1777,7 +1778,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     var cmd_buf: [2048]u16 = undefined;
-    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, title_id, false) orelse return false;
+    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, false) orelse return false;
 
     {
         var cmd_u8: [2048]u8 = undefined;
@@ -1801,14 +1802,14 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
     {
         var abuf: [640]u8 = undefined;
-        if (browserWinFilePathA(&abuf, title_id)) |ascii_path| {
+        if (browserWinFilePathA(&abuf, shell_id)) |ascii_path| {
             var wbuf: [640]u16 = undefined;
             if (win32WidePath(&wbuf, ascii_path)) |wpath| {
                 _ = SetEnvironmentVariableW(L("BROWSER_CLI_WINDOW_FILE"), wpath.ptr);
             }
         }
         var sid_buf: [16]u8 = undefined;
-        const sid_text = std.fmt.bufPrint(&sid_buf, "{d}", .{title_id}) catch "";
+        const sid_text = std.fmt.bufPrint(&sid_buf, "{d}", .{shell_id}) catch "";
         setEnvironmentAscii(L("ZIGSHELL_SHELL_ID"), sid_text);
         if (app_state.g_notify_bound_port != 0) {
             var port_buf: [16]u8 = undefined;
@@ -1898,7 +1899,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .tmux_detect_streak = 0,
         .claude_session = false,
         .wait_handle = null,
-        .shell_id = title_id,
+        .shell_id = shell_id,
+        .title_id = title_id,
         .favicon_hicon = null,
         .favicon_path = std.mem.zeroes([512]u8),
         .group_id = 0,
@@ -1917,7 +1919,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             app_state.shells[idx].tmux_session_len = session_len;
         }
     }
-    setDefaultName(&app_state.shells[idx], kind, title_id);
+    setDefaultName(&app_state.shells[idx], kind, shell_id);
     if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
@@ -1938,7 +1940,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (idx >= app_state.shell_count) return false;
     const kind = app_state.shells[idx].kind;
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
-    const title_id = app_state.allocateShellId() orelse return false;
+    const title_id = app_state.allocateConsoleTitleId() orelse return false;
+    const shell_id = app_state.shells[idx].shell_id;
 
     const saved_chat_id = app_state.shells[idx].chat_id;
     const saved_wake_id = app_state.shells[idx].wake_id;
@@ -1965,6 +1968,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_group_id = app_state.shells[idx].group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
     if (app_state.shells[idx].ssh_reconnect.phase != .reconnecting) app_state.shells[idx].ssh_reconnect.start();
+    app_state.shells[idx].ssh_reconnect.healthy_attach = false;
+    app_state.shells[idx].ssh_reconnect.gone_results = 0;
     const saved_ssh_reconnect = app_state.shells[idx].ssh_reconnect;
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;
@@ -2030,13 +2035,22 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     si.dwFlags = STARTF_USESHOWWINDOW;
     si.wShowWindow = @intCast(SW_HIDE);
 
+    app_state.shells[idx].title_id = title_id;
     app_state.shells[idx].spawn_tick = GetTickCount64();
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     var cmd_buf: [2048]u16 = undefined;
     const tmux_slice: ?[]const u8 = if (saved_tmux_len > 0) saved_tmux[0..saved_tmux_len] else null;
     app_state.g_pending_tmux_host = saved_tmux_host;
     defer app_state.g_pending_tmux_host = 0;
-    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_slice, null, title_id, saved_ssh_reconnect.create_session) orelse return false;
+    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_slice, null, shell_id, saved_ssh_reconnect.create_session) orelse return false;
+
+    var browser_path: [640]u8 = undefined;
+    var browser_wide: [640]u16 = undefined;
+    if (browserWinFilePathA(&browser_path, shell_id)) |path| {
+        if (win32WidePath(&browser_wide, path)) |wide| _ = SetEnvironmentVariableW(L("BROWSER_CLI_WINDOW_FILE"), wide.ptr);
+    }
+    var sid_buf: [16]u8 = undefined;
+    setEnvironmentAscii(L("ZIGSHELL_SHELL_ID"), std.fmt.bufPrint(&sid_buf, "{d}", .{shell_id}) catch "");
 
     if (CreateProcessW(null, cmd_ptr, null, null, 0, CREATE_NEW_CONSOLE, null, null, &si, &pi) == 0) {
         sshSpawnFailed();
@@ -2065,7 +2079,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         var exit_code: DWORD = std.math.maxInt(DWORD);
         const got_code = GetExitCodeProcess(pi.hProcess, &exit_code) != 0;
         var exit_log: [192]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&exit_log, "ssh-reconnect exit id={d} reason=respawn-console-missing exit_code={d} known={}", .{ title_id, exit_code, got_code }) catch "ssh-reconnect exit log-overflow");
+        debugLog(std.fmt.bufPrint(&exit_log, "ssh-reconnect exit id={d} reason=respawn-console-missing exit_code={d} known={}", .{ shell_id, exit_code, got_code }) catch "ssh-reconnect exit log-overflow");
         if (got_code and exit_code == 1 and GetTickCount64() -| app_state.shells[idx].spawn_tick <= 3000 and kind == .tmux) {
             app_state.shells[idx].ssh_reconnect.awaiting_probe = true;
             @import("chat_send.zig").sshRequestSessionProbe();
@@ -2085,7 +2099,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     _ = SetWindowLongPtrW(cmd_hwnd, GWL_STYLE, style);
     _ = SetWindowPos(cmd_hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
 
-    if (app_state.shells[idx].kind != .tmux) chatHistoryForget(app_state.shells[idx].shell_id);
     app_state.shells[idx] = .{
         .chat_id = saved_chat_id,
         .wake_id = saved_wake_id,
@@ -2134,7 +2147,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .tmux_detect_streak = 0,
         .claude_session = saved_claude,
         .wait_handle = null,
-        .shell_id = title_id,
+        .shell_id = shell_id,
+        .title_id = title_id,
         .favicon_hicon = saved_favicon,
         .favicon_path = saved_favicon_path,
         .favicon_path_len = saved_favicon_path_len,
@@ -2175,7 +2189,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     registerShellExitWait(idx);
     if (idx == app_state.active_shell) {
         app_state.g_front_period.selected = null;
-        if (@import("drawing.zig").reconnectTabVisible(idx)) _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "respawnShellInPlace");
+        if (@import("drawing.zig").reconnectTabVisible(idx)) {
+            positionReconnectedConsole(idx);
+            _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "respawnShellInPlace");
+        }
     }
 
     {
@@ -2192,10 +2209,10 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         @memcpy(pre[pp .. pp + tag2.len], tag2);
         pp += tag2.len;
         appendDecimal(&pre, &pp, idx);
-        const tag3 = " new_id=";
+        const tag3 = " id=";
         @memcpy(pre[pp .. pp + tag3.len], tag3);
         pp += tag3.len;
-        appendDecimal(&pre, &pp, title_id);
+        appendDecimal(&pre, &pp, shell_id);
         var nbuf: [64]u8 = undefined;
         var nl: usize = 0;
         var ni: usize = 0;
@@ -2212,6 +2229,12 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 pub fn showReconnectedConsole(idx: u32) void {
     if (!@import("ssh_reconnect.zig").eventEffects(@import("drawing.zig").reconnectTabVisible(idx)).invalidate_content or
         !@import("chat_composer.zig").shellConsoleShouldBeVisible(idx)) return;
+    positionReconnectedConsole(idx);
+    _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
+}
+
+fn positionReconnectedConsole(idx: u32) void {
+    if (!@import("drawing.zig").reconnectTabVisible(idx)) return;
     const shell = &app_state.shells[idx];
     if (shell.hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return;
     const pane = @import("browser_pane.zig");
@@ -2230,7 +2253,6 @@ pub fn showReconnectedConsole(idx: u32) void {
         rc.right = col.left + col.width;
     }
     _ = SetWindowPos(shell.hwnd, null, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-    _ = showShellConsole(idx, SW_SHOWNOACTIVATE, "sshReconnectOk");
 }
 
 pub fn markSshTabDisconnected(idx: u32) void {
@@ -2363,6 +2385,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     }
 
     chatHistoryForget(app_state.shells[idx].shell_id);
+    if (app_state.g_chat_cache_shell_id == app_state.shells[idx].shell_id) app_state.g_chat_cache_shell_id = 0;
+    if (app_state.g_chat_reconcile_shell == app_state.shells[idx].shell_id) app_state.g_chat_reconcile_shell = 0;
     if (remember_closed) {
         if (app_state.g_closed_count >= MAX_CLOSED_HISTORY) {
             var hi: u32 = 0;

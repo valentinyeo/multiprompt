@@ -15,22 +15,34 @@ function body(name, source) {
   return source.slice(start, end + 2);
 }
 
-test('ISSUE-511 respawn and every shell creation use bounded reusable ids', () => {
+test('ISSUE-511 respawn preserves shell identity and allocates only a bounded console title', () => {
   for (const file of ['console.zig', 'main.zig', 'session.zig', 'account_desktop.zig']) {
     const source = read(file);
     assert.doesNotMatch(source, /next_shell_id/);
     assert.match(source, /app_state\.allocateShellId\(\) orelse/);
   }
-  assert.match(body('respawnShellInPlace', read('console.zig')), /const title_id = app_state\.allocateShellId\(\) orelse return false/);
+  const respawn = body('respawnShellInPlace', read('console.zig'));
+  assert.match(respawn, /const title_id = app_state\.allocateConsoleTitleId\(\) orelse return false/);
+  assert.doesNotMatch(respawn, /allocateShellId\(|chatHistoryForget\(/);
+  assert.match(respawn, /const shell_id = app_state\.shells\[idx\]\.shell_id/);
+  assert.match(respawn, /\.shell_id = shell_id,\s*\.title_id = title_id/);
+  assert.match(respawn, /makeCmdLine\([^\n]*null, shell_id, saved_ssh_reconnect\.create_session/);
+  assert.match(respawn, /si\.lpTitle = SPAWN_TITLES\[title_id\]/);
+  assert.match(respawn, /FindWindowW\(null, SPAWN_TITLES\[title_id\]\)/);
+  assert.match(body('allocateConsoleTitleId', state), /&next_console_title_id, shells\[0\.\.shell_count\]/);
   assert.match(body('allocateShellId', state), /shells\[0\.\.shell_count\]/);
-  const allocator = body('allocateShellIdFrom', state);
+  const ids = body('allocateShellIdFrom', state);
+  assert.match(ids, /while \(next\.\* != 0\)/);
+  assert.match(ids, /next\.\* \+%= 1/);
+  const allocator = body('allocateConsoleTitleIdFrom', state);
   assert.match(allocator, /next\.\* == 0 or next\.\* >= SPAWN_TITLE_CAP/);
   assert.match(allocator, /for \(1\.\.SPAWN_TITLE_CAP\)/);
   assert.match(allocator, /candidate \+ 1 == SPAWN_TITLE_CAP\) 1 else/);
   assert.match(allocator, /if \(!used\[id\]\)/);
-  assert.match(state, /test "ISSUE-511 shell ids wrap/);
-  assert.match(state, /allocateShellIdFrom\(&next, &full\)/);
-  assert.match(body('chatBenchInit', read('chat_session.zig')), /if \(app_state\.shell_count == 0\) app_state\.next_shell_id = 1/);
+  assert.match(allocator, /used\[shell\.title_id\] = true/);
+  assert.match(state, /test "ISSUE-511 shell ids never recycle/);
+  assert.match(state, /allocateConsoleTitleIdFrom\(&next, &full\)/);
+  assert.doesNotMatch(body('chatBenchInit', read('chat_session.zig')), /next_shell_id/);
 });
 
 test('ISSUE-511 one failed probe cannot disconnect a live transport', () => {
@@ -77,8 +89,9 @@ test('ISSUE-511 relaunch queues remote tabs and reconnect timer staggers host st
   assert.ok(1000 / Number(timer[1]) <= 3);
   const tick = body('sshAutoReconnectTick', send);
   assert.match(tick, /var attempted = \[_\]bool\{false\} \*\* 256/);
-  assert.match(tick, /if \(!attempted\[host\] and shell\.ssh_reconnect\.due\(now\)\)/);
-  assert.match(tick, /attempted\[host\] = true;\s*sshReconnectAttempt/);
+  assert.match(tick, /if \(!attempted\[host\] and reconnecting\[host\] < 3 and shell\.ssh_reconnect\.due\(now\)\)/);
+  assert.match(tick, /attempted\[host\] = true;\s*reconnecting\[host\] \+= 1;\s*sshReconnectAttempt/);
+  assert.match(tick, /phase == \.reconnecting\) reconnecting\[shell\.tmux_host\] \+= 1/);
   assert.doesNotMatch(tick, /phase == \.reconnecting\) attempted/);
   assert.match(reconnect, /base \+ jitter % \(base \/ 4 \+ 1\)/);
 });
@@ -122,10 +135,10 @@ test('ISSUE-521 automatic reconnect paths never relayout the window or steal foc
 
 test('ISSUE-521 healthy probes confirm missing sessions before ending and skip ended tabs', () => {
   const worker = body('sshProbeThread', send);
-  assert.match(worker, /tmux list-sessions -F '@@S #\{session_name\}' 2>\/dev\/null;/);
+  assert.match(worker, /tmux list-sessions -F '@@S #\{session_name\}' 2>\/dev\/null && printf '@@LS_OK@@/);
   assert.match(worker, /\.sessionGone\(/);
   const finish = body('sshProbeFinish', send);
-  assert.match(finish, /if \(item\.session_gone\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
+  assert.match(finish, /if \(shell\.ssh_reconnect\.observeGone\(item\.session_gone, process_alive\)\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
   assert.match(finish, /phase == \.ended/);
   assert.match(body('sshProbeStart', send), /phase == \.ended/);
   assert.match(body('sshAutoReconnectTick', send), /phase == \.ended/);
@@ -193,7 +206,7 @@ test('ISSUE-521 visible-tab overlay restart does not request focus or switch tab
     assert.doesNotMatch(source, forbidden);
   }
   const show = body('showReconnectedConsole', read('console.zig'));
-  assert.match(show, /SWP_NOACTIVATE \| SWP_NOREDRAW/);
+  assert.match(body('positionReconnectedConsole', read('console.zig')), /SWP_NOACTIVATE \| SWP_NOREDRAW/);
   assert.match(show, /showShellConsole\(idx, SW_SHOWNOACTIVATE/);
 });
 
@@ -204,4 +217,55 @@ test('ISSUE-513 synthetic tabs cannot start or apply probes or enter ended-sessi
   for (const name of ['sshDisconnect', 'sshReconnectNow']) {
     assert.match(body(name, send), /\{\s*if \(chatBenchEnabled\(\) or idx >= app_state\.shell_count\) return;/, name);
   }
+});
+
+test('ISSUE-511 gone handling requires complete listing twice and defends live transports at the kill boundary', () => {
+  assert.match(body('sessionGone', reconnect), /attached\(output, "@@LS_OK@@"\)/);
+  assert.match(body('sshProbeThread', send), /job\.healthy\[item\.host\] = [^\n]*"@@LS_OK@@"/);
+  const observe = body('observeGone', reconnect);
+  assert.match(observe, /phase != \.reconnecting and !self\.create_session and self\.healthy_attach/);
+  assert.match(observe, /gone and eligible and !process_alive/);
+  assert.match(observe, /self\.gone_results >= 2/);
+  const finish = body('sshProbeFinish', send);
+  assert.match(finish, /const process_alive = shellProcessAliveForRead\(idx\)/);
+  assert.match(finish, /if \(item\.session_gone and process_alive\) continue/);
+  assert.match(finish, /gone_results > 0\) \{\s*shell\.ssh_reconnect\.awaiting_probe = true;\s*sshRequestSessionProbe\(\);\s*continue/);
+  assert.match(body('sshSessionEnded', send), /or shellProcessAliveForRead\(idx\)\) return/);
+  assert.match(reconnect, /test "ISSUE-511 gone requires two consecutive results/);
+  assert.match(reconnect, /test "ISSUE-511 creating reconnecting and never attached/);
+  const respawn = body('respawnShellInPlace', read('console.zig'));
+  assert.match(respawn, /ssh_reconnect\.healthy_attach = false/);
+  assert.match(respawn, /ssh_reconnect\.gone_results = 0/);
+  assert.match(finish, /phase != \.reconnecting and !shell\.ssh_reconnect\.create_session and shell\.ssh_reconnect\.healthy_attach\) sshDisconnect/);
+});
+
+test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survive completion', () => {
+  assert.match(body('sshProbeStart', send), /!shell\.ssh_reconnect\.awaiting_probe and GetTickCount64\(\) -\| shell\.spawn_tick < 3000/);
+  assert.match(body('sshRequestSessionProbe', send), /ssh_probe_pending_request = true;\s*ssh_probe_next_tick = 0/);
+  assert.match(body('sshProbeStart', send), /ssh_probe_job = job;\s*ssh_probe_pending_request = false/);
+  assert.match(body('sshProbeFinish', send), /ssh_probe_next_tick = if \(ssh_probe_pending_request\) 0 else GetTickCount64\(\) \+ 15_000/);
+});
+
+test('ISSUE-511 active respawn sizes its console before show without touching any other window', () => {
+  const console = read('console.zig');
+  const respawn = body('respawnShellInPlace', console);
+  assert.match(respawn, /if \(idx == app_state\.active_shell\) \{[^]*if \(@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*positionReconnectedConsole\(idx\);\s*_ = showShellConsole\(idx, SW_SHOWNOACTIVATE/);
+  const position = body('positionReconnectedConsole', console);
+  assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return/);
+  assert.match(position, /rc\.left = SIDEBAR_W\(\)/);
+  assert.match(position, /pane\.calcBrowserLayout\(\)/);
+  assert.match(position, /pane\.centeredConsoleColumn\(/);
+  assert.match(position, /SetWindowPos\(shell\.hwnd,[^\n]*SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW/);
+  assert.equal((position.match(/SetWindowPos\(/g) || []).length, 1);
+  assert.doesNotMatch(position, /repositionActive|posBrowser|posMasks|SetFocus|SetForegroundWindow|ShowWindow/);
+});
+
+test('ISSUE-511 close forgets id-keyed history and browser files even without a bound window', () => {
+  const close = body('closeShellRemember', read('console.zig'));
+  assert.ok(close.indexOf('chatHistoryForget(') < close.indexOf('shell_count -= 1'));
+  assert.ok(close.indexOf('closeBrowserForShell(idx)') < close.indexOf('shell_count -= 1'));
+  const browser = body('closeBrowserForShell', read('browser_pane.zig'));
+  assert.match(browser, /browser_window_id = 0;\s*\}\s*deleteBrowserWindowIdFile\(app_state\.shells\[idx\]\.shell_id\);\s*removePaneSessionFilesForShell\(idx\);\s*removeWebView2SessionFilesForShell\(idx\)/);
+  assert.match(close, /if \(webView2OwnsShell\(idx\)\) closeWebView2\(\)/);
+  assert.match(body('chatHistoryForget', read('chat_session.zig')), /entry\.retired = true/);
 });

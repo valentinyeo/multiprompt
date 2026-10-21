@@ -60,6 +60,7 @@ int main(int argc, char **argv) {
         if (strstr(cmd, "tmux list-sessions")) {
             for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) printf("@@S %s\n", p);
         }
+        if (strstr(cmd, "@@LS_OK@@")) puts("@@LS_OK@@");
         puts("@@MP_LIVE@@"); return 0;
     }
     if (strstr(cmd, "tmux list-sessions")) {

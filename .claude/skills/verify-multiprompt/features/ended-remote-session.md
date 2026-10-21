@@ -14,4 +14,4 @@ Case B removes verify-two from sessions.txt and kills its transport. Require one
 
 ## Gotchas
 
-A failed host probe is not proof of deletion. The fake returns the production completion sentinel and lists remaining sessions, so the app must positively confirm absence. The released build does not have the ended state and should fail this assertion. Do not count an infrastructure timeout as a valid negative control.
+A failed host probe or tmux listing is not proof of deletion. Only a successful list-sessions command emits @@LS_OK@@, alongside the host completion sentinel. Ending requires two consecutive complete gone results for the same tab and a dead transport; a live transport always vetoes ending. Reconnecting, session-creating, and never-healthy-since-spawn tabs are excluded. The fake emits both markers and lists remaining sessions. An attach exit awaiting a probe bypasses the three-second spawn grace; requests during a running probe schedule the next one immediately. The released build does not have the ended state and should fail this assertion. Do not count an infrastructure timeout as a valid negative control.

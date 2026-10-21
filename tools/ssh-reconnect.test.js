@@ -35,7 +35,7 @@ const Shell = struct {
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
-    ssh_reconnect: State = .{}, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
+    ssh_reconnect: State = .{ .healthy_attach = true }, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
@@ -44,7 +44,8 @@ const g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_ssh_reconnect_timer_on = false;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
-fn sshRequestSessionProbe() void { ssh_probe_next_tick = 0; }
+var ssh_probe_pending_request = false;
+fn sshRequestSessionProbe() void { ssh_probe_pending_request = true; ssh_probe_next_tick = 0; }
 var content_invalidations: usize = 0;
 fn invalidateReconnectContent(_: u32) void { content_invalidations += 1; }
 var ssh_probe_misses: [256]u8 = @splat(0);
@@ -492,6 +493,7 @@ test('ISSUE-501 production probe worker handles host indices BatchMode failure a
   const code = probeRuntime('').replace('fn sshProbeThread(_: *SshProbeJob) void {}', worker) + `
 var capture_count: usize = 0;
 var capture_ok = true;
+var listing_ok = true;
 const probeConsole = struct {
     fn appendSshExe(buf: anytype, pos: *usize) bool { return appendWideAscii(buf, pos, "ssh "); }
     fn appendWideAscii(buf: anytype, pos: *usize, text: []const u8) bool {
@@ -506,7 +508,7 @@ const probeVps = struct {
         std.debug.assert(std.mem.indexOf(u8, cmd, "-o ConnectTimeout=5") != null);
         std.debug.assert(timeout == 10000);
         capture_count += 1;
-        const result = if (capture_ok) "session\\n@@S session\\n@@MP_LIVE@@\\n" else "Permission denied";
+        const result = if (!capture_ok) "Permission denied" else if (listing_ok) "session\\n@@S session\\n@@LS_OK@@\\n@@MP_LIVE@@\\n" else "@@MP_LIVE@@\\n";
         @memcpy(output[0..result.len], result);
         return .{ .len = result.len, .success = capture_ok, .exit_code = if (capture_ok) 0 else 255 };
     }
@@ -574,6 +576,23 @@ test "ISSUE-511 worker requires three misses on a dead transport and ignores sta
     sshProbeFinish();
     try std.testing.expect(!shells[0].disconnected);
 }
+test "ISSUE-511 worker treats failed tmux listing as unknown even on successful ssh" {
+    shells[0] = .{ .tmux_host = 1, .tmux_session_len = 7 };
+    @memcpy(shells[0].tmux_session[0..7], "session");
+    capture_ok = true;
+    listing_ok = false;
+    alive = true;
+    const before = kills;
+    for (0..4) |_| {
+        const job = try workerJob();
+        sshProbeThread(job);
+        try std.testing.expect(!job.healthy[1]);
+        try std.testing.expect(!job.items[0].session_gone);
+        sshProbeFinish();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(before, kills);
+}
 test "ISSUE-501 worker releases abandoned allocation" {
     const old = try workerJob();
     fake_now += 45000;
@@ -589,24 +608,32 @@ test "ISSUE-501 worker releases abandoned allocation" {
 });
 
 
-test('ISSUE-511 forty restored tabs start once per host per second without waiting for older attaches', () => {
+test('ISSUE-511 restored tabs cap in-flight reconnects at three per host and one new start per tick', () => {
   const code = runtime(`
 test "ISSUE-511 forty restored tabs" {
-    for (&shells) |*shell| {
-        shell.* = .{ .process = null, .disconnected = true, .tmux_host = 1 };
+    for (&shells, 0..) |*shell, i| {
+        shell.* = .{ .process = null, .disconnected = true, .tmux_host = @intCast(i % 2) };
         shell.ssh_reconnect.manual(fake_now);
     }
-    for (0..40) |tick| {
+    for (0..10) |tick| {
         sshAutoReconnectTick();
-        try std.testing.expectEqual(tick + 1, spawns);
+        try std.testing.expectEqual(@min(tick + 1, 3) * 2, spawns);
         fake_now += 1000;
     }
+    shells[0].ssh_reconnect.ok();
+    shells[0].disconnected = false;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 7), spawns);
+    var in_flight = [_]u8{0} ** 2;
+    for (shells) |shell| {
+        if (shell.ssh_reconnect.phase == .reconnecting) in_flight[shell.tmux_host] += 1;
+    }
+    try std.testing.expectEqual([_]u8{ 3, 3 }, in_flight);
 }
 `).replace('var shells = [_]Shell{.{}};', 'var shells: [40]Shell = @splat(.{});')
     .replace('var shell_count: u32 = 1;', 'var shell_count: u32 = 40;');
   zig(code, 'ISSUE-511 forty');
 });
-
 
 test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', () => {
   zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-521 imported logic" { _ = reconnect; }', 'ISSUE-521');
@@ -621,7 +648,7 @@ test "ISSUE-521 confirmed gone stops and restarts" {
     fake_exit_code = 1;
     sshDisconnect(0, "process-exit-event");
     try std.testing.expect(shells[0].ssh_reconnect.awaiting_probe);
-    fake_now += 3000;
+    alive = false;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 0), spawns);
     const job = ssh_probe_job orelse return error.MissingProbe;
@@ -629,6 +656,14 @@ test "ISSUE-521 confirmed gone stops and restarts" {
     job.items[0].session_gone = true;
     job.finished.store(true, .release);
     _ = job.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expect(shells[0].ssh_reconnect.phase != .ended);
+    sshProbeStart();
+    const confirm = ssh_probe_job orelse return error.MissingConfirmation;
+    confirm.healthy[0] = true;
+    confirm.items[0].session_gone = true;
+    confirm.finished.store(true, .release);
+    _ = confirm.owners.fetchSub(1, .acq_rel);
     sshProbeFinish();
     try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
     try std.testing.expectEqual(@as(usize, 1), ended_logs);
@@ -817,4 +852,62 @@ test "ISSUE-513 connected idle" {
     try std.testing.expect(!shells[0].disconnected);
 }
 `), 'ISSUE-513 connected');
+});
+
+test('ISSUE-511 a probe requested during an old job runs immediately for a newly spawned awaiting tab', () => {
+  zig(probeRuntime(`
+test "ISSUE-511 pending urgent probe" {
+    fake_now = 10000;
+    sshProbeStart();
+    const old = ssh_probe_job orelse return error.MissingProbe;
+    shells[0].spawn_tick = fake_now;
+    shells[0].ssh_reconnect.awaiting_probe = true;
+    sshRequestSessionProbe();
+    old.finished.store(true, .release);
+    _ = old.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expectEqual(@as(u64, 0), ssh_probe_next_tick);
+    sshProbeStart();
+    try std.testing.expectEqual(@as(usize, 2), probe_starts);
+    const next = ssh_probe_job orelse return error.MissingUrgentProbe;
+    try std.testing.expectEqual(fake_now, next.items[0].spawn_tick);
+    try std.testing.expect(!ssh_probe_pending_request);
+    next.finished.store(true, .release);
+    _ = next.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expectEqual(fake_now + 15_000, ssh_probe_next_tick);
+}
+`), 'ISSUE-511 pending urgent');
+});
+
+test('ISSUE-511 repeated gone results cannot kill a live transport or end a creating or never-attached tab', () => {
+  zig(probeRuntime(`
+test "ISSUE-511 protected gone results" {
+    fake_now = 10000;
+    for (0..4) |mode| {
+        shells[0] = .{};
+        alive = mode == 0;
+        if (mode == 1) shells[0].ssh_reconnect.phase = .reconnecting;
+        if (mode == 2) shells[0].ssh_reconnect.create_session = true;
+        if (mode == 3) shells[0].ssh_reconnect.healthy_attach = false;
+        const before = kills;
+        for (0..3) |_| {
+            ssh_probe_next_tick = 0;
+            sshProbeStart();
+            const job = ssh_probe_job orelse return error.MissingProbe;
+            job.healthy[0] = true;
+            job.items[0].session_gone = true;
+            job.finished.store(true, .release);
+            _ = job.owners.fetchSub(1, .acq_rel);
+            sshProbeFinish();
+            try std.testing.expect(shells[0].ssh_reconnect.phase != .ended);
+        }
+        if (alive) try std.testing.expectEqual(before, kills);
+        try std.testing.expectEqual(@as(usize, 0), ended_logs);
+    }
+    alive = true;
+    sshSessionEnded(0);
+    try std.testing.expectEqual(@as(usize, 0), ended_logs);
+}
+`), 'ISSUE-511 protected gone');
 });

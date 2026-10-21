@@ -2819,9 +2819,10 @@ pub fn closeBrowserForShell(idx: u32) void {
     app_state.shells[idx].browser_relaunch_after_tick = 0;
     if (app_state.shells[idx].browser_window_id != 0) {
         app_state.shells[idx].browser_window_id = 0;
-        deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
-        removePaneSessionFilesForShell(idx);
     }
+    deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
+    removePaneSessionFilesForShell(idx);
+    removeWebView2SessionFilesForShell(idx);
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL);
 }
 

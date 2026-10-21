@@ -35,7 +35,7 @@ function load(mode) {
   assert.equal(summary[0].reposition_lines, reposition);
   assert.equal(summary[0].focus_changed, changed);
   assert.equal(summary[0].reconnected, true);
-  assert.match(a, /respawnShellInPlace ok kind=tmux idx=1 new_id=\d+/);
+  assert.match(a, /respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)=\d+/);
   assert.match(a, /ssh-reconnect ok id=\d+/);
   assert.equal(summary[0].pass, reposition === 0 && !changed);
   const gone = [...b.matchAll(/ssh-reconnect ended id=(\d+) reason=session-gone/g)];

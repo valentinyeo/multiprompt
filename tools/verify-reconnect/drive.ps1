@@ -100,7 +100,7 @@ try {
         Stop-Process -Id $readyTransport.Id -Force
         [void](Wait-For "tab $number confirmed connected" {
             $ready = (Read-Log).Substring($readyOffset)
-            $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) new_id=(\d+)")
+            $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) (?:new_id|id)=(\d+)")
             if ($spawn.Success -and $ready -match "ssh-reconnect ok id=$($spawn.Groups[1].Value)\b") { $true }
         })
     }
@@ -128,7 +128,7 @@ try {
         $focus = [ReconnectDesktop]::Focus($main)
         $samples.Add(@{utc=[DateTime]::UtcNow.ToString('o'); foreground=$focus[0]; focus=$focus[1]})
         $slice = (Read-Log).Substring($offset)
-        $match = [regex]::Match($slice, 'respawnShellInPlace ok kind=tmux idx=1 new_id=(\d+)')
+        $match = [regex]::Match($slice, 'respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)=(\d+)')
         $current = Transport 'verify-two'
         if ($match.Success -and $current -and $current.Id -ne $old.Id -and $slice -match "ssh-reconnect ok id=$($match.Groups[1].Value)\b") { $connected = $true; break }
         Start-Sleep -Milliseconds 100

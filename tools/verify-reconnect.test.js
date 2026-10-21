@@ -25,7 +25,7 @@ assert.match(drive, /while \(\$observationTimer\.Elapsed\.TotalSeconds -lt 60\) 
 assert.match(drive, /\$observeSeconds = \$observationTimer\.Elapsed\.TotalSeconds/);
 assert.match(drive, /ssh-reconnect attempt=/);
 assert.match(drive, /ssh-reconnect ended id=/);
-assert.match(drive, /respawnShellInPlace ok kind=tmux idx=1 new_id=/);
+assert.ok(drive.includes('respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)='));
 assert.match(drive, /ssh-path\.txt/);
 assert.match(drive, /chat_view_mode='nowhere'/);
 assert.match(desktop, /Class\(h\)=="ConsoleWindowClass"/);

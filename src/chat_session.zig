@@ -119,7 +119,6 @@ pub fn chatBenchInit() void {
     const n = GetEnvironmentVariableA("ZIGSHELL_CHAT_FIXTURE_DIR", &app_state.g_chat_bench_dir, app_state.g_chat_bench_dir.len);
     if (n > 0 and n < app_state.g_chat_bench_dir.len) {
         app_state.g_chat_bench_dir_len = n;
-        if (app_state.shell_count == 0) app_state.next_shell_id = 1;
         debugLog("[bench] fixture transport enabled");
     }
 }
