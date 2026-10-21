@@ -32,7 +32,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const start = source.indexOf('const FocusNative = struct {');
     const nativeEnd = source.indexOf('\n};', start) + 3;
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
-    const production = source.slice(nativeEnd, end);
+    const production = source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted');
     const fixture = fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, fixture.replace("fn reset() void {", production + "\nfn reset() void {"));
@@ -47,7 +47,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0, 'app-wide ownership must fail exact-pane regression');
     assert.match(negative.stderr, /typing and clicking a second pane[^]*FAIL/);
-    const withoutUserPaste = production.replace('if (focusGuardPasteAllows(target, g_focus_paste_target, g_main_hwnd)) return true;', '');
+    const withoutUserPaste = production.replace(/if \(focusGuardPasteAllows\(target, g_focus_paste_target, g_main_hwnd\)\) \{\s*focusTrace\(\.allowed, target, caller\);\s*return true;\s*\}/, '');
     assert.notEqual(withoutUserPaste, production);
     fs.writeFileSync(file, fixture.replace("fn reset() void {", withoutUserPaste + "\nfn reset() void {"));
     const missingAuthority = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
@@ -125,4 +125,46 @@ test('issue: agent wakes never foreground, never refocus, never block the UI thr
   auditAgentWake(source);
   assert.throws(() => auditAgentWake(source.replace('launchBrowserForShellFromRequest(ti)', 'launchBrowserForShell(ti)')));
   assert.throws(() => auditAgentWake(source.replace('startBrowserWindowResolve(idx);\n    } else {', 'if (resolveBrowserWindowIdForShell(shells[idx].shell_id)) |wid| bindBrowserWindowIdForShell(idx, wid);\n    } else {')));
+});
+
+function auditFocusTrace(focus, composer, main, diagnostics) {
+  assert.match(composer, /msg == WM_KILLFOCUS[^]*?hwnd == app_state.g_chat_composer_hwnd[^]*?focusTrace\(\.composer_killfocus, @ptrFromInt\(wp\), 0\)/);
+  assert.match(main, /WM_ACTIVATEAPP =>[^]*?if \(wp == 0\) \{\s*@import\("diagnostics.zig"\).focusTrace\(\.activateapp_inactive, GetForegroundWindow\(\), 0\)/);
+  assert.match(main, /if \(active == 0\) @import\("diagnostics.zig"\).focusTrace\(\.activate_inactive, @ptrFromInt/);
+  assert.match(focus, /fn focusGuardAt[^]*?focusTrace\(\.allowed, target, caller\)[^]*?focusTrace\(\.activation_refocus, target, caller\)[^]*?focusTrace\(\.blocked, target, caller\)/);
+  const wrappers = focus.slice(focus.indexOf('fn SetForegroundWindow('), focus.indexOf('pub fn SetWindowPos('));
+  assert.doesNotMatch(wrappers, /\bfocusGuard\(/);
+  assert.equal((focus.match(/pub noinline fn (?:focusGuard|SetForegroundWindow|SetFocus|AttachThreadInput|SwitchToThisWindow|AllowSetForegroundWindow|ShowWindow|ShowWindowAsync)\(/g) || []).length, 8);
+  assert.equal((wrappers.match(/@returnAddress\(\)/g) || []).length, 7);
+  assert.match(diagnostics, /if \(!owns_input or focus_trace_busy.swap/);
+  assert.match(diagnostics, /and !std.mem.startsWith\(u8, msg, "\[focus-trace\] "\)/);
+  assert.match(diagnostics, /GetClassNameW\(hwnd, &wide, wide.len\)/);
+  assert.match(diagnostics, /GetWindowThreadProcessId\(target, &pid\)/);
+  assert.match(diagnostics, /GetCurrentProcessId\(\)/);
+  assert.match(diagnostics, /caller -\| base/);
+}
+
+test('ISSUE-451 focus forensics cover all loss messages and guard callers even without verbose logging', () => {
+  const read = name => fs.readFileSync(path.join(root, 'src', name + '.zig'), 'utf8');
+  const args = [read('focus'), read('chat_composer'), read('main'), read('diagnostics')];
+  auditFocusTrace(...args);
+  for (let i = 0; i < args.length; i++) {
+    const missing = [...args];
+    missing[i] = missing[i].replaceAll('focusTrace', 'missingTrace').replaceAll('[focus-trace]', '[missing-trace]');
+    assert.throws(() => auditFocusTrace(...missing));
+  }
+});
+
+
+test('ISSUE-451 activation and frame-focus repairs use guard authorization rather than UI eligibility alone', () => {
+  const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const repair = main.slice(main.indexOf('        WM_ACTIVATEAPP =>'), main.indexOf('        WM_PARENTNOTIFY =>'));
+  const auditRepair = text => {
+    assert.equal((text.match(/focusGuardComposerRepairAllowed\(\)/g) || []).length, 3);
+    assert.doesNotMatch(text, /chatComposerFocusAllowed\(\)/);
+    assert.match(text, /const allowed = focusGuardComposerRepairAllowed\(\);\s*if \(allowed\) _ = SetFocus/);
+    assert.match(text, /site=setfocus allowed=\{\}[^]*?\.\{ allowed,/);
+  };
+  auditRepair(repair);
+  assert.throws(() => auditRepair(repair.replaceAll('focusGuardComposerRepairAllowed()', 'chatComposerFocusAllowed()')));
 });

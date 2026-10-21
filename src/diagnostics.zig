@@ -83,7 +83,7 @@ pub fn getSessionAuditPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u
 }
 
 pub fn debugLog(msg: []const u8) void {
-    if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ")) return;
+    if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ") and !std.mem.startsWith(u8, msg, "[focus-trace] ")) return;
     while (!app_state.g_debug_log_mutex.tryLock()) Sleep(1);
     defer app_state.g_debug_log_mutex.unlock();
     var path_buf: [512]u8 = undefined;
@@ -117,13 +117,15 @@ pub fn debugLog(msg: []const u8) void {
 fn buildDebugLine(buf: []u8, timestamp: []const u8, msg: []const u8) ?[]const u8 {
     if (timestamp.len > buf.len or buf.len - timestamp.len < 2 or
         msg.len > buf.len - timestamp.len - 2) return null;
-    @memcpy(buf[0..timestamp.len], timestamp);
-    buf[timestamp.len] = ' ';
-    const start = timestamp.len + 1;
-    for (msg, 0..) |c, i| {
+    const prefix_len: usize = if (std.mem.startsWith(u8, msg, "[focus-trace] ")) "[focus-trace] ".len else 0;
+    @memcpy(buf[0..prefix_len], msg[0..prefix_len]);
+    @memcpy(buf[prefix_len .. prefix_len + timestamp.len], timestamp);
+    buf[prefix_len + timestamp.len] = ' ';
+    const start = prefix_len + timestamp.len + 1;
+    for (msg[prefix_len..], 0..) |c, i| {
         buf[start + i] = if (c == '\r' or c == '\n') ' ' else c;
     }
-    const end = start + msg.len;
+    const end = timestamp.len + 1 + msg.len;
     buf[end] = '\n';
     return buf[0 .. end + 1];
 }
@@ -147,6 +149,123 @@ test "debug line requires room for the complete message and final newline" {
     try std.testing.expect(buildDebugLine(buf[0..24], timestamp, "") == null);
     try std.testing.expect(buildDebugLine(buf[0..0], timestamp, "") == null);
     try std.testing.expectEqualStrings(timestamp ++ " \n", buildDebugLine(buf[0..25], timestamp, "").?);
+}
+
+pub const FocusTraceEvent = enum {
+    composer_killfocus,
+    activate_inactive,
+    activateapp_inactive,
+    blocked,
+    activation_refocus,
+    allowed,
+};
+
+const FocusTraceLimiter = struct {
+    const Entry = struct {
+        line: [768]u8 = undefined,
+        len: usize = 0,
+        tick: u64 = 0,
+        repeats: u32 = 0,
+    };
+
+    entries: [8]Entry = @splat(.{}),
+
+    fn record(self: *FocusTraceLimiter, now: u64, line: []const u8, chat_owns_input: bool) ?u32 {
+        if (!chat_owns_input or line.len == 0 or line.len > self.entries[0].line.len) return null;
+        var oldest: ?*Entry = null;
+        for (&self.entries) |*entry| {
+            if (entry.len == line.len and std.mem.eql(u8, entry.line[0..entry.len], line)) {
+                if (now -| entry.tick < 250) {
+                    entry.repeats +|= 1;
+                    return null;
+                }
+                const repeats = entry.repeats;
+                entry.tick = now;
+                entry.repeats = 0;
+                return repeats;
+            }
+            if (entry.len == 0 or now -| entry.tick >= 250) {
+                if (oldest == null or entry.len == 0 or entry.tick < oldest.?.tick) oldest = entry;
+            }
+        }
+        const entry = oldest orelse return null;
+        @memcpy(entry.line[0..line.len], line);
+        entry.len = line.len;
+        entry.tick = now;
+        entry.repeats = 0;
+        return 0;
+    }
+};
+
+var focus_trace_limiters: [@typeInfo(FocusTraceEvent).@"enum".fields.len]FocusTraceLimiter = @splat(.{});
+var focus_trace_busy = std.atomic.Value(bool).init(false);
+
+fn focusTraceClass(hwnd: HANDLE, buf: *[96]u8) []const u8 {
+    var wide: [96]u16 = undefined;
+    const n = @import("win32.zig").GetClassNameW(hwnd, &wide, wide.len);
+    if (n <= 0) return "?";
+    const len: usize = @intCast(n);
+    for (wide[0..len], 0..) |c, i| {
+        buf[i] = if (c >= 32 and c <= 126 and c != '"' and c != '\\') @intCast(c) else '?';
+    }
+    return buf[0..len];
+}
+
+fn formatFocusTrace(buf: []u8, event: FocusTraceEvent, caller: usize, target: usize, class: []const u8, pid: u32, ours: bool, focus: usize, foreground: usize, foreground_class: []const u8) ?[]const u8 {
+    return std.fmt.bufPrint(buf, "[focus-trace] event={s} caller=exe+0x{X} target=0x{X} class=\"{s}\" pid={d} ours={} focus=0x{X} foreground=0x{X} foreground_class=\"{s}\"", .{
+        @tagName(event), caller, target, class, pid, ours, focus, foreground, foreground_class,
+    }) catch null;
+}
+
+pub fn focusTrace(event: FocusTraceEvent, target: HANDLE, caller: usize) void {
+    const owns_input = @import("chat_composer.zig").chatViewOwnsInput();
+    if (!owns_input or focus_trace_busy.swap(true, .acquire)) return;
+    defer focus_trace_busy.store(false, .release);
+    const foreground = @import("win32.zig").GetForegroundWindow();
+    var class_buf: [96]u8 = undefined;
+    var foreground_class_buf: [96]u8 = undefined;
+    var pid: u32 = 0;
+    if (target != null) _ = @import("win32.zig").GetWindowThreadProcessId(target, &pid);
+    const base = altqPtr(@import("win32.zig").GetModuleHandleW(null));
+    var buf: [768]u8 = undefined;
+    const line = formatFocusTrace(&buf, event, if (caller != 0) caller -| base else 0, altqPtr(target), focusTraceClass(target, &class_buf), pid, pid != 0 and pid == @import("win32.zig").GetCurrentProcessId(), altqPtr(@import("win32.zig").GetFocus()), altqPtr(foreground), focusTraceClass(foreground, &foreground_class_buf)) orelse return;
+    const repeats = focus_trace_limiters[@intFromEnum(event)].record(GetTickCount64(), line, owns_input) orelse return;
+    var output: [800]u8 = undefined;
+    const message = std.fmt.bufPrint(&output, "{s} repeats={d}", .{ line, repeats }) catch return;
+    debugLog(message);
+}
+
+test "ISSUE-451 trace formatting identifies the taker and keeps the prefix first" {
+    var buf: [768]u8 = undefined;
+    const line = formatFocusTrace(&buf, .composer_killfocus, 0x123, 0x456, "Chrome_WidgetWin_1", 42, false, 0x789, 0x456, "Chrome_WidgetWin_1").?;
+    try std.testing.expectEqualStrings("[focus-trace] event=composer_killfocus caller=exe+0x123 target=0x456 class=\"Chrome_WidgetWin_1\" pid=42 ours=false focus=0x789 foreground=0x456 foreground_class=\"Chrome_WidgetWin_1\"", line);
+    var output: [1024]u8 = undefined;
+    try std.testing.expectEqualStrings("[focus-trace] 2026-10-18 03:04:05.067 event=composer_killfocus caller=exe+0x123 target=0x456 class=\"Chrome_WidgetWin_1\" pid=42 ours=false focus=0x789 foreground=0x456 foreground_class=\"Chrome_WidgetWin_1\"\n", buildDebugLine(&output, "2026-10-18 03:04:05.067", line).?);
+    try std.testing.expect(formatFocusTrace(buf[0..8], .blocked, 0, 0, "?", 0, false, 0, 0, "?") == null);
+}
+
+test "ISSUE-451 rate limiter collapses interleaved repeats and bounds distinct bursts" {
+    var limiter: FocusTraceLimiter = .{};
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(0, "a", true));
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(1, "b", true));
+    try std.testing.expect(limiter.record(100, "a", true) == null);
+    try std.testing.expect(limiter.record(249, "a", true) == null);
+    try std.testing.expectEqual(@as(?u32, 2), limiter.record(250, "a", true));
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(500, "a", true));
+    limiter = .{};
+    for ("abcdefgh") |c| try std.testing.expectEqual(@as(?u32, 0), limiter.record(1000, &.{c}, true));
+    try std.testing.expect(limiter.record(1001, "i", true) == null);
+    try std.testing.expect(limiter.record(1249, "a", true) == null);
+    try std.testing.expectEqual(@as(?u32, 1), limiter.record(1250, "a", true));
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(1250, "i", true));
+}
+
+test "ISSUE-451 traces only record while Chat View owns input" {
+    var limiter: FocusTraceLimiter = .{};
+    try std.testing.expect(limiter.record(10, "composer", false) == null);
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(10, "composer", true));
+    try std.testing.expect(limiter.record(20, "composer", false) == null);
+    try std.testing.expectEqual(@as(?u32, 0), limiter.record(260, "composer", true));
 }
 
 pub fn browserTrace(reason: []const u8) void {

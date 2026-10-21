@@ -217,6 +217,7 @@ var g_account_keys_cache: struct {
     published_key: ?[]const u8 = null,
 } = .{};
 var g_account_key_prompt_active = false;
+var g_account_pending_device_keys: ?[]u8 = null;
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -356,6 +357,8 @@ fn accountDeleteToken() void {
     }
 }
 fn accountLock() void {
+    if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
+    g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
     app_state.g_account_dirty_at = 0;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
@@ -1015,13 +1018,25 @@ fn accountDevices(bytes: []const u8) void {
         }
     }
 }
-fn accountPromptDeviceKeys(bytes: []const u8) void {
+fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     if (g_account_key_prompt_active or app_state.g_account_busy) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const listing = account_keys.parseListing(a, bytes) catch return;
     defer listing.deinit();
+    var pending = false;
+    for (listing.value.keys) |key| {
+        if (key.status == .pending and !std.mem.eql(u8, key.device_id, listing.value.device_id)) pending = true;
+    }
+    const retained = if (pending) std.heap.page_allocator.dupe(u8, bytes) catch return else null;
+    if (g_account_pending_device_keys) |previous| std.heap.page_allocator.free(previous);
+    g_account_pending_device_keys = retained;
+    if (!pending) return;
+    if (!user_initiated) {
+        showHeaderNoticeAscii("A device waits for approval: Ctrl+K > Account: Approve devices", 86400000, false);
+        return;
+    }
     g_account_key_prompt_active = true;
     app_state.g_account_busy = true;
     var submitted = false;
@@ -1032,9 +1047,10 @@ fn accountPromptDeviceKeys(bytes: []const u8) void {
     var decisions: std.ArrayList(account_keys.Decision) = .empty;
     for (listing.value.keys) |key| {
         if (key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)) continue;
-        const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: ask again in five minutes.", .{key.name}) catch return;
+        const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: close. Open Ctrl+K > Account: Approve devices to return.", .{key.name}) catch return;
         const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
         const answer = MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Approve devices"), 3 | 0x20);
+        if (answer == 2) break;
         if (answer != 6 and answer != 7) continue;
         decisions.append(a, .{ .device_id = key.device_id, .public_key = key.public_key, .approve = answer == 6 }) catch return;
     }
@@ -1068,7 +1084,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             app_state.g_account_busy = false;
         }
         if (!reply.unauthorized and !reply.cancelled) {
-            if (reply.device_keys) |bytes| accountPromptDeviceKeys(bytes);
+            if (reply.device_keys) |bytes| accountPromptDeviceKeys(bytes, reply.job.kind == .device_keys);
         }
     }
     if (reply.signed_out) {
@@ -2160,7 +2176,7 @@ test "device prompt guard blocks nested rounds and background jobs until decisio
     }
     app_state.g_account_busy = false;
     g_account_key_prompt_active = true;
-    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[{\"device_id\":\"other\",\"name\":\"Laptop\",\"public_key\":\"ssh-ed25519 AAAA\",\"status\":\"pending\"}]}");
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[{\"device_id\":\"other\",\"name\":\"Laptop\",\"public_key\":\"ssh-ed25519 AAAA\",\"status\":\"pending\"}]}", true);
     try std.testing.expect(g_account_key_prompt_active);
     try std.testing.expect(!app_state.g_account_busy);
     startAccountJob(.{ .kind = .pull });
@@ -2170,7 +2186,7 @@ test "device prompt guard blocks nested rounds and background jobs until decisio
     handleLayoutReply(@bitCast(@intFromPtr(reply)));
     try std.testing.expect(!g_account_key_prompt_active);
     try std.testing.expect(!app_state.g_account_busy);
-    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[]}");
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[]}", true);
     try std.testing.expect(!g_account_key_prompt_active);
     try std.testing.expect(!app_state.g_account_busy);
 }

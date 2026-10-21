@@ -25,6 +25,17 @@ Explicit path changes:
   no longer requests OS focus. Pane tab activation is unchanged.
 - `src/bridge.zig`: legacy `fgUnlock` cannot grant foreground permission.
 
+## Chat activation recovery (ISSUE-451)
+
+- Only `SetForegroundWindow(main)` treats a remembered child as its container;
+  `SetFocus(main)` needs its own authority, such as a real user action.
+- A remembered main frame takes the activation fallback. Composer recovery requires
+  Chat input ownership, composer eligibility, main foreground, and frame/null focus;
+  remembered panes/external targets, editors, find, overlays and modals stay excluded.
+- `WM_ACTIVATEAPP`, `WM_ACTIVATE` and `WM_SETFOCUS` repair decisions include the guard.
+- Background device approvals use the header notice; only Ctrl+K > Account: Approve
+  devices opens the modal, including after Cancel.
+
 ## Centrally guarded native call sites
 
 Counts exclude extern declarations and raw wrapper implementations; repeated

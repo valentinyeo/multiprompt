@@ -485,6 +485,7 @@ const updateCardDismiss = @import("update_card.zig").updateCardDismiss;
 const updateCardRelaunch = @import("update_card.zig").updateCardRelaunch;
 const capacityBlockNoticeActive = @import("capacity.zig").capacityBlockNoticeActive;
 const announceCapacityTransitions = @import("capacity.zig").announceCapacityTransitions;
+const focusGuardComposerRepairAllowed = @import("focus.zig").focusGuardComposerRepairAllowed;
 const focusGuardNoteActivation = @import("focus.zig").focusGuardNoteActivation;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
@@ -6608,6 +6609,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
+                @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
@@ -6616,7 +6618,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
                     armBrowserEdgeMaskRaise();
                 }
-                if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
+                if (focusGuardComposerRepairAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
             }
             if (activePaneBorderOn() or chatViewOwnsInput()) {
                 _ = InvalidateRect(hwnd, null, 0);
@@ -6626,6 +6628,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         0x0006 => {
             const active = @as(u16, @truncate(wp));
+            if (active == 0) @import("diagnostics.zig").focusTrace(.activate_inactive, @ptrFromInt(@as(usize, @bitCast(lp))), 0);
             if (active != 0) {
                 focusGuardNoteActivation();
                 exitDeepIdleNow(hwnd);
@@ -6638,7 +6641,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     armBrowserEdgeMaskRaise();
                 }
                 const alt_down = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
-                if (chatComposerFocusAllowed()) {
+                if (focusGuardComposerRepairAllowed()) {
                     _ = SetFocus(app_state.g_chat_composer_hwnd);
                     altqLog("composer_focus site=activate pending={} handoff_left={} chat={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), app_state.g_chat_active });
                 } else if (app_state.shell_count > 0 and app_state.g_edit_hwnd == null and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
@@ -6656,8 +6659,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SETFOCUS => {
-            if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
-            altqLog("composer_focus site=setfocus allowed={} pending={} focus={X} chat={}", .{ chatComposerFocusAllowed(), app_state.g_native_browser_focus_pending_shell_id, altqPtr(GetFocus()), app_state.g_chat_active });
+            const allowed = focusGuardComposerRepairAllowed();
+            if (allowed) _ = SetFocus(app_state.g_chat_composer_hwnd);
+            altqLog("composer_focus site=setfocus allowed={} pending={} focus={X} chat={}", .{ allowed, app_state.g_native_browser_focus_pending_shell_id, altqPtr(GetFocus()), app_state.g_chat_active });
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_PARENTNOTIFY => {

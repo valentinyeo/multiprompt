@@ -1168,7 +1168,10 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
             else => {},
         }
     }
-    if (msg == WM_KILLFOCUS) chatAcClose();
+    if (msg == WM_KILLFOCUS) {
+        if (hwnd == app_state.g_chat_composer_hwnd) @import("diagnostics.zig").focusTrace(.composer_killfocus, @ptrFromInt(wp), 0);
+        chatAcClose();
+    }
     if (msg == WM_KEYDOWN and wp == 0x1B) {
         if (@import("chat_working.zig").composerEscStops(@import("window_layout.zig").chatWorkingBarVisible(), app_state.g_chat_ac.open, app_state.g_chat_sel_active) and (lp & 0x40000000) == 0) _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell);
         return 0;

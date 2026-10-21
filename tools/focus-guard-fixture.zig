@@ -25,6 +25,21 @@ fn win(id: usize) HANDLE {
 }
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_active = false;
+var g_search_active = false;
+var g_inbox_active = false;
+var g_shortcuts_active = false;
+var g_changelog_active = false;
+var g_url_picker_active = false;
+var g_all_sessions_active = false;
+var g_snippet_create_active = false;
+var g_chat_find_open = false;
+var g_edit_hwnd: HANDLE = null;
+var g_native_browser_focus_pending_shell_id: u32 = 0;
+var g_chat_browser_handoff_until: u64 = 0;
+fn altqLog(_: []const u8, _: anytype) void {}
+fn altqPtr(hwnd: HANDLE) usize {
+    return @intFromPtr(hwnd);
+}
 var g_chat_composer_hwnd: HANDLE = @ptrFromInt(3);
 var shell_count: usize = 2;
 var active_shell: usize = 0;
@@ -73,6 +88,9 @@ fn browserPaneOwnsForegroundHwnd(fg: HANDLE, _: HANDLE) bool {
 fn foregroundIsOurs() bool {
     return foreground != null and foreground != win(9);
 }
+fn focusTrace(event: enum { allowed, activation_refocus, blocked }, _: HANDLE, _: usize) void {
+    if (event == .blocked) blocked_logs += 1;
+}
 fn debugLog(text: []const u8) void {
     if (std.mem.startsWith(u8, text, "focus guard: blocked")) blocked_logs += 1;
     if (std.mem.startsWith(u8, text, "focus guard: returned focus")) returned_logs += 1;
@@ -118,6 +136,17 @@ const FocusNative = struct {
 };
 fn reset() void {
     g_chat_active = false;
+    g_search_active = false;
+    g_inbox_active = false;
+    g_shortcuts_active = false;
+    g_changelog_active = false;
+    g_url_picker_active = false;
+    g_all_sessions_active = false;
+    g_snippet_create_active = false;
+    g_chat_find_open = false;
+    g_edit_hwnd = null;
+    g_native_browser_focus_pending_shell_id = 0;
+    g_chat_browser_handoff_until = 0;
     g_chat_composer_hwnd = win(3);
     clock = 10000;
     foreground = win(2);
@@ -362,4 +391,94 @@ test "user screenshot from foreign Chrome grants only the pasted input and frame
         try std.testing.expect(!focusGuard(target));
         try std.testing.expect(!focusGuard(win(4)));
     }
+}
+
+test "ISSUE-451 frame remembered during Chat activation allows composer with frame or null focus" {
+    for ([_]HANDLE{ win(1), null }) |focused| {
+        reset();
+        g_chat_active = true;
+        foreground = win(1);
+        keyboard_focus = focused;
+        focusGuardNoteInput(win(1), clock, false);
+        focusGuardNoteActivation();
+        try std.testing.expect(focusGuardComposerRepairAllowed());
+        try std.testing.expect(focusGuard(win(3)));
+        _ = SetFocus(win(3));
+        try std.testing.expectEqual(win(3), keyboard_focus);
+    }
+}
+
+test "ISSUE-451 remembered composer allows raising frame but refuses keyboard focus without user action" {
+    for ([_]bool{ false, true }) |activating| {
+        reset();
+        g_chat_active = true;
+        foreground = win(1);
+        keyboard_focus = win(3);
+        focusGuardNoteInput(win(3), clock, true);
+        if (activating) focusGuardNoteActivation();
+        try std.testing.expectEqual(@as(HANDLE, null), SetFocus(win(1)));
+        try std.testing.expectEqual(win(3), keyboard_focus);
+        try std.testing.expectEqual(@as(BOOL, 1), SetForegroundWindow(win(1)));
+        try std.testing.expectEqual(win(3), keyboard_focus);
+        g_focus_user_action_tick = clock;
+        _ = SetFocus(win(1));
+        try std.testing.expectEqual(win(1), keyboard_focus);
+    }
+}
+
+test "ISSUE-451 activation container fallback rejects expiry foreign foreground and remembered pane or external target" {
+    try std.testing.expect(focusGuardActivationAllows(100, 200, true, win(3), win(1), win(1), win(3)));
+    try std.testing.expect(!focusGuardActivationAllows(201, 200, true, win(3), win(1), win(1), win(3)));
+    try std.testing.expect(!focusGuardActivationAllows(100, 200, false, win(3), win(1), win(1), win(3)));
+    for ([_]HANDLE{ win(4), win(6), win(9) }) |remembered| {
+        try std.testing.expect(!focusGuardActivationAllows(100, 200, true, win(3), remembered, win(1), win(3)));
+    }
+}
+
+test "ISSUE-451 activation repair refuses editor find overlays pane modal and expired or competing ownership" {
+    reset();
+    g_chat_active = true;
+    foreground = win(1);
+    keyboard_focus = win(1);
+    focusGuardNoteInput(win(1), clock, false);
+    focusGuardNoteActivation();
+    try std.testing.expect(focusGuardComposerRepairAllowed());
+    const owners = [_]*bool{ &g_search_active, &g_inbox_active, &g_shortcuts_active, &g_changelog_active, &g_url_picker_active, &g_all_sessions_active, &g_snippet_create_active, &g_chat_find_open };
+    for (owners) |owner| {
+        owner.* = true;
+        try std.testing.expect(!focusGuardComposerRepairAllowed());
+        try std.testing.expect(!focusGuard(win(3)));
+        owner.* = false;
+    }
+    g_edit_hwnd = win(7);
+    try std.testing.expect(!focusGuardComposerRepairAllowed());
+    try std.testing.expect(!focusGuard(win(3)));
+    g_edit_hwnd = null;
+    g_native_browser_focus_pending_shell_id = 10;
+    try std.testing.expect(!focusGuard(win(3)));
+    g_native_browser_focus_pending_shell_id = 0;
+    g_chat_browser_handoff_until = clock + 100;
+    try std.testing.expect(!focusGuard(win(3)));
+    g_chat_browser_handoff_until = 0;
+    for ([_]HANDLE{ win(4), win(7), win(9), win(8) }) |focused| {
+        keyboard_focus = focused;
+        try std.testing.expect(!focusGuardComposerRepairAllowed());
+        try std.testing.expect(!focusGuard(win(3)));
+    }
+    keyboard_focus = win(1);
+    for ([_]HANDLE{ win(4), win(9), win(8) }) |fg| {
+        foreground = fg;
+        try std.testing.expect(!focusGuardComposerRepairAllowed());
+        try std.testing.expect(!focusGuard(win(3)));
+    }
+    foreground = win(1);
+    for ([_]HANDLE{ win(4), win(9) }) |remembered| {
+        g_focus_return_hwnd = remembered;
+        try std.testing.expect(!focusGuardComposerRepairAllowed());
+        try std.testing.expect(!focusGuard(win(3)));
+    }
+    g_focus_return_hwnd = win(1);
+    clock += 1001;
+    try std.testing.expect(!focusGuardComposerRepairAllowed());
+    try std.testing.expect(!focusGuard(win(3)));
 }
