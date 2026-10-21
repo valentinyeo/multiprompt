@@ -196,3 +196,12 @@ test('ISSUE-521 visible-tab overlay restart does not request focus or switch tab
   assert.match(show, /SWP_NOACTIVATE \| SWP_NOREDRAW/);
   assert.match(show, /showShellConsole\(idx, SW_SHOWNOACTIVATE/);
 });
+
+test('ISSUE-513 synthetic tabs cannot start or apply probes or enter ended-session recovery', () => {
+  for (const name of ['sshProbeStart', 'sshProbeFinish', 'sshSessionEnded', 'sshReconnectArm']) {
+    assert.match(body(name, send), /\{\s*if \(chatBenchEnabled\(\)\) return;/, name);
+  }
+  for (const name of ['sshDisconnect', 'sshReconnectNow']) {
+    assert.match(body(name, send), /\{\s*if \(chatBenchEnabled\(\) or idx >= app_state\.shell_count\) return;/, name);
+  }
+});

@@ -59,6 +59,16 @@ var alive = true;
 var spawns: usize = 0;
 var kills: usize = 0;
 var timers: usize = 0;
+var fixture = false;
+var repaints: usize = 0;
+var full_repaints: usize = 0;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+var last_paint: RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+fn chatBenchEnabled() bool { return fixture; }
+fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
+fn reconnectTabVisible(_: u32) bool { return true; }
+fn threadTitleTop() i32 { return 10; }
+fn threadTitleHeight() i32 { return 44; }
 var spawn_ok = true;
 var fake_exit_code: u32 = 0;
 fn GetExitCodeProcess(_: ?*anyopaque, code: *u32) u32 { code.* = fake_exit_code; return 1; }
@@ -80,7 +90,11 @@ fn CloseHandle(_: ?*anyopaque) u32 { return 1; }
 fn killProcessTree(_: u32) void { kills += 1; }
 fn SetTimer(_: ?*anyopaque, _: u32, _: u32, _: ?*anyopaque) u32 { timers += 1; return 1; }
 fn KillTimer(_: ?*anyopaque, _: u32) u32 { return 1; }
-fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: u32) u32 { return 1; }
+fn InvalidateRect(_: ?*anyopaque, rc: ?*const RECT, _: u32) u32 {
+    repaints += 1;
+    if (rc) |rect| { last_paint = rect.*; } else { full_repaints += 1; }
+    return 1;
+}
 var exit_logs: usize = 0;
 var timeout_logs: usize = 0;
 var ended_logs: usize = 0;
@@ -102,7 +116,7 @@ function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
 test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', () => {
   if (modern) {
@@ -704,7 +718,7 @@ test('ISSUE-512 pure notice policy and active-tab rendering use recovery state i
   assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
 });
 
-test('ISSUE-512 debounced warnings refresh through quiet content invalidation and stop after recovery', () => {
+test('ISSUE-512 debounced warnings refresh only the header and stop after recovery', () => {
   zig(runtime(`
 test "ISSUE-512 quiet warning refresh" {
     shells[0].process = null;
@@ -713,23 +727,94 @@ test "ISSUE-512 quiet warning refresh" {
     shells[0].ssh_reconnect.confirmDisconnect(0, "process-exit-event", false);
     fake_now = 9999;
     sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 1), content_invalidations);
+    try std.testing.expectEqual(@as(usize, 1), repaints);
     try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, true) == null);
     fake_now = 10000;
     sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 2), content_invalidations);
+    try std.testing.expectEqual(@as(usize, 2), repaints);
     try std.testing.expectEqualStrings("SSH exited", shells[0].ssh_reconnect.noticeReason(fake_now, true).?);
     shells[0].ssh_reconnect.ok();
     shells[0].disconnected = false;
     shells[0].process = @ptrFromInt(1);
     sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 2), content_invalidations);
+    try std.testing.expectEqual(@as(usize, 2), repaints);
+    try std.testing.expectEqual(@as(usize, 0), content_invalidations);
+    try std.testing.expectEqual(@as(usize, 0), full_repaints);
     try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, false) == null);
 }
 `), 'ISSUE-512 quiet');
   const tick = body('sshAutoReconnectTick', fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8'));
-  assert.match(tick, /if \(app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.disconnected\) \{\s*@import\("drawing\.zig"\)\.invalidateReconnectContent\(app_state\.active_shell\);/);
-  assert.doesNotMatch(tick, /InvalidateRect\(/);
+  assert.match(tick, /reconnectTabVisible\(app_state\.active_shell\)/);
+  assert.match(tick, /header\.top = threadTitleTop\(\);\s*header\.bottom = header\.top \+ threadTitleHeight\(\);\s*_ = InvalidateRect\(app_state\.g_main_hwnd, &header, 0\);/);
+  assert.doesNotMatch(tick, /invalidateReconnectContent\(|InvalidateRect\([^\n]*null/);
   const paint = body('paintDisconnectedNotice', fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8'));
   assert.match(paint, /const text = if \(shell\.ssh_reconnect\.phase == \.ended\)\s*"Session ended"\s*else if \(shell\.ssh_reconnect\.noticeReason/);
+});
+
+test('ISSUE-513 synthetic chat tabs never enter SSH recovery or repaint while idle', () => {
+  zig(runtime(`
+test "ISSUE-513 fixture recovery isolation" {
+    fixture = true;
+    shells[0].process = null;
+    markSshTabDisconnected(0);
+    sshDisconnect(0, "process-exit-event");
+    sshReconnectArm(0, "link-exit");
+    sshReconnectArm(null, "power-resume");
+    sshReconnectNow(0);
+    sshSessionEnded(0);
+    try std.testing.expect(shells[0].ssh_reconnect.phase == .connected);
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(@as(usize, 0), kills);
+    try std.testing.expectEqual(@as(usize, 0), ended_logs);
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expect(!g_ssh_reconnect_timer_on);
+    for (0..120) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    try std.testing.expectEqual(@as(usize, 0), timers);
+}
+`), 'ISSUE-513 fixture');
+});
+
+test('ISSUE-513 disconnected countdown repaints only its header and respects backoff', () => {
+  zig(runtime(`
+test "ISSUE-513 bounded countdown repaint" {
+    shells[0].process = null;
+    shells[0].disconnected = true;
+    shells[0].ssh_reconnect.phase = .disconnected;
+    shells[0].ssh_reconnect.next_tick = fake_now + 30000;
+    for (0..29) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 29), repaints);
+    try std.testing.expectEqual(@as(usize, 0), full_repaints);
+    try std.testing.expectEqual(@as(i32, 0), last_paint.left);
+    try std.testing.expectEqual(@as(i32, 1920), last_paint.right);
+    try std.testing.expectEqual(threadTitleTop(), last_paint.top);
+    try std.testing.expectEqual(threadTitleTop() + threadTitleHeight(), last_paint.bottom);
+    fake_now += 1000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), spawns);
+}
+`), 'ISSUE-513 bounded');
+});
+
+test('ISSUE-513 connected idle monitoring does not respawn or repaint', () => {
+  zig(runtime(`
+test "ISSUE-513 connected idle" {
+    for (0..120) |_| {
+        fake_now += 1000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    try std.testing.expect(!shells[0].disconnected);
+}
+`), 'ISSUE-513 connected');
 });

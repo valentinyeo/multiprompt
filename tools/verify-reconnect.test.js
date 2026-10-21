@@ -35,13 +35,21 @@ assert.doesNotMatch(drive, /Stop-Process -Name|taskkill \/IM/i);
 assert.match(drive, /remaining_owned_processes/);
 const skill = read('.claude/skills/verify-multiprompt/SKILL.md');
 assert.match(skill, /^---\nname: verify-multiprompt\ndescription:/);
-for (const section of ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Helpers']) assert.ok(skill.includes(`## ${section}`));
+for (const section of ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Maintain']) assert.ok(skill.includes(`## ${section}`));
 assert.match(skill, /never runs on the Linux server/);
+assert.match(skill, /\.github\/workflows\/verify-reconnect\.yml/);
+assert.match(skill, /tools\/verify-reconnect\//);
+const baseline = ['appearance.md', 'command-palette.md', 'inbox.md', 'sessions.md', 'workspaces.md'];
+const reconnect = ['ended-remote-session.md', 'saved-remote-workspace.md', 'ssh-tab-reconnect.md'];
 const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f !== 'README.md');
-assert.ok(features.length >= 3 && features.length <= 5);
+assert.deepEqual(features.sort(), [...baseline, ...reconnect].sort());
+const index = read('.claude/skills/verify-multiprompt/features/README.md');
 for (const file of features) {
+  assert.ok(index.includes(`](${file})`), file);
   assert.deepEqual(read(`.claude/skills/verify-multiprompt/features/${file}`).match(/^## .+$/gm), [
-    '## Sub-features', '## How to get to it (user POV)', '## Driving it with the Windows reconnect harness', '## Gotchas',
+    '## Sub-features', '## How to get to it (user POV)',
+    baseline.includes(file) ? '## Driving it with control.ps1' : '## Driving it with the Windows reconnect harness',
+    '## Gotchas',
   ]);
 }
 console.log('reconnect verification source checks passed');

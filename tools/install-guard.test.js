@@ -37,7 +37,7 @@ const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_TEST_LOG, JSON.stringify(args) + '\\n');
 if (process.env.GH_TEST_FAIL === '1') process.exit(17);
 if (args[0] === 'api') console.log(process.env.GH_TEST_METADATA);
-else if (args[1] === 'view') console.log('v0.28.739');
+else if (args[1] === 'view') console.log(JSON.parse(process.env.GH_TEST_METADATA).tag_name);
 else if (args[1] === 'download') {
   const dir = args[args.indexOf('--dir') + 1];
   for (let i = 0; i < args.length; i++) if (args[i] === '--pattern') fs.copyFileSync(path.join(process.env.GH_TEST_ASSETS, args[++i]), path.join(dir, args[i]));
@@ -56,6 +56,10 @@ if (command.includes('Get-Process zig')) {
   const count = fs.readFileSync(process.env.LH_TEST_LOG, 'utf8').split('Get-Process zig').length - 1;
   if (process.env.LH_TEST_ZIG === 'error') { console.log('ZIG_CLEAR'); process.exit(17); }
   console.log(process.env.LH_TEST_ZIG === 'before' || (process.env.LH_TEST_ZIG === 'after' && count > 1) ? 'ZIG_RUNNING' : 'ZIG_CLEAR');
+}
+else if (command.includes('MPVERSION=')) {
+  console.log(process.env.LH_TEST_INSTALLED_VERSION);
+  if (process.env.LH_TEST_VERSION_ERROR === '1') process.exit(17);
 }
 else if (command.includes('Get-FileHash')) {
   const name = command.match(/([^\\\\']+)' -Algorithm/)[1];
@@ -78,11 +82,11 @@ else if (!/release-upload|Rename-Item|extension-reload/.test(command)) process.e
   const ghLog = path.join(dir, 'gh.jsonl');
   return { run, dir, exe, receipt, hash, checkReceipt, save, releaseDir, metadata,
     cli: (file = receipt, sha = run.binary.exeSha256) => spawnSync(process.execPath, [path.join(__dirname, 'chat-bench/receipt.mjs'), file, sha], { encoding: 'utf8' }),
-    install: (args, { pcHash = run.binary.exeSha256, extension = 'self-heal', zig = '', ghFail = '' } = {}) => {
+    install: (args, { pcHash = run.binary.exeSha256, extension = 'self-heal', zig = '', ghFail = '', installedVersion = '0.28.738', versionError = '' } = {}) => {
       fs.writeFileSync(log, '');
       fs.writeFileSync(ghLog, '');
       const result = spawnSync('bash', [path.join(__dirname, 'install-laptop1.sh'), ...args], { cwd: dir, encoding: 'utf8',
-        env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, LH_TEST_LOG: log, LH_TEST_HASH: pcHash, LH_TEST_EXTENSION: extension, LH_TEST_ZIG: zig,
+        env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, LH_TEST_LOG: log, LH_TEST_HASH: pcHash, LH_TEST_EXTENSION: extension, LH_TEST_ZIG: zig, LH_TEST_INSTALLED_VERSION: installedVersion, LH_TEST_VERSION_ERROR: versionError,
           GH_TEST_LOG: ghLog, GH_TEST_METADATA: JSON.stringify(metadata), GH_TEST_ASSETS: releaseDir, GH_TEST_FAIL: ghFail }, timeout: 20000 });
       const readLog = file => fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
       return { ...result, calls: readLog(log), ghCalls: readLog(ghLog) };
@@ -192,6 +196,26 @@ for (const mode of ['failed', 'invalid', 'missing', 'different-binary']) {
     assert.match(result.stderr, /RECEIPT_REJECTED:/);
     if (mode === 'different-binary') assert.match(result.stderr, /expected executable SHA-256 does not match receipt/);
     assert.deepEqual(result.calls, []);
+  });
+}
+
+for (const matchingHash of [true, false]) {
+  test(`IGSH-530 GitHub receipt ${matchingHash ? 'accepts the verified release' : 'rejects a different release hash'}`, async t => {
+    const f = await setup(t);
+    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multiprompt.exe';
+    if (!matchingHash) f.run.binary.exeSha256 = '0'.repeat(64);
+    f.save();
+    const original = fs.readFileSync(f.receipt, 'utf8');
+    const result = f.install(['--release', 'v0.28.739', '--bench', f.receipt]);
+    assert.equal(result.status, matchingHash ? 0 : 1, result.stderr);
+    assert.equal(fs.readFileSync(f.receipt, 'utf8'), original);
+    if (matchingHash) {
+      assert.match(result.stdout, /RECEIPT_OK/);
+      assert(result.calls.some(call => call[1]?.includes('Rename-Item')));
+    } else {
+      assert.match(result.stderr, /expected executable SHA-256 does not match receipt/);
+      assert.deepEqual(result.calls, []);
+    }
   });
 }
 
@@ -326,3 +350,79 @@ for (const mode of ['self-heal', 'healed-after-first', 'fallback', 'stuck']) {
     assert.deepEqual(result.ghCalls.at(-1).filter((_, i, args) => args[i - 1] === '--pattern'), ['SHA256SUMS.txt', 'multiprompt-extension.zip']);
   });
 }
+
+for (const [name, installedVersion, candidate, allowed] of [
+  ['older refused', '0.28.763', '0.28.762', false],
+  ['equal refused', '0.28.763', '0.28.763', false],
+  ['newer allowed', '0.28.762', '0.28.763', true],
+  ['numeric compare allows 0.28.100 over 0.28.99', '0.28.99', '0.28.100', true],
+  ['numeric compare refuses 0.28.79 over 0.28.788', '0.28.788', '0.28.79', false],
+  ['major version wins', '1.99.999', '2.0.0', true],
+  ['minor version wins', '0.29.0', '0.28.999', false],
+  ['leading zero components are decimal', '0.28.009', '0.28.010', true],
+]) {
+  test(`ISSUE-433 ${name}`, async t => {
+    const f = await setup(t);
+    f.metadata.tag_name = `v${candidate}`;
+    const result = f.install(['--release', 'latest', '--bench', f.receipt], { installedVersion });
+    assert.equal(result.status, allowed ? 0 : 1, result.stderr);
+    const probe = result.calls.findIndex(call => call[1]?.includes('MPVERSION='));
+    assert(probe >= 0, 'reads the installed exe without requiring a running app');
+    assert.match(result.calls[probe][1], /ReadAllBytes\(\$exe\)/);
+    assert.match(result.calls[probe][1], /\\zig-out\\bin\\multiprompt\.exe/);
+    if (allowed) {
+      const firstWrite = result.calls.findIndex(call => call[0] === 'write' || /New-Item|Rename-Item|Copy-Item/.test(call[1]));
+      assert(probe < firstWrite, 'version check precedes every upload, rename, and copy');
+      const install = result.calls.find(call => call[1]?.includes('Rename-Item'))[1];
+      assert(install.includes(`$v='v${installedVersion}'`));
+    } else {
+      assert(result.stderr.includes(`refusing install: installed ${installedVersion} is equal or newer than candidate ${candidate} (pass --allow-downgrade to override)`));
+      assert(!result.calls.some(call => call[0] === 'write' || /New-Item|Rename-Item|Copy-Item/.test(call[1])));
+    }
+  });
+}
+
+for (const installedVersion of ['0.28.740', '0.28.739', '']) {
+  test(`ISSUE-433 --allow-downgrade allows ${installedVersion || 'unreadable'} installed version`, async t => {
+    const f = await setup(t);
+    const result = f.install(['--release', 'v0.28.739', '--bench', f.receipt, '--allow-downgrade'], { installedVersion });
+    assert.equal(result.status, 0, result.stderr);
+    assert(result.calls.some(call => call[1]?.includes('MPVERSION=')));
+    assert(result.calls.some(call => call[1]?.includes('Rename-Item')));
+  });
+}
+
+for (const [name, installedVersion, versionError] of [
+  ['missing marker and fallbacks', '', ''],
+  ['malformed version', 'not-a-version', ''],
+  ['ambiguous versions', '0.28.738\n0.28.740', ''],
+  ['failed read despite version output', '0.28.738', '1'],
+]) {
+  test(`ISSUE-433 unreadable installed version refused: ${name}`, async t => {
+    const f = await setup(t);
+    const result = f.install(['--release', 'v0.28.739', '--bench', f.receipt], { installedVersion, versionError });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /refusing install: installed version cannot be read \(pass --allow-downgrade to override\)/);
+    assert(!result.calls.some(call => call[0] === 'write' || /New-Item|Rename-Item|Copy-Item/.test(call[1])));
+  });
+}
+
+test('ISSUE-433 extension-only skips exe version checks even when unreadable', async t => {
+  const f = await setup(t);
+  const result = f.install(['--extension-only', '--release', 'latest'], { installedVersion: '', versionError: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert(!result.calls.some(call => /MPVERSION=|FileVersionInfo|Rename-Item/.test(call[1])));
+});
+
+test('ISSUE-433 shared guard reads the on-disk marker before file-version and embedded-title fallbacks', () => {
+  const helper = fs.readFileSync(path.join(__dirname, 'install-version-guard.sh'), 'utf8');
+  const installer = fs.readFileSync(path.join(__dirname, 'install-laptop1.sh'), 'utf8');
+  assert.match(installer, /source "\$script_dir\/install-version-guard\.sh"/);
+  assert.equal(installer.split('check_install_version ').length, 2);
+  assert(helper.indexOf('MPVERSION=') < helper.indexOf('FileVersionInfo'));
+  assert(helper.indexOf('FileVersionInfo') < helper.indexOf('multiprompt v'));
+  assert.match(helper, /\[Text\.Encoding\]::ASCII\.GetString/);
+  assert.match(helper, /\[Text\.Encoding\]::Unicode\.GetString/);
+  assert.match(helper, /\$markers\.Count -gt 1/);
+  assert.doesNotMatch(helper, /Get-Process|MainWindowTitle|Start-Process/);
+});

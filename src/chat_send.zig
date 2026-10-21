@@ -55,6 +55,9 @@ const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const chatTrimRawConsoleRow = @import("chat_capture.zig").chatTrimRawConsoleRow;
 const chatFileIdentityForShell = @import("chat_session.zig").chatFileIdentityForShell;
 const chatPerf = @import("chat_session.zig").chatPerf;
+const chatBenchEnabled = @import("chat_session.zig").chatBenchEnabled;
+const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const chatHistoryPath = @import("chat_session.zig").chatHistoryPath;
 const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
@@ -1637,7 +1640,7 @@ pub fn chatOutboxClearActive() void {
 }
 
 pub fn armSshReconnectTimerIfNeeded() void {
-    if (app_state.g_main_hwnd == null) return;
+    if (chatBenchEnabled() or app_state.g_main_hwnd == null) return;
     var any = false;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) {
@@ -1655,6 +1658,7 @@ pub fn armSshReconnectTimerIfNeeded() void {
 }
 
 pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
+    if (chatBenchEnabled()) return;
     const now = GetTickCount64();
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
         if (affected != null and affected.? != i) continue;
@@ -1671,7 +1675,7 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
 }
 
 pub fn sshDisconnect(idx: u32, reason: []const u8) void {
-    if (idx >= app_state.shell_count) return;
+    if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended) return;
     var exit_code: DWORD = std.math.maxInt(DWORD);
@@ -1688,7 +1692,7 @@ pub fn sshDisconnect(idx: u32, reason: []const u8) void {
 }
 
 pub fn sshReconnectNow(idx: u32) void {
-    if (idx >= app_state.shell_count) return;
+    if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
     if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
@@ -1719,6 +1723,7 @@ fn sshNetworkVeto(idx: u32, now: u64) bool {
 }
 
 pub fn sshAutoReconnectTick() void {
+    if (chatBenchEnabled()) return;
     sshProbeFinish();
     const now = GetTickCount64();
     var attempted = [_]bool{false} ** 256;
@@ -1746,8 +1751,15 @@ pub fn sshAutoReconnectTick() void {
     }
     sshProbeStart();
     armSshReconnectTimerIfNeeded();
-    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected) {
-        @import("drawing.zig").invalidateReconnectContent(app_state.active_shell);
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected and
+        @import("drawing.zig").reconnectTabVisible(app_state.active_shell))
+    {
+        var header: RECT = undefined;
+        if (GetClientRect(app_state.g_main_hwnd, &header) != 0) {
+            header.top = threadTitleTop();
+            header.bottom = header.top + threadTitleHeight();
+            _ = InvalidateRect(app_state.g_main_hwnd, &header, 0);
+        }
     }
 }
 
@@ -1770,6 +1782,7 @@ pub fn sshRequestSessionProbe() void {
 }
 
 fn sshSessionEnded(idx: u32) void {
+    if (chatBenchEnabled()) return;
     const shell = &app_state.shells[idx];
     if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
@@ -1811,6 +1824,7 @@ var ssh_probe_next_tick: u64 = 0;
 var ssh_probe_misses: [256]u8 = @splat(0);
 
 fn sshProbeStart() void {
+    if (chatBenchEnabled()) return;
     if (ssh_probe_job != null or GetTickCount64() < ssh_probe_next_tick) return;
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
@@ -1872,6 +1886,7 @@ fn sshProbeThread(job: *SshProbeJob) void {
 }
 
 fn sshProbeFinish() void {
+    if (chatBenchEnabled()) return;
     const job = ssh_probe_job orelse return;
     if (!job.finished.load(.acquire)) {
         if (GetTickCount64() -| job.started_tick < 45_000) return;
