@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.777", .items = &.{
+        .{ .text = "The inbox icon, Send button, rounded panels and small symbols now have smoother edges at every display scale.", .ticket = "IGSH-444" },
+    } },
     .{ .ver = "0.28.776", .items = &.{
         .{ .text = "Shell borders and symbols now display correctly even when Nordwand Mono is already installed.", .ticket = "IGSH-443" },
     } },
