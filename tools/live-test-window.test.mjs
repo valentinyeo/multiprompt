@@ -153,6 +153,7 @@ before(async () => {
   const source = fs.readFileSync(path.join(root, 'tools/chat-reply-agent.c'), 'utf8');
   const body = source.slice(source.indexOf('    FILE *pid ='))
     .replaceAll('C:\\\\stub-', 'stub-')
+    .replace('    SetConsoleTitleW(', '    HWND console = GetConsoleWindow();\n    for (unsigned i = 0; console && !GetParent(console) && i < 1000; i++) Sleep(10);\n    if (!console || !GetParent(console)) return 5;\n    SetConsoleTitleW(')
     .replace('const WCHAR message[] = L"\\x25cf Reply fixture line\\r\\n\\r\\n";', `const WCHAR message[] = L"\\x25cf ${first}\\r\\n\\r\\n\\x25cf ${second}\\r\\n\\r\\n";`);
   assert.ok(body.includes(first));
   const agent = path.join(fixtureDir, 'agent.c');
@@ -260,23 +261,27 @@ test('ISSUE-438 own-window capture, drag Ctrl+C and right-click Copy return exac
   const rect = JSON.parse(rectResult.output);
   assert.ok(rect.right > rect.left && rect.bottom > rect.top);
   const screenshot = path.join(prefix, 'drive_c/before.png');
-  const shot = tool('shot', 'C:\\before.png');
-  assert.equal(shot.status, 0, shot.output);
-  assert.equal(fs.readFileSync(screenshot).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
   const artifact = path.join(os.tmpdir(), `mp-livetest-${process.pid}-capture.png`);
-  fs.copyFileSync(screenshot, artifact);
+  const enlarged = path.join(prefix, 'large.png');
+  let words;
+  await until('rendered fixture transcript', 30000, () => {
+    const shot = tool('shot', 'C:\\before.png');
+    assert.equal(shot.status, 0, shot.output);
+    assert.equal(fs.readFileSync(screenshot).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    fs.copyFileSync(screenshot, artifact);
+    assert.equal(run('convert', [screenshot, '-resize', '400%', enlarged]).status, 0);
+    const ocr = run('tesseract', [enlarged, 'stdout', '--psm', '11', 'tsv']);
+    assert.equal(ocr.status, 0, ocr.stderr);
+    words = ocr.stdout.trim().split('\n').slice(1).map(line => {
+      const fields = line.split('\t');
+      return { text: fields[11], x: Number(fields[6]) / 4, y: Number(fields[7]) / 4, w: Number(fields[8]) / 4, h: Number(fields[9]) / 4 };
+    }).filter(word => word.text);
+    return ['Anchor', 'closing.', 'Second', 'text.'].every(text => words.filter(word => word.text === text).length === 1);
+  });
   console.log(`LIVETEST_SCREENSHOT ${artifact}`);
   const dimensions = run('identify', ['-format', '%w %h', screenshot]);
   assert.equal(dimensions.status, 0, dimensions.stderr);
   assert.equal(dimensions.stdout, `${rect.right - rect.left} ${rect.bottom - rect.top}`);
-  const enlarged = path.join(prefix, 'large.png');
-  assert.equal(run('convert', [screenshot, '-resize', '400%', enlarged]).status, 0);
-  const ocr = run('tesseract', [enlarged, 'stdout', '--psm', '11', 'tsv']);
-  assert.equal(ocr.status, 0, ocr.stderr);
-  const words = ocr.stdout.trim().split('\n').slice(1).map(line => {
-    const fields = line.split('\t');
-    return { text: fields[11], x: Number(fields[6]) / 4, y: Number(fields[7]) / 4, w: Number(fields[8]) / 4, h: Number(fields[9]) / 4 };
-  }).filter(word => word.text);
   const word = text => {
     const found = words.filter(w => w.text === text);
     assert.equal(found.length, 1, `${text}: ${JSON.stringify(words)}`);
@@ -308,6 +313,12 @@ test('ISSUE-438 own-window capture, drag Ctrl+C and right-click Copy return exac
 });
 
 test('own window: stop closes only the test window and removes its folder', { timeout: 120000 }, async () => {
+    if (folder) {
+      for (const name of ['debug.log', 'session-livetest.json']) {
+        const file = path.join(folder, 'appdata/ZigShell', name);
+        if (fs.existsSync(file)) fs.copyFileSync(file, path.join(os.tmpdir(), `mp-livetest-${process.pid}-${name}`));
+      }
+    }
   const result = tool('stop');
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, new RegExp(`stopped pid=${state.pid} folder_removed=1`));
