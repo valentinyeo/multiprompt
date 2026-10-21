@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.788", .items = &.{
+        .{ .text = "Close all browser panes across every workspace from Ctrl+K while keeping their saved URLs.", .ticket = "IGSH-503" },
+    } },
     .{ .ver = "0.28.787", .items = &.{
         .{ .text = "Multiprompt opens straight to your saved chat and sidebar, without a progress bar.", .ticket = "IGSH-502" },
         .{ .text = "Connections, other tabs, the browser and sign-in checks load after the window appears.", .ticket = "IGSH-502" },
