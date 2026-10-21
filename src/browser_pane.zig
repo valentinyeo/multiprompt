@@ -306,7 +306,7 @@ fn browserUserDataDir() []const u8 {
     };
 }
 
-pub fn workspaceProfileForShell(idx: u32, buf: *[32]u8) ![]const u8 {
+fn workspaceProfileIdentityForShell(idx: u32, buf: *[32]u8) ![]const u8 {
     if (!browser_workspace_profile.IGSH_224) return "";
     if (idx >= app_state.shell_count) return error.MissingWorkspace;
     const ws = app_state.shells[idx].workspace;
@@ -317,6 +317,23 @@ pub fn workspaceProfileForShell(idx: u32, buf: *[32]u8) ![]const u8 {
     else
         return error.MissingWorkspaceId;
     return browser_workspace_profile.token(buf, browserEngineToken(), id);
+}
+
+pub fn workspaceProfileForShell(idx: u32, buf: *[32]u8) ![]const u8 {
+    const desired = try workspaceProfileIdentityForShell(idx, buf);
+    if (browser_workspace_profile.IGSH_224 and app_state.shells[idx].browser_hwnd != null and
+        !std.mem.eql(u8, desired, &app_state.shells[idx].browser_profile_token)) return error.WorkspaceProfileChanged;
+    return desired;
+}
+
+pub fn reconcileBrowserWorkspace(idx: u32) void {
+    if (!browser_workspace_profile.IGSH_224 or idx >= app_state.shell_count or app_state.shells[idx].browser_hwnd == null) return;
+    var expected: [32]u8 = undefined;
+    const desired = workspaceProfileIdentityForShell(idx, &expected) catch {
+        closeBrowserForShell(idx);
+        return;
+    };
+    if (!std.mem.eql(u8, desired, &app_state.shells[idx].browser_profile_token)) closeBrowserForShell(idx);
 }
 
 threadlocal var browser_command_profile: []const u8 = "";
@@ -2467,12 +2484,16 @@ pub fn handleWorkspaceProfileReady(pointer: usize) void {
     }
     var current: [32]u8 = undefined;
     const value = workspaceProfileForShell(idx, &current) catch return;
-    if (!std.mem.eql(u8, value, &job.token)) return;
+    if (!std.mem.eql(u8, value, &job.token)) {
+        if (idx == app_state.active_shell) launchBrowserForShellEx(idx, false);
+        return;
+    }
     launchBrowserForShellEx(idx, job.user_initiated and idx == app_state.active_shell);
 }
 
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
+    reconcileBrowserWorkspace(idx);
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     const launch_now = GetTickCount64();
     if (app_state.shells[idx].browser_relaunch_after_tick != 0 and launch_now < app_state.shells[idx].browser_relaunch_after_tick) return;
@@ -2482,6 +2503,7 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
         return;
     }
     if (!prepareWorkspaceBrowser(idx, user_initiated)) return;
+    _ = workspaceProfileIdentityForShell(idx, &app_state.shells[idx].browser_profile_token) catch return;
     ensureBrowserDefaultUrl(idx);
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_native = app_state.g_browser_native_default;
@@ -2984,6 +3006,7 @@ pub fn updateBrowserVisibility() void {
     defer app_state.g_updating_browser_visibility = false;
     browserTrace("updVis enter");
     if (app_state.g_app_closing) return;
+    reconcileBrowserWorkspace(app_state.active_shell);
     if (app_state.g_monitor_transition.active) {
         parkBrowserForMonitorTransition();
         return;

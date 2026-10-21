@@ -923,6 +923,7 @@ pub fn handleZsbBindRequest() void {
     const session = session_buf[0..session_len];
     var found = false;
     if (findZsbPaneTarget(session)) |ti| {
+        @import("browser_pane.zig").reconcileBrowserWorkspace(ti);
         var profile: [32]u8 = std.mem.zeroes([32]u8);
         _ = @import("browser_pane.zig").workspaceProfileForShell(ti, &profile) catch {
             finishZsbBindRequest(false);

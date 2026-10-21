@@ -40,6 +40,7 @@ pub fn isWorkspaceToken(value: []const u8) bool {
 }
 
 pub fn path(buf: []u8, local: []const u8, engine: []const u8, value: []const u8) ![]const u8 {
+    if (!std.mem.eql(u8, engine, "edge") and !std.mem.eql(u8, engine, "chrome")) return error.InvalidEngine;
     if (!isWorkspaceToken(value) or value[0] != engine[0]) return error.InvalidProfileToken;
     return std.fmt.bufPrint(buf, "{s}\\ZigShell\\BrowserWorkspaces\\{s}\\{s}", .{ local, engine, value[2..] });
 }

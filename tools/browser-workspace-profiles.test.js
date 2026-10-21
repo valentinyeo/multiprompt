@@ -27,3 +27,12 @@ test('IGSH-224 remote commands cannot override the bound profile or window with 
   assert.match(bridge, /zsb_profile_token = app_state\.g_zsb_bind_info\.profile/);
   assert.match(bridge, /" --profile \{s\}"/);
 });
+
+test('IGSH-224 moving a browser tab cannot retain or route through the previous workspace profile', () => {
+  const pane = read('src/browser_pane.zig');
+  const bridge = read('src/browser_bridge.zig');
+  assert.match(pane, /return error\.WorkspaceProfileChanged/);
+  assert.match(pane, /reconcileBrowserWorkspace\(app_state\.active_shell\)/);
+  assert.match(pane, /workspaceProfileIdentityForShell\(idx, &app_state\.shells\[idx\]\.browser_profile_token\)/);
+  assert.match(bridge, /reconcileBrowserWorkspace\(ti\)/);
+});

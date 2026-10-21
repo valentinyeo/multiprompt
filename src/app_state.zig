@@ -317,6 +317,7 @@ pub const Shell = struct {
     browser_connection_id: u64 = 0,
     browser_open_failed: bool = false,
     browser_profile_preparing: bool = false,
+    browser_profile_token: [32]u8 = std.mem.zeroes([32]u8),
     browser_suspended: bool = false,
     browser_native: bool = true,
     browser_split_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
