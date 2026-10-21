@@ -55,6 +55,11 @@ var alive = true;
 var spawns: usize = 0;
 var kills: usize = 0;
 var timers: usize = 0;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+fn chatBenchEnabled() bool { return false; }
+fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
+fn threadTitleTop() i32 { return 10; }
+fn threadTitleHeight() i32 { return 44; }
 var veto_logs: usize = 0;
 var spawn_ok = true;
 var fake_exit_code: u32 = 0;
@@ -77,7 +82,7 @@ fn CloseHandle(_: ?*anyopaque) u32 { return 1; }
 fn killProcessTree(_: u32) void { kills += 1; }
 fn SetTimer(_: ?*anyopaque, _: u32, _: u32, _: ?*anyopaque) u32 { timers += 1; return 1; }
 fn KillTimer(_: ?*anyopaque, _: u32) u32 { return 1; }
-fn InvalidateRect(_: ?*anyopaque, _: ?*anyopaque, _: u32) u32 { return 1; }
+fn InvalidateRect(_: ?*anyopaque, _: ?*const RECT, _: u32) u32 { return 1; }
 fn debugLog(line: []const u8) void { if (std.mem.indexOf(u8, line, "veto reason=windows-network-offline id=42") != null) veto_logs += 1; }
 fn logSessionAuditAlways(_: []const u8) void {}
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
