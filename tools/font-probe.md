@@ -12,7 +12,7 @@ Run `font-probe.exe` in an empty output directory on Windows. It creates no wind
 
 The fixed line is `Clear bold words make **bold** text readable`. The repeated word allows a same-glyph bold/body ink comparison rather than confounding different letter shapes. Word boxes include vertical padding; JSON also records the physical em size. Normalize coverage sums by character count times em-size squared for comparable per-glyph ink. A nonzero pixel is inked; partial coverage is strictly between 0.1 and 0.9.
 
-`--shipped` renders only `fonts.ChatFontOptions` defaults through the shared `fonts.chat()` creation path used by Chat View. This is the GDI renderer, not a capture of a live app window. Candidate options do not change shipped weights or quality.
+`--shipped` renders only `fonts.ChatFontOptions` defaults through the shared `fonts.chat()` creation path used by Chat View. Shipped defaults are body 400, bold 700, GDI quality 4. Medium faces remain bundled for the explicit w500 comparison candidates. This is the GDI renderer, not a capture of a live app window. Candidate options do not change shipped weights or quality.
 
 Options:
 

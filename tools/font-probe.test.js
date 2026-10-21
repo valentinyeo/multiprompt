@@ -6,7 +6,7 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 
 test('probe and Chat View share the body and bold creation path without changing shipped defaults', () => {
   const fonts = read('src/fonts.zig');
-  assert.match(fonts, /body_weight: i32 = 500/);
+  assert.match(fonts, /body_weight: i32 = 400/);
   assert.match(fonts, /bold_weight: i32 = 700/);
   assert.match(fonts, /CHAT_QUALITY: w\.DWORD = 4/);
   for (const name of ['chat_render', 'chat_composer', 'font_probe']) {

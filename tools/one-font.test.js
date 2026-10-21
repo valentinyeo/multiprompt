@@ -148,7 +148,7 @@ test('CI includes both structural regressions and authentic Windows GDI selectio
   assert.match(build, /test_step\.dependOn\(&b\.addRunArtifact\(font_tests\)\.step\)/);
 });
 
-test('Chat View uses grayscale Medium body text, real Bold emphasis and unchanged centralized leading', () => {
+test('Chat View uses grayscale Regular body text, real Bold emphasis and unchanged centralized leading', () => {
   const fonts = read('src/fonts.zig');
   assert.match(fonts, /UI_MEDIUM_FACE = "IBM Plex Sans Medm"/);
   assert.match(fonts, /CHAT_QUALITY: w\.DWORD = 4;/);
@@ -164,7 +164,7 @@ test('Chat View uses grayscale Medium body text, real Bold emphasis and unchange
       assert.match(request, /MONO_FACE/);
     }
   }
-  assert.match(fonts, /body_weight: i32 = 500/);
+  assert.match(fonts, /body_weight: i32 = 400/);
   assert.match(fonts, /bold_weight: i32 = 700/);
   assert.match(fonts, /quality: w\.DWORD = CHAT_QUALITY/);
   assert.match(read('src/chat_composer.zig'), /\.chat\(-uiScaled\(app_state\.g_chat_font_pt\), false, false, false, \.\{\}\)/);
