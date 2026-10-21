@@ -506,7 +506,6 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             while (end < span.text.end and text[end] != ' ' and text[end] != '\t' and text[end] != '\r' and text[end] != '\n') : (end += 1) {}
             var target = span.target;
             if (raw_link != null and raw_link.?.end <= pos) raw_link = link_detect.next(text, pos);
-            // Parser targets are atomic; the forward scan only fills plain-text gaps.
             if (target == null and !style.code) {
                 if (raw_link) |link| {
                     if (link.start == pos) {
@@ -831,6 +830,7 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
 }
 
 test "IGSH-537 clicking either side of a URL underscore opens the exact address" {
+    @setEvalBranchQuota(10000);
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
