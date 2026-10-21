@@ -2554,6 +2554,7 @@ pub fn switchToShell(idx: u32) void {
     }
     app_state.g_browser_focus_mode = false;
     const prev = app_state.active_shell;
+    @import("browser_pane.zig").rememberActiveBrowserTabUrl();
     if (!app_state.g_restoring and idx < app_state.shell_count and prev < app_state.shell_count and idx != prev) {
         app_state.g_previous_shell_sid = app_state.shells[prev].shell_id;
     }

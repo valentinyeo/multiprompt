@@ -1777,6 +1777,21 @@ pub fn chatComposerInsertAtCaret(text: []const u16) ?u32 {
     return @intCast(insert.caret);
 }
 
+pub fn chatInsertBrowserTabUrl() void {
+    if (app_state.active_shell >= app_state.shell_count or app_state.g_edit_hwnd != null or
+        app_state.g_search_active or app_state.g_inbox_active or app_state.g_shortcuts_active or
+        app_state.g_changelog_active or app_state.g_url_picker_active or app_state.g_all_sessions_active or app_state.g_snippet_create_active) return;
+    const url = @import("browser_pane.zig").browserTabUrlForChat() orelse {
+        showHeaderNoticeAscii("No browser tab URL available", 2000, false);
+        return;
+    };
+    var wide: [512]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&wide, url) catch return;
+    if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+    if (!app_state.g_chat_active) return;
+    if (chatComposerInsertAtCaret(wide[0..len])) |caret| requestShotFocus(app_state.active_shell, caret);
+}
+
 pub fn requestShotFocus(idx: usize, caret: ?u32) void {
     if (idx != app_state.active_shell) {
         debugLog("[paste-focus] skip: target tab is no longer active");
