@@ -1628,7 +1628,49 @@ pub var g_graceful_exit: bool = false;
 pub var g_quit_all_in_progress: bool = false;
 pub var g_app_closing: bool = false;
 
-const SPAWN_TITLE_CAP: usize = 1024;
+pub const SPAWN_TITLE_CAP: usize = 1024;
+
+pub fn allocateShellId() ?u32 {
+    return allocateShellIdFrom(&next_shell_id, shells[0..shell_count]);
+}
+
+fn allocateShellIdFrom(next: *u32, current: anytype) ?u32 {
+    var used: [SPAWN_TITLE_CAP]bool = @splat(false);
+    for (current) |shell| {
+        if (shell.shell_id < SPAWN_TITLE_CAP) used[shell.shell_id] = true;
+    }
+    var candidate: u32 = if (next.* == 0 or next.* >= SPAWN_TITLE_CAP) 1 else next.*;
+    for (1..SPAWN_TITLE_CAP) |_| {
+        const id = candidate;
+        candidate = if (candidate + 1 == SPAWN_TITLE_CAP) 1 else candidate + 1;
+        if (!used[id]) {
+            next.* = candidate;
+            return id;
+        }
+    }
+    return null;
+}
+
+test "ISSUE-511 shell ids wrap skip used ids and remain bounded over long sessions" {
+    const Used = struct { shell_id: u32 };
+    const current = [_]Used{ .{ .shell_id = 1 }, .{ .shell_id = 2 }, .{ .shell_id = 1023 } };
+    var next: u32 = 1023;
+    try std.testing.expectEqual(@as(?u32, 3), allocateShellIdFrom(&next, &current));
+    for (0..SPAWN_TITLE_CAP * 4) |_| {
+        const id = allocateShellIdFrom(&next, &current).?;
+        try std.testing.expect(id > 2 and id < SPAWN_TITLE_CAP - 1);
+    }
+    for ([_]u32{ 0, 1024, std.math.maxInt(u32) }) |invalid| {
+        next = invalid;
+        try std.testing.expectEqual(@as(?u32, 3), allocateShellIdFrom(&next, &current));
+    }
+    var full: [SPAWN_TITLE_CAP - 1]Used = undefined;
+    for (&full, 1..) |*shell, id| shell.shell_id = @intCast(id);
+    try std.testing.expectEqual(@as(?u32, null), allocateShellIdFrom(&next, &full));
+    full[511].shell_id = 0;
+    try std.testing.expectEqual(@as(?u32, 512), allocateShellIdFrom(&next, &full));
+}
+
 pub const SPAWN_TITLES = blk: {
     @setEvalBranchQuota(800000);
     var titles: [SPAWN_TITLE_CAP]LPCWSTR = undefined;

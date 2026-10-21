@@ -733,7 +733,6 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
-const SPAWN_TITLES = @import("app_state.zig").SPAWN_TITLES;
 const defaultWorkspaceName = @import("workspaces.zig").defaultWorkspaceName;
 const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const findWorkspace = @import("workspaces.zig").findWorkspace;
@@ -6608,6 +6607,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                     return 0;
                 }
+                if (got_code and exit_code == @import("win32.zig").STILL_ACTIVE) return 0;
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
@@ -7436,7 +7436,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                                 return 0;
                             }
                         }
-                        if (app_state.shell_count < MAX_SHELLS and @as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
+                        if (app_state.shell_count < MAX_SHELLS) {
+                            const shell_id = app_state.allocateShellId() orelse return 0;
                             const adopt_h: HANDLE = @ptrFromInt(transfer.console_hwnd);
 
                             _ = ShowWindow(adopt_h, SW_HIDE);
@@ -7468,8 +7469,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.inbox_excluded = transfer.inbox_excluded != 0;
                             new_shell.claude_session = transfer.claude_session != 0;
                             new_shell.tmux_host = transfer.tmux_host;
-                            new_shell.shell_id = app_state.next_shell_id;
-                            app_state.next_shell_id += 1;
+                            new_shell.shell_id = shell_id;
 
                             const nlen = @min(transfer.name_len, 63);
                             for (0..nlen) |ni| {
@@ -7980,10 +7980,7 @@ fn initializeDeferred(hwnd: HANDLE) void {
         new_shell.last_used = app_state.g_adopt_last_used;
         new_shell.input = app_state.g_adopt_input;
         new_shell.visits = app_state.g_adopt_visits;
-        if (@as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
-            new_shell.shell_id = app_state.next_shell_id;
-            app_state.next_shell_id += 1;
-        }
+        new_shell.shell_id = app_state.allocateShellId() orelse return;
 
         if (app_state.g_adopt_name_len > 0) {
             for (0..app_state.g_adopt_name_len) |ni| {

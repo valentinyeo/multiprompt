@@ -537,7 +537,7 @@ fn sshInputPump(input: HANDLE, output: HANDLE, activity: *std.atomic.Value(u64))
     }
 }
 
-pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, timeout_ms: DWORD) struct { len: usize, success: bool } {
+pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, timeout_ms: DWORD) struct { len: usize, success: bool, exit_code: DWORD = std.math.maxInt(DWORD) } {
     var sa = SECURITY_ATTRIBUTES{
         .nLength = @sizeOf(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = null,
@@ -650,7 +650,7 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
             _ = TerminateProcess(pi.hProcess, 1);
             _ = CloseHandle(pi.hProcess);
             _ = CloseHandle(read_pipe);
-            return .{ .len = 0, .success = false };
+            return .{ .len = total, .success = false, .exit_code = 1 };
         }
     }
     var exit_code: DWORD = 1;
@@ -658,7 +658,7 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     sshLoaderFailed(pi.hProcess);
     _ = CloseHandle(pi.hProcess);
     _ = CloseHandle(read_pipe);
-    return .{ .len = total, .success = exited };
+    return .{ .len = total, .success = exited, .exit_code = exit_code };
 }
 
 fn parseHostOutputIntoCache(host: u8, buf: []const u8, cache_count: *u32) u32 {

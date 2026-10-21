@@ -935,19 +935,16 @@ pub fn applyServerLayout(json: []const u8) !void {
             };
         }
         if (existing == null) {
-            app_state.g_pending_tmux_host = tab.tmux_host;
-            if (!spawnShellWithSession(.tmux, tab.tmux_session, null, null)) {
-                var shell = empty_shell;
-                shell.kind = .tmux;
-                shell.shell_id = app_state.next_shell_id;
-                app_state.next_shell_id += 1;
-                shell.tmux_host = tab.tmux_host;
-                @memcpy(shell.tmux_session[0..tab.tmux_session.len], tab.tmux_session);
-                shell.tmux_session_len = @intCast(tab.tmux_session.len);
-                shell.disconnected = true;
-                app_state.shells[app_state.shell_count] = shell;
-                app_state.shell_count += 1;
-            }
+            var shell = empty_shell;
+            shell.kind = .tmux;
+            shell.shell_id = app_state.allocateShellId() orelse return error.NoShellId;
+            shell.tmux_host = tab.tmux_host;
+            @memcpy(shell.tmux_session[0..tab.tmux_session.len], tab.tmux_session);
+            shell.tmux_session_len = @intCast(tab.tmux_session.len);
+            shell.disconnected = true;
+            app_state.shells[app_state.shell_count] = shell;
+            app_state.shell_count += 1;
+            @import("chat_send.zig").sshDisconnect(app_state.shell_count - 1, "account-restore-pending");
             existing = app_state.shell_count - 1;
         }
         std.mem.swap(Shell, &app_state.shells[dest], &app_state.shells[existing.?]);
