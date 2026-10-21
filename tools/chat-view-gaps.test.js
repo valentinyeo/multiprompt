@@ -205,7 +205,7 @@ print(json.dumps([json.loads(line) for line in wire.splitlines()[1:-1] if json.l
   assert.deepEqual(rows.map(row => ({ role: row.role, text: row.text })), [ { role: 'assistant', text: 'Before the tool.' }, { role: 'tool', text: 'Read a.txt' }, { role: 'assistant', text: 'After the tool.' } ]);
 });
 
-test('ISSUE-403 clicked Chat View links preserve their Unicode path', { todo: 'ISSUE-403' }, (t) => {
+test('ISSUE-403 clicked Chat View links preserve their Unicode path', (t) => {
   const run = execute(t, 'render-link', `
 const std = @import("std");
 const links = @import("link_detect.zig");
@@ -220,14 +220,26 @@ fn navigateBrowserPaneWithActivation(_: usize, url: []const u8, _: bool) void {
 fn webView2OwnsActiveShell() bool { return false; }
 fn requestWebView2Focus() void {}
 fn requestNativeBrowserFocus() void {}
+${body('clickedLinkUrl')}
+${source.match(/test "IGSH-403 [\s\S]*?\n}/)[0]}
 ${body('openClickedLink')}
-test "AUDIT click preserves Unicode in a detected transcript link" {
+test "IGSH-403 click preserves Unicode in a detected transcript link" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("see https://example.test/Kraków");
     const link = links.next(text, 0).?;
     openClickedLink(text[link.start..link.end]);
-    try std.testing.expectEqualStrings("https://example.test/Kraków", sent[0..sent_len]);
+    try std.testing.expectEqualStrings("https://example.test/Krak%C3%B3w", sent[0..sent_len]);
+    const oversized: [8193]u16 = @splat('x');
+    sent_len = 0;
+    openClickedLink(&oversized);
+    try std.testing.expectEqual(@as(usize, 0), sent_len);
+    openClickedLink(oversized[0..8192]);
+    try std.testing.expectEqual(@as(usize, 8192), sent_len);
+    const expanded: [4096]u16 = @splat('é');
+    sent_len = 0;
+    openClickedLink(&expanded);
+    try std.testing.expectEqual(@as(usize, 0), sent_len);
 }
-`, ['link_detect.zig'], 'AUDIT');
+`, ['link_detect.zig'], 'IGSH-403', ['-fno-llvm', '-fno-lld']);
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 

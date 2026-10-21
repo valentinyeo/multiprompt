@@ -2581,11 +2581,64 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
     return chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y }, disp.start, null);
 }
 
+fn clickedLinkUrl(url: []const u16, bytes: []u8) ?usize {
+    var it = std.unicode.Utf16LeIterator.init(url);
+    var n: usize = 0;
+    const hex = "0123456789ABCDEF";
+    while (it.nextCodepoint() catch 0xfffd) |codepoint| {
+        var utf8: [4]u8 = undefined;
+        const len = std.unicode.utf8Encode(codepoint, &utf8) catch unreachable;
+        const needed: usize = if (codepoint < 128) 1 else @as(usize, len) * 3;
+        if (needed > bytes.len - n) return null;
+        for (utf8[0..len]) |byte| {
+            if (byte < 128) {
+                bytes[n] = byte;
+                n += 1;
+            } else {
+                bytes[n] = '%';
+                bytes[n + 1] = hex[byte >> 4];
+                bytes[n + 2] = hex[byte & 15];
+                n += 3;
+            }
+        }
+    }
+    return n;
+}
+
+test "IGSH-403 clicked links encode Unicode and preserve ASCII" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_]struct { input: []const u16, expected: []const u8 }{
+        .{ .input = w(""), .expected = "" },
+        .{ .input = w("https://example.test/a%2Fb?q=x+y&n=1#part"), .expected = "https://example.test/a%2Fb?q=x+y&n=1#part" },
+        .{ .input = w("https://example.test/Kraków"), .expected = "https://example.test/Krak%C3%B3w" },
+        .{ .input = w("https://example.test/中文?q=é#😀"), .expected = "https://example.test/%E4%B8%AD%E6%96%87?q=%C3%A9#%F0%9F%98%80" },
+        .{ .input = &.{0xd800}, .expected = "%EF%BF%BD" },
+        .{ .input = &.{0xdc00}, .expected = "%EF%BF%BD" },
+        .{ .input = &.{ 0xd800, 'a', 0xdc00 }, .expected = "%EF%BF%BDa%EF%BF%BD" },
+        .{ .input = &.{ 0xd800, 0xd83d, 0xde00 }, .expected = "%EF%BF%BD%F0%9F%98%80" },
+        .{ .input = &.{ 0xdbff, 0xdfff }, .expected = "%F4%8F%BF%BF" },
+    };
+    var bytes: [256]u8 = undefined;
+    for (cases) |case| {
+        const n = clickedLinkUrl(case.input, &bytes).?;
+        try std.testing.expectEqualStrings(case.expected, bytes[0..n]);
+        try std.testing.expectEqual(@as(?usize, n), clickedLinkUrl(case.input, bytes[0..n]));
+        if (n > 0) try std.testing.expectEqual(@as(?usize, null), clickedLinkUrl(case.input, bytes[0 .. n - 1]));
+    }
+    const ascii: [128]u16 = comptime blk: {
+        var units: [128]u16 = undefined;
+        for (&units, 0..) |*unit, i| unit.* = i;
+        break :blk units;
+    };
+    const n = clickedLinkUrl(&ascii, &bytes).?;
+    try std.testing.expectEqual(ascii.len, n);
+    for (ascii, bytes[0..n]) |unit, byte| try std.testing.expectEqual(unit, byte);
+}
+
 pub fn openClickedLink(url: []const u16) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     var bytes: [8192]u8 = undefined;
-    const n = @min(url.len, bytes.len);
-    for (url[0..n], 0..) |c, i| bytes[i] = if (c < 128) @intCast(c) else '?';
+    const n = clickedLinkUrl(url, &bytes) orelse return;
     navigateBrowserPaneWithActivation(app_state.active_shell, bytes[0..n], true);
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
