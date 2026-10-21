@@ -2,7 +2,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import worker, { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
 
 let mf, db;
 const mail = [], usageToken = 'u'.repeat(43);
@@ -947,7 +948,7 @@ test('crash reports: dashboard revoke deletes existing reports and preserves a s
   assert.equal((await sendCrash(b, { ...crashReport, id: 'crash-0002' })).status, 201);
 });
 
-const deviceKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh';
+const deviceKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh';
 const putDeviceKey = (token, public_key = deviceKey) => request('/v1/device-key', { method: 'PUT', headers: auth(token), body: JSON.stringify({ public_key }) });
 const decideDeviceKey = (caller, target, action = 'approve') => request('/v1/device-keys/' + target.device_id + '/' + action, { method: 'POST', headers: auth(caller) });
 
@@ -975,7 +976,7 @@ test('device keys: registration is pending, unchanged keys preserve decisions an
       assert.equal(repeated.status, 409); assert.deepEqual(await repeated.json(), { error: 'not_pending' });
     }
     if (action === 'approve') {
-      const replacement = deviceKey + 'A';
+      const replacement = 'ssh-ed25519 ' + Buffer.concat([Buffer.from(deviceKey.slice(12), 'base64').subarray(0, 19), Buffer.alloc(32, 98)]).toString('base64');
       const changed = await putDeviceKey(a, replacement);
       assert.equal(changed.status, 200); assert.deepEqual(await changed.json(), { status: 'pending' });
       const row = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first();
@@ -1061,8 +1062,8 @@ test('device keys: strict public-key bodies reject private material, comments, a
   }
   for (const public_key of ['ssh-ed25519 A+/', 'ssh-ed25519 A+/=', 'ssh-ed25519 A+/==', 'ssh-ed25519 ' + 'A'.repeat(188)]) {
     const response = await putDeviceKey(token, public_key);
-    assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status: 'pending' });
-    assert.equal((await db.prepare('SELECT public_key FROM device_keys WHERE device_id=?').bind(token.device_id).first()).public_key, public_key);
+    assert.equal(response.status, 400); assert.deepEqual(await response.json(), { error: 'invalid_key' });
+    assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(token.device_id).first(), before);
   }
 });
 
@@ -1106,4 +1107,104 @@ test('device keys: after all flows every column in D1 is free of PRIVATE materia
   const check = row => { for (const value of Object.values(row)) assert.doesNotMatch(String(value), /PRIVATE/); };
   assert.throws(() => check({ decided_by: 'PRIVATE' }), assert.AssertionError);
   for (const row of rows) check(row);
+});
+
+function afterKeyLookup(hook) {
+  let fired = false;
+  return {
+    prepare(sql) {
+      const wrap = statement => new Proxy(statement, { get(target, name) {
+        if (name === 'bind') return (...args) => wrap(target.bind(...args));
+        if (name === 'first') return async (...args) => {
+          const result = await target.first(...args);
+          if (!fired && sql.startsWith('SELECT device_id FROM device_keys')) { fired = true; await hook(); }
+          return result;
+        };
+        const value = target[name];
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+      return wrap(db.prepare(sql));
+    },
+    batch: statements => db.batch(statements)
+  };
+}
+
+for (const initial of ['absent', 'pending', 'approved', 'denied']) test('device key regression: slow PUT cannot resurrect revoked key: ' + initial, async () => {
+  const { token: caller } = await enroll(), { token: admin } = await enroll();
+  if (initial !== 'absent') {
+    assert.equal((await putDeviceKey(caller)).status, 200);
+    if (initial !== 'pending') assert.equal((await decideDeviceKey(admin, caller, initial === 'approved' ? 'approve' : 'deny')).status, 200);
+  }
+  const reading = Promise.withResolvers(), release = Promise.withResolvers();
+  const stream = new ReadableStream({ async pull(controller) {
+    reading.resolve();
+    await release.promise;
+    controller.enqueue(new TextEncoder().encode(JSON.stringify({ public_key: 'ssh-ed25519 ' + Buffer.concat([Buffer.from(deviceKey.slice(12), 'base64').subarray(0, 19), Buffer.alloc(32, 98)]).toString('base64') })));
+    controller.close();
+  } }, { highWaterMark: 0 });
+  const pending = worker.fetch(new Request(base + '/v1/device-key', { method: 'PUT', headers: auth(caller), body: stream, duplex: 'half' }), { DB: db });
+  await reading.promise;
+  try { assert.equal((await request('/v1/devices/' + caller.device_id, { method: 'DELETE', headers: auth(admin) })).status, 200); }
+  finally { release.resolve(); }
+  const response = await pending;
+  const row = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(caller.device_id).first();
+  assert.equal(row?.status ?? null, initial === 'absent' ? null : 'revoked');
+  if (row) assert.equal(row.public_key, deviceKey);
+  assert.equal(response.status, 401); assert.deepEqual(await response.json(), { error: 'device_required' });
+  assert.equal((await decideDeviceKey(admin, caller)).status, initial === 'absent' ? 404 : 409);
+});
+
+for (const action of ['approve', 'deny']) {
+  test('device key regression: revoked caller cannot ' + action + ' after lookup', async () => {
+    const { token: caller } = await enroll(), { token: target } = await enroll(), { token: admin } = await enroll();
+    assert.equal((await putDeviceKey(target)).status, 200);
+    const before = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(target.device_id).first();
+    const guarded = afterKeyLookup(async () => {
+      assert.equal((await request('/v1/devices/' + caller.device_id, { method: 'DELETE', headers: auth(admin) })).status, 200);
+    });
+    const response = await worker.fetch(new Request(base + '/v1/device-keys/' + target.device_id + '/' + action, { method: 'POST', headers: auth(caller) }), { DB: guarded });
+    assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(target.device_id).first(), before);
+    assert.equal(response.status, 401); assert.deepEqual(await response.json(), { error: 'device_required' });
+  });
+  for (const change of ['caller account', 'target account', 'target revoked']) test('device key regression: ' + change + ' blocks ' + action + ' atomically', async () => {
+    const { token: caller } = await enroll(), { token: target } = await enroll();
+    assert.equal((await putDeviceKey(target)).status, 200);
+    const before = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(target.device_id).first();
+    const guarded = afterKeyLookup(async () => {
+      if (change === 'target revoked') await db.prepare('UPDATE devices SET revoked=1 WHERE id=?').bind(target.device_id).run();
+      else await db.prepare('UPDATE devices SET account=? WHERE id=?').bind('another@example.com', change === 'caller account' ? caller.device_id : target.device_id).run();
+    });
+    const response = await worker.fetch(new Request(base + '/v1/device-keys/' + target.device_id + '/' + action, { method: 'POST', headers: auth(caller) }), { DB: guarded });
+    assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(target.device_id).first(), before);
+    assert.equal(response.status, change === 'caller account' ? 401 : 409);
+  });
+}
+
+const keyPair = generateKeyPairSync('ed25519');
+const keyWire = Buffer.concat([Buffer.from('0000000b7373682d6564323535313900000020', 'hex'), keyPair.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32)]);
+for (const [name, encoded] of [
+  ['private DER', keyPair.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64')],
+  ['public DER', keyPair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64')],
+  ['non-key base64', 'A+/=='],
+  ['wrong algorithm', Buffer.concat([keyWire.subarray(0, 4), Buffer.from('ssh-ed25518'), keyWire.subarray(15)]).toString('base64')],
+  ['algorithm length', Buffer.concat([Buffer.from('0000000a', 'hex'), keyWire.subarray(4)]).toString('base64')],
+  ['key length', Buffer.concat([keyWire.subarray(0, 15), Buffer.from('0000001f', 'hex'), keyWire.subarray(19)]).toString('base64')],
+  ['truncated key', keyWire.subarray(0, -1).toString('base64')],
+  ['trailing bytes', Buffer.concat([keyWire, Buffer.from([0])]).toString('base64')],
+  ['noncanonical padding', keyWire.toString('base64') + '=']
+]) test('device key regression: rejects ' + name + ' without writing', async () => {
+  const { token } = await enroll();
+  const response = await putDeviceKey(token, 'ssh-ed25519 ' + encoded);
+  assert.equal(response.status, 400); assert.deepEqual(await response.json(), { error: 'invalid_key' });
+  assert.equal(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(token.device_id).first(), null);
+});
+
+test('device key regression: real Ed25519 and live-probe wire keys remain accepted', async () => {
+  const { token } = await enroll();
+  for (const wire of [keyWire, Buffer.concat([keyWire.subarray(0, 19), randomBytes(32)])]) {
+    const public_key = 'ssh-ed25519 ' + wire.toString('base64');
+    const response = await putDeviceKey(token, public_key);
+    assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status: 'pending' });
+    assert.equal((await db.prepare('SELECT public_key FROM device_keys WHERE device_id=?').bind(token.device_id).first()).public_key, public_key);
+  }
 });

@@ -225,11 +225,16 @@ export default {
       if (url.pathname === '/v1/device-key' && request.method === 'PUT') {
         const b = await body(request, 1024 * 1024, 'invalid_key');
         if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || typeof b.public_key !== 'string' || b.public_key.length > 200 ||
-            !/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(b.public_key) || /PRIVATE|BEGIN|\s$/.test(b.public_key)) fail(400, 'invalid_key');
+            !/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(b.public_key) || /\s$/.test(b.public_key)) fail(400, 'invalid_key');
+        const encoded = b.public_key.slice(12);
+        let decoded;
+        try { decoded = atob(encoded); } catch { fail(400, 'invalid_key'); }
+        if (btoa(decoded) !== encoded || decoded.length !== 51 || decoded.slice(0, 19) !== '\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20') fail(400, 'invalid_key');
         const result = await db.batch([
-          db.prepare("INSERT INTO device_keys (device_id,account,public_key,status,requested) VALUES (?,?,?,'pending',?) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key,status='pending',requested=excluded.requested,decided=NULL,decided_by=NULL WHERE device_keys.public_key<>excluded.public_key").bind(device.id, device.account, b.public_key, now()),
-          db.prepare('SELECT status FROM device_keys WHERE device_id=?').bind(device.id)
+          db.prepare("INSERT INTO device_keys (device_id,account,public_key,status,requested) SELECT ?,?,?,'pending',? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key,status='pending',requested=excluded.requested,decided=NULL,decided_by=NULL WHERE device_keys.public_key<>excluded.public_key AND device_keys.status<>'revoked' AND device_keys.account=excluded.account AND EXISTS (SELECT 1 FROM devices WHERE id=excluded.device_id AND account=excluded.account AND revoked=0)").bind(device.id, device.account, b.public_key, now(), device.id, device.account),
+          db.prepare('SELECT k.status FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.device_id=? AND k.account=? AND d.account=k.account AND d.revoked=0').bind(device.id, device.account)
         ]);
+        if (!result[1].results.length) fail(401, 'device_required');
         return json({ status: result[1].results[0].status });
       }
       if (url.pathname === '/v1/device-keys' && request.method === 'GET') {
@@ -242,8 +247,11 @@ export default {
         if (!row) fail(404, 'not_found');
         if (row.device_id === device.id) fail(403, 'self_approval');
         const status = decision[2] === 'approve' ? 'approved' : 'denied';
-        const result = await db.prepare("UPDATE device_keys SET status=?,decided=?,decided_by=? WHERE device_id=? AND account=? AND status='pending'").bind(status, now(), device.id, row.device_id, device.account).run();
-        if (!result.meta.changes) fail(409, 'not_pending');
+        const result = await db.prepare("UPDATE device_keys SET status=?,decided=?,decided_by=? WHERE device_id=? AND account=? AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) AND EXISTS (SELECT 1 FROM devices WHERE id=device_keys.device_id AND account=device_keys.account AND revoked=0)").bind(status, now(), device.id, row.device_id, device.account, device.id, device.account).run();
+        if (!result.meta.changes) {
+          if (!await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
+          fail(409, 'not_pending');
+        }
         return json({ status });
       }
       if (url.pathname === '/v1/devices' && request.method === 'GET') {
