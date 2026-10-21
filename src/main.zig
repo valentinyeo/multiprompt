@@ -7620,6 +7620,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CLOSE => {
             if (app_state.g_app_closing) return 0;
+            @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
             _ = KillTimer(hwnd, TIMER_BROWSER_HEALTH);
@@ -8164,6 +8165,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
         },
         .chat => {
+            @import("workspaces.zig").prepareWorkspaceFocus(app_state.active_shell);
             launch_cache.bindRestoredChat();
             if (app_state.active_shell < app_state.shell_count and
                 chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_view_restore_on, true))

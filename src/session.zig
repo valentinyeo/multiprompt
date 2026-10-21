@@ -682,7 +682,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += widl;
             json_buf[pos] = '"';
             pos += 1;
-            const last_shell = std.fmt.bufPrint(json_buf[pos..], ",\"last_shell\":{d}", .{app_state.g_ws_last_shell[wi]}) catch return false;
+            const last_shell = std.fmt.bufPrint(json_buf[pos..], ",\"last_shell\":{d},\"focus\":\"{s}\"", .{ app_state.g_ws_last_shell[wi], @tagName(app_state.g_ws_focus[wi]) }) catch return false;
             pos += last_shell.len;
             if (app_state.g_ws_snoozed[wi]) {
                 const sn = ",\"snoozed\":true";
@@ -1504,6 +1504,7 @@ pub fn restoreSession() u32 {
 
     var saved_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
+    app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
     var restored_active_ws: u8 = 0;
     if (json_reader.boolTrue(json, "single_window")) app_state.g_single_window = true;
     if (app_state.g_single_window) {
@@ -1521,6 +1522,7 @@ pub fn restoreSession() u32 {
             app_state.g_ws_id_len[wi] = wid_cap;
             app_state.g_ws_snoozed[wi] = json_reader.boolTrue(obj, "snoozed");
             saved_last_shell[wi] = @intCast(@min(json_reader.uint(obj, "last_shell"), std.math.maxInt(u32)));
+            app_state.g_ws_focus[wi] = @import("workspaces.zig").parseWorkspaceFocus(obj);
         }
     }
 
@@ -1652,6 +1654,9 @@ pub fn restoreSession() u32 {
             app_state.active_shell = idx;
             app_state.g_active_workspace = app_state.shells[idx].workspace;
         }
+    }
+    for (app_state.g_ws_last_shell, 0..) |shell_id, ws| {
+        if (shell_id == 0) app_state.g_ws_focus[ws] = .none;
     }
     seedActiveWorkspaceLastShell(app_state.shells[0..app_state.shell_count], app_state.active_shell, &app_state.g_ws_last_shell);
 

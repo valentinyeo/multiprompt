@@ -1,12 +1,13 @@
 # Workspaces
 
-Create a workspace in the same desktop window and switch away and back while retaining the workspace and its session.
+Create a workspace in the same desktop window and switch away and back while retaining the workspace and its session. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
 
 ## Sub-features
 
 - `workspace-create`: add one in-process workspace with a real CMD session.
 - `workspace-switch`: return to the first stored workspace.
 - `workspace-return`: cycle back to the new workspace and confirm its saved identity and active state.
+- `workspace-focus`: leave and return with Alt+Right / Alt+Left, then type into the remembered Chat View typing box or shell without clicking.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,19 @@ Preconditions:
 - **Switch away.** Press Alt+2. The saved active workspace must be the first stored workspace, index zero.
 - **Return.** Press Alt+Right. The saved active workspace must equal the newly created workspace, not Starred or a different window.
 - **Proof.** Inspect `before.png`, `created.png`, `after.png`, the timestamped keys in `actions.json`, and `data/roaming/ZigShell/session.json`. `result.json` records before/after workspace counts, returned active index and window title.
+
+### Keyboard focus regression journey
+
+Dispatch `gh workflow run verify.yml -f feature=workspace-focus`; Windows selects `control.ps1 -Feature workspace-focus`. Pull requests run this alongside the unchanged appearance journey.
+
+- In workspace 1, press Alt+C to open Chat View. Require the owned native Edit control to have focus, remember its HWND, and type `before-`.
+- Create workspace 2 with Ctrl+N, return with Alt+2, then switch away with Alt+Right and back with Alt+Left.
+- Without clicking or issuing another focus command, type `workspace-focus-chat`. Read the original Edit control's UI Automation ValuePattern and require exactly `before-workspace-focus-chat`, the same focused HWND, the same selected session and saved workspace focus `chat`.
+- Press Alt+C to return to the shell. Type `echo workspace-focus-shell` without Enter, switch away and back with Alt+Right / Alt+Left, then append redirection to the isolated `workspace-focus-shell.txt` and press Enter without clicking.
+- Require that previously absent file to contain exactly `workspace-focus-shell`, the same selected session and saved workspace focus `shell`. The harness never writes the marker or session state.
+- Require `workspace-focus chat PASS` and `workspace-focus shell PASS` in the job log. A missing text value, file, focus target or selected session fails the job; inspect `before.png`, `action.png`, `chat-returned.png`, `after.png`, `actions.json`, `result.json` and the retained data.
+
+This journey covers local CMD and Chat View typing focus, not account sync, agents, SSH or browser focus. The Zig workspace regression also covers persisted focus round trips; this desktop journey does not relaunch the app.
 
 ## Gotchas
 

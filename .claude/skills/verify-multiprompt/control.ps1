@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -731,6 +731,58 @@ try {
             Save-Json $after 'session-after.json'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
+        }
+        'workspace-focus' {
+            $initial = Read-Session
+            if ($initial.active_workspace -ne 0) { throw 'Expected first stored workspace' }
+            $initialTab = $initial.active_tab
+            Press @(0x12, 0x43) 'Alt+C: open Chat View and focus typing box'
+            Wait-Until {
+                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+                $focused.Current.ProcessId -eq $process.Id -and $focused.Current.ClassName -eq 'Edit'
+            } 'owned Chat View typing box focused'
+            $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $composerHandle = $composer.Current.NativeWindowHandle
+            Type-Text 'before-'
+            Snapshot 'action'
+            Press @(0x11, 0x4E) 'Ctrl+N: create second workspace'
+            Wait-Until { (Read-Session).workspace_count -eq $initial.workspace_count + 1 } 'second workspace saved'
+            $second = (Read-Session).active_workspace
+            Press @(0x12, 0x32) 'Alt+2: return to first workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'first workspace active'
+            Press @(0x12, 0x27) 'Alt+Right: leave Chat View workspace'
+            Wait-Until { (Read-Session).active_workspace -eq $second } 'second workspace active'
+            Press @(0x12, 0x25) 'Alt+Left: return to Chat View workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'Chat View workspace returned'
+            Type-Text 'workspace-focus-chat'
+            $expectedText = 'before-workspace-focus-chat'
+            Wait-Until {
+                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $value.Current.Value -ceq $expectedText
+            } 'text landed in Chat View typing box without a click'
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            if ($focused.Current.NativeWindowHandle -ne $composerHandle) { throw 'Chat View typing box did not retain keyboard focus' }
+            $chatState = Read-Session
+            if ($chatState.active_tab -ne $initialTab -or $chatState.workspaces[0].focus -ne 'chat') { throw 'Chat focus or selected session was not persisted' }
+            $result.checks += @{ name = 'workspace-focus-chat'; text = $expectedText; composer = $composerHandle; activeTab = $chatState.active_tab; savedFocus = $chatState.workspaces[0].focus }
+            Write-Output 'workspace-focus chat PASS'
+            Snapshot 'chat-returned'
+            Press @(0x12, 0x43) 'Alt+C: switch to shell console'
+            $marker = Join-Path $scratch 'workspace-focus-shell.txt'
+            if (Test-Path $marker) { throw 'Shell focus marker must not exist before input' }
+            Type-Text 'echo workspace-focus-shell'
+            Press @(0x12, 0x27) 'Alt+Right: leave shell workspace'
+            Wait-Until { (Read-Session).active_workspace -eq $second } 'second workspace active from shell'
+            Press @(0x12, 0x25) 'Alt+Left: return to shell workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'shell workspace returned'
+            Type-Text ('>"' + $marker + '"')
+            Press @(0x0D) 'Enter: execute in restored shell without a click'
+            Wait-Until { (Test-Path $marker) -and (Get-Content $marker -Raw).Trim() -ceq 'workspace-focus-shell' } 'restored console executed the typed command'
+            $shellState = Read-Session
+            if ($shellState.active_tab -ne $initialTab -or $shellState.workspaces[0].focus -ne 'shell') { throw 'Shell focus or selected session was not persisted' }
+            $result.checks += @{ name = 'workspace-focus-shell'; marker = (Get-Content $marker -Raw).Trim(); activeTab = $shellState.active_tab; savedFocus = $shellState.workspaces[0].focus }
+            Write-Output 'workspace-focus shell PASS'
+            Snapshot 'after'
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'

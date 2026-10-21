@@ -1572,6 +1572,7 @@ pub fn newPillForMove() ?u8 {
     app_state.g_ws_name_len[ws] = 0;
     app_state.g_ws_id_len[ws] = 0;
     app_state.g_ws_last_shell[ws] = 0;
+    app_state.g_ws_focus[ws] = .none;
     ensureWorkspaceSlotId(ws);
     return ws;
 }
@@ -2311,6 +2312,7 @@ pub fn ensureOtherWorkspaceSlot() void {
         app_state.g_ws_ids[next] = std.mem.zeroes([32]u8);
         app_state.g_ws_id_len[next] = 0;
         app_state.g_ws_last_shell[next] = 0;
+        app_state.g_ws_focus[next] = .none;
         break :blk next;
     };
     @memcpy(app_state.g_ws_names[slot][0..OTHER_WORKSPACE_NAME.len], OTHER_WORKSPACE_NAME);
@@ -2369,8 +2371,9 @@ test "ISSUE-439 stale moved and archived remembered sessions fall back to activi
     try std.testing.expectEqual(@as(?u32, null), pickWorkspaceTarget(&shells, 2, 41));
 }
 
-test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
+test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last shell" {
     const old_active = app_state.g_active_workspace;
+    const old_mode = app_state.g_chat_view_mode;
     const old_snoozed = app_state.g_ws_snoozed;
     const old_single = app_state.g_single_window;
     const old_count = app_state.g_lws_count;
@@ -2379,10 +2382,12 @@ test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
     const old_ids = app_state.g_ws_ids;
     const old_id_lengths = app_state.g_ws_id_len;
     const old_last_shell = app_state.g_ws_last_shell;
+    const old_focus = app_state.g_ws_focus;
     const old_shell_count = app_state.shell_count;
     const old_shells = app_state.shells[0..2].*;
     defer {
         app_state.g_active_workspace = old_active;
+        app_state.g_chat_view_mode = old_mode;
         app_state.g_ws_snoozed = old_snoozed;
         app_state.g_single_window = old_single;
         app_state.g_lws_count = old_count;
@@ -2391,9 +2396,11 @@ test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
         app_state.g_ws_ids = old_ids;
         app_state.g_ws_id_len = old_id_lengths;
         app_state.g_ws_last_shell = old_last_shell;
+        app_state.g_ws_focus = old_focus;
         app_state.shell_count = old_shell_count;
         app_state.shells[0..2].* = old_shells;
     }
+    app_state.g_chat_view_mode = .per_session;
     app_state.g_single_window = true;
     app_state.g_lws_count = 2;
     app_state.shell_count = 2;
@@ -2402,7 +2409,7 @@ test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
         app_state.shells[ws].kind = .tmux;
         app_state.shells[ws].workspace = @intCast(ws);
         app_state.shells[ws].shell_id = @intCast(41 + ws);
-        app_state.g_ws_last_shell[ws] = app_state.shells[ws].shell_id;
+        rememberWorkspaceFocus(@intCast(ws), app_state.shells[ws].shell_id, if (ws == 0) .chat else .shell);
         app_state.g_ws_names[ws][0] = @intCast('A' + ws);
         app_state.g_ws_name_len[ws] = 1;
         app_state.g_ws_ids[ws][0] = @intCast('a' + ws);
@@ -2434,10 +2441,21 @@ test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
     for (workspaces, 0..) |workspace, ws| {
         try std.testing.expectEqual(@as(u64, app_state.g_ws_last_shell[ws]), json_reader.uint(workspace, "last_shell"));
         try std.testing.expectEqual(app_state.g_ws_last_shell[ws], tabs[ws].shell_id);
+        const expected: app_state.WorkspaceFocus = if (ws == 0) .chat else .shell;
+        app_state.g_ws_focus[ws] = .none;
+        app_state.g_ws_focus[ws] = parseWorkspaceFocus(workspace);
+        try std.testing.expectEqual(expected, app_state.g_ws_focus[ws]);
+        app_state.shells[ws].chat_view_on = expected != .chat;
+        app_state.shells[ws].chat_shell_override = expected == .chat;
+        prepareWorkspaceFocus(@intCast(ws));
+        try std.testing.expectEqual(expected == .chat, app_state.shells[ws].chat_view_on);
+        try std.testing.expectEqual(expected == .shell, app_state.shells[ws].chat_shell_override);
     }
     swapWorkspaceSlots(0, 1);
     try std.testing.expectEqual(@as(u32, 42), app_state.g_ws_last_shell[0]);
     try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[1]);
+    try std.testing.expectEqual(app_state.WorkspaceFocus.shell, app_state.g_ws_focus[0]);
+    try std.testing.expectEqual(app_state.WorkspaceFocus.chat, app_state.g_ws_focus[1]);
 }
 
 test "IGSH-457 Starred is never serialized into session or synced layout" {
@@ -2457,6 +2475,7 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     const old_ids = app_state.g_ws_ids;
     const old_id_lengths = app_state.g_ws_id_len;
     const old_last_shell = app_state.g_ws_last_shell;
+    const old_focus = app_state.g_ws_focus;
     const old_shell_count = app_state.shell_count;
     const old_shells = app_state.shells[0..2].*;
     defer {
@@ -2470,6 +2489,7 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
         app_state.g_ws_ids = old_ids;
         app_state.g_ws_id_len = old_id_lengths;
         app_state.g_ws_last_shell = old_last_shell;
+        app_state.g_ws_focus = old_focus;
         app_state.shell_count = old_shell_count;
         app_state.shells[0..2].* = old_shells;
     }
@@ -2579,10 +2599,110 @@ pub fn refreshStarredWorkspace() void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+pub fn parseWorkspaceFocus(obj: std.json.Value) app_state.WorkspaceFocus {
+    return std.meta.stringToEnum(app_state.WorkspaceFocus, json_reader.string(json_reader.field(obj, "focus")) orelse "") orelse .none;
+}
+
+fn rememberWorkspaceFocus(ws: u8, shell_id: u32, input: app_state.WorkspaceFocus) void {
+    if (ws >= MAX_LWS or input == .none) return;
+    app_state.g_ws_last_shell[ws] = shell_id;
+    app_state.g_ws_focus[ws] = input;
+}
+
+pub fn captureWorkspaceFocus() void {
+    if (app_state.g_restoring or app_state.g_starred_workspace or app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (app_state.g_single_window and shell.workspace != app_state.g_active_workspace) return;
+    const input: app_state.WorkspaceFocus = if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null and
+        @import("win32.zig").GetFocus() == app_state.g_chat_composer_hwnd)
+        .chat
+    else if (@import("focus.zig").activeShellHasForegroundFocus())
+        .shell
+    else
+        .none;
+    rememberWorkspaceFocus(shell.workspace, shell.shell_id, input);
+}
+
+pub fn prepareWorkspaceFocus(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    const shell = &app_state.shells[idx];
+    if (shell.workspace >= MAX_LWS or shell.shell_id != app_state.g_ws_last_shell[shell.workspace]) return;
+    switch (app_state.g_ws_focus[shell.workspace]) {
+        .none => {},
+        .chat => {
+            if (app_state.g_chat_view_mode == .nowhere) return;
+            shell.chat_view_on = true;
+            shell.chat_shell_override = false;
+        },
+        .shell => {
+            shell.chat_view_on = false;
+            shell.chat_shell_override = true;
+        },
+    }
+}
+
+test "IGSH-522 leaving and returning restores chat and shell input without changing the selected session" {
+    const old_focus = app_state.g_ws_focus;
+    const old_last_shell = app_state.g_ws_last_shell;
+    const old_shells = app_state.shells[0..3].*;
+    const old_count = app_state.shell_count;
+    const old_active = app_state.active_shell;
+    const old_mode = app_state.g_chat_view_mode;
+    defer {
+        app_state.g_ws_focus = old_focus;
+        app_state.g_ws_last_shell = old_last_shell;
+        app_state.shells[0..3].* = old_shells;
+        app_state.shell_count = old_count;
+        app_state.active_shell = old_active;
+        app_state.g_chat_view_mode = old_mode;
+    }
+    app_state.shell_count = 3;
+    app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
+    app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
+    app_state.g_chat_view_mode = .per_session;
+    for (0..3) |i| {
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].shell_id = @intCast(41 + i);
+        app_state.shells[i].workspace = if (i == 1) 1 else 0;
+    }
+    app_state.shells[2].last_active = 1000;
+    for ([_]app_state.WorkspaceFocus{ .chat, .shell }) |input| {
+        rememberWorkspaceFocus(0, 41, input);
+        app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
+        prepareWorkspaceFocus(app_state.active_shell);
+        rememberWorkspaceFocus(1, 42, .shell);
+        app_state.shells[0].chat_view_on = input != .chat;
+        app_state.shells[0].chat_shell_override = input == .chat;
+        app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
+        prepareWorkspaceFocus(app_state.active_shell);
+        try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
+        try std.testing.expectEqual(input, app_state.g_ws_focus[0]);
+        try std.testing.expectEqual(input == .chat, app_state.shells[0].chat_view_on);
+        try std.testing.expectEqual(input == .shell, app_state.shells[0].chat_shell_override);
+    }
+    rememberWorkspaceFocus(0, 41, .chat);
+    rememberWorkspaceFocus(0, 43, .none);
+    try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[0]);
+    app_state.shells[2].chat_view_on = false;
+    prepareWorkspaceFocus(2);
+    try std.testing.expect(!app_state.shells[2].chat_view_on);
+    app_state.g_chat_view_mode = .nowhere;
+    app_state.shells[0].chat_view_on = false;
+    prepareWorkspaceFocus(0);
+    try std.testing.expect(!app_state.shells[0].chat_view_on);
+    for ([_][]const u8{ "{}", "{\"focus\":\"unknown\"}", "{\"focus\":42}" }) |raw| {
+        var parsed = try json_reader.parse(std.testing.allocator, raw);
+        defer parsed.deinit();
+        try std.testing.expectEqual(app_state.WorkspaceFocus.none, parseWorkspaceFocus(parsed.value));
+    }
+}
+
 pub fn switchToWorkspace(ws_in: u32) void {
-    app_state.g_browser_focus_mode = false;
     if (!app_state.g_single_window) return;
     if (ws_in == @import("workspace_view.zig").starred) {
+        captureWorkspaceFocus();
+        _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
+        app_state.g_browser_focus_mode = false;
         app_state.g_starred_workspace = true;
         @import("inbox.zig").loadInboxModel();
         _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_INBOX_REFRESH, 1000, null);
@@ -2604,6 +2724,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
         return;
     }
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;
+    captureWorkspaceFocus();
     const was_starred = app_state.g_starred_workspace;
     app_state.g_starred_workspace = false;
     const ws: u8 = @intCast(ws_in);
@@ -2615,12 +2736,16 @@ pub fn switchToWorkspace(ws_in: u32) void {
         focusActiveShell();
         return;
     }
+    _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
+    app_state.g_browser_focus_mode = false;
     app_state.g_active_workspace = ws;
 
     const target = pickWorkspaceTarget(app_state.shells[0..app_state.shell_count], ws, app_state.g_ws_last_shell[ws]);
 
     if (target) |idx| {
+        prepareWorkspaceFocus(idx);
         if (app_state.g_focus_user_action_tick != 0) @import("console.zig").switchToShellByUser(idx) else switchToShell(idx);
+        focusActiveShell();
     } else {
         if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
             _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
@@ -3065,6 +3190,7 @@ fn leaveSingleWindowMode() bool {
     app_state.g_active_workspace = 0;
     app_state.g_lws_count = 1;
     app_state.g_ws_last_shell[0] = app_state.g_ws_last_shell[active_slot];
+    app_state.g_ws_focus[0] = app_state.g_ws_focus[active_slot];
     app_state.g_ws_names[0] = std.mem.zeroes([32]u8);
     if (active_name_len > 0) @memcpy(app_state.g_ws_names[0][0..active_name_len], active_name_buf[0..active_name_len]);
     app_state.g_ws_name_len[0] = @intCast(active_name_len);
@@ -3078,6 +3204,7 @@ fn leaveSingleWindowMode() bool {
         app_state.g_ws_name_len[clear_ws] = 0;
         app_state.g_ws_id_len[clear_ws] = 0;
         app_state.g_ws_last_shell[clear_ws] = 0;
+        app_state.g_ws_focus[clear_ws] = .none;
     }
 
     mergeWorkspaceRegistryFromDisk();
@@ -3103,11 +3230,14 @@ fn leaveSingleWindowMode() bool {
 pub fn newWorkspace() void {
     if (!app_state.g_single_window) return;
     if (app_state.g_lws_count >= MAX_LWS) return;
+    captureWorkspaceFocus();
+    _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
     app_state.g_starred_workspace = false;
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;
     app_state.g_ws_last_shell[new_ws] = 0;
+    app_state.g_ws_focus[new_ws] = .none;
     app_state.g_active_workspace = new_ws;
     if (!spawnShellWithSession(.cmd, null, null, null)) {
         app_state.g_lws_count -= 1;
@@ -3149,6 +3279,7 @@ pub fn compactWorkspaceSlots() void {
                 app_state.g_ws_id_len[new_count] = app_state.g_ws_id_len[ws];
                 app_state.g_ws_snoozed[new_count] = app_state.g_ws_snoozed[ws];
                 app_state.g_ws_last_shell[new_count] = app_state.g_ws_last_shell[ws];
+                app_state.g_ws_focus[new_count] = app_state.g_ws_focus[ws];
             }
             new_count += 1;
         }
@@ -3166,6 +3297,7 @@ pub fn compactWorkspaceSlots() void {
             app_state.g_ws_id_len[t] = 0;
             app_state.g_ws_snoozed[t] = false;
             app_state.g_ws_last_shell[t] = 0;
+            app_state.g_ws_focus[t] = .none;
         }
         const prev_active = app_state.g_active_workspace;
         const prev_active_kept = prev_active < MAX_LWS and keep_slot[prev_active];
@@ -3190,7 +3322,10 @@ fn mergeDuplicateOtherWorkspaces() void {
         for (0..app_state.shell_count) |si| {
             if (app_state.shells[si].workspace == ws) app_state.shells[si].workspace = keep;
         }
-        if (app_state.g_active_workspace == ws or app_state.g_ws_last_shell[keep] == 0) app_state.g_ws_last_shell[keep] = app_state.g_ws_last_shell[ws];
+        if (app_state.g_active_workspace == ws or app_state.g_ws_last_shell[keep] == 0) {
+            app_state.g_ws_last_shell[keep] = app_state.g_ws_last_shell[ws];
+            app_state.g_ws_focus[keep] = app_state.g_ws_focus[ws];
+        }
         if (app_state.g_active_workspace == ws) app_state.g_active_workspace = keep;
         removeWorkspaceSlot(ws);
     }
@@ -3205,6 +3340,7 @@ test "duplicate Other repair preserves complete live shell records and other emp
     const old_ids = app_state.g_ws_ids;
     const old_id_lengths = app_state.g_ws_id_len;
     const old_last_shell = app_state.g_ws_last_shell;
+    const old_focus = app_state.g_ws_focus;
     const old_shell_count = app_state.shell_count;
     const old_shells = app_state.shells[0..4].*;
     defer {
@@ -3216,6 +3352,7 @@ test "duplicate Other repair preserves complete live shell records and other emp
         app_state.g_ws_ids = old_ids;
         app_state.g_ws_id_len = old_id_lengths;
         app_state.g_ws_last_shell = old_last_shell;
+        app_state.g_ws_focus = old_focus;
         app_state.shell_count = old_shell_count;
         app_state.shells[0..4].* = old_shells;
     }
@@ -3267,12 +3404,14 @@ fn removeWorkspaceSlot(slot: u8) void {
         app_state.g_ws_id_len[ws] = app_state.g_ws_id_len[ws + 1];
         app_state.g_ws_snoozed[ws] = app_state.g_ws_snoozed[ws + 1];
         app_state.g_ws_last_shell[ws] = app_state.g_ws_last_shell[ws + 1];
+        app_state.g_ws_focus[ws] = app_state.g_ws_focus[ws + 1];
     }
     app_state.g_lws_count -= 1;
     app_state.g_ws_name_len[app_state.g_lws_count] = 0;
     app_state.g_ws_id_len[app_state.g_lws_count] = 0;
     app_state.g_ws_snoozed[app_state.g_lws_count] = false;
     app_state.g_ws_last_shell[app_state.g_lws_count] = 0;
+    app_state.g_ws_focus[app_state.g_lws_count] = .none;
     for (0..app_state.shell_count) |si| {
         if (app_state.shells[si].workspace > slot) app_state.shells[si].workspace -= 1;
     }
@@ -3300,6 +3439,7 @@ pub fn swapWorkspaceSlots(a: u8, b: u8) void {
     app_state.g_ws_id_len[b] = tmp_ilen;
     std.mem.swap(bool, &app_state.g_ws_snoozed[a], &app_state.g_ws_snoozed[b]);
     std.mem.swap(u32, &app_state.g_ws_last_shell[a], &app_state.g_ws_last_shell[b]);
+    std.mem.swap(app_state.WorkspaceFocus, &app_state.g_ws_focus[a], &app_state.g_ws_focus[b]);
     for (0..app_state.shell_count) |si| {
         if (app_state.shells[si].workspace == a) {
             app_state.shells[si].workspace = b;
@@ -3658,7 +3798,7 @@ fn exportSlotSessionFile(slot: u8) bool {
     @memcpy(json_buf[pos .. pos + t2.len], t2);
     pos += t2.len;
     appendJsonEscaped(&json_buf, &pos, wid);
-    const last_shell = std.fmt.bufPrint(json_buf[pos..], "\",\"last_shell\":{d}", .{app_state.g_ws_last_shell[slot]}) catch return false;
+    const last_shell = std.fmt.bufPrint(json_buf[pos..], "\",\"last_shell\":{d},\"focus\":\"{s}\"", .{ app_state.g_ws_last_shell[slot], @tagName(app_state.g_ws_focus[slot]) }) catch return false;
     pos += last_shell.len;
     const t3 = "}]";
     @memcpy(json_buf[pos .. pos + t3.len], t3);
@@ -3939,6 +4079,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     var src_wids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
     var src_wid_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     var src_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
+    var src_focus: [MAX_LWS]app_state.WorkspaceFocus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
     for (json_reader.array(json_reader.field(parsed.value, "workspaces")), 0..) |obj, swi| {
         if (swi >= MAX_LWS) break;
         var nb: [64]u8 = std.mem.zeroes([64]u8);
@@ -3952,6 +4093,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         if (wcap > 0) @memcpy(src_wids[swi][0..wcap], wb[0..wcap]);
         src_wid_len[swi] = wcap;
         src_last_shell[swi] = @intCast(@min(json_reader.uint(obj, "last_shell"), std.math.maxInt(u32)));
+        src_focus[swi] = parseWorkspaceFocus(obj);
     }
 
     for (0..tab_count) |t| {
@@ -3995,6 +4137,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         @memcpy(app_state.g_ws_ids[slot][0..id_len], id[0..id_len]);
         app_state.g_ws_id_len[slot] = @intCast(id_len);
         app_state.g_ws_last_shell[slot] = 0;
+        app_state.g_ws_focus[slot] = .none;
     }
     for (0..tab_count) |t| {
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
@@ -4009,6 +4152,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 app_state.g_lws_count += 1;
                 slot_map[src_ws] = slot;
                 app_state.g_ws_last_shell[slot] = 0;
+                app_state.g_ws_focus[slot] = .none;
                 const sn = src_names[src_ws][0..@min(src_name_len[src_ws], 31)];
                 const nm = if (sn.len > 0) sn else fallback_name;
                 const ncap2 = @min(nm.len, @as(usize, 31));
@@ -4102,7 +4246,11 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].workspace = slot;
             for (tabs[0..tab_count], 0..) |saved, saved_idx| {
                 if (saved.workspace == src_ws and saved.shell_id != 0 and saved.shell_id == src_last_shell[src_ws] and
-                    tmux_identity.restoreWinner(tabs[0..tab_count], saved_idx) == t) app_state.g_ws_last_shell[slot] = app_state.shells[idx].shell_id;
+                    tmux_identity.restoreWinner(tabs[0..tab_count], saved_idx) == t)
+                {
+                    app_state.g_ws_last_shell[slot] = app_state.shells[idx].shell_id;
+                    app_state.g_ws_focus[slot] = src_focus[src_ws];
+                }
             }
             app_state.shells[idx].last_active = if (tabs[t].last_active != 0) tabs[t].last_active else nowFileTime();
             app_state.shells[idx].last_viewed = tabs[t].last_viewed;
@@ -4137,6 +4285,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.g_ws_name_len[s] = 0;
             app_state.g_ws_id_len[s] = 0;
             app_state.g_ws_last_shell[s] = 0;
+            app_state.g_ws_focus[s] = .none;
         }
         app_state.g_lws_count = entry_lws;
         return false;
