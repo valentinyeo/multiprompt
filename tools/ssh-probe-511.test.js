@@ -266,7 +266,9 @@ test('ISSUE-511 close forgets id-keyed history and browser files even without a 
   assert.ok(close.indexOf('chatHistoryForget(') < close.indexOf('shell_count -= 1'));
   assert.ok(close.indexOf('closeBrowserForShell(idx)') < close.indexOf('shell_count -= 1'));
   const browser = body('closeBrowserForShell', read('browser_pane.zig'));
-  assert.match(browser, /browser_window_id = 0;\s*\}\s*deleteBrowserWindowIdFile\(app_state\.shells\[idx\]\.shell_id\);\s*removePaneSessionFilesForShell\(idx\);\s*removeWebView2SessionFilesForShell\(idx\)/);
+  assert.match(browser, /browser_window_id = 0;\s*removePaneSessionFilesForShell\(idx\);\s*\}\s*deleteBrowserWindowIdFile\(app_state\.shells\[idx\]\.shell_id\);\s*removePaneShellKeyFileForShell\(idx\)/);
+  assert.match(browser, /removeWebView2SessionFile\(shellZsbSessionKey\(app_state\.shells\[idx\]\.shell_id, &key_buf\)\)/);
+  assert.doesNotMatch(browser, /removeWebView2SessionFilesForShell\(/);
   assert.match(close, /if \(webView2OwnsShell\(idx\)\) closeWebView2\(\)/);
   assert.match(body('chatHistoryForget', read('chat_session.zig')), /entry\.retired = true/);
 });
