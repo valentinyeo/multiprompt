@@ -1,1 +1,2 @@
 tools/chat-bench/** text eol=lf
+src/chat_history_reader.py text eol=lf

@@ -10,6 +10,7 @@ import { checkReceipt, sourceHash } from './receipt.mjs';
 
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const sources = { run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' };
+if (fs.existsSync(new URL('ssh-fixture.c', import.meta.url))) sources.ssh = 'ssh-fixture.c';
 
 test('ISSUE-513 new benchmark checkouts emit LF runner hashes on every platform', () => {
   const attributes = fs.readFileSync(new URL('../../.gitattributes', import.meta.url), 'utf8');
