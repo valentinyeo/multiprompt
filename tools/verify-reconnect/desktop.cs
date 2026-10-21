@@ -28,7 +28,7 @@ public static class ReconnectDesktop {
     public static long[] Focus(IntPtr main) { uint pid; uint thread=GetWindowThreadProcessId(main,out pid); var g=new GUI(); g.cbSize=(uint)Marshal.SizeOf<GUI>(); if(!GetGUIThreadInfo(thread,ref g)) throw new Exception("GetGUIThreadInfo failed"); return new[]{GetForegroundWindow().ToInt64(),g.focus.ToInt64(),g.active.ToInt64()}; }
     static void Send(INPUT i) { if(SendInput(1,new[]{i},Marshal.SizeOf<INPUT>())!=1) throw new Exception("SendInput failed"); }
     public static void Key(ushort vk,bool up) { var i=new INPUT(); i.type=1; i.data.key.vk=vk; i.data.key.flags=up?2u:0u; Send(i); System.Threading.Thread.Sleep(80); }
-    public static void Activate(IntPtr h) { RECT r; GetWindowRect(h,out r); MouseAt(r.Left+Math.Min(300,(r.Right-r.Left)/2),r.Top+12); }
+    public static void Activate(IntPtr h) { Key(0x12,false); Key(0x12,true); if(!SetForegroundWindow(h)) throw new Exception("Could not activate app window"); RECT r; GetWindowRect(h,out r); MouseAt(r.Left+Math.Min(300,(r.Right-r.Left)/2),r.Top+12); }
     static void MouseAt(int x,int y) { var i=new INPUT(); i.data.mouse.x=x*65535/(GetSystemMetrics(0)-1); i.data.mouse.y=y*65535/(GetSystemMetrics(1)-1); i.data.mouse.flags=0x8003; Send(i); i.data.mouse.flags=0x8005; Send(i); }
     public static void Click(IntPtr h) { RECT r; if(!GetWindowRect(h,out r)) throw new Exception("Missing click rect"); var i=new INPUT(); i.data.mouse.x=(r.Left+(r.Right-r.Left)/2)*65535/(GetSystemMetrics(0)-1); i.data.mouse.y=(r.Top+(r.Bottom-r.Top)/2)*65535/(GetSystemMetrics(1)-1); i.data.mouse.flags=0x8003; Send(i); i.data.mouse.flags=0x8005; Send(i); }
 }

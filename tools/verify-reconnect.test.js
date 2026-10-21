@@ -29,6 +29,7 @@ assert.match(desktop, /Class\(h\)=="ConsoleWindowClass"/);
 assert.match(desktop, /GetForegroundWindow/);
 assert.match(desktop, /GetGUIThreadInfo/);
 assert.match(desktop, /SendInput/);
+assert.match(desktop, /void Activate\(IntPtr h\) \{ Key\(0x12,false\); Key\(0x12,true\); if\(!SetForegroundWindow\(h\)\) throw/);
 assert.match(read('src/chat_send.zig'), /@import\("focus\.zig"\)\.ShowWindow\(shell\.hwnd/);
 assert.doesNotMatch(drive, /Stop-Process -Name|taskkill \/IM/i);
 assert.match(drive, /remaining_owned_processes/);

@@ -727,8 +727,9 @@ test "ISSUE-512 quiet warning refresh" {
     try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, false) == null);
 }
 `), 'ISSUE-512 quiet');
-  assert.match(body('sshAutoReconnectTick'), /if \(app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.disconnected\) \{\s*@import\("drawing\.zig"\)\.invalidateReconnectContent\(app_state\.active_shell\);/);
-  assert.doesNotMatch(body('sshAutoReconnectTick'), /InvalidateRect\(/);
+  const tick = body('sshAutoReconnectTick', fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8'));
+  assert.match(tick, /if \(app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.disconnected\) \{\s*@import\("drawing\.zig"\)\.invalidateReconnectContent\(app_state\.active_shell\);/);
+  assert.doesNotMatch(tick, /InvalidateRect\(/);
   const paint = body('paintDisconnectedNotice', fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8'));
   assert.match(paint, /const text = if \(shell\.ssh_reconnect\.phase == \.ended\)\s*"Session ended"\s*else if \(shell\.ssh_reconnect\.noticeReason/);
 });
