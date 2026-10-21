@@ -1,5 +1,5 @@
 name: Chat bench A/B
-run-name: chat bench ${{ inputs.tag_a || 'v0.28.789' }} vs ${{ inputs.tag_b || 'v0.28.791' }}
+run-name: chat bench ${{ inputs.tag_a || 'v0.28.789' }} vs ${{ inputs.tag_b || 'v0.28.793' }}
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 120
     env:
       TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.789' || inputs.tag_a }}
-      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.791' || inputs.tag_b }}
+      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.793' || inputs.tag_b }}
       RUNS: ${{ github.event_name == 'pull_request' && '3' || inputs.runs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
