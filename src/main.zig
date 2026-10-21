@@ -1174,6 +1174,7 @@ const openInboxFilter = @import("inbox.zig").openInboxFilter;
 const closeInboxFilter = @import("inbox.zig").closeInboxFilter;
 const toggleInbox = @import("inbox.zig").toggleInbox;
 const armInboxStepContext = @import("inbox.zig").armInboxStepContext;
+const jumpToInboxRow = @import("inbox.zig").jumpToInboxRow;
 const inboxJump = @import("inbox.zig").inboxJump;
 const inboxStepJump = @import("inbox.zig").inboxStepJump;
 const refreshNextUnreadCache = @import("inbox.zig").refreshNextUnreadCache;

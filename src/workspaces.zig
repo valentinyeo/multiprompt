@@ -39,6 +39,7 @@ const SetParent = @import("win32.zig").SetParent;
 const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
 const GetWindowLongPtrW = @import("win32.zig").GetWindowLongPtrW;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
+const SetTimer = @import("win32.zig").SetTimer;
 const DestroyWindow = @import("win32.zig").DestroyWindow;
 const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
@@ -2306,6 +2307,77 @@ test "ISSUE-439 stale moved and archived remembered sessions fall back to activi
     try std.testing.expectEqual(@as(?u32, null), pickWorkspaceTarget(&shells, 2, 41));
 }
 
+test "ISSUE-439 session JSON round trip keeps each workspace last shell" {
+    const old_active = app_state.g_active_workspace;
+    const old_snoozed = app_state.g_ws_snoozed;
+    const old_single = app_state.g_single_window;
+    const old_count = app_state.g_lws_count;
+    const old_names = app_state.g_ws_names;
+    const old_lengths = app_state.g_ws_name_len;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    const old_last_shell = app_state.g_ws_last_shell;
+    const old_shell_count = app_state.shell_count;
+    const old_shells = app_state.shells[0..2].*;
+    defer {
+        app_state.g_active_workspace = old_active;
+        app_state.g_ws_snoozed = old_snoozed;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_count;
+        app_state.g_ws_names = old_names;
+        app_state.g_ws_name_len = old_lengths;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.g_ws_last_shell = old_last_shell;
+        app_state.shell_count = old_shell_count;
+        app_state.shells[0..2].* = old_shells;
+    }
+    app_state.g_single_window = true;
+    app_state.g_lws_count = 2;
+    app_state.shell_count = 2;
+    for (0..2) |ws| {
+        app_state.shells[ws] = empty_shell;
+        app_state.shells[ws].kind = .tmux;
+        app_state.shells[ws].workspace = @intCast(ws);
+        app_state.shells[ws].shell_id = @intCast(41 + ws);
+        app_state.g_ws_last_shell[ws] = app_state.shells[ws].shell_id;
+        app_state.g_ws_names[ws][0] = @intCast('A' + ws);
+        app_state.g_ws_name_len[ws] = 1;
+        app_state.g_ws_ids[ws][0] = @intCast('a' + ws);
+        app_state.g_ws_id_len[ws] = 1;
+    }
+    var temp: [512]u8 = undefined;
+    const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(temp_len > 0 and temp_len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-439-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(@import("session.zig").saveSessionTo(path, null));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var parsed = try json_reader.parse(std.testing.allocator, bytes);
+    defer parsed.deinit();
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(bytes, &tabs));
+    const workspaces = json_reader.array(json_reader.field(parsed.value, "workspaces"));
+    try std.testing.expectEqual(@as(usize, 2), workspaces.len);
+    for (workspaces, 0..) |workspace, ws| {
+        try std.testing.expectEqual(@as(u64, app_state.g_ws_last_shell[ws]), json_reader.uint(workspace, "last_shell"));
+        try std.testing.expectEqual(app_state.g_ws_last_shell[ws], tabs[ws].shell_id);
+    }
+    swapWorkspaceSlots(0, 1);
+    try std.testing.expectEqual(@as(u32, 42), app_state.g_ws_last_shell[0]);
+    try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[1]);
+}
+
 test "IGSH-457 Starred is never serialized into session or synced layout" {
     const old_starred = app_state.g_starred_workspace;
     defer app_state.g_starred_workspace = old_starred;
@@ -2369,7 +2441,7 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
     try std.testing.expect(temp_len > 0 and temp_len < temp.len);
     var path_buf: [600]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-439-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\igsh-457-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
     defer {
         for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
             var clean_buf: [640]u8 = undefined;
@@ -2408,9 +2480,6 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
     try std.testing.expectEqualStrings(encoded_home, try layout.encode(allocator, rebased));
     try std.testing.expectEqual(@as(usize, 2), starred_layout.workspaces.len);
     for (starred_layout.tabs, 0..) |tab, ws| try std.testing.expectEqualStrings(starred_layout.workspaces[ws].name, tab.workspace);
-    swapWorkspaceSlots(0, 1);
-    try std.testing.expectEqual(@as(u32, 42), app_state.g_ws_last_shell[0]);
-    try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[1]);
 }
 
 pub fn starredShellVisible(idx: usize) bool {

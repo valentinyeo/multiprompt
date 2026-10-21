@@ -119,10 +119,29 @@ test('IGSH-457 Starred uses shared live membership and digit mapping on every na
   assert.match(sidebar, /if \(app_state.g_starred_workspace\) \{[\s\S]*?starredShellVisible\(i\)[\s\S]*?return count;/);
   assert.match(main, /const cur: u32 = if \(app_state.g_starred_workspace\) 0 else @as\(u32, app_state.g_active_workspace\) \+ 1/);
   assert.match(main, /target == SEARCH_STARRED_OFFSET/);
+  assert.match(main, /const jumpToInboxRow = @import\("inbox.zig"\).jumpToInboxRow;/);
+  assert.match(inbox, /pub fn jumpToInboxRow\(ri: u32\) void/);
+  assert.match(workspaces, /const SetTimer = @import\("win32.zig"\).SetTimer;/);
+  assert.match(read('src/win32.zig'), /pub extern "user32" fn SetTimer\(/);
   assert.match(sidebar, /L\("Go to Starred workspace"\)/);
   assert.match(sidebar, /No starred sessions\. Press Alt\+S on a session to star it\./);
 });
 
+
+test('IGSH-457 serialization coverage stays separate from the ISSUE-439 round trip', () => {
+  const workspaces = fs.readFileSync(path.join(__dirname, '../src/workspaces.zig'), 'utf8');
+  const roundTrip = between('test "ISSUE-439 session JSON round trip keeps each workspace last shell"', 'test "IGSH-457 Starred is never serialized into session or synced layout"');
+  assert.match(roundTrip, /parseSessionTabs\(bytes, &tabs\)/);
+  assert.match(roundTrip, /swapWorkspaceSlots\(0, 1\)/);
+  assert.doesNotMatch(roundTrip, /g_starred_workspace|captureSessionLayout/);
+  const starred = workspaces.slice(workspaces.indexOf('test "IGSH-457 Starred is never serialized into session or synced layout"'), workspaces.indexOf('pub fn starredShellVisible('));
+  assert.match(starred, /expect\(app_state.g_starred_workspace\)/);
+  assert.match(starred, /saveSessionTo\(path, null\)/);
+  assert.match(starred, /json_reader.uint\(parsed.value, "workspace_count"\)/);
+  assert.match(starred, /json_reader.uint\(parsed.value, "active_workspace"\)/);
+  assert.match(starred, /expectEqualStrings\(encoded_home, encoded_starred\)/);
+  assert.match(starred, /account_layout.zig"\).rebase/);
+});
 
 test('IGSH-457 production Starred rows include other windows without duplicating local sessions', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-starred-rows-'));
