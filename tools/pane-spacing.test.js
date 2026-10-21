@@ -57,7 +57,7 @@ var g_hide_sidebar = false;
 var g_thread_title = true;
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
-var shells = [_]struct { hwnd: HANDLE = 2, full_width: bool = false, browser_native: bool = true, font_gen: u32 = 0 }{.{}};
+var shells = [_]struct { hwnd: HANDLE = 2, full_width: bool = false, browser_native: bool = true, font_gen: u32 = 0, disconnected: bool = false }{.{}};
 var g_main_hwnd: HANDLE = 1;
 var g_chat_active = false;
 var g_chat_composer_extra_h: i32 = 0;
