@@ -212,6 +212,12 @@ var g_account_hosts_cache: struct {
     refreshed_at: ?u64 = null,
 } = .{};
 
+var g_account_keys_cache: struct {
+    last_check_ms: ?u64 = null,
+    published_key: ?[]const u8 = null,
+} = .{};
+var g_account_key_prompt_active = false;
+
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
     if (job.base) |b| a.free(b);
@@ -221,6 +227,10 @@ fn accountJobFree(job: AccountJob) void {
 }
 pub fn startAccountJob(job: AccountJob) void {
     if (app_state.g_account_busy or app_state.g_account_bypass) {
+        accountJobFree(job);
+        return;
+    }
+    if (g_account_key_prompt_active and job.kind != .decide_keys) {
         accountJobFree(job);
         return;
     }
@@ -554,11 +564,11 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
 }
 
 fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
-    if (reply.key_error != null) return;
+    if (!account_keys.syncPolicy(reply.job.kind, 0, null, null, null).show_error or reply.key_error != null) return;
     reply.key_error = std.heap.page_allocator.dupe(u8, text) catch null;
 }
 
-fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []const u8) !void {
+fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []const u8, job_kind: AccountJobKind) !void {
     const exe = std.mem.trim(u8, ssh, "\" ");
     const dir = std.mem.lastIndexOfAny(u8, exe, "\\/") orelse return error.Process;
     var profile: [512]u8 = undefined;
@@ -577,14 +587,19 @@ fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []cons
         win32MakeDir(folder);
         const generate = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\" -t ed25519 -N \"\" -q -C multiprompt -f \"{s}\"", .{ exe[0..dir], private_path });
         _ = try accountSshOutput(a, generate, 30000);
-    } else if (!has_public) return error.IncompleteKeyPair;
+    } else if (!has_public) return error.MissingPublicKey;
     const bytes = readFileAllocWin32(public_path, 4096) orelse return error.Storage;
     defer std.heap.page_allocator.free(bytes);
     const key = try account_keys.parsePublicKey(a, bytes);
+    if (!account_keys.syncPolicy(job_kind, 0, null, g_account_keys_cache.published_key, key).publish) return;
+    const published = try std.heap.page_allocator.dupe(u8, key);
+    errdefer std.heap.page_allocator.free(published);
     const body = try std.json.Stringify.valueAlloc(a, .{ .public_key = key }, .{});
     const result = try account_client.request("PUT", "/v1/device-key", access, body);
     defer result.deinit();
     if (result.status != 200) return error.PublishKey;
+    if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
+    g_account_keys_cache.published_key = published;
 }
 
 fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutReply) ![]const []const u8 {
@@ -617,11 +632,18 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
+    const now = GetTickCount64();
+    const policy = account_keys.syncPolicy(job.kind, now, g_account_keys_cache.last_check_ms, null, null);
+    if (policy.check) g_account_keys_cache.last_check_ms = now;
     var ssh_buf: [1024]u8 = undefined;
     var ssh_len: usize = 0;
     if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.Process;
     const ssh = ssh_buf[0..ssh_len];
-    try accountPublishDeviceKey(a, ssh, access);
+    accountPublishDeviceKey(a, ssh, access, job.kind) catch |err| {
+        if (err == error.MissingPublicKey) accountDeviceKeyError(reply, "The public key file id_ed25519.pub is missing next to your private key.");
+        return err;
+    };
+    if (!policy.check) return;
     const result = try account_client.request("GET", "/v1/device-keys", access, "");
     defer result.deinit();
     if (result.status != 200) return error.DeviceKeys;
@@ -994,20 +1016,23 @@ fn accountDevices(bytes: []const u8) void {
     }
 }
 fn accountPromptDeviceKeys(bytes: []const u8) void {
+    if (g_account_key_prompt_active or app_state.g_account_busy) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const listing = account_keys.parseListing(a, bytes) catch return;
     defer listing.deinit();
+    g_account_key_prompt_active = true;
     app_state.g_account_busy = true;
     var submitted = false;
     defer if (!submitted) {
+        g_account_key_prompt_active = false;
         app_state.g_account_busy = false;
     };
     var decisions: std.ArrayList(account_keys.Decision) = .empty;
     for (listing.value.keys) |key| {
         if (key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)) continue;
-        const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: ask again next sync.", .{key.name}) catch return;
+        const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: ask again in five minutes.", .{key.name}) catch return;
         const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
         const answer = MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Approve devices"), 3 | 0x20);
         if (answer != 6 and answer != 7) continue;
@@ -1017,13 +1042,14 @@ fn accountPromptDeviceKeys(bytes: []const u8) void {
     const encoded = std.json.Stringify.valueAlloc(std.heap.page_allocator, decisions.items, .{}) catch return;
     app_state.g_account_busy = false;
     startAccountJob(.{ .kind = .decide_keys, .edited = encoded });
-    submitted = true;
+    submitted = app_state.g_account_busy;
 }
 
 pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
+        g_account_key_prompt_active = false;
         accountSyncFailed(app_state.g_account_has_token);
         return;
     }
@@ -1031,6 +1057,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
     defer a.destroy(reply);
     defer accountJobFree(reply.job);
+    if (reply.job.kind == .decide_keys) g_account_key_prompt_active = false;
     defer if (reply.bytes) |bytes| a.free(bytes);
     defer if (reply.device_keys) |bytes| a.free(bytes);
     defer if (reply.key_error) |bytes| a.free(bytes);
@@ -2106,4 +2133,44 @@ test "authenticated layout capacity failure cannot relock an already running pro
     handleLayoutReply(@bitCast(@intFromPtr(reply)));
     try std.testing.expect(!app_state.g_account_locked);
     try std.testing.expect(app_state.g_account_has_token);
+}
+
+test "device key errors stay silent for background jobs and explicit jobs retain one plain message" {
+    for ([_]AccountJobKind{ .startup, .login, .pull, .push, .devices, .revoke, .signout, .device_keys, .decide_keys }) |kind| {
+        var reply: LayoutReply = .{ .job = .{ .kind = kind } };
+        defer if (reply.key_error) |text| std.heap.page_allocator.free(text);
+        accountDeviceKeyError(&reply, "The public key file id_ed25519.pub is missing next to your private key.");
+        accountDeviceKeyError(&reply, "Generic fallback");
+        if (kind == .device_keys or kind == .decide_keys) {
+            try std.testing.expectEqualStrings("The public key file id_ed25519.pub is missing next to your private key.", reply.key_error.?);
+        } else try std.testing.expect(reply.key_error == null);
+    }
+}
+
+test "device prompt guard blocks nested rounds and background jobs until decision completion" {
+    const old_busy = app_state.g_account_busy;
+    const old_guard = g_account_key_prompt_active;
+    const old_status = app_state.g_account_status;
+    const old_login = app_state.g_account_login_active;
+    defer {
+        app_state.g_account_busy = old_busy;
+        g_account_key_prompt_active = old_guard;
+        app_state.g_account_status = old_status;
+        app_state.g_account_login_active = old_login;
+    }
+    app_state.g_account_busy = false;
+    g_account_key_prompt_active = true;
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[{\"device_id\":\"other\",\"name\":\"Laptop\",\"public_key\":\"ssh-ed25519 AAAA\",\"status\":\"pending\"}]}");
+    try std.testing.expect(g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
+    startAccountJob(.{ .kind = .pull });
+    try std.testing.expect(!app_state.g_account_busy);
+    const reply = try std.heap.page_allocator.create(LayoutReply);
+    reply.* = .{ .job = .{ .kind = .decide_keys }, .cancelled = true };
+    handleLayoutReply(@bitCast(@intFromPtr(reply)));
+    try std.testing.expect(!g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
+    accountPromptDeviceKeys("{\"device_id\":\"self\",\"keys\":[]}");
+    try std.testing.expect(!g_account_key_prompt_active);
+    try std.testing.expect(!app_state.g_account_busy);
 }

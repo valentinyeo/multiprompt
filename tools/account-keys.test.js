@@ -17,14 +17,14 @@ function audit(source) {
   assert.match(publish, /GetEnvironmentVariableA\("USERPROFILE"/);
   assert.match(publish, /ssh-keygen\.exe\\" -t ed25519 -N \\"\\" -q -C multiprompt -f/);
   assert.match(publish, /GetFileAttributesW\(private_w\.ptr\)/);
-  assert.match(publish, /else if \(!has_public\) return error.IncompleteKeyPair/);
+  assert.match(publish, /else if \(!has_public\) return error.MissingPublicKey/);
   assert.match(publish, /readFileAllocWin32\(public_path, 4096\)/);
   assert.doesNotMatch(publish, /readFileAllocWin32\(private_path/);
   assert.match(publish, /account_keys.parsePublicKey\(a, bytes\)/);
   assert.match(publish, /\.\{ \.public_key = key \}/);
   assert.match(publish, /request\("PUT", "\/v1\/device-key", access, body\)/);
   const sync = section(source, 'accountSyncDeviceKeys');
-  assert.ok(sync.indexOf('try accountPublishDeviceKey(') < sync.indexOf('request("GET", "/v1/device-keys"'));
+  assert.ok(sync.indexOf('accountPublishDeviceKey(') < sync.indexOf('request("GET", "/v1/device-keys"'));
   assert.match(sync, /key.status == \.pending and std.mem.eql\(u8, key.device_id, decision.device_id\) and std.mem.eql\(u8, key.public_key, decision.public_key\)/);
   assert.match(sync, /if \(!current\) return error.DeviceChanged/);
   assert.match(sync, /if \(aliases.len == 0\)/);
@@ -70,5 +70,56 @@ test('device-key transport, worker SSH, UI decisions and durable cleanup fail cl
   ]) {
     assert.ok(desktop.includes(before), before);
     assert.throws(() => audit(desktop.replace(before, after)), before);
+  }
+});
+
+function auditBackground(source) {
+  const errors = section(source, 'accountDeviceKeyError');
+  assert.match(errors, /if \(!account_keys\.syncPolicy\(reply\.job\.kind, 0, null, null, null\)\.show_error or reply\.key_error != null\) return;/);
+  const sync = section(source, 'accountSyncDeviceKeys');
+  assert.match(sync, /const policy = account_keys\.syncPolicy\(job\.kind, now, g_account_keys_cache\.last_check_ms, null, null\);/);
+  assert.match(sync, /if \(policy\.check\) g_account_keys_cache\.last_check_ms = now;/);
+  assert.match(sync, /if \(!policy\.check\) return;/);
+  assert.ok(sync.indexOf('g_account_keys_cache.last_check_ms = now') < sync.indexOf('accountPublishDeviceKey('));
+  assert.ok(sync.indexOf('if (!policy.check) return;') < sync.indexOf('request("GET", "/v1/device-keys"'));
+  assert.ok(sync.indexOf('if (!policy.check) return;') < sync.indexOf('accountKnownKeyHosts('));
+  assert.match(sync, /if \(err == error\.MissingPublicKey\) accountDeviceKeyError\(reply, "The public key file id_ed25519.pub is missing next to your private key\."\);/);
+  const publish = section(source, 'accountPublishDeviceKey');
+  assert.match(publish, /if \(!account_keys\.syncPolicy\(job_kind, 0, null, g_account_keys_cache\.published_key, key\)\.publish\) return;/);
+  assert.ok(publish.indexOf('.publish) return;') < publish.indexOf('request("PUT"'));
+  assert.match(publish, /if \(result\.status != 200\) return error\.PublishKey;/);
+  assert.match(publish, /g_account_keys_cache\.published_key = published;/);
+  assert.ok(publish.indexOf('if (result.status != 200) return error.PublishKey;') < publish.indexOf('g_account_keys_cache.published_key = published;'));
+  assert.match(publish, /else if \(!has_public\) return error\.MissingPublicKey;/);
+  const prompt = section(source, 'accountPromptDeviceKeys');
+  assert.match(prompt, /if \(g_account_key_prompt_active or app_state\.g_account_busy\) return;/);
+  assert.match(prompt, /g_account_key_prompt_active = true;/);
+  assert.ok(prompt.indexOf('g_account_key_prompt_active = true;') < prompt.indexOf('MessageBoxW('));
+  assert.match(prompt, /defer if \(!submitted\) \{\s*g_account_key_prompt_active = false;\s*app_state\.g_account_busy = false;/);
+  assert.match(prompt, /submitted = app_state\.g_account_busy;/);
+  assert.match(section(source, 'startAccountJob'), /if \(g_account_key_prompt_active and job\.kind != \.decide_keys\)/);
+  const reply = section(source, 'handleLayoutReply');
+  assert.match(reply, /if \(lp == 0\) \{\s*g_account_key_prompt_active = false;/);
+  assert.match(reply, /if \(reply\.job\.kind == \.decide_keys\) g_account_key_prompt_active = false;/);
+}
+
+test('background keys throttle failed attempts, publish only on change or explicit request, and serialize Cancel/decision rounds', () => {
+  auditBackground(desktop);
+  for (const [before, after] of [
+    ['!account_keys.syncPolicy(reply.job.kind, 0, null, null, null).show_error or ', ''],
+    ['if (policy.check) g_account_keys_cache.last_check_ms = now;', ''],
+    ['if (!policy.check) return;', ''],
+    ['if (!account_keys.syncPolicy(job_kind, 0, null, g_account_keys_cache.published_key, key).publish) return;', ''],
+    ['if (result.status != 200) return error.PublishKey;', ''],
+    ['else if (!has_public) return error.MissingPublicKey;', ''],
+    ['if (err == error.MissingPublicKey) accountDeviceKeyError', 'if (false) accountDeviceKeyError'],
+    ['if (g_account_key_prompt_active or app_state.g_account_busy) return;', ''],
+    ['g_account_key_prompt_active = true;', ''],
+    ['submitted = app_state.g_account_busy;', 'submitted = true;'],
+    ['g_account_key_prompt_active and job.kind != .decide_keys', 'false'],
+    ['if (reply.job.kind == .decide_keys) g_account_key_prompt_active = false;', ''],
+  ]) {
+    assert.ok(desktop.includes(before), before);
+    assert.throws(() => auditBackground(desktop.replace(before, after)), before);
   }
 });

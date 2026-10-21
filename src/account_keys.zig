@@ -35,6 +35,18 @@ pub const Device = struct { device_id: []const u8, name: []const u8, public_key:
 pub const Listing = struct { device_id: []const u8, keys: []const Device };
 pub const Decision = struct { device_id: []const u8, public_key: []const u8, approve: bool };
 
+pub const SyncPolicy = struct { check: bool, publish: bool, show_error: bool };
+
+pub fn syncPolicy(job_kind: anytype, now_ms: u64, last_check_ms: ?u64, last_published_key: ?[]const u8, current_key: ?[]const u8) SyncPolicy {
+    const explicit = job_kind == .device_keys;
+    const decision = job_kind == .decide_keys;
+    return .{
+        .check = explicit or decision or last_check_ms == null or now_ms -| last_check_ms.? >= 5 * 60 * 1000,
+        .publish = if (current_key) |key| explicit or last_published_key == null or !std.mem.eql(u8, last_published_key.?, key) else false,
+        .show_error = explicit or decision,
+    };
+}
+
 pub fn validDeviceId(id: []const u8) bool {
     if (id.len == 0 or id.len > 128) return false;
     for (id) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return false;
@@ -115,4 +127,37 @@ test "public comments cannot inject into generated commands and oversized keys a
     @memcpy(oversized[0..12], "ssh-ed25519 ");
     try std.testing.expectError(error.InvalidKey, addCommand(a, &oversized));
     try std.testing.expectError(error.InvalidKey, removeCommand(a, &oversized));
+}
+
+test "background device checks run initially and only every five minutes, including after Cancel or errors" {
+    const Job = enum { startup, login, pull, push, device_keys, decide_keys };
+    for ([_]Job{ .startup, .login, .pull, .push }) |job| {
+        try std.testing.expect(syncPolicy(job, 0, null, null, null).check);
+        try std.testing.expect(!syncPolicy(job, 300999, 1000, null, null).check);
+        try std.testing.expect(syncPolicy(job, 301000, 1000, null, null).check);
+        try std.testing.expect(syncPolicy(job, 301001, 1000, null, null).check);
+        try std.testing.expect(!syncPolicy(job, 0, 1000, null, null).check);
+        try std.testing.expect(!syncPolicy(job, 20000, 1000, null, null).show_error);
+    }
+}
+
+test "explicit device checks and decisions bypass cadence and show errors" {
+    const Job = enum { device_keys, decide_keys };
+    for ([_]Job{ .device_keys, .decide_keys }) |job| {
+        const policy = syncPolicy(job, 1001, 1000, "ssh-ed25519 AAAA", "ssh-ed25519 AAAA");
+        try std.testing.expect(policy.check);
+        try std.testing.expect(policy.show_error);
+        try std.testing.expectEqual(job == .device_keys, policy.publish);
+    }
+}
+
+test "publication is deduplicated after success but key changes and explicit palette checks republish" {
+    const Job = enum { pull, device_keys, decide_keys };
+    const key = "ssh-ed25519 AAAA";
+    try std.testing.expect(syncPolicy(Job.pull, 0, null, null, key).publish);
+    try std.testing.expect(!syncPolicy(Job.pull, 600000, 0, key, key).publish);
+    try std.testing.expect(!syncPolicy(Job.decide_keys, 1, 0, key, key).publish);
+    try std.testing.expect(syncPolicy(Job.pull, 1, 0, key, "ssh-ed25519 BBBB").publish);
+    try std.testing.expect(syncPolicy(Job.device_keys, 1, 0, key, key).publish);
+    try std.testing.expect(!syncPolicy(Job.device_keys, 1, 0, key, null).publish);
 }
