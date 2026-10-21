@@ -5,7 +5,6 @@ on:
       - src/chat_render.zig
       - src/chat_markdown.zig
       - src/chat_table_measure.zig
-      - src/chat_table_bench.zig
       - tools/chat-table-bench/**
       - .github/workflows/chat-table-bench.yml
   workflow_dispatch:
@@ -36,12 +35,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force evidence | Out-Null
-          $benchmark = Get-Content after/tools/chat-table-bench/benchmark.zig -Raw
+          $render = Get-Content after/src/chat_render.zig -Raw
+          $start = $render.IndexOf('test "IGSH-436 table build benchmark"')
+          if ($start -lt 0) { throw 'Table benchmark test missing' }
+          $benchmark = $render.Substring($start)
+          Add-Content before/src/chat_render.zig "`n$benchmark"
           Copy-Item after/build.zig before/build.zig
-          Copy-Item after/src/chat_table_bench.zig before/src/chat_table_bench.zig
           foreach ($revision in @('before', 'after')) {
             git -C $revision rev-parse HEAD | Set-Content "evidence/$revision-revision.txt"
-            Add-Content "$revision/src/chat_render.zig" "`n$benchmark"
             $env:APPDATA = Join-Path $pwd "evidence/$revision"
             $env:ZIGSHELL_DEBUG = '1'
             New-Item -ItemType Directory -Force "$env:APPDATA/ZigShell" | Out-Null
