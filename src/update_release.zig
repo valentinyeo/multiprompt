@@ -67,7 +67,7 @@ fn spawn(mode: []const u8, pids: []const u32, accepted: []const u8) win.HANDLE {
         used += part.len;
     }
     const a = std.heap.page_allocator;
-    const script8 = std.unicode.utf16LeToUtf8Alloc(a, std.mem.span(&script)) catch return null;
+    const script8 = std.unicode.utf16LeToUtf8Alloc(a, script[0 .. exe_len + ".updater.ps1".len]) catch return null;
     defer a.free(script8);
     const exe8 = std.unicode.utf16LeToUtf8Alloc(a, exe[0..exe_len]) catch return null;
     defer a.free(exe8);

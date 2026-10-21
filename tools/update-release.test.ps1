@@ -12,7 +12,7 @@ function Refuses([scriptblock]$Action, [string]$Message) {
 $root = Join-Path $env:RUNNER_TEMP ('update-tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 try {
-    Add-Type -TypeDefinition 'using System; using System.Threading; class UpdateOld { static void Main(string[] args) { if (args.Length == 2) { using (var e = EventWaitHandle.OpenExisting(args[1])) { e.Set(); } Thread.Sleep(2500); } } }' -OutputAssembly "$root/old.exe" -OutputType ConsoleApplication
+    Add-Type -TypeDefinition 'using System; using System.Threading; class UpdateOld { static void Main(string[] args) { System.IO.File.AppendAllText(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName + ".starts", "start\n"); if (args.Length == 2) { using (var e = EventWaitHandle.OpenExisting(args[1])) { e.Set(); } Thread.Sleep(2500); } } }' -OutputAssembly "$root/old.exe" -OutputType ConsoleApplication
     Add-Type -TypeDefinition 'class UpdateBroken { static int Main() { return 1; } }' -OutputAssembly "$root/broken.exe" -OutputType ConsoleApplication
     Copy-Item "$root/old.exe" "$root/app.exe"
     $target = "$root/app.exe"
@@ -54,6 +54,7 @@ try {
     Assert (-not (Save-Update $target '1.10.0' 'x64')) 'Equal release staged'
     Assert (Save-Update $target '1.9.0' 'x64') 'Verified update was not staged'
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Background check replaced running installation'
+    Assert (-not (Test-Path "$target.starts")) 'Background check launched the app'
     Assert (-not (Test-Path "$target.previous.exe")) 'Background check installed without consent'
     Assert (Test-Path "$dir/ready.txt") 'Background check did not publish readiness'
     Write-Host 'no automatic restart while running passed'
@@ -62,6 +63,7 @@ try {
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Stale update modified installation'
     Refuses { Install-Update $target 'x64' '' '1.9.0' } 'Broken update reported success'
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Previous executable not restored'
+    Assert ((Get-Content "$target.starts" -Raw) -eq "start`n") 'Rollback did not start the previous executable exactly once'
     Assert ((Get-FileHash "$target.previous.exe").Hash -eq $oldHash) 'Previous executable not retained'
     Assert ((Get-FileHash "$dir/failed.exe").Hash -eq $brokenHash) 'Failed executable not quarantined'
     Assert ((Get-Content "$dir/rejected.txt" -Raw) -eq 'v1.10.0') 'Failed version not suppressed'
