@@ -14,10 +14,10 @@ function body(text, name) {
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
-    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, 'var g_chat_find_open = false;\n' + code);
+    fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + code);
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -282,10 +282,14 @@ test "table paint without selection makes no per-character GDI calls; real selec
     _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
     try std.testing.expectEqual(@as(usize, 0), character_widths);
     try std.testing.expectEqual(@as(usize, 0), selection_runs);
-    g_chat_sel_active = true; g_chat_sel_transcript_focus = true;
-    _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
-    try std.testing.expectEqual(@as(usize, 1000), character_widths);
-    try std.testing.expectEqual(@as(usize, 1000), selection_runs);
+    g_chat_sel_active = true;
+    for ([_]bool{ true, false }) |focused| {
+        g_chat_sel_transcript_focus = focused;
+        character_widths = 0; selection_runs = 0;
+        _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
+        try std.testing.expectEqual(@as(usize, 1000), character_widths);
+        try std.testing.expectEqual(@as(usize, 1000), selection_runs);
+    }
 }
 `;
 test('production table paint avoids per-character selection measurement when nothing is selected', () => {
@@ -329,6 +333,59 @@ fn DeleteObject(_: HANDLE) i32 { return 1; }
 fn chatCodePanelColor() u32 { return 0; }
 fn themeConsoleFg() u32 { return 0; }
 `;
+const caretChecks = String.raw`
+var caret_widths: usize = 0;
+fn caretTextWidth(hdc: HANDLE, text: []const u16) i32 {
+    caret_widths += 1;
+    return chatTextWidth(hdc, text);
+}
+test "ISSUE-438 dragging on line one measures no glyph prefixes on other lines" {
+    var data: [128 * 81]u16 = undefined;
+    for (0..128) |line| {
+        @memset(data[line * 81 ..][0..80], 'x');
+        data[line * 81 + 80] = '\n';
+    }
+    const area = RECT{ .left = 10, .top = 30, .right = 650 };
+    for (0..3) |mode| {
+        var first_widths: usize = 0;
+        for ([_]usize{ 1, 128 }) |lines| {
+            const text = data[0 .. lines * 81];
+            var at: usize = 0;
+            caret_widths = 0;
+            const hit = ChatHit{ .x = 331, .y = 35, .char = &at };
+            if (mode == 2) _ = chatRichText(0, text, area, 0, false, hit, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, hit, 17, null, null);
+            try std.testing.expectEqual(@as(usize, 57), at);
+            try std.testing.expect(caret_widths > 1);
+            if (lines == 1) first_widths = caret_widths else try std.testing.expectEqual(first_widths, caret_widths);
+            if (lines == 128) for ([_]i32{ area.top - 1, area.top + @as(i32, @intCast(lines + 1)) * 20 }) |y| {
+                caret_widths = 0;
+                const outside = ChatHit{ .x = 331, .y = y, .char = &at };
+                if (mode == 2) _ = chatRichText(0, text, area, 0, false, outside, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, outside, 17, null, null);
+                try std.testing.expectEqual(@as(usize, 0), caret_widths);
+                try std.testing.expectEqual(if (y < area.top) @as(usize, 17) else 17 + text.len, at);
+            };
+        }
+    }
+}
+`;
+function runCaret(control = false) {
+  const before = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-7953828.zig', 'utf8') });
+  assert.equal(before.status, 0);
+  const renderer = control ? before.stdout.replace(/\bapp_state\./g, '') : source;
+  const prelude = rich.replace('fn chatCharAtX(_: HANDLE, _: []const u16, _: i32) usize { return 0; }',
+    body(source, 'chatCharAtX').replaceAll('chatTextWidth(', 'caretTextWidth('));
+  return run(prelude + richPrelude + body(renderer, 'chatFlowText') + body(renderer, 'chatRichText') + caretChecks);
+}
+test('ISSUE-438 production drag hit measures glyph prefixes only on the pointer line', () => {
+  const result = runCaret();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('ISSUE-438 caret measurement oracle rejects the original all-lines drag path', () => {
+  const result = runCaret(true);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /expected 42, found 5376/);
+});
+
 const richChecks = `
 test "rich layout: URL-free scans and GDI width calls grow linearly" {
     var data: [5120]u16 = undefined;

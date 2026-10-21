@@ -959,6 +959,12 @@ fn refreshChatBlockCache(force: bool) bool {
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
     const changed_offset = if (app_state.g_chat_layout_reuse > 0 and app_state.g_chat_layout_reuse < count) entry.?.history.blocks.items[app_state.g_chat_layout_reuse].start else 0;
     app_state.g_chat_tables.clearFrom(std.heap.page_allocator, changed_offset);
+    const keep_selection = @import("chat_hit.zig").keepSelection(
+        app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id,
+        app_state.g_chat_capture[0..app_state.g_chat_last_len],
+        source,
+        @max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret),
+    );
     app_state.g_chat_cache_shell_id = app_state.shells[app_state.active_shell].shell_id;
     @memcpy(app_state.g_chat_capture[0..len], source);
     app_state.g_chat_last_len = len;
@@ -966,8 +972,10 @@ fn refreshChatBlockCache(force: bool) bool {
     app_state.g_chat_cache_generation = generation;
     app_state.g_chat_hover_copy = null;
     app_state.g_chat_hover_link = null;
-    chatSelectionClear();
-    app_state.g_chat_sel_transcript_focus = false;
+    if (!keep_selection) {
+        chatSelectionClear();
+        app_state.g_chat_sel_transcript_focus = false;
+    }
     app_state.g_chat_blocks_from_file = from_file;
     if (from_file) {
         app_state.g_chat_block_count = count;

@@ -25,9 +25,18 @@ if ! command -v pwsh >/dev/null 2>&1; then
     ln -s "$pwsh" "$shim/pwsh"
 fi
 
+display=()
+if [[ -z "${DISPLAY:-}" ]]; then
+    if ! command -v xvfb-run >/dev/null 2>&1; then
+        printf '%s\n' 'xvfb-run missing: install xvfb for headless Windows tests (see openwiki/operations/build-and-install.md)' >&2
+        exit 2
+    fi
+    display=(xvfb-run -a)
+fi
+
 runner=()
 if systemd-run --user --scope -q -p MemoryMax=12G -p CPUQuota=400% true >/dev/null 2>&1; then
     runner=(systemd-run --user --scope -q -p MemoryMax=12G -p CPUQuota=400%)
 fi
-"${runner[@]}" nice -n 15 "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"
+"${runner[@]}" nice -n 15 "${display[@]}" "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"
 "${runner[@]}" nice -n 15 "$zig" build test-vps --summary all

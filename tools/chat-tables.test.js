@@ -66,7 +66,7 @@ test "table surface: complete captured box grid is exactly one table block" {
     }
     const reflowed = try a.dupe(u16, text);
     defer a.free(reflowed);
-    const reflow_len = chatReflowTranscript(reflowed, g_chat_line_starts[0..row_count], g_chat_line_lens[0..row_count], &([_]bool{false} ** 32));
+    const reflow_len = chatReflowTranscript(reflowed, g_chat_line_starts[0..row_count], g_chat_line_lens[0..row_count], &([_]bool{false} ** 32), &.{});
     const n = chatClassifyBlocks(reflowed[0..reflow_len], &blocks);
     try std.testing.expectEqual(@as(usize, 3), n);
     try std.testing.expectEqual(chat_markdown.Kind.table, blocks[1].kind);

@@ -13,6 +13,7 @@ function body(name) {
 }
 const prelude = String.raw`
 const std = @import("std");
+const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_code = @import("chat_code.zig");
 const chat_style = @import("chat_style.zig");
@@ -186,7 +187,7 @@ test "ISSUE-421 nested marker and body share the depth indent and trace only the
 function execute(control) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-grid-'));
   try {
-    copyZig(['chat_markdown.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
     let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableWheel', 'chatFindY'].map(body).join('\n');
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
