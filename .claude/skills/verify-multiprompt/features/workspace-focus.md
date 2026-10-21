@@ -4,7 +4,7 @@ Return to a workspace and resume typing in its Chat View typing box or shell wit
 
 ## Sub-features
 
-- `workspace-focus-chat`: remember the selected session and Chat View typing box; verify text through the native Edit control's read-only UI Automation value.
+- `workspace-focus-chat`: remember the selected session and Chat View typing box; verify text through the native Edit control's read-only text, retrieved with bounded WM_GETTEXT.
 - `workspace-focus-shell`: remember the selected session and console; verify a command staged before switching executes after returning.
 
 ## How to get to it (user POV)

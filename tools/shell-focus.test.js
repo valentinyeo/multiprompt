@@ -43,3 +43,37 @@ test('CI runs the shell focus regression through the full Zig test graph', () =>
   const build = fs.readFileSync(path.resolve(__dirname, '..', 'build.zig'), 'utf8');
   assert.match(build, /const shell_focus_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/shell-focus.test.js" \}\);\s*test_step.dependOn\(&shell_focus_tests.step\)/);
 });
+
+function auditWorkspaceFocusJourney(source) {
+  const reader = source.slice(source.indexOf('public static string EditText('), source.indexOf('public static string Title('));
+  assert.match(reader, /Class\(hwnd\) != "Edit"/);
+  assert.match(reader, /SendMessageTimeout\(hwnd, 0x000D, new UIntPtr\(\(uint\)text.Capacity\), text, 2, 1000, out length\) == IntPtr.Zero\) throw/);
+  assert.match(reader, /length.ToUInt64\(\) >= \(ulong\)\(text.Capacity - 1\)\) throw/);
+  assert.match(reader, /return text.ToString\(\);/);
+  assert.doesNotMatch(reader, /GetWindowText\(|SetFocus\(|SetForegroundWindow\(/);
+  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  assert.doesNotMatch(journey, /ValuePattern|GetCurrentPattern/);
+  for (const expected of ["'before-'", '$expectedText', "($expectedText + '-pill')"]) {
+    assert.ok(journey.includes(`[VerifyNative]::EditText([IntPtr]$composerHandle) -ceq ${expected}`), `exact composer text: ${expected}`);
+  }
+  assert.match(journey, /\$expectedText = 'before-workspace-focus-chat'/);
+  assert.match(journey, /\$focused.Current.NativeWindowHandle -ne \$composerHandle/);
+  assert.match(journey, /\$chatState.active_tab -ne \$initialTab -or \$chatState.workspaces\[0\].focus -ne 'chat'/);
+  const keyboardReturn = journey.slice(journey.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"), journey.indexOf("Snapshot 'chat-returned'"));
+  assert.match(keyboardReturn, /Type-Text 'workspace-focus-chat'/);
+  assert.doesNotMatch(keyboardReturn, /SetFocus|SetForegroundWindow|ShowWindow|Click/);
+}
+
+test('workspace focus journey reads cross-process Edit text with a bounded read-only message and keeps no-click assertions', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  auditWorkspaceFocusJourney(source);
+  for (const [before, after] of [
+    ['SendMessageTimeout(hwnd, 0x000D,', 'GetWindowText(hwnd,'],
+    ['text, 2, 1000, out length', 'text, 8, 1000, out length'],
+    ["[VerifyNative]::EditText([IntPtr]$composerHandle) -ceq $expectedText", '$true'],
+    ["Type-Text 'workspace-focus-chat'", "[void][VerifyNative]::SetForegroundWindow($script:window)\n            Type-Text 'workspace-focus-chat'"],
+  ]) {
+    assert.ok(source.includes(before), before);
+    assert.throws(() => auditWorkspaceFocusJourney(source.replace(before, after)), `mutation must fail: ${before}`);
+  }
+});

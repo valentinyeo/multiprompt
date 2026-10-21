@@ -44,6 +44,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
@@ -122,6 +123,14 @@ public static class VerifyNative {
             if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
             Thread.Sleep(35);
         }
+    }
+    public static string EditText(IntPtr hwnd) {
+        if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
+        StringBuilder text = new StringBuilder(512);
+        UIntPtr length;
+        if (SendMessageTimeout(hwnd, 0x000D, new UIntPtr((uint)text.Capacity), text, 2, 1000, out length) == IntPtr.Zero) throw new InvalidOperationException("Cannot read Edit text within timeout");
+        if (length.ToUInt64() >= (ulong)(text.Capacity - 1)) throw new InvalidOperationException("Edit text may be truncated");
+        return text.ToString();
     }
     public static string Title(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(512); GetWindowText(hwnd, text, text.Capacity); return text.ToString();
@@ -792,8 +801,7 @@ try {
             } 'owned Chat View typing box focused'
             Type-Text 'before-'
             Wait-Until {
-                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                $value.Current.Value -ceq 'before-'
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq 'before-'
             } 'initial text landed in Chat View typing box'
             Snapshot 'action'
             Press @(0x11, 0x4E) 'Ctrl+N: create second workspace'
@@ -808,8 +816,7 @@ try {
             Type-Text 'workspace-focus-chat'
             $expectedText = 'before-workspace-focus-chat'
             Wait-Until {
-                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                $value.Current.Value -ceq $expectedText
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq $expectedText
             } 'text landed in Chat View typing box without a click'
             $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
             if ($focused.Current.NativeWindowHandle -ne $composerHandle) { throw 'Chat View typing box did not retain keyboard focus' }
@@ -824,8 +831,7 @@ try {
             Wait-Until { (Read-Session).active_workspace -eq 0 } 'pill returned to Chat View workspace'
             Type-Text '-pill'
             Wait-Until {
-                $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                $value.Current.Value -ceq ($expectedText + '-pill')
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq ($expectedText + '-pill')
             } 'pill return restored Chat View input without a composer click'
             $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
             $pillState = Read-Session

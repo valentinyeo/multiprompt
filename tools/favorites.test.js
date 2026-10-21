@@ -130,7 +130,7 @@ test('IGSH-457 Starred uses shared live membership and digit mapping on every na
 
 test('IGSH-457 serialization coverage stays separate from the ISSUE-439 round trip', () => {
   const workspaces = fs.readFileSync(path.join(__dirname, '../src/workspaces.zig'), 'utf8');
-  const roundTrip = between('test "ISSUE-439 session JSON round trip keeps each workspace last shell"', 'test "IGSH-457 Starred is never serialized into session or synced layout"');
+  const roundTrip = between('test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last shell"', 'test "IGSH-457 Starred is never serialized into session or synced layout"');
   assert.match(roundTrip, /parseSessionTabs\(bytes, &tabs\)/);
   assert.match(roundTrip, /swapWorkspaceSlots\(0, 1\)/);
   assert.doesNotMatch(roundTrip, /g_starred_workspace|captureSessionLayout/);
