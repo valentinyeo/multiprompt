@@ -67,7 +67,8 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 - `before.png`, `action.png`, `after.png`: real app identity and baseline, the entry point/selection, and resulting visible state. Some journeys add intermediate screenshots.
 - Matching `.uia.json` window/control snapshots; custom-drawn contents require screenshot inspection, not invented accessibility nodes.
 - `actions.json`: ordered timestamped real inputs and window titles.
-- `result.json`: pass/fail, asserted side effects, explicit offline-login boundary, errors and cleanup outcome.
+- `result.json`: pass/fail, asserted side effects, explicit offline-login boundary, errors, cleanup outcome and observed scratch removal.
+- `process-tree.json`: kernel job accounting, including total owned processes and zero active processes after termination.
 - `build.json`, `doctor.json`: source revision/release, executable hash/version and PID/HWND identity.
 - `stdout.log`, `stderr.log`, and `data/`: the isolated app's saved files, debug/session-audit logs and any file created by the user journey, copied before scratch removal.
 
@@ -83,7 +84,7 @@ Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `r
 
 ## Cleanup
 
-The helper's `finally` runs on success and on caught failures: ask only its original Process object to close, wait up to ten seconds, then kill that same process if needed. Never terminate by image name, enumerate and kill unrelated consoles, or touch a user's machine. Normal app shutdown owns its console teardown. Copy isolated scratch to `evidence/data`, then remove only that scratch directory, retrying for up to twenty seconds while Windows releases closing-console directory handles. A persistent lock fails cleanup; it never authorizes killing another PID. Screenshots, logs, result JSON and copied app data stay outside scratch and are checked after cleanup. `always()` uploads evidence even on failure. GitHub tears down the disposable VM after the job, including if a hard job timeout prevents `finally`.
+The helper creates a private Windows Job object with kill-on-close and no breakaway, launches the app suspended in the original scratch working directory, assigns it to that job, then resumes it. Descendants inherit job membership before they can run; no process-name matching or shared-console killing is used. In `finally`, ask only the original app to close and wait up to ten seconds, then terminate the owned job, including surviving CMD/conhost descendants. Wait up to ten seconds for the job's active process count to reach zero and retain its accounting in `process-tree.json`. Copy isolated scratch to `evidence/data` before removing only that scratch directory, with a bounded twenty-second retry for Windows handle release. `result.json` records both owned-tree shutdown and the observed absence of scratch. Evidence stays outside scratch and is uploaded even on failure. A persistent cleanup error fails verification; never hide it behind runner disposal. Finally close the job/process handles and restore the harness environment; abrupt harness termination also closes the non-inherited job handle and kills its owned tree. Never touch a user's machine.
 
 ## Maintain
 
