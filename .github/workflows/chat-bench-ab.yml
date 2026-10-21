@@ -88,7 +88,7 @@ jobs:
           wsl-conf: |
             [boot]
             systemd=true
-          additional-packages: nodejs python3 wine64 wine xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
+          additional-packages: nodejs python3 wine64 wine fonts-wine fonts-liberation fonts-dejavu-core xfonts-base xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
       - name: Prepare synthetic fixtures and reader tooling
         shell: wsl-bash {0}
         working-directory: tooling
