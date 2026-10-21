@@ -211,7 +211,8 @@ test "AUDIT click preserves Unicode in a detected transcript link" {
 test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', { todo: 'ISSUE-404' }, (t) => {
   const run = execute(t, 'render-copy', `
 const std = @import("std");
-const ChatBlock = @import("chat_markdown.zig").Block;
+const chat_markdown = @import("chat_markdown.zig");
+const ChatBlock = chat_markdown.Block;
 var g_chat_capture: [262200]u16 = @splat('x');
 var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
@@ -233,7 +234,7 @@ fn setUnicodeClipboardTextWithRetry(text: []const u16) bool { copied = text.len;
 fn showHeaderNoticeAscii(text: []const u8, _: u32, _: bool) void { @memcpy(notice[0..text.len], text); notice_len = text.len; }
 fn chatComposerFocusAllowed() bool { return false; }
 fn SetFocus(_: ?usize) ?usize { return null; }
-${['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatSelectionToClipboard', 'chatCopySelection'].map(body).join('\n')}
+${['chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection'].map(body).join('\n')}
 test "AUDIT full conversation selection copies every selected character" {
     chatSelectAll();
     chatCopySelection();

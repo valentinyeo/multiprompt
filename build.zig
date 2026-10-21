@@ -494,7 +494,7 @@ pub fn build(b: *std.Build) void {
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     vps_test_step.dependOn(&server_tool_tests.step);
     const wine_step = b.step("test-wine", "Run the Wine window tests; build with -Dtarget=x86_64-windows-gnu");
-    const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs" });
+    const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs", "tools/chat-select.test.mjs" });
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 }

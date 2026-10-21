@@ -1,6 +1,7 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const link_detect = @import("link_detect.zig");
+const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_history = @import("chat_history.zig");
 const chat_echo = @import("chat_echo.zig");
@@ -284,12 +285,16 @@ fn chatSelBrush() DWORD {
 }
 
 fn chatCharAtX(hdc: HANDLE, segment: []const u16, x_rel: i32) usize {
+    if (x_rel <= 0) return 0;
+    if (x_rel >= chatTextWidth(hdc, segment)) return segment.len;
     var acc: i32 = 0;
     var i: usize = 0;
-    while (i < segment.len) : (i += 1) {
-        const cw = chatTextWidth(hdc, segment[i .. i + 1]);
-        if (x_rel < acc + cw) return i;
-        acc += cw;
+    while (i < segment.len) {
+        const count: usize = if (segment[i] >= 0xD800 and segment[i] <= 0xDBFF and i + 1 < segment.len and segment[i + 1] >= 0xDC00 and segment[i + 1] <= 0xDFFF) 2 else 1;
+        const next = chatTextWidth(hdc, segment[0 .. i + count]);
+        if (x_rel < acc + @divTrunc(next - acc + 1, 2)) return i;
+        acc = next;
+        i += count;
     }
     return segment.len;
 }
@@ -300,19 +305,8 @@ fn chatPaintSelectionRun(hdc: HANDLE, segment: []const u16, base: usize, seg_lef
     if (sel.end <= base or sel.start >= seg_end) return;
     const lo = @max(sel.start, base) - base;
     const hi = @min(sel.end, seg_end) - base;
-    var x0: i32 = 0;
-    var x1: i32 = 0;
-    var acc: i32 = 0;
-    var i: usize = 0;
-    while (i < segment.len) : (i += 1) {
-        if (i == lo) x0 = acc;
-        acc += chatTextWidth(hdc, segment[i .. i + 1]);
-        if (i + 1 == hi) {
-            x1 = acc;
-            break;
-        }
-    }
-    if (hi >= segment.len) x1 = acc;
+    const x0 = chatTextWidth(hdc, segment[0..lo]);
+    const x1 = chatTextWidth(hdc, segment[0..hi]);
     if (x1 <= x0) return;
     const brush = CreateSolidBrush(chatSelBrush());
     var rc = RECT{ .left = seg_left + x0, .top = seg_top, .right = seg_left + x1, .bottom = seg_top + line_h };
@@ -357,6 +351,10 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     const max_w = @max(1, area.right - area.left);
     var indent: i32 = if (code) 0 else chatLineIndentPx(hdc, text, 0);
     if (indent >= max_w) indent = 0;
+    var nearest = chat_hit.Nearest{ .char = offset };
+    defer if (hit) |pt| {
+        if (pt.char) |out| out.* = nearest.boundary(pt.y, offset, offset + text.len);
+    };
     var x: i32 = 0;
     var y: i32 = 0;
     var pos: usize = 0;
@@ -366,6 +364,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var token: ?chat_code.Token = if (code) syntax.next() else null;
     while (pos < text.len) {
         if (text[pos] == '\r' or text[pos] == '\n') {
+            if (hit) |pt| if (pt.char != null) nearest.consider(pt.x, pt.y, area.left + x, area.top + y, area.left + x, area.top + y + line_h, offset + pos);
             if (text[pos] == '\r' and pos + 1 < text.len and text[pos + 1] == '\n') pos += 1;
             pos += 1;
             indent = if (code) 0 else chatLineIndentPx(hdc, text, pos);
@@ -402,13 +401,14 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             const segment = text[pos .. pos + count];
             const w = chatTextWidth(hdc, segment);
             const rect = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
-            if (hit) |pt| if (pointInRect(rect, pt.x, pt.y)) {
-                if (pt.char) |out| {
-                    const at = pos + chatCharAtX(hdc, segment, pt.x - rect.left);
-                    out.* = offset + (if (source_map) |map| map[@min(at, map.len - 1)] else at);
+            if (hit) |pt| {
+                if (pt.char != null) {
+                    const at = pos + (if (pt.y >= rect.top and pt.y < rect.bottom) chatCharAtX(hdc, segment, pt.x - rect.left) else if (pt.y < rect.top or pt.x <= rect.left) @as(usize, 0) else segment.len);
+                    const source = if (source_map) |map| (if (at < map.len) map[at] else map[map.len - 1] + 1) else at;
+                    nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + source);
                 }
-                if (in_link) return .{ .start = offset + (if (source_map) |map| map[link.?.start] else link.?.start), .end = offset + (if (source_map) |map| map[link.?.end - 1] + 1 else link.?.end) };
-            };
+                if (in_link and pointInRect(rect, pt.x, pt.y)) return .{ .start = offset + (if (source_map) |map| map[link.?.start] else link.?.start), .end = offset + (if (source_map) |map| map[link.?.end - 1] + 1 else link.?.end) };
+            }
             if (in_link) {
                 if (paint) {
                     _ = SetTextColor(hdc, customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)));
@@ -427,7 +427,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
                         }
                     } else @import("chat_find_ui.zig").paintRun(hdc, segment, offset + pos, rect.left, rect.top, line_h);
                 }
-                if (app_state.g_chat_sel_active and app_state.g_chat_sel_transcript_focus) {
+                if (app_state.g_chat_sel_active) {
                     if (source_map) |map| {
                         var left = rect.left;
                         for (segment, 0..) |_, i| {
@@ -478,6 +478,10 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     const spans = if (text.len <= span_buf.len) span_buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null);
     defer if (text.len > span_buf.len) std.heap.page_allocator.free(spans);
     const n = chat_markdown.inlineSpans(text, spans);
+    var nearest = chat_hit.Nearest{ .char = offset };
+    defer if (hit) |pt| {
+        if (pt.char) |out| out.* = nearest.boundary(pt.y, offset, offset + text.len);
+    };
     var x: i32 = 0;
     var y: i32 = 0;
     var raw_link = link_detect.next(text, 0);
@@ -493,7 +497,11 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                 continue;
             }
             if (text[pos] == '\n' or text[pos] == ' ' or text[pos] == '\t') {
-                if (x > 0) x += space_w;
+                if (x > 0) {
+                    if (hit) |pt| if (pt.char != null) nearest.consider(pt.x, pt.y, area.left + x, area.top + y, area.left + x + space_w, area.top + y + line_h, offset + pos + @intFromBool(pt.x - area.left - x >= @divTrunc(space_w + 1, 2)));
+                    if (paint) chatPaintSelectionRun(hdc, &.{' '}, offset + pos, area.left + x, area.top + y, line_h);
+                    x += space_w;
+                }
                 pos += 1;
                 continue;
             }
@@ -523,10 +531,15 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                 const segment = text[pos .. pos + count];
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);
                 var rc = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
-                if (hit) |pt| if (pointInRect(rc, pt.x, pt.y)) {
-                    if (pt.char) |out| out.* = offset + pos + chatCharAtX(hdc, segment, pt.x - rc.left);
-                    if (target) |t| return .{ .start = offset + t.start, .end = offset + t.end };
-                };
+                if (hit) |pt| {
+                    if (pt.char != null) {
+                        const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, pt.x - rc.left) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
+                        nearest.consider(pt.x, pt.y, rc.left, rc.top, rc.right, rc.bottom, offset + pos + at);
+                    }
+                    if (pointInRect(rc, pt.x, pt.y)) {
+                        if (target) |t| return .{ .start = offset + t.start, .end = offset + t.end };
+                    }
+                }
                 if (paint) {
                     if (span.style.code) {
                         const brush = CreateSolidBrush(chatCodePanelColor());
@@ -590,7 +603,23 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     const overflow = layout.content_w > layout.view_w;
     if (height) |h| h.* = total_h + (if (overflow) uiScaled(7) else @as(i32, 0));
     if (!paint and hit == null) return null;
-    if (hit) |pt| if (pt.x < area.left or pt.x >= area.right or pt.y < area.top or pt.y >= area.top + total_h) return null;
+    if (hit) |pt| if (pt.char == null and (pt.x < area.left or pt.x >= area.right or pt.y < area.top or pt.y >= area.top + total_h)) return null;
+    var cell_nearest = chat_hit.Nearest{ .char = 0 };
+    if (hit) |pt| if (pt.char != null) {
+        var row_y = area.top;
+        for (layout.table.rows.items, layout.heights, 0..) |row, row_h, ri| {
+            var cell_x = area.left - layout.scroll;
+            for (row.cells, layout.widths, 0..) |_, cell_w, ci| {
+                cell_nearest.consider(pt.x, pt.y, cell_x, row_y, cell_x + cell_w, row_y + row_h, ri * layout.table.columns + ci);
+                cell_x += cell_w;
+            }
+            row_y += row_h;
+        }
+    };
+    var nearest = chat_hit.Nearest{ .char = offset };
+    defer if (hit) |pt| {
+        if (pt.char) |out| out.* = if (pt.y < area.top) offset else if (pt.y >= area.top + total_h) offset + text.len else nearest.char;
+    };
     const saved = if (paint) SaveDC(hdc) else 0;
     defer if (paint) {
         _ = RestoreDC(hdc, saved);
@@ -603,7 +632,7 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     var y = area.top;
     for (layout.table.rows.items, layout.heights, layout.lines, 0..) |row, row_h, line_h, ri| {
         var x = area.left - layout.scroll;
-        for (row.cells, layout.widths) |cell, cell_w| {
+        for (row.cells, layout.widths, 0..) |cell, cell_w, ci| {
             if (paint) {
                 const grid = RECT{ .left = x, .top = y, .right = x + 1, .bottom = y + row_h };
                 _ = FillRect(hdc, &grid, brush);
@@ -611,7 +640,14 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
             for (cell.fragments.items, 0..) |fragment, fi| {
                 const top = y + uiScaled(6) + @as(i32, @intCast(fi)) * line_h;
                 const cell_area = RECT{ .left = x + uiScaled(10), .top = top, .right = x + cell_w - uiScaled(10), .bottom = top + line_h };
-                if (chatRichText(hdc, text[fragment.start..fragment.end], cell_area, 0, paint, hit, offset + fragment.start, null, ri == 0)) |link| return link;
+                var char = offset + fragment.start;
+                var cell_hit = hit;
+                if (cell_hit) |*pt| if (pt.char != null) {
+                    if (cell_nearest.char == ri * layout.table.columns + ci) pt.char = &char else cell_hit = null;
+                };
+                const link = chatRichText(hdc, text[fragment.start..fragment.end], cell_area, 0, paint, cell_hit, offset + fragment.start, null, ri == 0);
+                if (cell_hit) |pt| if (pt.char != null) nearest.consider(pt.x, pt.y, x, top, x + cell_w, top + line_h, char);
+                if (link != null) return link;
             }
             x += cell_w;
         }
@@ -2138,9 +2174,15 @@ pub fn chatReplyLatestAgent() void {
 
 fn chatCopyBlockToClipboard(index: usize) void {
     if (index >= app_state.g_chat_block_count) return;
-    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-    const disp = chatBlockDisplayRange(buf, app_state.g_chat_blocks[index]);
-    if (setUnicodeClipboardTextWithRetry(buf[disp.start .. disp.start + disp.len])) {
+    const block = app_state.g_chat_blocks[index];
+    const n = chatCopyBlockText(&app_state.g_chat_sel_text, block, block.start, block.start + block.len);
+    chatCopyTextToClipboard(app_state.g_chat_sel_text[0..n]);
+}
+
+fn chatCopyTextToClipboard(text: []const u16) void {
+    if (text.len == 0) {
+        showHeaderNoticeAscii("Nothing selected", 1200, false);
+    } else if (setUnicodeClipboardTextWithRetry(text)) {
         showHeaderNoticeAscii("Copied", 1200, false);
     } else {
         showHeaderNoticeAscii("Clipboard is busy; try Copy again", 2500, true);
@@ -2232,8 +2274,12 @@ fn chatWordRangeAt(buf: []const u16, pos: usize) struct { start: usize, end: usi
     return .{ .start = start, .end = end };
 }
 
+fn chatTranscriptSelectionBlockAt(y: i32) ?usize {
+    return chat_hit.nearestBlock(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_blocks[0..app_state.g_chat_block_count], y + app_state.g_chat_scroll_y);
+}
+
 fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
-    const index = chatTranscriptBlockAtPoint(y) orelse return null;
+    const index = chatTranscriptSelectionBlockAt(y) orelse return null;
     const block = app_state.g_chat_blocks[index];
     if (block.role == .tool) return null;
     const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
@@ -2261,6 +2307,10 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
+    const block_rect = app_state.g_chat_layout_rects[index];
+    const content_y = y + app_state.g_chat_scroll_y;
+    if (content_y < block_rect.top) return disp.start;
+    if (content_y >= block_rect.bottom) return disp.start + disp.len;
     var char: usize = disp.start;
     const dc = GetDC(hwnd);
     if (dc == null) return char;
@@ -2278,6 +2328,89 @@ pub fn chatSelectAll() void {
     app_state.g_chat_sel_caret = last.start + last.len;
     app_state.g_chat_sel_active = app_state.g_chat_sel_anchor != app_state.g_chat_sel_caret;
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+}
+
+fn chatCopyPlainText(out: []u16, text: []const u16) usize {
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < text.len and n < out.len) : (i += 1) {
+        if (text[i] == '\r' or text[i] == '\n') {
+            if (n + 2 > out.len) break;
+            if (text[i] == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
+            out[n] = '\r';
+            out[n + 1] = '\n';
+            n += 2;
+        } else {
+            out[n] = text[i];
+            n += 1;
+        }
+    }
+    return n;
+}
+
+fn chatCopyRichText(out: []u16, text: []const u16, lo: usize, hi: usize) usize {
+    var storage: [512]chat_markdown.Span = undefined;
+    const spans = if (text.len <= storage.len) storage[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return 0;
+    defer if (text.len > storage.len) std.heap.page_allocator.free(spans);
+    const count = chat_markdown.inlineSpans(text, spans);
+    var n: usize = 0;
+    var started = false;
+    for (spans[0..count]) |span| {
+        for (text[span.text.start..span.text.end], span.text.start..) |c, i| {
+            if (c == '\r') continue;
+            const space = c == ' ' or c == '\n' or c == '\t';
+            if (!space) started = true;
+            if (!started or i < lo or i >= hi) continue;
+            if (n == out.len) return n;
+            out[n] = if (space) ' ' else c;
+            n += 1;
+        }
+    }
+    return n;
+}
+
+fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) usize {
+    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+    const disp = chatBlockDisplayRange(buf, block);
+    const text = buf[disp.start .. disp.start + disp.len];
+    const start = @min(@max(lo, disp.start), disp.start + disp.len) - disp.start;
+    const end = @max(@min(hi, disp.start + disp.len), disp.start) - disp.start;
+    if (end <= start) return 0;
+    if (block.kind == .table) {
+        var table = chat_markdown.parseTable(std.heap.page_allocator, text) catch return 0;
+        defer table.deinit(std.heap.page_allocator);
+        var n: usize = 0;
+        var previous_row: ?usize = null;
+        for (table.rows.items, 0..) |row, ri| {
+            var previous_cell: ?usize = null;
+            for (row.cells, 0..) |cell, ci| {
+                for (cell.fragments.items) |fragment| {
+                    const low = @max(start, fragment.start);
+                    const high = @min(end, fragment.end);
+                    if (high <= low and !(fragment.start == fragment.end and start <= fragment.start and end >= fragment.end)) continue;
+                    const separator: []const u16 = if (previous_row != null and previous_row.? != ri) &.{ '\r', '\n' } else if (previous_cell != null and previous_cell.? != ci) &.{'\t'} else if (previous_cell != null) &.{' '} else &.{};
+                    if (n + separator.len > out.len) return n;
+                    @memcpy(out[n .. n + separator.len], separator);
+                    n += separator.len;
+                    n += chatCopyRichText(out[n..], text[fragment.start..fragment.end], low - fragment.start, high - fragment.start);
+                    previous_row = ri;
+                    previous_cell = ci;
+                }
+            }
+        }
+        return n;
+    }
+    if (!block.markdown or block.role == .code or block.role == .user or block.role == .injected) return chatCopyPlainText(out, text[start..end]);
+    if (block.kind == .list) {
+        const prefix = @as(usize, block.prefix);
+        var n: usize = 0;
+        if (start < prefix) {
+            n = chatCopyPlainText(out, if (prefix == 2) &.{ 0x2022, ' ' } else text[start..@min(end, prefix)]);
+        }
+        if (end > prefix) n += chatCopyRichText(out[n..], text[prefix..], @max(start, prefix) - prefix, end - prefix);
+        return n;
+    }
+    return chatCopyRichText(out, text, start, end);
 }
 
 fn chatSelectionToClipboard(out: []u16) usize {
@@ -2298,21 +2431,7 @@ fn chatSelectionToClipboard(out: []u16) usize {
             out[pos + 3] = '\n';
             pos += 4;
         }
-        var p = lo;
-        while (p < hi and pos + 2 <= out.len) {
-            const c = buf[p];
-            if (c == '\r' or c == '\n') {
-                if (c == '\r' and p + 1 < hi and buf[p + 1] == '\n') p += 1;
-                out[pos] = '\r';
-                out[pos + 1] = '\n';
-                pos += 2;
-                p += 1;
-                continue;
-            }
-            out[pos] = c;
-            pos += 1;
-            p += 1;
-        }
+        pos += chatCopyBlockText(out[pos..], app_state.g_chat_blocks[i], lo, hi);
         first = false;
     }
     return pos;
@@ -2320,19 +2439,7 @@ fn chatSelectionToClipboard(out: []u16) usize {
 
 pub fn chatCopySelection() void {
     const n = chatSelectionToClipboard(&app_state.g_chat_sel_text);
-    if (n == 0) {
-        showHeaderNoticeAscii("Nothing selected", 1200, false);
-        return;
-    }
-    if (setUnicodeClipboardTextWithRetry(app_state.g_chat_sel_text[0..n])) {
-        showHeaderNoticeAscii("Copied", 1200, false);
-        chatSelectionClear();
-        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-    } else {
-        showHeaderNoticeAscii("Clipboard is busy; try Copy again", 2500, true);
-    }
-    app_state.g_chat_sel_transcript_focus = false;
-    if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
+    chatCopyTextToClipboard(app_state.g_chat_sel_text[0..n]);
 }
 
 test "Chat View selection copies displayed ranges with CRLF and block joins" {
@@ -2429,7 +2536,7 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
         return;
     };
     if (app_state.g_chat_sel_click_count >= 3) {
-        if (chatTranscriptBlockAtPoint(y)) |idx| {
+        if (chatTranscriptSelectionBlockAt(y)) |idx| {
             const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], app_state.g_chat_blocks[idx]);
             app_state.g_chat_sel_anchor = disp.start;
             app_state.g_chat_sel_caret = disp.start + disp.len;
@@ -2721,6 +2828,11 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             chatTranscriptMouseDown(hwnd, GET_X(lp), GET_Y(lp));
             return 0;
         },
+        0x0215, 0x001F => {
+            app_state.g_chat_sel_dragging = false;
+            _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        },
         WM_LBUTTONUP => {
             if (app_state.g_chat_sel_dragging) {
                 app_state.g_chat_sel_dragging = false;
@@ -2778,9 +2890,20 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             const menu = CreatePopupMenu();
             if (menu == null) return 0;
+            defer _ = DestroyMenu(menu);
             _ = AppendMenuW(menu, MF_STRING, 1, L("Copy"));
             _ = AppendMenuW(menu, MF_STRING, 2, L("Select All"));
             const block_at = chatTranscriptBlockAtPoint(GET_Y(lp));
+            const copy_target = chatContextCopyTarget(chatSelRange() != null, block_at != null);
+            const selection_n = if (copy_target == .selection) chatSelectionToClipboard(&app_state.g_chat_sel_text) else 0;
+            const selection_text = std.heap.page_allocator.dupe(u16, app_state.g_chat_sel_text[0..selection_n]) catch return 0;
+            defer std.heap.page_allocator.free(selection_text);
+            const message_n = if (block_at) |idx| blk: {
+                const block = app_state.g_chat_blocks[idx];
+                break :blk chatCopyBlockText(&app_state.g_chat_sel_text, block, block.start, block.start + block.len);
+            } else 0;
+            const message_text = std.heap.page_allocator.dupe(u16, app_state.g_chat_sel_text[0..message_n]) catch return 0;
+            defer std.heap.page_allocator.free(message_text);
             if (block_at != null) _ = AppendMenuW(menu, MF_STRING, 3, L("Copy Message"));
             var reply_text: ?[]u16 = null;
             if (block_at) |idx| {
@@ -2797,11 +2920,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = ClientToScreen(hwnd, &pt);
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
-            _ = DestroyMenu(menu);
             switch (cmd) {
-                1 => if (app_state.g_chat_sel_active) chatCopySelection(),
+                1 => chatCopyTextToClipboard(if (copy_target == .selection) selection_text else message_text),
                 2 => chatSelectAll(),
-                3 => if (block_at) |idx| chatCopyBlockToClipboard(idx),
+                3 => chatCopyTextToClipboard(message_text),
                 4 => if (reply_text) |text| {
                     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
                     @import("chat_composer.zig").selectChatReply(text);
@@ -2873,7 +2995,6 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 } else if (pt.y > client_rc.bottom) {
                     chatScrollBy(-uiScaled(24));
                 } else {
-                    _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
                     return 0;
                 }
                 if (chatTranscriptCharAt(hwnd, pt.x, pt.y)) |char| {
@@ -2958,4 +3079,238 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
     chatToggleTodos();
     try std.testing.expect(!app_state.shells[0].chat_todo_open);
     try std.testing.expect(app_state.shells[1].chat_todo_open);
+}
+
+fn chatContextCopyTarget(selected: bool, message: bool) enum { selection, message, nothing } {
+    return if (selected) .selection else if (message) .message else .nothing;
+}
+
+test "ISSUE-438 nearest caret covers spaces line tails and below the last line" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("one two");
+    const old = SelectObject(dc, ensureChatFont());
+    defer _ = SelectObject(dc, old);
+    const space_x = chatTextWidth(dc, text[0..3]) + @divTrunc(chatTextWidth(dc, text[3..4]), 4);
+    for ([_]bool{ false, true }) |rich| {
+        for ([_]struct { x: i32, y: i32, expected: usize }{
+            .{ .x = space_x, .y = 5, .expected = 3 },
+            .{ .x = 350, .y = 5, .expected = text.len },
+            .{ .x = 5, .y = 200, .expected = text.len },
+        }) |point| {
+            var char: usize = 0;
+            const area = RECT{ .left = 0, .top = 0, .right = 400, .bottom = 250 };
+            const hit = ChatHit{ .x = point.x, .y = point.y, .char = &char };
+            if (rich) _ = chatRichText(dc, text, area, 0, false, hit, 0, null, false) else _ = chatFlowText(dc, text, area, false, false, hit, 0, null, null);
+            try std.testing.expectEqual(point.expected, char);
+        }
+    }
+    const width = chatTextWidth(dc, text[0..1]);
+    try std.testing.expectEqual(@as(usize, 1), chatCharAtX(dc, text[0..1], @divTrunc(width * 3, 4)));
+}
+
+test "ISSUE-438 gap and outside transcript snap to nearest block boundary" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("firstsecond");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 2;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = 5, .role = .user };
+    app_state.g_chat_blocks[1] = .{ .start = 5, .len = 6, .role = .user };
+    app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 100, .right = 300, .bottom = 150 };
+    app_state.g_chat_layout_rects[1] = .{ .left = 0, .top = 200, .right = 300, .bottom = 250 };
+    app_state.g_chat_scroll_y = 0;
+    defer {
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+    }
+    try std.testing.expectEqual(@as(?usize, 5), chatTranscriptCharAt(null, 20, 160));
+    try std.testing.expectEqual(@as(?usize, 5), chatTranscriptCharAt(null, 20, 190));
+    try std.testing.expectEqual(@as(?usize, 0), chatTranscriptCharAt(null, 20, 0));
+    try std.testing.expectEqual(@as(?usize, text.len), chatTranscriptCharAt(null, 20, 400));
+}
+
+test "ISSUE-438 contextual Copy prefers selection otherwise copies the message" {
+    try std.testing.expectEqual(.message, chatContextCopyTarget(false, true));
+    try std.testing.expectEqual(.selection, chatContextCopyTarget(true, true));
+    try std.testing.expectEqual(.selection, chatContextCopyTarget(true, false));
+    try std.testing.expectEqual(.nothing, chatContextCopyTarget(false, false));
+}
+
+test "ISSUE-438 table selection copies visible cells without markdown borders" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| **Name** | Value |\n| --- | --- |\n| Alpha | `two` |");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .prose, .kind = .table, .markdown = true };
+    app_state.g_chat_sel_anchor = 0;
+    app_state.g_chat_sel_caret = text.len;
+    app_state.g_chat_sel_active = true;
+    defer {
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    var out: [256]u16 = undefined;
+    var n = chatSelectionToClipboard(&out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Name\tValue\r\nAlpha\ttwo"), out[0..n]);
+    app_state.g_chat_sel_anchor = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Alpha")).?;
+    app_state.g_chat_sel_caret = app_state.g_chat_sel_anchor + 5;
+    n = chatSelectionToClipboard(&out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Alpha"), out[0..n]);
+}
+
+test "ISSUE-438 table padding stays in the pointed cell and links stay exact" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Name | Value |\n| --- | --- |\n| Alpha | [two](https://example.test) |");
+    defer app_state.g_chat_tables.clear(std.heap.page_allocator);
+    const area = RECT{ .left = 0, .top = 0, .right = 500, .bottom = 300 };
+    const layout = chatTableLayout(dc, text, 0, 500) orelse return error.TestUnexpectedResult;
+    const fragment = layout.table.rows.items[1].cells[1].fragments.items[0];
+    const x = layout.widths[0] + layout.widths[1] - 2;
+    const y = layout.heights[0] + layout.heights[1] - 2;
+    var char: usize = 0;
+    _ = chatFlowTable(dc, text, area, false, .{ .x = x, .y = y, .char = &char }, 0, null);
+    try std.testing.expectEqual(fragment.end, char);
+    try std.testing.expect(chatFlowTable(dc, text, area, false, .{ .x = x, .y = y }, 0, null) == null);
+    const link_x = layout.widths[0] + uiScaled(10) + 1;
+    const link_y = layout.heights[0] + uiScaled(6) + 1;
+    try std.testing.expect(chatFlowTable(dc, text, area, false, .{ .x = link_x, .y = link_y }, 0, null) != null);
+}
+
+test "ISSUE-438 lists and code copy only the selected visible text" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("- **hello** worldconst x = 1;\nnext");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 2;
+    const code_start = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("const")).?;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = code_start, .role = .prose, .kind = .list, .markdown = true, .prefix = 2 };
+    app_state.g_chat_blocks[1] = .{ .start = code_start, .len = text.len - code_start, .role = .code };
+    app_state.g_chat_sel_anchor = 5;
+    app_state.g_chat_sel_caret = text.len;
+    app_state.g_chat_sel_active = true;
+    defer {
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    var out: [128]u16 = undefined;
+    const n = chatSelectionToClipboard(&out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("ello world\r\n\r\nconst x = 1;\r\nnext"), out[0..n]);
+}
+
+test "ISSUE-438 double click selects a word and triple click selects a padded block" {
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("selection"), 0, 0, 0, 400, 200, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hello world");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .user };
+    app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 0, .right = 400, .bottom = 200 };
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_content_left = 0;
+    defer {
+        _ = ReleaseCapture();
+        _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_sel_click_count = 0;
+        app_state.g_chat_sel_transcript_focus = false;
+        chatSelectionClear();
+    }
+    const x = uiScaled(CHAT_BUBBLE_PAD) + 1;
+    const y = uiScaled(CHAT_BUBBLE_PAD) + 1;
+    app_state.g_chat_sel_last_x = x;
+    app_state.g_chat_sel_last_y = y;
+    app_state.g_chat_sel_last_click = GetTickCount64();
+    app_state.g_chat_sel_click_count = 1;
+    chatTranscriptMouseDown(hwnd, x, y);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_sel_anchor);
+    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_sel_caret);
+    _ = chatTranscriptWndProc(hwnd, 0x0215, 0, 0);
+    try std.testing.expect(!app_state.g_chat_sel_dragging);
+    try std.testing.expect(app_state.g_chat_sel_active);
+    app_state.g_chat_sel_last_x = 1;
+    app_state.g_chat_sel_last_y = 190;
+    app_state.g_chat_sel_last_click = GetTickCount64();
+    chatTranscriptMouseDown(hwnd, 1, 190);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_sel_anchor);
+    try std.testing.expectEqual(text.len, app_state.g_chat_sel_caret);
+}
+
+test "ISSUE-438 real popup Copy returns command and copies a snapshot despite refresh" {
+    const w = @import("win32.zig");
+    const owner = w.CreateWindowExW(0, L("STATIC"), L("copy"), 0, 0, 0, 400, 200, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(owner);
+    const old_main = app_state.g_main_hwnd;
+    app_state.g_main_hwnd = owner;
+    const Timer = struct {
+        var target: HANDLE = null;
+        var calls: usize = 0;
+        extern "user32" fn EndMenu() callconv(WINAPI) i32;
+        extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) i32;
+        fn fire(_: HANDLE, _: UINT, _: usize, _: DWORD) callconv(WINAPI) void {
+            calls += 1;
+            if (calls == 1) {
+                chatSelectionClear();
+                app_state.g_chat_block_count = 0;
+                @memset(app_state.g_chat_capture[0..app_state.g_chat_last_len], 'x');
+                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
+                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x0D, 0);
+            } else _ = EndMenu();
+        }
+    };
+    Timer.target = owner;
+    defer {
+        app_state.g_main_hwnd = old_main;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    for ([_]bool{ false, true }) |selected| {
+        const text = std.unicode.utf8ToUtf16LeStringLiteral("hello world");
+        @memcpy(app_state.g_chat_capture[0..text.len], text);
+        app_state.g_chat_last_len = text.len;
+        app_state.g_chat_block_count = 1;
+        app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .user };
+        app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 0, .right = 400, .bottom = 100 };
+        app_state.g_chat_sel_anchor = 6;
+        app_state.g_chat_sel_caret = text.len;
+        app_state.g_chat_sel_active = selected;
+        if (selected) {
+            chatCopySelection();
+            try std.testing.expect(app_state.g_chat_sel_active);
+            try std.testing.expectEqualSlices(u16, text[6..], app_state.g_chat_sel_text[0 .. text.len - 6]);
+        }
+        try std.testing.expect(setUnicodeClipboardTextWithRetry(std.unicode.utf8ToUtf16LeStringLiteral("stale")));
+        Timer.calls = 0;
+        const timer = SetTimer(null, 0, 200, @ptrCast(@constCast(&Timer.fire)));
+        defer _ = KillTimer(null, timer);
+        const y: LPARAM = if (selected) 150 else 20;
+        _ = chatTranscriptWndProc(owner, WM_RBUTTONDOWN, 0, (y << 16) | 20);
+        try std.testing.expectEqual(@as(usize, 1), Timer.calls);
+        try std.testing.expect(OpenClipboard(owner) != 0);
+        defer _ = CloseClipboard();
+        const data = GetClipboardData(CF_UNICODETEXT) orelse return error.TestUnexpectedResult;
+        const ptr = w.GlobalLock(data) orelse return error.TestUnexpectedResult;
+        defer _ = w.GlobalUnlock(data);
+        const copied = std.mem.span(@as([*:0]const u16, @ptrCast(@alignCast(ptr))));
+        try std.testing.expectEqualSlices(u16, if (selected) text[6..] else text, copied);
+    }
+}
+
+test "ISSUE-438 copying preserves empty table columns and rendered rich whitespace" {
+    var out: [128]u16 = undefined;
+    const rich = std.unicode.utf8ToUtf16LeStringLiteral(" **hello**\r\nworld\t[link](https://example.test)");
+    var n = chatCopyRichText(&out, rich, 0, rich.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello world link"), out[0..n]);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | | C |\n| --- | --- | --- |\n| one | | three |");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    defer app_state.g_chat_last_len = 0;
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .kind = .table, .markdown = true };
+    n = chatCopyBlockText(&out, block, 0, text.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A\t\tC\r\none\t\tthree"), out[0..n]);
 }

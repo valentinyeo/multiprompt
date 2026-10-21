@@ -361,7 +361,7 @@ fn chatJoinedRowsNeedSpace(previous: []const u16, current: []const u16) bool {
     };
 }
 
-fn chatReflowTranscript(buf: []u16, line_starts: []const usize, line_lens: []const usize, edges: []const bool) usize {
+fn chatReflowTranscript(buf: []u16, line_starts: []const usize, line_lens: []const usize, edges: []const bool, wraps: []const bool) usize {
     const count = @min(line_starts.len, line_lens.len);
     var write: usize = 0;
     var have_line = false;
@@ -402,7 +402,7 @@ fn chatReflowTranscript(buf: []u16, line_starts: []const usize, line_lens: []con
                 buf[write] = '\r';
                 buf[write + 1] = '\n';
                 write += 2;
-            } else if (!join_url and chatJoinedRowsNeedSpace(buf[previous_start .. previous_start + previous_len], line)) {
+            } else if (!join_url and !(i < wraps.len and wraps[i]) and chatJoinedRowsNeedSpace(buf[previous_start .. previous_start + previous_len], line)) {
                 buf[write] = ' ';
                 write += 1;
             }
@@ -428,9 +428,22 @@ test "Chat View reflows console-wrapped prose but preserves structured rows" {
     var buf: [source_z.len]u16 = source_z[0..source_z.len].*;
     const starts = [_]usize{ 0, 26, 53, 72, 74, 85, 87, 96 };
     const lens = [_]usize{ 24, 25, 17, 0, 9, 0, 7, 8 };
-    const len = chatReflowTranscript(&buf, &starts, &lens, &([_]bool{false} ** starts.len));
+    const len = chatReflowTranscript(&buf, &starts, &lens, &([_]bool{false} ** starts.len), &.{});
     const expected_z = std.unicode.utf8ToUtf16LeStringLiteral("● Connection works. Want the overnight QA verdict? One command away.\r\n\r\n❯ testing\r\n\r\n- first\r\n- second");
     try std.testing.expectEqualSlices(u16, expected_z[0..expected_z.len], buf[0..len]);
+}
+
+test "ISSUE-438 copying console prose preserves words split at the buffer edge" {
+    const source = std.unicode.utf8ToUtf16LeStringLiteral("● Copy i\r\ns exact.\r\nand words.");
+    const starts = [_]usize{ 0, 10, 20 };
+    const lens = [_]usize{ 8, 8, 10 };
+    for ([_]bool{ false, true }) |wrapped| {
+        var buf: [source.len]u16 = source[0..source.len].*;
+        const wraps = [_]bool{ false, wrapped, false };
+        const len = chatReflowTranscript(&buf, &starts, &lens, &.{}, &wraps);
+        const expected: []const u16 = if (wrapped) std.unicode.utf8ToUtf16LeStringLiteral("● Copy is exact. and words.") else std.unicode.utf8ToUtf16LeStringLiteral("● Copy i s exact. and words.");
+        try std.testing.expectEqualSlices(u16, expected, buf[0..len]);
+    }
 }
 
 test "Chat View joins a console-wrapped indented URL without inserting a space" {
@@ -439,7 +452,7 @@ test "Chat View joins a console-wrapped indented URL without inserting a space" 
     const starts = [_]usize{ 0, 24, 38 };
     const lens = [_]usize{ 22, 12, 13 };
     const edges = [_]bool{ true, false, false };
-    const len = chatReflowTranscript(&buf, &starts, &lens, &edges);
+    const len = chatReflowTranscript(&buf, &starts, &lens, &edges, &.{});
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("❯ https://example.com/long-path. Next sentence");
     try std.testing.expectEqualSlices(u16, expected, buf[0..len]);
     const url = link_detect.next(buf[0..len], 0) orelse unreachable;
@@ -457,7 +470,7 @@ test "Chat View rejoins a Claude URL in a pane narrower than the visible console
     const starts = [_]usize{ 0, 81 };
     const lens = [_]usize{ 79, 8 };
     const edges = [_]bool{ link_detect.rowEndsNearEdge(&raw, 95, 1), false };
-    const len = chatReflowTranscript(&buf, &starts, &lens, &edges);
+    const len = chatReflowTranscript(&buf, &starts, &lens, &edges, &.{});
     const expected = "https://mail.google.com/mail/u/?authuser=reader1234@example.com#drafts/1a1016d19d0adccc";
     try std.testing.expectEqual(expected.len, len);
     for (expected, buf[0..len]) |a, b| try std.testing.expectEqual(@as(u16, a), b);
@@ -468,7 +481,7 @@ test "Chat View preserves fenced code line breaks during reflow" {
     var buf: [source_z.len]u16 = source_z[0..source_z.len].*;
     const starts = [_]usize{ 0, 5, 12, 18 };
     const lens = [_]usize{ 3, 5, 4, 3 };
-    const len = chatReflowTranscript(&buf, &starts, &lens, &([_]bool{false} ** starts.len));
+    const len = chatReflowTranscript(&buf, &starts, &lens, &([_]bool{false} ** starts.len), &.{});
     try std.testing.expectEqualSlices(u16, source_z[0..source_z.len], buf[0..len]);
 }
 
@@ -1096,6 +1109,8 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     var hiding_tool_block = false;
     var in_startup_banner = false;
     var link_edges: [1200]bool = @splat(false);
+    var wraps: [1200]bool = @splat(false);
+    var previous_row: usize = rows;
     var row: usize = 0;
     while (row < rows and row * width < chars_read and line_count < app_state.g_chat_line_starts.len) : (row += 1) {
         const raw_start = row * width;
@@ -1167,6 +1182,9 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
             out[out_len + 1] = '\n';
             out_len += 2;
         }
+        wraps[line_count] = row > 0 and row == previous_row + 1 and first == 0 and
+            app_state.g_chat_raw[raw_start - 1] != ' ' and app_state.g_chat_raw[raw_start - 1] != '\t' and app_state.g_chat_raw[raw_start - 1] != 0;
+        previous_row = row;
         app_state.g_chat_line_starts[line_count] = out_len;
         app_state.g_chat_line_lens[line_count] = line_len;
         var nearby: [7][]const u16 = undefined;
@@ -1192,5 +1210,5 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     if (line_count == 0) return 0;
     const last_end = app_state.g_chat_line_starts[line_count - 1] + app_state.g_chat_line_lens[line_count - 1];
     const visible_len = chatTranscriptWithoutComposer(out[0..last_end], line_count);
-    return chatReflowTranscript(out[0..visible_len], app_state.g_chat_line_starts[0..line_count], app_state.g_chat_line_lens[0..line_count], link_edges[0..line_count]);
+    return chatReflowTranscript(out[0..visible_len], app_state.g_chat_line_starts[0..line_count], app_state.g_chat_line_lens[0..line_count], link_edges[0..line_count], wraps[0..line_count]);
 }

@@ -42,7 +42,7 @@ test('the capped Wine runner runs desktop tests then test-vps without forwarding
   assert.match(script, /^set -euo pipefail$/m);
   const builds = script.split('\n').filter(line => line.includes('"$zig" build'));
   assert.deepEqual(builds, [
-    '"${runner[@]}" nice -n 15 "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"',
+    '"${runner[@]}" nice -n 15 "${display[@]}" "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"',
     '"${runner[@]}" nice -n 15 "$zig" build test-vps --summary all',
   ]);
   const docs = ['openwiki/operations/build-and-install.md'];
@@ -75,3 +75,39 @@ test('the Wine runner propagates the selected compiler to native child tests', {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
+  test(`the Wine runner handles ${scenario} display configuration`, { skip: process.platform === 'win32' }, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wine-display-'));
+    try {
+      for (const name of ['git', 'dirname', 'flock', 'mktemp', 'rm', 'nice']) {
+        const resolved = spawnSync('which', [name], { encoding: 'utf8' });
+        assert.equal(resolved.status, 0, resolved.stderr);
+        fs.symlinkSync(resolved.stdout.trim(), path.join(dir, name));
+      }
+      for (const name of ['python', 'pwsh']) fs.writeFileSync(path.join(dir, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      fs.writeFileSync(path.join(dir, 'systemd-run'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const zig = path.join(dir, 'zig');
+      fs.writeFileSync(zig, '#!/bin/sh\nprintf "%s:%s\\n" "$2" "${DISPLAY:-none}"\n', { mode: 0o755 });
+      if (scenario !== 'missing') {
+        fs.writeFileSync(path.join(dir, 'xvfb-run'), '#!/bin/sh\n[ "$1" = -a ] || exit 99\nshift\nDISPLAY=:test exec "$@"\n', { mode: 0o755 });
+      }
+      const env = { ...process.env, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock') };
+      delete env.DISPLAY;
+      if (scenario === 'empty') env.DISPLAY = '';
+      if (scenario === 'existing') env.DISPLAY = ':existing';
+      const result = spawnSync('/bin/bash', ['tools/test-windows-wine.sh'], { cwd: root, encoding: 'utf8', timeout: 120000, env });
+      assert.equal(result.status, scenario === 'missing' ? 2 : 0, result.stdout + result.stderr);
+      if (scenario === 'missing') {
+        assert.match(result.stderr, /xvfb-run missing: install xvfb/);
+        assert.equal(result.stdout, '');
+      } else {
+        assert.equal(result.stdout, scenario === 'existing'
+          ? 'test-desktop::existing\ntest-vps::existing\n'
+          : 'test-desktop::test\ntest-vps:none\n');
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
