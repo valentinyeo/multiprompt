@@ -132,6 +132,13 @@ shell-backed rearm also removed status amplification but added process overhead
 and failed the same CPU target. Meeting that budget at this output rate needs a
 further change to activity observation, not more option or environment tuning.
 
+Additional scratch controls: turning visual alerts on ran 390 status jobs/min
+and 8.09 CPU s/min, versus 188 jobs and 4.09 CPU s/min off. A scratch-only
+constant-marker writer using native `set-buffer` / `save-buffer` / `delete-buffer`
+avoided enqueue forks but still used 5.83 CPU s/min versus 4.04 off. It was not
+implemented as a notification transport: eliminating forks alone did not solve
+the remaining per-output native-alert cost.
+
 With the original RSS `ps | head | awk` status job plus a marker, an earlier
 47-client sample reproduced 237 jobs/min with hooks off and 566 with the previous
 hooks; an environment-only native-timer candidate ran 236. These are scratch
