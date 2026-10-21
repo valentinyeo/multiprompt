@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { defaults, hash, evaluate } from './lib.mjs';
+import { defaults, hash, sourceHash, evaluate } from './lib.mjs';
 
 export const isDefaultConfig = config => isDeepStrictEqual(config, defaults);
 
@@ -19,7 +19,7 @@ export function checkReceipt(run, expectedSha256) {
   for (const [key, file] of Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' })) {
     if (key === 'browser' && !Object.hasOwn(run?.runnerHashes || {}, key)) continue;
     try {
-      if (run?.runnerHashes?.[key] !== hash(new URL(file, import.meta.url))) reasons.push(`stale or missing runnerHashes.${key}`);
+      if (![sourceHash(new URL(file, import.meta.url)), sourceHash(new URL(file, import.meta.url), true)].includes(run?.runnerHashes?.[key])) reasons.push(`stale or missing runnerHashes.${key}`);
     } catch (error) {
       reasons.push(`cannot hash ${file}: ${error.message}`);
     }

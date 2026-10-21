@@ -354,7 +354,7 @@ test('documented smoke status is serialized in results.json', async () => {
     let result;
     require('node:vm').runInNewContext(`${create}\n${write}`, {
       requestedExe: 'app.exe', exe: 'app.exe', binary: {}, prefix: '/prefix', out: '/bench', config, installable, fixtures: {}, priority: 15,
-      process: { env: {} }, hash: () => 'hash', script: '/run.mjs', path, verdict: { pass: true },
+      process: { env: {} }, sourceHash: () => 'hash', script: '/run.mjs', path, verdict: { pass: true },
       atomic: (file, text) => { assert.equal(file, '/bench/results.json'); result = JSON.parse(text); },
     });
     assert.equal(result.installable, !smoke);
