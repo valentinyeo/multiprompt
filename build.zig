@@ -370,6 +370,9 @@ pub fn build(b: *std.Build) void {
     const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js" });
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);
+    const terminal_glyph_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-glyphs.test.js" });
+    test_step.dependOn(&terminal_glyph_tests.step);
+    vps_test_step.dependOn(&terminal_glyph_tests.step);
     const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
     test_step.dependOn(&console_font_tests.step);
     vps_test_step.dependOn(&console_font_tests.step);
