@@ -68,16 +68,21 @@ def transcript_evidence(reader, path, wire, finding):
             if finding['kind'] != 'pane_missing' and not base <= at < end:
                 continue
             event = json.loads(line)
-            message = reader.conversation_event(event, fields[9]) or reader.settlement_event(event, fields[9])
+            messages = [row for row in reader.conversation_rows(event, fields[9], at) if row['role'] in ('user', 'assistant')]
+            if not messages:
+                fact = reader.settlement_event(event, fields[9])
+                messages = [fact] if fact else []
             record = 'conversation'
-            if message:
+            matches = False
+            for message in messages:
                 content = message.get('settlement', {}).get('content', message['text'])
                 matches = target is not None and content == target.get('settlement', {}).get('content', target['text'])
                 if target is None and finding.get('text'):
                     plain = normalize(content.replace('**', '').replace('`', ''))
                     matches = normalize(finding['text'])[:60] in plain
-            else:
-                matches = False
+                if matches:
+                    break
+            if not messages:
                 content = (event.get('message') or {}).get('content', [])
                 if finding['kind'] == 'pane_missing' and isinstance(content, list):
                     for part in content:

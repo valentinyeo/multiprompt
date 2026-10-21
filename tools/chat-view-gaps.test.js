@@ -185,7 +185,7 @@ test "ordinary assistant replies remain visible" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the history wire', { todo: 'ISSUE-402' }, (t) => {
+test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the history wire', (t) => {
   const dir = prepare(t, 'reader-order');
   const fixture = path.join(dir, 'reader-order.jsonl');
   fs.writeFileSync(fixture, JSON.stringify({ type: 'assistant', timestamp: '2026-10-03T12:34:00Z', message: { role: 'assistant', id: 'message-1', content: [ { type: 'text', text: 'Before the tool.' }, { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/work/a.txt' } }, { type: 'text', text: 'After the tool.' } ] } }) + '\n');
@@ -197,12 +197,61 @@ spec.loader.exec_module(r)
 r.resolve_response_path=lambda *args: ('claude','sid',Path(sys.argv[2]),None)
 q=dict(id=1,codex=False,sid='sid',tmux='term-1',cwd='/work',cached_sid='',inode=0,offset=0,start=0,before=0,mtime=0,probe='',source_offsets=True)
 wire=r.response(q)
-print(json.dumps([json.loads(line) for line in wire.splitlines()[1:-1] if json.loads(line).get('role')!='status']))
+rows=[json.loads(line) for line in wire.splitlines()[1:-1] if json.loads(line).get('role')!='status']
+fields=wire.splitlines()[0].split('\\t')
+with Path(sys.argv[2]).open('a') as output:
+    output.write(json.dumps(dict(type='user',message=dict(role='user',content=[dict(type='tool_result',tool_use_id='tool-1',content='finished')])))+'\\n')
+q.update(id=2,cached_sid='sid',inode=int(fields[7]),offset=int(fields[6]),start=int(fields[14]),mtime=int(fields[11]),probe=fields[12])
+print(json.dumps(dict(rows=rows,wire=wire,delta=r.response(q))))
 `;
   const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   assert.equal(run.status, 0, run.stdout + run.stderr);
-  const rows = JSON.parse(run.stdout);
+  const { rows, wire, delta } = JSON.parse(run.stdout);
   assert.deepEqual(rows.map(row => ({ role: row.role, text: row.text })), [ { role: 'assistant', text: 'Before the tool.' }, { role: 'tool', text: 'Read a.txt' }, { role: 'assistant', text: 'After the tool.' } ]);
+  assert.equal(rows[0].id, 'message-1');
+  assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
+  const native = execute(t, 'history-order', `
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+fn expectOrder(h: history.History) !void {
+    try std.testing.expectEqual(@as(usize, 3), h.blocks.items.len);
+    const expected = [_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("Before the tool."),
+        std.unicode.utf8ToUtf16LeStringLiteral("Read a.txt"),
+        std.unicode.utf8ToUtf16LeStringLiteral("After the tool."),
+    };
+    for (h.blocks.items, expected, 0..) |block, text, index| {
+        try std.testing.expectEqualSlices(u16, text, h.text.items[block.start..][0..block.len]);
+        try std.testing.expectEqual(index == 1, block.role == .tool);
+    }
+}
+test "ISSUE-402 actual reader wire preserves order across suffix delta clone and cache" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "/work");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, ${JSON.stringify(wire)}, 1, key);
+    try expectOrder(h);
+    var next = try h.suffix(a);
+    defer next.deinit(a);
+    try next.apply(a, ${JSON.stringify(delta)}, 2, key);
+    try h.appendParsed(a, &next);
+    try expectOrder(h);
+    try std.testing.expectEqual(.ok, h.blocks.items[1].tool_status);
+    var cloned = try h.clone(a);
+    defer cloned.deinit(a);
+    try expectOrder(cloned);
+    const bytes = try h.encode(a, key);
+    defer a.free(bytes);
+    var restored = try history.History.decode(a, bytes, key);
+    defer restored.deinit(a);
+    try expectOrder(restored);
+    try std.testing.expectEqualSlices(u8, h.rows.items, restored.rows.items);
+}
+`, ['chat_history.zig', 'chat_transcript.zig'], 'ISSUE-402');
+  assert.equal(native.status, 0, native.stdout + native.stderr);
+
 });
 
 test('ISSUE-403 clicked Chat View links preserve their Unicode path', (t) => {

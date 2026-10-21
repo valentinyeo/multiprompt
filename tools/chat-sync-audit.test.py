@@ -133,6 +133,23 @@ class ChatSyncAuditTest(unittest.TestCase):
             evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=content))
             self.assertEqual(evidence[0]['record'], 'thinking')
 
+    def test_igsh402_evidence_matches_each_ordered_text_segment(self):
+        reader = audit.load_reader()
+        event = dict(type='assistant', timestamp='2026-10-17T15:06:44Z',
+                     message=dict(role='assistant', id='reply-402', content=[dict(type='text', text='Before the tool'),
+                         dict(type='tool_use', id='call-402', name='Read', input={}), dict(type='text', text='After the tool')]))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(json.dumps(event) + '\n')
+            rows = reader.conversation_rows(event, 'claude')
+            wire = self.wire(rows).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            for row in (1, 3):
+                evidence = audit.transcript_evidence(reader, path, wire, dict(kind='turn_missing', row=row))
+                self.assertEqual(evidence, [dict(line=1, timestamp=event['timestamp'], location='in_window', record='conversation')])
+            evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text='After the tool'))
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text='not in this event')), [])
+
     def test_actual_hypertask_tasks_response_shape(self):
         with patch.object(audit, 'run', return_value=json.dumps(dict(success=True, tasks=[dict(section='Todo')]))):
             self.assertTrue(audit.ticket_is_open('DEMO-900'))

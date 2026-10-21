@@ -513,6 +513,98 @@ class HistoryReaderTest(unittest.TestCase):
         with patch.object(reader, 'ISSUE_270_DIFF_CARDS', False):
             self.assertNotIn('diff', reader.tool_events(result, 'claude')[0])
 
+    def test_igsh402_ordered_segments_keep_ids_offsets_and_adjacent_text(self):
+        event = self.tool_call()
+        event['message']['id'] = 'reply-402'
+        tool = event['message']['content'][0]
+        event['message']['content'] = [dict(type='text', text='Before'), dict(type='text', text='still before'),
+                                      tool, dict(type='thinking', thinking='hidden'), dict(type='text', text='After'),
+                                      dict(tool, id='second-call'), dict(type='text', text='Last')]
+        self.query['source_offsets'] = True
+        self.write(event)
+        fields, rows = self.read()
+        self.assertEqual([row['role'] for row in rows], ['assistant', 'tool', 'assistant', 'tool', 'assistant'])
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Before\nstill before', 'After', 'Last'])
+        self.assertEqual(rows[0]['id'], 'reply-402')
+        self.assertEqual(len({row['id'] for row in rows}), len(rows))
+        self.assertTrue(all((row['offset'], row['end']) == (0, self.path.stat().st_size) for row in rows))
+        self.assertEqual(reader.response(dict(self.query, cached_sid='', offset=0)).splitlines()[1:-1],
+                         [reader.wire_row(row) for row in rows])
+        self.assertEqual(self.read()[1], [])
+        self.assertEqual(fields[13], 'tail')
+
+    def test_igsh402_live_delta_partial_write_and_result_pairing(self):
+        self.write(self.event('initial'))
+        self.read()
+        event = self.tool_call()
+        event['message'].update(id='reply-402', content=[dict(type='text', text='Before'),
+            *event['message']['content'], dict(type='text', text='After')])
+        offset = self.query['offset']
+        raw = (json.dumps(event) + '\n').encode()
+        with self.path.open('ab') as output:
+            output.write(raw[:-1])
+        self.assertEqual(self.read()[1], [])
+        self.assertEqual(self.query['offset'], offset)
+        with self.path.open('ab') as output:
+            output.write(raw[-1:])
+        with patch.object(reader, 'PAGE_BYTES', 1):
+            fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual([row['role'] for row in rows], ['assistant', 'tool', 'assistant'])
+        self.assertEqual(rows[1]['status'], 'running')
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.tool_result()) + '\n')
+        result = self.read()[1]
+        self.assertEqual([row['role'] for row in result], ['tool_result'])
+        paired = reader.pair_tool_rows(rows + result)
+        self.assertEqual([row['role'] for row in paired], ['assistant', 'tool', 'assistant'])
+        self.assertEqual(paired[1]['status'], 'ok')
+        self.assertEqual(len({row['id'] for row in paired}), len(paired))
+
+    def test_igsh402_missing_message_ids_and_repeated_message_ids_are_stable(self):
+        for identity in ('', 'shared-message'):
+            with self.subTest(identity=identity):
+                event = self.tool_call()
+                event['message'].update(id=identity, content=[dict(type='text', text='Before'),
+                    *event['message']['content'], dict(type='text', text='After')])
+                later = dict(event, message=dict(event['message'], content=[dict(event['message']['content'][1], id='later-call'),
+                                                                          dict(type='text', text='Later')]))
+                self.write(event, later)
+                self.query.update(cached_sid='', offset=0)
+                _, rows = self.read()
+                self.assertTrue(all(row['id'] for row in rows))
+                self.assertEqual(len({row['id'] for row in rows}), len(rows))
+                replay = reader.response(dict(self.query, cached_sid='', offset=0)).splitlines()[1:-1]
+                self.assertEqual([reader.wire_row(row) for row in rows], replay)
+
+    def test_igsh402_search_matches_visible_segments_in_source_order(self):
+        event = self.tool_call(value=dict(command='needle command'))
+        event['message']['content'] = [dict(type='text', text='needle before'),
+                                      *event['message']['content'], dict(type='text', text='needle after')]
+        self.write(event, self.tool_result('finished'))
+        for query in ('needle', 'needle ', 'before\nneedle'):
+            with self.subTest(query=query):
+                _, hits = self.search(query)
+                if query.startswith('before'):
+                    self.assertEqual(hits, [])
+                else:
+                    self.assertEqual([hit['role'] for hit in hits], ['assistant', 'tool', 'assistant'])
+                    self.assertEqual(hits[0]['snippet'], 'needle before')
+                    self.assertEqual(hits[-1]['snippet'], 'needle after')
+                    self.assertTrue(all(hit['offset'] == 0 for hit in hits))
+
+    def test_igsh402_hidden_events_and_disabled_tools_keep_previous_contract(self):
+        event = self.tool_call()
+        event['message'].update(id='reply-402', content=[dict(type='text', text='Before'),
+            *event['message']['content'], dict(type='text', text='After')])
+        for flag in ('isMeta', 'isSidechain', 'isCompactSummary', 'isVisibleInTranscriptOnly'):
+            self.assertEqual(reader.conversation_rows(dict(event, **{flag: True}), 'claude'), [])
+        with patch.object(reader, 'ISSUE_263_TOOL_STEPS', False):
+            self.assertEqual(reader.conversation_rows(event, 'claude'),
+                             [reader.conversation_event(event, 'claude')])
+        plain = self.event('plain')
+        self.assertEqual(reader.conversation_rows(plain, 'claude'), [reader.conversation_event(plain, 'claude')])
+
     def test_igsh263_claude_paired_ok_error_running_and_later_delta(self):
         for error in (False, True):
             self.query.update(cached_sid='', offset=0)
