@@ -680,7 +680,7 @@ test('ISSUE-513 production idle reconnect scheduler coalesces healthy checks but
 });
 
 test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy reconnect timer', () => {
-  const original = body('armSshReconnectTimerIfNeeded', fs.readFileSync(path.join(__dirname, 'fixtures/issue-513-reconnect-before.zig'), 'utf8'));
+  const original = body('armSshReconnectTimerIfNeeded', fs.readFileSync(path.join(__dirname, 'fixtures/issue-513-reconnect-before.zig'), 'utf8')).replaceAll('app_state.', '');
   const code = runtime(idleTimerChecks).replace(body('armSshReconnectTimerIfNeeded'), original) + '\nvar g_ssh_reconnect_timer_on = false;\n';
   zig(code, 'ISSUE-513 healthy', true, 1);
 });
