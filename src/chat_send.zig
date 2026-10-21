@@ -55,6 +55,9 @@ const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const chatTrimRawConsoleRow = @import("chat_capture.zig").chatTrimRawConsoleRow;
 const chatFileIdentityForShell = @import("chat_session.zig").chatFileIdentityForShell;
 const chatPerf = @import("chat_session.zig").chatPerf;
+const chatBenchEnabled = @import("chat_session.zig").chatBenchEnabled;
+const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const chatHistoryPath = @import("chat_session.zig").chatHistoryPath;
 const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
@@ -1637,7 +1640,7 @@ pub fn chatOutboxClearActive() void {
 }
 
 pub fn armSshReconnectTimerIfNeeded() void {
-    if (app_state.g_main_hwnd == null) return;
+    if (chatBenchEnabled() or app_state.g_main_hwnd == null) return;
     var any = false;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) {
@@ -1712,6 +1715,7 @@ fn sshNetworkVeto(idx: u32, now: u64) bool {
 }
 
 pub fn sshAutoReconnectTick() void {
+    if (chatBenchEnabled()) return;
     sshProbeFinish();
     const now = GetTickCount64();
     var attempted = [_]bool{false} ** 256;
@@ -1742,7 +1746,12 @@ pub fn sshAutoReconnectTick() void {
     sshProbeStart();
     armSshReconnectTimerIfNeeded();
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected) {
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        var header: RECT = undefined;
+        if (GetClientRect(app_state.g_main_hwnd, &header) != 0) {
+            header.top = threadTitleTop();
+            header.bottom = header.top + threadTitleHeight();
+            _ = InvalidateRect(app_state.g_main_hwnd, &header, 0);
+        }
     }
 }
 

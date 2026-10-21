@@ -13,6 +13,9 @@ const toolExe = path.resolve(root, process.env.LIVETEST_EXE || 'zig-out/bin/mp-l
 let prefix, env, xvfb, wm, wineLock, realWindow, testWindow, realPids, testPids, state, folder;
 let batchId = 0;
 const launches = [];
+const first = 'Opening words Anchor amber birch cedar drift elm forest garden hill island jasmine kettle lantern maple north ocean pine quiet river silver trail under violet willow yellow zenith across the valley until the winding road reaches its peaceful closing.';
+const second = 'Second message reaches harbor meadow with enough additional words to show that copying a message is different from copying only the selected text.';
+let selectionPoints;
 
 function run(command, args = [], timeout = 15000) {
   const result = spawnSync(command, args, { env, encoding: 'utf8', timeout });
@@ -121,7 +124,7 @@ function unixPath(windowsPath) {
 }
 
 before(async () => {
-  for (const command of ['wine', 'wineboot', 'wineserver', 'Xvfb', 'xdotool', 'pgrep', 'nice', 'flock', 'openbox', 'xprop']) {
+  for (const command of ['wine', 'wineboot', 'wineserver', 'Xvfb', 'xdotool', 'pgrep', 'nice', 'flock', 'openbox', 'xprop', 'convert', 'identify', 'tesseract']) {
     assert.equal(spawnSync('which', [command]).status, 0, `Required tool missing: ${command}`);
   }
   assert.ok(fs.existsSync(exe), `Executable missing: ${exe}`);
@@ -145,6 +148,22 @@ before(async () => {
   const boot = run('nice', ['-n', '10', 'wineboot', '--init'], 180000);
   assert.equal(boot.status, 0, `wineboot failed: ${boot.stderr}`);
   fs.mkdirSync(path.join(prefix, 'drive_c/ad'), { recursive: true });
+  const fixtureDir = path.join(prefix, 'drive_c/fixture');
+  fs.mkdirSync(fixtureDir);
+  const source = fs.readFileSync(path.join(root, 'tools/chat-reply-agent.c'), 'utf8');
+  const body = source.slice(source.indexOf('    FILE *pid ='))
+    .replaceAll('C:\\\\stub-', 'stub-')
+    .replace('    SetConsoleTitleW(', '    HWND console = GetConsoleWindow();\n    for (unsigned i = 0; console && !GetParent(console) && i < 1000; i++) Sleep(10);\n    if (!console || !GetParent(console)) return 5;\n    SetConsoleTitleW(')
+    .replace('const WCHAR message[] = L"\\x25cf Reply fixture line\\r\\n\\r\\n";', `const WCHAR message[] = L"\\x25cf ${first}\\r\\n\\r\\n\\x25cf ${second}\\r\\n\\r\\n";`);
+  assert.ok(body.includes(first));
+  const agent = path.join(fixtureDir, 'agent.c');
+  fs.writeFileSync(agent, '#include <windows.h>\n#include <stdio.h>\nint main(void) {\n' + body);
+  const compile = run(process.env.ZIG || 'zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', agent, '-o', path.join(fixtureDir, 'claude.exe')], 90000);
+  assert.equal(compile.status, 0, compile.stderr);
+  fs.writeFileSync(path.join(fixtureDir, 'session.json'), JSON.stringify({
+    active_tab: 0, single_window: false, chat_active: true, chat_view_mode: 'everywhere',
+    tabs: [{ kind: 'cmd', name: 'Selection fixture', manual: true, cv: true, cwd: 'C:\\fixture', pid: 0, claude_session: true }],
+  }));
   const file = batch(`"${winPath(exe)}"`);
   launches.push(spawn('nice', ['-n', '10', 'wine', 'cmd', '/c', file], { env, stdio: 'ignore' }));
   await until('real app window', 90000, () => windows('multiprompt v').length === 1);
@@ -167,7 +186,7 @@ after(() => {
 
 test('separate settings: test window starts beside the real app without handover', { timeout: 180000 }, async () => {
   await delay(2500);
-  const result = tool('start', '--exe', winPath(exe), '--idle-seconds', '2');
+  const result = tool('start', '--exe', winPath(exe), '--session', 'C:\\fixture\\session.json', '--idle-seconds', '2');
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /started pid=\d+ hwnd=[0-9a-f]+ appdata=/);
   await until('two visible app windows', 90000, () => windows('multiprompt v').length === 2);
@@ -215,7 +234,91 @@ test('refuses to type when the real window is in front', { timeout: 90000 }, asy
   assert.match(key.output, /refused: foreground is not the test window/);
 });
 
+test('ISSUE-438 mouse refuses foreground and idle violations and rejects out-of-client coordinates', { timeout: 90000 }, async () => {
+  await steadyFocus(realWindow, 0);
+  for (const args of [['click', '300', '300'], ['drag', '300', '300', '400', '400']]) {
+    const refused = tool(...args, '--idle-seconds', '0');
+    assert.equal(refused.status, 3, refused.output);
+    assert.match(refused.output, /refused:/);
+  }
+  await steadyFocus(testWindow, 1);
+  assert.equal(run('xdotool', ['mousemove', '500', '400', 'mousemove_relative', '--', '1', '1']).status, 0);
+  for (const args of [['click', '300', '300'], ['drag', '300', '300', '400', '400']]) {
+    const refused = tool(...args, '--idle-seconds', '300');
+    assert.equal(refused.status, 3, refused.output);
+    assert.match(refused.output, /user active/);
+  }
+  const outside = tool('click', '-1', '0', '--idle-seconds', '0');
+  assert.equal(outside.status, 1, outside.output);
+  assert.match(outside.output, /PointOutsideClient/);
+});
+
+test('ISSUE-438 own-window capture, drag Ctrl+C and right-click Copy return exact clipboard text', { timeout: 150000 }, async () => {
+  await steadyFocus(testWindow, 1);
+  await until('fixture output', 20000, () => fs.existsSync(path.join(prefix, 'drive_c/fixture/stub-pid.txt')));
+  const rectResult = tool('rect');
+  assert.equal(rectResult.status, 0, rectResult.output);
+  const rect = JSON.parse(rectResult.output);
+  assert.ok(rect.right > rect.left && rect.bottom > rect.top);
+  const screenshot = path.join(prefix, 'drive_c/before.png');
+  const artifact = path.join(os.tmpdir(), `mp-livetest-${process.pid}-capture.png`);
+  const enlarged = path.join(prefix, 'large.png');
+  let words;
+  await until('rendered fixture transcript', 30000, () => {
+    const shot = tool('shot', 'C:\\before.png');
+    assert.equal(shot.status, 0, shot.output);
+    assert.equal(fs.readFileSync(screenshot).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    fs.copyFileSync(screenshot, artifact);
+    assert.equal(run('convert', [screenshot, '-resize', '400%', enlarged]).status, 0);
+    const ocr = run('tesseract', [enlarged, 'stdout', '--psm', '11', 'tsv']);
+    assert.equal(ocr.status, 0, ocr.stderr);
+    words = ocr.stdout.trim().split('\n').slice(1).map(line => {
+      const fields = line.split('\t');
+      return { text: fields[11], x: Number(fields[6]) / 4, y: Number(fields[7]) / 4, w: Number(fields[8]) / 4, h: Number(fields[9]) / 4 };
+    }).filter(word => word.text);
+    return ['Anchor', 'closing.', 'Second', 'text.'].every(text => words.filter(word => word.text === text).length === 1);
+  });
+  console.log(`LIVETEST_SCREENSHOT ${artifact}`);
+  const dimensions = run('identify', ['-format', '%w %h', screenshot]);
+  assert.equal(dimensions.status, 0, dimensions.stderr);
+  assert.equal(dimensions.stdout, `${rect.right - rect.left} ${rect.bottom - rect.top}`);
+  const word = text => {
+    const found = words.filter(w => w.text === text);
+    assert.equal(found.length, 1, `${text}: ${JSON.stringify(words)}`);
+    return found[0];
+  };
+  const anchor = word('Anchor'), closing = word('closing.'), last = word('text.'), secondStart = word('Second');
+  assert.ok(closing.y > anchor.y + anchor.h, 'Message must wrap');
+  assert.ok(secondStart.y > closing.y + closing.h + 6, 'Messages must have a gap');
+  const point = w => [Math.floor(w.x + 1), Math.floor(w.y + w.h / 2)];
+  selectionPoints = { from: point(anchor), to: [Math.floor(last.x + last.w + 5), point(last)[1]], second: point(secondStart) };
+  const checked = (...args) => {
+    const result = tool('--idle-seconds', '0', ...args.map(String));
+    assert.equal(result.status, 0, result.output);
+    return result.output;
+  };
+  checked('drag', ...selectionPoints.from, ...selectionPoints.to, '--steps', '24');
+  await delay(300);
+  checked('shot', 'C:\\selection.png');
+  checked('key', 'ctrl+c');
+  const actual = JSON.parse(checked('clipboard'));
+  assert.equal(actual, first.slice(first.indexOf('Anchor')) + '\r\n\r\n' + second);
+  checked('key', 'esc');
+  checked('click', ...selectionPoints.second, '--right');
+  checked('key', 'down');
+  checked('key', 'enter');
+  assert.equal(JSON.parse(checked('clipboard')), second);
+  await steadyFocus(realWindow, 0);
+  assert.equal(JSON.parse(checked('clipboard')), second, 'Clipboard read must not need foreground or idle');
+});
+
 test('own window: stop closes only the test window and removes its folder', { timeout: 120000 }, async () => {
+    if (folder) {
+      for (const name of ['debug.log', 'session-livetest.json']) {
+        const file = path.join(folder, 'appdata/ZigShell', name);
+        if (fs.existsSync(file)) fs.copyFileSync(file, path.join(os.tmpdir(), `mp-livetest-${process.pid}-${name}`));
+      }
+    }
   const result = tool('stop');
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, new RegExp(`stopped pid=${state.pid} folder_removed=1`));

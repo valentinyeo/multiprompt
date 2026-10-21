@@ -126,6 +126,7 @@ jobs:
           destination="$(pwd)/../results"
           trap 'cp -r /opt/chat-bench/results/. "$destination/"' EXIT
           cd /opt/chat-bench/tooling
+          export GITHUB_ACTIONS=true
           export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
           export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
           export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
