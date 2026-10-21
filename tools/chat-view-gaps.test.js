@@ -149,14 +149,37 @@ test "failed remote permission is retryable by stable shell id" {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
-test('ISSUE-401 ordinary assistant replies starting Ready or Readable are not hidden as tools', { todo: 'ISSUE-401' }, (t) => {
+test('ISSUE-401 ordinary assistant replies starting Ready or Readable are not hidden as tools', (t) => {
   const run = execute(t, 'capture', 'const std = @import("std");\n' + ['chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineIsToolActivity'].map(body).join('\n') + `
 test "ordinary assistant replies remain visible" {
+    @setEvalBranchQuota(10000);
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expect(chatLineIsToolActivity(w("● Read(src/main.zig)")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Read 3 files (ctrl+o to expand)")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Searching for 2 patterns…")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Reading 3 files…")));
+    try std.testing.expect(chatLineIsToolActivity(w("• Edited src/main.zig (+3 -1)")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Bash(zig build test)")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Task(Explore repo)")));
+    try std.testing.expect(chatLineIsToolActivity(w("• Explored")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Searched for 1 pattern, read 2 files")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Searching for 1 pattern, reading 2 files…")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Listing 2 directories…")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Editing 1 file…")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Writing for 2 files…")));
+    try std.testing.expect(chatLineIsToolActivity(w("● Read: src/main.zig")));
     try std.testing.expect(!chatLineIsToolActivity(w("● The build now passes")));
     try std.testing.expect(!chatLineIsToolActivity(w("● Ready to deploy.")));
     try std.testing.expect(!chatLineIsToolActivity(w("● Readable error messages are now enabled.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Searching the logs now.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Editing the config was enough.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Tasks are done.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Bashful output is fine.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Read3 files")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Searching for patterns…")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Reading")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Listing the files now.")));
+    try std.testing.expect(!chatLineIsToolActivity(w("● Writing the report now.")));
 }
 `, [], '', ['-fno-llvm', '-fno-lld']);
   assert.equal(run.status, 0, run.stdout + run.stderr);
