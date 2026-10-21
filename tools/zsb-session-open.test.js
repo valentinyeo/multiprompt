@@ -231,9 +231,13 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
-  assert.equal(fragment.split('\n').length, 1);
-  assert.match(fragment, /workspace/);
+  const fragmentPath = path.join(root, 'changelog.d/IGSH-535-session-open.md');
+  const entry = fs.existsSync(fragmentPath)
+    ? fs.readFileSync(fragmentPath, 'utf8').trim()
+    : fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8').match(/\.text = "([^"\n]+)", \.ticket = "IGSH-535"/)?.[1];
+  assert.equal(typeof entry, 'string');
+  assert.equal(entry.split('\n').length, 1);
+  assert.match(entry, /workspace/);
 });
 
 test('changed code contains no removable comments and the comment oracle rejects a positive control', async () => {
