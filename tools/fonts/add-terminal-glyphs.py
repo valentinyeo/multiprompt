@@ -207,7 +207,18 @@ def main():
     font["maxp"].recalc(font)
     font["post"].formatType = 2.0
     font["OS/2"].recalcUnicodeRanges(font)
+    names = {
+        1: "Nordwand Mono MP SemiBold",
+        2: "Regular",
+        3: "NordwandMonoMP-SemiBold; Multiprompt terminal glyphs",
+        4: "Nordwand Mono MP SemiBold",
+        6: "NordwandMonoMP-SemiBold",
+        16: "Nordwand Mono MP",
+        17: "SemiBold",
+    }
     for record in font["name"].names:
+        if record.nameID in names:
+            record.string = names[record.nameID].encode(record.getEncoding())
         if record.nameID == 5:
             record.string = (record.toUnicode() + VERSION_SUFFIX).encode(record.getEncoding())
     font["head"].created = 3873555003

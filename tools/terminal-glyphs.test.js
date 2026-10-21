@@ -243,7 +243,7 @@ test('solid and thin Powerline arrows point in opposite directions without filli
 });
 
 test('committed font matches the SHA-256 of the reproducible generator output', () => {
-  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), '4e12ff22bac2b17554dfbaa6f4b80ea66e56adbf5d868c8fe573a69c15e419e2');
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), '0bb851120a3fca358212afe9f0fb84f853317e1eaffebef6fe9c16aa234b1a2e');
 });
 
 test('both CI build test steps include the dependency-free terminal glyph regression', () => {
@@ -251,4 +251,35 @@ test('both CI build test steps include the dependency-free terminal glyph regres
   assert.match(build, /const terminal_glyph_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/terminal-glyphs\.test\.js" \}\);/);
   assert.match(build, /test_step\.dependOn\(&terminal_glyph_tests\.step\)/);
   assert.match(build, /vps_test_step\.dependOn\(&terminal_glyph_tests\.step\)/);
+});
+
+test('IGSH-443 patched font has distinct Windows and Mac family identities', () => {
+  const expected = new Map([
+    [1, 'Nordwand Mono MP SemiBold'], [2, 'Regular'],
+    [3, 'NordwandMonoMP-SemiBold; Multiprompt terminal glyphs'],
+    [4, 'Nordwand Mono MP SemiBold'], [6, 'NordwandMonoMP-SemiBold'],
+    [16, 'Nordwand Mono MP'], [17, 'SemiBold'],
+  ]);
+  const platforms = new Map([[1, new Set()], [3, new Set()]]);
+  const name = tables.get('name');
+  for (let i = 0; i < u16('name', 2); i++) {
+    const offset = name + 6 + i * 12;
+    const platform = bytes.readUInt16BE(offset);
+    const id = bytes.readUInt16BE(offset + 6);
+    const length = bytes.readUInt16BE(offset + 8);
+    const start = name + u16('name', 4) + bytes.readUInt16BE(offset + 10);
+    const raw = Buffer.from(bytes.subarray(start, start + length));
+    const value = platform === 0 || platform === 3 ? raw.swap16().toString('utf16le') : raw.toString('latin1');
+    assert.notEqual(value, 'Nordwand Mono');
+    assert.notEqual(value, 'Nordwand Mono SemiBold');
+    if (!expected.has(id)) continue;
+    assert.equal(value, expected.get(id), `platform ${platform} name ID ${id}`);
+    platforms.get(platform)?.add(id);
+    if (id === 1 || id === 4) assert.ok(value.length <= 31);
+    if (id === 6) assert.doesNotMatch(value, /\s/);
+  }
+  for (const [platform, ids] of platforms) {
+    assert.deepEqual([...ids].sort((a, b) => a - b), [...expected.keys()], `platform ${platform}`);
+  }
+  assert.equal(u16('OS/2', 4), 600);
 });

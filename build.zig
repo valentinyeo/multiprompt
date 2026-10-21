@@ -373,6 +373,17 @@ pub fn build(b: *std.Build) void {
     const terminal_glyph_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-glyphs.test.js" });
     test_step.dependOn(&terminal_glyph_tests.step);
     vps_test_step.dependOn(&terminal_glyph_tests.step);
+    const shell_font_migration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/themes.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+        .filters = &.{"IGSH-443"},
+    });
+    const run_shell_font_migration_tests = b.addRunArtifact(shell_font_migration_tests);
+    test_step.dependOn(&run_shell_font_migration_tests.step);
+    vps_test_step.dependOn(&run_shell_font_migration_tests.step);
     const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
     test_step.dependOn(&console_font_tests.step);
     vps_test_step.dependOn(&console_font_tests.step);
