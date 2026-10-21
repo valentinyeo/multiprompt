@@ -461,17 +461,19 @@ test "browser toggle debounce uses original event time across delayed delivery" 
     try std.testing.expect(claimBrowserToggleEvent(21_501, &handled_event_time));
 }
 
-pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, now: u64, guard_shell_id: u32, guard_until: u64) bool {
-    _ = launch_tick;
+pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, hwnd_missing: bool, now: u64, guard_shell_id: u32, guard_until: u64) bool {
+    if (launch_tick != 0 and !hwnd_missing) return false;
     return shell_id != guard_shell_id or now >= guard_until;
 }
 
 test "Alt browser open guard rejects a delayed complete second chord" {
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, 56_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, 65_000, 42, 65_000));
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, true, 56_000, 42, 65_000));
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, true, 58_344, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, true, 65_000, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, true, 58_344, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, true, 65_000, 42, 65_000));
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, false, 65_000, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, false, 65_000, 42, 65_000));
 }
 
 pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {

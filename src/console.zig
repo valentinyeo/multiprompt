@@ -2017,6 +2017,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_browser_url = app_state.shells[idx].browser_url;
     const saved_browser_url_len = app_state.shells[idx].browser_url_len;
     const saved_browser_launch_tick = app_state.shells[idx].browser_launch_tick;
+    const saved_browser_first_launch_tick = app_state.shells[idx].browser_first_launch_tick;
     const saved_browser_connection_id = app_state.shells[idx].browser_connection_id;
     const saved_browser_open_failed = app_state.shells[idx].browser_open_failed;
     const saved_browser_bind_nonce = app_state.shells[idx].browser_bind_nonce;
@@ -2194,6 +2195,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .browser_url = saved_browser_url,
         .browser_url_len = saved_browser_url_len,
         .browser_launch_tick = saved_browser_launch_tick,
+        .browser_first_launch_tick = saved_browser_first_launch_tick,
         .browser_connection_id = saved_browser_connection_id,
         .browser_open_failed = saved_browser_open_failed,
         .browser_bind_nonce = saved_browser_bind_nonce,

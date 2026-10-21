@@ -66,6 +66,7 @@ const Shell = struct {
     browser_url_len: u32 = 0,
     browser_docking: bool = false,
     browser_launch_tick: u64 = 0,
+    browser_first_launch_tick: u64 = 0,
     browser_connection_id: u64 = 0,
     browser_open_failed: bool = false,
     browser_bind_nonce: [40]u8 = @splat(0),
@@ -173,6 +174,7 @@ fn prepare(webview_owner: u32) void {
             .browser_suspended = i == 3,
             .browser_docking = i == 4,
             .browser_launch_tick = if (i == 4) 123 else 0,
+            .browser_first_launch_tick = if (i == 4) 123 else 0,
             .browser_health_misses = 2,
             .browser_relaunch_after_tick = 456,
             .browser_window_id = if (i == 3 or i == 4) 0 else @intCast(i + 10),
@@ -216,6 +218,7 @@ test "production palette handler closes every session through native teardown an
             try std.testing.expectEqual(@as(HANDLE, null), shell.browser_hwnd);
             try std.testing.expect(!shell.browser_docking and !shell.browser_suspended);
             try std.testing.expectEqual(@as(u64, 0), shell.browser_launch_tick);
+            try std.testing.expectEqual(@as(u64, 0), shell.browser_first_launch_tick);
             try std.testing.expectEqual(@as(u8, 0), shell.browser_health_misses);
             try std.testing.expectEqual(@as(u64, 0), shell.browser_relaunch_after_tick);
             try std.testing.expectEqual(@as(i64, 0), shell.browser_window_id);

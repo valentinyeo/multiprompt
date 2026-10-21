@@ -2632,6 +2632,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (physical_shortcut and app_state.shells[target_idx].browser_enabled and !recover_dead_pane and !physicalBrowserShortcutMayClose(
                     app_state.shells[target_idx].shell_id,
                     app_state.shells[target_idx].browser_launch_tick,
+                    app_state.shells[target_idx].browser_hwnd == null,
                     GetTickCount64(),
                     app_state.g_browser_shortcut_open_guard_shell_id,
                     app_state.g_browser_shortcut_open_guard_until,
@@ -5219,7 +5220,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     if (app_state.active_shell < app_state.shell_count) {
-                        if (app_state.shells[app_state.active_shell].browser_enabled and app_state.shells[app_state.active_shell].browser_launch_tick != 0) {
+                        if (app_state.shells[app_state.active_shell].browser_enabled and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) {
                             _ = PostMessageW(hwnd, WM_APP_BROWSER_TOGGLE, 0, 0);
                             return 0;
                         }

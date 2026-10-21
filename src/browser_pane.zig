@@ -1,6 +1,7 @@
 const app_state = @import("app_state.zig");
 const Shell = @import("app_state.zig").Shell;
 const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
+const GetMessageTime = @import("win32.zig").GetMessageTime;
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
@@ -3350,7 +3351,7 @@ pub fn browserPlaceholderClick(mx: i32, my: i32) bool {
     for ([_]bool{ true, false }) |retry| {
         const rc = browserPlaceholderButtonRect(retry) orelse return false;
         if (mx >= rc.left and mx < rc.right and my >= rc.top and my < rc.bottom) {
-            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, if (retry) 2 else 0, 0);
+            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, if (retry) 2 else 0, GetMessageTime());
             return true;
         }
     }
