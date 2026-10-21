@@ -2512,7 +2512,7 @@ pub fn handleWorkspaceProfileReady(pointer: usize) void {
         if (idx == app_state.active_shell) launchBrowserForShellEx(idx, false);
         return;
     }
-    launchBrowserForShellEx(idx, job.user_initiated and idx == app_state.active_shell);
+    launchBrowserForShellEx(idx, job.user_initiated and idx == app_state.active_shell and foregroundIsOurs() and !browserChromeHiddenForOverlay());
 }
 
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {

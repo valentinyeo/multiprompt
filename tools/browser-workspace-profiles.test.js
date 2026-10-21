@@ -45,3 +45,11 @@ test('IGSH-224 local CLI reads one atomic window and profile binding instead of 
   assert.match(pane, /writeFileAtomicW\(path, s\)/);
   assert.match(pane, /"\{d\}\\n\{s\}\\n"/);
 });
+
+test('IGSH-224 finishing a seed copy cannot retain foreground authority after the user switches away', () => {
+  const pane = read('src/browser_pane.zig');
+  const start = pane.indexOf('pub fn handleWorkspaceProfileReady(');
+  assert.notEqual(start, -1);
+  const ready = pane.slice(start, pane.indexOf('\nfn launchBrowserForShellEx(', start));
+  assert.match(ready, /job\.user_initiated and idx == app_state\.active_shell and foregroundIsOurs\(\) and !browserChromeHiddenForOverlay\(\)/);
+});
