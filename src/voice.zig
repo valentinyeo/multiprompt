@@ -1667,7 +1667,6 @@ fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpR
 
 fn dictationWorkerThread() void {
     crash_recorder.guardThread();
-    defer app_state.g_dictation_running.store(false, .release);
     const audio = std.heap.page_allocator.alloc(u8, DICTATION_MAX_BYTES) catch {
         dictationSetErrorAscii("Dictation failed: out of memory");
         if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
@@ -1840,6 +1839,7 @@ test "dictation verification ignores TUI framing and requires new console text" 
 }
 
 pub fn handleDictationReady() void {
+    app_state.g_dictation_running.store(false, .release);
     var text_copy: [8192]u16 = undefined;
     var text_len: usize = 0;
     var err_copy: [160]u16 = undefined;
@@ -1906,8 +1906,8 @@ pub fn handleDictationReady() void {
         return;
     }
 
-    if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null) {
-        insertTextIntoChatComposer(transcript);
+    if (app_state.g_dictation_draft_owner_len > 0) {
+        @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
         dictationAudit("target-chat-composer", transcript.len);
         return;
     }
@@ -1992,6 +1992,11 @@ pub fn toggleDictation() void {
         defer app_state.g_dictation_mutex.unlock();
         app_state.g_dictation_transcript_len = 0;
         app_state.g_dictation_error_len = 0;
+    }
+    app_state.g_dictation_draft_owner_len = 0;
+    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
+        const id = @import("chat_composer.zig").chatDraftKeyForShell(app_state.active_shell, &app_state.g_dictation_draft_owner);
+        app_state.g_dictation_draft_owner_len = id.len;
     }
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);

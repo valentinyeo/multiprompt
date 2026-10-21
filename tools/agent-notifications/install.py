@@ -116,18 +116,23 @@ def tmux_config(fifo):
         command = f"if [ -p {destination} ]; then printf '%s\\0' {fields} 3<>{destination} >&3; fi"
         return "run-shell -b " + json.dumps(command, ensure_ascii=False)
 
-    rearm = "kill-session -C -t #{session_id}; set-option -w -t #{window_id} monitor-activity on"
+    clear = "if-shell -F '#{==:#{session_attached},0}' { kill-session -C }"
+    rearm = (
+        "set-environment -h -t #{session_id} MULTIPROMPT_NOTIFY_READY 1; "
+        "if-shell -F -t #{session_id}: '##{==:##{session_attached},0}' { kill-session -C -t #{session_id} }"
+    )
     activity = (
-        "if-shell -F '#{window_active}' { kill-session -C; set-option -w monitor-activity off; "
-        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},0}' { set-environment MULTIPROMPT_NOTIFY_STATE 1; "
+        "if-shell -F '#{MULTIPROMPT_NOTIFY_READY}' { if-shell -F '#{window_active}' { "
+        "set-environment -h MULTIPROMPT_NOTIFY_READY 0; "
+        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},0}' { set-environment -h MULTIPROMPT_NOTIFY_STATE 1; "
         "run-shell -bCd 3 " + json.dumps(rearm) + " } { "
-        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},1}' { set-environment MULTIPROMPT_NOTIFY_STATE 2 }; " + emit("activity") + "; "
-        "run-shell -bCd 15 " + json.dumps(rearm) + " } }"
+        "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},1}' { set-environment -h MULTIPROMPT_NOTIFY_STATE 2 }; " + emit("activity") + "; "
+        "run-shell -bCd 15 " + json.dumps(rearm) + " } } }"
     )
     silence = (
-        "if-shell -F '#{&&:#{window_active},#{!=:#{MULTIPROMPT_NOTIFY_STATE},0}}' { kill-session -C; "
+        "if-shell -F '#{&&:#{window_active},#{!=:#{MULTIPROMPT_NOTIFY_STATE},0}}' { " + clear + "; "
         "if-shell -F '#{==:#{MULTIPROMPT_NOTIFY_STATE},2}' { " + emit("silence") + " }; "
-        "set-environment MULTIPROMPT_NOTIFY_STATE 0 }"
+        "set-environment -h MULTIPROMPT_NOTIFY_STATE 0 }"
     )
     title = "if-shell -F '#{&&:#{&&:#{window_active},#{pane_active}},#{m:✳*,#{pane_title}}}' { " + emit("title") + " }"
     lines = [
@@ -135,7 +140,10 @@ def tmux_config(fifo):
         "set-option -gw monitor-silence 10",
         "set-option -g activity-action any",
         "set-option -g silence-action any",
-        "set-environment -g MULTIPROMPT_NOTIFY_STATE 0",
+        "set-option -g visual-activity off",
+        "set-option -g visual-silence off",
+        "set-environment -gh MULTIPROMPT_NOTIFY_STATE 0",
+        "set-environment -gh MULTIPROMPT_NOTIFY_READY 1",
     ]
     for event, command in (
         ("alert-activity", activity), ("alert-silence", silence),

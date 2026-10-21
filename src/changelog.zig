@@ -53,6 +53,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.794", .items = &.{
+        .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
+        .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },
+        .{ .text = "Multiprompt redraws as fast as before and keeps its smoother edges.", .ticket = "IGSH-444" },
+    } },
     .{ .ver = "0.28.793", .items = &.{
         .{ .text = "Taking a browser screenshot with Ctrl+Shift+S keeps the message box focused with the cursor after the link and one space, without opening the window menu.", .ticket = "IGSH-509" },
     } },

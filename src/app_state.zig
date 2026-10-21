@@ -683,6 +683,7 @@ pub const HitTarget = union(enum) {
 };
 
 pub const ClosedShell = struct {
+    chat_id: u64 = 0,
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
@@ -1387,6 +1388,7 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_chat_id: u64 = 0;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -1566,6 +1568,8 @@ pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
 pub var g_dictation_transcript_len: usize = 0;
+pub var g_dictation_draft_owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+pub var g_dictation_draft_owner_len: usize = 0;
 pub var g_dictation_error: [160]u16 = std.mem.zeroes([160]u16);
 pub var g_dictation_error_len: usize = 0;
 pub var g_pending_tmux_cmd: [1024]u8 = std.mem.zeroes([1024]u8);
