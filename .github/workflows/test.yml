@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4, 5, 6, 7, 8]
+        group: [1, 2, 3, 4]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -80,7 +80,6 @@ jobs:
         with:
           node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: matrix.group != 1 && matrix.group != 6
         with:
           python-version: '3.12'
       - name: Test release version
@@ -108,9 +107,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v2-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -137,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3]
+        group: [1, 2]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -148,7 +147,6 @@ jobs:
         with:
           node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: matrix.group != 2
         with:
           python-version: '3.12'
       - name: Test release version
@@ -176,9 +174,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v2-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
@@ -194,27 +192,17 @@ jobs:
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
-
-  service:
-    name: service
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
       - name: Build the account Worker
+        if: matrix.group == 1
         working-directory: service
         run: npm ci && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
+        if: matrix.group == 1
         run: node --test service/test/infra.test.js service/test/worker.test.js
 
   test-result:
     name: test
-    needs: [changes, test, test-vps, service]
+    needs: [changes, test, test-vps]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -225,24 +213,22 @@ jobs:
           HEAVY: ${{ needs.changes.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
-          SERVICE: ${{ needs.service.result }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1
             case "$2" in
               false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
+              true) [ "$3" = success ] && [ "$4" = success ] ;;
               *) return 1 ;;
             esac
           }
-          require_jobs success true success success success
-          require_jobs success false skipped skipped skipped
+          require_jobs success true success success
+          require_jobs success false skipped skipped
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success success; then exit 1; fi
-            if require_jobs success true success "$result" success; then exit 1; fi
-            if require_jobs success true success success "$result"; then exit 1; fi
+            if require_jobs "$result" false skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success; then exit 1; fi
+            if require_jobs success true success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success success; then exit 1; fi
+          if require_jobs success invalid success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$SERVICE"
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS"
