@@ -489,7 +489,7 @@ test "AUDIT plain text keeps backslashes before non-punctuation and at end" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
-test('ISSUE-406 sync audit recognizes literal Markdown in user bubbles', { todo: 'ISSUE-406' }, (t) => {
+test('ISSUE-406 sync audit recognizes literal Markdown in user bubbles', (t) => {
   const dir = prepare(t, 'audit-cli', ['chat_audit.zig']);
   const exe = path.join(dir, process.platform === 'win32' ? 'chat-audit.exe' : 'chat-audit');
   const build = zig(['build-exe', 'chat_audit.zig', '-O', 'ReleaseSafe', `-femit-bin=${exe}`], dir);

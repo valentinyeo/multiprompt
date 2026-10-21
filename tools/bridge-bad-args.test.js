@@ -190,10 +190,12 @@ test('every help command and alias has an executable negative case', () => {
 });
 
 test('only the help branch may call usage and no usageExit remains', () => {
-  const helpBranch = /\} else if \(std\.mem\.eql\(u8, command, "help"\)[\s\S]*?(?=\} else if)/;
+  const helpBranch = /if \(std\.mem\.eql\(u8, command, "help"\)[\s\S]*?(?=\n    \})\n    \}/;
   const match = source.match(helpBranch);
   assert.ok(match, 'Help dispatch branch missing');
   assert.match(match[0], /return usage\(\)/);
+  assert.ok(source.indexOf(match[0]) < source.indexOf('resolveWindowFromEnv(allocator)'));
+  assert.ok(source.indexOf(match[0]) < source.indexOf('const profile_env ='));
   assert.doesNotMatch(source.replace(helpBranch, ''), /return usage\(\)|usageExit\(/);
 });
 
@@ -230,5 +232,29 @@ test('profile-clone is standalone and publishes exact JSON with durable bytes on
     assert.ok(!fs.existsSync(path.join(temp, 'invalid.partial')));
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-228: type rejects trailing flags without typing anything', () => {
+  for (const args of [
+    ['type', '#composer', 'hello', '--unknown'],
+    ['type', 'hello', '--unknown'],
+    ['type', '--keys', '#composer', 'hello', '--unknown'],
+    ['type', '#composer', 'hello', '--tab'],
+    ['type', 'hello', '--tab'],
+    ['type', '#composer', 'hello', '--tab', '1', '--tab', '2'],
+    ['type', '--tab', '1', '#composer', 'hello', '--tab', '2'],
+    ['type', '#composer', 'hello', '--tab', '--unknown'],
+    ['type', '--tab', '--unknown', '#composer', 'hello'],
+    ['type', '#composer', 'hello', '--tab', '1', '--unknown'],
+  ]) {
+    const result = run(args);
+    assert.equal(result.status, 2, JSON.stringify(args) + ': ' + result.stdout + result.stderr);
+    assert.match(result.stdout, /^[^\r\n]+\r?\n$/);
+    const reply = JSON.parse(result.stdout);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.error, 'bad_args');
+    assert.equal(reply.typed, undefined);
+    assert.equal(reply.result, undefined);
   }
 });
