@@ -43,6 +43,7 @@ test('ISSUE-511 respawn preserves shell identity and allocates only a bounded co
   assert.match(state, /test "ISSUE-511 shell ids never recycle/);
   assert.match(state, /allocateConsoleTitleIdFrom\(&next, &full\)/);
   assert.doesNotMatch(body('chatBenchInit', read('chat_session.zig')), /next_shell_id/);
+  assert.match(body('restore', read('launch_cache.zig')), /state\.next_shell_id != 0 and row\.id >= state\.next_shell_id\) state\.next_shell_id = row\.id \+% 1/);
 });
 
 test('ISSUE-511 one failed probe cannot disconnect a live transport', () => {

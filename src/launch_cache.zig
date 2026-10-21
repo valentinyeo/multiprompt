@@ -70,6 +70,7 @@ pub fn restore() void {
     for (s.rows, 0..) |row, i| {
         var shell = state.empty_shell;
         shell.shell_id = row.id;
+        if (state.next_shell_id != 0 and row.id >= state.next_shell_id) state.next_shell_id = row.id +% 1;
         shell.chat_id = row.chat_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
