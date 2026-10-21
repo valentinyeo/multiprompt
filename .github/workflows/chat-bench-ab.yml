@@ -1,5 +1,5 @@
 name: Chat bench A/B
-run-name: IGSH-513 one-line idle front A/B ${{ github.sha }}
+run-name: chat bench ${{ inputs.tag_a || 'v0.28.789' }} vs ${{ inputs.tag_b || 'v0.28.791' }}
 
 on:
   workflow_dispatch:
@@ -17,6 +17,11 @@ on:
         required: true
         default: '3'
         type: string
+  pull_request:
+    paths:
+      - .github/workflows/chat-bench-ab.yml
+      - .gitattributes
+      - tools/chat-bench/**
 
 permissions:
   contents: read
@@ -44,22 +49,42 @@ jobs:
           node-version: 22
       - name: Test summary calculations
         run: node --test candidate/tools/chat-bench-ab-summary.test.js
-      - name: Plan same-source baseline and candidate
+      - name: Download and verify release executables
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          [[ "$TAG_A" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$TAG_B" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RUNS" =~ ^([1-9]|10)$ ]]
           mkdir results
-          git -C candidate rev-parse HEAD > results/candidate-commit.txt
+          git -C tooling rev-parse HEAD > results/tooling-commit.txt
+          cp tooling/tools/chat-bench/config.json results/config.json
+          for label in A B; do
+            tag="$TAG_A"
+            if [ "$label" = B ]; then tag="$TAG_B"; fi
+            dir="results/releases/$label"
+            mkdir -p "$dir"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt
+            mapfile -t lines < <(grep -E '^[a-fA-F0-9]{64} [ *]multiprompt-x64\.exe$' "$dir/SHA256SUMS.txt")
+            test "${#lines[@]}" -eq 1
+            expected="${lines[0]:0:64}"
+            actual="$(sha256sum "$dir/multiprompt-x64.exe" | cut -d' ' -f1)"
+            test "$actual" = "${expected,,}"
+            printf '%s %s\n' "$tag" "$actual" > "$dir/verified.txt"
+          done
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const plan = [];
           for (let index = 1; index <= Number(process.env.RUNS); index++) {
-            for (const label of ['A', 'B']) plan.push({label, index, path: `runs/${label}-${index}/results.json`});
+            for (const [label, tag] of [['A', process.env.TAG_A], ['B', process.env.TAG_B]]) {
+              plan.push({ label, tag, index, path: `runs/${label}-${tag}-${index}/results.json` });
+            }
           }
-          fs.writeFileSync('results/manifest.json', JSON.stringify(plan, null, 2));
+          fs.writeFileSync('results/manifest.json', JSON.stringify(plan, null, 2) + '\n');
           NODE
       - name: Set up the documented Linux and Wine environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends strace python3 wine64 wine fonts-wine fonts-liberation fonts-dejavu-core xfonts-base xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
+          sudo apt-get install -y --no-install-recommends python3 wine64 wine fonts-wine fonts-liberation fonts-dejavu-core xfonts-base xvfb xauth xdotool x11-utils imagemagick curl xz-utils dbus-user-session
           sudo loginctl enable-linger "$(id -un)"
           sudo systemctl start "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
@@ -86,24 +111,6 @@ jobs:
             mkdir -p "$out"
             "$ZIG" cc -target x86_64-windows-gnu -O2 -municode -Wl,--subsystem,windows "$PWD/tools/chat-bench/browser-fixture.c" -o "$out/browser-fixture.exe" -luser32
           done < ../results/plan.tsv
-          cd "$GITHUB_WORKSPACE/candidate"
-          cp src/main.zig /opt/chat-bench/fixed-main.zig
-          python3 - <<'PYBUILD'
-          from pathlib import Path
-          p = Path('src/main.zig')
-          s = p.read_text()
-          old = 'visible and sid != null and (user or app_state.g_front_period.selected == sid) and foregroundIsOurs()'
-          assert s.count(old) == 1
-          p.write_text(s.replace(old, 'visible and foregroundIsOurs()'))
-          PYBUILD
-          "$ZIG" build -Dtarget=x86_64-windows-gnu
-          mkdir -p /opt/chat-bench/results/releases/A /opt/chat-bench/results/releases/B
-          cp zig-out/bin/multiprompt.exe /opt/chat-bench/results/releases/A/multiprompt-x64.exe
-          cp /opt/chat-bench/fixed-main.zig src/main.zig
-          "$ZIG" build -Dtarget=x86_64-windows-gnu
-          cp zig-out/bin/multiprompt.exe /opt/chat-bench/results/releases/B/multiprompt-x64.exe
-          printf 'A: candidate source with only the foreground eligibility guard reverted. B: candidate source unchanged. These are branch builds, not release-tag results.\n' > /opt/chat-bench/results/comparison.txt
-          cd /opt/chat-bench/tooling
           test "$(cat /proc/1/comm)" = systemd
           systemd-run --user --scope --quiet true
           {
@@ -117,26 +124,6 @@ jobs:
             git -C "$GITHUB_WORKSPACE/tooling" ls-files --eol tools/chat-bench src/chat_history_reader.py
             sha256sum tools/chat-bench/run.mjs tools/chat-bench/lib.mjs tools/chat-bench/reader-service.py tools/chat-bench/browser-fixture.c
           } | tee ../results/environment.txt
-      - name: Trace idle syscalls
-        working-directory: tooling
-        run: |
-          python3 - <<'PYTRACE'
-          from pathlib import Path
-          p = Path('/opt/chat-bench/tooling/tools/chat-bench/run.mjs')
-          s = p.read_text()
-          s = s.replace("let timer;", "let timer; const traced = new Set();")
-          anchor = "      if (guiCount !== config.windows)"
-          trace = """      if (run.samples.at(-1).idle && !traced.has(phase)) {
-                  traced.add(phase);
-                  const args = ['timeout', '12s', 'strace', '-f', '-tt', '-T', '-o', path.join('/opt/chat-bench/results', `idle-${path.basename(out)}-${phase}.strace`), ...[...current.keys()].flatMap(pid => ['-p', String(pid)])];
-                  const trace = spawn('sudo', args, { stdio: ['ignore', 'ignore', logFd] });
-                  trace.on('error', error => run.errors.push(`trace: ${error.message}`));
-                }
-          """
-          assert anchor in s
-          s = s.replace(anchor, trace + anchor)
-          p.write_text(s)
-          PYTRACE
       - name: Run default config in A B order
         working-directory: tooling
         run: |
@@ -161,16 +148,9 @@ jobs:
             fi
             test -f "$out/results.json"
           done < ../results/plan.tsv
-      - name: Write one-line comparison
+      - name: Write A/B summary
         if: always()
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          for (const row of JSON.parse(fs.readFileSync('results/manifest.json'))) {
-            const result = JSON.parse(fs.readFileSync(`results/${row.path}`));
-            console.log(row.label, row.index, result.status, result.metrics.idleAverageCpu, result.failures);
-          }
-          NODE
+        run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
       - name: Upload all benchmark evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
