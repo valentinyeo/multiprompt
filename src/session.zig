@@ -91,7 +91,6 @@ const nowFileTime = @import("inbox.zig").nowFileTime;
 const writeUintTo = @import("inbox.zig").writeUintTo;
 const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
 const findShellById = @import("inbox.zig").findShellById;
-const drawStartupProgress = @import("main.zig").drawStartupProgress;
 
 pub fn getSessionPath(buf: *[512]u8) ?[]const u8 {
     const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
@@ -782,6 +781,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
 }
 
 pub fn saveSession() void {
+    @import("launch_cache.zig").changed();
+    if (@import("launch_cache.zig").pending) return;
     if (app_state.g_account_locked or app_state.g_restoring) return;
     logSessionAudit("saveSession:before-write");
     var path_buf: [512]u8 = undefined;
@@ -1495,7 +1496,6 @@ pub fn restoreSession() u32 {
     var restored_shell_ids: [MAX_SHELLS]u32 = [_]u32{0} ** MAX_SHELLS;
     for (0..tab_count) |t| {
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
-        if (app_state.g_startup_progress) drawStartupProgress(@intCast(t), tab_count, tabs[t].name[0..tabs[t].name_len]);
         const ok = if (chatBenchEnabled() and isRemoteShellKind(tabs[t].kind)) false else spawnSavedTab(&tabs[t], .continue_latest);
         if (ok) {
             const idx = app_state.shell_count - 1;

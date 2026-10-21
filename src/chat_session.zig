@@ -1010,6 +1010,7 @@ fn refreshChatBlockCache(force: bool) bool {
         }
     }
     if (app_state.g_chat_active) chatStoreTabCache(from_file);
+    @import("launch_cache.zig").changed();
     return true;
 }
 
@@ -1060,6 +1061,7 @@ pub fn chatRefreshAfterFontChange() void {
 }
 
 pub fn chatDeferTranscriptLoad() void {
+    if (@import("launch_cache.zig").pending and @import("launch_cache.zig").queue.next <= 2) return;
     @import("chat_find_ui.zig").close(false);
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     app_state.g_chat_prepend_pending = false;

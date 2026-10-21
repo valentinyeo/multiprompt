@@ -43,7 +43,8 @@ function appPids() {
   assert.ok(result.status === 0 || result.status === 1, result.stderr);
   return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number).filter(pid => {
     try {
-      return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`WINEPREFIX=${prefix}`)
+      return !fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('--usage-telemetry')
+        && fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`WINEPREFIX=${prefix}`)
         && !fs.readFileSync(`/proc/${pid}/stat`, 'utf8').match(/\) Z /);
     } catch { return false; }
   }).sort((a, b) => a - b);
@@ -129,4 +130,70 @@ test('ISSUE-308 live copy is focused', { timeout: 240000 }, async () => {
     return second.exitCode !== null && JSON.stringify(current) === JSON.stringify(original)
       && windows('^multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
   });
+});
+
+test('ISSUE-502 cached chat and 45 sidebar sessions paint before deferred startup without a progress bar', { timeout: 240000 }, async () => {
+  const dir = path.join(prefix, 'drive_c/ad/ZigShell');
+  fs.mkdirSync(dir, { recursive: true });
+  const mailbox = path.join(prefix, 'drive_c/mailbox');
+  fs.mkdirSync(mailbox, { recursive: true });
+  const tabs = Array.from({ length: 45 }, (_, i) => ({
+    kind: 'tmux', name: `Launch session ${i + 1}`, tmux_session: `launch-${i + 1}`,
+    chat_id: i + 1, cv: true, workspace: 0,
+  }));
+  fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({ tabs, active_tab: 17 }));
+  const text = Array.from('Saved launch conversation', c => c.charCodeAt(0));
+  const rows = tabs.map((tab, i) => ({ id: i + 1, chat_id: i + 1, name: Array.from(tab.name, c => c.charCodeAt(0)), kind: 3 }));
+  const cache = { active: 18, rows, chat: true, text, blocks: [{ start: 0, len: text.length, role: 'prose', markdown: true }] };
+  fs.writeFileSync(path.join(dir, 'session.json.launch.json'), JSON.stringify(cache));
+  fs.writeFileSync(path.join(prefix, 'drive_c/go.bat'), `@echo off\r\nset "APPDATA=C:\\ad"\r\nset "MULTIPROMPT_NO_LOGIN=1"\r\nset "ZIGSHELL_CHAT_FIXTURE_DIR=C:\\mailbox"\r\n"Z:${exe.replaceAll('/', '\\')}" --single-window --no-window-restore\r\n`);
+  const log = path.join(dir, 'debug.log');
+  const readLog = () => fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+  const began = Date.now();
+  launch();
+  let windowMs;
+  await until('launch first paint', 90000, () => {
+    if (windowMs === undefined && windows('^multiprompt v').length) windowMs = Date.now() - began;
+    const output = readLog();
+    return process.env.MP_LAUNCH_BASELINE === '1' ? /\[switch\] chat painted/.test(output) : /launch first-paint ms=\d+/.test(output);
+  });
+  const observedPaintMs = Date.now() - began;
+  const output = readLog();
+  const version = fs.readFileSync(exe).toString('latin1').match(/MPVERSION=([0-9.]+);/)?.[1];
+  if (process.env.MP_LAUNCH_BASELINE === '1') {
+    const timestamp = line => Date.parse(line.slice(0, 23).replace(' ', 'T'));
+    const lines = output.split('\n');
+    const start = lines.find(line => line.includes('[bench] fixture transport enabled'));
+    const paint = lines.find(line => line.includes('[switch] chat painted'));
+    assert.ok(start && paint, 'Original startup proxies missing');
+    console.log(JSON.stringify({ mode: 'before', version, sessions: 45, windowMs, observedPaintMs, fixtureInitToChatPaintProxyMs: timestamp(paint) - timestamp(start), proxy: '[bench] fixture transport enabled -> [switch] chat painted' }));
+    assert.ok(fs.readFileSync(exe).includes(Buffer.from('Restoring sessions - ')), 'Positive control must contain the original custom progress paint');
+    return;
+  }
+  const firstPaintMs = Number(output.match(/launch first-paint ms=(\d+)/)[1]);
+  assert.ok(firstPaintMs < 1000, `First paint took ${firstPaintMs}ms`);
+  const first = output.indexOf('launch first-paint');
+  assert.ok(output.indexOf('launch snapshot-restored') < first, 'Snapshot must be installed before paint');
+  assert.match(output.slice(0, first), /launch cached-chat rows=45 active=18 blocks=1/);
+  assert.ok(!/launch step=(account|telemetry|links|tabs|browser)/.test(output.slice(0, first)), 'Deferred work ran before cached paint');
+  await until('all deferred startup steps', 90000, () => /launch step=browser/.test(readLog()));
+  const complete = readLog();
+  assert.ok(complete.indexOf('launch deferred-start') > first);
+  for (const step of ['account', 'telemetry', 'links', 'tabs', 'browser']) assert.ok(complete.indexOf(`launch step=${step}`) > first);
+  assert.ok(!fs.readFileSync(exe).includes(Buffer.from('Restoring sessions - ')), 'Custom progress paint remains in the executable');
+  assert.equal(windows('Restoring sessions|msctls_progress32').length, 0);
+  assert.ok(!/progress.*paint|paint.*progress/i.test(complete), 'Progress paint was logged');
+  await until('debounced snapshot worker write', 30000, () => {
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'session.json.launch.json'), 'utf8'));
+    return saved.version === 1 && saved.active === 18 && saved.rows.length === 45 && saved.blocks.length > 0;
+  });
+  stopApps();
+  fs.writeFileSync(log, '');
+  launch();
+  await until('cached restart first paint', 90000, () => /launch first-paint ms=\d+/.test(readLog()));
+  const restart = readLog();
+  assert.match(restart, /launch cached-chat rows=45 active=18 blocks=1/);
+  const restartPaintMs = Number(restart.match(/launch first-paint ms=(\d+)/)[1]);
+  assert.ok(restartPaintMs < 1000, `Persisted snapshot restart took ${restartPaintMs}ms`);
+  console.log(JSON.stringify({ mode: 'after', version, sessions: 45, windowMs, observedPaintMs, firstPaintMs, restartPaintMs, deferredStartMs: Number(complete.match(/launch deferred-start ms=(\d+)/)[1]), progressWindows: 0 }));
 });
