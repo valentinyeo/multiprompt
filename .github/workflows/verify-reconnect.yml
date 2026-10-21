@@ -67,6 +67,9 @@ jobs:
       - name: Drive real Windows desktop
         shell: pwsh
         run: ./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+      - name: Reconnect production logic tests on Windows
+        if: env.EXE_SOURCE == 'build'
+        run: node --test --test-concurrency=1 tools/ssh-clock-standby.test.js tools/ssh-reconnect.test.js tools/ssh-probe-511.test.js
       - name: Source-only contract checks
         if: always()
         run: node tools/verify-reconnect.test.js

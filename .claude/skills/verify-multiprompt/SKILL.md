@@ -25,7 +25,7 @@ On the runner the workflow invokes:
 ./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
 ```
 
-The driver creates a unique RUNNER_TEMP profile, sets APPDATA and LOCALAPPDATA, bypasses account login with the existing MULTIPROMPT_NO_LOGIN=1 option, enables ZIGSHELL_DEBUG, and seeds session.json with two named tmux tabs. No credentials are needed. Readiness requires live stand-in transports and connected app log evidence, not just a main HWND. An existing desktop instance is not safe to double-drive; use a fresh hosted runner.
+The build job also runs the existing SSH reconnect/probe logic tests on Windows. The driver creates a unique RUNNER_TEMP profile, sets APPDATA and LOCALAPPDATA, bypasses account login with the existing MULTIPROMPT_NO_LOGIN=1 option, enables ZIGSHELL_DEBUG, and seeds session.json with two named tmux tabs. No credentials are needed. Readiness requires live stand-in transports and explicit reconnect-ok evidence for both tabs after using the normal Ctrl+Shift+R shortcut, not just a main HWND. An existing desktop instance is not safe to double-drive; use a fresh hosted runner.
 
 ## Doctor
 
