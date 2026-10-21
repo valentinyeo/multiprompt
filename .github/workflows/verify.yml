@@ -18,6 +18,8 @@ on:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
       - tools/verify-multiprompt.test.js
+      - src/**
+      - tools/check-browser-pane-stuck.mjs
 
 permissions:
   contents: read
@@ -26,8 +28,12 @@ jobs:
   verify:
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "browser-pane-stuck"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
     env:
-      FEATURE: ${{ inputs.feature || 'appearance' }}
+      FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

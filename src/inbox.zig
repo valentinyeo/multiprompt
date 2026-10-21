@@ -393,12 +393,6 @@ pub fn publishInboxStateNow() void {
         @memcpy(json[pos .. pos + pane_window.len], pane_window);
         pos += pane_window.len;
         pos += writeUintTo(json[pos..], @intCast(@max(0, app_state.shells[i].browser_window_id)));
-        const pane_url = ",\"browser_url\":\"";
-        @memcpy(json[pos .. pos + pane_url.len], pane_url);
-        pos += pane_url.len;
-        appendJsonEscaped(&json, &pos, app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len]);
-        json[pos] = '"';
-        pos += 1;
         if (app_state.shells[i].eta_total_ms > 0) {
             const oed = ",\"ed\":";
             @memcpy(json[pos .. pos + oed.len], oed);

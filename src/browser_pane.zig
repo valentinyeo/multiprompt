@@ -1,5 +1,5 @@
 const app_state = @import("app_state.zig");
-const Shell = app_state.Shell;
+const Shell = @import("app_state.zig").Shell;
 const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
@@ -2158,6 +2158,7 @@ fn dockBrowserWindow(idx: u32, hwnd: HANDLE, foreground_launch: bool) void {
     if (beacon_was_foreground) _ = focusGuardReturnFromPane(hwnd);
     showBrowserWindowAsync(hwnd, SW_HIDE);
     setBrowserWindowPosAsync(hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    app_state.shells[idx].browser_launch_tick = 0;
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_health_misses = 0;
     app_state.shells[idx].browser_relaunch_after_tick = 0;
@@ -2212,7 +2213,7 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
     const hwnd = job.hwnd;
     const foreground_launch = job.foreground_launch;
     const beacon_was_foreground = job.beacon_was_foreground;
-    const frame_ready = browserPaneMayOccupyLayout(idx) and app_state.shells[idx].browser_window_id != 0;
+    const frame_ready = browserPaneMayOccupyLayout(idx);
     const trusted_beacon_handoff = foreground_launch and beacon_was_foreground;
     if (trusted_beacon_handoff) {
         _ = SetForegroundWindow(app_state.g_main_hwnd);
@@ -2500,7 +2501,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (app_state.shells[app_state.active_shell].browser_window_id == 0 or browserChromeHiddenForOverlay()) {
+    if (browserChromeHiddenForOverlay()) {
         parkBrowserWindow(bh);
         if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0)
             _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
@@ -2698,7 +2699,7 @@ pub fn browserHealthTick() void {
             publishInboxState();
             if (i == app_state.active_shell) active_lost = true;
         }
-        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_launch_tick != 0 and
+        if (app_state.shells[i].browser_enabled and
             app_state.shells[i].browser_window_id == 0 and app_state.shells[i].browser_hwnd != null) startBrowserWindowResolve(@intCast(i));
         const bh = app_state.shells[i].browser_hwnd orelse continue;
         if (IsWindow(bh) == 0) {
@@ -2870,15 +2871,33 @@ fn enumCloseCancelledBrowserLaunch(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BO
     return 1;
 }
 
+fn cancelledBrowserLaunchSlot(launches: []const app_state.CancelledBrowserLaunch, now: u64) usize {
+    var oldest: usize = 0;
+    for (launches, 0..) |launch, i| {
+        if (launch.nonce_len == 0 or now >= launch.deadline) return i;
+        if (launch.deadline < launches[oldest].deadline) oldest = i;
+    }
+    return oldest;
+}
+
+test "IGSH-523 cancelled launches reuse expired slots and evict oldest when full" {
+    var launches = [_]app_state.CancelledBrowserLaunch{.{}} ** 2;
+    try std.testing.expectEqual(@as(usize, 0), cancelledBrowserLaunchSlot(&launches, 1000));
+    launches[0] = .{ .nonce_len = 1, .deadline = 3000 };
+    try std.testing.expectEqual(@as(usize, 1), cancelledBrowserLaunchSlot(&launches, 1000));
+    launches[1] = .{ .nonce_len = 1, .deadline = 2000 };
+    try std.testing.expectEqual(@as(usize, 1), cancelledBrowserLaunchSlot(&launches, 1000));
+    try std.testing.expectEqual(@as(usize, 1), cancelledBrowserLaunchSlot(&launches, 2000));
+    launches[1].deadline = 4000;
+    try std.testing.expectEqual(@as(usize, 0), cancelledBrowserLaunchSlot(&launches, 1000));
+}
+
 pub fn closeBrowserForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     if (app_state.shells[idx].browser_hwnd == null and app_state.shells[idx].browser_bind_nonce_len > 0) {
         const now = GetTickCount64();
-        for (&app_state.g_cancelled_browser_launches) |*launch| {
-            if (launch.nonce_len != 0 and now < launch.deadline) continue;
-            launch.* = .{ .nonce = app_state.shells[idx].browser_bind_nonce, .nonce_len = app_state.shells[idx].browser_bind_nonce_len, .deadline = now + BROWSER_PLACEHOLDER_NOT_OPEN_MS };
-            break;
-        }
+        const slot = cancelledBrowserLaunchSlot(&app_state.g_cancelled_browser_launches, now);
+        app_state.g_cancelled_browser_launches[slot] = .{ .nonce = app_state.shells[idx].browser_bind_nonce, .nonce_len = app_state.shells[idx].browser_bind_nonce_len, .deadline = now + BROWSER_PLACEHOLDER_NOT_OPEN_MS };
     }
     cancelBrowserAdoptionForShell(idx);
     if (idx == app_state.active_shell) hideBrowserEdgeMasks();
@@ -3068,14 +3087,14 @@ fn browserConnectionMatches(sh: *const Shell, connection_id: u64) bool {
 }
 
 fn browserOpeningExpired(sh: *const Shell, now: u64) bool {
-    return sh.browser_enabled and !sh.browser_open_failed and sh.browser_launch_tick != 0 and
+    return sh.browser_enabled and !sh.browser_open_failed and sh.browser_hwnd == null and sh.browser_launch_tick != 0 and
         now -| sh.browser_launch_tick >= BROWSER_PLACEHOLDER_NOT_OPEN_MS;
 }
 
 pub fn browserConnectionState(sh: *const Shell) []const u8 {
     if (!sh.browser_enabled) return "closed";
     if (sh.browser_open_failed) return "failed";
-    if (sh.browser_launch_tick != 0 or sh.browser_window_id == 0) return "opening";
+    if (sh.browser_hwnd == null or sh.browser_docking) return "opening";
     return "connected";
 }
 
@@ -3091,7 +3110,7 @@ fn browserPlaceholderDelay(state: BrowserPlaceholder, elapsed: u64) ?UINT {
     return @intCast(@max(1, BROWSER_PLACEHOLDER_NOT_OPEN_MS -| elapsed));
 }
 
-test "browser placeholder deadline also applies to in-flight launches" {
+test "browserPlaceholderPure applies the deadline only to uncovered slots" {
     try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(false, false, 0, false));
     try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 99_000, false));
     try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 0, false));
@@ -3126,6 +3145,8 @@ test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits
     try std.testing.expect(browserConnectionMatches(&sh, 2));
     try std.testing.expect(!browserOpeningExpired(&sh, 21_999));
     try std.testing.expect(browserOpeningExpired(&sh, 22_000));
+    sh.browser_window_id = 7;
+    try std.testing.expect(browserOpeningExpired(&sh, 22_000));
     resetBrowserConnection(&sh);
     sh.browser_open_failed = true;
     try std.testing.expectEqualStrings("failed", browserConnectionState(&sh));
@@ -3136,18 +3157,35 @@ test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits
     try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
     try std.testing.expect(browserConnectionMatches(&sh, 3));
     try std.testing.expectEqualStrings(url, sh.browser_url[0..sh.browser_url_len]);
-    sh.browser_window_id = 7;
+    sh.browser_hwnd = @ptrFromInt(1);
     sh.browser_launch_tick = 0;
     try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
     try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
     try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 100_000, true));
 }
 
+test "IGSH-523 connected pane stays visible without an extension past the opening deadline" {
+    var sh = app_state.empty_shell;
+    beginBrowserOpening(&sh, 1000, 1);
+    sh.browser_hwnd = @ptrFromInt(1);
+    sh.browser_launch_tick = 0;
+    try std.testing.expectEqual(@as(i64, 0), sh.browser_window_id);
+    try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
+    try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
+    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 99_000, false));
+    sh.browser_launch_tick = 1000;
+    try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
+    try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
+    sh.browser_docking = true;
+    try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
+    try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
+}
+
 pub fn browserPaneCoversSlot() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     if (webView2OwnsActiveShell()) return true;
     const sh = &app_state.shells[app_state.active_shell];
-    if (!sh.browser_enabled or sh.browser_suspended or sh.browser_window_id == 0) return false;
+    if (!sh.browser_enabled or sh.browser_suspended) return false;
     const bh = sh.browser_hwnd;
     if (bh == null or IsWindow(bh) == 0 or IsWindowVisible(bh) == 0) return false;
     if (!browserPaneMayOccupyLayout(app_state.active_shell)) return false;

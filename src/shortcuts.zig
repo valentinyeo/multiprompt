@@ -462,15 +462,27 @@ test "browser toggle debounce uses original event time across delayed delivery" 
 }
 
 pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, now: u64, guard_shell_id: u32, guard_until: u64) bool {
-    if (launch_tick != 0) return true;
+    _ = launch_tick;
     return shell_id != guard_shell_id or now >= guard_until;
 }
 
-test "IGSH-523 Alt browser shortcut closes opening panes despite the open guard" {
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, 56_000, 42, 65_000));
+test "Alt browser open guard rejects a delayed complete second chord" {
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, 56_000, 42, 65_000));
     try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, 58_344, 42, 65_000));
     try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, 65_000, 42, 65_000));
     try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, 58_344, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, 65_000, 42, 65_000));
+}
+
+pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {
+    return enabled and !hwnd_live and launch_tick == 0;
+}
+
+test "Alt browser shortcut recovers an enabled pane with no live window" {
+    try std.testing.expect(physicalBrowserShortcutShouldRecover(true, false, 0));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(false, false, 0));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, true, 0));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 55_000));
 }
 
 fn isWindowsLevelShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) bool {
@@ -902,7 +914,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            const retry = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            const retry = kb.vkCode == 0x41 and (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             if (PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, if (retry) 2 else 1, @intCast(kb.time)) == 0) {
                 app_state.g_browser_toggle_chord_held = false;
                 return CallNextHookEx(app_state.g_hook, nCode, wp, lp);

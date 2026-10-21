@@ -56,6 +56,23 @@ public static class VerifyNative {
         }
         Thread.Sleep(250);
     }
+    delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr hwnd, string name);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    public static bool PaneVisible(IntPtr owner) {
+        Rect frame;
+        if (!GetWindowRect(owner, out frame)) return false;
+        bool visible = false;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            if (GetProp(hwnd, "ZigShellPaneOwner") != owner || !IsWindowVisible(hwnd)) return true;
+            Rect pane;
+            if (GetWindowRect(hwnd, out pane) && pane.Right > pane.Left && pane.Bottom > pane.Top &&
+                pane.Left < frame.Right && pane.Right > frame.Left && pane.Top < frame.Bottom && pane.Bottom > frame.Top) visible = true;
+            return true;
+        }, IntPtr.Zero);
+        return visible;
+    }
     public static string Title(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(512); GetWindowText(hwnd, text, text.Capacity); return text.ToString();
     }
@@ -223,27 +240,44 @@ function Read-BrowserPane {
     return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
 }
 
-function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0, [string]$Url = '') {
+function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0) {
     Wait-Until {
         $pane = Read-BrowserPane
-        $null -ne $pane -and $pane.browser_state -eq $State -and
-            (($State -eq 'opening' -and $pane.browser_connection_id -gt $PreviousId) -or
-             ($State -ne 'opening' -and $pane.browser_connection_id -eq 0)) -and
-            ($Url -eq '' -or $pane.browser_url -eq $Url)
-    } "browser-pane-stuck ${Step}: $State, connection identity and saved URL" 25
+        $null -ne $pane -and
+            (($State -eq 'open' -and $pane.browser_state -in @('opening', 'connected')) -or $pane.browser_state -eq $State) -and
+            (($State -in @('open', 'opening', 'connected') -and $pane.browser_connection_id -gt $PreviousId) -or
+             ($State -in @('closed', 'failed') -and $pane.browser_connection_id -eq 0))
+    } "browser-pane-stuck ${Step}: $State and connection identity" 25
     $pane = Read-BrowserPane
     if ($pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
     Save-Json $pane ("browser-pane-$Step.json")
-    $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id; url = $pane.browser_url }
+    $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id }
     Write-Host "browser-pane-stuck $Step PASS"
     return $pane
 }
 
-function Open-StuckBrowserPane([string]$Step, [long]$PreviousId = 0, [string]$Url = '') {
+function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
-    return Assert-BrowserPane 'opening' $Step $PreviousId $Url
+    return Assert-BrowserPane 'open' $Step $PreviousId
+}
+
+function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
+    $connected = Assert-BrowserPane 'connected' 'connected-pane-docked' ($ConnectionId - 1)
+    if ($connected.browser_connection_id -ne $ConnectionId) { throw 'Docking replaced the browser connection' }
+    Wait-Until { [VerifyNative]::PaneVisible($script:window) } 'docked browser pane is visible inside the app'
+    $deadline = [DateTime]::UtcNow.AddSeconds(21)
+    do {
+        $pane = Read-BrowserPane
+        if ($null -eq $pane -or $pane.browser_state -ne 'connected' -or $pane.browser_connection_id -ne $ConnectionId -or
+            $pane.browser_window_id -ne 0 -or -not [VerifyNative]::PaneVisible($script:window)) {
+            throw 'Connected pane closed, hid, or lost its identity past the opening deadline'
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $pane = Assert-BrowserPane 'connected' 'connected-pane-stays-visible' ($ConnectionId - 1)
+    Snapshot 'connected'
 }
 
 function Doctor {
@@ -545,29 +579,28 @@ try {
             if (Test-Path (Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension/manifest.json')) { throw 'Expected no browser extension in the isolated profile' }
             Press @(0x12, 0x43) 'Alt+C: open Chat View'
             Wait-Until { @((Read-Session).tabs | Where-Object { $_.cv -eq $true }).Count -eq 1 } 'Chat View saved for the initial session'
-            $first = Open-StuckBrowserPane 'initial-opening'
-            if ([string]::IsNullOrWhiteSpace($first.browser_url)) { throw 'Opening pane did not retain a URL' }
-            $url = $first.browser_url
+            $first = Open-BrowserPane 'initial-open'
             Snapshot 'action'
-            Press @(0x12, 0x41) 'Alt+A: close opening browser pane'
-            $closed = Assert-BrowserPane 'closed' 'shortcut-close' 0 $url
-            $second = Open-StuckBrowserPane 'reopen-after-shortcut' $first.browser_connection_id $url
+            Press @(0x12, 0x41) 'Alt+A: close browser pane'
+            $closed = Assert-BrowserPane 'closed' 'shortcut-close'
+            $second = Open-BrowserPane 'reopen-after-shortcut' $first.browser_connection_id
             Palette 'close all browser panes'
-            Press @(0x0D) 'Enter: Close All Browser Panes while opening'
-            $closed = Assert-BrowserPane 'closed' 'palette-close-all' 0 $url
+            Press @(0x0D) 'Enter: Close All Browser Panes'
+            $closed = Assert-BrowserPane 'closed' 'palette-close-all'
             if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Close All left a browser pane open' }
-            $third = Open-StuckBrowserPane 'reopen-after-close-all' $second.browser_connection_id $url
+            $third = Open-BrowserPane 'reopen-after-close-all' $second.browser_connection_id
             Palette 'close browser pane'
-            Press @(0x0D) 'Enter: Close Browser Pane while opening'
-            $closed = Assert-BrowserPane 'closed' 'palette-close-pane' 0 $url
-            $fourth = Open-StuckBrowserPane 'reopen-after-close-pane' $third.browser_connection_id $url
-            $failed = Assert-BrowserPane 'failed' 'opening-timeout' 0 $url
-            Snapshot 'timeout'
-            Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: Retry Browser Pane'
-            $retry = Assert-BrowserPane 'opening' 'shortcut-retry' $fourth.browser_connection_id $url
+            Press @(0x0D) 'Enter: Close Browser Pane'
+            $closed = Assert-BrowserPane 'closed' 'palette-close-pane'
+            $fourth = Open-BrowserPane 'reopen-after-close-pane' $third.browser_connection_id
+            Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
+            Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
+            $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
+            Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
+            $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
             Palette 'close all browser panes'
-            Press @(0x0D) 'Enter: Close All Browser Panes after retry'
-            $closed = Assert-BrowserPane 'closed' 'final-close' 0 $url
+            Press @(0x0D) 'Enter: Close All Browser Panes'
+            $closed = Assert-BrowserPane 'closed' 'final-close'
             Snapshot 'after'
         }
         'command-palette' {
