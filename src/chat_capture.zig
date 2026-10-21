@@ -502,7 +502,15 @@ fn chatDisplayGlyph(c: u16) u16 {
 }
 
 pub fn chatApplyDisplayGlyphs(buf: []u16) void {
-    for (buf) |*c| c.* = chatDisplayGlyph(c.*);
+    var start: usize = 0;
+    while (start < buf.len) {
+        const end = std.mem.indexOfScalarPos(u16, buf, start, '\n') orelse buf.len;
+        const line = buf[start..end];
+        if (!chat_markdown.consoleTableLine(line)) {
+            for (line) |*c| c.* = chatDisplayGlyph(c.*);
+        }
+        start = @min(end + 1, buf.len);
+    }
 }
 
 test "chatDisplayGlyph maps glyphs IBM Plex Sans lacks to ones it has" {

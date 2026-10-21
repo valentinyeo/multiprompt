@@ -15,7 +15,9 @@ function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-capture-'));
   try {
     copyZig(['chat_markdown.zig', 'link_detect.zig', 'voice_filter.zig'], dir);
-    let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer'].map(body).join('\n');
+    let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer', 'chatDisplayGlyph', 'chatApplyDisplayGlyphs'].map(body).join('\n');
+    const glyphMap = source.match(/const CHAT_DISPLAY_GLYPH_MAP = [^]*?\n};/)[0];
+    if (control === 'glyphs') functions = functions.replace(body('chatApplyDisplayGlyphs'), 'fn chatApplyDisplayGlyphs(buf: []u16) void { for (buf) |*c| c.* = chatDisplayGlyph(c.*); }');
     let chrome = body('captureChatTranscript').match(/\((?:!table_line and )?!tool_header and voice_filter\.isClaudeChrome\(line\)\)/)[0];
     if (control === 'chrome') chrome = chrome.replace('!table_line and ', '');
     if (control === 'reflow') functions = functions.replace('previous_was_divider = is_divider or table_line;', 'previous_was_divider = is_divider;').replace('const table_line = chat_markdown.consoleTableLine(line);', '');
@@ -29,6 +31,8 @@ const link_detect = @import("link_detect.zig");
 const voice_filter = @import("voice_filter.zig");
 var g_chat_line_starts: [32]usize = undefined;
 var g_chat_line_lens: [32]usize = undefined;
+const ChatGlyphMap = struct { from: u16, to: u16 };
+${glyphMap}
 ${functions}
 test "table surface: chrome filtering keeps structural borders but hides real chrome" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -88,6 +92,12 @@ test "table surface: complete captured box grid is exactly one table block" {
     const reflowed = try a.dupe(u16, text);
     defer a.free(reflowed);
     const reflow_len = chatReflowTranscript(reflowed, g_chat_line_starts[0..row_count], g_chat_line_lens[0..row_count], &([_]bool{false} ** 32), &.{});
+    const raw_table = try a.dupe(u16, reflowed[0..reflow_len]);
+    defer a.free(raw_table);
+    chatApplyDisplayGlyphs(reflowed[0..reflow_len]);
+    try std.testing.expectEqual(@as(u16, 0x2022), reflowed[0]);
+    const table_start = std.mem.indexOfScalar(u16, raw_table, 0x250c).?;
+    try std.testing.expectEqualSlices(u16, raw_table[table_start..reflow_len], reflowed[table_start..reflow_len]);
     const n = chatClassifyBlocks(reflowed[0..reflow_len], &blocks);
     try std.testing.expectEqual(@as(usize, 3), n);
     try std.testing.expectEqual(chat_markdown.Kind.table, blocks[1].kind);
@@ -137,4 +147,10 @@ test('IGSH-436 console chrome oracle rejects dropping the real table borders', (
   const result = runHarness('chrome');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected false, found true/);
+});
+
+test('IGSH-436 captured table oracle rejects flattening table source before layout', () => {
+  const result = runHarness('glyphs');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /FAIL/);
 });
