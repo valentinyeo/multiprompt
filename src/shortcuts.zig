@@ -307,6 +307,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Palette / Actions", .b = "", .header = true },
     .{ .a = "Ctrl+K", .b = "Open command palette; it opens with your last 5 sessions", .header = false },
     .{ .a = "Ctrl+K -> Account: Sign Out", .b = "Forget this device login and lock multiprompt", .header = false },
+    .{ .a = "Ctrl+K -> Account: Approve devices", .b = "Approve or deny a new device reaching your servers", .header = false },
     .{ .a = "Ctrl+K -> Account: Devices", .b = "List account devices and revoke a device", .header = false },
     .{ .a = "Ctrl+K -> Sync: Pull Now", .b = "Reconcile server workspaces and synchronized tmux tabs", .header = false },
     .{ .a = "Ctrl+Shift+K", .b = "Open command palette from any multiprompt surface, including browser", .header = false },

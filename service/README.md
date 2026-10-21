@@ -46,7 +46,11 @@ For self-hosted desktop sync, change the public service origin in `src/account_c
 - `GET /v1/me`: current browser or device identity
 - `GET|PUT /v1/usage`: account usage readback and service-token-authenticated ingestion
 - `POST /oauth/token`: authorization-code or refresh-token grant
-- `GET /v1/devices`, `DELETE /v1/devices/{id}`: list and revoke devices
+- `GET /v1/devices`, `DELETE /v1/devices/{id}`: list and revoke devices; revoked device keys remain listed
+- `PUT /v1/device-key`: device Bearer auth; register an Ed25519 public key as pending, preserving status for an unchanged key
+- `GET /v1/device-keys`: device Bearer auth; list account device public keys and approval status
+- `POST /v1/device-keys/{device_id}/approve`: device Bearer auth; approve another device's pending key on the same account
+- `POST /v1/device-keys/{device_id}/deny`: device Bearer auth; deny another device's pending key on the same account
 - `POST /v1/crash-reports`: device Bearer auth; strict Android report fields, 32 KiB body limit, duplicate IDs scoped to each device, newest 50 reports per device retained and deleted on revocation
 - `GET /v1/layout`, `PUT /v1/layout`: revision-based layout sync; stale writes return 409
 

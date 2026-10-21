@@ -59,3 +59,9 @@ CREATE TABLE IF NOT EXISTS crash_reports (
  PRIMARY KEY (device_id, report_id)
 );
 CREATE INDEX IF NOT EXISTS crash_reports_device_received_idx ON crash_reports(device_id, received_at);
+CREATE TABLE IF NOT EXISTS device_keys (
+ device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+ account TEXT NOT NULL, public_key TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','revoked')),
+ requested INTEGER NOT NULL, decided INTEGER, decided_by TEXT
+);

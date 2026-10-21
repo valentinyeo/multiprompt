@@ -38,7 +38,8 @@ function audit(desktop, client) {
   assert.match(worker, /accountRequest\(job, reply\)/);
   assert.match(desktop, /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
   assert.match(desktop, /CreateProcessW\(null, cmd_z.ptr, null, null, 1, 0x08000000/);
-  assert.match(desktop, /GetTickCount64\(\) \+ 5000/);
+  assert.match(discovery, /accountSshOutput\(a, command, 5000\)/);
+  assert.match(desktop, /GetTickCount64\(\) \+ timeout_ms/);
 }
 
 test('hosts sync discovery is worker-serialized, cached with owned data, bounded and reused on conflict retries', () => {
