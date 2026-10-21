@@ -189,9 +189,12 @@ test('ISSUE-402 a Claude event preserves text/tool/text content ordering in the 
   const dir = prepare(t, 'reader-order');
   const fixture = path.join(dir, 'reader-order.jsonl');
   fs.writeFileSync(fixture, JSON.stringify({ type: 'assistant', timestamp: '2026-10-03T12:34:00Z', message: { role: 'assistant', id: 'message-1', content: [ { type: 'text', text: 'Before the tool.' }, { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/work/a.txt' } }, { type: 'text', text: 'After the tool.' } ] } }) + '\n');
-  const script = `import importlib.util,json,sys
+  const script = `import importlib.util,json,sys,types
 from pathlib import Path
-if sys.platform == 'win32': sys.modules['pwd'] = type(sys)('pwd')
+if sys.platform == 'win32':
+    def unexpected_user_lookup(*args):
+        raise AssertionError('the transcript fixture must not query system users')
+    sys.modules['pwd']=types.SimpleNamespace(getpwnam=unexpected_user_lookup,getpwuid=unexpected_user_lookup)
 spec=importlib.util.spec_from_file_location('reader',sys.argv[1])
 r=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
