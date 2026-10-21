@@ -53,6 +53,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.791", .items = &.{
+        .{ .text = "The Chat View find box now correctly types symbols and accented letters with your keyboard layout.", .ticket = "IGSH-407" },
+        .{ .text = "Disconnected tabs use less CPU while waiting to reconnect.", .ticket = "IGSH-513" },
+        .{ .text = "Remote tab activity notifications now use terminal events instead of repeatedly scanning every tab.", .ticket = "IGSH-514" },
+    } },
     .{ .ver = "0.28.790", .items = &.{
         .{ .text = "Browser commands wait for the connection to become ready and no longer lose fast replies.", .ticket = "IGSH-394" },
         .{ .text = "Compare chat switching performance between two releases with repeatable benchmark reports.", .ticket = "IGSH-507" },
