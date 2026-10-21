@@ -27,9 +27,7 @@ if [ "$release" = latest ]; then
   release=$(gh release view -R "$repo" --json tagName --jq .tagName)
 fi
 if [[ ! "$release" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo 'invalid release tag' >&2; exit 1; fi
-app='C:\Users\user\Documents\GitHub\zigshell'
 download_dir=$(mktemp -d)
-upload_pc="$app\\release-upload-$(basename "$download_dir")"
 checked_pc=0
 staged_pc=0
 check_no_zig() {
@@ -90,6 +88,10 @@ if [ "$only_ext" = 0 ]; then
 fi
 check_no_zig
 checked_pc=1
+profile=$(lh shell '$env:USERPROFILE' --timeout 60 | tr -d '\r\n')
+if [[ ! "$profile" =~ ^[A-Za-z]:\\Users\\[A-Za-z0-9._-]+$ ]]; then echo 'refusing install: unexpected laptop user folder' >&2; exit 1; fi
+app="$profile\\Documents\\GitHub\\zigshell"
+upload_pc="$app\\release-upload-$(basename "$download_dir")"
 staged_pc=1
 lh shell "\$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force '$upload_pc' | Out-Null" --timeout 60
 upload() {
