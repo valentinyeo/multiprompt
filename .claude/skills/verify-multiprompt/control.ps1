@@ -312,7 +312,13 @@ try {
         }
         if (Test-Path $scratch) {
             Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force
-            Remove-Item $scratch -Recurse -Force
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while (Test-Path $scratch) {
+                try { Remove-Item $scratch -Recurse -Force } catch {
+                    if ([DateTime]::UtcNow -ge $deadline) { throw }
+                    Start-Sleep -Milliseconds 200
+                }
+            }
         }
         $result.cleanup = 'owned PID stopped; scratch copied to evidence/data then removed'
         if ($result.status -eq 'passed') {

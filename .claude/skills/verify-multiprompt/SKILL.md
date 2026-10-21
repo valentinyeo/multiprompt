@@ -83,7 +83,7 @@ Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `r
 
 ## Cleanup
 
-The helper's `finally` runs on success and on caught failures: ask only its original Process object to close, wait up to ten seconds, then kill that same process if needed. Never terminate by image name, enumerate and kill unrelated consoles, or touch a user's machine. Normal app shutdown owns its console teardown. Copy isolated scratch to `evidence/data`, then remove only that scratch directory. Screenshots, logs, result JSON and copied app data stay outside scratch and are checked after cleanup. `always()` uploads evidence even on failure. GitHub tears down the disposable VM after the job, including if a hard job timeout prevents `finally`.
+The helper's `finally` runs on success and on caught failures: ask only its original Process object to close, wait up to ten seconds, then kill that same process if needed. Never terminate by image name, enumerate and kill unrelated consoles, or touch a user's machine. Normal app shutdown owns its console teardown. Copy isolated scratch to `evidence/data`, then remove only that scratch directory, retrying for up to twenty seconds while Windows releases closing-console directory handles. A persistent lock fails cleanup; it never authorizes killing another PID. Screenshots, logs, result JSON and copied app data stay outside scratch and are checked after cleanup. `always()` uploads evidence even on failure. GitHub tears down the disposable VM after the job, including if a hard job timeout prevents `finally`.
 
 ## Maintain
 
