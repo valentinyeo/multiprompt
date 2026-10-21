@@ -595,10 +595,9 @@ fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*
 
 fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32) ?link_detect.Range {
     const layout = chatTableLayout(hdc, text, offset, area.right - area.left) orelse return null;
-    var total_h: i32 = 1;
-    for (layout.heights) |h| total_h += h;
-    const overflow = layout.content_w > layout.view_w;
-    if (height) |h| h.* = total_h + (if (overflow) uiScaled(7) else @as(i32, 0));
+    const total_h = layout.bodyHeight();
+    const scrollbar = layout.scrollbar(uiScaled(16), uiScaled(24));
+    if (height) |h| h.* = total_h + (if (scrollbar) |bar| bar.bar_h else @as(i32, 0));
     if (!paint and hit == null) return null;
     if (hit) |pt| if (pt.char == null and (pt.x < area.left or pt.x >= area.right or pt.y < area.top or pt.y >= area.top + total_h)) return null;
     var cell_nearest = chat_hit.Nearest{ .char = 0 };
@@ -621,7 +620,7 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     defer if (paint) {
         _ = RestoreDC(hdc, saved);
     };
-    if (paint) _ = IntersectClipRect(hdc, area.left, area.top, area.right, area.top + total_h + uiScaled(7));
+    if (paint) _ = IntersectClipRect(hdc, area.left, area.top, area.right, area.top + total_h + (if (scrollbar) |bar| bar.bar_h else @as(i32, 0)));
     const brush = if (paint) CreateSolidBrush(customColorOr("border", if (app_state.g_light_theme) RGB(190, 194, 202) else RGB(72, 78, 88))) else null;
     defer if (paint) {
         _ = DeleteObject(brush);
@@ -659,11 +658,11 @@ fn chatFlowTable(hdc: HANDLE, text: []const u16, area: RECT, paint: bool, hit: ?
     if (paint) {
         const bottom = RECT{ .left = area.left - layout.scroll, .top = y, .right = area.left - layout.scroll + layout.content_w, .bottom = y + 1 };
         _ = FillRect(hdc, &bottom, brush);
-        if (overflow) {
-            const thumb_w = @min(layout.view_w, @max(uiScaled(16), @divTrunc(@as(i64, layout.view_w) * layout.view_w, layout.content_w)));
-            const thumb_x = @divTrunc(@as(i64, layout.scroll) * (layout.view_w - thumb_w), layout.content_w - layout.view_w);
-            const indicator = RECT{ .left = area.left + @as(i32, @intCast(thumb_x)), .top = y + uiScaled(3), .right = area.left + @as(i32, @intCast(thumb_x + thumb_w)), .bottom = y + uiScaled(5) };
-            _ = FillRect(hdc, &indicator, brush);
+        if (scrollbar) |bar| {
+            const track = RECT{ .left = area.left, .top = area.top + total_h + uiScaled(3), .right = area.right, .bottom = area.top + total_h + bar.bar_h - uiScaled(3) };
+            fillRoundRectAA(hdc, track, uiScaled(5), customColorOr("scrollbar_track", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55)));
+            const thumb = RECT{ .left = track.left + bar.thumb_x, .top = track.top, .right = track.left + bar.thumb_x + bar.thumb_w, .bottom = track.bottom };
+            fillRoundRectAA(hdc, thumb, uiScaled(5), customColorOr("scrollbar_thumb", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
         }
     }
     return null;
@@ -2719,23 +2718,73 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
     }
 }
 
-pub fn chatTableWheel(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
-    if (msg != WM_MOUSEHWHEEL and (wp & 0x0004) == 0) return false;
-    var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
-    _ = ScreenToClient(hwnd, &pt);
-    const index = chatTranscriptBlockAtPoint(pt.y) orelse return false;
+var chat_table_drag: ?struct { offset: usize, hash: u64, pointer_x: i32, scroll: i32 } = null;
+
+fn chatTableAt(x: i32, y: i32) ?struct { offset: usize, left: i32, top: i32, layout: *chat_markdown.TableLayout, bar: chat_markdown.TableScrollbar, hit: chat_markdown.TableScrollHit } {
+    if (app_state.g_chat_find_open and y < uiScaled(app_state.CHAT_FIND_TOP_H)) return null;
+    const index = chatTranscriptBlockAtPoint(y) orelse return null;
     const block = app_state.g_chat_blocks[index];
-    if (block.kind != .table) return false;
+    if (block.kind != .table) return null;
     const rc = app_state.g_chat_layout_rects[index];
     const pad = uiScaled(CHAT_CODE_PAD);
     const left = app_state.g_chat_content_left + rc.left + pad;
     const top = rc.top - app_state.g_chat_scroll_y + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + pad;
-    if (pt.x < left or pt.x >= app_state.g_chat_content_left + rc.right - pad or pt.y < top or pt.y >= rc.bottom - app_state.g_chat_scroll_y - pad) return false;
-    const table = app_state.g_chat_tables.entries.getPtr(block.start) orelse return false;
-    const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
-    table.layout.scroll = chat_markdown.tableScroll(table.layout.scroll, if (msg == WM_MOUSEHWHEEL) @as(i32, delta) else -@as(i32, delta), uiScaled(54), table.layout.content_w, table.layout.view_w);
+    const table = app_state.g_chat_tables.entries.getPtr(block.start) orelse return null;
+    const bar = table.layout.scrollbar(uiScaled(16), uiScaled(24)) orelse return null;
+    const hit = bar.hit(x - left, y - top);
+    if (hit == .outside) return null;
+    return .{ .offset = block.start, .left = left, .top = top, .layout = &table.layout, .bar = bar, .hit = hit };
+}
+
+fn chatTableSetScroll(hwnd: HANDLE, offset: usize, scroll: i32) void {
+    const table = app_state.g_chat_tables.entries.getPtr(offset) orelse return;
+    if (scroll == table.layout.scroll) return;
+    table.layout.scroll = scroll;
     app_state.g_chat_hover_link = null;
-    _ = InvalidateRect(hwnd, null, 0);
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
+        if (block.kind != .table or block.start != offset) continue;
+        var rc = app_state.g_chat_layout_rects[index];
+        rc.left += app_state.g_chat_content_left;
+        rc.right += app_state.g_chat_content_left;
+        rc.top -= app_state.g_chat_scroll_y;
+        rc.bottom -= app_state.g_chat_scroll_y;
+        _ = InvalidateRect(hwnd, &rc, 0);
+        break;
+    }
+}
+
+fn chatTableMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
+    const table = chatTableAt(x, y) orelse return false;
+    switch (table.hit) {
+        .thumb => {
+            const entry = app_state.g_chat_tables.entries.getPtr(table.offset).?;
+            chat_table_drag = .{ .offset = table.offset, .hash = entry.hash, .pointer_x = x, .scroll = table.layout.scroll };
+            app_state.g_chat_hover_link = null;
+            _ = SetCapture(hwnd);
+        },
+        .track_before, .track_after => chatTableSetScroll(hwnd, table.offset, table.bar.page(table.layout.scroll, table.hit)),
+        else => return false,
+    }
+    return true;
+}
+
+fn chatTableMouseMove(hwnd: HANDLE, x: i32) bool {
+    const drag = chat_table_drag orelse return false;
+    const entry = app_state.g_chat_tables.entries.getPtr(drag.offset) orelse return true;
+    if (entry.hash != drag.hash) return true;
+    const bar = entry.layout.scrollbar(uiScaled(16), uiScaled(24)) orelse return true;
+    chatTableSetScroll(hwnd, drag.offset, bar.drag(drag.scroll, x - drag.pointer_x));
+    return true;
+}
+
+pub fn chatTableWheel(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
+    if (msg != WM_MOUSEHWHEEL and (wp & 0x0004) == 0) return false;
+    var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
+    _ = ScreenToClient(hwnd, &pt);
+    const table = chatTableAt(pt.x, pt.y) orelse return false;
+    const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+    const routed = table.bar.wheel(pt.x - table.left, pt.y - table.top, msg == WM_MOUSEHWHEEL, (wp & 0x0004) != 0, delta) orelse return false;
+    chatTableSetScroll(hwnd, table.offset, chat_markdown.tableScroll(table.layout.scroll, routed, uiScaled(54), table.layout.content_w, table.layout.view_w));
     return true;
 }
 
@@ -2795,6 +2844,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     rc.top -= app_state.g_chat_scroll_y;
                     rc.bottom -= app_state.g_chat_scroll_y;
                     if (rc.top > h) break;
+                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
                     chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
                     chatPaintBlockImages(mem_dc, i, rc);
                     @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
@@ -2812,6 +2862,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     rc.top -= app_state.g_chat_scroll_y;
                     rc.bottom -= app_state.g_chat_scroll_y;
                     if (rc.bottom < 0 or rc.top > h) continue;
+                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
                     const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
                     chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc);
                 }
@@ -2839,6 +2890,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_MOUSEMOVE => {
+            if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
             var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
             _ = TrackMouseEvent(&tracking);
             if (app_state.g_chat_sel_dragging) {
@@ -2890,6 +2942,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatImageReady();
                 return 0;
             }
+            if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatEchoRetryAt(GET_X(lp), GET_Y(lp))) return 0;
             if (chatTranscriptCopyAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatCopyBlockToClipboard(index);
@@ -2908,11 +2961,20 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         0x0215, 0x001F => {
+            const table_dragging = chat_table_drag != null;
+            chat_table_drag = null;
+            if (msg == 0x001F and table_dragging) _ = ReleaseCapture();
             app_state.g_chat_sel_dragging = false;
             _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONUP => {
+            if (chat_table_drag != null) {
+                _ = chatTableMouseMove(hwnd, GET_X(lp));
+                chat_table_drag = null;
+                _ = ReleaseCapture();
+                return 0;
+            }
             if (app_state.g_chat_sel_dragging) {
                 app_state.g_chat_sel_dragging = false;
                 _ = ReleaseCapture();
@@ -2931,6 +2993,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatImageReady();
                 return 0;
             }
+            if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatTranscriptCopyAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatCopyBlockToClipboard(index);
                 return 0;
@@ -3436,4 +3499,65 @@ test "IGSH-442 unconfirmed actions hit their own buttons across scroll offsets" 
     try std.testing.expect(!chatEchoRetryAt(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
     entries[0].state = .queued;
     try std.testing.expect(!chatEchoRetryHover(rc.right - uiScaled(10), rc.bottom - uiScaled(10) - app_state.g_chat_scroll_y));
+}
+
+test "ISSUE-458 real window captures table thumb drags until release and cancels without text selection" {
+    const w = @import("win32.zig");
+    const Capture = struct {
+        extern "user32" fn GetCapture() callconv(WINAPI) HANDLE;
+    };
+    ensureChatTranscriptClassRegistered();
+    const hwnd = w.CreateWindowExW(0, L("ZigShellChatTranscript"), L("table scrollbar"), 0, 0, 0, 458, 300, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    defer {
+        _ = ReleaseCapture();
+        app_state.g_chat_tables.clear(std.heap.page_allocator);
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_sel_transcript_focus = false;
+        chatSelectionClear();
+    }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A very long heading with enough words to overflow the narrow chat column | Another very long heading with even more words in the last column |\n|---|---|\n| first | last |");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .code, .kind = .table };
+    app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 0, .right = 458, .bottom = 300 };
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_content_left = 0;
+    app_state.g_chat_find_open = false;
+    app_state.g_chat_sel_dragging = false;
+    const dc = GetDC(hwnd) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(hwnd, dc);
+    const layout = chatTableLayout(dc, text, 0, 458 - 2 * uiScaled(CHAT_CODE_PAD)) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(layout.content_w > layout.view_w);
+    var body_h: i32 = 1;
+    for (layout.heights) |h| body_h += h;
+    const x = uiScaled(CHAT_CODE_PAD) + 1;
+    const y = uiScaled(CHAT_CODE_PAD) + body_h + uiScaled(4);
+    const down: LPARAM = (y << 16) | x;
+    _ = w.SendMessageW(hwnd, WM_LBUTTONDOWN, 1, down);
+    try std.testing.expect(!app_state.g_chat_sel_dragging);
+    try std.testing.expectEqual(hwnd, Capture.GetCapture());
+    _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | 2000);
+    try std.testing.expectEqual(layout.content_w - layout.view_w, layout.scroll);
+    _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | @as(LPARAM, @as(u16, @bitCast(@as(i16, -2000)))));
+    try std.testing.expectEqual(@as(i32, 0), layout.scroll);
+    _ = w.SendMessageW(hwnd, WM_LBUTTONUP, 0, (500 << 16) | 2000);
+    try std.testing.expectEqual(layout.content_w - layout.view_w, layout.scroll);
+    try std.testing.expect(Capture.GetCapture() == null);
+    _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 0, down);
+    try std.testing.expectEqual(layout.content_w - layout.view_w, layout.scroll);
+    layout.scroll = 0;
+    _ = w.SendMessageW(hwnd, WM_LBUTTONDBLCLK, 1, down);
+    try std.testing.expectEqual(hwnd, Capture.GetCapture());
+    _ = w.SendMessageW(hwnd, 0x001F, 0, 0);
+    try std.testing.expect(Capture.GetCapture() == null);
+    _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | 2000);
+    try std.testing.expectEqual(@as(i32, 0), layout.scroll);
+    _ = w.SendMessageW(hwnd, WM_LBUTTONDOWN, 1, down);
+    _ = ReleaseCapture();
+    _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | 2000);
+    try std.testing.expectEqual(@as(i32, 0), layout.scroll);
+    try std.testing.expect(!app_state.g_chat_sel_dragging);
 }

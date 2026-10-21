@@ -405,6 +405,52 @@ pub fn tableScroll(offset: i32, delta: i32, step: i32, content_w: i32, view_w: i
     return @intCast(std.math.clamp(next, 0, @as(i64, @max(0, content_w - view_w))));
 }
 
+pub const TableScrollHit = enum { outside, body, thumb, track_before, track_after };
+pub const TableScrollbar = struct {
+    view_w: i32,
+    body_h: i32,
+    bar_h: i32,
+    thumb_x: i32,
+    thumb_w: i32,
+    max_scroll: i32,
+
+    pub fn init(content_w: i32, view_w: i32, body_h: i32, offset: i32, bar_h: i32, min_thumb: i32) ?TableScrollbar {
+        if (view_w <= 0 or content_w <= view_w) return null;
+        const thumb_w: i32 = @intCast(@min(view_w, @max(@min(min_thumb, @max(1, @divTrunc(view_w, 2))), @divTrunc(@as(i64, view_w) * view_w, content_w))));
+        const max_scroll = content_w - view_w;
+        return .{ .view_w = view_w, .body_h = body_h, .bar_h = bar_h, .thumb_x = @intCast(@divTrunc(@as(i64, std.math.clamp(offset, 0, max_scroll)) * (view_w - thumb_w), max_scroll)), .thumb_w = thumb_w, .max_scroll = max_scroll };
+    }
+
+    pub fn hit(self: TableScrollbar, x: i32, y: i32) TableScrollHit {
+        if (x < 0 or x >= self.view_w or y < 0 or y >= self.body_h + self.bar_h) return .outside;
+        if (y < self.body_h) return .body;
+        if (x < self.thumb_x) return .track_before;
+        if (x >= self.thumb_x + self.thumb_w) return .track_after;
+        return .thumb;
+    }
+
+    pub fn drag(self: TableScrollbar, offset: i32, pointer_delta: i32) i32 {
+        const travel = self.view_w - self.thumb_w;
+        if (travel <= 0) return std.math.clamp(offset, 0, self.max_scroll);
+        const next = @as(i64, offset) + @divTrunc(@as(i64, pointer_delta) * self.max_scroll, travel);
+        return @intCast(std.math.clamp(next, 0, self.max_scroll));
+    }
+
+    pub fn page(self: TableScrollbar, offset: i32, target: TableScrollHit) i32 {
+        const delta: i64 = switch (target) {
+            .track_before => -@as(i64, self.view_w),
+            .track_after => self.view_w,
+            else => 0,
+        };
+        return @intCast(std.math.clamp(@as(i64, offset) + delta, 0, self.max_scroll));
+    }
+
+    pub fn wheel(self: TableScrollbar, x: i32, y: i32, horizontal: bool, shift: bool, delta: i32) ?i32 {
+        if ((!horizontal and !shift) or self.hit(x, y) == .outside) return null;
+        return if (horizontal) delta else -delta;
+    }
+};
+
 pub const TableSize = struct { width: i32, height: i32 };
 pub const TableKey = struct { view_w: i32, font_pt: i32, scale: i32, pad_x: i32, pad_y: i32 };
 pub const TableLayout = struct {
@@ -421,6 +467,16 @@ pub const TableLayout = struct {
         a.free(self.widths);
         a.free(self.heights);
         a.free(self.lines);
+    }
+
+    pub fn bodyHeight(self: *const TableLayout) i32 {
+        var height: i32 = 1;
+        for (self.heights) |h| height += h;
+        return height;
+    }
+
+    pub fn scrollbar(self: *const TableLayout, bar_h: i32, min_thumb: i32) ?TableScrollbar {
+        return TableScrollbar.init(self.content_w, self.view_w, self.bodyHeight(), self.scroll, bar_h, min_thumb);
     }
 
     pub fn rowY(self: *const TableLayout, position: usize) i32 {
@@ -465,6 +521,50 @@ pub const TableCache = struct {
             entry.value_ptr.layout.deinit(a);
             _ = self.entries.remove(key);
         }
+    }
+
+    pub fn refresh(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block) void {
+        const Identity = struct { message: u64, table: usize };
+        var identities: std.AutoHashMapUnmanaged(Identity, usize) = .empty;
+        defer identities.deinit(a);
+        identities.ensureTotalCapacity(a, self.entries.count()) catch {
+            self.clear(a);
+            return;
+        };
+        var retained: std.AutoHashMapUnmanaged(usize, Entry) = .empty;
+        retained.ensureTotalCapacity(a, self.entries.count()) catch {
+            self.clear(a);
+            return;
+        };
+        var message: u64 = 0;
+        var ordinal: usize = 0;
+        for (before) |block| {
+            const id = if (block.source_end != 0) block.source_offset else message;
+            if (block.first or id != message) {
+                message = if (block.source_end != 0) block.source_offset else @intCast(block.start);
+                ordinal = 0;
+            }
+            if (block.kind != .table) continue;
+            if (self.entries.contains(block.start)) identities.putAssumeCapacity(.{ .message = message, .table = ordinal }, block.start);
+            ordinal += 1;
+        }
+        message = 0;
+        ordinal = 0;
+        for (after) |block| {
+            const id = if (block.source_end != 0) block.source_offset else message;
+            if (block.first or id != message) {
+                message = if (block.source_end != 0) block.source_offset else @intCast(block.start);
+                ordinal = 0;
+            }
+            if (block.kind != .table) continue;
+            if (identities.get(.{ .message = message, .table = ordinal })) |old_offset| {
+                if (self.entries.fetchRemove(old_offset)) |entry| retained.putAssumeCapacity(block.start, entry.value);
+            }
+            ordinal += 1;
+        }
+        self.clear(a);
+        self.entries.deinit(a);
+        self.entries = retained;
     }
 
     pub fn deinit(self: *TableCache, a: std.mem.Allocator) void {
@@ -699,6 +799,110 @@ test "ISSUE-421 horizontal table scrolling clamps and steps in both directions" 
     try std.testing.expectEqual(@as(i32, 0), tableScroll(100, 120, 54, 100, 320));
     try std.testing.expectEqual(@as(i32, 0), tableScroll(100, 0, 54, 100, 320));
     try std.testing.expectEqual(@as(i32, 480), tableScroll(0, std.math.maxInt(i32), std.math.maxInt(i32), 800, 320));
+}
+
+test "ISSUE-458 scrollbar geometry sizes and positions the thumb for real overflowing widths only" {
+    const bar = TableScrollbar.init(1447, 434, 100, 0, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 130), bar.thumb_w);
+    try std.testing.expectEqual(@as(i32, 0), bar.thumb_x);
+    try std.testing.expectEqual(@as(i32, 1013), bar.max_scroll);
+    const middle = TableScrollbar.init(1447, 434, 100, 506, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 151), middle.thumb_x);
+    const end = TableScrollbar.init(1447, 434, 100, 1013, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 434), end.thumb_x + end.thumb_w);
+    try std.testing.expectEqual(@as(i32, 173), TableScrollbar.init(1087, 434, 100, 0, 16, 24).?.thumb_w);
+    try std.testing.expect(TableScrollbar.init(400, 434, 100, 0, 16, 24) == null);
+    try std.testing.expect(TableScrollbar.init(434, 434, 100, 0, 16, 24) == null);
+    try std.testing.expect(TableScrollbar.init(1447, 0, 100, 0, 16, 24) == null);
+}
+
+test "ISSUE-458 hit testing distinguishes the thumb track and body including boundaries" {
+    const bar = TableScrollbar.init(1447, 434, 100, 506, 16, 24).?;
+    try std.testing.expectEqual(TableScrollHit.body, bar.hit(200, 99));
+    try std.testing.expectEqual(TableScrollHit.track_before, bar.hit(150, 100));
+    try std.testing.expectEqual(TableScrollHit.thumb, bar.hit(151, 100));
+    try std.testing.expectEqual(TableScrollHit.thumb, bar.hit(280, 115));
+    try std.testing.expectEqual(TableScrollHit.track_after, bar.hit(281, 100));
+    try std.testing.expectEqual(TableScrollHit.outside, bar.hit(434, 100));
+    try std.testing.expectEqual(TableScrollHit.outside, bar.hit(-1, 100));
+    try std.testing.expectEqual(TableScrollHit.outside, bar.hit(200, 116));
+    try std.testing.expectEqual(TableScrollHit.outside, bar.hit(200, -1));
+}
+
+test "ISSUE-458 dragging maps pointer travel to content and reaches the last column at both clamps" {
+    const bar = TableScrollbar.init(1447, 434, 100, 0, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 506), bar.drag(0, 152));
+    try std.testing.expectEqual(@as(i32, 1013), bar.drag(0, 304));
+    try std.testing.expectEqual(@as(i32, 0), bar.drag(1013, -304));
+    try std.testing.expectEqual(@as(i32, 0), bar.drag(506, -10000));
+    try std.testing.expectEqual(@as(i32, 1013), bar.drag(506, 10000));
+    try std.testing.expectEqual(@as(i32, 1013), bar.drag(0, std.math.maxInt(i32)));
+    try std.testing.expectEqual(@as(i32, 0), bar.drag(1013, std.math.minInt(i32)));
+    const tiny = TableScrollbar.init(1447, 1, 100, 500, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 500), tiny.drag(500, 200));
+}
+
+test "ISSUE-458 clicking either side of the track pages by the viewport and clamps" {
+    const bar = TableScrollbar.init(1447, 434, 100, 506, 16, 24).?;
+    try std.testing.expectEqual(@as(i32, 940), bar.page(506, bar.hit(433, 100)));
+    try std.testing.expectEqual(@as(i32, 72), bar.page(506, bar.hit(0, 100)));
+    try std.testing.expectEqual(@as(i32, 1013), bar.page(940, .track_after));
+    try std.testing.expectEqual(@as(i32, 0), bar.page(72, .track_before));
+    try std.testing.expectEqual(@as(i32, 506), bar.page(506, .thumb));
+    try std.testing.expectEqual(@as(i32, 506), bar.page(506, .body));
+}
+
+test "ISSUE-458 wheel routes only sideways input to the overflowing table under the pointer" {
+    const bar = TableScrollbar.init(1447, 434, 100, 0, 16, 24).?;
+    try std.testing.expectEqual(@as(?i32, -120), bar.wheel(30, 40, false, true, 120));
+    try std.testing.expectEqual(@as(?i32, 120), bar.wheel(30, 40, true, false, 120));
+    try std.testing.expectEqual(@as(?i32, -60), bar.wheel(30, 115, true, true, -60));
+    try std.testing.expect(bar.wheel(30, 40, false, false, 120) == null);
+    try std.testing.expect(bar.wheel(434, 40, true, false, 120) == null);
+    try std.testing.expect(bar.wheel(30, 116, false, true, 120) == null);
+    try std.testing.expect(bar.wheel(-1, 40, true, false, 120) == null);
+}
+
+test "ISSUE-458 table offsets survive refresh prepend and resize without mixing messages or tables" {
+    const a = std.testing.allocator;
+    var cache: TableCache = .{};
+    defer cache.deinit(a);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| Long heading | Other heading |\n|---|---|\n| cell | value |");
+    const Measure = struct {
+        fn cell(_: void, part: []const u16, _: bool) TableSize {
+            return .{ .width = @as(i32, @intCast(part.len)) * 20, .height = 20 };
+        }
+    };
+    var key = TableKey{ .view_w = 100, .font_pt = 13, .scale = 1024, .pad_x = 10, .pad_y = 6 };
+    const before = [_]Block{
+        .{ .start = 10, .len = text.len, .role = .code, .kind = .table, .first = true, .source_offset = 900, .source_end = 1000 },
+        .{ .start = 100, .len = text.len, .role = .code, .kind = .table, .source_offset = 900, .source_end = 1000 },
+        .{ .start = 200, .len = text.len, .role = .code, .kind = .table, .first = true, .source_offset = 1000, .source_end = 1100 },
+    };
+    for (before, 0..) |block, i| {
+        const layout = try cache.layout(a, text, block.start, key, {}, Measure.cell);
+        layout.scroll = @intCast(100 + i * 50);
+    }
+    cache.refresh(a, &before, &before);
+    try std.testing.expectEqual(@as(i32, 100), cache.entries.getPtr(10).?.layout.scroll);
+    var after = before;
+    for (&after) |*block| block.start += 300;
+    cache.refresh(a, &before, &after);
+    for (after, 0..) |block, i| {
+        const layout = try cache.layout(a, text, block.start, key, {}, Measure.cell);
+        try std.testing.expectEqual(@as(i32, @intCast(100 + i * 50)), layout.scroll);
+    }
+    try std.testing.expect(!cache.entries.contains(10));
+    const layout = cache.entries.getPtr(310).?.layout;
+    key.view_w = layout.content_w - 25;
+    const resized = try cache.layout(a, text, 310, key, {}, Measure.cell);
+    try std.testing.expectEqual(@as(i32, 25), resized.scroll);
+    key.view_w = resized.content_w + 1;
+    const narrow = try cache.layout(a, text, 310, key, {}, Measure.cell);
+    try std.testing.expectEqual(@as(i32, 0), narrow.scroll);
+    try std.testing.expect(narrow.scrollbar(16, 24) == null);
+    cache.refresh(a, &after, &.{});
+    try std.testing.expectEqual(@as(u32, 0), cache.entries.count());
 }
 
 test "ISSUE-421 rich cells retain Unicode code pipes empty cells and separator-like data" {
