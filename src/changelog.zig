@@ -54,6 +54,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.775", .items = &.{
+        .{ .text = "Messages with unconfirmed delivery now have Send again and Remove buttons, also available by right-clicking the message.", .ticket = "IGSH-442" },
+        .{ .text = "Send again checks whether the message already arrived or is waiting in the terminal before resending it.", .ticket = "IGSH-442" },
+        .{ .text = "Busy sessions wait for delivery confirmation instead of showing an early failure.", .ticket = "IGSH-442" },
+    } },
     .{ .ver = "0.28.774", .items = &.{
         .{ .text = "Shell box frames, charts, and arrow prompts now line up without gaps or solid rectangles.", .ticket = "IGSH-443" },
         .{ .text = "Chat text is a little bolder and uses smoother edges for easier reading on dark backgrounds.", .ticket = "IGSH-445" },
