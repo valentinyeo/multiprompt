@@ -54,6 +54,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.769", .items = &.{
+        .{ .text = "Your servers follow your account to a new computer without replacing servers you already set up there.", .ticket = "IGSH-422" },
+    } },
     .{ .ver = "0.28.768", .items = &.{
         .{ .text = "Android crash reports are stored per device so failures can be diagnosed without collecting device credentials.", .ticket = "IGSH-429" },
     } },
