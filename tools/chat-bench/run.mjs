@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import readline from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parseArgs, atomic, hash, sourceHash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate } from './lib.mjs';
+import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate } from './lib.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);
@@ -63,7 +63,7 @@ async function run({ requestedExe, config, out, installable }) {
   const logFd = fs.openSync(path.join(out, 'wine.log'), 'a');
   const fixtures = generate(out, config);
   const priority = Number(execFileSync('ps', ['-o', 'ni=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
-  const run = { schema: 1, requestedExe, exe, binary, prefix, out, config, installable, fixtures, priority, display: process.env.DISPLAY, runnerHashes: { run: sourceHash(script), lib: sourceHash(path.join(path.dirname(script), 'lib.mjs')), service: sourceHash(path.join(path.dirname(script), 'reader-service.py')) }, started: new Date().toISOString(), samples: [], switches: [], readerResponses: [], appends: [], errors: [], infra: [], processes: [], restarted: false };
+  const run = { schema: 1, requestedExe, exe, binary, prefix, out, config, installable, fixtures, priority, display: process.env.DISPLAY, runnerHashes: { run: hash(script), lib: hash(path.join(path.dirname(script), 'lib.mjs')), service: hash(path.join(path.dirname(script), 'reader-service.py')) }, started: new Date().toISOString(), samples: [], switches: [], readerResponses: [], appends: [], errors: [], infra: [], processes: [], restarted: false };
   const hz = +execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' });
   const pageSize = +execFileSync('getconf', ['PAGESIZE'], { encoding: 'utf8' });
   const screenshots = path.join(out, 'screenshots'); fs.mkdirSync(screenshots);
@@ -324,7 +324,7 @@ async function run({ requestedExe, config, out, installable }) {
   try {
     if (await waitForCapacity()) {
       await execute(process.env.ZIG || 'zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-municode', '-Wl,--subsystem,windows', path.join(path.dirname(script), 'browser-fixture.c'), '-o', browserExe, '-luser32'], { timeout: 60_000, maxBuffer: 1024 * 1024 });
-      run.runnerHashes.browser = sourceHash(path.join(path.dirname(script), 'browser-fixture.c'));
+      run.runnerHashes.browser = hash(path.join(path.dirname(script), 'browser-fixture.c'));
       await execute('xdpyinfo', [], { timeout: 5000, maxBuffer: 1024 * 1024 });
       await execute('wineboot', ['--init'], { env, timeout: 180_000, maxBuffer: 1024 * 1024 });
       timer = setInterval(() => { try { sample(); } catch (error) { run.errors.push(`sample: ${error.message}`); } }, config.sampleMs);

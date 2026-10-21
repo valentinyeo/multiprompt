@@ -1,7 +1,13 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { defaults, hash, sourceHash, evaluate } from './lib.mjs';
+import { defaults, hash, evaluate } from './lib.mjs';
+
+export const sourceHash = (file, crlf = false) => {
+  const source = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
+  return crypto.createHash('sha256').update(crlf ? source.replaceAll('\n', '\r\n') : source).digest('hex');
+};
 
 export const isDefaultConfig = config => isDeepStrictEqual(config, defaults);
 

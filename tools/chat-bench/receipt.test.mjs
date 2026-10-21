@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import * as lib from './lib.mjs';
 import { goodRun } from './good-run.mjs';
-import { checkReceipt } from './receipt.mjs';
+import { checkReceipt, sourceHash } from './receipt.mjs';
 
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const sources = { run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' };
@@ -20,11 +20,11 @@ test('ISSUE-513 runner hashes normalize CRLF without changing binary hashes', t 
     const copy = path.join(dir, file);
     fs.writeFileSync(copy, crlf);
     assert.notEqual(lib.hash(copy), digest(lf));
-    assert.equal(lib.sourceHash(copy), digest(lf));
-    assert.equal(lib.sourceHash(copy, true), digest(crlf));
+    assert.equal(sourceHash(copy), digest(lf));
+    assert.equal(sourceHash(copy, true), digest(crlf));
     fs.writeFileSync(copy, lf);
-    assert.equal(lib.sourceHash(copy), digest(lf));
-    assert.equal(lib.sourceHash(copy, true), digest(crlf));
+    assert.equal(sourceHash(copy), digest(lf));
+    assert.equal(sourceHash(copy, true), digest(crlf));
   }
 });
 
