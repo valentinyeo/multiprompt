@@ -84,7 +84,19 @@ for (const name of names) {
 NODE
 if [ "$only_ext" = 0 ]; then
   receipt_sha=$(sha256sum "$download_dir/multiprompt-x64.exe" | cut -d' ' -f1)
-  node "$script_dir/chat-bench/receipt.mjs" "$bench" "$receipt_sha"
+  node --input-type=module - "$bench" "$download_dir/multiprompt-x64.exe" "$download_dir/results-local.json" <<'NODE'
+import fs from 'node:fs';
+const [input, exe, output] = process.argv.slice(2);
+try {
+  const receipt = JSON.parse(fs.readFileSync(input, 'utf8'));
+  receipt.exe = exe;
+  fs.writeFileSync(output, JSON.stringify(receipt));
+} catch (error) {
+  console.error(`RECEIPT_REJECTED: ${error.message}`);
+  process.exitCode = 1;
+}
+NODE
+  node "$script_dir/chat-bench/receipt.mjs" "$download_dir/results-local.json" "$receipt_sha"
 fi
 check_no_zig
 checked_pc=1
