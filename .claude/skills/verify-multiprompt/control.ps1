@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -274,6 +274,40 @@ function Palette([string]$Query) {
     Type-Text $Query
 }
 
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
+    Doctor
+    Assert-Foreground
+    Record ('zsb ' + ($Arguments -join ' '))
+    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))
+    $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")
+    [IO.File]::WriteAllBytes((Join-Path $Evidence ($Name + '.request.bin')), $wire)
+    $client = New-Object Net.Sockets.TcpClient
+    $reply = New-Object IO.MemoryStream
+    try {
+        $connecting = $client.ConnectAsync('127.0.0.1', $Port)
+        if (-not $connecting.Wait(5000)) { throw 'zsb local bridge connection timed out' }
+        $connecting.GetAwaiter().GetResult()
+        $stream = $client.GetStream()
+        $stream.WriteTimeout = 5000
+        $stream.Write($wire, 0, $wire.Length)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $buffer = New-Object byte[] 65536
+        do {
+            $remaining = 90000 - $timer.ElapsedMilliseconds
+            if ($remaining -le 0) { throw 'zsb reply exceeded 90 seconds' }
+            $stream.ReadTimeout = [int]$remaining
+            $count = $stream.Read($buffer, 0, $buffer.Length)
+            if ($reply.Length + $count -gt 16 * 1024 * 1024) { throw 'zsb reply exceeded 16 MiB' }
+            $reply.Write($buffer, 0, $count)
+        } while ($count -gt 0)
+        $raw = [Text.Encoding]::UTF8.GetString($reply.ToArray())
+        [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '.reply.json')), $raw)
+        $response = $raw | ConvertFrom-Json
+        if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
+        return $response
+    } finally { $reply.Dispose(); $client.Dispose() }
+}
+
 function Select-Theme([string]$Theme, [string]$ActionShot) {
     Palette 'themes'
     Press @(0x0D) 'Enter: Themes...'
@@ -372,6 +406,91 @@ try {
             Press @(0x12, 0x27) 'Alt+Right: cycle to new workspace'
             Wait-Until { (Read-Session).active_workspace -eq $created } 'new workspace active again'
             $result.checks += @{ name = 'create-switch-return'; workspacesBefore = $before; workspacesAfter = (Read-Session).workspace_count; activeWorkspace = $created; title = [VerifyNative]::Title($script:window) }
+            Snapshot 'after'
+        }
+        'session-open' {
+            $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; only background tab creation and idempotency are verified'; observed = 'pending'; tabRemoved = $null }
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
+            $initial = Read-Session
+            if (@($initial.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' }).Count -ne 0) { throw 'verify-1 already exists before the journey' }
+            $groupCount = 0
+            if ($initial.PSObject.Properties['groups']) { $groupCount = @($initial.groups).Count }
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Snapshot 'group-action'
+            Press @(0x0D) 'Enter: New group and inline name editor'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq $groupCount + 1 } 'user-created group saved'
+            Press @(0x11, 0x41) 'Ctrl+A: replace group name'
+            Type-Text 'Verify group'
+            Press @(0x0D) 'Enter: save group name'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.groups | Where-Object { $_.name -ceq 'Verify group' }).Count -eq 1 } 'named group persisted in session.json'
+            $baseline = Read-Session
+            $group = @($baseline.groups | Where-Object { $_.name -ceq 'Verify group' })[0]
+            $workspaceBefore = $baseline.active_workspace
+            $activeTabBefore = $baseline.active_tab
+            $activeBefore = $baseline.tabs[$activeTabBefore]
+            if ($activeBefore.group_id -ne $group.id) { throw 'New group does not contain the original active tab' }
+            $titleBefore = [VerifyNative]::Title($script:window)
+            $foregroundBefore = [VerifyNative]::GetForegroundWindow()
+            $foregroundTitleBefore = [VerifyNative]::Title($foregroundBefore)
+            Save-Json $baseline 'session-before.json'
+            Snapshot 'before'
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $script:zsbPort = 0
+            Wait-Until {
+                if (-not (Test-Path $log)) { return $false }
+                $listener = [regex]::Match((Get-Content $log -Raw), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+                if (-not $listener.Success) { return $false }
+                $script:zsbPort = [int]$listener.Groups[1].Value
+                @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
+            } 'app-owned loopback tunnel-inbound listener' 30
+            $listed = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list'
+            $workspaceName = $baseline.workspaces[$workspaceBefore].name
+            if (-not $workspaceName) { $workspaceName = 'Workspace ' + ($workspaceBefore + 1) }
+            $workspaces = @($listed.workspaces | Where-Object { $_.id -eq $workspaceBefore -and $_.name -ceq $workspaceName -and $_.active -eq $true })
+            if ($workspaces.Count -ne 1) { throw 'workspace-list did not report the saved active workspace' }
+            $listedGroups = @($workspaces[0].groups | Where-Object { $_.id -eq $group.id -and $_.name -ceq $group.name })
+            if ($listedGroups.Count -ne 1) { throw 'workspace-list did not report the user-created group' }
+            if (@($listed.hosts).Count -lt 1 -or -not ($listed.hosts[0] -is [string]) -or -not $listed.hosts[0]) { throw 'workspace-list reported no usable host name' }
+            $hostName = $listed.hosts[0]
+            $openArgs = @('session-open', '--workspace', $workspaceName, '--group', $group.name, '--host', $hostName, '--tmux', 'verify-1', '--name', 'Verify 1')
+            $assertSaved = {
+                $state = Read-Session
+                if ($null -eq $state) { throw 'session.json is not readable' }
+                $tabs = @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' })
+                if ($tabs.Count -ne 1 -or @($state.tabs).Count -ne @($baseline.tabs).Count + 1) { throw 'Expected exactly one new verify-1 tab' }
+                $tab = $tabs[0]
+                $tabWorkspace = 0
+                if ($tab.PSObject.Properties['workspace']) { $tabWorkspace = $tab.workspace }
+                if ($tab.kind -cne 'tmux' -or $tab.name -cne 'Verify 1' -or $tab.group_id -ne $group.id -or $tabWorkspace -ne $workspaceBefore) { throw 'Saved tmux tab title, group or workspace mismatch' }
+                if (@($state.groups).Count -ne $groupCount + 1 -or @($state.groups | Where-Object { $_.id -eq $group.id -and $_.name -ceq $group.name }).Count -ne 1) { throw 'Saved group changed' }
+                if ($state.active_workspace -ne $workspaceBefore -or $state.active_tab -ne $activeTabBefore -or $state.tabs[$activeTabBefore].name -cne $activeBefore.name -or $state.tabs[$activeTabBefore].kind -cne $activeBefore.kind) { throw 'Background request changed the active workspace or active tab' }
+                if ([VerifyNative]::GetForegroundWindow() -ne $foregroundBefore -or [VerifyNative]::Title($foregroundBefore) -cne $foregroundTitleBefore -or [VerifyNative]::Title($script:window) -cne $titleBefore) { throw 'Background request changed foreground window or title' }
+                $script:sessionOpenSaved = $state
+                return $true
+            }
+            Snapshot 'action'
+            $created = Invoke-Zsb $openArgs $script:zsbPort 'session-open-created'
+            if ($created.created -ne $true -or $created.tab -le 0) { throw 'session-open did not reply ok/created with a tab ID' }
+            Wait-Until $assertSaved 'exact saved background tab and unchanged selection after creation'
+            Save-Json $script:sessionOpenSaved 'session-created.json'
+            $repeated = Invoke-Zsb $openArgs $script:zsbPort 'session-open-repeated'
+            if ($repeated.existing -ne $true -or $repeated.tab -ne $created.tab -or $repeated.workspace -cne $workspaceName) { throw 'Repeated session-open was not an existing:true no-op for the same tab and workspace' }
+            Wait-Until $assertSaved 'repeat no-op with exactly one saved tab and unchanged selection'
+            Save-Json $script:sessionOpenSaved 'session-repeated.json'
+            $script:sshFailure = $null
+            Wait-Until {
+                $failure = [regex]::Match((Get-Content $log -Raw), ('ssh-reconnect disconnect id=' + $created.tab + ' reason=(process-exit-event|process-exit-poll|startup-console-missing) exit_code=(\d+) known=true'))
+                if (-not $failure.Success -or [uint64]$failure.Groups[2].Value -in @(0, 259)) { return $false }
+                $script:sshFailure = @{ reason = $failure.Groups[1].Value; exitCode = [uint64]$failure.Groups[2].Value; logLine = $failure.Value }
+                return $true
+            } 'observed failed SSH attach for the created tab' 60
+            $result.sshBoundary.observed = $script:sshFailure
+            Wait-Until $assertSaved 'failed SSH tab preserved in saved state with unchanged active tab and foreground'
+            $result.sshBoundary.tabRemoved = $false
+            Save-Json $script:sessionOpenSaved 'session-after.json'
+            $result.checks += @{ name = 'session-open-background-idempotent'; workspace = $workspaceName; group = $group.name; groupId = $group.id; host = $hostName; port = $script:zsbPort; created = $created; repeated = $repeated; tmux = 'verify-1'; title = 'Verify 1'; matchingTabs = 1; tabsBefore = @($baseline.tabs).Count; tabsAfter = @($script:sessionOpenSaved.tabs).Count; activeWorkspaceBefore = $workspaceBefore; activeWorkspaceAfter = $script:sessionOpenSaved.active_workspace; activeTabBefore = $activeTabBefore; activeTabAfter = $script:sessionOpenSaved.active_tab; foregroundBefore = $foregroundBefore.ToInt64(); foregroundAfter = [VerifyNative]::GetForegroundWindow().ToInt64(); windowTitleBefore = $titleBefore; windowTitleAfter = [VerifyNative]::Title($script:window) }
             Snapshot 'after'
         }
         'inbox' {
