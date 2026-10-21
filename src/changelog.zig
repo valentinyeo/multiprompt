@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.784", .items = &.{
+        .{ .text = "Chat text is lighter so bold words stand out, and its edges look smoother.", .ticket = "IGSH-453" },
+    } },
     .{ .ver = "0.28.783", .items = &.{
         .{ .text = "Files sent to server chats no longer time out while the upload is still making progress.", .ticket = "IGSH-455" },
         .{ .text = "The shell uses the Hack font again and keeps it.", .ticket = "IGSH-456" },
