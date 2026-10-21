@@ -212,6 +212,24 @@ pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: b
     return state == .queued and !write_started and !busy and !link_down;
 }
 
+pub const PendingActions = struct { send_again: bool, remove: bool };
+
+pub fn pendingActions(state: OutboxState) PendingActions {
+    return .{ .send_again = state == .not_sent, .remove = state == .not_sent };
+}
+
+pub const ResendDecision = enum { mark_delivered, press_enter_only, write_again };
+
+pub fn resendDecision(transcript_seen: bool, facts: DeliveryEvidence, input_held: ?bool) ResendDecision {
+    if (transcript_seen or facts.enqueued) return .mark_delivered;
+    if (input_held == true) return .press_enter_only;
+    return .write_again;
+}
+
+pub fn verifyExpiredState(busy: bool, input_held: ?bool) OutboxState {
+    return if (busy and input_held != true) .delivered else .not_sent;
+}
+
 pub fn needsFullSettle(state: OutboxState, write_started: bool, transcript_queued: bool, sent_ms: i64, now_ms: i64) bool {
     return ((state == .delivered and !transcript_queued) or (state == .not_sent and write_started)) and
         now_ms >= sent_ms and now_ms - sent_ms >= 60_000;
@@ -805,26 +823,87 @@ test "ISSUE-349 tagged pending matches the cleaned rendered user block" {
 }
 
 pub const TranscriptEvidence = enum { none, enqueued, delivered };
-pub const TranscriptDecision = enum { wait, retry, queued, delivered, unconfirmed };
+pub const TranscriptDecision = enum { wait, queued, delivered, unconfirmed };
 
-pub fn transcriptStatus(elapsed_ms: i64, retries_done: u8, evidence: TranscriptEvidence) TranscriptDecision {
+pub fn transcriptStatus(watch: *DeliveryWatch, busy: bool, now_ms: i64, loaded_ms: i64, evidence: TranscriptEvidence) TranscriptDecision {
+    watch.observe(busy, now_ms);
+    if (!busy and watch.idle_since_ms == 0) watch.idle_since_ms = now_ms;
     return switch (evidence) {
         .delivered => .delivered,
         .enqueued => .queued,
-        .none => if (elapsed_ms < 10_000) .wait else if (retries_done == 0) .retry else .unconfirmed,
+        .none => if (!busy and watch.due(now_ms, loaded_ms)) .unconfirmed else .wait,
     };
 }
 
-test "transcript send decisions wait retry once and settle only from evidence" {
-    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(-1, 0, .none));
-    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(9_999, 0, .none));
-    try std.testing.expectEqual(TranscriptDecision.retry, transcriptStatus(10_000, 0, .none));
-    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(9_999, 1, .none));
-    try std.testing.expectEqual(TranscriptDecision.unconfirmed, transcriptStatus(10_000, 1, .none));
-    for ([_]u8{ 0, 1, 2 }) |retries| {
-        for ([_]i64{ 0, 10_000, 20_000, 600_000 }) |elapsed| {
-            try std.testing.expectEqual(TranscriptDecision.queued, transcriptStatus(elapsed, retries, .enqueued));
-            try std.testing.expectEqual(TranscriptDecision.delivered, transcriptStatus(elapsed, retries, .delivered));
-        }
+test "IGSH-442 unconfirmed written entries offer Send again and Remove" {
+    const state = stateOnLoad(@intFromEnum(OutboxState.not_sent), true);
+    const actions = pendingActions(state);
+    try std.testing.expect(actions.send_again);
+    try std.testing.expect(actions.remove);
+    try std.testing.expect(pendingActions(.not_sent).send_again);
+    for ([_]OutboxState{ .queued, .sending, .delivered }) |other| {
+        try std.testing.expect(!pendingActions(other).send_again);
+        try std.testing.expect(!pendingActions(other).remove);
+    }
+}
+
+test "IGSH-442 resend prioritizes transcript and queued evidence over terminal input" {
+    for ([_]?bool{ null, false, true }) |held| {
+        try std.testing.expectEqual(ResendDecision.mark_delivered, resendDecision(true, .{}, held));
+        try std.testing.expectEqual(ResendDecision.mark_delivered, resendDecision(false, .{ .enqueued = true }, held));
+    }
+}
+
+test "IGSH-442 resend presses only Enter for held text and otherwise writes again" {
+    try std.testing.expectEqual(ResendDecision.press_enter_only, resendDecision(false, .{}, true));
+    try std.testing.expectEqual(ResendDecision.write_again, resendDecision(false, .{}, false));
+    try std.testing.expectEqual(ResendDecision.write_again, resendDecision(false, .{}, null));
+}
+
+test "IGSH-442 busy verification waits for delivery watch expiry before not sent" {
+    for ([_]?bool{ null, false }) |held| {
+        try std.testing.expectEqual(OutboxState.delivered, verifyExpiredState(true, held));
+        var watch = DeliveryWatch{};
+        watch.observe(true, 1000);
+        watch.observe(true, 100_000);
+        try std.testing.expect(!watch.due(100_000, 100_000));
+        watch.observe(false, 100_001);
+        try std.testing.expect(!watch.due(100_001 + SETTLE_GRACE_MS - 1, 200_000));
+        try std.testing.expect(watch.due(100_001 + SETTLE_GRACE_MS, 200_000));
+    }
+    try std.testing.expectEqual(OutboxState.not_sent, verifyExpiredState(true, true));
+    try std.testing.expectEqual(OutboxState.not_sent, verifyExpiredState(false, null));
+}
+
+test "IGSH-442 busy with no transcript past both timeout budgets never retransmits" {
+    var watch = DeliveryWatch{};
+    for ([_]i64{ 2000, 11_999, 12_000, 22_000, 600_000 }) |now_ms| {
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, now_ms, now_ms, .none));
+        try std.testing.expect(watch.busy_seen);
+        try std.testing.expectEqual(@as(i64, 0), watch.idle_since_ms);
+    }
+    watch.evidence(.{ .removed_ms = 1000 }, 2000);
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, 700_000, 700_000, .none));
+}
+
+test "IGSH-442 positive transcript evidence confirms even while busy after timeouts" {
+    var watch = DeliveryWatch{};
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, 2000, 0, .none));
+    try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, 600_000, 600_000, .none));
+    try std.testing.expectEqual(TranscriptDecision.queued, transcriptStatus(&watch, true, 600_001, 600_001, .enqueued));
+    try std.testing.expectEqual(TranscriptDecision.delivered, transcriptStatus(&watch, true, 600_002, 600_002, .delivered));
+}
+
+test "IGSH-442 idle plus fresh transcript grace can fail without retransmission" {
+    for ([_]bool{ false, true }) |was_busy| {
+        var watch = DeliveryWatch{};
+        if (was_busy) _ = transcriptStatus(&watch, true, 2000, 2000, .none);
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, false, 600_000, 600_000, .none));
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, false, 619_999, 620_000, .none));
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, false, 620_000, 619_999, .none));
+        try std.testing.expectEqual(TranscriptDecision.delivered, transcriptStatus(&watch, false, 620_000, 620_000, .delivered));
+        try std.testing.expectEqual(TranscriptDecision.unconfirmed, transcriptStatus(&watch, false, 620_000, 620_000, .none));
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, true, 620_001, 620_001, .none));
+        try std.testing.expectEqual(TranscriptDecision.wait, transcriptStatus(&watch, false, 620_002, 620_002, .none));
     }
 }

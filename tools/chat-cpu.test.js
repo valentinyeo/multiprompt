@@ -14,7 +14,7 @@ function body(text, name) {
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
-    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + code);
@@ -123,6 +123,7 @@ test('singleton startup oracle rejects the actual 706 check-then-spawn race', ()
 
 const layout = `
 const std = @import("std");
+const chat_echo = @import("chat_echo.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
 const HANDLE = ?*anyopaque;
@@ -159,7 +160,7 @@ var g_chat_blocks_from_file = true;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
 const CHAT_OUTBOX_KEY_CAP = 8;
-var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64 } = &.{} }{};
+var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64, state: chat_echo.OutboxState } = &.{} }{};
 var g_chat_echo_layout: [20]RECT = undefined;
 var g_chat_echo_layout_ids: [20]u64 = undefined;
 var measured: usize = 0;

@@ -74,6 +74,10 @@ var reconcile_passes: usize = 0;
 fn chatPerf(_: []const u8, _: u64, _: usize) void { reconcile_passes += 1; }
 fn GetTickCount64() u64 { return @intCast(fake_now_ms); }
 var writes: usize = 0;
+var enters: usize = 0;
+var input_held: ?bool = null;
+fn chatPromptStillInInputBox(_: u32, _: []const u16) ?bool { return input_held; }
+fn chatLinkLooksDown(_: u32) bool { return false; }
 var persisted: ?[]u8 = null;
 var persist_ok = true;
 var paste_ok = true;
@@ -101,6 +105,9 @@ fn clear() void {
     g_chat_outbox_revision +%= 1;
     reconcile_passes = 0;
     writes = 0;
+    enters = 0;
+    input_held = null;
+    g_chat_verify_echo_id = 0;
     channel_starts = 0;
     delivery_polls = 0;
     g_chat_tmux_send_job = null;
@@ -118,7 +125,7 @@ fn chatBlockDisplayRange(_: []const u16, b: ChatBlock) struct { start: usize, le
 var fake_now_ms: i64 = 2000;
 var fake_loaded_ms: i64 = 0;
 var fake_history: chat_history.History = .{};
-const HistoryEntry = struct { generation: u64 = 1, retired: bool = false, key: struct { shell_id: u32 = 1 } = .{}, history: chat_history.History = .{} };
+const HistoryEntry = struct { loaded_ms: i64 = 0, generation: u64 = 1, retired: bool = false, key: struct { shell_id: u32 = 1 } = .{}, history: chat_history.History = .{} };
 var history_entry = HistoryEntry{};
 var history_entries = [_]*HistoryEntry{&history_entry};
 var g_chat_histories = struct { items: []*HistoryEntry }{ .items = &history_entries };
@@ -137,7 +144,7 @@ fn pasteTextToShellDirectEx(_: u32, _: []const u16, _: bool) bool {
     return paste_ok;
 }
 fn sendLocalChatPrompt(_: u32, _: []const u16) bool { unreachable; }
-fn sendEnterToShell(_: u32) bool { return true; }
+fn sendEnterToShell(_: u32) bool { enters += 1; return true; }
 fn chatArmSendVerify(_: u32, _: []const u16, id: u64) bool { g_chat_verify_echo_id = id; return true; }
 fn chatVerifyClear() void { g_chat_verify_echo_id = 0; }
 fn chatOutboxChanged() void { g_chat_outbox_revision +%= 1; }
@@ -165,33 +172,56 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
 }
-test "delivery: channel retries exactly once at ten seconds then remains unconfirmed" {
+test "delivery: IGSH-442 busy channel waits past both budgets without retransmission then confirms" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build");
+    try enqueue(text, .delivered);
+    g_chat_outbox.items[0].channel_sent = true;
+    g_chat_outbox.items[0].channel_sent_ms = 2000;
+    for ([_]bool{ false, true }) |screen_busy| {
+        shells[0].activity = if (screen_busy) .idle else .active;
+        g_chat_screen_working = screen_busy;
+        for ([_]i64{ 2000, 12_000, 22_000, 600_000 }) |now_ms| {
+            fake_now_ms = now_ms;
+            history_entry.loaded_ms = now_ms;
+            chatTmuxSettle();
+            try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
+            try std.testing.expect(g_chat_outbox.items[0].delivery_watch.busy_seen);
+            try std.testing.expect(!g_chat_outbox.items[0].channel_pending);
+            try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+        }
+    }
+    try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000 });
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "delivery: IGSH-442 channel idle settlement requires grace and fresh transcript without retyping" {
     defer clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("please check the build"), .delivered);
     g_chat_outbox.items[0].channel_sent = true;
-    g_chat_outbox.items[0].channel_sent_ms = 2000;
-    fake_now_ms = 11999;
+    shells[0].activity = .active;
     chatTmuxSettle();
-    try std.testing.expectEqual(@as(usize, 0), channel_starts);
-    fake_now_ms = 12000;
+    shells[0].activity = .idle;
+    fake_now_ms = 600_000;
     chatTmuxSettle();
-    try std.testing.expectEqual(@as(usize, 1), channel_starts);
-    try std.testing.expect(g_chat_outbox.items[0].channel_pending);
-    chatTmuxSettle();
-    try std.testing.expectEqual(@as(usize, 1), channel_starts);
-    g_chat_outbox.items[0].channel_pending = false;
-    g_chat_outbox.items[0].channel_retries = 1;
-    g_chat_outbox.items[0].channel_sent_ms = 12000;
-    fake_now_ms = 21999;
+    fake_now_ms = 619_999;
+    history_entry.loaded_ms = 620_000;
     chatTmuxSettle();
     try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
-    fake_now_ms = 22000;
+    fake_now_ms = 620_000;
+    history_entry.loaded_ms = 619_999;
+    chatTmuxSettle();
+    try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
+    history_entry.loaded_ms = 620_000;
     chatTmuxSettle();
     try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
     try std.testing.expect(g_chat_outbox.items[0].write_started);
     chatTmuxSettle();
-    try std.testing.expectEqual(@as(usize, 1), channel_starts);
-    try std.testing.expectEqual(@as(usize, 0), writes);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: background queued evidence survives strict unknown dequeue and late evidence restores status" {
     defer clear();
@@ -498,8 +528,74 @@ test "delivery: cache round trip preserves timestamp and matches beyond 256 bloc
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
 }
+test "delivery: IGSH-442 Remove persists only the selected message and rolls back failed saves" {
+    defer clear();
+    const one = std.unicode.utf8ToUtf16LeStringLiteral("remove me");
+    const two = std.unicode.utf8ToUtf16LeStringLiteral("keep me");
+    try enqueue(one, .not_sent);
+    try enqueue(two, .not_sent);
+    const id = g_chat_outbox.items[0].id;
+    persist_ok = false;
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    persist_ok = true;
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try reload();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, two, g_chat_outbox.items[0].text);
+}
+test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("already arrived");
+    try enqueue(text, .not_sent);
+    transcript(text, 2000);
+    input_held = true;
+    chatEchoSendAgain(g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    try std.testing.expectEqual(@as(usize, 0), enters);
+}
+test "delivery: IGSH-442 Send again writes nothing for queued transcript evidence" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("queued task");
+    try enqueue(text, .not_sent);
+    try setFacts("{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"1970-01-01T00:00:02Z\\",\\"settlement\\":{\\"operation\\":\\"enqueue\\",\\"content\\":\\"queued task\\"}}\\n");
+    chatEchoSendAgain(g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    try std.testing.expectEqual(@as(usize, 0), enters);
+}
+test "delivery: IGSH-442 Send again presses Enter only for held text" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("held prompt"), .not_sent);
+    input_held = true;
+    chatEchoSendAgain(g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    try std.testing.expectEqual(@as(usize, 1), enters);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
+}
+test "delivery: IGSH-442 Send again requeues missing text through the normal outbox" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("missing prompt"), .not_sent);
+    g_chat_outbox.items[0].retryable = true;
+    g_chat_outbox.items[0].delivery_watch.busy_seen = true;
+    g_chat_outbox.items[0].left_box_ms = 1;
+    shells[0].activity = .active;
+    chatEchoSendAgain(g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
+    try std.testing.expect(!g_chat_outbox.items[0].write_started);
+    try std.testing.expect(!g_chat_outbox.items[0].retryable);
+    try std.testing.expect(!g_chat_outbox.items[0].delivery_watch.busy_seen);
+    try std.testing.expectEqual(@as(u64, 0), g_chat_outbox.items[0].left_box_ms);
+    shells[0].activity = .idle;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), writes);
+}
+
 `;
-const names = ['chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxTrySendEntry'];
+const names = ['chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxTrySendEntry'];
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
   try {
@@ -531,8 +627,10 @@ test('cache timestamp oracle rejects the actual integration omission (positive c
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 0, found 1/);
 });
-test('retry UI cannot retype reserved messages and pending bubbles never say Sent', () => {
-  assert.match(body('chatEchoRetryAt'), /write_started/);
+test('retry UI delegates to evidence-safe resend and pending bubbles never say Sent', () => {
+  assert.match(body('chatEchoRetryAt'), /chatEchoSendAgain\(id\)/);
+  assert.match(body('chatEchoSendAgain'), /chatEchoTryMatchEntry/);
+  assert.match(body('chatEchoSendAgain'), /chat_echo.resendDecision/);
   assert.match(body('chatEchoRetryAllForActive'), /write_started/);
   assert.doesNotMatch(body('chatPaintEchoStatus'), /2713.*Sent/);
   assert.doesNotMatch(body('chatEchoMatchActive'), /chatEchoRepresentedBlock/);

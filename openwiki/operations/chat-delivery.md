@@ -12,12 +12,13 @@ or a named bracketed-paste buffer, waits 150 ms, then sends Enter separately.
 Arguments never pass through a shell. If bracketed paste is unsupported, the
 multiline text is sent literally in one operation.
 
-Outbox settlement follows transcript evidence, not console visibility or the
-activity indicator. Outstanding matching enqueue facts show `Queued, session is
+Positive outbox confirmation follows transcript evidence, not console visibility
+or activity alone. Outstanding matching enqueue facts show `Queued, session is
 busy` without a timeout. Matching user blocks (including normalized queued-command
 attachments) retire the echo through the existing one-to-one assignment logic.
-Without evidence, the app retries once after ten seconds, then shows
-`Delivery unconfirmed · check terminal` after another ten seconds. Queue removal
+Without evidence, the app waits while the session is busy, then allows twenty
+seconds of idle grace and requires a fresh transcript before showing
+`Delivery unconfirmed`. It never automatically retransmits the text. Queue removal
 uses the strict partial-history rules; an unrelated dequeue cannot clear a known
 pending message. Background pending sends request transcript updates even while
 Chat View is hidden. Late transcript evidence can still settle an unconfirmed echo.
@@ -99,3 +100,18 @@ The shared fixtures live only in `src/testdata/chat-table-fixture.md` and
 `src/testdata/chat-table-fixture.terminal.txt`. Native parser/cache tests and
 `tools/chat-tables.test.js` / `tools/igsh421-tables.test.js` cover parsing, capture,
 rich painting, source-aware scrolled hit testing, input routing and trace reuse.
+
+## Unconfirmed message actions (IGSH-442)
+
+Every not-sent message, including a send whose text write already started, has
+Send again and Remove buttons and matching right-click items. Send again first
+checks anchored transcript matches and queued delivery evidence. A confirmed
+message is retired; a queued message resumes waiting without another write.
+Text still in the terminal input box receives only Enter. Otherwise the entry
+returns to the normal outbox queue with its write reservation and delivery watch
+reset. Remove saves the outbox immediately and rolls back if saving fails.
+
+When console verification runs out while the session is busy and input is absent
+or unknown, it hands the message to the delivery watch rather than declaring it
+not sent. Transcript evidence and the existing fresh-history idle grace decide
+settlement. A visibly held prompt retains the bounded Enter retry behavior.

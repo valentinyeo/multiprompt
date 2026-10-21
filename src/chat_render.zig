@@ -227,11 +227,10 @@ const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
 const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
 const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
-const saveChatOutbox = @import("chat_send.zig").saveChatOutbox;
-const chatOutboxChanged = @import("chat_send.zig").chatOutboxChanged;
+const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
+const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
-const chatOutboxTick = @import("chat_send.zig").chatOutboxTick;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const chatWorkingIndicatorText = @import("window_layout.zig").chatWorkingIndicatorText;
@@ -918,6 +917,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureEchoRect(hdc, e.text, width, y);
+                if (chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -2004,13 +2004,24 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
 
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT) void {
     _ = SetBkMode(hdc, TRANSPARENT);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) };
+    const actions = chat_echo.pendingActions(e.state);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) - (if (actions.send_again) uiScaled(26) else @as(i32, 0)) };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, e.text, text_rc, false, true, null, 0, null, null);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
+    if (actions.send_again) {
+        const old = SelectObject(hdc, chatMetadataFont());
+        defer _ = SelectObject(hdc, old);
+        for ([_]bool{ false, true }) |remove| {
+            var button = chatEchoActionRect(rc, remove);
+            fillRoundRectAA(hdc, button, uiScaled(5), chatCodePanelColor());
+            _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
+            _ = DrawTextW(hdc, if (remove) L("Remove") else L("Send again"), -1, &button, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+    }
 }
 
 fn chatStatusRowRect(bubble: RECT) RECT {
@@ -2043,7 +2054,7 @@ fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
         .waiting_transcript => L("\u{25F7} Waiting for transcript"),
         .waiting_connection => L("\u{25F7} Waiting for connection"),
         .waiting_to_send => L("\u{25F7} Waiting to send"),
-        .not_sent => if (e.write_started) L("Delivery unconfirmed \u{00B7} check terminal") else L("Not sent \u{00B7} click to retry"),
+        .not_sent => if (e.write_started) L("Delivery unconfirmed") else L("Not sent"),
     };
     var rc = area;
     _ = DrawTextW(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -2221,38 +2232,65 @@ pub fn chatToggleAllTools() void {
     chatImageReady();
 }
 
-fn chatEchoRetryAt(x: i32, y: i32) bool {
+fn chatEchoActionRect(rc: RECT, remove: bool) RECT {
+    const right = rc.right - uiScaled(6);
+    return .{
+        .left = right - uiScaled(if (remove) @as(i32, 64) else @as(i32, 164)),
+        .right = if (remove) right else right - uiScaled(70),
+        .top = rc.bottom - uiScaled(24),
+        .bottom = rc.bottom - uiScaled(2),
+    };
+}
+
+fn chatEchoAt(x: i32, y: i32) ?u64 {
     const content_y = y + app_state.g_chat_scroll_y;
     for (0..app_state.g_chat_echo_layout_count) |i| {
         const rc = app_state.g_chat_echo_layout[i];
-        if (content_y < rc.top or content_y >= rc.bottom or x < rc.left or x >= rc.right) continue;
-        const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse return false;
-        if (app_state.g_chat_outbox.items[ei].state == .delivered and !app_state.g_chat_outbox.items[ei].channel_sent) {
-            chatEchoPushQueuedNow();
+        if (content_y < rc.top or content_y >= rc.bottom) continue;
+        const id = app_state.g_chat_echo_layout_ids[i];
+        const ei = chatOutboxIndexById(id) orelse continue;
+        const actions = chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state);
+        if (pointInRect(rc, x, content_y) or (actions.send_again and
+            (pointInRect(chatEchoActionRect(rc, false), x, content_y) or pointInRect(chatEchoActionRect(rc, true), x, content_y)))) return id;
+    }
+    return null;
+}
+
+fn chatEchoRetryAt(x: i32, y: i32) bool {
+    const id = chatEchoAt(x, y) orelse return false;
+    const ei = chatOutboxIndexById(id) orelse return false;
+    const entry = app_state.g_chat_outbox.items[ei];
+    if (entry.state == .delivered and !entry.channel_sent) {
+        chatEchoPushQueuedNow();
+        return true;
+    }
+    if (!chat_echo.pendingActions(entry.state).send_again) return false;
+    for (0..app_state.g_chat_echo_layout_count) |i| {
+        if (app_state.g_chat_echo_layout_ids[i] != id) continue;
+        const rc = app_state.g_chat_echo_layout[i];
+        if (pointInRect(chatEchoActionRect(rc, false), x, y + app_state.g_chat_scroll_y)) {
+            chatEchoSendAgain(id);
             return true;
         }
-        if (app_state.g_chat_outbox.items[ei].state != .not_sent or app_state.g_chat_outbox.items[ei].write_started) return false;
-        app_state.g_chat_outbox.items[ei].state = .queued;
-        app_state.g_chat_outbox.items[ei].retryable = false;
-        app_state.g_chat_outbox.items[ei].delivery_watch = .{};
-        app_state.g_chat_outbox.items[ei].left_box_ms = 0;
-        _ = saveChatOutbox();
-        app_state.g_chat_scroll_bottom_pending = true;
-        chatOutboxChanged();
-        chatOutboxTick();
-        showHeaderNoticeAscii("Retrying message...", 2500, false);
-        return true;
+        if (pointInRect(chatEchoActionRect(rc, true), x, y + app_state.g_chat_scroll_y)) {
+            chatEchoRemove(id);
+            return true;
+        }
     }
     return false;
 }
 
 fn chatEchoRetryHover(x: i32, y: i32) bool {
-    const content_y = y + app_state.g_chat_scroll_y;
+    const id = chatEchoAt(x, y) orelse return false;
+    const ei = chatOutboxIndexById(id) orelse return false;
+    const entry = app_state.g_chat_outbox.items[ei];
+    if (entry.state == .delivered and !entry.channel_sent) return true;
+    if (!chat_echo.pendingActions(entry.state).send_again) return false;
     for (0..app_state.g_chat_echo_layout_count) |i| {
+        if (app_state.g_chat_echo_layout_ids[i] != id) continue;
         const rc = app_state.g_chat_echo_layout[i];
-        if (content_y < rc.top or content_y >= rc.bottom or x < rc.left or x >= rc.right) continue;
-        const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse return false;
-        return (app_state.g_chat_outbox.items[ei].state == .not_sent and !app_state.g_chat_outbox.items[ei].write_started) or (app_state.g_chat_outbox.items[ei].state == .delivered and !app_state.g_chat_outbox.items[ei].channel_sent);
+        return pointInRect(chatEchoActionRect(rc, false), x, y + app_state.g_chat_scroll_y) or
+            pointInRect(chatEchoActionRect(rc, true), x, y + app_state.g_chat_scroll_y);
     }
     return false;
 }
@@ -2891,6 +2929,15 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const menu = CreatePopupMenu();
             if (menu == null) return 0;
             defer _ = DestroyMenu(menu);
+            const echo_id = chatEchoAt(GET_X(lp), GET_Y(lp));
+            if (echo_id) |id| {
+                if (chatOutboxIndexById(id)) |ei| {
+                    if (chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again) {
+                        _ = AppendMenuW(menu, MF_STRING, 5, L("Send again"));
+                        _ = AppendMenuW(menu, MF_STRING, 6, L("Remove"));
+                    }
+                }
+            }
             _ = AppendMenuW(menu, MF_STRING, 1, L("Copy"));
             _ = AppendMenuW(menu, MF_STRING, 2, L("Select All"));
             const block_at = chatTranscriptBlockAtPoint(GET_Y(lp));
@@ -2924,6 +2971,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 1 => chatCopyTextToClipboard(if (copy_target == .selection) selection_text else message_text),
                 2 => chatSelectAll(),
                 3 => chatCopyTextToClipboard(message_text),
+                5 => if (echo_id) |id| chatEchoSendAgain(id),
+                6 => if (echo_id) |id| chatEchoRemove(id),
                 4 => if (reply_text) |text| {
                     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
                     @import("chat_composer.zig").selectChatReply(text);
@@ -3313,4 +3362,37 @@ test "ISSUE-438 copying preserves empty table columns and rendered rich whitespa
     const block = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .kind = .table, .markdown = true };
     n = chatCopyBlockText(&out, block, 0, text.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A\t\tC\r\none\t\tthree"), out[0..n]);
+}
+
+test "IGSH-442 unconfirmed actions hit their own buttons across scroll offsets" {
+    const old_outbox = app_state.g_chat_outbox;
+    const old_count = app_state.g_chat_echo_layout_count;
+    const old_rect = app_state.g_chat_echo_layout[0];
+    const old_id = app_state.g_chat_echo_layout_ids[0];
+    const old_scroll = app_state.g_chat_scroll_y;
+    defer {
+        app_state.g_chat_outbox = old_outbox;
+        app_state.g_chat_echo_layout_count = old_count;
+        app_state.g_chat_echo_layout[0] = old_rect;
+        app_state.g_chat_echo_layout_ids[0] = old_id;
+        app_state.g_chat_scroll_y = old_scroll;
+    }
+    var entries = [_]ChatOutboxEntry{.{ .id = 442, .state = .not_sent, .write_started = true }};
+    app_state.g_chat_outbox = .{ .items = &entries, .capacity = entries.len };
+    app_state.g_chat_echo_layout_count = 1;
+    const rc = RECT{ .left = uiScaled(240), .right = uiScaled(300), .top = uiScaled(100), .bottom = uiScaled(200) };
+    app_state.g_chat_echo_layout[0] = rc;
+    app_state.g_chat_echo_layout_ids[0] = 442;
+    app_state.g_chat_scroll_y = uiScaled(50);
+    for ([_]bool{ false, true }) |remove| {
+        const button = chatEchoActionRect(rc, remove);
+        const x = button.left + 1;
+        const y = button.top + 1 - app_state.g_chat_scroll_y;
+        try std.testing.expectEqual(@as(?u64, 442), chatEchoAt(x, y));
+        try std.testing.expect(chatEchoRetryHover(x, y));
+    }
+    try std.testing.expect(!chatEchoRetryHover(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
+    try std.testing.expect(!chatEchoRetryAt(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
+    entries[0].state = .queued;
+    try std.testing.expect(!chatEchoRetryHover(rc.right - uiScaled(10), rc.bottom - uiScaled(10) - app_state.g_chat_scroll_y));
 }

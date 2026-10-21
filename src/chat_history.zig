@@ -946,7 +946,8 @@ test "ISSUE-349 outstanding exact enqueue survives unrelated strict dequeue and 
     var facts = try h.deliveryEvidence(a, pending);
     try std.testing.expect(facts.enqueued);
     try std.testing.expectEqual(@as(i64, 0), facts.removed_ms);
-    try std.testing.expectEqual(echo.TranscriptDecision.queued, echo.transcriptStatus(600_000, 1, if (facts.enqueued) .enqueued else .none));
+    var watch = echo.DeliveryWatch{};
+    try std.testing.expectEqual(echo.TranscriptDecision.queued, echo.transcriptStatus(&watch, true, 600_000, 600_000, if (facts.enqueued) .enqueued else .none));
     try h.apply(a, "@mp\t2\thistory\tok\tsid\t600\t700\t9\t0\tclaude\t-\t2\t\tdelta\t500\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:03Z\",\"settlement\":{\"operation\":\"remove\",\"content\":\"please check the build\"}}\n@@MP_END@@\n", 2, key);
     facts = try h.deliveryEvidence(a, pending);
     try std.testing.expect(!facts.enqueued);
