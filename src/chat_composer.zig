@@ -89,8 +89,7 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
-const AddFontMemResourceEx = @import("win32.zig").AddFontMemResourceEx;
+const CreateFontW = @import("fonts.zig").create;
 const Sleep = @import("win32.zig").Sleep;
 const GetModuleHandleW = @import("win32.zig").GetModuleHandleW;
 const CloseHandle = @import("win32.zig").CloseHandle;
@@ -152,7 +151,6 @@ const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibil
 const paneFocusInset = @import("browser_pane.zig").paneFocusInset;
 const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
-const chat_font_bytes = @import("app_state.zig").chat_font_bytes;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
@@ -218,7 +216,8 @@ pub fn chatViewLayout() ChatViewLayout {
     const col = ConsoleColumn{ .left = column.left, .width = column.width };
     const slot = RECT{ .left = col.left, .top = slot_top, .right = col.left + col.width, .bottom = slot_bottom };
     const inset = paneFocusInset();
-    const content = chat_style.contentColumn(slot.left, col.width, browserSlotReserved(), browserSplitPermilleForActiveShell(), uiScaled(760), inset);
+    const full_width = app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
+    const content = chat_style.contentColumn(slot.left, col.width, browserSlotReserved(), browserSplitPermilleForActiveShell(), if (full_width) col.width else uiScaled(760), inset);
     const left = content.left;
     const right = left + content.width;
     const content_top = slot.top + inset;
@@ -386,18 +385,9 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
     return 0;
 }
 
-pub fn ensureChatFontFamilyRegistered() void {
-    if (app_state.g_chat_font_family_checked) return;
-    app_state.g_chat_font_family_checked = true;
-    var count: DWORD = 0;
-    const handle = AddFontMemResourceEx(chat_font_bytes.ptr, @intCast(chat_font_bytes.len), null, &count);
-    app_state.g_chat_font_family_ok = handle != null and count > 0;
-}
-
 pub fn ensureChatFont() HANDLE {
     if (app_state.g_chat_font == null) {
-        ensureChatFontFamilyRegistered();
-        const face = if (app_state.g_chat_font_family_ok) L("IBM Plex Sans") else L("Segoe UI");
+        const face = L(@import("fonts.zig").UI_FACE);
         app_state.g_chat_font = CreateFontW(-uiScaled(app_state.g_chat_font_pt), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, face);
     }
     return app_state.g_chat_font;
@@ -556,6 +546,7 @@ fn ensureChatControls() bool {
     }
     if (app_state.g_chat_status_hwnd == null) {
         app_state.g_chat_status_hwnd = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, app_state.g_main_hwnd, null, null, null);
+        @import("fonts.zig").setControlFont(app_state.g_chat_status_hwnd);
         if (app_state.g_chat_status_hwnd == null) return false;
         _ = SetWindowLongPtrW(app_state.g_chat_status_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&@import("chat_render.zig").chatStatusWndProc)));
     }
@@ -1048,6 +1039,7 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
         chatDropFiles(@ptrFromInt(wp));
         return 0;
@@ -1205,6 +1197,36 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     return CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
 }
 
+pub fn fullWidthShouldResizeConsole(chat_active: bool) bool {
+    return !app_state.ISSUE_440_FULL_WIDTH_CHAT or !chat_active;
+}
+
+test "ISSUE-440 full width never resizes the console behind Chat View" {
+    try std.testing.expect(!fullWidthShouldResizeConsole(true));
+    try std.testing.expect(fullWidthShouldResizeConsole(false));
+}
+
+test "ISSUE-440 full width respects chat modes and per-session shell overrides" {
+    for ([_]ChatViewMode{ .everywhere, .per_session, .nowhere }) |mode| {
+        for ([_]bool{ false, true }) |remembered| {
+            for ([_]bool{ false, true }) |shell_override| {
+                for ([_]bool{ false, true }) |global| {
+                    for ([_]bool{ false, true }) |first| {
+                        const chat = chatViewShouldShowForTab(mode, remembered, shell_override, global, first);
+                        const want_chat = switch (mode) {
+                            .everywhere => !shell_override,
+                            .per_session => remembered,
+                            .nowhere => false,
+                        };
+                        try std.testing.expectEqual(want_chat, chat);
+                        try std.testing.expectEqual(!want_chat, fullWidthShouldResizeConsole(chat));
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn chatViewShouldShowForTab(mode: ChatViewMode, tab_remembered_on: bool, shell_override: bool, global_on: bool, is_first_view_after_switch: bool) bool {
     _ = global_on;
     _ = is_first_view_after_switch;
@@ -1353,6 +1375,7 @@ pub fn closeChatView() void {
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
+        if (app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.shells[app_state.active_shell].pid != 0) @import("console.zig").applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "closeChatView");
         repositionActive();
         updateBrowserVisibility();

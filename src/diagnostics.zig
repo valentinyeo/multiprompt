@@ -83,7 +83,7 @@ pub fn getSessionAuditPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u
 }
 
 pub fn debugLog(msg: []const u8) void {
-    if (!verboseLoggingEnabled()) return;
+    if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ")) return;
     while (!app_state.g_debug_log_mutex.tryLock()) Sleep(1);
     defer app_state.g_debug_log_mutex.unlock();
     var path_buf: [512]u8 = undefined;

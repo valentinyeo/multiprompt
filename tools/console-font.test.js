@@ -1,0 +1,120 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const state = read('src/app_state.zig');
+const consoleSource = read('src/console.zig');
+const main = read('src/main.zig').split('pub fn main(init: std.process.Init) void {')[1];
+
+test('all bundled Nordwand Mono faces and their OFL license are embedded', () => {
+  for (const file of ['NordwandMono-Regular.ttf', 'NordwandMono-Bold.ttf', 'NordwandMono-SemiBold.ttf', 'LICENSE-NordwandMono.txt']) {
+    assert.ok(fs.statSync(path.join(root, 'src/fonts', file)).size > 0, file);
+    assert.ok((consoleSource + read('src/fonts.zig')).includes(`@embedFile("fonts/${file}")`), file);
+  }
+  assert.match(read('src/fonts/LICENSE-NordwandMono.txt'), /SIL Open Font License, Version 1\.1/);
+  for (const face of ['Regular', 'Bold', 'SemiBold']) {
+    const bytes = fs.readFileSync(path.join(root, `src/fonts/NordwandMono-${face}.ttf`));
+    assert.equal(bytes.readUInt32BE(0), 0x00010000);
+    assert.ok(bytes.includes(Buffer.from('Nordwand Mono', 'utf16le').swap16()));
+  }
+});
+
+test('font registration is visible to separate conhost processes and balanced on exit', () => {
+  assert.match(consoleSource, /AddFontResourceExW\(@ptrCast\(path\), 0, null\)/);
+  assert.doesNotMatch(consoleSource, /FR_PRIVATE|AddFontMemResourceEx/);
+  assert.match(consoleSource, /RemoveFontResourceExW\(@ptrCast\(&fonts\.paths\[i\]\), 0, null\)/);
+  assert.match(consoleSource, /if \(registered\)/);
+  for (const fn of ['AddFontResourceExW', 'RemoveFontResourceExW']) {
+    assert.ok(read('src/win32.zig').includes(`pub extern "gdi32" fn ${fn}`));
+  }
+  const registration = main.indexOf('registerBundledConsoleFonts()');
+  assert.ok(registration >= 0);
+  for (const startup of ['CreateWindowExW(', 'accountBootstrap(hwnd)', 'restoreSession()', 'spawnShell(.cmd)', 'if (app_state.g_adopt_hwnd)']) {
+    assert.ok(main.indexOf(startup) > registration, startup);
+  }
+  assert.match(main, /defer @import\("console\.zig"\)\.unregisterBundledConsoleFonts\(&console_fonts\)/);
+  assert.match(read('src/session.zig'), /reclaimShell\(/);
+});
+
+test('font cache uses Unicode local app data paths and skips same-sized files', () => {
+  assert.match(consoleSource, /GetEnvironmentVariableW\(L\("LOCALAPPDATA"\)/);
+  assert.match(consoleSource, /L\("\\\\ZigShell\\\\fonts"\)/);
+  assert.match(consoleSource, /GetFileSizeEx\(existing, &size\) != 0 and size == file\[1\]\.len/);
+  assert.match(consoleSource, /if \(!cached\)/);
+  assert.match(consoleSource, /written == file\[1\]\.len/);
+  assert.doesNotMatch(consoleSource.slice(consoleSource.indexOf('pub fn registerBundledConsoleFonts'), consoleSource.indexOf('fn applyThemedConsoleFont')), /RegSet|RegCreate/);
+});
+
+test('all saved indices migrate to the only bundled SemiBold face without changing size', () => {
+  assert.match(state, /DEV_CONSOLE_FONTS = \[_\]\[\]const u8\{DEFAULT_CONSOLE_FONT\}/);
+  assert.match(state, /DEFAULT_CONSOLE_FONT = @import\("fonts\.zig"\)\.MONO_FACE/);
+  assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono SemiBold"/);
+  const restore = read('src/session.zig');
+  assert.match(restore, /app_state\.g_dev_font_idx = app_state\.DEFAULT_CONSOLE_FONT_IDX/);
+  assert.doesNotMatch(restore, /font < DEV_CONSOLE_FONTS\.len/);
+  assert.match(restore, /size >= 8 and size <= 40/);
+  assert.match(read('src/themes.zig'), /setWideAscii\(&app_state\.g_dev_theme\.console_font, app_state\.DEFAULT_CONSOLE_FONT\)/);
+});
+
+test('the embedded theme names only bundled fonts and preserves its console height', () => {
+  assert.match(state, /g_dev_font_idx: usize = DEFAULT_CONSOLE_FONT_IDX/);
+  const expression = state.match(/pub const DEFAULT_DEV_THEME_JSON =([\s\S]*?)\n;/)[1];
+  const parts = expression.split('++ DEFAULT_CONSOLE_FONT ++').map(part => part.split('\n')
+    .filter(line => /^\s*\\\\/.test(line)).map(line => line.replace(/^\s*\\\\/, '')).join('\n'));
+  assert.equal(parts.length, 2);
+  const theme = JSON.parse(parts.join('Nordwand Mono SemiBold'));
+  for (const key of ['title_font', 'subtitle_font', 'close_font']) assert.equal(theme.fonts[key], 'IBM Plex Sans');
+  assert.equal(theme.fonts.console_font, 'Nordwand Mono SemiBold');
+  assert.equal(theme.fonts.console_font_height, 18);
+  assert.equal(theme.fonts.console_font_weight, 600);
+});
+
+test('console height stays unchanged, weight is SemiBold and readback logs once without verbose mode', () => {
+  assert.match(state, /"console_font_height": 18/);
+  assert.match(state, /"console_font_weight": 600/);
+  assert.match(consoleSource, /themed\.FontWeight = 600/);
+  assert.match(consoleSource, /std\.mem\.span\(L\(@import\("fonts\.zig"\)\.MONO_FACE\)\)/);
+  assert.match(consoleSource, /if \(i < 3 and cached\)/);
+  const readback = consoleSource.slice(consoleSource.indexOf('var f2: CONSOLE_FONT_INFOEX'));
+  assert.match(readback, /base_font_h == 0/);
+  assert.match(readback, /if \(GetCurrentConsoleFontEx\(h, 0, &f2\) != 0\) \{\s*var log_font = true;/);
+  assert.match(readback, /if \(app_state\.shells\[si\]\.pid == pid\) \{\s*log_font = !app_state\.shells\[si\]\.console_font_logged;\s*if \(log_font\) app_state\.shells\[si\]\.console_font_logged = true;\s*break;/);
+  assert.match(readback, /if \(log_font\) \{\s*var face_buf:/);
+  assert.match(readback, /utf16LeToUtf8\(&face_buf, std\.mem\.sliceTo\(&f2\.FaceName, 0\)\)/);
+  assert.match(readback, /"\[consolefont\] pid=\{d\} face=\{s\} h=\{d\}", \.\{ pid, face_buf\[0\.\.face_len\], f2\.dwFontSize\.y \}/);
+  assert.ok(readback.indexOf('[consolefont] pid={d} face={s} h={d}') < readback.indexOf('if (verboseLoggingEnabled())'));
+  assert.match(read('src/diagnostics.zig'), /if \(!verboseLoggingEnabled\(\) and !std\.mem\.startsWith\(u8, msg, "\[consolefont\] "\)\) return;/);
+});
+
+test('spawn and respawn apply the console theme before hiding and parenting the window', () => {
+  for (const name of ['spawnShellWithSession', 'respawnShellInPlace']) {
+    const start = consoleSource.indexOf(`pub fn ${name}(`);
+    assert.ok(start >= 0, name);
+    const end = consoleSource.indexOf('\npub fn ', start + 1);
+    const body = consoleSource.slice(start, end < 0 ? undefined : end);
+    const apply = body.indexOf('applyBlackConsoleBackground(pi.dwProcessId)');
+    const hide = body.indexOf('ShowWindow(cmd_hwnd, SW_HIDE)');
+    const parent = body.indexOf('SetParent(cmd_hwnd, app_state.g_main_hwnd)');
+    assert.ok(apply >= 0 && hide > apply && parent > hide, name);
+    assert.equal(body.match(/applyBlackConsoleBackground\(pi\.dwProcessId\)/g).length, 1, name);
+  }
+});
+
+test('Chat View uses the bundled mono face for code and Plex for prose', () => {
+  const render = read('src/chat_render.zig');
+  assert.match(render, /L\(@import\("fonts\.zig"\)\.MONO_FACE\)/);
+  assert.match(render, /L\(@import\("fonts\.zig"\)\.UI_FACE\)/);
+  assert.match(read('src/chat_composer.zig'), /L\(@import\("fonts\.zig"\)\.UI_FACE\)/);
+});
+
+test('CI runs the console font regression', () => {
+  const build = read('build.zig');
+  assert.match(build, /const console_font_tests = b\.addSystemCommand\(&\.\{ \"node\", \"--test\", \"tools\/console-font\.test\.js\" \}\);/);
+  assert.match(build, /test_step\.dependOn\(&console_font_tests\.step\)/);
+  assert.match(build, /vps_test_step\.dependOn\(&console_font_tests\.step\)/);
+  assert.match(read('.github/workflows/test.yml'), /run: zig build test --summary all/);
+  assert.match(read('.github/workflows/test.yml'), /run: zig build test-vps --summary all/);
+});

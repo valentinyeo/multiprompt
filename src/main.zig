@@ -342,7 +342,7 @@ const SetBkMode = @import("win32.zig").SetBkMode;
 const SetBkColor = @import("win32.zig").SetBkColor;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
 const RoundRect = @import("win32.zig").RoundRect;
 const CreatePen = @import("win32.zig").CreatePen;
 const BitBlt = @import("win32.zig").BitBlt;
@@ -379,8 +379,8 @@ const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = @import("win32.zig").JOB_OBJECT_LIMIT
 const JobObjectExtendedLimitInformation = @import("win32.zig").JobObjectExtendedLimitInformation;
 const EnumWindows = @import("win32.zig").EnumWindows;
 const SendMessageW = @import("win32.zig").SendMessageW;
-const TrackPopupMenu = @import("win32.zig").TrackPopupMenu;
-const MessageBoxW = @import("win32.zig").MessageBoxW;
+const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
+const MessageBoxW = @import("fonts.zig").messageBox;
 const WindowFromPoint = @import("win32.zig").WindowFromPoint;
 const GetAncestor = @import("win32.zig").GetAncestor;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
@@ -554,6 +554,10 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
+const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
+const SEARCH_SHOW_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_SHOW_FAVORITES_OFFSET;
+const SEARCH_SHOW_ALL_OFFSET = @import("app_state.zig").SEARCH_SHOW_ALL_OFFSET;
 const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
 const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
 const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
@@ -1249,7 +1253,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.765";
+pub const APP_VERSION = "0.28.772";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1322,6 +1326,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         finishBrowserDock(job);
         return 0;
     }
+    if (msg == 0x0120) {
+        if (@import("fonts.zig").menuChar(wp)) |result| return result;
+    }
+    if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -2494,7 +2502,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_TOGGLE_FULLWIDTH => {
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].full_width = !app_state.shells[app_state.active_shell].full_width;
-                if (app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
+                if (@import("chat_composer.zig").fullWidthShouldResizeConsole(app_state.g_chat_active) and app_state.shells[app_state.active_shell].pid != 0) applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);
                 repositionActive();
                 saveSession();
                 _ = InvalidateRect(hwnd, null, 0);
@@ -3083,7 +3091,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_TOGGLE_UNREAD => {
             app_state.g_unread_only = !app_state.g_unread_only;
-            if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+            if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -4670,7 +4678,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_UNREADONLY_OFFSET) {
                     app_state.g_unread_only = !app_state.g_unread_only;
-                    if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                    if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -4811,7 +4819,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const restored = unarchiveHiddenWorkspaceSessions(target_ws);
                     if (was_from_inbox and app_state.g_inbox_active) {
                         loadInboxModel();
-                        if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                        if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                     } else {
                         showActiveShellAfterOverlay();
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
@@ -5503,6 +5511,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_SHOW_FREQUENT_OFFSET or target == SEARCH_FREQUENT_FIRST_OFFSET or target == SEARCH_SHOW_FAVORITES_OFFSET or target == SEARCH_SHOW_ALL_OFFSET) {
+                    var settings = app_state.g_layout_settings orelse frequent.Settings{};
+                    switch (target) {
+                        SEARCH_SHOW_FREQUENT_OFFSET => settings.frequent = !settings.frequent,
+                        SEARCH_FREQUENT_FIRST_OFFSET => settings.frequent_first = !settings.frequent_first,
+                        SEARCH_SHOW_FAVORITES_OFFSET => settings.favorites = !settings.favorites,
+                        SEARCH_SHOW_ALL_OFFSET => settings.all = !settings.all,
+                        else => unreachable,
+                    }
+                    app_state.g_layout_settings = settings;
+                    @import("inbox.zig").ensureInboxSplitVisible();
+                    saveSession();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7218,8 +7241,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     have_sel = true;
                 }
                 loadInboxModel();
-                if (app_state.g_inbox_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1) app_state.g_inbox_tab = frequent.all_split;
-                if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = frequent.all_split;
+                if (app_state.g_inbox_tab > frequent.splitCount(app_state.g_inbox_ws_count) - 1) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
+                if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
                 var resel = false;
                 if (have_sel) {
                     var c: u32 = 0;
@@ -7576,7 +7599,7 @@ pub fn drawStartupProgress(done: u32, total: u32, name: []const u16) void {
         }
     }
 
-    const hfont = CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L("Segoe UI"));
+    const hfont = CreateFontW(13, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L(@import("fonts.zig").UI_FACE));
     const old_font: HANDLE = if (hfont != null) SelectObject(hdc, hfont) else null;
     defer {
         if (hfont != null) {
@@ -7620,6 +7643,9 @@ pub fn main(init: std.process.Init) void {
 
     if (update_check.runRelaunchHelperIfRequested()) return;
 
+    defer @import("fonts.zig").unregister();
+    if (!@import("fonts.zig").register()) return;
+
     if (parseSyncAuthCallbackArg()) |callback_url| {
         if (handleSyncAuthCallback(callback_url)) {
             runVaultFlowProcess();
@@ -7638,6 +7664,9 @@ pub fn main(init: std.process.Init) void {
         sendNotify(payload);
         return;
     }
+
+    var console_fonts = @import("console.zig").registerBundledConsoleFonts();
+    defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
 
     _ = SetErrorMode(SSH_ERROR_MODE);
     crash_recorder.install(&crashSnapshot, APP_VERSION, IS_DEV);

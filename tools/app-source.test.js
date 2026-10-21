@@ -62,3 +62,10 @@ test('only test-discovery imports may accompany import bindings in the source pr
   fs.writeFileSync(file, 'comptime { hiddenLogic(); }\n' + original);
   assert.throws(() => read(), /Unmapped source prefix/);
 }));
+
+test('the production source map resolves every current declaration', () => {
+  const source = require('./app-source').readAppSource();
+  assert.match(source, /fn ensureChatFont\(/);
+  assert.match(source, /fn ensureChatCodeFont\(/);
+  assert.match(source, /@import\("fonts\.zig"\)\.UI_FACE/);
+});

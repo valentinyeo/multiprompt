@@ -137,6 +137,12 @@ pub fn build(b: *std.Build) void {
     const run_usage_telemetry_tests = b.addRunArtifact(usage_telemetry_tests);
 
     const test_step = b.step(if (b.graph.host.result.os.tag == .windows) "test" else "test-desktop", "Run desktop tests");
+    const font_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/fonts.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(font_tests).step);
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
@@ -200,6 +206,16 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
+    const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/session_layout.zig", "src/account_layout.zig" }) |source| {
+        const tests = b.addTest(.{ .root_module = b.createModule(.{
+            .root_source_file = b.path(source),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }) });
+        account_test_step.dependOn(&b.addRunArtifact(tests).step);
+    }
+    vps_test_step.dependOn(account_test_step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_layout.zig"),
         .target = target,
@@ -231,6 +247,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(account_state_tests).step);
     const account_desktop_tests = b.addSystemCommand(&.{ "python3", "tests/test_account_desktop.py" });
     test_step.dependOn(&account_desktop_tests.step);
+    account_test_step.dependOn(&account_desktop_tests.step);
     const session_layout_sync_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_layout_sync.zig"),
         .target = target,
@@ -334,7 +351,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/split-settings.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
@@ -350,6 +367,12 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
+    const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js" });
+    test_step.dependOn(&one_font_tests.step);
+    vps_test_step.dependOn(&one_font_tests.step);
+    const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
+    test_step.dependOn(&console_font_tests.step);
+    vps_test_step.dependOn(&console_font_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
     test_step.dependOn(&palette_rows_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
@@ -427,7 +450,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&paste_focus_tests.step);
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
     test_step.dependOn(&shell_focus_tests.step);
-    const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js" });
+    const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/full-width-chat.test.js" });
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
@@ -480,7 +503,7 @@ pub fn build(b: *std.Build) void {
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     vps_test_step.dependOn(&server_tool_tests.step);
     const wine_step = b.step("test-wine", "Run the Wine window tests; build with -Dtarget=x86_64-windows-gnu");
-    const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs" });
+    const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs", "tools/chat-select.test.mjs" });
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 }

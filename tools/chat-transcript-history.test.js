@@ -72,6 +72,8 @@ var g_chat_block_count: usize = 0;
 var g_chat_hover_copy: ?usize = null;
 var g_chat_hover_link: ?usize = null;
 var g_chat_sel_transcript_focus = false;
+var g_chat_sel_anchor: usize = 0;
+var g_chat_sel_caret: usize = 0;
 var g_chat_window_full = false;
 var g_chat_blocks_from_file = false;
 var g_voice_cursor_shell_id: u32 = 0;
@@ -389,7 +391,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
 function runHarness(deferSource, oldImage) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh301-'));
   try {
-    copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + functions.map(n => n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + acceptance);

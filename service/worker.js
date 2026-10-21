@@ -18,16 +18,30 @@ function layoutResponse(request, value, status = 200) {
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
+  if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings');
+  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts');
   return response;
 }
 export function validateLayout(x) {
   const keys = (v, expected) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected.sort().join(',');
   const text = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && !/[\x00-\x1f\x7f]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v);
-  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...(Object.hasOwn(x || {}, 'settings') ? ['settings'] : [])]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
+  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
       !Array.isArray(x.workspaces) || x.workspaces.length > 9 || !Array.isArray(x.tabs) || x.tabs.length > 256) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'settings') && (!x.settings || typeof x.settings !== 'object' || Array.isArray(x.settings) || Object.entries(x.settings).some(([key, value]) => !['frequent', 'favorites', 'all', 'frequent_first'].includes(key) || typeof value !== 'boolean'))) fail(400, 'invalid_layout');
+  if (Object.hasOwn(x, 'hosts')) {
+    const slots = new Set();
+    if (!Array.isArray(x.hosts) || x.hosts.length > 3 || JSON.stringify(x.hosts).includes('PRIVATE KEY')) fail(400, 'invalid_hosts');
+    for (const h of x.hosts) {
+      if (!keys(h, ['slot', 'name', 'hostname', 'port', 'user', ...(Object.hasOwn(h || {}, 'host_keys') ? ['host_keys'] : [])]) ||
+          !Number.isInteger(h.slot) || h.slot < 0 || h.slot > 2 || slots.has(h.slot) || !text(h.name, 32) || /[\u0080-\u009f]/u.test(h.name) ||
+          !text(h.hostname, 253) || !/^(?:[A-Za-z0-9.-]{1,253}|[0-9A-Fa-f:]{2,45})$/.test(h.hostname) ||
+          !Number.isInteger(h.port) || h.port < 1 || h.port > 65535 || !text(h.user, 32) || !/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(h.user) ||
+          (Object.hasOwn(h, 'host_keys') && (!Array.isArray(h.host_keys) || h.host_keys.length > 4 || new Set(h.host_keys).size !== h.host_keys.length ||
+            h.host_keys.some(key => !text(key, 1024) || !/^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-rsa) [A-Za-z0-9+/]+={0,2}$/.test(key))))) fail(400, 'invalid_hosts');
+      slots.add(h.slot);
+    }
+  }
   const ws = new Set(), ids = new Set();
   for (const w of x.workspaces) {
     if (!keys(w, ['name']) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
@@ -43,10 +57,19 @@ export function validateLayout(x) {
   return x;
 }
 
-async function body(request, limit = 1024 * 1024) {
+function validateCrashReport(x) {
+  const fields = ['id', 'captured_at', 'app_version', 'android_version', 'thread', 'summary', 'stack_trace'];
+  const limits = { app_version: 64, android_version: 64, thread: 200, summary: 2000, stack_trace: 16000 };
+  if (!x || typeof x !== 'object' || Array.isArray(x) || Object.keys(x).length !== fields.length || Object.keys(x).some(key => !fields.includes(key)) ||
+      typeof x.id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(x.id) || !Number.isSafeInteger(x.captured_at) ||
+      Object.entries(limits).some(([key, limit]) => typeof x[key] !== 'string' || x[key].length > limit) || !x.stack_trace.length) fail(400, 'invalid_crash_report');
+  return x;
+}
+
+async function body(request, limit = 1024 * 1024, invalid = 'invalid_json') {
   if (Number(request.headers.get('Content-Length')) > limit) fail(413, 'too_large');
   const reader = request.body?.getReader();
-  if (!reader) fail(400, 'invalid_json');
+  if (!reader) fail(400, invalid);
   let size = 0; const chunks = [];
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
@@ -55,7 +78,7 @@ async function body(request, limit = 1024 * 1024) {
   }
   const bytes = new Uint8Array(size); let pos = 0;
   for (const chunk of chunks) { bytes.set(chunk, pos); pos += chunk.length; }
-  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { fail(400, 'invalid_json'); }
+  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { fail(400, invalid); }
 }
 async function authenticate(request, db) {
   const token = request.headers.get('Authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
@@ -203,8 +226,20 @@ export default {
         return json({ device_id: device.id, devices: result.results });
       }
       if (url.pathname.startsWith('/v1/devices/') && request.method === 'DELETE') {
-        const result = await db.prepare('UPDATE devices SET revoked=1 WHERE id=? AND account=?').bind(url.pathname.slice('/v1/devices/'.length), device.account).run();
-        return result.meta.changes ? json({ revoked: true }) : json({ error: 'not_found' }, 404);
+        const id = url.pathname.slice('/v1/devices/'.length);
+        const result = await db.batch([
+          db.prepare('UPDATE devices SET revoked=1 WHERE id=? AND account=?').bind(id, device.account),
+          db.prepare('DELETE FROM crash_reports WHERE device_id IN (SELECT id FROM devices WHERE id=? AND account=?)').bind(id, device.account)
+        ]);
+        return result[0].meta.changes ? json({ revoked: true }) : json({ error: 'not_found' }, 404);
+      }
+      if (url.pathname === '/v1/crash-reports' && request.method === 'POST') {
+        const b = validateCrashReport(await body(request, 32 * 1024, 'invalid_crash_report'));
+        const result = await db.batch([
+          db.prepare('INSERT INTO crash_reports (device_id,report_id,account,received_at,captured_at,app_version,android_version,thread,summary,stack_trace) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,report_id) DO NOTHING').bind(device.id, b.id, device.account, now(), b.captured_at, b.app_version, b.android_version, b.thread, b.summary, b.stack_trace),
+          db.prepare('DELETE FROM crash_reports WHERE device_id=? AND rowid IN (SELECT rowid FROM crash_reports WHERE device_id=? ORDER BY received_at DESC,rowid DESC LIMIT -1 OFFSET 50)').bind(device.id, device.id)
+        ]);
+        return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
@@ -219,6 +254,12 @@ export default {
         if (!layoutFeature(request, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;
+        }
+        if (!layoutFeature(request, 'hosts')) {
+          if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;
+          else delete layout.hosts;
+        } else if (previousLayout?.hosts !== undefined || layout.hosts !== undefined) {
+          layout.hosts = [...new Map([...(previousLayout?.hosts || []), ...(layout.hosts || [])].map(host => [host.slot, host])).values()].sort((a, b) => a.slot - b.slot);
         }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {

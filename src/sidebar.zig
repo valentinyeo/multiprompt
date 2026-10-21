@@ -1,3 +1,4 @@
+const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const archive_rules = @import("archive_rules.zig");
@@ -119,6 +120,10 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
+const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
+const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
+const SEARCH_SHOW_FAVORITES_OFFSET = @import("app_state.zig").SEARCH_SHOW_FAVORITES_OFFSET;
+const SEARCH_SHOW_ALL_OFFSET = @import("app_state.zig").SEARCH_SHOW_ALL_OFFSET;
 const SEARCH_INBOX_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_INBOX_FREQUENT_OFFSET;
 const SEARCH_WSSORT_MENU_OFFSET = @import("app_state.zig").SEARCH_WSSORT_MENU_OFFSET;
 const SEARCH_WSMOVE_MENU_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_MENU_OFFSET;
@@ -2561,6 +2566,26 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ih_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("copy"), -1, &ih_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SHOW_FREQUENT_OFFSET) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent) L("Show Frequent split: ON") else L("Show Frequent split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_FREQUENT_FIRST_OFFSET) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent_first) L("Frequent as first tab: ON") else L("Frequent as first tab: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SHOW_FAVORITES_OFFSET) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).favorites) L("Show Favorites split: ON") else L("Show Favorites split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SHOW_ALL_OFFSET) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).all) L("Show All split: ON") else L("Show All split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_INBOX_FREQUENT_OFFSET) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));

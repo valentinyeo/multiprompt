@@ -54,6 +54,31 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.772", .items = &.{
+        .{ .text = "IBM Plex Sans now appears throughout the desktop, with real bold and italic text.", .ticket = "IGSH-443" },
+        .{ .text = "Shells and Chat View code use Nordwand Mono SemiBold at the same size as before.", .ticket = "IGSH-443" },
+    } },
+    .{ .ver = "0.28.771", .items = &.{
+        .{ .text = "Hide the Frequent, Favorites or All split from Ctrl+K, or place Frequent after Favorites; your choices follow your account to your phone.", .ticket = "IGSH-423" },
+    } },
+    .{ .ver = "0.28.770", .items = &.{
+        .{ .text = "Selecting chat text now follows the mouse smoothly across messages, tables, lists, and code.", .ticket = "IGSH-438" },
+        .{ .text = "Double-click selects a word and triple-click selects the paragraph under the mouse.", .ticket = "IGSH-438" },
+        .{ .text = "Copy keeps the selected text highlighted, and right-click Copy copies the message when no text is selected.", .ticket = "IGSH-438" },
+    } },
+    .{ .ver = "0.28.769", .items = &.{
+        .{ .text = "Your servers follow your account to a new computer without replacing servers you already set up there.", .ticket = "IGSH-422" },
+    } },
+    .{ .ver = "0.28.768", .items = &.{
+        .{ .text = "Android crash reports are stored per device so failures can be diagnosed without collecting device credentials.", .ticket = "IGSH-429" },
+    } },
+    .{ .ver = "0.28.767", .items = &.{
+        .{ .text = "Switching back to a workspace opens the session you were last on.", .ticket = "IGSH-439" },
+    } },
+    .{ .ver = "0.28.766", .items = &.{
+        .{ .text = "Full width keeps Chat View open and respects your choice to show a session’s terminal.", .ticket = "IGSH-440" },
+        .{ .text = "The desktop shell now uses the bundled Nordwand Mono font at the same size as before.", .ticket = "IGSH-441" },
+    } },
     .{ .ver = "0.28.765", .items = &.{
         .{ .text = "If an Allow or Deny answer fails to reach the agent, the buttons stay so you can click again.", .ticket = "" },
     } },

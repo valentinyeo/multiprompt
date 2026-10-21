@@ -293,6 +293,7 @@ pub const Shell = struct {
     adopt_streak: u8 = 0,
     revert_streak: u8 = 0,
     external_name_sync: ExternalNameSyncState = .{},
+    console_font_logged: bool = false,
     base_font_h: i16 = 0,
     base_font_w: i16 = 0,
     base_font_face: [32]u16 = std.mem.zeroes([32]u16),
@@ -470,15 +471,20 @@ pub var g_dev_saved_console_palette: [16]DWORD = std.mem.zeroes([16]DWORD);
 pub var g_dev_saved_console_attr: WORD = 0x0007;
 pub var g_dev_saved_console_font: CONSOLE_FONT_INFOEX = undefined;
 
+pub const ISSUE_441 = true;
+pub const DEFAULT_CONSOLE_FONT = @import("fonts.zig").MONO_FACE;
+
 pub const DEFAULT_DEV_THEME_JSON =
     \\{
     \\  "theme_revision": 11,
     \\  "name": "Dev Blue",
     \\  "fonts": {
-    \\    "title_font": "Segoe UI",
-    \\    "subtitle_font": "Segoe UI",
-    \\    "close_font": "Segoe UI",
-    \\    "console_font": "JetBrainsMono NFM",
+    \\    "title_font": "IBM Plex Sans",
+    \\    "subtitle_font": "IBM Plex Sans",
+    \\    "close_font": "IBM Plex Sans",
+    \\    "console_font": "
+++ DEFAULT_CONSOLE_FONT ++
+    \\",
     \\    "title_height": 16,
     \\    "subtitle_height": 14,
     \\    "close_height": 14,
@@ -486,7 +492,7 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "subtitle_weight": 400,
     \\    "close_weight": 400,
     \\    "console_font_height": 18,
-    \\    "console_font_weight": 700
+    \\    "console_font_weight": 600
     \\  },
     \\  "colors": {
     \\    "sidebar_bg": "#03080E",
@@ -587,16 +593,14 @@ pub const DEV_LETTER_SPACING: i32 = 0;
 pub const DEV_SHELL_COLS: i32 = 100;
 pub const DEV_TOP_PAD: i32 = 10;
 
-pub const DEV_CONSOLE_FONTS = [_][]const u8{
-    "CaskaydiaCove NFM",
-    "CaskaydiaCove NFM SemiBold",
-    "JetBrainsMono NFM",
-    "JetBrainsMono NFM SemiBold",
-    "FiraCode Nerd Font Mono",
-    "FiraCode Nerd Font Mono SemBd",
-    "Hack Nerd Font Mono",
+pub const DEV_CONSOLE_FONTS = [_][]const u8{DEFAULT_CONSOLE_FONT};
+pub const DEFAULT_CONSOLE_FONT_IDX = blk: {
+    for (DEV_CONSOLE_FONTS, 0..) |face, i| {
+        if (std.mem.eql(u8, face, DEFAULT_CONSOLE_FONT)) break :blk i;
+    }
+    unreachable;
 };
-pub var g_dev_font_idx: usize = 2;
+pub var g_dev_font_idx: usize = DEFAULT_CONSOLE_FONT_IDX;
 pub const DEV_CONSOLE_SIZES = [_]i32{ 14, 16, 18, 20, 22 };
 pub var g_dev_size_idx: usize = 2;
 pub var g_dev_font_hud: bool = false;
@@ -622,6 +626,7 @@ pub var g_ws_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
 pub var g_ws_name_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
 pub var g_ws_ids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
 pub var g_ws_id_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
+pub var g_ws_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
 pub var g_ws_snoozed: [MAX_LWS]bool = [_]bool{false} ** MAX_LWS;
 
 pub const WS_STRIP_H: i32 = 34;
@@ -1060,8 +1065,6 @@ pub var g_chat_composer_scroll_shown: bool = false;
 pub var g_chat_font_pt: i32 = CHAT_FONT_DEFAULT_PT;
 pub const CHAT_FONT_DEFAULT_PT: i32 = 14;
 pub var g_chat_font: HANDLE = null;
-pub var g_chat_font_family_checked: bool = false;
-pub var g_chat_font_family_ok: bool = false;
 pub var g_chat_bg_brush: HANDLE = null;
 pub var g_chat_input_brush: HANDLE = null;
 pub var g_chat_bg_color: DWORD = 0;
@@ -1269,6 +1272,10 @@ pub const SEARCH_POWER_AUTO_OFFSET: usize = 6337;
 pub const SEARCH_POWER_ALWAYS_OFFSET: usize = 6338;
 pub const SEARCH_POWER_OFF_OFFSET: usize = 6339;
 pub const SEARCH_FAVORITE_OFFSET: usize = 6389;
+pub const SEARCH_SHOW_FREQUENT_OFFSET: usize = 6380;
+pub const SEARCH_FREQUENT_FIRST_OFFSET: usize = 6381;
+pub const SEARCH_SHOW_FAVORITES_OFFSET: usize = 6382;
+pub const SEARCH_SHOW_ALL_OFFSET: usize = 6383;
 pub const SEARCH_INBOX_FREQUENT_OFFSET: usize = 6396;
 pub const SEARCH_LADDER_AUTO_OFFSET: usize = 6390;
 pub const SEARCH_LADDER_CLAUDE_OFFSET: usize = 6391;
@@ -1838,6 +1845,7 @@ pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
 
 pub const SavedTab = struct {
+    shell_id: u32 = 0,
     chat_id: u64 = 0,
     sync_owned: bool = false,
     kind: ShellKind,
@@ -1894,6 +1902,7 @@ pub const SavedTab = struct {
 
 pub const ISSUE_347_KEEP_FULL_WIDTH = true;
 pub const ISSUE_373_SHELL_OVERRIDE = true;
+pub const ISSUE_440_FULL_WIDTH_CHAT = true;
 pub const ISSUE_274_DOT_ON_SELECTED_TAB = true;
 
 pub var g_restored_valid_session = false;
@@ -2295,8 +2304,6 @@ pub const ChatViewLayout = struct {
     attach_btn: RECT,
     stop_btn: RECT,
 };
-
-pub const chat_font_bytes = @embedFile("fonts/IBMPlexSans-Regular.ttf");
 
 pub const CHAT_SUMMARY_VERBS = [_][]const u8{
     "searched for", "read", "ran", "edited", "wrote", "listed", "fetched", "updated", "created", "found",
@@ -3278,6 +3285,7 @@ pub var g_inbox_ws_count: u32 = 0;
 pub var g_inbox_rows: [INBOX_MAX_ROWS]InboxRow = undefined;
 pub var g_inbox_row_count: u32 = 0;
 pub var g_inbox_sel: u32 = 0;
+pub var g_layout_settings: ?@import("frequent.zig").Settings = null;
 pub var g_inbox_tab: u32 = @import("frequent.zig").all_split;
 pub var g_front_period: @import("frequent.zig").FrontPeriod = .{};
 pub const TIMER_VISIT_DWELL: usize = 173;

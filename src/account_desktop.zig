@@ -3,6 +3,7 @@ const std = @import("std");
 const tmux_identity = @import("tmux_identity.zig");
 const sync_auth = @import("sync_auth.zig");
 const session_layout = @import("session_layout.zig");
+const account_hosts = @import("account_hosts.zig");
 const account_layout = @import("account_layout.zig");
 const account_state = @import("account_state.zig");
 const account_client = @import("account_client.zig");
@@ -42,7 +43,7 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreateFontW = @import("win32.zig").CreateFontW;
+const CreateFontW = @import("fonts.zig").create;
 const CreateProcessW = @import("win32.zig").CreateProcessW;
 const Sleep = @import("win32.zig").Sleep;
 const GetModuleFileNameW = @import("win32.zig").GetModuleFileNameW;
@@ -99,7 +100,7 @@ const keybd_event = @import("win32.zig").keybd_event;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
-const MessageBoxW = @import("win32.zig").MessageBoxW;
+const MessageBoxW = @import("fonts.zig").messageBox;
 const ShellExecuteW = @import("win32.zig").ShellExecuteW;
 const SESSION_JSON_CAPACITY = @import("app_state.zig").SESSION_JSON_CAPACITY;
 const L = @import("startup.zig").L;
@@ -162,7 +163,7 @@ const CREDUI_FLAGS_GENERIC_CREDENTIALS = @import("app_state.zig").CREDUI_FLAGS_G
 const CREDUI_FLAGS_KEEP_USERNAME = @import("app_state.zig").CREDUI_FLAGS_KEEP_USERNAME;
 const CREDUI_FLAGS_DO_NOT_PERSIST = @import("app_state.zig").CREDUI_FLAGS_DO_NOT_PERSIST;
 const CREDUI_FLAGS_EXCLUDE_CERTIFICATES = @import("app_state.zig").CREDUI_FLAGS_EXCLUDE_CERTIFICATES;
-const CredUIPromptForCredentialsW = @import("win32.zig").CredUIPromptForCredentialsW;
+const CredUIPromptForCredentialsW = @import("fonts.zig").promptForCredentials;
 const HttpsBearerResult = @import("app_state.zig").HttpsBearerResult;
 const SYNC_VAULT_URL = @import("app_state.zig").SYNC_VAULT_URL;
 const VaultFetch = @import("app_state.zig").VaultFetch;
@@ -201,8 +202,14 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .workspace = workspaces.items[ws].name,
         });
     }
-    return .{ .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = app_state.g_layout_settings, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
+
+var g_account_hosts_cache: struct {
+    arena: ?std.heap.ArenaAllocator = null,
+    hosts: []const account_hosts.Host = &.{},
+    refreshed_at: ?u64 = null,
+} = .{};
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -409,6 +416,141 @@ fn accountReadLayout(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     if (revision != .integer or revision.integer < 0 or parsed.value.revision != revision.integer) return error.InvalidLayout;
     return json;
 }
+fn accountSshOutput(a: std.mem.Allocator, command: []const u8) ![]const u8 {
+    const w = @import("win32.zig");
+    var cmd: [2048]u16 = undefined;
+    const cmd_z = win32WidePath(&cmd, command) orelse return error.InvalidHosts;
+    var sa = w.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(w.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
+    var reader: HANDLE = null;
+    var writer: HANDLE = null;
+    if (w.CreatePipe(&reader, &writer, &sa, 0) == 0) return error.Storage;
+    defer _ = CloseHandle(reader);
+    if (w.SetHandleInformation(reader, 1, 0) == 0) {
+        _ = CloseHandle(writer);
+        return error.Storage;
+    }
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = 0x00000100;
+    si.hStdOutput = writer;
+    var pi = std.mem.zeroes(PROCESS_INFORMATION);
+    const started = CreateProcessW(null, cmd_z.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
+    _ = CloseHandle(writer);
+    if (started == 0) return error.Process;
+    _ = CloseHandle(pi.hThread);
+    defer _ = CloseHandle(pi.hProcess);
+    defer {
+        if (WaitForSingleObject(pi.hProcess, 0) != 0) {
+            _ = TerminateProcess(pi.hProcess, 1);
+            _ = WaitForSingleObject(pi.hProcess, 1000);
+        }
+    }
+    const deadline = GetTickCount64() + 5000;
+    var output: std.ArrayList(u8) = .empty;
+    var done = false;
+    while (true) {
+        var available: DWORD = 0;
+        if (w.PeekNamedPipe(reader, null, 0, null, &available, null) != 0 and available > 0) {
+            var buf: [4096]u8 = undefined;
+            var count: DWORD = 0;
+            if (w.ReadFile(reader, &buf, @min(available, buf.len), &count, null) == 0) break;
+            if (output.items.len + count > 65536) {
+                _ = TerminateProcess(pi.hProcess, 1);
+                _ = WaitForSingleObject(pi.hProcess, 1000);
+                return error.TooLarge;
+            }
+            try output.appendSlice(a, buf[0..count]);
+            continue;
+        }
+        if (done) break;
+        if (GetTickCount64() >= deadline) {
+            _ = TerminateProcess(pi.hProcess, 1);
+            _ = WaitForSingleObject(pi.hProcess, 1000);
+            return error.Timeout;
+        }
+        done = WaitForSingleObject(pi.hProcess, 10) == 0;
+    }
+    var exit: DWORD = 1;
+    if (w.GetExitCodeProcess(pi.hProcess, &exit) == 0 or exit != 0) return error.Process;
+    return output.toOwnedSlice(a);
+}
+
+fn accountAppendSshFile(path: []const u8, bytes: []const u8) !void {
+    const file = @import("file_io.zig").win32OpenAppend(path) orelse return error.Storage;
+    defer _ = CloseHandle(file);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var written: DWORD = 0;
+        if (@import("win32.zig").WriteFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) return error.Storage;
+        total += written;
+    }
+}
+
+fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![]const account_hosts.Host {
+    const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+    const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
+    var ssh_buf: [1024]u8 = undefined;
+    var ssh_len: usize = 0;
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return &.{};
+    const ssh = ssh_buf[0..ssh_len];
+    const path = std.mem.trim(u8, ssh, "\" ");
+    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return &.{};
+    const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
+    var profile_buf: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
+    if (n == 0 or n >= profile_buf.len) return &.{};
+    const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
+    const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
+    const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
+    var hosts: std.ArrayList(account_hosts.Host) = .empty;
+    for (aliases, names, 0..) |alias, name, slot| {
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
+        const output = accountSshOutput(a, command) catch continue;
+        const resolved = account_hosts.parseSshConfig(output) orelse continue;
+        const missing = account_hosts.shouldImport(alias, resolved);
+        var incoming: ?account_hosts.Host = null;
+        if (missing) {
+            for (remote) |host| if (host.slot == slot) {
+                incoming = host;
+                break;
+            };
+            if (incoming == null) continue;
+        }
+        var host = incoming orelse account_hosts.Host{ .slot = @intCast(slot), .name = name, .hostname = resolved.hostname, .port = resolved.port, .user = resolved.user };
+        const target = try account_hosts.knownHostName(a, host.hostname, host.port);
+        const lookup = try std.fmt.allocPrint(a, "{s} -F \"{s}\" -f \"{s}\"", .{ keygen, target, known });
+        const key_output = accountSshOutput(a, lookup) catch "";
+        const keys = try account_hosts.readKeys(a, key_output);
+        if (missing) {
+            host.hostname = try a.dupe(u8, host.hostname);
+            host.user = try a.dupe(u8, host.user);
+            if (host.host_keys) |incoming_keys| {
+                const owned_keys = try a.alloc([]const u8, incoming_keys.len);
+                for (incoming_keys, owned_keys) |key, *owned| owned.* = try a.dupe(u8, key);
+                host.host_keys = owned_keys;
+            }
+            const block = try account_hosts.configBlock(a, alias, host);
+            win32MakeDir(folder);
+            var additions: std.ArrayList(u8) = .empty;
+            for (host.host_keys orelse &.{}) |key| {
+                var present = false;
+                for (keys) |old| if (std.mem.eql(u8, old, key)) {
+                    present = true;
+                };
+                if (!present) try additions.appendSlice(a, try account_hosts.knownHostLine(a, host, key));
+            }
+            if (additions.items.len > 0) {
+                try accountAppendSshFile(known, "\r\n");
+                try accountAppendSshFile(known, additions.items);
+            }
+            accountAppendSshFile(config, block) catch continue;
+        } else host.host_keys = keys[0..@min(keys.len, 4)];
+        host.name = name;
+        try hosts.append(a, host);
+    }
+    return hosts.toOwnedSlice(a);
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -467,34 +609,45 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     defer remote.deinit();
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
-    if (job.base != null and job.edited != null) {
-        var arena = std.heap.ArenaAllocator.init(a);
-        defer arena.deinit();
-        const alloc = arena.allocator();
-        const base = try session_layout.parse(alloc, job.base.?);
-        defer base.deinit();
-        const edited = try session_layout.parse(alloc, job.edited.?);
-        defer edited.deinit();
-        var attempts: usize = 0;
-        while (attempts < 3) : (attempts += 1) {
-            const json = try accountReadLayout(alloc, remote.bytes);
-            const server = try session_layout.parse(alloc, json);
-            defer server.deinit();
-            const rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
-            if (account_layout.equal(server.value, rebased)) break;
-            const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
-            const put = try account_client.request("PUT", "/v1/layout", access, body);
-            remote.deinit();
-            remote = put;
-            if (remote.status == 200) break;
-            if (remote.status == 401) reply.unauthorized = true;
-            if (remote.status != 409) return error.Network;
-        }
-        if (remote.status != 200) return error.Conflict;
-    }
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
-    reply.bytes = try a.dupe(u8, try accountReadLayout(arena.allocator(), remote.bytes));
+    const alloc = arena.allocator();
+    const initial_json = try accountReadLayout(alloc, remote.bytes);
+    const initial = try session_layout.parse(alloc, initial_json);
+    defer initial.deinit();
+    if (remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
+        var host_arena = std.heap.ArenaAllocator.init(a);
+        errdefer host_arena.deinit();
+        const discovered = try accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{});
+        if (g_account_hosts_cache.arena) |*old| old.deinit();
+        g_account_hosts_cache = .{ .arena = host_arena, .hosts = discovered, .refreshed_at = GetTickCount64() };
+    }
+    const hosts = g_account_hosts_cache.hosts;
+    var attempts: usize = 0;
+    while (attempts < 3) : (attempts += 1) {
+        const json = try accountReadLayout(alloc, remote.bytes);
+        const server = try session_layout.parse(alloc, json);
+        defer server.deinit();
+        var rebased = server.value;
+        if (job.base != null and job.edited != null) {
+            const base = try session_layout.parse(alloc, job.base.?);
+            defer base.deinit();
+            const edited = try session_layout.parse(alloc, job.edited.?);
+            defer edited.deinit();
+            rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
+        }
+        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
+        rebased.hosts = if (remote.hosts_supported) hosts else null;
+        const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
+        const put = try account_client.request("PUT", "/v1/layout", access, body);
+        remote.deinit();
+        remote = put;
+        if (remote.status == 200) break;
+        if (remote.status == 401) reply.unauthorized = true;
+        if (remote.status != 409) return error.Network;
+    }
+    if (remote.status != 200) return error.Conflict;
+    reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
 }
 fn layoutSyncWorker(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -574,6 +727,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     const old_ids = app_state.g_ws_ids;
     const old_id_len = app_state.g_ws_id_len;
     const old_snoozed = app_state.g_ws_snoozed;
+    const old_last_shell = app_state.g_ws_last_shell;
+    app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     const old_ws_count = app_state.g_lws_count;
     app_state.g_single_window = true;
     app_state.g_lws_count = @intCast(@max(desired.workspaces.len, 1));
@@ -590,6 +745,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             app_state.g_ws_ids[wi] = old_ids[oi];
             app_state.g_ws_id_len[wi] = old_id_len[oi];
             app_state.g_ws_snoozed[wi] = old_snoozed[oi];
+            app_state.g_ws_last_shell[wi] = old_last_shell[oi];
             break;
         }
         ensureWorkspaceSlotId(@intCast(wi));
@@ -607,6 +763,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_ws_ids[slot] = old_ids[oi];
         app_state.g_ws_id_len[slot] = old_id_len[oi];
         app_state.g_ws_snoozed[slot] = true;
+        app_state.g_ws_last_shell[slot] = old_last_shell[oi];
         app_state.g_lws_count += 1;
     }
     for (desired.tabs, 0..) |tab, dest| {
@@ -670,6 +827,8 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_active_workspace = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else 0;
         switchToWorkspace(app_state.g_active_workspace);
     }
+    app_state.g_layout_settings = desired.settings;
+    @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
     saveSession();
     syncInProcessWorkspacesToRegistry();
@@ -833,7 +992,7 @@ pub fn paintAccountLock(hwnd: HANDLE) void {
     const bg = CreateSolidBrush(themeSidebarBg());
     defer _ = DeleteObject(bg);
     _ = FillRect(hdc, &rc, bg);
-    const font = CreateFontW(uiScaled(22), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L("Segoe UI"));
+    const font = CreateFontW(uiScaled(22), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, L(@import("fonts.zig").UI_FACE));
     const old = SelectObject(hdc, font);
     defer {
         _ = SelectObject(hdc, old);

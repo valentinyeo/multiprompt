@@ -47,10 +47,10 @@ pub fn setWideAscii(out: *[64]u16, value: []const u8) void {
 
 fn resetDevThemeDefaults() void {
     app_state.g_dev_theme = std.mem.zeroes(DevTheme);
-    setWideAscii(&app_state.g_dev_theme.title_font, "Segoe UI");
-    setWideAscii(&app_state.g_dev_theme.subtitle_font, "Segoe UI");
-    setWideAscii(&app_state.g_dev_theme.close_font, "Segoe UI");
-    setWideAscii(&app_state.g_dev_theme.console_font, "JetBrainsMono NFM");
+    setWideAscii(&app_state.g_dev_theme.title_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.subtitle_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.close_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.console_font, app_state.DEFAULT_CONSOLE_FONT);
     app_state.g_dev_theme.title_height = 16;
     app_state.g_dev_theme.subtitle_height = 14;
     app_state.g_dev_theme.close_height = 14;
@@ -58,7 +58,7 @@ fn resetDevThemeDefaults() void {
     app_state.g_dev_theme.subtitle_weight = 400;
     app_state.g_dev_theme.close_weight = 400;
     app_state.g_dev_theme.console_font_height = 18;
-    app_state.g_dev_theme.console_font_weight = 700;
+    app_state.g_dev_theme.console_font_weight = 600;
     app_state.g_dev_theme.sidebar_bg = RGB(3, 8, 14);
     app_state.g_dev_theme.shell_bg = RGB(3, 8, 14);
     app_state.g_dev_theme.titlebar_bg = RGB(3, 8, 14);
@@ -401,10 +401,10 @@ pub fn loadDevThemeFromFile() void {
     var parsed = json_reader.parse(std.heap.page_allocator, buf[0..n]) catch return;
     defer parsed.deinit();
     const json = parsed.value;
-    parseThemeFontField(json, "title_font", &app_state.g_dev_theme.title_font);
-    parseThemeFontField(json, "subtitle_font", &app_state.g_dev_theme.subtitle_font);
-    parseThemeFontField(json, "close_font", &app_state.g_dev_theme.close_font);
-    parseThemeFontField(json, "console_font", &app_state.g_dev_theme.console_font);
+    setWideAscii(&app_state.g_dev_theme.title_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.subtitle_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.close_font, @import("fonts.zig").UI_FACE);
+    setWideAscii(&app_state.g_dev_theme.console_font, app_state.DEFAULT_CONSOLE_FONT);
     parseThemeIntField(json, "title_height", &app_state.g_dev_theme.title_height);
     parseThemeIntField(json, "subtitle_height", &app_state.g_dev_theme.subtitle_height);
     parseThemeIntField(json, "close_height", &app_state.g_dev_theme.close_height);
@@ -412,7 +412,7 @@ pub fn loadDevThemeFromFile() void {
     parseThemeIntField(json, "subtitle_weight", &app_state.g_dev_theme.subtitle_weight);
     parseThemeIntField(json, "close_weight", &app_state.g_dev_theme.close_weight);
     parseThemeIntField(json, "console_font_height", &app_state.g_dev_theme.console_font_height);
-    parseThemeIntField(json, "console_font_weight", &app_state.g_dev_theme.console_font_weight);
+    app_state.g_dev_theme.console_font_weight = 600;
     parseThemeColorField(json, "sidebar_bg", &app_state.g_dev_theme.sidebar_bg);
     parseThemeColorField(json, "shell_bg", &app_state.g_dev_theme.shell_bg);
     parseThemeColorField(json, "console_fg", &app_state.g_dev_theme.console_fg);
@@ -531,30 +531,15 @@ pub fn customColorOr(comptime field: []const u8, fallback: DWORD) DWORD {
 }
 
 pub fn themeTitleFontFace() LPCWSTR {
-    if (app_state.g_multiprompt_theme) return L("Inter");
-    if (LOOK_UNIFIED) {
-        ensureDevThemeInitialized();
-        return @ptrCast(&app_state.g_dev_theme.title_font);
-    }
-    return L("Segoe UI Variable Text");
+    return @import("fonts.zig").uiFace(themeTitleFontWeight());
 }
 
 pub fn themeSubtitleFontFace() LPCWSTR {
-    if (app_state.g_multiprompt_theme) return L("Inter");
-    if (LOOK_UNIFIED) {
-        ensureDevThemeInitialized();
-        return @ptrCast(&app_state.g_dev_theme.subtitle_font);
-    }
-    return L("Segoe UI Variable Text");
+    return @import("fonts.zig").uiFace(themeSubtitleFontWeight());
 }
 
 pub fn themeCloseFontFace() LPCWSTR {
-    if (app_state.g_multiprompt_theme) return L("Inter");
-    if (LOOK_UNIFIED) {
-        ensureDevThemeInitialized();
-        return @ptrCast(&app_state.g_dev_theme.close_font);
-    }
-    return L("Segoe UI Variable Text");
+    return @import("fonts.zig").uiFace(themeCloseFontWeight());
 }
 
 pub fn themeTitleFontHeight() i32 {

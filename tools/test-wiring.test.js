@@ -42,7 +42,7 @@ test('the capped Wine runner runs desktop tests then test-vps without forwarding
   assert.match(script, /^set -euo pipefail$/m);
   const builds = script.split('\n').filter(line => line.includes('"$zig" build'));
   assert.deepEqual(builds, [
-    '"${runner[@]}" nice -n 15 "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"',
+    '"${runner[@]}" nice -n 15 "${display[@]}" "$zig" build test-desktop -Dtarget=x86_64-windows-gnu -fwine -j4 --summary all "$@"',
     '"${runner[@]}" nice -n 15 "$zig" build test-vps --summary all',
   ]);
   const docs = ['openwiki/operations/build-and-install.md'];
@@ -71,6 +71,80 @@ test('the Wine runner propagates the selected compiler to native child tests', {
     const calls = result.stdout.trim().split('\n').map(line => JSON.parse(line));
     assert.deepEqual(calls.map(call => call.step), ['test-desktop', 'test-vps']);
     for (const call of calls) assert.deepEqual([call.selected, call.resolved, call.exe], [zig, zig, zig]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const scenario of ['unset', 'empty', 'existing', 'missing']) {
+  test(`the Wine runner handles ${scenario} display configuration`, { skip: process.platform === 'win32' }, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wine-display-'));
+    try {
+      for (const name of ['git', 'dirname', 'flock', 'mktemp', 'rm', 'nice']) {
+        const resolved = spawnSync('which', [name], { encoding: 'utf8' });
+        assert.equal(resolved.status, 0, resolved.stderr);
+        fs.symlinkSync(resolved.stdout.trim(), path.join(dir, name));
+      }
+      for (const name of ['python', 'pwsh']) fs.writeFileSync(path.join(dir, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      fs.writeFileSync(path.join(dir, 'systemd-run'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const zig = path.join(dir, 'zig');
+      fs.writeFileSync(zig, '#!/bin/sh\nprintf "%s:%s\\n" "$2" "${DISPLAY:-none}"\n', { mode: 0o755 });
+      if (scenario !== 'missing') {
+        fs.writeFileSync(path.join(dir, 'xvfb-run'), '#!/bin/sh\n[ "$1" = -a ] || exit 99\nshift\nDISPLAY=:test exec "$@"\n', { mode: 0o755 });
+      }
+      const env = { ...process.env, ZIG: zig, PATH: dir, MP_WINE_LOCK: path.join(dir, 'lock') };
+      delete env.DISPLAY;
+      if (scenario === 'empty') env.DISPLAY = '';
+      if (scenario === 'existing') env.DISPLAY = ':existing';
+      const result = spawnSync('/bin/bash', ['tools/test-windows-wine.sh'], { cwd: root, encoding: 'utf8', timeout: 120000, env });
+      assert.equal(result.status, scenario === 'missing' ? 2 : 0, result.stdout + result.stderr);
+      if (scenario === 'missing') {
+        assert.match(result.stderr, /xvfb-run missing: install xvfb/);
+        assert.equal(result.stdout, '');
+      } else {
+        assert.equal(result.stdout, scenario === 'existing'
+          ? 'test-desktop::existing\ntest-vps::existing\n'
+          : 'test-desktop::test\ntest-vps:none\n');
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+test('the public audit propagates its selected compiler to bare Zig child commands', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-toolchain-'));
+  try {
+    const selected = path.join(dir, 'selected');
+    const older = path.join(dir, 'older');
+    fs.mkdirSync(selected);
+    fs.mkdirSync(older);
+    const zig = path.join(selected, 'zig');
+    fs.writeFileSync(zig, '#!/bin/sh\nprintf "0.16.0\\n"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(older, 'zig'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    const result = spawnSync('python3', ['-c', `
+import importlib.util, os, pathlib, shutil, sys
+spec = importlib.util.spec_from_file_location('audit', sys.argv[1])
+audit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(audit)
+audit.ROOT = pathlib.Path(sys.argv[2]) / 'tree'
+for folder in ['src', 'tools', 'service/node_modules', 'docs-site/node_modules']:
+    (audit.ROOT / folder).mkdir(parents=True, exist_ok=True)
+calls = []
+def run(args, cwd=None):
+    assert os.environ.get('ZIG_EXE') == sys.argv[3]
+    assert shutil.which('zig') == sys.argv[3]
+    calls.append(args)
+audit.run = run
+audit.verify()
+assert calls[0] == [sys.argv[3], 'build', '-Dtarget=x86_64-windows-gnu']
+assert len(calls) > 5
+print('AUDIT_TOOLCHAIN_PASS')
+`, path.join(root, 'tools/public_audit.py'), dir, zig], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+      env: { ...process.env, ZIG: zig, ZIG_EXE: '', PATH: older + path.delimiter + process.env.PATH },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /AUDIT_TOOLCHAIN_PASS/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
