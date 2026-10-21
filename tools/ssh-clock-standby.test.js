@@ -46,6 +46,7 @@ var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
+const DWORD = u32;
 const SW_HIDE = 0;
 const g_chat_active = false;
 var fake_now: u64 = 100;
@@ -56,6 +57,8 @@ var kills: usize = 0;
 var timers: usize = 0;
 var veto_logs: usize = 0;
 var spawn_ok = true;
+var fake_exit_code: u32 = 0;
+fn GetExitCodeProcess(_: ?*anyopaque, code: *u32) u32 { code.* = fake_exit_code; return 1; }
 fn GetTickCount64() u64 { return fake_now; }
 fn chatNetworkReportsConnected() bool { return network; }
 fn shellProcessAliveForRead(_: usize) bool { return alive; }

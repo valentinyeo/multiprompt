@@ -24,7 +24,9 @@ def load_eta_hook():
 class Installation(unittest.TestCase):
     def setUp(self):
         systemctl = patch.object(installer.subprocess, "run")
+        self.real_run = subprocess.run
         self.run = systemctl.start()
+        self.run.return_value.returncode = 0
         self.addCleanup(systemctl.stop)
 
     def test_merge_preserves_other_handlers_and_is_idempotent(self):
@@ -51,6 +53,105 @@ class Installation(unittest.TestCase):
             p.write_text(json.dumps({"version": 1, "hooks": {"afterFileEdit": [{"command": "format"}]}}), encoding="utf-8")
             installer.merge_hooks(p, {"stop": "python3 /x/zigshell/notify.py cursor done"}, cursor=True)
             self.assertEqual(json.loads(p.read_text(encoding="utf-8"))["hooks"]["afterFileEdit"], [{"command": "format"}])
+
+    @unittest.skipIf(os.name == "nt", "tmux hooks are installed on Linux")
+    def test_tmux_hooks_persist_and_migrate_without_replacing_other_config(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            home = Path(tmp)
+            config = home / ".tmux.conf"
+            config.write_text("set -g history-limit 5000", encoding="utf-8")
+            legacy = home / ".local/bin/zigshell-watcher.sh"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("old watcher", encoding="utf-8")
+            service = home / ".config/systemd/user/zigshell-watcher.service"
+            service.parent.mkdir(parents=True)
+            service.write_text("old service", encoding="utf-8")
+            dest = home / ".local/share/zigshell"
+            with patch.object(installer, "HOME", home), patch.object(installer, "DEST", dest):
+                installer.install_tmux_hooks()
+                first = config.read_text(encoding="utf-8")
+                snippet = (dest / "tmux-notifications.conf").read_text(encoding="utf-8")
+                installer.install_tmux_hooks()
+            self.assertEqual(first, config.read_text(encoding="utf-8"))
+            self.assertTrue(first.startswith("set -g history-limit 5000\nsource-file -q "))
+            self.assertEqual(first.count("source-file"), 1)
+            self.assertFalse(legacy.exists())
+            self.assertFalse(service.exists())
+            self.assertEqual(len(list(legacy.parent.glob("*.pre-zigshell-*"))), 1)
+            self.assertEqual(len(list(service.parent.glob("*.pre-zigshell-*"))), 1)
+            self.assertTrue((dest / "tmux_notify.py").exists())
+            self.assertEqual(snippet, (dest / "tmux-notifications.conf").read_text(encoding="utf-8"))
+            calls = [call.args[0] for call in self.run.call_args_list]
+            self.assertIn(["systemctl", "--user", "disable", "--now", "zigshell-watcher.service"], calls)
+            self.assertIn(["tmux", "source-file", str(dest / "tmux-notifications.conf")], calls)
+            self.assertFalse(any("restart" in call and "zigshell-watcher" in " ".join(call) for call in calls))
+
+    def test_tmux_hook_commands_cover_events_debounce_and_native_throttling(self):
+        config = installer.tmux_config(Path("/tmp/mp-notify-test/tmux-events"))
+        for option in ("-g monitor-activity on", "-gw monitor-silence 10", "-g activity-action any", "-g silence-action any"):
+            self.assertIn("set-option " + option, config)
+        for event in ("alert-activity", "alert-silence", "pane-title-changed", "session-created", "client-attached"):
+            self.assertEqual(config.count("set-hook -g " + event + "[514]"), 1)
+        self.assertIn('run-shell -bCd 3 "kill-session -C -t #{session_id};', config)
+        self.assertIn('run-shell -bCd 15 "kill-session -C -t #{session_id};', config)
+        self.assertIn("set-option -w -t #{window_id} monitor-activity on", config)
+        self.assertIn("set-option -w monitor-activity off", config)
+        self.assertIn("kill-session -C", config)
+        self.assertNotIn("capture-pane", config)
+        self.assertNotIn("pgrep", config)
+        self.assertNotIn("python", config)
+        self.assertIn("#{q:session_name}", config)
+        self.assertIn("#{pane_id}'' #{q:socket_path}''", config)
+
+    @unittest.skipIf(os.name == "nt", "tmux hooks are installed on Linux")
+    def test_no_running_tmux_still_saves_persistent_hooks(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            home = Path(tmp)
+            self.run.side_effect = FileNotFoundError("no server tools")
+            with patch.object(installer, "HOME", home), patch.object(installer, "DEST", home / ".local/share/zigshell"):
+                installer.install_tmux_hooks()
+            self.assertIn("source-file -q", (home / ".tmux.conf").read_text(encoding="utf-8"))
+            self.assertTrue((home / ".local/share/zigshell/tmux-notifications.conf").exists())
+
+    @unittest.skipIf(os.name == "nt", "tmux hooks are installed on Linux")
+    def test_failed_legacy_service_stop_preserves_the_unit_and_script(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            home = Path(tmp)
+            unit = home / ".config/systemd/user/zigshell-watcher.service"
+            unit.parent.mkdir(parents=True)
+            unit.write_text("old unit", encoding="utf-8")
+            self.run.return_value.returncode = 1
+            with patch.object(installer, "HOME", home), patch.object(installer, "DEST", home / ".local/share/zigshell"):
+                with self.assertRaises(RuntimeError):
+                    installer.install_tmux_hooks()
+            self.assertEqual(unit.read_text(encoding="utf-8"), "old unit")
+
+    @unittest.skipIf(os.name == "nt", "FIFO enqueue runs on Linux")
+    def test_hook_enqueue_is_atomic_quoted_and_safe_without_a_reader(self):
+        import shlex
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fifo = Path(tmp) / "events"
+            config = installer.tmux_config(fifo)
+            command = json.JSONDecoder().raw_decode(config.split("run-shell -b ", 1)[1])[0]
+            session = "tab $HOME `false`"
+            command = command.replace("#{q:session_name}", shlex.quote(session))
+            command = command.replace("#{q:pane_current_command}", "bash")
+            command = command.replace("#{pane_pid}", "123")
+            command = command.replace("#{pane_id}", "%4")
+            command = command.replace("#{q:socket_path}", shlex.quote("/tmp/socket with spaces"))
+            self.real_run(["/bin/sh", "-c", command], check=True, timeout=2)
+            self.assertFalse(fifo.exists())
+            os.mkfifo(fifo, 0o600)
+            fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+            try:
+                self.real_run(["/bin/sh", "-c", command], check=True, timeout=2)
+                self.assertEqual(os.read(fd, 4096).split(b"\0"), [
+                    b"activity", session.encode(), b"bash", b"123", b"%4", b"/tmp/socket with spaces", b"",
+                ])
+            finally:
+                os.close(fd)
+            self.real_run(["/bin/sh", "-c", command], check=True, timeout=2)
 
     def eta_commands(self, settings):
         return [h["command"] for groups in settings["hooks"].values() for group in groups for h in group["hooks"]]

@@ -776,10 +776,11 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
 
     if (app_state.g_sidebar_collapsed) {
         _ = SetTextColor(hdc, customColorOr("accent", RGB(120, 170, 255)));
-        var nbuf = [_]u16{ '0' + @as(u16, app_state.g_active_workspace) + 1, 0 };
+        var nbuf: [4]u8 = undefined;
+        const number = std.fmt.bufPrint(&nbuf, "{d}", .{if (app_state.g_starred_workspace) @as(u32, 1) else @as(u32, app_state.g_active_workspace) + 2}) catch "";
         var nrc = RECT{ .left = 0, .top = WS_PILL_TOP, .right = sw, .bottom = WS_PILL_TOP + WS_PILL_H };
-        _ = DrawTextW(hdc, @ptrCast(&nbuf), 1, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-        const state = workspaceCapacityState(app_state.g_active_workspace);
+        drawAscii(hdc, number, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        const state = if (app_state.g_starred_workspace) .unknown else workspaceCapacityState(app_state.g_active_workspace);
         if (state == .amber or state == .red or state == .critical) {
             drawAttentionDot(hdc, sw - 5, WS_PILL_TOP + 4, 3, if (state == .amber) RGB(245, 170, 70) else RGB(235, 80, 75));
         }
@@ -793,11 +794,13 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     const pill_right = inboxButtonRect(false).left - 4;
 
     var x: i32 = WS_STRIP_LEFT;
-    var ws: u8 = 0;
-    while (ws < app_state.g_lws_count) : (ws += 1) {
-        if (app_state.g_ws_snoozed[ws]) continue;
+    var position: u8 = 0;
+    while (position <= app_state.g_lws_count) : (position += 1) {
+        const is_starred = position == 0;
+        const ws: u8 = if (is_starred) 0 else position - 1;
+        if (!is_starred and app_state.g_ws_snoozed[ws]) continue;
         if (x + WS_PILL_W > pill_right) break;
-        const is_active = ws == app_state.g_active_workspace;
+        const is_active = if (is_starred) app_state.g_starred_workspace else !app_state.g_starred_workspace and ws == app_state.g_active_workspace;
         const pill_bg = if (is_active) accent else inactive_bg;
         const br = CreateSolidBrush(pill_bg);
         const pen = CreatePen(0, 1, pill_bg);
@@ -809,10 +812,11 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
         _ = DeleteObject(br);
         _ = DeleteObject(pen);
         _ = SetTextColor(hdc, if (is_active) text_active else text_inactive);
-        var nbuf = [_]u16{ '0' + @as(u16, ws) + 1, 0 };
+        var nbuf: [4]u8 = undefined;
+        const number = std.fmt.bufPrint(&nbuf, "{d}", .{position + 1}) catch "";
         var nrc = RECT{ .left = x, .top = WS_PILL_TOP, .right = x + WS_PILL_W, .bottom = WS_PILL_TOP + WS_PILL_H };
-        _ = DrawTextW(hdc, @ptrCast(&nbuf), 1, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-        const state = workspaceCapacityState(ws);
+        drawAscii(hdc, number, &nrc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        const state = if (is_starred) .unknown else workspaceCapacityState(ws);
         if (state == .amber or state == .red or state == .critical) {
             drawAttentionDot(hdc, x + WS_PILL_W - 4, WS_PILL_TOP + 4, 3, if (state == .amber) RGB(245, 170, 70) else RGB(235, 80, 75));
         }
@@ -845,6 +849,19 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     _ = FillRect(hdc, &line_rc, line_br);
     _ = DeleteObject(line_br);
     paintInboxButtonTooltip(hdc, false);
+    if (app_state.g_workspace_hover) |hover| {
+        var name_buf: [32]u8 = undefined;
+        const name = if (hover == @import("workspace_view.zig").starred) "Starred" else if (hover == app_state.WS_NEW_PILL) "New workspace" else @import("workspaces.zig").workspaceDisplayName(hover, &name_buf);
+        var label_buf: [80]u8 = undefined;
+        const digit: u32 = if (hover == @import("workspace_view.zig").starred) 1 else @as(u32, hover) + 2;
+        const label = if (digit <= 9) std.fmt.bufPrint(&label_buf, "{s} (Alt+{d})", .{ name, digit }) catch name else name;
+        var tip = RECT{ .left = 4, .top = WS_STRIP_H + 2, .right = sw - 4, .bottom = WS_STRIP_H + 26 };
+        const br = CreateSolidBrush(sidebar_bg);
+        _ = FillRect(hdc, &tip, br);
+        _ = DeleteObject(br);
+        _ = SetTextColor(hdc, text_inactive);
+        drawAscii(hdc, label, &tip, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
 }
 
 test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 percent" {
@@ -937,9 +954,15 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
     const old_font = SelectObject(hdc, uiFontSubtitle());
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, customColorOr("warning", if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70)));
-    var buf: [96]u8 = undefined;
-    const seconds = (shell.ssh_reconnect.next_tick -| GetTickCount64() + 999) / 1000;
-    const text = if (shell.ssh_reconnect.phase == .reconnecting) "Disconnected. Reconnecting..." else std.fmt.bufPrint(&buf, "Disconnected. Reconnecting in {d}s", .{seconds}) catch "Disconnected. Reconnecting...";
+    var buf: [192]u8 = undefined;
+    const now = GetTickCount64();
+    const seconds = (shell.ssh_reconnect.next_tick -| now + 999) / 1000;
+    const text = if (shell.ssh_reconnect.noticeReason(now, shell.disconnected)) |reason|
+        std.fmt.bufPrint(&buf, "{s} disconnected: {s} - Ctrl+Shift+R to reconnect", .{ if (shell.locked) "Locked session" else if (shell.pinned_top) "Pinned session" else "Session", reason }) catch "Reconnecting..."
+    else if (shell.ssh_reconnect.phase == .reconnecting)
+        "Reconnecting..."
+    else
+        std.fmt.bufPrint(&buf, "Reconnecting in {d}s", .{seconds}) catch "Reconnecting...";
     var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
     drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));

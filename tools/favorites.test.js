@@ -17,7 +17,7 @@ function between(start, end) {
 test('favorite toggle, split filter and JSON parser execute as native Zig unit tests', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-favorite-test-'));
   try {
-    copyZig(['json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig'], tmp);
+    copyZig(['json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig', 'workspace_view.zig'], tmp);
     const pure = 'const frequent = @import("frequent.zig");\nconst std = @import("std");\nconst json_reader = @import("json_reader.zig");\n' +
       between('fn toggledFavorite(', 'fn toggleFavorite(') +
       between('test "favorite toggle', 'test "used JSON field');
@@ -25,7 +25,7 @@ test('favorite toggle, split filter and JSON parser execute as native Zig unit t
     fs.writeFileSync(file, pure);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'favorite'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stderr, /All 2 tests passed/);
+    assert.match(result.stderr, /All 3 tests passed/);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -91,7 +91,7 @@ test('favorite marker is one small dot everywhere', async () => {
   assert.match(source, /FAVORITE_DOT_D: i32 = 6/);
   const draw = between('fn drawFavoriteDot(', 'fn drawSessionLockIcon(');
   assert.ok(draw.includes('drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));'));
-  assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 4);
+  assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 5);
   const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
   assert.doesNotMatch(sidebar, /@as\(i32, 18\) else 0/);
   const shot = fs.readFileSync(path.join(__dirname, 'chat-bench/demo-shot.mjs'), 'utf8');
@@ -101,4 +101,94 @@ test('favorite marker is one small dot everywhere', async () => {
   const { sessions } = await import('./chat-bench/demo-workspace.mjs');
   assert.equal(sessions.filter(s => s.favorite).length, 1);
   assert.ok(sessions.every(s => !s.hero || !s.favorite));
+});
+
+test('IGSH-457 Starred uses shared live membership and digit mapping on every navigation surface', () => {
+  const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  const inbox = read('src/inbox.zig');
+  const workspaces = read('src/workspaces.zig');
+  const sidebar = read('src/sidebar.zig');
+  const hook = read('src/shortcuts.zig');
+  const main = read('src/main.zig');
+  assert.match(inbox, /const favoriteSplitMatches = @import\("workspace_view.zig"\).splitMatches/);
+  assert.match(workspaces, /@import\("workspace_view.zig"\).contains\(true, 0, shell.workspace, shell.favorite\)/);
+  const starredSwitch = workspaces.slice(workspaces.indexOf('if (ws_in == @import("workspace_view.zig").starred)'), workspaces.indexOf('if (ws_in >= app_state.g_lws_count'));
+  assert.match(starredSwitch, /updateMainWindowTitle\(\);\s*_ = InvalidateRect\(app_state.g_main_hwnd, null, 0\);\s*return;/);
+  assert.equal((hook.match(/WM_APP_SWITCH_WORKSPACE, @import\("workspace_view.zig"\).fromDigit\(kb.vkCode - 0x30\).\?/g) || []).length, 2);
+  assert.doesNotMatch(hook, /WM_APP_SWITCH_WORKSPACE, kb.vkCode - 0x31/);
+  assert.match(sidebar, /if \(app_state.g_starred_workspace\) \{[\s\S]*?starredShellVisible\(i\)[\s\S]*?return count;/);
+  assert.match(main, /const cur: u32 = if \(app_state.g_starred_workspace\) 0 else @as\(u32, app_state.g_active_workspace\) \+ 1/);
+  assert.match(main, /target == SEARCH_STARRED_OFFSET/);
+  assert.match(main, /const jumpToInboxRow = @import\("inbox.zig"\).jumpToInboxRow;/);
+  assert.match(inbox, /pub fn jumpToInboxRow\(ri: u32\) void/);
+  assert.match(workspaces, /const SetTimer = @import\("win32.zig"\).SetTimer;/);
+  assert.match(read('src/win32.zig'), /pub extern "user32" fn SetTimer\(/);
+  assert.match(sidebar, /L\("Go to Starred workspace"\)/);
+  assert.match(sidebar, /No starred sessions\. Press Alt\+S on a session to star it\./);
+});
+
+
+test('IGSH-457 serialization coverage stays separate from the ISSUE-439 round trip', () => {
+  const workspaces = fs.readFileSync(path.join(__dirname, '../src/workspaces.zig'), 'utf8');
+  const roundTrip = between('test "ISSUE-439 session JSON round trip keeps each workspace last shell"', 'test "IGSH-457 Starred is never serialized into session or synced layout"');
+  assert.match(roundTrip, /parseSessionTabs\(bytes, &tabs\)/);
+  assert.match(roundTrip, /swapWorkspaceSlots\(0, 1\)/);
+  assert.doesNotMatch(roundTrip, /g_starred_workspace|captureSessionLayout/);
+  const starred = workspaces.slice(workspaces.indexOf('test "IGSH-457 Starred is never serialized into session or synced layout"'), workspaces.indexOf('pub fn starredShellVisible('));
+  assert.match(starred, /expect\(app_state.g_starred_workspace\)/);
+  assert.match(starred, /saveSessionTo\(path, null\)/);
+  assert.match(starred, /json_reader.uint\(parsed.value, "workspace_count"\)/);
+  assert.match(starred, /json_reader.uint\(parsed.value, "active_workspace"\)/);
+  assert.match(starred, /expectEqualStrings\(encoded_home, encoded_starred\)/);
+  assert.match(starred, /account_layout.zig"\).rebase/);
+});
+
+test('IGSH-457 production Starred rows include other windows without duplicating local sessions', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-starred-rows-'));
+  try {
+    copyZig(['workspace_view.zig'], tmp);
+    const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
+    const start = sidebar.indexOf('pub fn layoutRows(');
+    const end = sidebar.indexOf('    const show_section_headers', start);
+    assert.ok(start >= 0 && end > start);
+    const production = sidebar.slice(start, end) + '    return 0;\n}\n';
+    fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
+    fs.writeFileSync(path.join(tmp, 'integration.zig'), `const std = @import("std");
+const frequent = @import("frequent.zig");
+const MAX_ROWS = 8;
+const LOOK_UNIFIED = false;
+const DEV_TOP_PAD = 0;
+const Row = struct { kind: enum { tab, inbox }, gidx: u32, shell_idx: u32, y: i32 };
+const InboxRow = struct { ws: u32, favorite: bool };
+pub var local_favorite = true;
+pub const app_state = struct {
+    var g_starred_workspace = true;
+    var shell_count: u32 = 1;
+    var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
+    var g_inbox_ws_count: u32 = 2;
+    var g_inbox_ws = [_]struct { hwnd: usize }{ .{ .hwnd = 1 }, .{ .hwnd = 2 } };
+    var g_inbox_row_count: u32 = 3;
+    var g_inbox_rows = [_]InboxRow{ .{ .ws = 0, .favorite = true }, .{ .ws = 1, .favorite = true }, .{ .ws = 1, .favorite = false } };
+};
+fn wsStripHeight() i32 { return 40; }
+fn tabRowH() i32 { return 32; }
+${production}
+test "IGSH-457 Starred mirrors local and other-account window favorites after star and unstar" {
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(.tab, rows[0].kind);
+    try std.testing.expectEqual(.inbox, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    local_favorite = false;
+    app_state.g_inbox_rows[1].favorite = false;
+    try std.testing.expectEqual(@as(u32, 0), layoutRows(&rows));
+    app_state.g_inbox_rows[2].favorite = true;
+    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), rows[0].shell_idx);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(tmp, 'integration.zig'), '--test-filter', 'IGSH-457'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All \d+ tests passed/);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

@@ -554,6 +554,7 @@ const SEARCH_CLOSEWIN_OFFSET = @import("app_state.zig").SEARCH_CLOSEWIN_OFFSET;
 const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET;
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
+const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -628,6 +629,7 @@ const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET
 const SEARCH_CRASH_REPORTS_OFFSET = @import("app_state.zig").SEARCH_CRASH_REPORTS_OFFSET;
 const SEARCH_CRASH_NOW_OFFSET = @import("app_state.zig").SEARCH_CRASH_NOW_OFFSET;
 const SEARCH_HIBERNATE_NOW_OFFSET = @import("app_state.zig").SEARCH_HIBERNATE_NOW_OFFSET;
+const SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET = @import("app_state.zig").SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
 const SEARCH_INBOX_EXCLUDE_OFFSET = @import("app_state.zig").SEARCH_INBOX_EXCLUDE_OFFSET;
 const SEARCH_REMIND_PRESET_OFFSET = @import("app_state.zig").SEARCH_REMIND_PRESET_OFFSET;
 const SEARCH_GROUPMOVE_GROUP_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_GROUP_OFFSET;
@@ -1173,6 +1175,7 @@ const openInboxFilter = @import("inbox.zig").openInboxFilter;
 const closeInboxFilter = @import("inbox.zig").closeInboxFilter;
 const toggleInbox = @import("inbox.zig").toggleInbox;
 const armInboxStepContext = @import("inbox.zig").armInboxStepContext;
+const jumpToInboxRow = @import("inbox.zig").jumpToInboxRow;
 const inboxJump = @import("inbox.zig").inboxJump;
 const inboxStepJump = @import("inbox.zig").inboxStepJump;
 const refreshNextUnreadCache = @import("inbox.zig").refreshNextUnreadCache;
@@ -1258,7 +1261,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.787";
+pub const APP_VERSION = "0.28.790";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1850,6 +1853,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const target = hitTestSidebar(logical_my);
                 switch (target) {
+                    .inbox => |ri| {
+                        jumpToInboxRow(ri);
+                        return 0;
+                    },
                     .section => |tier| {
                         toggleSidebarSectionCollapsed(tier);
                         return 0;
@@ -2027,6 +2034,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
+            if (app_state.g_workspace_hover != null) {
+                app_state.g_workspace_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_inbox_button_hover) {
                 app_state.g_inbox_button_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2045,6 +2056,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = TrackMouseEvent(&tracking);
                     }
                 }
+            }
+            const ws_hover = workspaceStripHitTest(GET_X(lp), GET_Y(lp));
+            if (ws_hover != app_state.g_workspace_hover) {
+                app_state.g_workspace_hover = ws_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (ws_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
             }
             const hovered = inboxButtonHitTest(GET_X(lp), GET_Y(lp));
             if (hovered != app_state.g_inbox_button_hover) {
@@ -2366,7 +2386,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const my = GET_Y(lp);
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (workspaceStripHitTest(mx, my)) |ws| {
-                    if (ws != WS_NEW_PILL) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
+                    if (ws < app_state.g_lws_count) _ = PostMessageW(hwnd, WM_APP_WS_SNOOZE_OPEN, @as(usize, ws) + 1, 0);
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
@@ -2853,14 +2873,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CYCLE_WORKSPACE => {
             if (app_state.g_inbox_active) closeInbox(hwnd);
-            if (app_state.g_single_window and app_state.g_lws_count > 1) {
-                const cur: u32 = app_state.g_active_workspace;
-                const cnt: u32 = app_state.g_lws_count;
+            if (app_state.g_single_window) {
+                const cur: u32 = if (app_state.g_starred_workspace) 0 else @as(u32, app_state.g_active_workspace) + 1;
+                const cnt: u32 = @as(u32, app_state.g_lws_count) + 1;
                 var step: u32 = 1;
                 while (step < cnt) : (step += 1) {
                     const next: u32 = if (wp == 1) (cur + step) % cnt else (cur + cnt - step) % cnt;
-                    if (!app_state.g_ws_snoozed[next]) {
-                        switchToWorkspace(next);
+                    if (next == 0 or !app_state.g_ws_snoozed[next - 1]) {
+                        switchToWorkspace(if (next == 0) @import("workspace_view.zig").starred else next - 1);
                         break;
                     }
                 }
@@ -2869,6 +2889,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_INBOX_STEP => {
+            if (app_state.g_single_window and !app_state.g_inbox_active and (app_state.g_starred_workspace or !app_state.g_inbox_step_context_active)) {
+                _ = SendMessageW(hwnd, WM_APP_CYCLE_WORKSPACE, wp, 0);
+                return 0;
+            }
             inboxStepJump(if (wp == 1) 1 else -1);
             return 0;
         },
@@ -3701,6 +3725,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 showHeaderNoticeAscii("Workspace snooze needs single-window mode", 3500, true);
                 return 0;
             }
+            if (wp == 0 and app_state.g_starred_workspace) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
             if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
@@ -5310,6 +5335,28 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (crash_now) crash_recorder.crashNow() else crash_recorder.openFolder();
                     return 0;
                 }
+                if (target == SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_browser_focus_mode = false;
+                    app_state.g_shell_focused = true;
+                    app_state.g_browser_shortcut_open_guard_until = 0;
+                    clearSearchBackdrop();
+                    discardBrowserUrlBarEdit();
+                    closeWebView2();
+                    for (0..app_state.shell_count) |i| {
+                        app_state.shells[i].browser_enabled = false;
+                        closeBrowserForShell(@intCast(i));
+                    }
+                    showActiveShellAfterOverlay();
+                    updateBrowserVisibility();
+                    repositionActive();
+                    syncMouseHookForUrlClicks();
+                    invalidateSidebar();
+                    saveSession();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (target == SEARCH_HIBERNATE_NOW_OFFSET) {
                     const hib_count = hibernateAllParkedBrowserPanesNow();
                     var hib_buf: [64]u8 = undefined;
@@ -5523,6 +5570,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_CLOSEWIN_OFFSET) {
                     app_state.g_search_active = false;
                     clearSearchBackdrop();
+                    if (app_state.g_starred_workspace) {
+                        showActiveShellAfterOverlay();
+                        return 0;
+                    }
                     if (app_state.g_single_window and app_state.g_lws_count > 1) {
                         app_state.g_shell_focused = true;
                         showActiveShellAfterOverlay();
@@ -5587,6 +5638,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_tab = frequent.frequent_split;
                     openInbox(hwnd);
                     app_state.g_inbox_sel = 0;
+                    return 0;
+                }
+                if (target == SEARCH_STARRED_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    app_state.g_search_from_inbox = false;
+                    if (app_state.g_inbox_active) closeInbox(hwnd);
+                    switchToWorkspace(@import("workspace_view.zig").starred);
                     return 0;
                 }
                 if (target == SEARCH_GOINBOX_OFFSET) {
@@ -6539,39 +6599,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
-                if (app_state.shells[idx].disconnected and app_state.shells[idx].process == null) return 0;
+                var exit_code: DWORD = std.math.maxInt(DWORD);
+                const got_code = app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
+                if (app_state.shells[idx].ssh_reconnect.phase == .closed or
+                    (app_state.shells[idx].disconnected and app_state.shells[idx].process == null))
+                {
+                    var exit_log: [160]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
+                    return 0;
+                }
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
                 const is_ssh_kind = (k == .vps or k == .vps2 or k == .tmux);
-                {
-                    const knames = [_][]const u8{ "cmd", "pwsh", "vps", "tmux", "vps2", "bash", "gitbash" };
-                    var lbuf: [128]u8 = undefined;
-                    var ll: usize = 0;
-                    const t = "WM_APP_SHELL_EXITED kind=";
-                    @memcpy(lbuf[0..t.len], t);
-                    ll = t.len;
-                    const kn = knames[@intFromEnum(k)];
-                    @memcpy(lbuf[ll .. ll + kn.len], kn);
-                    ll += kn.len;
-                    const t2 = " idx=";
-                    @memcpy(lbuf[ll .. ll + t2.len], t2);
-                    ll += t2.len;
-                    appendDecimal(&lbuf, &ll, idx);
-                    const t3 = " in_window=";
-                    @memcpy(lbuf[ll .. ll + t3.len], t3);
-                    ll += t3.len;
-                    lbuf[ll] = if (in_resume_window) '1' else '0';
-                    ll += 1;
-                    const t4 = " window_remaining_ms=";
-                    @memcpy(lbuf[ll .. ll + t4.len], t4);
-                    ll += t4.len;
-                    const remaining: u64 = if (app_state.g_resume_until_tick > now) app_state.g_resume_until_tick - now else 0;
-                    appendDecimal(&lbuf, &ll, remaining);
-                    debugLog(lbuf[0..ll]);
-                }
-                var exit_code: DWORD = 0;
-                const got_code = is_ssh_kind and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
                 const loader_failure = got_code and exit_code == 0xC0000139;
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
@@ -6581,6 +6621,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
                     return 0;
                 }
+                var exit_log: [192]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} kind={s} reason={s} exit_code={d} known={}", .{ exited_id, @tagName(k), @tagName(action), exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                 switch (action) {
                     .respawn => {
                         if (!respawnShellInPlace(idx, false)) {
@@ -6600,6 +6642,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         closeShell(idx);
                     },
                 }
+            } else {
+                var exit_log: [160]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=removed-or-detached exit_code=unknown", .{exited_id}) catch "WM_APP_SHELL_EXITED log-overflow");
             }
             return 0;
         },
@@ -7290,6 +7335,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         const sv = allSessionsVisibleCount();
                         if (app_state.g_all_sessions_sel >= sv) app_state.g_all_sessions_sel = if (sv > 0) sv - 1 else 0;
                     }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (app_state.g_starred_workspace and !app_state.g_inbox_active) {
+                    loadInboxModel();
+                    @import("workspaces.zig").refreshStarredWorkspace();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

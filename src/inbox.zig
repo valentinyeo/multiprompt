@@ -230,6 +230,7 @@ pub fn inboxPublishesShell(shell: *const Shell) bool {
 pub fn toggleInboxExcluded(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     app_state.shells[idx].inbox_excluded = !app_state.shells[idx].inbox_excluded;
+    if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
     if (!app_state.g_restoring) saveSession();
     publishInboxStateNow();
     loadInboxModel();
@@ -672,19 +673,14 @@ fn toggledFavorite(favorite: bool) bool {
     return !favorite;
 }
 
-fn favoriteSplitMatches(tab: u32, ws: u32, favorite: bool) bool {
-    return switch (frequent.splitKind(tab)) {
-        .all, .frequent => true,
-        .favorites => favorite,
-        .workspace => |workspace| ws == workspace,
-    };
-}
+const favoriteSplitMatches = @import("workspace_view.zig").splitMatches;
 
 pub fn toggleFavorite(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     app_state.shells[idx].favorite = toggledFavorite(app_state.shells[idx].favorite);
     publishInboxStateNow();
     if (!app_state.g_restoring) saveSession();
+    if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
     invalidateSidebar();
     if (app_state.g_inbox_active) {
         loadInboxModel();
@@ -1402,6 +1398,7 @@ pub fn closeInbox(hwnd: HANDLE) void {
     app_state.g_inbox_filter_len = 0;
     updateMainWindowTitle();
     _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
+    if (app_state.g_starred_workspace) _ = SetTimer(hwnd, TIMER_INBOX_REFRESH, 1000, null);
     if (app_state.g_chat_active) {
         if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
         if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
