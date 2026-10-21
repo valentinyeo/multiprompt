@@ -16,7 +16,8 @@ const ShellSendResult = enum { ok, write_failed, enter_failed };
 const Entry = struct {
     state: enum { queued, sending, delivered, not_sent } = .queued,
     write_started: bool = false,
-    anchor: u32 = 0,
+    anchor: struct { sent_ms: i64 = 0 } = .{},
+    expires_ms: i64 = 0,
     channel_pending: bool = false,
     channel_sent: bool = false,
     channel_sent_ms: i64 = 0,
@@ -50,7 +51,7 @@ const ChatTmuxSendJob = struct {
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
 fn chatFileIdentityForShell(_: u32) Key { return test_key; }
 fn chatOutboxIndexById(id: u64) ?usize { return if (id == 1) 0 else null; }
-fn chatEchoAnchorNow(_: u32) u32 { return 44; }
+fn chatEchoAnchorNow(_: u32) @TypeOf(storage[0].anchor) { return .{ .sent_ms = 44 }; }
 fn saveChatOutbox() bool { saves += 1; return save_ok; }
 fn chatShouldUseDirectInput(_: u32) bool { return direct; }
 fn pasteTextToShellDirectEx(_: u32, _: []const u16, _: bool) bool { pastes += 1; return paste_ok; }
@@ -113,6 +114,18 @@ test "failed worker startup safely falls back once and reserved writes never rep
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), starts + pastes);
 }
+test "ISSUE-460 late channel completion never revives or retries a failed delivery" {
+    reset();
+    storage[0].state = .not_sent;
+    finishJob(true, false, 1);
+    try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters);
+    reset();
+    storage[0].state = .not_sent;
+    finishJob(false, false, 1);
+    try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters);
+}
 test "channel write failure falls back once but a written request or retry never pastes" {
     reset(); finishJob(false, false, 1);
     try std.testing.expectEqual(@as(usize, 1), pastes);
@@ -149,7 +162,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 4 tests passed/);
+  assert.match(result.stderr, /All 5 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);

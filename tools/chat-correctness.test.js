@@ -44,6 +44,7 @@ const TIMER_CHAT_SEND_VERIFY = 33;
 const CHAT_SEND_VERIFY_DELAYS_MS = [_]u32{ 700, 1200, 2000, 3000, 4000, 5000 };
 const Entry = struct {
     id: u64 = 1, state: ChatEchoState = .queued, write_started: bool = false,
+    expires_ms: i64 = 0,
     anchor: chat_echo.Anchor = .{}, sent_tick_ms: i64 = 0, left_box_ms: u64 = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
 };
 const ChatOutboxEntry = Entry;

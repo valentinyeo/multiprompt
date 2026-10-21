@@ -172,9 +172,11 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_send_tests.step);
     const chat_send_integration = b.addSystemCommand(&.{ "python3", "tools/chat-tmux-send-test.py", "--integration" });
     vps_test_step.dependOn(&chat_send_integration.step);
+    const outbox_test_step = b.step("test-chat-outbox", "Run native outbox delivery and restart tests");
     const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js" });
     chat_send_routing.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     vps_test_step.dependOn(&chat_send_routing.step);
+    outbox_test_step.dependOn(&chat_send_routing.step);
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_reader_tests = b.addSystemCommand(&.{ "python3", "tools/chat-history-reader-test.py" });
@@ -365,6 +367,7 @@ pub fn build(b: *std.Build) void {
         previous_chat_run = &run.step;
         test_step.dependOn(&run.step);
         vps_test_step.dependOn(&run.step);
+        outbox_test_step.dependOn(&run.step);
     }
     const frequent_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/frequent.zig"),
