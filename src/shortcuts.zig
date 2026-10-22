@@ -361,6 +361,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+[ / Alt+]", .b = "Read previous / next agent reply aloud; Chat View follows the spoken reply", .header = false },
     .{ .a = "Alt+W", .b = "Open a URL in a new pane tab and focus the browser", .header = false },
     .{ .a = "Alt+A", .b = "Toggle the Edge browser pane for this tab", .header = false },
+    .{ .a = "Alt+Shift+A", .b = "Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane)", .header = false },
     .{ .a = "Ctrl+Shift+S", .b = "Screenshot browser tab, paste link + space, focus Chat View composer or shell", .header = false },
     .{ .a = "Ctrl+Shift+X", .b = "Insert current browser tab URL (or most recent) + space at the Chat View caret; never send", .header = false },
     .{ .a = "Ctrl+Shift+L / Ctrl+L", .b = "Focus browser address bar", .header = false },
@@ -460,20 +461,23 @@ test "browser toggle debounce uses original event time across delayed delivery" 
     try std.testing.expect(claimBrowserToggleEvent(21_501, &handled_event_time));
 }
 
-pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, now: u64, guard_shell_id: u32, guard_until: u64) bool {
-    if (launch_tick != 0) return false;
+pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, hwnd_missing: bool, now: u64, guard_shell_id: u32, guard_until: u64) bool {
+    if (launch_tick != 0 and !hwnd_missing) return false;
     return shell_id != guard_shell_id or now >= guard_until;
+}
+
+test "Alt browser open guard rejects a delayed complete second chord" {
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, true, 56_000, 42, 65_000));
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, true, 58_344, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, true, 65_000, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, true, 58_344, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, true, 65_000, 42, 65_000));
+    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, false, 65_000, 42, 65_000));
+    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, false, 65_000, 42, 65_000));
 }
 
 pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {
     return enabled and !hwnd_live and launch_tick == 0;
-}
-
-test "Alt browser open guard rejects a delayed complete second chord" {
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, 56_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, 58_344, 42, 65_000));
 }
 
 test "Alt browser shortcut recovers an enabled pane with no live window" {
@@ -912,7 +916,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            if (PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, 1, @intCast(kb.time)) == 0) {
+            const retry = kb.vkCode == 0x41 and (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            if (PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_TOGGLE, if (retry) 2 else 1, @intCast(kb.time)) == 0) {
                 app_state.g_browser_toggle_chord_held = false;
                 return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
             }

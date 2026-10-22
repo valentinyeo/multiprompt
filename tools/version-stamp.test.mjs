@@ -141,6 +141,30 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
+test('PR runs only restore Zig caches while master pushes can save them', () => {
+  for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
+    const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
+    for (const cache of caches) {
+      assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
+      assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == '/);
+      if (cache.includes('uses: actions/cache/restore@')) {
+        assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'pull_request'\n/);
+      } else {
+        assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+      }
+    }
+    if (file === 'test.yml') {
+      assert.equal(caches.length, 8);
+      for (let i = 0; i < caches.length; i += 2) {
+        assert.ok(caches[i].includes('uses: actions/cache/restore@'));
+        assert.ok(caches[i + 1].includes('uses: actions/cache@'));
+        assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
+      }
+    }
+  }
+});
+
 test('build, CI, installer and documentation use the stamp contract', () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /const version_stamp_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/version-stamp\.test\.mjs", "tools\/release-version\.test\.mjs" \}\);/);

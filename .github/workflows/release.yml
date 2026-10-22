@@ -4,7 +4,6 @@ on:
   push:
     branches: [master]
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
     inputs:
       tag:
@@ -16,6 +15,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
