@@ -304,6 +304,12 @@ rollback profiles.
 A stable workspace ID is SHA-256 hashed (the first 30 hexadecimal characters),
 never a display name or slot. Profiles live under
 `%LOCALAPPDATA%\ZigShell\BrowserWorkspaces\edge\<hash>` or `chrome\<hash>`.
+Single-window slots retain their IDs when split into standalone windows. A
+standalone session persists `workspace_id` separately from the window's transport
+name; collapsing windows restores that ID and the original workspace order.
+Renaming, reordering and ordinary close/reopen do not select a new profile root.
+Transport-name collisions receive a separate export alias, never a new browser ID.
+
 The engine-prefixed token (`e-<hash>` / `c-<hash>`) is shown in a header notice
 when opening a pane. Bookmark cleanup is manual and affects only that profile.
 Closing or deleting a workspace leaves its hash-addressed browser data intact;

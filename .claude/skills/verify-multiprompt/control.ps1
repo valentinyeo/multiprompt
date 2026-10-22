@@ -532,7 +532,21 @@ function Wait-ConsoleText([string]$Command) {
     } "console visibly contains staged command: $Command"
 }
 
+function Focus-WorkspaceShell {
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -ne $focused -and (Get-Process -Id $focused.Current.ProcessId).ProcessName -eq 'msedge') {
+        Press @(0x1B) 'Esc: dismiss any Edge startup bubble without disabling the extension'
+        Press @(0x12, 0x4D) 'Alt+M: return keyboard focus from browser to workspace shell'
+    }
+    Wait-Until {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $null -ne $focused -and (Get-Process -Id $focused.Current.ProcessId).ProcessName -ne 'msedge'
+    } 'workspace shell owns keyboard input'
+}
+
 function Palette([string]$Query) {
+    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceShell }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
 }
@@ -1034,6 +1048,7 @@ try {
             $browserRoot = Join-Path $scratch 'local/ZigShell/BrowserWorkspaces/edge'
             for ($index = 0; $index -lt 6; $index++) {
                 if ($index -gt 0) {
+                    Focus-WorkspaceShell
                     Press @(0x11, 0x4E) 'Ctrl+N: create an independent workspace'
                     Wait-Until { (Read-Session).workspace_count -eq $index + 1 } 'new workspace saved'
                 }
@@ -1091,7 +1106,7 @@ try {
             Snapshot 'bookmark-action'
             Press @(0x0D) 'Enter: save favorite'
             Press @(0x1B) 'Esc: close favorite dialog'
-            [void][VerifyNative]::SetForegroundWindow($script:window)
+            Focus-WorkspaceShell
             Assert-WorkspaceProfile 'renamed' $targetId $targetRoot $bookmark
             Palette 'sort workspaces'
             Press @(0x0D) 'Enter: Sort Workspaces'
