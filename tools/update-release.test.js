@@ -32,7 +32,12 @@ test('Windows behavioral update tests are required by CI', () => {
   const update = jobs['test-windows-update'];
   const build = jobs['build-windows'];
   const source = jobs['test-update-source'];
-  assert.match(update, /^    needs: \[build-windows\]\n    runs-on: windows-latest\n/);
+  assert.doesNotMatch(update, /^    needs:/m);
+  assert.match(update, /^    runs-on: windows-latest$/m);
+  assert.match(update, /name: Wait for x64 update verifier/);
+  assert.match(update, /ARTIFACT: update-verifier-x64-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/);
+  assert.match(update, /AddMinutes\(4\)/);
+  assert.match(update, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Could not list update artifacts' \}/);
   assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
   assert.match(update, /fail-fast: false/);
   assert.match(source, /runs-on: ubuntu-latest/);
@@ -50,7 +55,7 @@ test('Windows behavioral update tests are required by CI', () => {
   assert.match(source, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
   assert.match(source, /foreach \(\$finding in 1\.\.9\)/);
   assert.doesNotMatch(update, /zig build|actions\/cache@|actions\/cache\/restore@|Install Zig|ZIG_GLOBAL_CACHE_DIR/);
-  assert.match(update, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: update-verifier/);
+  assert.match(update, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\n          path: update-verifier/);
   assert.match(build, /runs-on: ubuntu-latest/);
   assert.match(build, /arch: \[arm64, x64\]/);
   assert.match(build, /if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all\n/);
@@ -58,7 +63,7 @@ test('Windows behavioral update tests are required by CI', () => {
     .replace('${{ matrix.target }}', 'x86_64-windows-gnu')
     .replace("${{ github.event_name != 'pull_request' }}", 'true');
   assert.ok(build.includes(`run: ${releaseBuild} --summary all\n`));
-  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
+  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
   assert.match(build, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-\$\{\{ matrix.arch \}\}-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
   assert.match(update, /MULTIPROMPT_TEST_SIGNING_KEY: \$\{\{ github.workspace \}\}\/update-verifier\/update-test-key.der/);
   assert.match(build, /- name: Prepare throwaway update-test signing key\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: node tools\/update-release-fixtures.mjs --prepare-key zig-out\/bin\/update-test-key.der/);

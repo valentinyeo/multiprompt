@@ -632,6 +632,18 @@ pub fn build(b: *std.Build) void {
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 
+    for ([_]*std.Build.Step.Run{
+        chat_cpu_regression, chat_view_gaps_tests, frequent_integration_tests, ssh_reconnect_tests,
+        window_flicker_tests, chat_switch_tests, bridge_version_heal_tests, reply_quote_tests, chat_skill_tab_tests,
+    }) |run| {
+        run.argv.insertSlice(b.allocator, 1, &.{
+            .{ .bytes = b.dupe("--test-reporter=tap") },
+            .{ .bytes = b.dupe("--test-reporter-destination=stderr") },
+        }) catch @panic("OOM");
+        run.has_side_effects = true;
+        run.expectExitCode(0);
+    }
+
     const test_groups = [_]*std.Build.Step{
         b.step("test-group-1", "Run desktop, telemetry and chat CPU tests"),
         b.step("test-group-2", "Run Chat View regression, pane spacing and upload fixtures"),
@@ -647,9 +659,9 @@ pub fn build(b: *std.Build) void {
             dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
             1
         else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step or
-            dependency == &frequent_integration_tests.step or dependency == &version_stamp_tests.step)
+            dependency == &frequent_integration_tests.step)
             4
-        else if (dependency == &run_sync_protocol_tests.step or
+        else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
             dependency == &console_font_lifecycle_tests.step or dependency == &launch_regression.step or
             dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
             dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step or

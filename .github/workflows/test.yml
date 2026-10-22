@@ -213,7 +213,9 @@ jobs:
           echo 'Release placeholder rejected; ordinary tests remain buildable'
 
   test-windows-update:
-    needs: [build-windows]
+    permissions:
+      contents: read
+      actions: read
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -250,10 +252,25 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Wait for x64 update verifier
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: update-verifier-x64-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: pwsh
+        run: |
+          $deadline = [DateTime]::UtcNow.AddMinutes(4)
+          do {
+            $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts" --paginate | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Could not list update artifacts' }
+            if ($artifacts.artifacts | Where-Object { $_.name -eq $env:ARTIFACT -and -not $_.expired }) { break }
+            if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for x64 update verifier' }
+            Start-Sleep -Seconds 2
+          } while ($true)
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         with:
-          name: update-verifier-x64-${{ github.run_id }}
+          name: update-verifier-x64-${{ github.run_id }}-${{ github.run_attempt }}
           path: update-verifier
       - name: Test safe release updates
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
@@ -511,7 +528,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         with:
-          name: update-verifier-x64-${{ github.run_id }}
+          name: update-verifier-x64-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             zig-out/bin/multiprompt.exe
             zig-out/bin/update-test-key.der
