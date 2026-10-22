@@ -27,8 +27,9 @@ unpacked extension at the app's normal development extension path. After Edge
 publishes the actual extension ID, the harness registers the matching native
 host executable in the disposable runner's HKCU, removing it during cleanup.
 No app state, browser preferences or bookmark files are seeded or edited.
-Before app commands, dismiss Edge startup bubbles with Escape and return to the
-shell with Alt+M when UI Automation reports browser focus.
+Before app commands, focus only the Doctor-verified owned app frame through
+Win32 thread-input attachment, then confirm non-browser keyboard focus through
+UI Automation. This changes OS input focus, never app state or focus policy.
 
 Create a second workspace with Ctrl+N to persist the fresh layout, then return
 to the first workspace and open both panes before creating the remaining four.

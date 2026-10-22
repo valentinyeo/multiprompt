@@ -35,6 +35,25 @@ public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern IntPtr GetFocus();
+    [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    public static void FocusFrame(IntPtr hwnd, int expectedPid) {
+        uint owner;
+        uint target = GetWindowThreadProcessId(hwnd, out owner);
+        if (owner != expectedPid || Class(hwnd) != "ZigShell" || GetAncestor(hwnd, 3) != hwnd) throw new InvalidOperationException("Focus frame ownership mismatch");
+        uint current = GetCurrentThreadId();
+        bool attached = current != target;
+        if (attached && !AttachThreadInput(current, target, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            if (!SetForegroundWindow(hwnd)) throw new InvalidOperationException("Owned frame could not become foreground");
+            SetFocus(hwnd);
+            if (GetAncestor(GetFocus(), 3) != hwnd) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
+        } finally {
+            if (attached) AttachThreadInput(current, target, false);
+        }
+    }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
@@ -533,20 +552,9 @@ function Wait-ConsoleText([string]$Command) {
 }
 
 function Focus-WorkspaceShell {
-    [void][VerifyNative]::SetForegroundWindow($script:window)
-    $script:focusedBrowser = $false
-    Wait-Until {
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($null -eq $focused) { return $false }
-        $owner = [int]$focused.Current.ProcessId
-        if ($owner -le 0) { return $false }
-        $script:focusedBrowser = [Diagnostics.Process]::GetProcessById($owner).ProcessName -eq 'msedge'
-        return $true
-    } 'focused control has a live owning process'
-    if ($script:focusedBrowser) {
-        Press @(0x1B) 'Esc: dismiss any Edge startup bubble without disabling the extension'
-        Press @(0x12, 0x4D) 'Alt+M: return keyboard focus from browser to workspace shell'
-    }
+    Doctor
+    Record 'Focus the verified owned app frame for workspace keyboard commands'
+    [VerifyNative]::FocusFrame($script:window, $process.Id)
     Wait-Until {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($null -eq $focused) { return $false }
