@@ -233,7 +233,13 @@ try {
         $env:IGSH_246 = '0'
         Copy-Item "$Root/v1.11.0/multiprompt-x64.exe" $target -Force
         Copy-Item "$Root/v1.11.0/zigshell-bridge-x64.exe" "$Root/zigshell-bridge.exe" -Force
+        Copy-Item "$Root/v1.10.0/multiprompt-x64.exe" "$target.previous.exe" -Force
+        $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
+        Copy-Item "$Root/extension/manifest.json" "$extension/manifest.json" -Force
         $launch = ' "--name" "Review Desk" "--other" "C:\tail\\"'
+        $null = Start-Process $target -ArgumentList '--name "Rollback setup"' -PassThru
+        Wait-File "$target.starts"
+        Stop-FixtureApps
     }
     if ($TestGroup -ne 'Lifecycle') {
         $goodHash = (Get-FileHash $target).Hash
