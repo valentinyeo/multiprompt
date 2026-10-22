@@ -116,6 +116,7 @@ fn pollFonts() void {
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
+    .replaceAll('@import("focus.zig").', '')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
@@ -244,6 +245,9 @@ var g_active_workspace: u8 = 0;
 var g_account_applying = false;
 var g_ws_last_shell: [2]u32 = @splat(0);
 var g_focus_user_action_tick: u64 = 0;
+var g_focus_authorized_hwnd: HANDLE = null;
+var g_focus_authorized_until: u64 = 0;
+var g_focus_browser_shell_id: u32 = 0;
 var g_sidebar_scroll: i32 = 0;
 var g_nudge_repaint = false;
 const Console = struct { live: bool = false, font: CONSOLE_FONT_INFOEX = .{ .FaceName = makeFace("Courier New") }, buffer: CONSOLE_SCREEN_BUFFER_INFOEX = .{}, last_requested: [32]u16 = @splat(0) };
@@ -388,6 +392,9 @@ fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn updateBrowserVisibility() void {}
 fn focusActiveShell() void {}
+fn foregroundIsOurs() bool { return true; }
+fn captureWorkspaceFocus() void {}
+fn parkMainWindowBeforeActiveShellRemoval(_: usize) bool { return false; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) BOOL { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn openChatView() void { g_chat_active = true; }
@@ -620,6 +627,17 @@ test('IGSH-457 console lifecycle harness includes Starred workspace dependencies
   assert.match(source, /var g_starred_workspace = false/);
   assert.match(source, /var g_starred_last_shell: u32 = 0/);
   assert.doesNotMatch(source, /@import\("inbox.zig"\)/);
+});
+
+test('IGSH-522 console lifecycle harness resolves workspace focus handoff dependencies', () => {
+  const source = harness();
+  assert.doesNotMatch(source, /@import\("focus\.zig"\)/);
+  assert.match(source, /fn foregroundIsOurs\(\) bool/);
+  for (const name of ['g_focus_authorized_hwnd', 'g_focus_authorized_until', 'g_focus_browser_shell_id']) {
+    assert.match(source, new RegExp(`var ${name}:`));
+    assert.match(source, new RegExp(`app_state\\.${name} =`));
+  }
+  assert.match(source, /!app_state\.g_restoring and !app_state\.g_account_applying and foregroundIsOurs\(\)/);
 });
 
 test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold after events and queued sync work', () => {

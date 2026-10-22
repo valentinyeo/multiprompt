@@ -2600,6 +2600,8 @@ pub fn switchToShell(idx: u32) void {
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
     chatDraftBindToActive();
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
+        if (app_state.g_ws_last_shell[app_state.shells[idx].workspace] != app_state.shells[idx].shell_id)
+            app_state.g_ws_focus[app_state.shells[idx].workspace] = .none;
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
     }
     @import("main.zig").sessionFrontChanged();

@@ -36,6 +36,7 @@ var g_chat_find_open = false;
 var g_edit_hwnd: HANDLE = null;
 var g_native_browser_focus_pending_shell_id: u32 = 0;
 var g_chat_browser_handoff_until: u64 = 0;
+fn captureWorkspaceFocus() void {}
 fn altqLog(_: []const u8, _: anytype) void {}
 fn altqPtr(hwnd: HANDLE) usize {
     return @intFromPtr(hwnd);

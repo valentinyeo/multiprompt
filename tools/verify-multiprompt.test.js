@@ -330,3 +330,141 @@ test('browser emulation map drives the real native CLI and extension only on Git
   assert.match(read(skill + 'features/README.md'), /\[Browser emulation\]\(browser-emulation\.md\)/);
 
 });
+
+function assertsWorkspaceFocusHandoff(text) {
+  const start = text.indexOf('pub fn switchToWorkspace(');
+  const end = text.indexOf('\npub fn copyBlueDotHookInstructions(', start);
+  assert.ok(start >= 0 && end > start);
+  const switching = text.slice(start, end);
+  assert.match(switching, /if \(target\) \|idx\| \{\s*if \(app_state\.g_focus_user_action_tick != 0\) [^\n]*switchToShell\(idx\);\s*if \(!app_state\.g_restoring and !app_state\.g_account_applying and @import\("focus\.zig"\)\.foregroundIsOurs\(\)\) \{\s*app_state\.g_focus_authorized_hwnd = if \(app_state\.g_chat_active\) app_state\.g_chat_composer_hwnd else app_state\.shells\[idx\]\.hwnd;\s*app_state\.g_focus_authorized_until = GetTickCount64\(\) \+ 1500;\s*app_state\.g_focus_browser_shell_id = 0;\s*\}\s*focusActiveShell\(\);/);
+  assert.doesNotMatch(switching, /g_focus_(?:user_action|input)_tick\s*=/);
+}
+
+test('IGSH-522: workspace return grants a bounded owned-input handoff, never background or pane authority', () => {
+  const switching = read('src/workspaces.zig');
+  assertsWorkspaceFocusHandoff(switching);
+  for (const [before, after] of [
+    ['!app_state.g_restoring and ', ''],
+    ['!app_state.g_account_applying and ', ''],
+    ['@import("focus.zig").foregroundIsOurs()', 'true'],
+    ['app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd', 'app_state.shells[idx].browser_hwnd'],
+    ['GetTickCount64() + 1500', 'GetTickCount64() + 60000'],
+    ['app_state.g_focus_browser_shell_id = 0;', ''],
+    [/        focusActiveShell\(\);\r?\n    } else \{/, '        app_state.g_focus_user_action_tick = GetTickCount64();\n        focusActiveShell();\n    } else {'],
+  ]) {
+    for (const newline of ['\n', '\r\n']) {
+      const source = switching.replace(/\r?\n/g, newline);
+      const broken = source.replace(before, after);
+      assert.notEqual(broken, source);
+      assert.throws(() => assertsWorkspaceFocusHandoff(broken));
+    }
+  }
+  const focusJourney = control.slice(control.indexOf("        'workspace-focus' {"), control.indexOf("        'chat-view' {"));
+  const returning = focusJourney.slice(focusJourney.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
+  assert.ok(returning.includes("Type-Text 'workspace-focus-chat'"));
+  assert.ok(returning.includes("$expectedText = 'before-workspace-focus-chat'"));
+  assert.match(returning, /EditText\(\[IntPtr\]\$composerHandle\) -ceq \$expectedText/);
+  assert.match(returning, /NativeWindowHandle -ne \$composerHandle/);
+  assert.doesNotMatch(returning, /SetForegroundWindow|SetFocus|\.SetFocus\(|Click.*(?:composer|typing box)/i);
+});
+
+function assertsOptionalChatViewRead(source) {
+  const surface = source.slice(source.indexOf('function Wait-WorkspaceSurface('), source.indexOf('function Wait-ConsoleText('));
+  const expression = surface.match(/\[bool\]\(([^\n]+?)\) -ne \$Chat/);
+  assert.ok(expression, 'Chat View must retain its expected-state comparison');
+  assert.equal(expression[1], "$state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv");
+  const evaluate = new Function('tab', `return Boolean(${expression[1]
+    .replace("$state.tabs[$Tab].PSObject.Properties['cv']", "Object.hasOwn(tab, 'cv')")
+    .replace('$state.tabs[$Tab].cv', 'tab.cv')
+    .replace(' -and ', ' && ')});`);
+  for (const saved of [{}, { cv: false }, { cv: true }]) {
+    const tab = new Proxy(saved, {
+      get(target, key) {
+        assert.ok(Object.hasOwn(target, key), `StrictMode read of missing ${key}`);
+        return target[key];
+      },
+    });
+    for (const expected of [false, true]) {
+      assert.equal(evaluate(tab) !== expected, (saved.cv === true) !== expected);
+    }
+  }
+}
+
+test('IGSH-522: optional saved cv is false under StrictMode without weakening Chat View equality', () => {
+  assert.match(read('src/session.zig'), /if \(app_state\.shells\[i\]\.chat_view_on and pos < json_buf\.len - 540\) \{\s*const cv = ",\\"cv\\":true";/);
+  assert.match(read('src/app_state.zig'), /cv: bool = false/);
+  assertsOptionalChatViewRead(control);
+  for (const [before, after] of [
+    ["$state.tabs[$Tab].PSObject.Properties['cv'] -and ", ''],
+    [' -and $state.tabs[$Tab].cv', ''],
+    [' -ne $Chat)', ' -ne $false)'],
+  ]) {
+    const broken = control.replace(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => assertsOptionalChatViewRead(broken), assert.AssertionError);
+  }
+});
+
+function assertsFocusJourneyReadiness(source) {
+  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'chat-view' {"));
+  const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
+  const palette = source.slice(source.indexOf('function Focus-Palette('), source.indexOf('function Wait-WorkspaceSurface('));
+  const surface = source.slice(source.indexOf('function Wait-WorkspaceSurface('), source.indexOf('function Wait-ConsoleText('));
+  const console = source.slice(source.indexOf('function Wait-ConsoleText('), source.indexOf('function Palette('));
+  assert.match(focus, /if \(\$initial.hide_pills\) \{\s*Focus-Palette 'workspace switcher' 6213\s*Press @\(0x0D\) 'Enter: show workspace switcher'/);
+  assert.ok(focus.indexOf("'workspace switcher shown and saved'") < focus.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
+  assert.match(focus, /Snapshot 'pills-ready'/);
+  assert.match(focus, /Focus-Palette 'per tab' 6345/);
+  for (const text of [pills, focus]) {
+    assert.match(text, /PSObject.Properties\['hide_pills'\] -and -not \$state.hide_pills/);
+    for (const field of ['hide_sidebar', 'sidebar_collapsed']) {
+      assert.ok(text.includes(`-not ($state.PSObject.Properties['${field}'] -and $state.${field})`));
+    }
+  }
+  assert.match(pills, /\$state.single_window/);
+  assert.ok(pills.includes("Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0"));
+  assert.ok(pills.includes("-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100"));
+  assert.ok(pills.indexOf('Wait-Until {') < pills.indexOf('[VerifyNative]::ClickClient'));
+  assert.match(pills, /8 \+ \(\$Workspace \+ 1\) \* 29 \+ 12\), 17/);
+  assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length/);
+  assert.match(palette, /Substring\(\$start\)/);
+  assert.match(palette, /GetFocusedWindow\(\$script:window\) -eq \$script:window/);
+  assert.match(palette, /\$Query.Length/);
+  assert.match(palette, /\$Target/);
+  assert.equal((palette.match(/Wait-Until \{/g) || []).length, 2);
+  for (const field of ['active_workspace', 'active_tab', 'kind', 'cv']) assert.ok(surface.includes(`$state.${field}`) || surface.includes(`].${field}`));
+  assert.match(surface, /IsOffscreen/);
+  assert.match(surface, /NativeWindowHandle -eq \$Composer/);
+  assert.match(surface, /Class\(\$foreground\) -eq 'ConsoleWindowClass'/);
+  assert.match(surface, /'ZigShell-' \+ \$state.tabs\[\$Tab\].shell_id/);
+  assert.doesNotMatch(surface + console, /SetFocus|SetForegroundWindow|ClickClient|::Text\(|::Chord\(/);
+  assert.match(console, /TextPattern\]::Pattern/);
+  assert.match(console, /EndsWith\(\$Command, \[StringComparison\]::Ordinal\)/);
+  for (const line of focus.split(/\r?\n/)) {
+    if (/Press .*?(?:Ctrl\+N|Alt\+2|Alt\+Right|Alt\+Left|switch to shell)|^\s+Click-WorkspacePill /.test(line)) {
+      const after = focus.slice(focus.indexOf(line) + line.length);
+      assert.match(after, /^\r?\n\s+(?:Wait-Until \{|Wait-WorkspaceSurface )/);
+    }
+  }
+  assert.equal((focus.match(/Wait-ConsoleText /g) || []).length, 4);
+  assert.equal((focus.match(/Click-WorkspacePill /g) || []).length, 4);
+  assert.equal((focus.match(/name = 'workspace-focus-/g) || []).length, 4);
+}
+
+test('IGSH-522: hidden pills are shown through the palette and every focus transition waits for real input readiness', () => {
+  assertsFocusJourneyReadiness(control);
+  for (const [before, after] of [
+    ["Focus-Palette 'workspace switcher' 6213", "Palette 'workspace switcher'"],
+    ["$state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills", '$true'],
+    ["Wait-WorkspaceSurface $second $secondTab $false", 'Start-Sleep -Milliseconds 250'],
+    ["Wait-ConsoleText 'echo workspace-focus-shell-pill'", ''],
+    ['$focused.Current.NativeWindowHandle -eq $Composer', '$true'],
+  ]) {
+    const broken = control.replaceAll(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => assertsFocusJourneyReadiness(broken));
+  }
+  assert.match(read('src/app_state.zig'), /g_hide_pills: bool = true/);
+  assert.match(read('src/sidebar.zig'), /g_hide_sidebar or app_state.g_hide_pills\) return null/);
+  assert.match(read('src/command_palette.zig'), /defer \{[\s\S]*?\[palette\] ready chars=\{d\} count=\{d\} target=\{d\}/);
+});

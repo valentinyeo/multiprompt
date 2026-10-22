@@ -13,6 +13,11 @@ const WS_BORDER = @import("win32.zig").WS_BORDER;
 const WM_KILLFOCUS = @import("win32.zig").WM_KILLFOCUS;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const SW_HIDE = @import("win32.zig").SW_HIDE;
+const SWP_HIDEWINDOW = @import("win32.zig").SWP_HIDEWINDOW;
+const SWP_NOMOVE = @import("win32.zig").SWP_NOMOVE;
+const SWP_NOSIZE = @import("win32.zig").SWP_NOSIZE;
+const SWP_NOZORDER = @import("win32.zig").SWP_NOZORDER;
+const SWP_NOACTIVATE = @import("win32.zig").SWP_NOACTIVATE;
 const ES_AUTOHSCROLL = @import("win32.zig").ES_AUTOHSCROLL;
 const WM_KEYDOWN = @import("win32.zig").WM_KEYDOWN;
 const WM_APP_SEARCH_OPEN = @import("win32.zig").WM_APP_SEARCH_OPEN;
@@ -78,6 +83,7 @@ const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
 const focusGuard = @import("focus.zig").focusGuard;
 const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
 const SetFocus = @import("focus.zig").SetFocus;
+const SetWindowPos = @import("focus.zig").SetWindowPos;
 const ShowWindow = @import("focus.zig").ShowWindow;
 const isCtrlDown = @import("focus.zig").isCtrlDown;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
@@ -652,12 +658,12 @@ pub fn hideShellsForOverlay() void {
     closeWebView2();
     for (0..app_state.shell_count) |i| {
         if (app_state.shells[i].hwnd != null) {
-            _ = ShowWindow(app_state.shells[i].hwnd, SW_HIDE);
+            _ = SetWindowPos(app_state.shells[i].hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
-    if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
-    if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
-    if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
+    if (app_state.g_chat_status_hwnd != null) _ = SetWindowPos(app_state.g_chat_status_hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    if (app_state.g_chat_transcript_hwnd != null) _ = SetWindowPos(app_state.g_chat_transcript_hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    if (app_state.g_chat_composer_hwnd != null) _ = SetWindowPos(app_state.g_chat_composer_hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     hideAllBrowserChrome();
 }
 

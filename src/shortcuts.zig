@@ -595,6 +595,14 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const surface = if (fg == app_state.g_main_hwnd and GetFocus() != null) GetFocus() else fg;
             if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) focusGuardNoteInput(surface, GetTickCount64(), true);
             if (foregroundHwndIsOurs(fg)) app_state.g_focus_user_action_tick = app_state.g_focus_input_tick;
+        } else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and
+            kb.vkCode != VK_MENU and kb.vkCode != 0xA4 and kb.vkCode != 0xA5 and kb.vkCode != 0xFF and
+            foregroundIsOurs())
+        {
+            app_state.g_focus_authorized_hwnd = null;
+            app_state.g_focus_authorized_until = 0;
+            app_state.g_focus_browser_shell_id = 0;
+            app_state.g_focus_user_action_tick = GetTickCount64();
         }
 
         const find_key_up = kb.vkCode < app_state.g_chat_find_consumed.len and app_state.g_chat_find_consumed[kb.vkCode] and (wp == WM_KEYUP or wp == WM_SYSKEYUP);
@@ -1697,7 +1705,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
                     }
                     debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 0, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);
                     return 1;
                 }
                 if (kb.vkCode == 0x54 and shift) {

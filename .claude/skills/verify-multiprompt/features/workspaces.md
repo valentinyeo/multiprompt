@@ -1,12 +1,13 @@
 # Workspaces
 
-Create a workspace in the same desktop window and switch away and back while retaining the workspace and its session.
+Create a workspace in the same desktop window and switch away and back while retaining the workspace and its session. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
 
 ## Sub-features
 
 - `workspace-create`: add one in-process workspace with a real CMD session.
 - `workspace-switch`: return to the first stored workspace.
 - `workspace-return`: cycle back to the new workspace and confirm its saved identity and active state.
+- `workspace-focus`: leave and return with Alt+Right / Alt+Left, then type into the remembered Chat View typing box or shell without clicking.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,17 @@ Preconditions:
 - **Switch away.** Press Alt+2. The saved active workspace must be the first stored workspace, index zero.
 - **Return.** Press Alt+Right. The saved active workspace must equal the newly created workspace, not Starred or a different window.
 - **Proof.** Inspect `before.png`, `created.png`, `after.png`, the timestamped keys in `actions.json`, and `data/roaming/ZigShell/session.json`. `result.json` records before/after workspace counts, returned active index and window title.
+
+### Keyboard focus regression journey
+
+Dispatch `gh workflow run verify.yml -f feature=workspace-focus`; Windows selects `control.ps1 -Feature workspace-focus`. Pull requests run this alongside the unchanged appearance journey.
+
+- Show the default-hidden workspace switcher through Ctrl+K before any pill click; wait for saved visibility, expanded sidebar and the default unsnoozed layout.
+- Follow the [complete workspace-focus step and bounded-readiness table](workspace-focus.md#driving-it-with-controlps1). It enumerates setup, keyboard and pill returns in both Chat View and the console, no-click text assertions, staged commands and cleanup.
+- Require all four `workspace-focus ... PASS` outcomes and a passed `result.json`. Every transition waits for the selected saved session, matching view and actual input surface, not just the active workspace index.
+- Inspect `pills-ready.png`, `action.png`, `chat-returned.png`, `after.png`, timestamped `actions.json`, saved state and debug logs. Readiness checks never click a composer or repair focus after switching.
+
+This journey covers local CMD and Chat View typing focus, not account sync, agents, SSH or browser focus. The Zig workspace regression also covers persisted focus round trips; this desktop journey does not relaunch the app.
 
 ## Gotchas
 

@@ -32,7 +32,8 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const start = source.indexOf('const FocusNative = struct {');
     const nativeEnd = source.indexOf('\n};', start) + 3;
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
-    const production = source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted');
+    const production = (source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted'))
+      .replaceAll('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()');
     const fixture = fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, fixture.replace("fn reset() void {", production + "\nfn reset() void {"));

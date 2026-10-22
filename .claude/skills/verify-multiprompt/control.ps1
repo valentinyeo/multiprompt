@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -27,6 +27,8 @@ using System.Text;
 using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
@@ -34,12 +36,17 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
@@ -107,6 +114,34 @@ public static class VerifyNative {
             return true;
         }, IntPtr.Zero);
         return visible;
+    }
+    public static void ClickClient(IntPtr hwnd, int x, int y) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");
+        if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Cannot position mouse on pill");
+        foreach (uint flags in new uint[] { 2, 4 }) {
+            Input input = new Input(); input.type = 0;
+            input.data.mouse = new Mouse { flags = flags };
+            if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
+            Thread.Sleep(35);
+        }
+    }
+    public static IntPtr GetFocusedWindow(IntPtr hwnd) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
+        GuiThreadInfo info = new GuiThreadInfo();
+        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+        if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return info.Focus;
+    }
+    public static string EditText(IntPtr hwnd) {
+        if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
+        StringBuilder text = new StringBuilder(512);
+        UIntPtr length;
+        if (SendMessageTimeout(hwnd, 0x000D, new UIntPtr((uint)text.Capacity), text, 2, 1000, out length) == IntPtr.Zero) throw new InvalidOperationException("Cannot read Edit text within timeout");
+        if (length.ToUInt64() >= (ulong)(text.Capacity - 1)) throw new InvalidOperationException("Edit text may be truncated");
+        return text.ToString();
     }
     public static string Title(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(512); GetWindowText(hwnd, text, text.Capacity); return text.ToString();
@@ -391,6 +426,13 @@ function Doctor {
 }
 
 function Snapshot([string]$Name) {
+    $focus = @{ foreground = [VerifyNative]::GetForegroundWindow().ToInt64() }
+    try { $focus.native = [VerifyNative]::GetFocusedWindow($script:window).ToInt64() } catch { $focus.nativeError = $_.Exception.Message }
+    try {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $focus.uia = @{ handle = $focused.Current.NativeWindowHandle; pid = $focused.Current.ProcessId; class = $focused.Current.ClassName }
+    } catch { $focus.uiaError = $_.Exception.Message }
+    Save-Json $focus ($Name + '.focus.json')
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
     $tree = foreach ($node in $nodes) {
@@ -428,6 +470,61 @@ function Type-Text([string]$Text) {
     Assert-Foreground
     Record ('Type ' + $Text)
     [VerifyNative]::Text($Text)
+}
+
+function Click-WorkspacePill([int]$Workspace) {
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
+    } "visible unsnoozed workspace pill $Workspace at default layout"
+    Doctor
+    Assert-Foreground
+    Record ("Click workspace pill for stored workspace $Workspace")
+    [void][VerifyNative]::DwmFlush()
+    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
+function Focus-Palette([string]$Query, [int]$Target) {
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $start = (Get-Content $log -Raw).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    Wait-Until {
+        $trace = (Get-Content $log -Raw).Substring($start)
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+    } 'command palette initialized and owned frame focused'
+    Type-Text $Query
+    Wait-Until {
+        (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
+    } "palette query consumed and expected command $Target selected"
+}
+
+function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
+    Wait-Until {
+        $state = Read-Session
+        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]($state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv) -ne $Chat) { return $false }
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
+        if (-not $Chat) {
+            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and [VerifyNative]::Title($foreground).EndsWith(('ZigShell-' + $state.tabs[$Tab].shell_id), [StringComparison]::Ordinal)
+        }
+        $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Composer)
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $foreground -eq $script:window -and $element.Current.ProcessId -eq $process.Id -and -not $element.Current.IsOffscreen -and $focused.Current.NativeWindowHandle -eq $Composer
+    } "workspace $Workspace session $Tab Chat View=$Chat visible and input ready"
+}
+
+function Wait-ConsoleText([string]$Command) {
+    Wait-Until {
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window -or [VerifyNative]::Class($foreground) -ne 'ConsoleWindowClass') { return $false }
+        $console = [System.Windows.Automation.AutomationElement]::FromHandle($foreground)
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+        $document = $console.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -eq $document) { return $false }
+        $pattern = $document.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
+        $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
+    } "console visibly contains staged command: $Command"
 }
 
 function Palette([string]$Query) {
@@ -686,6 +783,139 @@ try {
             $result.sshBoundary.tabRemoved = $false
             Save-Json $script:sessionOpenSaved 'session-after.json'
             $result.checks += @{ name = 'session-open-background-idempotent'; workspace = $workspaceName; group = $group.name; groupId = $group.id; host = $hostName; port = $script:zsbPort; created = $created; repeated = $repeated; tmux = 'verify-1'; title = 'Verify 1'; matchingTabs = 1; tabsBefore = @($baseline.tabs).Count; tabsAfter = @($script:sessionOpenSaved.tabs).Count; activeWorkspaceBefore = $workspaceBefore; activeWorkspaceAfter = $script:sessionOpenSaved.active_workspace; activeTabBefore = $activeTabBefore; activeTabAfter = $script:sessionOpenSaved.active_tab; foregroundBefore = $foregroundBefore.ToInt64(); foregroundAfter = [VerifyNative]::GetForegroundWindow().ToInt64(); windowTitleBefore = $titleBefore; windowTitleAfter = [VerifyNative]::Title($script:window) }
+            Snapshot 'after'
+        }
+        'workspace-focus' {
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+            } 'initial CMD session saved' 60
+            $initial = Read-Session
+            if ($initial.active_workspace -ne 0 -or $initial.workspace_count -ne 1) { throw 'Expected one initial stored workspace' }
+            $initialTab = $initial.active_tab
+            Wait-WorkspaceSurface 0 $initialTab $false
+            if ($initial.hide_pills) {
+                Focus-Palette 'workspace switcher' 6213
+                Press @(0x0D) 'Enter: show workspace switcher'
+            }
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)
+            } 'workspace switcher shown and saved'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            Snapshot 'pills-ready'
+            Focus-Palette 'per tab' 6345
+            Press @(0x0D) 'Enter: Chat View per tab'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and -not ($state.PSObject.Properties.Name -contains 'chat_view_mode')
+            } 'per-session Chat View mode saved'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            $tab = (Read-Session).tabs[$initialTab]
+            if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
+                Press @(0x12, 0x43) 'Alt+C: enable Chat View for the test session'
+            }
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv
+            } 'test session Chat View enabled'
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+            $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+            Wait-Until {
+                $candidate = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                $null -ne $candidate -and $candidate.Current.ProcessId -eq $process.Id -and -not $candidate.Current.IsOffscreen -and $candidate.Current.NativeWindowHandle -ne 0
+            } 'owned Chat View typing box visible' 30
+            $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+            $composerHandle = $composer.Current.NativeWindowHandle
+            if ([VerifyNative]::GetAncestor([IntPtr]$composerHandle, 2) -ne $script:window) { throw 'Chat View typing box is not in the owned window' }
+            Record 'Setup: foreground owned Chat View before focus regression'
+            [void][VerifyNative]::ShowWindow($script:window, 9)
+            [void][VerifyNative]::SetForegroundWindow($script:window)
+            Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'foreground Chat View frame'
+            Wait-Until {
+                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+                $focused.Current.ProcessId -eq $process.Id -and $focused.Current.NativeWindowHandle -eq $composerHandle
+            } 'owned Chat View typing box focused'
+            Type-Text 'before-'
+            Wait-Until {
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq 'before-'
+            } 'initial text landed in Chat View typing box'
+            Snapshot 'action'
+            Press @(0x11, 0x4E) 'Ctrl+N: create second workspace'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.workspace_count -eq $initial.workspace_count + 1 -and $state.active_workspace -eq 1 -and $state.active_tab -ne $initialTab -and $state.tabs[$state.active_tab].workspace -eq 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+            } 'second workspace and distinct CMD session saved'
+            $second = (Read-Session).active_workspace
+            $secondTab = (Read-Session).active_tab
+            Wait-WorkspaceSurface $second $secondTab $false
+            Press @(0x12, 0x32) 'Alt+2: return to first workspace'
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
+            Press @(0x12, 0x27) 'Alt+Right: leave Chat View workspace'
+            Wait-WorkspaceSurface $second $secondTab $false
+            Press @(0x12, 0x25) 'Alt+Left: return to Chat View workspace'
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
+            Type-Text 'workspace-focus-chat'
+            $expectedText = 'before-workspace-focus-chat'
+            Wait-Until {
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq $expectedText
+            } 'text landed in Chat View typing box without a click'
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            if ($focused.Current.NativeWindowHandle -ne $composerHandle) { throw 'Chat View typing box did not retain keyboard focus' }
+            $chatState = Read-Session
+            if ($chatState.active_tab -ne $initialTab -or $chatState.workspaces[0].focus -ne 'chat') { throw 'Chat focus or selected session was not persisted' }
+            $result.checks += @{ name = 'workspace-focus-chat'; text = $expectedText; composer = $composerHandle; activeTab = $chatState.active_tab; savedFocus = $chatState.workspaces[0].focus }
+            Write-Output 'workspace-focus chat PASS'
+            Snapshot 'chat-returned'
+            Click-WorkspacePill $second
+            Wait-WorkspaceSurface $second $secondTab $false
+            Click-WorkspacePill 0
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
+            Type-Text '-pill'
+            Wait-Until {
+                [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq ($expectedText + '-pill')
+            } 'pill return restored Chat View input without a composer click'
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $pillState = Read-Session
+            if ($focused.Current.NativeWindowHandle -ne $composerHandle -or $pillState.active_tab -ne $initialTab -or $pillState.workspaces[0].focus -ne 'chat') { throw 'Pill return lost Chat View focus or selected session' }
+            $result.checks += @{ name = 'workspace-focus-chat-pill'; text = ($expectedText + '-pill'); composer = $composerHandle; activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
+            Write-Output 'workspace-focus chat pill PASS'
+            Press @(0x12, 0x43) 'Alt+C: switch to shell console'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            $pillMarker = Join-Path $scratch 'workspace-focus-shell-pill.txt'
+            if (Test-Path $pillMarker) { throw 'Pill shell marker must not exist before input' }
+            Type-Text 'echo workspace-focus-shell-pill'
+            Wait-ConsoleText 'echo workspace-focus-shell-pill'
+            Click-WorkspacePill $second
+            Wait-WorkspaceSurface $second $secondTab $false
+            if ((Read-Session).workspaces[0].focus -ne 'shell') { throw 'Pill mouse-down did not capture the newly selected shell surface' }
+            Click-WorkspacePill 0
+            Wait-WorkspaceSurface 0 $initialTab $false
+            Type-Text ('>"' + $pillMarker + '"')
+            Wait-ConsoleText ('echo workspace-focus-shell-pill>"' + $pillMarker + '"')
+            Press @(0x0D) 'Enter: execute in pill-restored shell without a console click'
+            Wait-Until { (Test-Path $pillMarker) -and (Get-Content $pillMarker -Raw).Trim() -ceq 'workspace-focus-shell-pill' } 'pill-restored console executed typed command'
+            $pillState = Read-Session
+            if ($pillState.active_tab -ne $initialTab -or $pillState.workspaces[0].focus -ne 'shell') { throw 'Pill return lost shell focus or selected session' }
+            $result.checks += @{ name = 'workspace-focus-shell-pill'; marker = (Get-Content $pillMarker -Raw).Trim(); activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
+            Write-Output 'workspace-focus shell pill PASS'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            $marker = Join-Path $scratch 'workspace-focus-shell.txt'
+            if (Test-Path $marker) { throw 'Shell focus marker must not exist before input' }
+            Type-Text 'echo workspace-focus-shell'
+            Wait-ConsoleText 'echo workspace-focus-shell'
+            Press @(0x12, 0x27) 'Alt+Right: leave shell workspace'
+            Wait-WorkspaceSurface $second $secondTab $false
+            Press @(0x12, 0x25) 'Alt+Left: return to shell workspace'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            Type-Text ('>"' + $marker + '"')
+            Wait-ConsoleText ('echo workspace-focus-shell>"' + $marker + '"')
+            Press @(0x0D) 'Enter: execute in restored shell without a click'
+            Wait-Until { (Test-Path $marker) -and (Get-Content $marker -Raw).Trim() -ceq 'workspace-focus-shell' } 'restored console executed the typed command'
+            $shellState = Read-Session
+            if ($shellState.active_tab -ne $initialTab -or $shellState.workspaces[0].focus -ne 'shell') { throw 'Shell focus or selected session was not persisted' }
+            $result.checks += @{ name = 'workspace-focus-shell'; marker = (Get-Content $marker -Raw).Trim(); activeTab = $shellState.active_tab; savedFocus = $shellState.workspaces[0].focus }
+            Write-Output 'workspace-focus shell PASS'
             Snapshot 'after'
         }
         'chat-view' {

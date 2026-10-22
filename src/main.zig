@@ -1241,6 +1241,7 @@ comptime {
 }
 
 const std = @import("std");
+const WM_MOUSEACTIVATE: UINT = 0x0021;
 const json_reader = @import("json_reader.zig");
 const link_detect = @import("link_detect.zig");
 const tmux_identity = @import("tmux_identity.zig");
@@ -1596,7 +1597,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        WM_MOUSEACTIVATE => {
+            @import("workspaces.zig").captureWorkspaceFocus();
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        },
         WM_LBUTTONDOWN => {
+            @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
 
@@ -3583,17 +3589,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
-            if (wp == 1 and foregroundIsOurs()) {
-                cancelShellRefocus(hwnd);
-                const fg = GetForegroundWindow();
-                const our_thread = GetCurrentThreadId();
-                const fg_thread = GetWindowThreadProcessId(fg, null);
-                const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-                _ = SetForegroundWindow(hwnd);
-                _ = SetFocus(hwnd);
-                if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
-                if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
-            }
+            app_state.g_focus_authorized_hwnd = null;
+            app_state.g_focus_authorized_until = 0;
+            app_state.g_focus_browser_shell_id = 0;
             if (app_state.g_all_sessions_active) {
                 closeAllSessions(hwnd);
             }
@@ -3628,8 +3626,41 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_spawn_ws = 0xFF;
             }
             const was_search_active = app_state.g_search_active;
+            altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
+            if (wp == 1 and foregroundIsOurs()) {
+                app_state.g_focus_authorized_hwnd = hwnd;
+                app_state.g_focus_authorized_until = GetTickCount64() + 1500;
+                const allowed = focusGuard(hwnd);
+                altqLog("palette_guard allowed={} foreground={X} frame={X} action={} input={}", .{ allowed, altqPtr(GetForegroundWindow()), altqPtr(hwnd), app_state.g_focus_user_action_tick, app_state.g_focus_input_tick });
+                if (allowed) {
+                    cancelShellRefocus(hwnd);
+                    const fg = GetForegroundWindow();
+                    const our_thread = GetCurrentThreadId();
+                    var fg_pid: DWORD = 0;
+                    const fg_thread = GetWindowThreadProcessId(fg, &fg_pid);
+                    const tap_alt = fg != hwnd and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0;
+                    if (tap_alt) keybd_event(VK_MENU, 0, 0, 0);
+                    const attach_result = if (fg_thread != 0 and fg_thread != our_thread) AttachThreadInput(our_thread, fg_thread, 1) else 0;
+                    const sfw_result = SetForegroundWindow(hwnd);
+                    const sfw_foreground = GetForegroundWindow();
+                    var sfw_pid: DWORD = 0;
+                    const sfw_thread = GetWindowThreadProcessId(sfw_foreground, &sfw_pid);
+                    _ = SetFocus(hwnd);
+                    const detach_result = if (attach_result != 0) AttachThreadInput(our_thread, fg_thread, 0) else 0;
+                    if (tap_alt) {
+                        keybd_event(0xFF, 0, 0, 0);
+                        keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
+                        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+                    }
+                    if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
+                    altqLog("palette_native before={X} tid={} pid={} our_tid={} attach={} sfw={} after={X} tid={} pid={} detach={} alt={}", .{ altqPtr(fg), fg_thread, fg_pid, our_thread, attach_result, sfw_result, altqPtr(sfw_foreground), sfw_thread, sfw_pid, detach_result, tap_alt });
+                    altqLog("palette_activate foreground={X} frame={X} focus={X}", .{ altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()) });
+                }
+                app_state.g_focus_authorized_hwnd = null;
+                app_state.g_focus_authorized_until = 0;
+            }
             app_state.g_search_workspace_mode = false;
             app_state.g_search_workspace_delete_mode = false;
             app_state.g_search_workspace_delete_confirm = null;
@@ -3678,6 +3709,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 updateBrowserVisibility();
             }
             _ = SetFocus(app_state.g_main_hwnd);
+            altqLog("palette_focus wp={} foreground={X} frame={X} focus={X} rem={} wait_alt={}", .{ wp, altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -7296,6 +7328,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 invalidateSidebar();
             } else if (wp == TIMER_REFOCUS) {
                 _ = KillTimer(hwnd, TIMER_REFOCUS);
+                if (app_state.g_search_active) {
+                    altqLog("palette_refocus suppressed foreground={X} rem={} wait_alt={}", .{ altqPtr(GetForegroundWindow()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
+                    cancelShellRefocus(hwnd);
+                    return 0;
+                }
                 if (!focusGuard(if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard())) {
                     cancelShellRefocus(hwnd);
                     return 0;
@@ -7620,6 +7657,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CLOSE => {
             if (app_state.g_app_closing) return 0;
+            @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
             _ = KillTimer(hwnd, TIMER_BROWSER_HEALTH);
