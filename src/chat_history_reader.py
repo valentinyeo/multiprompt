@@ -23,6 +23,7 @@ TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
+_SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
 SEARCH_ASCII_FOLDS = "ßİŉſǰẖẗẘẙẚẞKﬀﬁﬂﬃﬄﬅﬆ"
 END = "@@MP_END@@"
 PAGE_BYTES = 350000
@@ -402,6 +403,7 @@ def conversation_event(event, agent):
                          and isinstance(part.get("text"), str))
     else:
         text = content if isinstance(content, str) else ""
+    text = _SYSTEM_REMINDER.sub("", text)
     if role == "user":
         if text.lstrip().startswith("<task-notification>"):
             return None

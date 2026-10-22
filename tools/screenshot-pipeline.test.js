@@ -35,11 +35,13 @@ test("consecutive screenshots serialize the complete transaction", () => {
   assert.ok(acknowledged > pasteRequest, "transaction must await native paste delivery acknowledgement");
 });
 
-test("every screenshot uses the same CDP viewport capture path", () => {
+test("screenshots prefer CDP and fall back only for extension-frame access refusals", () => {
   const capture = functionBody(extension, "captureScreenshotResult", "screenshot");
   assert.match(capture, /captureScreenshotViaCdp\(tab\.id, 10000\)/);
-  assert.match(capture, /via: "Page\.captureScreenshot"/);
-  assert.doesNotMatch(capture, /captureVisibleTab/);
+  assert.match(capture, /let via = "Page\.captureScreenshot"/);
+  assert.match(capture, /if \(!isExtensionFrameAccessError\(error\)\) throw error/);
+  assert.match(capture, /captureVisibleTab\(tab\.windowId, \{ format: "png" \}\)/);
+  assert.match(capture, /via = "chrome\.tabs\.captureVisibleTab"/);
   assert.doesNotMatch(capture, /targetBrowserWindowIsFocused/);
 });
 
