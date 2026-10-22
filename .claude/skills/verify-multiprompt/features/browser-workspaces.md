@@ -27,9 +27,9 @@ unpacked extension at the app's normal development extension path. After Edge
 publishes the actual extension ID, the harness registers the matching native
 host executable in the disposable runner's HKCU, removing it during cleanup.
 No app state, browser preferences or bookmark files are seeded or edited.
-Before app commands, focus only the Doctor-verified owned app frame through
-Win32 thread-input attachment, then confirm non-browser keyboard focus through
-UI Automation. This changes OS input focus, never app state or focus policy.
+Common app keystrokes use the strict Doctor-verified main-window foreground guard.
+Browser-only keystrokes validate the exact profile PID/HWND and root owner;
+Win32 thread-input attachment changes OS focus, never app state or focus policy.
 
 Create a second workspace with Ctrl+N to persist the fresh layout, then return
 to the first workspace and open both panes before creating the remaining four.
@@ -37,7 +37,8 @@ Hash all six persisted IDs independently and
 require completion markers, Local State and six real profile processes.
 In the sixth workspace, rename it to IGSH224 Journey using the existing inline
 palette editor (Ctrl+A, type, Enter), without transferring native focus; use Browser Open URL to navigate to a synthetic
-example.com URL and bookmark it through real keyboard input. Move the workspace
+example.com URL. Select its newly opened tab with Ctrl+9 in the verified Edge window,
+independently read its address bar, then bookmark it with Ctrl+D. Move the workspace
 one position earlier, convert to six standalone windows and back, then close
 and reopen the named workspace. At each stage, assert the same ID, root and
 bookmark and capture a screenshot plus saved state in workspace-lifecycle.json.

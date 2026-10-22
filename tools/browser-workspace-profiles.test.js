@@ -129,3 +129,12 @@ test('IGSH-224 workspace reopening cannot select a frame transport alias instead
   assert.ok(lookup.indexOf('return false') < lookup.indexOf('if (query.len == 0) return true'));
   assert.doesNotMatch(palette, /app_state\.g_search_len == 0 or workspaceMatchesSearch/);
 });
+
+test('IGSH-224 collapse preserves default-named sibling sessions until absorption', () => {
+  const workspaces = read('src/workspaces.zig');
+  const collapse = workspaces.slice(workspaces.indexOf('fn collapseOtherWindowsIntoThis('));
+  assert.match(collapse, /PostMessageW\(target, @import\("win32.zig"\).WM_APP_QUIT_ALL, 0, 0\)/);
+  assert.match(read('src/main.zig'), /WM_APP_QUIT_ALL => \{\s+app_state.g_quit_all_in_progress = true;\s+rememberOpenWorkspaceForQuit\(\);/);
+  assert.match(read('src/main.zig'), /g_current_workspace_restore = app_state.g_quit_all_in_progress/);
+  assert.match(workspaces, /pub fn gcDefaultNamedWindowOnClose\(\) void \{[\s\S]*?if \(app_state.g_current_workspace_restore\) return;/);
+});

@@ -4354,7 +4354,7 @@ fn collapseOtherWindowsIntoThis() void {
             }
         }
         debugLog2("collapse: closing sibling workspace ", id);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        _ = PostMessageW(target, @import("win32.zig").WM_APP_QUIT_ALL, 0, 0);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) {
