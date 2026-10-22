@@ -7,7 +7,7 @@ description: Verify Multiprompt's real Windows desktop UI on GitHub Windows runn
 
 Multiprompt is a native Windows desktop app hosting real console windows, with custom-drawn sidebar, Inbox and Ctrl+K overlays. It is not a browser page or an Electron app. The account Worker and browser extension are secondary surfaces. The `browser-emulation` map is a separate real-Chrome extension journey driven by `browser-emulation.mjs` through this workflow; it does not launch or verify the embedded app pane.
 
-Read [features/README.md](features/README.md), then the selected feature file before running anything. Never build, launch or drive locally, through Wine, on a VPS, or on a user's laptop. All execution below happens on GitHub's free `windows-latest` machines in the public repository.
+Read [features/README.md](features/README.md), then the selected feature file before running anything. See [recent changes coverage](coverage.md) for gaps and this pass's run results. Never build, launch or drive locally, through Wine, on a VPS, or on a user's laptop. Desktop execution below happens on GitHub's free `windows-latest` machines in the public repository.
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
@@ -22,7 +22,7 @@ gh run watch <id> --interval 60
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `sessions`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, and `pane-layout`. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `sessions`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, and `browser-emulation`. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
@@ -33,12 +33,12 @@ If GitHub refuses because the workflow is not on the default branch yet, open or
 To exercise a published executable instead of compiling the branch:
 
 ```sh
-gh workflow run verify.yml -f feature=appearance -f tag=v0.28.789
+gh workflow run verify.yml -f feature=appearance -f tag=v0.28.821
 ```
 
-The tag must be `v<major>.<minor>.<patch>`. The workflow downloads the real x64 release executable and its published SHA256SUMS, verifies the checksum and embedded version, and records the tag. This verifies that release, not the branch's app code. Leave `tag` empty for branch verification. The branch path installs checksum-pinned Zig 0.16.0 and runs the repository's `zig build` on Windows, like release/test workflows. No tests or builds run on the caller's machine.
+The tag must be `v<major>.<minor>.<patch>`. The workflow downloads the real x64 release executable and its published SHA256SUMS, verifies the checksum and embedded version, and records the tag. This verifies that release, not the branch's app code. Leave `tag` empty for branch verification. `safe-updates` and `browser-emulation` run only as branch builds, with no tag: updates need the job-only verifier public key, and emulation needs the matching extension and bridge. A tag run needs a release containing every change the harness asserts; for example, v0.28.820 predates IGSH-587 and fails the current appearance check for maximized startup, while v0.28.821 contains it. The branch path installs checksum-pinned Zig 0.16.0 and runs the repository's `zig build` on Windows, like release/test workflows. No tests or builds run on the caller's machine.
 
-The Windows helper starts exactly that executable with `--single-window --no-window-restore`, a unique empty directory under RUNNER_TEMP, and private APPDATA, LOCALAPPDATA, USERPROFILE and HOME. It creates no session fixtures or settings. A ready instance has its own visible `ZigShell` main window, the expected version, and a published initial CMD session. Startup is bounded to 60 seconds; missing readiness fails, rather than driving a login screen or an unrelated window.
+For ordinary desktop journeys, the Windows helper starts exactly that executable with `--single-window --no-window-restore`, a unique empty directory under RUNNER_TEMP, and private APPDATA, LOCALAPPDATA, USERPROFILE and HOME. It creates no session fixtures or settings. A ready instance has its own visible `ZigShell` main window, the expected version, and a published initial CMD session. Startup is bounded to 60 seconds; missing readiness fails, rather than driving a login screen or an unrelated window.
 
 `IGSH_246=0` keeps the selected branch/release executable fixed during verification; update download and rollback behavior is tested separately on GitHub Windows.
 
@@ -46,7 +46,7 @@ The Windows helper starts exactly that executable with `--single-window --no-win
 
 ## Doctor
 
-`control.ps1` runs `Doctor` after launch, before each input, and after the journey. Doctor is read-only and cheap: the original Process object must be alive, its path and SHA256 must match the selected executable, its HWND must belong to that PID and class `ZigShell`, its title must contain the expected version, UI Automation must see that window, and its published Inbox state must contain a usable initial shell. It writes only evidence (`doctor.json`), never app state; it does not build, seed, authenticate, invoke actions or repair preconditions.
+For ordinary desktop journeys, `control.ps1` runs `Doctor` after launch, before each input, and after the journey. Doctor is read-only and cheap: the original Process object must be alive, its path and SHA256 must match the selected executable, its HWND must belong to that PID and class `ZigShell`, its title must contain the expected version, UI Automation must see that window, and its published Inbox state must contain a usable initial shell. It writes only evidence (`doctor.json`), never app state; it does not build, seed, authenticate, invoke actions or repair preconditions.
 
 When something looks off, read the artifact's `doctor.json`, `result.json`, and `data/roaming/ZigShell/debug.log`. Rerun the workflow to obtain a new isolated instance; do not reuse or repair the failed one. Build identity and provenance live in `build.json`.
 
@@ -58,9 +58,9 @@ The executable helper is [control.ps1](control.ps1). Its exact workflow-side inv
 & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
 ```
 
-Invoke it only through `verify.yml`; it refuses non-GitHub/non-Windows execution. This single command performs Launch, Doctor, the selected feature recipe, Evidence and Cleanup. No helper requires a separate interpreter investigation or an undocumented server.
+Invoke it only through `verify.yml`; it refuses non-GitHub/non-Windows execution. For ordinary desktop journeys this command performs Launch, Doctor, the selected feature recipe, Evidence and Cleanup. `safe-updates` delegates to its fixture driver and `browser-emulation` to its Chrome driver before desktop Doctor; each has its own checks and cleanup. No helper requires a separate interpreter investigation or an undocumented server.
 
-The harness uses .NET System.Windows.Automation for window identity and accessibility snapshots, and Win32 SendInput for genuine keyboard input. Text uses keyboard-layout-mapped virtual keys, not Unicode packets (the palette hook consumes those). Custom-painted palette rows are not UIA buttons: do not invent accessibility selectors or send private WM_APP messages. Selection uses actual Ctrl+K search terms and arrow/Enter navigation from the feature maps. Native HWND ownership, not screen coordinates, determines where input goes. The foreground root must be our window before every input. Window-relative pixels are used only for screenshots and read-only theme luminance checks, never clicking.
+The harness uses .NET System.Windows.Automation for window identity and accessibility snapshots, and Win32 SendInput for genuine keyboard input. Text uses keyboard-layout-mapped virtual keys, not Unicode packets (the palette hook consumes those). Custom-painted palette rows are not UIA buttons: do not invent accessibility selectors or send private WM_APP messages. Selection uses actual Ctrl+K search terms and arrow/Enter navigation from the feature maps. Native HWND ownership, not screen coordinates, determines where input goes. The foreground root must be our window before every input. Window-relative pixels support screenshots and theme luminance checks; mapped mouse journeys also target ownership-checked browser strips and workspace pills.
 
 The `pane-layout` journey keeps the real CMD console visible, groups it through Move to Group, docks a browser, maximizes through Win+Up and checks `pane-layout.png` against owned HWND/UIA rectangles. See [pane layout](features/pane-layout.md) for pixel detection and evidence limits.
 
@@ -90,9 +90,9 @@ Check the exact head SHA and source mode; never poll more often than once a minu
 
 Unlike the baseline `control.ps1` journeys, this harness seeds two saved tmux tabs in a unique RUNNER_TEMP profile and replaces only the SSH system boundary using the production `ssh-path.txt` override. No network or credentials are used. The console-backed stand-in implements attach, explicit new-session, list-clients, list-sessions, the `@@MP_LIVE@@` host sentinel and the `@@LS_OK@@` successful-listing sentinel. This is proof of app reconnect behavior, not a real SSH server or AI agent. Do not pass these feature stems to `verify.yml`.
 
-Launch/Doctor require both live transports and reconnect-ok after preflight drops, matching PID/executable identity, nonzero main/console HWNDs, and owned foreground/typing focus. `provenance.json` records revision, source mode and executable hash. Case A uses SendInput Ctrl+1 and a native-console click, kills only the background transport, waits for its idx=1 respawn and reconnect-ok, then requires zero reposition/browser/mask layout lines and unchanged sampled foreground/focus. Case B removes that remote session, kills its transport, requires exactly one `reason=session-gone` and no further attempts for 60 seconds, then uses Ctrl+2 to expose `Session ended`.
+Reconnect Launch/Doctor require both live transports and reconnect-ok after preflight drops, a visible non-console window owned by the app PID, a native console owned by the selected transport, and foreground/typing focus. Doctor records the app path but does not recheck its hash, version or `ZigShell` class; workflow acquisition records the executable hash in provenance. `provenance.json` records revision, source mode and executable hash. Case A uses SendInput Ctrl+1 and a native-console click, kills only the background transport, waits for its idx=1 respawn and reconnect-ok, then requires zero reposition/browser/mask layout lines and unchanged sampled foreground/focus. Case F repeats the background loss while typing in the active Chat View composer and requires exact retained text and no focus events. Case B empties the server session list, kills verify-two's transport, requires exactly one `reason=session-gone` and no further attempts for 60 seconds, then uses Ctrl+2 to expose `Session ended`.
 
-Require build `PASS A` and `PASS B`, and released `v0.28.788` `FAIL A` from the exercised layout/focus assertion, not launch failure. Artifacts `verify-reconnect-<exe_source>` retain summary/action JSON, debug and case logs, native focus samples, Doctor/provenance, screenshots, stand-in invocations and cleanup. Inspect screenshots and record exact run URLs and revision. `tools/verify-reconnect/check-evidence.js` independently recomputes measurements; execute it only on GitHub for this work, never on the VPS. Failed assertions retain artifacts and fail the job.
+Require build `PASS A`, `PASS F` and `PASS B`, and released `v0.28.788` `FAIL A` from the exercised layout/focus assertion, not launch failure. Artifacts `verify-reconnect-<exe_source>` retain summary/action JSON, debug and case logs, native focus samples, Doctor/provenance, screenshots, stand-in invocations and cleanup. Inspect screenshots and record exact run URLs and revision. `tools/verify-reconnect/check-evidence.js` can independently recompute measurements, but the workflow does not invoke it. It needs build and v0.28.788 artifact directories plus externally collected `run.json` metadata for each. Execute it only on GitHub for this work, never on the server; a green driver run alone is not that comparison.
 
 Reconnect cleanup runs in `finally`: capture the screen, stop only the owned app PID tree and surviving stand-in PIDs after executable-path checks, preserve logs/state outside the profile, remove that profile, and require zero remaining owned processes in `cleanup.json`. Never kill by process name. Downloaded artifacts remain intact.
 
@@ -116,7 +116,7 @@ For example:
 gh run download <id> -n verify-appearance -D /tmp/verify-multiprompt-<id>
 ```
 
-Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. There are no synthetic accounts, agent transcripts, remote servers or mocked UI in these journeys.
+Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. Ordinary desktop journeys use no synthetic accounts, transcripts, remote servers or mocked UI. Reconnect seeds saved tabs and replaces SSH; the branch Chat View painter uses a synthetic message; safe updates uses signed fixture releases; emulation serves a synthetic page to real Chrome. None proves live agent or account behavior.
 
 ## Cleanup
 
@@ -124,4 +124,4 @@ The helper creates a private Windows Job object with kill-on-close and no breaka
 
 ## Maintain
 
-Use `/maintain-verification-skill` when menus, keyboard routing, persistence or startup change. Update the relevant map and harness together, then repeat the GitHub journey and screenshot review. Never relabel an unverified path as covered.
+Use `/maintain-verification-skill` when menus, keyboard routing, persistence or startup change. Update the relevant map, [coverage table](coverage.md) and harness together, then repeat the GitHub journey and screenshot review. Never relabel an unverified path as covered.

@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Automatic reconnect after a transport exit, background-tab isolation, retained typing focus in the console and in the Chat View composer, and no full-window layout churn. Automatic starts are limited to one per host per tick and three in-flight attaches per host; healthy completion frees capacity. Healthy monitoring coalesces to 15 seconds; recovery and pending probes use one-second ticks, and ended tabs do not keep an idle recovery timer alive. A visible active respawn sizes only its own console before any show, without activation. Background respawns neither size nor show windows.
+Automatic reconnect after a transport exit, background-tab isolation, retained typing focus in the console and in the Chat View composer, and no full-window layout churn. Automatic reconnect starts are limited to one attempted start per host per tick; there is no three-in-flight-attach cap. Initial saved-tab spawns are direct and separate from that scheduler. Healthy monitoring coalesces to 15 seconds; recovery and pending probes use one-second ticks, and ended tabs do not keep an idle recovery timer alive. A visible active respawn sizes only its own console before any show, without activation. Background respawns neither size nor show windows.
 
 ## How to get to it (user POV)
 
