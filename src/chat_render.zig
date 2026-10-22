@@ -3340,6 +3340,24 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
     return chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y }, disp.start, null);
 }
 
+fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
+    _ = buf;
+    _ = link;
+    return null;
+}
+
+test "IGSH-574 Copy link uses only the clicked URL without trailing punctuation" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const buf = w("See https://example.com/a). and more text");
+    const link = link_detect.next(buf, 0) orelse return error.TestUnexpectedResult;
+    const copied = chatContextLinkText(buf, link) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, w("https://example.com/a"), copied);
+    var bytes: [128]u8 = undefined;
+    const n = clickedLinkUrl(buf[link.start..link.end], &bytes) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("https://example.com/a", bytes[0..n]);
+    try std.testing.expect(chatContextLinkText(buf, null) == null);
+}
+
 fn clickedLinkUrl(url: []const u16, bytes: []u8) ?usize {
     var it = std.unicode.Utf16LeIterator.init(url);
     var n: usize = 0;
