@@ -243,7 +243,9 @@ var consoles: [32]Console = @splat(.{});
 var attached: usize = 0;
 var next_pid: u32 = 2;
 var latest_pid: u32 = 0;
-var registered_hack = false;
+var registered_fonts: [8][]const u8 = undefined;
+var registered_font_count: usize = 0;
+var last_written: []const u8 = &.{};
 var registrations: usize = 0;
 var removals: usize = 0;
 var writes: usize = 0;
@@ -251,7 +253,7 @@ var resets: usize = 0;
 var redraws: usize = 0;
 var read_failures: usize = 0;
 var fail_set = false;
-var reject_hack = false;
+var reject_shell_font = false;
 var fail_attach = false;
 var fail_registration = false;
 var selection_errors: usize = 0;
@@ -269,7 +271,7 @@ fn SetCurrentConsoleFontEx(_: HANDLE, _: i32, font: *CONSOLE_FONT_INFOEX) BOOL {
     event(.font); writes += 1;
     if (fail_set) return 0;
     const c = &consoles[attached]; c.font = font.*; c.font.dwFontSize.x = 9; c.last_requested = font.FaceName;
-    if (!registered_hack or reject_hack or !std.mem.eql(u16, std.mem.sliceTo(&font.FaceName, 0), std.mem.span(L("Hack")))) c.font.FaceName = makeFace("Courier New");
+    if (reject_shell_font or !gdiSelects(std.mem.sliceTo(&font.FaceName, 0))) c.font.FaceName = makeFace("Courier New");
     return 1;
 }
 fn GetConsoleScreenBufferInfoEx(_: HANDLE, info: *CONSOLE_SCREEN_BUFFER_INFOEX) BOOL { info.* = consoles[attached].buffer; return 1; }
@@ -330,12 +332,44 @@ fn GetEnvironmentVariableW(_: [*:0]const u16, buf: []u16, _: usize) u32 { buf[0]
 fn CreateDirectoryW(_: [*:0]const u16, _: ?usize) BOOL { return 1; }
 fn CreateFileW(_: [*:0]const u16, access: u32, _: u32, _: ?usize, _: u32, _: u32, _: HANDLE) HANDLE { return if (access == GENERIC_READ) INVALID_HANDLE_VALUE_PTR else 500; }
 fn GetFileSizeEx(_: HANDLE, size: *i64) BOOL { size.* = 0; return 1; }
-fn WriteFile(_: HANDLE, _: []const u8, len: usize, written: *u32, _: ?usize) BOOL { written.* = @intCast(len); return 1; }
-fn AddFontResourceExW(file: [*:0]const u16, _: u32, _: ?usize) i32 {
+fn WriteFile(_: HANDLE, data: []const u8, len: usize, written: *u32, _: ?usize) BOOL { last_written = data; written.* = @intCast(len); return 1; }
+fn AddFontResourceExW(_: [*:0]const u16, flags: u32, _: ?usize) i32 {
     event(.register); if (fail_registration) return 0;
     registrations += 1;
-    if (std.mem.indexOf(u16, std.mem.span(file), std.mem.span(L("Hack-"))) != null) registered_hack = true;
+    if (flags == 0) { registered_fonts[registered_font_count] = last_written; registered_font_count += 1; }
     return 1;
+}
+fn sfntTable(file: []const u8, tag: *const [4]u8) []const u8 {
+    if (file.len < 12) return &.{};
+    for (0..std.mem.readInt(u16, file[4..6], .big)) |i| {
+        const record = file[12 + i * 16 ..][0..16];
+        if (!std.mem.eql(u8, record[0..4], tag)) continue;
+        return file[std.mem.readInt(u32, record[8..12], .big)..][0..std.mem.readInt(u32, record[12..16], .big)];
+    }
+    return &.{};
+}
+fn gdiFamily(file: []const u8, face: []const u16) bool {
+    const name = sfntTable(file, "name");
+    if (name.len < 6) return false;
+    const strings = name[std.mem.readInt(u16, name[4..6], .big)..];
+    for (0..std.mem.readInt(u16, name[2..4], .big)) |i| {
+        const record = name[6 + i * 12 ..][0..12];
+        if (std.mem.readInt(u16, record[0..2], .big) != 3 or std.mem.readInt(u16, record[6..8], .big) != 1) continue;
+        const text = strings[std.mem.readInt(u16, record[10..12], .big)..][0..std.mem.readInt(u16, record[8..10], .big)];
+        if (text.len != face.len * 2) continue;
+        for (face, 0..) |c, j| {
+            if (std.mem.readInt(u16, text[j * 2 ..][0..2], .big) != c) break;
+        } else return true;
+    }
+    return false;
+}
+fn gdiSelects(face: []const u16) bool {
+    for (registered_fonts[0..registered_font_count]) |file| {
+        const os2 = sfntTable(file, "OS/2");
+        if (os2.len < 86 or std.mem.readInt(u32, os2[78..82], .big) & 1 == 0) continue;
+        if (gdiFamily(file, face)) return true;
+    }
+    return false;
 }
 fn RemoveFontResourceExW(_: [*:0]const u16, _: u32, _: ?usize) BOOL { removals += 1; return 1; }
 fn closeFind(_: bool) void {}
@@ -364,9 +398,9 @@ fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
 fn prepare() BundledConsoleFonts {
     shells = @splat(.{}); shell_count = 0; active_shell = 0; next_pid = 2;
-    consoles = @splat(.{}); attached = 0; registered_hack = false; registrations = 0; removals = 0;
+    consoles = @splat(.{}); attached = 0; registered_font_count = 0; last_written = &.{}; registrations = 0; removals = 0;
     event_count = 0; writes = 0; resets = 0; redraws = 0; read_failures = 0;
-    fail_set = false; reject_hack = false; fail_attach = false; fail_registration = false; selection_errors = 0;
+    fail_set = false; reject_shell_font = false; fail_attach = false; fail_registration = false; selection_errors = 0;
     g_console_font_override = 0; g_main_monitor_dpi = 96; g_font_gen = 1; g_font_sync_done = 0;
     g_chat_active = false; g_chat_view_mode = .per_session; g_active_workspace = 0;
     g_starred_workspace = false; g_starred_last_shell = 0; g_inbox_step_context_active = false;
@@ -379,15 +413,16 @@ fn drain() void {
     while (nextStaleFontShell() != null and ticks < MAX_SHELLS * 2) : (ticks += 1) fontSyncTimerTick(g_main_hwnd);
     pollFonts();
 }
-fn expectHack() !void {
+const SHELL_FONT = "Nordwand Mono MP SemiBold";
+fn expectShellFont() !void {
     for (&consoles, 0..) |*c, pid| {
         if (!c.live) continue;
         try std.testing.expect(AttachConsole(@intCast(pid)) != 0);
         var actual: CONSOLE_FONT_INFOEX = .{};
         try std.testing.expect(GetCurrentConsoleFontEx(GetStdHandle(0), 0, &actual) != 0);
-        try std.testing.expectEqualSlices(u16, std.mem.span(L("Hack")), std.mem.sliceTo(&actual.FaceName, 0));
-        try std.testing.expectEqual(makeFace("Hack"), c.last_requested);
-        try std.testing.expectEqual(@as(u32, 400), actual.FontWeight);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L(SHELL_FONT)), std.mem.sliceTo(&actual.FaceName, 0));
+        try std.testing.expectEqual(makeFace(SHELL_FONT), c.last_requested);
+        try std.testing.expectEqual(@as(u32, 600), actual.FontWeight);
         try std.testing.expectEqual(@as(u32, 54), actual.FontFamily);
         _ = FreeConsole();
     }
@@ -401,23 +436,30 @@ fn seedWrong(i: usize, height: i16) void {
 `;
 
 const tests = String.raw`
-test "fake models silent family rejection and buffer reset substitution" {
+test "ISSUE-456 fake GDI rejects a face without the ANSI code page and selects the bundled shell font" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
-    registered_hack = true;
     consoles[2] = .{ .live = true }; _ = AttachConsole(2);
-    var requested: CONSOLE_FONT_INFOEX = .{ .FaceName = makeFace("Nordwand Mono MP SemiBold") };
+    var requested: CONSOLE_FONT_INFOEX = .{ .FaceName = makeFace(SHELL_FONT) };
     try std.testing.expectEqual(@as(i32, 1), SetCurrentConsoleFontEx(2, 0, &requested));
+    try std.testing.expectEqual(makeFace(SHELL_FONT), consoles[2].font.FaceName);
+    var without_code_pages = font_policy.MONO_SEMIBOLD.*;
+    @memset(@constCast(sfntTable(&without_code_pages, "OS/2"))[78..86], 0);
+    registered_fonts[0] = &without_code_pages;
+    _ = SetCurrentConsoleFontEx(2, 0, &requested);
     try std.testing.expectEqual(makeFace("Courier New"), consoles[2].font.FaceName);
-    requested.FaceName = makeFace("Hack"); _ = SetCurrentConsoleFontEx(2, 0, &requested);
-    try std.testing.expectEqual(makeFace("Hack"), consoles[2].font.FaceName);
+    registered_fonts[0] = font_policy.MONO_SEMIBOLD;
+    requested.FaceName = makeFace("Nordwand Mono SemiBold"); _ = SetCurrentConsoleFontEx(2, 0, &requested);
+    try std.testing.expectEqual(makeFace("Courier New"), consoles[2].font.FaceName);
+    requested.FaceName = makeFace(SHELL_FONT); _ = SetCurrentConsoleFontEx(2, 0, &requested);
+    try std.testing.expectEqual(makeFace(SHELL_FONT), consoles[2].font.FaceName);
     var info: CONSOLE_SCREEN_BUFFER_INFOEX = .{}; _ = SetConsoleScreenBufferInfoEx(2, &info);
     try std.testing.expectEqual(makeFace("Courier New"), consoles[2].font.FaceName);
 }
-test "new local SSH and tmux sessions register before spawn and stay Hack after queued work" {
+test "new local SSH and tmux sessions register before spawn and stay on the shell font after queued work" {
     const bundle = prepare();
     for ([_]ShellKind{ .cmd, .pwsh, .bash, .vps, .vps2, .tmux }, 0..) |kind, i| try std.testing.expect(spawnSession(kind, i));
-    try expectHack(); drain(); try expectHack();
-    try std.testing.expectEqual(@as(usize, 2), registrations);
+    try expectShellFont(); drain(); try expectShellFont();
+    try std.testing.expectEqual(@as(usize, 1), registrations);
     try std.testing.expectEqual(@as(i16, 18), consoles[2].font.dwFontSize.y);
     try std.testing.expectEqual(@TypeOf(events[0]).register, events[0]);
     for (events[0..event_count], 0..) |e, i| if (e == .reset) {
@@ -425,14 +467,14 @@ test "new local SSH and tmux sessions register before spawn and stay Hack after 
     };
     unregisterBundledConsoleFonts(&bundle); try std.testing.expectEqual(registrations, removals);
 }
-test "SSH and tmux reconnect replace native console and preserve Hack after settle and poll" {
+test "SSH and tmux reconnect replace native console and preserve the shell font after settle and poll" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     for ([_]ShellKind{ .vps, .vps2, .tmux }) |kind| {
         try std.testing.expect(spawnSession(kind, 0));
         const old = shells[0].pid; consoles[old].live = false;
         try std.testing.expect(reconnectSession(kind, 0));
         try std.testing.expect(shells[0].pid != old);
-        armConsoleGeometrySettle(g_main_hwnd); drain(); try expectHack();
+        armConsoleGeometrySettle(g_main_hwnd); drain(); try expectShellFont();
         consoles[shells[0].pid].live = false;
     }
 }
@@ -440,38 +482,38 @@ test "restart reclaims surviving console and later theme and poll cannot roll ba
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     consoles[2] = .{ .live = true }; next_pid = 3;
     try std.testing.expect(reclaimShell(2, .tmux));
-    drain(); try expectHack();
-    seedWrong(0, 12); applyConsoleThemeToAllShells(); drain(); try expectHack();
-    try std.testing.expect(spawnSession(.cmd, 1)); drain(); try expectHack();
+    drain(); try expectShellFont();
+    seedWrong(0, 12); applyConsoleThemeToAllShells(); drain(); try expectShellFont();
+    try std.testing.expect(spawnSession(.cmd, 1)); drain(); try expectShellFont();
 }
 test "tab switch stale generation runs production layout sync then settle and poll" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.cmd, 0)); try std.testing.expect(spawnSession(.tmux, 1));
     drain(); seedWrong(1, 18); fontSyncMarkAllStale(g_main_hwnd, "tab");
-    switchToShell(1); drain(); try expectHack();
+    switchToShell(1); drain(); try expectShellFont();
     try std.testing.expectEqual(g_font_gen, shells[1].font_gen);
     seedWrong(0, 18); shells[0].font_gen = g_font_gen;
-    switchToShell(0); drain(); try expectHack();
+    switchToShell(0); drain(); try expectShellFont();
 }
 test "workspace switch chooses remembered native tab and adoption ignores stale cached identity" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.cmd, 0)); try std.testing.expect(spawnSession(.tmux, 1));
     shells[1].workspace = 1; g_ws_last_shell[1] = shells[1].shell_id;
     seedWrong(1, 12); fontSyncMarkAllStale(g_main_hwnd, "workspace");
-    switchToWorkspace(1); drain(); try expectHack();
+    switchToWorkspace(1); drain(); try expectShellFont();
     try std.testing.expectEqual(@as(u32, 1), active_shell);
-    switchToWorkspace(0); drain(); try expectHack(); switchToWorkspace(0); drain(); try expectHack();
+    switchToWorkspace(0); drain(); try expectShellFont(); switchToWorkspace(0); drain(); try expectShellFont();
 }
-test "IGSH-457 Starred workspace switch keeps the selected console on Hack" {
+test "IGSH-457 Starred workspace switch keeps the selected console on the shell font" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.cmd, 0)); try std.testing.expect(spawnSession(.tmux, 1));
     shells[1].workspace = 1; shells[1].favorite = true;
     seedWrong(1, 12); fontSyncMarkAllStale(g_main_hwnd, "starred workspace");
-    switchToWorkspace(@import("workspace_view.zig").starred); drain(); try expectHack();
+    switchToWorkspace(@import("workspace_view.zig").starred); drain(); try expectShellFont();
     try std.testing.expect(g_starred_workspace);
     try std.testing.expectEqual(@as(u32, 1), active_shell);
 }
-test "ordinary Chat exit never resets and pending full width ends on Hack after queued work" {
+test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
     for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
         for ([_]bool{ false, true }) |full| {
             for (0..3) |toggles| {
@@ -481,41 +523,41 @@ test "ordinary Chat exit never resets and pending full width ends on Hack after 
                 const before = resets;
                 for (0..toggles) |_| _ = toggleFullWidth(g_main_hwnd);
                 try std.testing.expectEqual(before, resets);
-                closeChatView(); try expectHack();
+                closeChatView(); try expectShellFont();
                 try std.testing.expectEqual(before + @intFromBool(toggles > 0), resets);
                 try std.testing.expect(!shells[0].full_width_pending_console_resize);
-                armConsoleGeometrySettle(g_main_hwnd); drain(); try expectHack();
+                armConsoleGeometrySettle(g_main_hwnd); drain(); try expectShellFont();
             }
         }
     }
 }
-test "same-height wrong face is repaired and stale cached face never overrides Hack during DPI and zoom" {
+test "same-height wrong face is repaired and stale cached face never overrides the shell font during DPI and zoom" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.tmux, 0)); drain();
-    seedWrong(0, 18); _ = normalizeConsoleFont(0, shells[0].pid); try expectHack();
+    seedWrong(0, 18); _ = normalizeConsoleFont(0, shells[0].pid); try expectShellFont();
     for ([_]u32{ 144, 192, 96 }) |dpi| {
-        seedWrong(0, 12); _ = dpiChanged(g_main_hwnd, dpi, 0); drain(); try expectHack();
+        seedWrong(0, 12); _ = dpiChanged(g_main_hwnd, dpi, 0); drain(); try expectShellFont();
         try std.testing.expectEqual(@as(i16, @intCast(18 * dpi / 96)), consoles[shells[0].pid].font.dwFontSize.y);
     }
-    _ = zoomBigger(g_main_hwnd); drain(); try expectHack();
+    _ = zoomBigger(g_main_hwnd); drain(); try expectShellFont();
     try std.testing.expectEqual(@as(i16, 19), g_console_font_override);
     try std.testing.expect(@abs(consoles[shells[0].pid].font.dwFontSize.y - 19) <= 1);
-    _ = zoomBigger(g_main_hwnd); _ = zoomSmaller(g_main_hwnd); drain(); try expectHack();
-    _ = zoomReset(g_main_hwnd); drain(); try expectHack();
+    _ = zoomBigger(g_main_hwnd); _ = zoomSmaller(g_main_hwnd); drain(); try expectShellFont();
+    _ = zoomReset(g_main_hwnd); drain(); try expectShellFont();
     try std.testing.expectEqual(@as(i16, 18), consoles[shells[0].pid].font.dwFontSize.y);
 }
 test "independent same-height normalization repairs Courier without a theme reset" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
-    try std.testing.expect(spawnSession(.cmd, 0)); registered_hack = true;
+    try std.testing.expect(spawnSession(.cmd, 0));
     seedWrong(0, 18); const before = resets;
-    _ = normalizeConsoleFont(0, shells[0].pid); try expectHack();
+    _ = normalizeConsoleFont(0, shells[0].pid); try expectShellFont();
     try std.testing.expectEqual(before, resets);
 }
 test "independent size normalization ignores stale cached Courier identity" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
-    try std.testing.expect(spawnSession(.cmd, 0)); registered_hack = true;
-    seedWrong(0, 12); consoles[shells[0].pid].font.FaceName = makeFace("Hack");
-    _ = normalizeConsoleFont(0, shells[0].pid); try expectHack();
+    try std.testing.expect(spawnSession(.cmd, 0));
+    seedWrong(0, 12); consoles[shells[0].pid].font.FaceName = makeFace(SHELL_FONT);
+    _ = normalizeConsoleFont(0, shells[0].pid); try expectShellFont();
     try std.testing.expectEqual(@as(i16, 18), consoles[shells[0].pid].font.dwFontSize.y);
 }
 test "viewport repair never restores captured wrong face and keeps remote redraw rules" {
@@ -525,36 +567,36 @@ test "viewport repair never restores captured wrong face and keeps remote redraw
     var captured = consoles[pid].font; captured.FaceName = makeFace("Courier New");
     consoles[pid].buffer.dwSize.y = 10; consoles[pid].buffer.srWindow = .{ .bottom = 9 };
     try std.testing.expect(normalizeAttachedConsoleViewport(0, pid, &captured));
-    try std.testing.expectEqual(@as(usize, 1), redraws); try expectHack();
+    try std.testing.expectEqual(@as(usize, 1), redraws); try expectShellFont();
     test_pane_h = 360; _ = AttachConsole(pid); _ = normalizeAttachedConsoleViewport(0, pid, &captured);
-    try std.testing.expectEqual(@as(usize, 1), redraws); try expectHack();
+    try std.testing.expectEqual(@as(usize, 1), redraws); try expectShellFont();
     test_pane_h = 720; consoles[pid].buffer.dwSize.y = 100; consoles[pid].buffer.srWindow = .{ .top = 5, .bottom = 24 };
     _ = AttachConsole(pid); _ = normalizeAttachedConsoleViewport(0, pid, &captured);
-    try std.testing.expectEqual(@as(usize, 1), redraws); drain(); try expectHack();
+    try std.testing.expectEqual(@as(usize, 1), redraws); drain(); try expectShellFont();
 }
-test "initial font read failure still reapplies Hack after buffer reset" {
+test "initial font read failure still reapplies the shell font after buffer reset" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     consoles[2] = .{ .live = true }; installConsole(2, .cmd, 0);
-    read_failures = 1; applyBlackConsoleBackground(2); try expectHack(); drain(); try expectHack();
+    read_failures = 1; applyBlackConsoleBackground(2); try expectShellFont(); drain(); try expectShellFont();
 }
 test "failed selection or silent substitution remains stale and a later sync retries" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.cmd, 0)); drain();
     for (0..3) |failure| {
         seedWrong(0, 18); fontSyncMarkAllStale(g_main_hwnd, "retry");
-        fail_set = failure == 0; reject_hack = failure == 1; fail_attach = failure == 2;
+        fail_set = failure == 0; reject_shell_font = failure == 1; fail_attach = failure == 2;
         _ = fontSyncShell(0); try std.testing.expect(fontGenStale(shells[0].font_gen, g_font_gen));
-        fail_set = false; reject_hack = false; fail_attach = false;
-        drain(); try expectHack(); try std.testing.expectEqual(g_font_gen, shells[0].font_gen);
+        fail_set = false; reject_shell_font = false; fail_attach = false;
+        drain(); try expectShellFont(); try std.testing.expectEqual(g_font_gen, shells[0].font_gen);
     }
     try std.testing.expect(selection_errors > 0);
 }
-test "registration failure cannot masquerade as Hack and mintty bypasses conhost writes" {
-    _ = prepare(); fail_registration = true; registered_hack = false;
+test "registration failure cannot masquerade as the shell font and mintty bypasses conhost writes" {
+    _ = prepare(); fail_registration = true; registered_font_count = 0;
     const bundle = registerBundledConsoleFonts(); defer unregisterBundledConsoleFonts(&bundle);
     try std.testing.expect(spawnSession(.cmd, 0));
     try std.testing.expectEqual(makeFace("Courier New"), consoles[shells[0].pid].font.FaceName);
-    fail_registration = false; _ = registerBundledConsoleFonts(); drain(); try expectHack();
+    fail_registration = false; _ = registerBundledConsoleFonts(); drain(); try expectShellFont();
     const before = writes; shells[0].kind = .gitbash; fontSyncMarkAllStale(g_main_hwnd, "mintty");
     _ = fontSyncShell(0); try std.testing.expectEqual(before, writes);
     try std.testing.expectEqual(g_font_gen, shells[0].font_gen);
@@ -571,7 +613,7 @@ test('IGSH-457 console lifecycle harness includes Starred workspace dependencies
   assert.doesNotMatch(source, /@import\("inbox.zig"\)/);
 });
 
-test('extracted production console lifecycle keeps literal Hack after events and queued sync work', () => {
+test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold after events and queued sync work', () => {
   const dir = fs.mkdtempSync(path.join(process.env.CONSOLE_FONT_TEST_TMP || os.tmpdir(), 'console-font-lifecycle-'));
   try {
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });

@@ -243,7 +243,7 @@ test('solid and thin Powerline arrows point in opposite directions without filli
 });
 
 test('committed font matches the SHA-256 of the reproducible generator output', () => {
-  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), '0bb851120a3fca358212afe9f0fb84f853317e1eaffebef6fe9c16aa234b1a2e');
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), 'dada384b7332520a6bdc2af15c27a927a5161b68f0f7022f2fb7d591255f0370');
 });
 
 test('both CI build test steps include the dependency-free terminal glyph regression', () => {
@@ -282,4 +282,9 @@ test('IGSH-443 patched font has distinct Windows and Mac family identities', () 
     assert.deepEqual([...ids].sort((a, b) => a - b), [...expected.keys()], `platform ${platform}`);
   }
   assert.equal(u16('OS/2', 4), 600);
+});
+
+test('ISSUE-456 patched font declares Latin 1 and OEM 437/850 so GDI selects it for conhost', () => {
+  assert.equal(bytes.readUInt32BE(tables.get('OS/2') + 78), 1);
+  assert.equal(bytes.readUInt32BE(tables.get('OS/2') + 82), 0xC0000000);
 });
