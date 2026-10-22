@@ -154,7 +154,8 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /function Press[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
-  assert.match(control, /Copy-Item \$scratch[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
+  assert.match(control, /Copy-Item \(Join-Path \$scratch 'roaming\/ZigShell'\)[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
+  assert.doesNotMatch(control, /Copy-Item \$scratch /);
 });
 
 test('maintained verification code contains no removable code comments', async () => {
