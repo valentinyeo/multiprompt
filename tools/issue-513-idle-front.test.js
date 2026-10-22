@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,7 +16,7 @@ function frontFunction(source) {
 function run(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-513-front-'));
   try {
-    fs.copyFileSync(path.join(__dirname, '../src/frequent.zig'), path.join(dir, 'frequent.zig'));
+    copyZig(['frequent.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), `
 const std = @import("std");
 const frequent = @import("frequent.zig");
