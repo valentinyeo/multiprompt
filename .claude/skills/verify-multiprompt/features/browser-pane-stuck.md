@@ -34,7 +34,7 @@ Preconditions:
 
 ## Gotchas
 
-- Visibility inspects owned top-level and child windows: a docked browser is a child, not a top-level window. Cleanup retains ZigShell application data and avoids copying Windows compatibility-cache junctions from the disposable browser profile.
+- Docked browser windows remain owned popups. Their connected state must be published after docking; a stale opening snapshot is not evidence that docking failed. Cleanup retains ZigShell application data without traversing Windows compatibility-cache junctions.
 
 - No extension is not a failed launch: a successfully docked pane must work indefinitely without a bound window ID.
 - Undocked timeout/retry, opening close after the guard, stale replies, URL retention, and cancellation overflow are covered by production-state unit tests. This desktop journey does not claim to force an undocked launch failure; its opening-only palette close queues input ahead of adoption timers rather than racing docking.

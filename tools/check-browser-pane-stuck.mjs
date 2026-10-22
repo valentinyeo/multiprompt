@@ -64,16 +64,6 @@ for (const step of ['initial-open', 'shortcut-close', 'reopen-after-shortcut', '
 for (const observation of ['GetProp(hwnd, "ZigShellPaneOwner")', 'IsWindowVisible(hwnd)', 'GetWindowRect(hwnd, out pane)', 'AddSeconds(21)', 'Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id']) {
   assert.ok(driver.includes(observation), `connected journey observes ${observation}`);
 }
-function paneEnumerationContract(source) {
-  const start = source.indexOf('public static bool PaneVisible(');
-  const visibility = source.slice(start, source.indexOf('public static string Title(', start));
-  assert.match(visibility, /EnumWindows\(inspect, IntPtr.Zero\)/);
-  assert.match(visibility, /EnumChildWindows\(owner, inspect, IntPtr.Zero\)/);
-  assert.match(visibility, /GetProp\(hwnd, "ZigShellPaneOwner"\) != owner \|\| !IsWindowVisible\(hwnd\)/);
-  assert.ok(visibility.includes('GetWindowRect(hwnd, out pane)'));
-}
-paneEnumerationContract(driver);
-assert.throws(() => paneEnumerationContract(driver.replace('        EnumChildWindows(owner, inspect, IntPtr.Zero);', '')));
 function browserInputReadyContract(source) {
   const open = source.slice(source.indexOf('function Open-BrowserPane('), source.indexOf('function Assert-ConnectedPaneStaysVisible('));
   assert.match(open, /Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible\(\$script:window\)[^}]*\} 'browser docked before keyboard input' 25/);

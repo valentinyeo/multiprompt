@@ -78,22 +78,19 @@ public static class VerifyNative {
     }
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
-    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr owner, EnumWindow callback, IntPtr data);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     public static bool PaneVisible(IntPtr owner) {
         Rect frame;
         if (!GetWindowRect(owner, out frame)) return false;
         bool visible = false;
-        EnumWindow inspect = delegate(IntPtr hwnd, IntPtr data) {
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
             if (GetProp(hwnd, "ZigShellPaneOwner") != owner || !IsWindowVisible(hwnd)) return true;
             Rect pane;
             if (GetWindowRect(hwnd, out pane) && pane.Right > pane.Left && pane.Bottom > pane.Top &&
                 pane.Left < frame.Right && pane.Right > frame.Left && pane.Top < frame.Bottom && pane.Bottom > frame.Top) visible = true;
             return true;
-        };
-        EnumWindows(inspect, IntPtr.Zero);
-        EnumChildWindows(owner, inspect, IntPtr.Zero);
+        }, IntPtr.Zero);
         return visible;
     }
     public static string Title(IntPtr hwnd) {
