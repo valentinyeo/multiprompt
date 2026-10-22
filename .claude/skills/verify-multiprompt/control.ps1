@@ -50,12 +50,10 @@ public static class VerifyNative {
         bool targetAttached = false;
         try {
             if (foreground != 0 && foreground != current) {
-                if (!AttachThreadInput(current, foreground, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                foregroundAttached = true;
+                foregroundAttached = AttachThreadInput(current, foreground, true);
             }
             if (target != current && target != foreground) {
-                if (!AttachThreadInput(current, target, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                targetAttached = true;
+                targetAttached = AttachThreadInput(current, target, true);
             }
             SetForegroundWindow(hwnd);
             if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
@@ -566,8 +564,8 @@ function Wait-ConsoleText([string]$Command) {
 function Focus-WorkspaceShell {
     Doctor
     Record 'Focus the verified owned app frame for workspace keyboard commands'
-    [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
     Wait-Until {
+        [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($null -eq $focused) { return $false }
         $owner = [int]$focused.Current.ProcessId
@@ -593,8 +591,10 @@ function Focus-WorkspaceBrowser([string]$Root) {
         return $false
     } 'exact profile browser HWND belongs to the owned app' 60
     Record 'Focus the actual owned Edge window for the keyboard favorite action'
-    [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow } 'exact workspace browser owns keyboard input'
+    Wait-Until {
+        [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow
+    } 'exact workspace browser owns keyboard input'
 }
 
 function Palette([string]$Query) {
