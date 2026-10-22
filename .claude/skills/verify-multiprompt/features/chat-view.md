@@ -8,6 +8,7 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - `received-markdown-render`: native Windows tests render a synthetic received envelope through the production bubble painter, including a heading, bold text, a list, a table, a link, inline code and a fenced code block, plus separate short list, heading and link bubbles.
 - `received-markdown-selection-copy`: native tests check source-coordinate selection and copying rendered text rather than Markdown syntax.
 - `pending-message-selection-copy`: native tests check that messages still waiting to send can be selected, selected together with sent messages, and copied, and that the selection survives streamed transcript updates.
+- `copy-link`: native tests check that right-clicking a link offers Copy link and copies only that URL, without trailing punctuation.
 
 ## How to get to it (user POV)
 
