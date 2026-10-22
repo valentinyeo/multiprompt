@@ -243,6 +243,16 @@ test('workspace zsb requests restore the main frame after lifecycle screenshots 
   assert.throws(() => assert.match(lifecycle.replace("            Focus-BrowserPaneOwner 'workspace-parked-zsb' (Read-BrowserPane).browser_connection_id\n", ''), parkedHandoff));
 });
 
+test('workspace frame activation hit-tests an exposed title strip when sibling windows cover the normal point', () => {
+  const focus = control.slice(control.indexOf('    public static void FocusOwnedWindow('), control.indexOf('    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'));
+  const exposedFrame = /if \(hwnd == frame && GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd\) point.Y = bounds.Top \+ 8;\s+if \(GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd \|\| GetAncestor\(WindowFromPoint\(point\), 3\) != frame\) throw/;
+  assert.match(focus, exposedFrame);
+  for (const required of ['hwnd == frame && ', 'point.Y = bounds.Top + 8;', 'GetAncestor(WindowFromPoint(point), 3) != frame']) {
+    assert.throws(() => assert.match(focus.replace(required, ''), exposedFrame));
+  }
+  assert.ok(focus.indexOf('point.Y = bounds.Top + 8;') < focus.indexOf('SetCursorPos(point.X, point.Y)'));
+});
+
 test('audit verification is isolated from unchanged desktop journeys and retains fixture evidence', () => {
   const auditJob = workflow.slice(workflow.indexOf('  chat-sync-audit:'), workflow.indexOf('  verify:'));
   assert.match(auditJob, /if: inputs\.feature == 'chat-sync-audit'/);

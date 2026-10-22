@@ -49,6 +49,7 @@ public static class VerifyNative {
             Rect bounds;
             if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
             Point point = new Point { X = hwnd == frame ? bounds.Left + 100 : bounds.Right - 160, Y = bounds.Top + 22 };
+            if (hwnd == frame && GetAncestor(WindowFromPoint(point), 2) != hwnd) point.Y = bounds.Top + 8;
             if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
             if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             Input[] click = new Input[2];
