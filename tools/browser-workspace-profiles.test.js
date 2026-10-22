@@ -133,6 +133,18 @@ test('IGSH-224 workspace reopening cannot select a frame transport alias instead
   assert.doesNotMatch(palette, /app_state\.g_search_len == 0 or workspaceMatchesSearch/);
 });
 
+test('IGSH-224 workspace zsb sockets cannot be inherited by native bridge children', () => {
+  const bridge = read('src/browser_bridge.zig');
+  const listener = bridge.slice(bridge.indexOf('fn tunnelInboundThread('), bridge.indexOf('const ZsbSessionOpenArgs'));
+  for (const socket of ['client', 'srv']) {
+    const guarded = new RegExp(`if \\(SetHandleInformation\\(@ptrFromInt\\(${socket}\\), 1, 0\\) == 0\\) \\{\\s+_ = closesocket\\(${socket}\\);\\s+${socket === 'client' ? 'continue' : 'return'};\\s+\\}`);
+    assert.match(listener, guarded);
+    assert.throws(() => assert.match(listener.replace(`SetHandleInformation(@ptrFromInt(${socket}), 1, 0)`, `SetHandleInformation(@ptrFromInt(${socket}), 1, 1)`), guarded));
+  }
+  assert.ok(listener.indexOf('SetHandleInformation(@ptrFromInt(client)') < listener.indexOf('std.Thread.spawn'));
+  assert.ok(listener.indexOf('SetHandleInformation(@ptrFromInt(srv)') < listener.indexOf('listen(srv, 5)'));
+});
+
 test('IGSH-224 collapse preserves default-named sibling sessions until absorption', () => {
   const workspaces = read('src/workspaces.zig');
   const collapse = workspaces.slice(workspaces.indexOf('fn collapseOtherWindowsIntoThis('));

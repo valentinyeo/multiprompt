@@ -23,6 +23,7 @@ const InvalidateRect = @import("win32.zig").InvalidateRect;
 const CreateProcessW = @import("win32.zig").CreateProcessW;
 const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
+const SetHandleInformation = @import("win32.zig").SetHandleInformation;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
 const FindFirstFileW = @import("win32.zig").FindFirstFileW;
 const FindNextFileW = @import("win32.zig").FindNextFileW;
@@ -1781,6 +1782,10 @@ fn tunnelInboundThread(srv_usize: usize) void {
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
+        if (SetHandleInformation(@ptrFromInt(client), 1, 0) == 0) {
+            _ = closesocket(client);
+            continue;
+        }
 
         var buf: [ZSB_WIRE_CAP]u8 = undefined;
         var total: usize = 0;
@@ -1841,6 +1846,10 @@ pub fn startTunnelInboundListener() void {
     if (WSAStartup(0x0202, &wsa) != 0) return;
     const srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv == INVALID_SOCKET) return;
+    if (SetHandleInformation(@ptrFromInt(srv), 1, 0) == 0) {
+        _ = closesocket(srv);
+        return;
+    }
     const yes: i32 = 1;
     _ = setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, @ptrCast(&yes), @sizeOf(i32));
     var addr = SOCKADDR_IN{
