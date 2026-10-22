@@ -53,6 +53,15 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.805", .items = &.{
+        .{ .text = "The docked browser now has smooth rounded corners and a border matching Chat View.", .ticket = "IGSH-496" },
+        .{ .text = "Panes and sidebar cards now have matching margins and gaps at every display scale.", .ticket = "IGSH-496" },
+        .{ .text = "Groups start gray and keep a chosen color, with one continuous line beside their sessions.", .ticket = "IGSH-496" },
+        .{ .text = "Right-click a group or search Ctrl+K to rename, color, move, collapse, ungroup, or close it.", .ticket = "IGSH-496" },
+        .{ .text = "Full Width switches between a centered reading column and the whole pane.", .ticket = "IGSH-496" },
+        .{ .text = "Chosen group colors survive reopening tabs and importing workspaces.", .ticket = "IGSH-496" },
+        .{ .text = "Release update checks finish sooner without reducing test coverage.", .ticket = "IGSH-519" },
+    } },
     .{ .ver = "0.28.804", .items = &.{
         .{ .text = "Preview a page as an iPhone, Pixel, or custom screen size with zsb emulate, keeping the mobile view across page changes until you turn it off.", .ticket = "IGSH-127" },
     } },
