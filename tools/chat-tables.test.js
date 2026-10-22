@@ -99,6 +99,7 @@ test "table surface: IGSH-436 old visible table survives more than 256 hidden ra
     for (0..rows) |row| {
         const line = std.mem.trim(u16, raw[row * width..][0..width], &.{ ' ', '\t', 0 });
         const table_line = table_rows[row];
+        try std.testing.expectEqual(row < table.len, table_line);
         const tool_header = false;
         if (${chrome}) continue;
         @memcpy(scratch[len..][0..line.len], line);

@@ -1062,7 +1062,7 @@ fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_ro
         scratch[len + 1] = '\n';
         len += 2;
     }
-    var blocks: [app_state.CHAT_MAX_BLOCKS]ChatBlock = undefined;
+    var blocks: [starts.len]ChatBlock = undefined;
     const block_count = chatClassifyBlocks(scratch[0..len], &blocks);
     var row: usize = 0;
     for (blocks[0..block_count]) |block| {

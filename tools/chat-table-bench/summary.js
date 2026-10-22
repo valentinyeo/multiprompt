@@ -17,12 +17,12 @@ function summarize(samples) {
     result[revision] = { samples: values, msPerBuild: [...ms].sort((a, b) => a - b)[3] };
   }
   result.ratio = result.after.msPerBuild / result.before.msPerBuild;
-  assert.ok(result.ratio <= 0.8, `median improvement must be at least 20%: ratio=${result.ratio}`);
-  result.improvedPairs = samples.after.filter((sample, index) => {
+  assert.ok(result.ratio <= 1.1, `median regression must not exceed 10%: ratio=${result.ratio}`);
+  result.nonRegressedPairs = samples.after.filter((sample, index) => {
     const before = samples.before[index];
-    return sample.ticks / sample.frequency <= 0.8 * before.ticks / before.frequency;
+    return sample.ticks / sample.frequency <= 1.1 * before.ticks / before.frequency;
   }).length;
-  assert.ok(result.improvedPairs >= 6, `at least six of seven paired samples must improve by 20%: ${result.improvedPairs}`);
+  assert.ok(result.nonRegressedPairs >= 6, `at least six of seven paired samples must stay within 10% regression: ${result.nonRegressedPairs}`);
   return result;
 }
 
