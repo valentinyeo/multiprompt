@@ -53,6 +53,15 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.803", .items = &.{
+        .{ .text = "Messages from other agents now show formatted headings, lists, tables, links, and code inside their blue bubbles.", .ticket = "IGSH-376" },
+        .{ .text = "Remote tabs no longer drop every half minute when the server is slow.", .ticket = "IGSH-511" },
+        .{ .text = "Tabs can reconnect even after a long session.", .ticket = "IGSH-511" },
+        .{ .text = "Reconnecting tabs no longer make the window flicker or steal typing focus.", .ticket = "IGSH-511" },
+        .{ .text = "A tab whose server session is gone shows Session ended and can start a new one.", .ticket = "IGSH-511" },
+        .{ .text = "Release update checks run separately so other Windows checks finish sooner.", .ticket = "IGSH-519" },
+        .{ .text = "Dictation and talk-back now use the Deepgram key saved in your Windows user settings, so a stale key from another program no longer breaks them.", .ticket = "IGSH-540" },
+    } },
     .{ .ver = "0.28.802", .items = &.{
         .{ .text = "Multiprompt now downloads verified updates automatically, lets you restart when ready, and returns to the previous version if an update cannot start.", .ticket = "IGSH-246" },
         .{ .text = "Server address, port and username changes now sync between your laptops while keeping your local credentials and backing up your SSH settings.", .ticket = "IGSH-252" },
