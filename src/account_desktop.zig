@@ -218,6 +218,7 @@ var g_account_keys_cache: struct {
 } = .{};
 var g_account_key_prompt_active = false;
 var g_account_pending_device_keys: ?[]u8 = null;
+var startup_reply: LPARAM = 0;
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -360,6 +361,7 @@ fn accountLock() void {
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
+    _ = KillTimer(app_state.g_main_hwnd, @import("launch_cache.zig").TIMER_STARTUP);
     app_state.g_account_dirty_at = 0;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     app_state.g_search_active = false;
@@ -506,22 +508,22 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
     const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
     var ssh_buf: [1024]u8 = undefined;
     var ssh_len: usize = 0;
-    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return &.{};
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
     const ssh = ssh_buf[0..ssh_len];
     const path = std.mem.trim(u8, ssh, "\" ");
-    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return &.{};
+    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return error.SshUnavailable;
     const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
     var profile_buf: [512]u8 = undefined;
     const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
-    if (n == 0 or n >= profile_buf.len) return &.{};
+    if (n == 0 or n >= profile_buf.len) return error.Storage;
     const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
     const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
     const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
     var hosts: std.ArrayList(account_hosts.Host) = .empty;
     for (aliases, names, 0..) |alias, name, slot| {
         const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
-        const output = accountSshOutput(a, command, 5000) catch continue;
-        const resolved = account_hosts.parseSshConfig(output) orelse continue;
+        const output = try accountSshOutput(a, command, 5000);
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
         const missing = account_hosts.shouldImport(alias, resolved);
         var incoming: ?account_hosts.Host = null;
         if (missing) {
@@ -762,12 +764,15 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const initial_json = try accountReadLayout(alloc, remote.bytes);
     const initial = try session_layout.parse(alloc, initial_json);
     defer initial.deinit();
+    var hosts_ready = g_account_hosts_cache.arena != null;
     if (remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
         var host_arena = std.heap.ArenaAllocator.init(a);
-        errdefer host_arena.deinit();
-        const discovered = try accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{});
-        if (g_account_hosts_cache.arena) |*old| old.deinit();
-        g_account_hosts_cache = .{ .arena = host_arena, .hosts = discovered, .refreshed_at = GetTickCount64() };
+        const discovered: ?[]const account_hosts.Host = accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{}) catch null;
+        hosts_ready = discovered != null;
+        if (discovered) |found| {
+            if (g_account_hosts_cache.arena) |*old| old.deinit();
+            g_account_hosts_cache = .{ .arena = host_arena, .hosts = found, .refreshed_at = GetTickCount64() };
+        } else host_arena.deinit();
     }
     const hosts = g_account_hosts_cache.hosts;
     var attempts: usize = 0;
@@ -783,8 +788,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer edited.deinit();
             rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
         }
-        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) hosts else null;
+        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
+        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) hosts else server.value.hosts) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const put = try account_client.request("PUT", "/v1/layout", access, body);
         remote.deinit();
@@ -799,7 +804,9 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
 }
-fn layoutSyncWorker(job: AccountJob) void {
+fn layoutSyncWorker(submitted: AccountJob) void {
+    _ = @import("console.zig").resolveSshPath(false);
+    const job = if (submitted.kind == .startup and submitted.base == null and submitted.edited == null) accountResumeJob(.startup) else submitted;
     const a = std.heap.page_allocator;
     const reply = a.create(LayoutReply) catch {
         accountJobFree(job);
@@ -1062,7 +1069,24 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     submitted = app_state.g_account_busy;
 }
 
+pub fn resumeStartupReply() void {
+    const reply = startup_reply;
+    startup_reply = 0;
+    if (reply != 0) handleLayoutReply(reply);
+}
+
 pub fn handleLayoutReply(lp: LPARAM) void {
+    if (lp != 0 and @import("launch_cache.zig").pending) {
+        const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (!reply.unauthorized and !reply.signed_out and !reply.cancelled and (reply.job.kind == .startup or (reply.job.kind == .login and reply.bytes != null))) {
+            if (app_state.g_account_locked and reply.bytes != null) {
+                app_state.g_account_locked = false;
+                _ = PostMessageW(app_state.g_main_hwnd, @import("launch_cache.zig").WM_DEFERRED, 0, 0);
+            }
+            startup_reply = lp;
+            return;
+        }
+    }
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
@@ -1348,13 +1372,9 @@ pub fn accountClaim(hwnd: HANDLE) bool {
 
 pub fn accountBootstrap(hwnd: HANDLE) bool {
     if (app_state.g_account_bypass) return true;
-    if (readDpapiFile("account-device.dat", 16384)) |token| {
-        app_state.g_account_has_token = true;
-        freeSecret(token);
-    }
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
-    startAccountJob(accountResumeJob(.startup));
+    startAccountJob(.{ .kind = .startup });
     _ = SetTimer(hwnd, TIMER_ACCOUNT, 20000, null);
     return true;
 }

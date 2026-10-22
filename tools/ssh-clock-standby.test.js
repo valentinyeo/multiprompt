@@ -39,7 +39,7 @@ const std = @import("std");
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
-    kind: ShellKind = .tmux, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
+    kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,

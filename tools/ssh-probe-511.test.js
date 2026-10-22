@@ -27,8 +27,10 @@ test('ISSUE-511 respawn preserves shell identity and allocates only a bounded co
   assert.match(respawn, /const shell_id = app_state\.shells\[idx\]\.shell_id/);
   assert.match(respawn, /\.shell_id = shell_id,\s*\.title_id = title_id/);
   assert.match(respawn, /makeCmdLine\([^\n]*null, shell_id, saved_ssh_reconnect\.create_session/);
-  assert.match(respawn, /si\.lpTitle = SPAWN_TITLES\[title_id\]/);
-  assert.match(respawn, /FindWindowW\(null, SPAWN_TITLES\[title_id\]\)/);
+  assert.match(respawn, /\.shell_id = shell_id, \.title_id = title_id, \.reconnect = true/);
+  const worker = body('startupShellWorker', read('console.zig'));
+  assert.match(worker, /si\.lpTitle = SPAWN_TITLES\[job\.title_id\]/);
+  assert.match(worker, /FindWindowW\(null, SPAWN_TITLES\[job\.title_id\]\)/);
   assert.match(body('allocateConsoleTitleId', state), /&next_console_title_id, shells\[0\.\.shell_count\]/);
   assert.match(body('allocateShellId', state), /shells\[0\.\.shell_count\]/);
   const ids = body('allocateShellIdFrom', state);
@@ -126,7 +128,7 @@ test('ISSUE-521 automatic reconnect paths never relayout the window or steal foc
   assert.match(invalidate, /&rc, 0/);
   assert.match(body('markSshTabDisconnected', console), /if \(state_changed\).*invalidateReconnectContent/);
   assert.match(body('sshReconnectOk', send), /if \(state_changed\).*invalidateReconnectContent/);
-  assert.match(body('respawnShellInPlace', console), /SWP_NOACTIVATE \| SWP_NOREDRAW/);
+  assert.match(body('startupShellWorker', console), /SWP_NOACTIVATE \| SWP_NOREDRAW/);
   const show = body('showReconnectedConsole', console);
   assert.match(show, /eventEffects\(/);
   assert.match(show, /shellConsoleShouldBeVisible/);
@@ -257,8 +259,11 @@ test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survi
 
 test('ISSUE-511 active respawn sizes its console before show without touching any other window', () => {
   const console = read('console.zig');
-  const respawn = body('respawnShellInPlace', console);
-  assert.match(respawn, /if \(idx == app_state\.active_shell\) \{[^]*if \(@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*if \(positionReconnectedConsole\(idx\)\) _ = showShellConsole\(idx, SW_SHOWNOACTIVATE/);
+  const complete = body('finishStartupShell', console);
+  assert.match(complete, /if \(job\.reconnect\) \{\s*if \(idx == app_state\.active_shell and @import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) \{\s*if \(positionReconnectedConsole\(idx\)\) showReconnectedConsole\(idx\)/);
+  const reconnectComplete = complete.slice(complete.indexOf('    if (job.reconnect) {'), complete.indexOf('    if (idx == app_state.active_shell) {'));
+  assert.doesNotMatch(reconnectComplete, /repositionActive|InvalidateRect|SetFocus|SetForegroundWindow/);
+  assert.match(reconnectComplete, /sshRequestSessionProbe\(\)/);
   const position = body('positionReconnectedConsole', console);
   assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return false/);
   assert.match(position, /rc\.left = SIDEBAR_W\(\)/);
