@@ -2737,6 +2737,7 @@ pub const ChatOutboxEntry = struct {
     delivery_watch: chat_echo.DeliveryWatch = .{},
     channel_sent: bool = false,
     channel_pending: bool = false,
+    steer_pending: bool = false,
     sent_tick_ms: i64 = 0,
     expires_ms: i64 = 0,
     channel_sent_ms: i64 = 0,

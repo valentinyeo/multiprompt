@@ -1270,7 +1270,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.818";
+pub const APP_VERSION = "0.28.819";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -3420,7 +3420,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_SEND => {
-            sendChatPrompt();
+            if (wp == 1) @import("chat_send.zig").chatSteerPrompt() else sendChatPrompt();
             return 0;
         },
         WM_APP_VOICE_SPEECH_START => {

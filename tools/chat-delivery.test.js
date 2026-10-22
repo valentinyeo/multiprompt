@@ -23,6 +23,8 @@ const json_reader = @import("json_reader.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_history = @import("chat_history.zig");
 const chat_transcript = @import("chat_transcript.zig");
+const chat_complete = @import("chat_complete.zig");
+const skill_model = @import("skills.zig");
 const ChatBlock = chat_markdown.Block;
 const ChatEchoState = chat_echo.OutboxState;
 const CHAT_OUTBOX_MAX_PER_KEY = 20;
@@ -50,16 +52,36 @@ var g_chat_active = true;
 var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
-var g_chat_tmux_send_job: ?u8 = null;
+const ChatTmuxSendJob = struct {
+    key: struct { shell_id: u32 = 1 } = .{},
+    echo_id: u64,
+    text: []u16,
+    retry: bool = false,
+    written: bool = true,
+    rejected: bool = false,
+    finished: std.atomic.Value(bool) = .init(false),
+};
+var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
+fn discardChannelJob() void {
+    const job = g_chat_tmux_send_job orelse return;
+    std.heap.page_allocator.free(job.text);
+    std.heap.page_allocator.destroy(job);
+    g_chat_tmux_send_job = null;
+}
+fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id) 0 else null; }
 var channel_enabled = false;
 fn chatTmuxSendEligible(_: u32) bool { return channel_enabled; }
 var channel_starts: usize = 0;
 var delivery_polls: usize = 0;
-fn chatTmuxSendStart(_: u32, _: []const u16, id: u64, retry: bool) bool {
-    _ = retry;
+fn chatTmuxSendStart(_: u32, text: []const u16, id: u64, retry: bool) bool {
     std.debug.assert(g_chat_tmux_send_job == null);
+    const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch return false;
+    job.* = .{ .echo_id = id, .text = std.heap.page_allocator.dupe(u16, text) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    }, .retry = retry };
     channel_starts += 1;
-    g_chat_tmux_send_job = 1;
+    g_chat_tmux_send_job = job;
     if (chatOutboxIndexById(id)) |i| g_chat_outbox.items[i].channel_pending = true;
     return true;
 }
@@ -67,7 +89,58 @@ fn chatFileIdentityForShell(_: u32) u32 { return 1; }
 fn chatFileRequestForDelivery(_: u32, delivery: bool) void { std.debug.assert(delivery); delivery_polls += 1; }
 fn chatHistoryEntry(_: u32) ?*HistoryEntry { return &history_entry; }
 const ISSUE_349_FULL_SETTLE = false;
-fn chatTmuxSendFinish() void {}
+var tmux_steers: usize = 0;
+var direct_steers: usize = 0;
+var steer_shell: u32 = 99;
+var writes_at_steer: usize = 0;
+var enters_at_steer: usize = 0;
+var state_at_steer: ?ChatEchoState = null;
+fn chatAgentKey(idx: u32, digit: u8) bool {
+    std.debug.assert(digit == 0x18);
+    tmux_steers += 1;
+    steer_shell = idx;
+    if (g_chat_outbox.items.len > 0) state_at_steer = g_chat_outbox.items[0].state;
+    return true;
+}
+fn sendClaudeSendQueuedNowToShell(idx: u32) bool {
+    direct_steers += 1;
+    steer_shell = idx;
+    writes_at_steer = writes;
+    enters_at_steer = enters;
+    return true;
+}
+var chat_steer_prompt = false;
+var composer_text: []const u16 = &.{};
+const g_chat_composer_hwnd: ?*anyopaque = @ptrFromInt(1);
+var g_chat_reply: [1024]u8 = @splat(0);
+var g_chat_reply_len: usize = 0;
+var g_chat_message_wide: [16384]u16 = undefined;
+var g_chat_skill_name: [256]u8 = @splat(0);
+var g_chat_skill_name_len: usize = 0;
+var g_chat_skill_body: [1024]u8 = @splat(0);
+var g_chat_skill_body_len: usize = 0;
+var g_voice_mode_active = false;
+var g_voice_auto_sending = false;
+var g_voice_last_activity_tick: u64 = 0;
+var g_voice_utt_open = [_]struct { id: u64 = 0, consumed: bool = false }{.{}};
+var g_chat_ac_dialog_len: usize = 0;
+var g_chat_ac_dialog_command: [256]u16 = @splat(0);
+var g_chat_draft_dirty = false;
+const TIMER_CHAT_REFRESH: u32 = 1;
+fn GetWindowTextW(_: anytype, buf: [*]u16, cap: i32) i32 {
+    const n = @min(composer_text.len, @as(usize, @intCast(cap - 1)));
+    @memcpy(buf[0..n], composer_text[0..n]);
+    buf[n] = 0;
+    return @intCast(n);
+}
+fn SetWindowTextW(_: anytype, _: anytype) i32 { composer_text = &.{}; return 1; }
+fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }
+fn SetTimer(_: anytype, _: u32, _: u32, _: ?*anyopaque) usize { return 0; }
+fn chatAcClose() void {}
+fn chatAcAgent() chat_complete.Agent { return .claude; }
+fn chatDraftFlush() void {}
+fn stampSessionUse(_: u32, _: bool) void {}
+fn clearChatReply() void { g_chat_reply_len = 0; }
 fn chatFullSettleFinish() void {}
 fn chatFullSettleStart() void {}
 fn armChatOutboxTimerIfNeeded() void {}
@@ -134,7 +207,16 @@ fn clear() void {
     channel_enabled = false;
     channel_starts = 0;
     delivery_polls = 0;
-    g_chat_tmux_send_job = null;
+    discardChannelJob();
+    tmux_steers = 0;
+    direct_steers = 0;
+    steer_shell = 99;
+    writes_at_steer = 0;
+    enters_at_steer = 0;
+    state_at_steer = null;
+    composer_text = &.{};
+    chat_steer_prompt = false;
+    active_shell = 0;
     fake_now_ms = 2000;
     fake_loaded_ms = 0;
     history_entry.history.deinit(std.heap.page_allocator);
@@ -800,6 +882,103 @@ test "ISSUE-460 queued evidence releases the next connected message into Claude 
     chatOutboxTick();
     try std.testing.expectEqualSlices(u16, &.{'s'}, written_order[0..writes]);
 }
+test "IGSH-564 steer busy tmux types before keys and targets the original session once" {
+    defer clear();
+    channel_enabled = true;
+    shells[0].activity = .active;
+    g_chat_screen_working = true;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("steer this request");
+    chatSteerPrompt();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("steer this request"), g_chat_tmux_send_job.?.text);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 0), tmux_steers + direct_steers);
+    try std.testing.expect(g_chat_outbox.items[0].steer_pending);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 0), tmux_steers + direct_steers);
+    g_chat_tmux_send_job.?.finished.store(true, .release);
+    active_shell = 99;
+    chatTmuxSendFinish();
+    try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
+    try std.testing.expect(!g_chat_outbox.items[0].steer_pending);
+    try std.testing.expectEqual(@as(usize, 1), tmux_steers);
+    try std.testing.expectEqual(ChatEchoState.delivered, state_at_steer.?);
+    try std.testing.expectEqual(@as(u32, 0), steer_shell);
+    chatTmuxSendFinish();
+    active_shell = 0;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), tmux_steers);
+    try std.testing.expectEqual(@as(usize, 0), writes + enters + direct_steers);
+}
+test "IGSH-564 steer empty composer needs no delivered entry on either transport" {
+    defer clear();
+    for ([_]bool{ true, false }) |channel| {
+        channel_enabled = channel;
+        chatSteerPrompt();
+        try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    }
+    try std.testing.expectEqual(@as(usize, 1), tmux_steers);
+    try std.testing.expectEqual(@as(usize, 1), direct_steers);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "IGSH-564 steer direct input pastes and presses Enter before keys exactly once" {
+    defer clear();
+    shells[0].activity = .active;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("direct steer");
+    chatSteerPrompt();
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    try std.testing.expectEqual(@as(usize, 1), enters);
+    try std.testing.expectEqual(@as(usize, 1), writes_at_steer);
+    try std.testing.expectEqual(@as(usize, 1), enters_at_steer);
+    try std.testing.expectEqual(@as(usize, 1), direct_steers);
+    try std.testing.expectEqual(@as(usize, 0), tmux_steers + channel_starts);
+    try std.testing.expectEqual(@as(u32, 0), steer_shell);
+    try std.testing.expect(!g_chat_outbox.items[0].steer_pending);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), direct_steers);
+}
+test "IGSH-564 steer failed paste never presses keys and ordinary Enter does not steer" {
+    defer clear();
+    paste_ok = false;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("failed steer");
+    chatSteerPrompt();
+    try std.testing.expectEqual(@as(usize, 0), enters + tmux_steers + direct_steers);
+    clear();
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("ordinary send");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    try std.testing.expectEqual(@as(usize, 1), enters);
+    try std.testing.expectEqual(@as(usize, 0), tmux_steers + direct_steers);
+}
+test "IGSH-564 steer chord fires only for adjacent plain Ctrl X then Ctrl S" {
+    var pending = false;
+    try std.testing.expect(!chatSteerChord(&pending, 0x53, true, false, false, true));
+    try std.testing.expect(!chatSteerChord(&pending, 0x58, true, false, false, true));
+    try std.testing.expect(pending);
+    for ([_]u32{ 0x11, 0xA2, 0xA3 }) |held| {
+        try std.testing.expect(!chatSteerChord(&pending, held, true, false, false, true));
+        try std.testing.expect(pending);
+    }
+    try std.testing.expect(chatSteerChord(&pending, 0x53, true, false, false, true));
+    try std.testing.expect(!pending);
+    try std.testing.expect(!chatSteerChord(&pending, 0x53, true, false, false, true));
+}
+test "IGSH-564 steer chord another key disarms without consuming normal editing" {
+    for ([_]u32{ 0x41, 0x0D, 0x58 }) |other| {
+        var pending = false;
+        try std.testing.expect(!chatSteerChord(&pending, 0x58, true, false, false, true));
+        try std.testing.expect(!chatSteerChord(&pending, other, true, false, false, true));
+        try std.testing.expect(!pending);
+        try std.testing.expect(!chatSteerChord(&pending, 0x53, true, false, false, true));
+    }
+    for (0..4) |case| {
+        var pending = false;
+        _ = chatSteerChord(&pending, 0x58, true, false, false, true);
+        try std.testing.expect(!chatSteerChord(&pending, 0x53, case != 0, case == 1, case == 2, case != 3));
+        try std.testing.expect(!pending);
+    }
+}
 test "ISSUE-460 busy channel sends first immediately then confirms in order (IGSH-564)" {
     defer clear();
     channel_enabled = true;
@@ -813,7 +992,7 @@ test "ISSUE-460 busy channel sends first immediately then confirms in order (IGS
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     g_chat_outbox.items[0].channel_pending = false;
     g_chat_outbox.items[0].state = .delivered;
-    g_chat_tmux_send_job = null;
+    discardChannelJob();
     g_chat_outbox.items[0].transcript_queued = true;
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), channel_starts);
@@ -836,7 +1015,7 @@ test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript and s
     g_chat_outbox.items[0].state = .delivered;
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
-    g_chat_tmux_send_job = null;
+    discardChannelJob();
     try std.testing.expect(!g_chat_outbox.items[0].transcript_queued);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), channel_starts);
@@ -849,7 +1028,7 @@ test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript and s
         g_chat_outbox.items[1].state = .queued;
         g_chat_outbox.items[1].write_started = false;
         g_chat_outbox.items[1].channel_pending = false;
-        g_chat_tmux_send_job = null;
+        discardChannelJob();
         chatOutboxTick();
         try std.testing.expectEqual(@as(usize, 3) + attempt, channel_starts);
         try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
@@ -1076,7 +1255,7 @@ test "ISSUE-460 both saved laptop entries stay failed until positive background 
 }
 
 `;
-const names = ['loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
+const names = ['chatSteerPrompt', 'sendChatPrompt', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
 const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
@@ -1085,13 +1264,23 @@ const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat 
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
   try {
-    copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig'], dir);
+    copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'chat_complete.zig', 'skills.zig', 'chat_reply.zig'], dir);
     if (control === true) {
       const file = path.join(dir, 'chat_history.zig');
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
-    let functions = names.map(body).join('\n').replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery');
+    let functions = names.map(body).join('\n')
+      .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
+      .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
+      .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
+      .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
+    if (control === 'steer-before') {
+      functions = functions.replace('    chatEchoPushQueuedForShell(idx);', '    _ = idx;');
+    }
+    if (control === 'steer-empty-before') {
+      functions = functions.replace('fn chatEchoPushQueuedForShell(idx: u32) void {', 'fn chatEchoPushQueuedForShell(idx: u32) void {\n    if (chatEchoCountDeliveredForShell(idx) == 0) return;');
+    }
     if (control === 'settlement') {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
       assert.notEqual(functions, names.map(body).join('\n'));
@@ -1102,7 +1291,7 @@ function runHarness(control = false) {
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests);
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('correctness repeats and unreadable: executed production outbox, write reservation and matching handle restart, busy/idle, repeated text and cache reload', () => {
@@ -1157,6 +1346,28 @@ test('ISSUE-460 production outbox regression tests', () => {
 test('IGSH-564 busy tmux readiness and FIFO regression', () => {
   const result = runHarness('igsh564');
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test('IGSH-564 steer oracles reject missing post-delivery keys and the old delivered-entry guard', () => {
+  for (const control of ['steer-before', 'steer-empty-before']) {
+    const result = runHarness(control);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /IGSH-564 steer [\s\S]*FAIL/);
+    assert.match(result.stderr, /expected 1, found 0/);
+  }
+});
+
+test('IGSH-564 steer hook leaves Ctrl+X native and dispatches only the completed chord', () => {
+  const hook = body('keyboardHookProc');
+  const chord = hook.slice(hook.indexOf('if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {'), hook.indexOf('const find_key_up'));
+  assert.match(chord, /chatSteerChord\(&chat_steer_chord_pending/);
+  assert.match(chord, /chatViewOwnsInput\(\) and foregroundIsOurs\(\) and !activeBrowserHasForegroundFocus\(\)/);
+  assert.match(chord, /WM_APP_CHAT_SEND, 1, 0/);
+  assert.ok(hook.indexOf('chatSteerChord(') < hook.indexOf('chatComposerOwnsKey('));
+  assert.match(body('chatComposerOwnsKey'), /0x58/);
+  assert.match(body('chatSteerPrompt'), /sendChatPrompt\(\)/);
+  assert.match(source, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send.zig"\)\.chatSteerPrompt\(\) else sendChatPrompt\(\)/);
+  assert.doesNotMatch(body('chatSteerChord'), /GetTickCount|Timer|Sleep/);
 });
 
 test('production Zig outbox capacity and FIFO unit tests', () => {
