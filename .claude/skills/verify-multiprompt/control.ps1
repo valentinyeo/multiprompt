@@ -483,7 +483,7 @@ function Focus-Palette([string]$Query, [int]$Target) {
 function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
     Wait-Until {
         $state = Read-Session
-        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]$state.tabs[$Tab].cv -ne $Chat) { return $false }
+        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]($state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv) -ne $Chat) { return $false }
         $foreground = [VerifyNative]::GetForegroundWindow()
         if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
         if (-not $Chat) {

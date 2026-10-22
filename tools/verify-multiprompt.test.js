@@ -368,6 +368,43 @@ test('IGSH-522: workspace return grants a bounded owned-input handoff, never bac
   assert.doesNotMatch(returning, /SetForegroundWindow|SetFocus|\.SetFocus\(|Click.*(?:composer|typing box)/i);
 });
 
+function assertsOptionalChatViewRead(source) {
+  const surface = source.slice(source.indexOf('function Wait-WorkspaceSurface('), source.indexOf('function Wait-ConsoleText('));
+  const expression = surface.match(/\[bool\]\(([^\n]+?)\) -ne \$Chat/);
+  assert.ok(expression, 'Chat View must retain its expected-state comparison');
+  assert.equal(expression[1], "$state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv");
+  const evaluate = new Function('tab', `return Boolean(${expression[1]
+    .replace("$state.tabs[$Tab].PSObject.Properties['cv']", "Object.hasOwn(tab, 'cv')")
+    .replace('$state.tabs[$Tab].cv', 'tab.cv')
+    .replace(' -and ', ' && ')});`);
+  for (const saved of [{}, { cv: false }, { cv: true }]) {
+    const tab = new Proxy(saved, {
+      get(target, key) {
+        assert.ok(Object.hasOwn(target, key), `StrictMode read of missing ${key}`);
+        return target[key];
+      },
+    });
+    for (const expected of [false, true]) {
+      assert.equal(evaluate(tab) !== expected, (saved.cv === true) !== expected);
+    }
+  }
+}
+
+test('IGSH-522: optional saved cv is false under StrictMode without weakening Chat View equality', () => {
+  assert.match(read('src/session.zig'), /if \(app_state\.shells\[i\]\.chat_view_on and pos < json_buf\.len - 540\) \{\s*const cv = ",\\"cv\\":true";/);
+  assert.match(read('src/app_state.zig'), /cv: bool = false/);
+  assertsOptionalChatViewRead(control);
+  for (const [before, after] of [
+    ["$state.tabs[$Tab].PSObject.Properties['cv'] -and ", ''],
+    [' -and $state.tabs[$Tab].cv', ''],
+    [' -ne $Chat)', ' -ne $false)'],
+  ]) {
+    const broken = control.replace(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => assertsOptionalChatViewRead(broken), assert.AssertionError);
+  }
+});
+
 function assertsFocusJourneyReadiness(source) {
   const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
   const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
