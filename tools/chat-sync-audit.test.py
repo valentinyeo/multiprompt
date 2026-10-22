@@ -261,6 +261,28 @@ class ChatSyncAuditTest(unittest.TestCase):
         candidates = audit.pane_candidates('\n'.join(capture) + '\n')
         self.assertEqual([c['text'] for c in candidates], ['Checking 2 neutral builds before the release went out', 'please check the actual neutral prompt'])
 
+    def test_ISSUE_571_background_task_status_lines_are_not_chat_turns(self):
+        statuses = ['Task "Wait for laptop2 to come online" still running in background',
+                    'Task "Wait for revert check results" still running in background',
+                    'Task "Wait for combined PR check results" still running in background',
+                    'Task "Wait for the 7510 or chained click helper" still running in background']
+        message = 'The neutral assistant summary is ready'
+        for prefix in ('● ', ''):
+            with self.subTest(issue='ISSUE-571', prefix=prefix):
+                capture = [prefix + text for text in statuses] + ['● ' + message] + [''] * 8
+                candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+                self.assertEqual([item['text'] for item in candidates], [message])
+                self.assertEqual([item['pane_line'] for item in candidates], [5])
+
+    def test_ISSUE_571_real_messages_about_background_tasks_remain_candidates(self):
+        messages = ['● The Task "neutral check" still running in background needs attention',
+                    '● Task "neutral check" still running in background; I will wait',
+                    '● Task neutral check still running in background',
+                    '● Task "neutral check" is still running in background',
+                    '❯ Task "neutral check" still running in background']
+        candidates = audit.pane_candidates('\n'.join(messages + [''] * 8) + '\n')
+        self.assertEqual([item['text'] for item in candidates], [text[2:] for text in messages])
+
     def test_thinking_is_proven_protocol_activity_not_silently_dropped_prose(self):
         reader = audit.load_reader()
         content = 'please check the neutral build status'
