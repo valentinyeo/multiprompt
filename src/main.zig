@@ -1266,7 +1266,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.800";
+pub const APP_VERSION = "0.28.801";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1351,6 +1351,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (app_state.g_app_closing or initializeDeferred(hwnd)) {
             _ = KillTimer(hwnd, launch_cache.TIMER_STARTUP);
             launch_cache.pending = false;
+            saveSession();
             launch_cache.changed();
             @import("account_desktop.zig").resumeStartupReply();
         }

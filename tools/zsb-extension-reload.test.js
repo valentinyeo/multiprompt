@@ -201,7 +201,7 @@ fn runPipeServer(_: std.mem.Allocator, _: *HostContext, _: [*:0]const u8) void {
 fn routeReplyPipe(_: std.mem.Allocator, _: []const u8) !bool { return false; }
 fn handleJsonMessage(_: std.mem.Allocator, _: []const u8) ![]u8 { unreachable; }
 fn makeErrorResponse(_: std.mem.Allocator, _: ?std.json.Value, _: []const u8) ![]u8 { unreachable; }
-${'fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {\n' + section(bridge, '    const stdin = std.Io.File.stdin().handle;', 'fn sendBrowserRequest(')}
+${'fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {\n' + section(bridge, '    const stdin = std.Io.File.stdin().handle;', '\n}\n') + '\n}\n'}
 fn makeResultResponse(allocator: std.mem.Allocator, _: ?std.json.Value, result: []const u8) ![]u8 { return allocator.dupe(u8, result); }
 fn nativePing(allocator: std.mem.Allocator) ![]u8 {
     const method = "ping";

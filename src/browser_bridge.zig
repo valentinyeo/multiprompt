@@ -1429,7 +1429,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         debugLog(ls);
     }
 
-    const out_buf = std.heap.page_allocator.alloc(u8, 8 * 1024 * 1024) catch {
+    const out_buf = std.heap.page_allocator.alloc(u8, 16 * 1024 * 1024) catch {
         zsbSendError(client, "multiprompt-browser: out of memory for output\n");
         return;
     };
@@ -1560,6 +1560,8 @@ fn zsbRunBridgeOnce(cmd_slice: []const u8, out_buf: []u8) ?ZsbBridgeRun {
 
     const WAIT_OBJ0_ZSB: DWORD = 0x00000000;
     const start_tick = GetTickCount64();
+    const script_command = std.mem.indexOf(u8, cmd_slice, "\"cdp\" \"--script") != null;
+    const timeout_ms: u64 = if (script_command) 330_000 else 30_000;
     while (true) {
         zsbDrainPipeAvailable(read_pipe, out_buf, &result.out_len);
 
@@ -1568,7 +1570,7 @@ fn zsbRunBridgeOnce(cmd_slice: []const u8, out_buf: []u8) ?ZsbBridgeRun {
             break;
         }
 
-        if (GetTickCount64() - start_tick > 30_000) {
+        if (GetTickCount64() - start_tick > timeout_ms) {
             result.timed_out = true;
             _ = TerminateProcess(pi.hProcess, 1);
             _ = WaitForSingleObject(pi.hProcess, 2000);
@@ -1586,6 +1588,7 @@ fn zsbLooksLikeStaleBindingError(buf: []const u8) bool {
     var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, buf, .{}) catch return false;
     defer parsed.deinit();
     if (parsed.value != .object) return false;
+    if (parsed.value.object.get("failedStep") != null) return false;
     const ok = parsed.value.object.get("ok") orelse return false;
     if (ok != .bool or ok.bool) return false;
     const err = parsed.value.object.get("error") orelse return false;

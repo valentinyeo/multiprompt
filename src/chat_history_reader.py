@@ -354,7 +354,19 @@ def resolve_tmux_agent(agent, name, pid=None):
         cwd = mapped_cwd or cwd
         if sid:
             path = conversation_path("claude", sid, cwd) if cwd else None
-            return (sid, path) if path is not None else None
+            if path is not None:
+                return sid, path
+        try:
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+        except OSError:
+            argv = []
+        for index, argument in enumerate(argv[:-1]):
+            if argument == "--resume" and SESSION_ID.fullmatch(argv[index + 1]):
+                resumed = argv[index + 1]
+                path = conversation_path("claude", resumed, cwd or "")
+                return (resumed, path) if path is not None else None
+        if sid:
+            return None
         fallback = claude_transcript_for_cwd(cwd) if cwd else None
         if fallback is None:
             return None

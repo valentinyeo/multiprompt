@@ -47,6 +47,7 @@ var g_chat_layout_reuse: usize = 0;
 var g_chat_cache_generation: u64 = 0;
 var g_chat_prepend_pending = false;
 var g_chat_tables: chat_markdown.TableCache = .{};
+var g_chat_tables_shell_id: u32 = 0;
 var g_chat_cache_pruned: u64 = 0;
 fn chatPerf(_: []const u8, _: u64, _: usize) void {}
 fn chatFetchRelease() void {}
@@ -142,7 +143,7 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
 fn captureScreenText(_: u32, _: []u16) ?usize { capture_count += 1; return capture_result; }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
-fn chatApplyDisplayGlyphs(_: []u16) void {}
+fn chatApplyDisplayGlyphs(_: []u16, _: []const ChatBlock) void {}
 fn chatLatestAgentReply(_: []u16) usize { return 0; }
 fn findShellById(id: u32) ?usize { for (shells, 0..) |s, i| if (s.shell_id == id) return i; return null; }
 fn saveSession() void {}
@@ -157,7 +158,7 @@ fn chatRelayout(_: i32) void {
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
-const functions = ['chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy'];
+const functions = ['chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy'];
 const acceptance = `
 test "cache-first switch-back, stale completion and failure preserve complete messages" {
     const a = std.heap.page_allocator;

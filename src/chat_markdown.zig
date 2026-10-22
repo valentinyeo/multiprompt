@@ -1168,3 +1168,31 @@ test "IGSH-537 underscore flanking recognizes Unicode punctuation and symbols" {
     const n = inlineSpans(text, &out);
     for (out[0..n]) |span| try std.testing.expect(!span.style.italic);
 }
+
+test "IGSH-436 unchanged table hits cache and every geometry or content key rebuilds" {
+    const a = std.testing.allocator;
+    var cache: TableCache = .{};
+    defer cache.deinit(a);
+    const Measure = struct {
+        fn cell(calls: *usize, part: []const u16, _: bool) TableSize {
+            calls.* += 1;
+            return .{ .width = @intCast(part.len * 8), .height = 20 };
+        }
+    };
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("| A | B |\n|---|---|\n| one | two |");
+    var key = TableKey{ .view_w = 100, .font_pt = 13, .scale = 1024, .pad_x = 10, .pad_y = 6 };
+    var calls: usize = 0;
+    _ = try cache.layout(a, text, 0, key, &calls, Measure.cell);
+    _ = try cache.layout(a, text, 0, key, &calls, Measure.cell);
+    try std.testing.expectEqual(@as(usize, 4), calls);
+    inline for (.{ "view_w", "font_pt", "scale", "pad_x", "pad_y" }) |field| {
+        @field(key, field) += 1;
+        const before = calls;
+        _ = try cache.layout(a, text, 0, key, &calls, Measure.cell);
+        try std.testing.expectEqual(before + 4, calls);
+    }
+    const before = calls;
+    _ = try cache.layout(a, w("| A | B |\n|---|---|\n| new | two |"), 0, key, &calls, Measure.cell);
+    try std.testing.expectEqual(before + 4, calls);
+}

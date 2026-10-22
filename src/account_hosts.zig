@@ -133,6 +133,108 @@ pub fn readKeys(a: Allocator, output: []const u8) ![]const []const u8 {
     return keys.toOwnedSlice(a);
 }
 
+pub fn find(hosts: []const Host, slot: u8) ?Host {
+    for (hosts) |host| if (host.slot == slot) return host;
+    return null;
+}
+
+pub fn sameAddress(x: Host, y: Host) bool {
+    return std.mem.eql(u8, x.hostname, y.hostname) and x.port == y.port and std.mem.eql(u8, x.user, y.user);
+}
+
+pub fn rebase(local: Host, base: ?Host, remote: ?Host) struct { host: Host, conflict: bool } {
+    var result = local;
+    var conflict = false;
+    if (base) |b| {
+        if (remote) |r| {
+            inline for (.{ "hostname", "port", "user" }) |field| {
+                const l = @field(local, field);
+                const old = @field(b, field);
+                const incoming = @field(r, field);
+                const local_changed = if (@TypeOf(l) == u16) l != old else !std.mem.eql(u8, l, old);
+                const remote_changed = if (@TypeOf(l) == u16) incoming != old else !std.mem.eql(u8, incoming, old);
+                const different = if (@TypeOf(l) == u16) l != incoming else !std.mem.eql(u8, l, incoming);
+                if (!local_changed) @field(result, field) = incoming;
+                conflict = conflict or (local_changed and remote_changed and different);
+            }
+        }
+    }
+    return .{ .host = result, .conflict = conflict };
+}
+
+pub fn rewriteConfig(a: Allocator, config: []const u8, alias: []const u8, before: Host, after: Host) ![]const u8 {
+    try validate(&.{after});
+    if (!validHostname(alias)) return error.InvalidHosts;
+    if (sameAddress(before, after)) return config;
+    const newline: []const u8 = if (std.mem.indexOf(u8, config, "\r\n") != null) "\r\n" else "\n";
+    var header_end: usize = 0;
+    var block_end: usize = config.len;
+    var lines = std.mem.splitScalar(u8, config, '\n');
+    var offset: usize = 0;
+    while (lines.next()) |line| {
+        const end = @min(config.len, offset + line.len + 1);
+        var tokens = std.mem.tokenizeAny(u8, line, " \t\r=");
+        const key = tokens.next() orelse {
+            offset = end;
+            continue;
+        };
+        if (key[0] == '#') {
+            offset = end;
+            continue;
+        }
+        if (header_end == 0) {
+            const value = tokens.next() orelse break;
+            if (!std.ascii.eqlIgnoreCase(key, "Host") or !std.ascii.eqlIgnoreCase(value, alias)) break;
+            if (tokens.next()) |extra| if (extra[0] != '#') break;
+            header_end = end;
+        } else if (std.ascii.eqlIgnoreCase(key, "Host") or std.ascii.eqlIgnoreCase(key, "Match")) {
+            block_end = offset;
+            break;
+        }
+        offset = end;
+    }
+    var out: std.ArrayList(u8) = .empty;
+    if (header_end > 0) {
+        try out.appendSlice(a, config[0..header_end]);
+        if (config[header_end - 1] != '\n') try out.appendSlice(a, newline);
+    } else try out.appendSlice(a, try std.fmt.allocPrint(a, "Host {s}{s}", .{ alias, newline }));
+    inline for (.{ "hostname", "port", "user" }) |field| {
+        const old = @field(before, field);
+        const value = @field(after, field);
+        const changed = if (@TypeOf(value) == u16) value != old else !std.mem.eql(u8, value, old);
+        if (changed) {
+            const line = if (@TypeOf(value) == u16)
+                try std.fmt.allocPrint(a, "  Port {d}{s}", .{ value, newline })
+            else
+                try std.fmt.allocPrint(a, "  {s} {s}{s}", .{ field, value, newline });
+            try out.appendSlice(a, line);
+        }
+    }
+    if (header_end == 0) {
+        try out.appendSlice(a, try std.fmt.allocPrint(a, "Host *{s}", .{newline}));
+        try out.appendSlice(a, config);
+    } else {
+        offset = header_end;
+        lines = std.mem.splitScalar(u8, config[header_end..block_end], '\n');
+        while (lines.next()) |line| {
+            const end = @min(block_end, offset + line.len + 1);
+            var tokens = std.mem.tokenizeAny(u8, line, " \t\r=");
+            const key = tokens.next() orelse "";
+            var replace = false;
+            inline for (.{ "hostname", "port", "user" }) |field| {
+                const old = @field(before, field);
+                const value = @field(after, field);
+                const changed = if (@TypeOf(value) == u16) value != old else !std.mem.eql(u8, value, old);
+                replace = replace or (changed and std.ascii.eqlIgnoreCase(key, field));
+            }
+            if (!replace) try out.appendSlice(a, config[offset..end]);
+            offset = end;
+        }
+        try out.appendSlice(a, config[block_end..]);
+    }
+    return out.toOwnedSlice(a);
+}
+
 pub fn shouldRefresh(now: u64, last_refresh: ?u64, immediate: bool, local: []const Host, remote: []const Host) bool {
     if (immediate) return true;
     const last = last_refresh orelse return true;
@@ -140,6 +242,7 @@ pub fn shouldRefresh(now: u64, last_refresh: ?u64, immediate: bool, local: []con
     for (remote) |host| {
         var configured = false;
         for (local) |cached| if (cached.slot == host.slot) {
+            if (!sameAddress(cached, host)) return true;
             configured = true;
             break;
         };
@@ -242,12 +345,40 @@ test "hosts login and startup jobs refresh immediately" {
     try std.testing.expect(shouldRefresh(1000, 1000, true, &.{fixture}, &.{fixture}));
 }
 
-test "hosts remote slot missing locally refreshes immediately but configured slots do not" {
+test "ISSUE-252 remote address changes refresh configured slots immediately" {
     var remote = fixture;
     remote.slot = 1;
     try std.testing.expect(shouldRefresh(1001, 1000, false, &.{fixture}, &.{remote}));
     try std.testing.expect(shouldRefresh(1001, 1000, false, &.{}, &.{fixture}));
     remote.slot = fixture.slot;
     remote.hostname = "remote.example";
-    try std.testing.expect(!shouldRefresh(1001, 1000, false, &.{fixture}, &.{remote}));
+    try std.testing.expect(shouldRefresh(1001, 1000, false, &.{fixture}, &.{remote}));
+}
+
+test "ISSUE-252 inherited addresses override only changed fields without editing shared blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const config = "Include local.conf\nHost remote-*\n  HostName old.example\n  IdentityFile ~/.ssh/local_key\n  User owner\nHost other\n  HostName untouched.example\n";
+    var changed = fixture;
+    changed.hostname = "new.example";
+    const first = try rewriteConfig(a, config, "remote-1", fixture, changed);
+    try std.testing.expectEqualStrings("Host remote-1\n  hostname new.example\nHost *\n", first[0 .. first.len - config.len]);
+    try std.testing.expect(std.mem.endsWith(u8, first, config));
+    var again = changed;
+    again.hostname = "next.example";
+    const second = try rewriteConfig(a, first, "remote-1", changed, again);
+    try std.testing.expectEqualStrings("Host remote-1\n  hostname next.example\nHost *\n", second[0 .. second.len - config.len]);
+    try std.testing.expect(std.mem.endsWith(u8, second, config));
+}
+
+test "ISSUE-252 exact first host rewrites only changed address directives preserving other bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var changed = fixture;
+    changed.port = 2222;
+    const config = "Host remote-1\r\n\tHostName=203.0.113.5\r\n\tPort=22\r\n\tUser owner\r\n\tIdentityFile=~/.ssh/key\r\nMatch all\r\n  ForwardAgent no";
+    const result = try rewriteConfig(arena.allocator(), config, "remote-1", fixture, changed);
+    try std.testing.expectEqualStrings("Host remote-1\r\n  Port 2222\r\n\tHostName=203.0.113.5\r\n\tUser owner\r\n\tIdentityFile=~/.ssh/key\r\nMatch all\r\n  ForwardAgent no", result);
+    try std.testing.expectEqualStrings(config, try rewriteConfig(arena.allocator(), config, "remote-1", fixture, fixture));
 }
