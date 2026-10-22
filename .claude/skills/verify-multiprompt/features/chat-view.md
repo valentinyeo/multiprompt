@@ -9,6 +9,7 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - `received-markdown-selection-copy`: native tests check source-coordinate selection and copying rendered text rather than Markdown syntax.
 - `pending-message-selection-copy`: native tests check that messages still waiting to send can be selected, selected together with sent messages, and copied, and that the selection survives streamed transcript updates.
 - `copy-link`: native tests check that right-clicking a link offers Copy link and copies only that URL, without trailing punctuation.
+- `steer-send`: native tests check that Ctrl+X then Ctrl+S in Chat View sends the typed message and then presses Claude's own Ctrl+X Ctrl+S once it is typed, on both the tmux channel and direct input, that an empty composer presses it at once, that a failed paste presses nothing, and that only an adjacent plain Ctrl+X, Ctrl+S chord fires.
 
 ## How to get to it (user POV)
 
