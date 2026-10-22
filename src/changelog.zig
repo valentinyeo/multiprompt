@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.811", .items = &.{
+        .{ .text = "Console focus borders stay visible, pane gaps stay clear, and sidebar group lines no longer cover session icons.", .ticket = "IGSH-549" },
+    } },
     .{ .ver = "0.28.810", .items = &.{
         .{ .text = "Sessions in the Favorites workspace (Alt+1) can now be grouped there without leaving their home groups.", .ticket = "IGSH-556" },
     } },
