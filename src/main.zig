@@ -8166,7 +8166,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .updates => {
             updateCardInit();
-            if (!startUpdateCardWatch()) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
+            _ = startUpdateCardWatch();
+            _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
             restoreRegisteredWorkspaceWindows();
             checkDueReminders();
