@@ -766,15 +766,15 @@ test "ISSUE-460 queued evidence cannot release the next message into the input" 
     chatOutboxTick();
     try std.testing.expectEqualSlices(u16, &.{'s'}, written_order[0..writes]);
 }
-test "ISSUE-460 busy channel holds both messages until ready then confirms in order" {
+test "ISSUE-460 busy channel sends first immediately then confirms in order (IGSH-564)" {
     defer clear();
     channel_enabled = true;
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .queued);
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .queued);
     shells[0].activity = .active;
+    g_chat_screen_working = true;
     chatOutboxTick();
-    try std.testing.expectEqual(@as(usize, 0), channel_starts);
-    shells[0].activity = .idle;
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     g_chat_outbox.items[0].channel_pending = false;
