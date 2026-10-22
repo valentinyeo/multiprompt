@@ -70,11 +70,20 @@ print_help() {
       cdp)
         cat <<'CDP_HELP'
 usage: zsb cdp <method> [params-json]
+       zsb cdp --script <file.json|-> [--out FILE]
 Send a Chrome DevTools Protocol command. Params must be a JSON object.
+Scripts run ordered steps in ONE attached session on the same target tab.
+Steps: {"method":"Profiler.enable","params":{}}, {"waitMs":500},
+       {"method":"Page.reload","waitEvent":"Page.loadEventFired","timeoutMs":15000}.
+Use - for stdin; print a JSON result array or write it to local --out FILE.
+Errors stop at failedStep (1-based) and include completed results; no replay.
+Step timeout defaults to 15000 ms; total timeout budget is at most 300000 ms.
+Script total reply deadline: 360s; ZSB_TIMEOUT overrides this default.
 
 Examples:
   zsb cdp Page.enable
   zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+  zsb cdp --script profile.json --out results.json
 CDP_HELP
         ;;
       open) echo 'usage: zsb open [url]' ;;
@@ -132,12 +141,13 @@ Commands and flags:
   status | doctor | back | forward | reload | shoturl
   cursor [on | off | move X Y | click X Y]
   insert <text> | eval <code> | cdp <method> [params-json]
+  cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
 
 Unqualified reads and actions use the target:true tab in zsb tabs, not necessarily active:true.
 Use zsb <command> --help or -h for local command help without contacting the browser.
 Reply deadlines (total seconds from send, not idle time):
   Default 15; status/version 5; doctor 20; text/get-text/snapshot/cdp/eval/script 30;
-  screenshot/shoturl 60; selftest 180 total across its requests.
+  screenshot/shoturl 60; selftest 180 total across its requests; cdp --script 360.
   ZSB_TIMEOUT overrides these defaults: finite seconds greater than 0, at most 86400.
   Expiry returns nonzero with JSON error reply_timeout, elapsed time, deadline and a recovery hint.
 Remote recovery: reconnect SSH/tmux, open or rebind this session's pane, then run zsb status.
@@ -414,11 +424,12 @@ PY_SELFTEST
 fi
 
 send_zsb() {
-  python3 - "$sess" "$port" "$@" <<'PY_REQUEST'
+  python3 - "$sess" "$port" "$@" 3<&0 <<'PY_REQUEST'
 import base64
 import json
 import math
 import os
+import pathlib
 import socket
 import sys
 import time
@@ -436,9 +447,12 @@ def fail(code, message, reply=None, hint=None):
     sys.exit(1)
 
 
+script_mode = args[0] == "cdp" and len(args) > 1 and args[1] == "--script"
 default_timeout = {"status": 5, "version": 5, "doctor": 20,
                    "text": 30, "get-text": 30, "snapshot": 30, "cdp": 30, "eval": 30, "script": 30,
                    "screenshot": 60, "shoturl": 60}.get(args[0], 15)
+if script_mode:
+    default_timeout = 360
 try:
     timeout = float(os.environ.get("ZSB_TIMEOUT", default_timeout))
     if not math.isfinite(timeout) or not 0 < timeout <= 86400:
@@ -467,6 +481,25 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
+output_path = None
+if script_mode:
+    if len(args) not in {3, 5} or (len(args) == 5 and (args[3] != "--out" or not args[4])):
+        fail("bad_args", "usage: zsb cdp --script <file.json|-> [--out FILE]")
+    if len(args) == 5:
+        output_path = args[4]
+    try:
+        with os.fdopen(3, "r", encoding="utf-8") if args[2] == "-" else open(args[2], encoding="utf-8") as source:
+            script = source.read(1024 * 1024 + 1)
+        if len(script.encode()) > 1024 * 1024:
+            fail("bad_args", "CDP script exceeds 1 MiB")
+        steps = json.loads(script)
+        if not isinstance(steps, list):
+            fail("bad_args", "CDP script must be a JSON array")
+        script = json.dumps(steps, separators=(",", ":"))
+    except (OSError, ValueError) as exc:
+        fail("bad_args", f"cannot read CDP script: {exc}")
+    args = ["cdp", "--script-json", script]
+
 if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
     try:
         timeout = float(os.environ["ZSB_TIMEOUT_SECONDS"])
@@ -477,6 +510,8 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
 started = time.monotonic()
 deadline = started + timeout
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
+if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
+    fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
 try:
     sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
@@ -518,6 +553,15 @@ except ValueError:
     if first.startswith(("multiprompt-browser [--window", "usage:")):
         fail("bad_args", f"the bridge rejected the arguments of '{args[0]}' and printed its usage ({first}). Check the command and its flags; the app and pane are fine.")
     fail("invalid_reply", f"multiprompt app/bridge returned an invalid reply (possibly interrupted by an update). Reply started with: {first}. " + fix)
+if script_mode and isinstance(reply, list):
+    if output_path:
+        try:
+            pathlib.Path(output_path).write_text(raw.rstrip() + "\n", encoding="utf-8")
+        except OSError as exc:
+            fail("write_failed", f"cannot write CDP results: {exc}")
+    else:
+        print(raw.rstrip())
+    sys.exit(0)
 if not isinstance(reply, dict) or not isinstance(reply.get("ok"), bool):
     fail("invalid_reply", "multiprompt app/bridge returned an invalid reply (possibly incompatible versions). " + fix)
 loaded, bridge = reply.get("extensionVersion"), reply.get("bridgeVersion")
