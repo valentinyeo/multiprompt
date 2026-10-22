@@ -12,6 +12,12 @@ const chat = read('chat_composer');
 const capacity = read('capacity');
 const corners = read('browser_corners');
 const state = read('app_state');
+const sidebar = read('sidebar');
+function statement(source, prefix) {
+  const start = source.indexOf(prefix);
+  assert.ok(start >= 0, prefix);
+  return source.slice(start, source.indexOf(';', start) + 1);
+}
 function fn(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -28,11 +34,12 @@ function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
     fn(read('drawing'), 'uiScaled'),
-    ...['SIDEBAR_W', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
-    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'),
+    ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
+    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
+    fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
+  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;').replaceAll('@import("smooth.zig").drawRoundRect', 'drawRoundRect');
   return `const std = @import("std");
 const app_state = @This();
 const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read('chat_style'), 'contentColumn')} };
@@ -51,6 +58,40 @@ const GWL_STYLE = 0;
 const SWP_FRAMECHANGED = 1;
 const SWP_NOZORDER = 2;
 const SW_HIDE = 0;
+const SWP_NOREDRAW = 16;
+const NULL_BRUSH = 5;
+const DWORD = u32;
+var g_shortcuts_active = false;
+var g_changelog_active = false;
+var g_inbox_active = false;
+var g_url_picker_active = false;
+var g_snippet_create_active = false;
+var g_search_active = false;
+var g_multiprompt_theme = false;
+var g_light_theme = false;
+var g_amoled_theme = false;
+var g_edge_gray_theme = false;
+var g_mid_theme = false;
+var g_sidebar_scroll: i32 = 0;
+var test_browser_focused = false;
+var ring_rect: RECT = .{};
+var splitter_paint: RECT = .{};
+fn reconnectTabVisible(_: u32) bool { return true; }
+fn foregroundIsOurs() bool { return true; }
+fn chatViewOwnsInput() bool { return g_chat_active; }
+fn browserPaneActive() bool { return reserved; }
+fn activeBrowserHasForegroundFocus() bool { return test_browser_focused; }
+fn paletteAnchoredBesideBrowser() bool { return false; }
+fn RGB(r: u32, g: u32, b: u32) u32 { return r | (g << 8) | (b << 16); }
+fn customColorOr(_: []const u8, color: u32) u32 { return color; }
+fn multipromptColorOr(_: []const u8, color: u32) u32 { return color; }
+fn CreateSolidBrush(_: u32) HANDLE { return null; }
+fn CreatePen(_: i32, _: i32, _: u32) HANDLE { return null; }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return null; }
+fn GetStockObject(_: i32) HANDLE { return null; }
+fn DeleteObject(_: HANDLE) i32 { return 1; }
+fn FillRect(_: HANDLE, rc: *const RECT, _: HANDLE) i32 { splitter_paint = rc.*; return 1; }
+fn drawRoundRect(_: HANDLE, l: i32, t: i32, r: i32, b: i32, _: i32, _: i32) i32 { ring_rect = .{ .left = l, .top = t, .right = r, .bottom = b }; return 1; }
 var g_ui_scale: u32 = 100;
 var g_sidebar_w_full: i32 = 220;
 var g_sidebar_collapsed = false;
@@ -186,6 +227,103 @@ fn equalGap(expected: i32, actual: i32) !void {
     if (@abs(expected - actual) > 1) {
         std.debug.print("SPACING ASSERTION expected={d} measured={d}\\n", .{expected, actual});
         return error.UnequalPaneSpacing;
+    }
+}
+fn expectInside(rect: RECT, inner: RECT) !void {
+    if (rect.left < inner.left or rect.top < inner.top or rect.right > inner.right or rect.bottom > inner.bottom) {
+        std.debug.print("scale={d} rect=({d},{d},{d},{d}) inner=({d},{d},{d},{d})\\n", .{ g_ui_scale, rect.left, rect.top, rect.right, rect.bottom, inner.left, inner.top, inner.right, inner.bottom });
+        return error.OutsideFocusRing;
+    }
+}
+fn intersects(a: RECT, b: RECT) bool {
+    return a.left < b.right and a.right > b.left and a.top < b.bottom and a.bottom > b.top;
+}
+test "IGSH-549 console HWND and browser layout stay inside the primary ring" {
+    g_chat_active = false;
+    g_hide_sidebar = false;
+    for ([_]u32{100, 125, 150}) |scale| {
+        g_ui_scale = scale;
+        for ([_]bool{false, true}) |docked| {
+            reserved = docked;
+            for ([_]bool{false, true}) |full| {
+                shells[0].full_width = full;
+                for ([_]bool{false, true}) |title| {
+                    g_thread_title = title;
+                    for ([_]bool{false, true}) |focused| {
+                        test_browser_focused = focused;
+                        const primary = activePaneRects(test_client).primary;
+                        const edge = paneFocusRingPad() + paneFocusBorderW();
+                        const inner = RECT{ .left = primary.left + edge, .top = primary.top + edge, .right = primary.right - edge, .bottom = primary.bottom - edge };
+                        repositionActive();
+                        try expectInside(shell_rect, inner);
+                        const placed = shell_rect;
+                        try std.testing.expect(positionReconnectedConsole(0));
+                        try expectInside(shell_rect, inner);
+                        try std.testing.expectEqual(placed, shell_rect);
+                        if (docked) {
+                            const b = calcBrowserLayout().?;
+                            try expectInside(.{ .left = b.console_x, .top = b.console_y, .right = b.console_x + b.console_w, .bottom = b.console_y + b.console_h }, inner);
+                            const content = activePaneContentRect(test_client);
+                            try std.testing.expectEqual(content.left, b.console_x);
+                            try std.testing.expectEqual(content.right, b.console_x + b.console_w);
+                            paintActivePaneBorder(null);
+                            const slot = if (focused) activePaneRects(test_client).browser else primary;
+                            try std.testing.expectEqual(slot.left + paneFocusRingPad(), ring_rect.left);
+                            try std.testing.expectEqual(slot.right - paneFocusRingPad(), ring_rect.right);
+                            try std.testing.expectEqual(slot.top + paneFocusRingPad(), ring_rect.top);
+                            try std.testing.expectEqual(slot.bottom - paneFocusRingPad(), ring_rect.bottom);
+                        } else try std.testing.expect(calcBrowserLayout() == null);
+                    }
+                }
+            }
+        }
+    }
+    g_thread_title = true;
+    shells[0].full_width = false;
+    test_browser_focused = false;
+    reserved = false;
+}
+test "IGSH-549 splitter paint is a bounded grip in the gap, never touching a ring" {
+    reserved = true;
+    for ([_]u32{100, 125, 150}) |scale| {
+        g_ui_scale = scale;
+        paintBrowserSplitter(null);
+        const panes = activePaneRects(test_client);
+        try expectInside(splitter_paint, panes.splitter);
+        try std.testing.expect(splitter_paint.bottom - splitter_paint.top <= uiScaled(32));
+        for ([_]bool{false, true}) |focused| {
+            test_browser_focused = focused;
+            paintActivePaneBorder(null);
+            const border = paneFocusBorderW();
+            const outer = RECT{ .left = ring_rect.left - border, .top = ring_rect.top - border, .right = ring_rect.right + border, .bottom = ring_rect.bottom + border };
+            try std.testing.expect(!intersects(splitter_paint, outer));
+        }
+    }
+    reserved = false;
+    test_browser_focused = false;
+}
+test "IGSH-549 sidebar group rail has its own column before every row icon" {
+    for ([_]u32{100, 125, 150}) |scale| {
+        g_ui_scale = scale;
+        const column = activePaneRects(test_client).sidebar;
+        const row = .{ .y = uiScaled(40) };
+        const bottom = uiScaled(120);
+        ${statement(sidebar, 'var rail = RECT').replace('var rail', 'const rail')}
+        const y = row.y + uiScaled(24);
+        ${statement(sidebar, 'const fav_size: i32 =')}
+        ${statement(sidebar, 'const left_pad: i32 =')}
+        const favicon = RECT{ .left = left_pad, .top = y, .right = left_pad + fav_size, .bottom = y + fav_size };
+        for ([_]bool{false, true}) |has_favicon| {
+            var text_left: i32 = if (has_favicon) left_pad + fav_size + 8 else left_pad;
+            for (0..3) |_| {
+                ${statement(sidebar, 'var ag_sb_rc = RECT').replace('var ag_sb_rc', 'const ag_sb_rc')}
+                try std.testing.expect(!intersects(rail, ag_sb_rc));
+                try std.testing.expect(rail.right < ag_sb_rc.left);
+                text_left += 18;
+            }
+        }
+        try std.testing.expect(!intersects(rail, favicon));
+        try std.testing.expect(rail.left > column.left and rail.right < favicon.left);
     }
 }
 test "IGSH-549 Chat View content stays inside the focus border" {
