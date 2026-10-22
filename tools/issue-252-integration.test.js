@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { readChangelogEntry } = require('./changelog-entry');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
@@ -81,7 +82,7 @@ test('ISSUE-252 palette F1 documentation and changelog expose the same opt-in ac
   assert.match(read('src/main.zig'), /target == SEARCH_LAPTOP_SYNC_OFFSET[\s\S]*?accountToggleSync\(\)/);
   assert.match(read('src/sidebar.zig'), /L\("Sync between laptops: ON"\).*L\("Sync between laptops: OFF"\)/);
   assert.match(read('src/shortcuts.zig'), /off by default/);
-  assert.ok(read('changelog.d/IGSH-252-laptop-sync.md').includes('SSH keys, passwords and window positions'));
+  assert.ok(readChangelogEntry('IGSH-252').includes('SSH keys, passwords and window positions'));
   const core = read('src/account_records.zig');
   assert.match(core, /pub const poll_ms = 180000;/);
   assert.match(core, /\.device_id, b\.device_id\) == \.gt/);
