@@ -1572,7 +1572,7 @@ function isPaneBeaconTab(tab) {
 }
 
 function isExtensionTab(tab) {
-  return [tab?.url, tab?.pendingUrl].some((url) => /^(chrome|moz)-extension:\/\//i.test(url || ""));
+  return [tab?.url, tab?.pendingUrl].some((url) => /^[a-z][a-z0-9+.-]*-extension:\/\//i.test(url || ""));
 }
 
 function paneContentTab(tabs) {
@@ -1817,16 +1817,27 @@ async function evalAction(message) {
   });
 }
 
+function isExtensionFrameAccessError(error) {
+  return /Cannot access a chrome-extension:\/\/ URL of different extension/i.test(error?.message || String(error));
+}
+
 async function runInDataTab(tabId, func, args) {
-  return withCdpSession(tabId, async (debuggee) => {
-    const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
-      expression: `(${func.toString()})(...${JSON.stringify(args)})`,
-      returnByValue: true,
-      awaitPromise: true,
+  try {
+    return await withCdpSession(tabId, async (debuggee) => {
+      const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+        expression: `(${func.toString()})(...${JSON.stringify(args)})`,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
+      return reply.result?.value;
     });
-    if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
-    return reply.result?.value;
-  });
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+  }
+  const [entry] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func, args });
+  if (entry?.error) throw new Error(entry.error.message || String(entry.error));
+  return entry?.result;
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -1855,8 +1866,7 @@ async function runInFrame(tabId, frameId, func, args = []) {
 
 async function runInAllFrames(tabId, func, args = []) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
-  const results = await Promise.all((frames || []).filter((frame) =>
-    !/^(chrome|moz)-extension:\/\//i.test(frame.url || "")).map(async (frame) => {
+  const results = await Promise.all((frames || []).filter((frame) => !isExtensionTab(frame)).map(async (frame) => {
     try {
       return { frameId: frame.frameId, result: await runInFrame(tabId, frame.frameId, func, args) };
     } catch (error) {
@@ -2333,13 +2343,30 @@ function keyDescriptor(raw, shift) {
 
 async function captureScreenshotResult(message) {
   const tab = await getTargetTab(message);
-  const data = await captureScreenshotViaCdp(tab.id, 10000);
-  const dataUrl = `data:image/png;base64,${data}`;
+  let dataUrl;
+  let via = "Page.captureScreenshot";
+  try {
+    const data = await captureScreenshotViaCdp(tab.id, 10000);
+    dataUrl = `data:image/png;base64,${data}`;
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    try {
+      if (activeTab?.id !== tab.id) await chrome.tabs.update(tab.id, { active: true });
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      via = "chrome.tabs.captureVisibleTab";
+    } finally {
+      if (activeTab?.id && activeTab.id !== tab.id) {
+        const [current] = await chrome.tabs.query({ active: true, windowId: tab.windowId }).catch(() => []);
+        if (current?.id === tab.id) await chrome.tabs.update(activeTab.id, { active: true }).catch(() => {});
+      }
+    }
+  }
   return {
     tab: compactTab(tab),
     dataUrl,
-    bytesApprox: Math.ceil(data.length * 0.75),
-    via: "Page.captureScreenshot",
+    bytesApprox: Math.ceil(dataUrl.slice(dataUrl.indexOf(",") + 1).length * 0.75),
+    via,
   };
 }
 
@@ -2611,7 +2638,9 @@ async function resetBridge(message) {
 }
 
 async function tryAcceptPendingDialog(debuggee) {
-  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch((error) => {
+    if (isExtensionFrameAccessError(error)) throw error;
+  });
 }
 
 async function acceptPendingDialog(tabId) {
@@ -2630,7 +2659,9 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
           chrome.debugger.sendCommand(debuggee, "Page.enable", {}),
           2000,
           "CDP Page.enable timed out",
-        ).catch(() => {});
+        ).catch((error) => {
+          if (isExtensionFrameAccessError(error)) throw error;
+        });
         const result = await withTimeout(
           chrome.debugger.sendCommand(debuggee, "Page.captureScreenshot", {
             format: "png",
@@ -2645,6 +2676,7 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
         return result.data;
       });
     } catch (error) {
+      if (isExtensionFrameAccessError(error)) throw error;
       lastError = error;
       if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, attempt * 120));
     }

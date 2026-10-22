@@ -1,6 +1,6 @@
 # Isolated Chat View benchmark
 
-This optional Linux/Wine harness generates synthetic Claude and Codex conversations and runs a Windows cross-build in a fresh Wine prefix. It does not use real conversations, SSH hosts, browser profiles or account credentials. Its SSH tabs connect through `ssh-fixture.c`, a local stub that the app finds through the standard `%APPDATA%\ZigShell\ssh-path.txt` override and that answers the app's own attach and liveness probes, so every tab is a connected session as on a real machine. It measures switching, idle CPU, incremental updates, restart and browser-split geometry; it is not live Windows acceptance.
+This optional Linux/Wine harness generates synthetic Claude and Codex conversations and runs a Windows cross-build in a fresh Wine prefix. It does not use real conversations, SSH hosts, browser profiles or account credentials. It measures switching, idle CPU, incremental updates, restart and browser-split geometry; it is not live Windows acceptance.
 
 Prerequisites: Zig 0.16, Node.js, Python 3, Wine (including `wineserver` and `wineboot`), Xvfb (`xvfb-run`), xdotool, ImageMagick (`import`, `convert`, `montage`) and standard Linux process tools.
 
