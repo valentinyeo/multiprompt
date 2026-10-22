@@ -1461,17 +1461,27 @@ try {
                 $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[0].group_id -eq $state.groups[0].id
             } 'CMD membership in the user-created gray group'
             Press @(0x1B) 'Esc: leave inline group rename using the saved default name'
+            Palette 'new cmd'
+            Press @(0x0D) 'Enter: create ungrouped foreground console'
+            Wait-Until {
+                $state = Read-Session
+                @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'cmd' -and
+                    (-not $state.tabs[1].PSObject.Properties['group_id'] -or $state.tabs[1].group_id -eq 0)
+            } 'second CMD selected while grouped rail stays fully visible'
+            $consoleTab = (Read-Session).active_tab
+            $consoleShellId = (Read-Session).tabs[$consoleTab].shell_id
+            $script:browserShellId = $consoleShellId
             $pane = Open-BrowserPane 'pane-layout-open'
             Press @(0x5B, 0x26) 'Win+Up: maximize main window'
             Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'maximized main window'
-            Press @(0x11, 0x31) 'Ctrl+1: return to the CMD console'
-            Wait-WorkspaceSurface $initial.active_workspace 0 $false
+            Press @(0x11, 0x32) 'Ctrl+2: return to the ungrouped CMD console'
+            Wait-WorkspaceSurface $initial.active_workspace $consoleTab $false
             $console = [VerifyNative]::GetForegroundWindow()
             $browser = [VerifyNative]::PaneWindow($script:window)
             if ($browser -eq [IntPtr]::Zero) { throw 'No visible owned docked browser HWND' }
             $consoleElement = [System.Windows.Automation.AutomationElement]::FromHandle($console)
             if ($consoleElement.Current.IsOffscreen -or $consoleElement.Current.ClassName -ne 'ConsoleWindowClass' -or
-                -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $initial.tabs[0].shell_id), [StringComparison]::Ordinal)) { throw 'UIA cannot see the owned CMD console' }
+                -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $consoleShellId), [StringComparison]::Ordinal)) { throw 'UIA cannot see the owned CMD console' }
             Snapshot 'action'
             Snapshot 'pane-layout'
             $frame = New-Object VerifyNative+Rect
@@ -1488,7 +1498,7 @@ try {
                 [Math]::Abs($uiaRect.Right - $consoleRect.Right) -gt 1 -or [Math]::Abs($uiaRect.Bottom - $consoleRect.Bottom) -gt 1) { throw 'Console UIA and HWND bounds disagree' }
             Write-Host 'pane-layout console-uia-hwnd PASS'
             $state = Read-Session
-            if ($state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv) { throw 'Journey accidentally entered Chat View' }
+            if ($state.tabs[$consoleTab].PSObject.Properties['cv'] -and $state.tabs[$consoleTab].cv) { throw 'Journey accidentally entered Chat View' }
             $scale = 100
             if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
             $dpi = [VerifyNative]::GetDpiForWindow($script:window)
