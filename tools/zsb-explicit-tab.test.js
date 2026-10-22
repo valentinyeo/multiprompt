@@ -35,6 +35,8 @@ function browserHarness(ownsWindow) {
       } },
     },
     document: { title: tab.title },
+    loadProtectedWindows: async () => {},
+    protectedWindowMeta: new Map(),
     markZigShellWindow: async () => {},
     ensureBackgroundTabFocusEmulation: async value => value,
     getRememberedZsbTargetTab: async () => null,
@@ -135,6 +137,15 @@ fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     return result.stderr.trim();
   };
 }
+
+test('explicit-tab browser dispatch has the pane-protection dependencies', async () => {
+  const owner = browserHarness(true), wrong = browserHarness(false);
+  const message = { method: 'text', windowId, tab: String(tabId) };
+  assert.equal((await owner.api.dispatch(message)).tab.id, tabId);
+  assert.deepEqual(owner.reads, [tabId]);
+  await assert.rejects(wrong.api.dispatch(message), /not found \(no active tab\)/);
+  assert.deepEqual(wrong.reads, []);
+});
 
 test('explicit --tab survives transport and retries a non-owning instance, not a foreign tab', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-explicit-tab-'));

@@ -28,6 +28,7 @@ const png = "iVBORw0KGgo=";
 function harness(frames, {
   tabs = [{ id: 1, windowId: 10, active: true, url: frames[0].url }],
   failedFrames = [], attachError, commandError, failedCommand, captureError,
+  protectedWindowMeta = new Map(),
 } = {}) {
   const scriptCalls = [];
   const cdpTargets = [];
@@ -35,8 +36,13 @@ function harness(frames, {
   const detached = [];
   const captures = [];
   const activations = [];
+  const hostRequests = [];
   const context = vm.createContext({
-    console, setTimeout, clearTimeout,
+    console, setTimeout, clearTimeout, protectedWindowMeta,
+    requestHostReply: async (method, fields) => {
+      hostRequests.push({ method, ...fields });
+      return { via: "native-window", dataUrl: `data:image/png;base64,${png}`, bytesApprox: 8 };
+    },
     cdpOperationChains: new Map(),
     debuggedTabs: new Set(),
     screenshotCdpDetachTimers: new Map(),
@@ -105,16 +111,15 @@ function harness(frames, {
     },
   });
   const names = [
-    "isExtensionTab", "isPaneBeaconTab", "paneContentTab", "paneWindowNotFoundMessage", "getTargetTab",
+    "isExtensionTab", "isBrowserInternalTab", "isExtensionFrameAccessError", "isPaneBeaconTab", "paneContentTab", "paneWindowNotFoundMessage", "getTargetTab",
     "ensureBackgroundTabFocusEmulation", "runInFrame", "runInAllFrames", "textAction", "getSnapshot",
     "errorText", "isPageScriptingError", "pageErrorResult", "compactTab", "numberOr", "getVisibleText", "getCompactSnapshot",
     "runInDataTab", "withCdpSession", "withTimeout", "clearScreenshotCdpDetachTimer",
     "tryAcceptPendingDialog", "acceptPendingDialog", "captureScreenshotViaCdp", "captureScreenshotResult",
   ];
-  if (source.includes("function isExtensionFrameAccessError(")) names.push("isExtensionFrameAccessError");
   vm.runInContext(names.map(bridgeFunction).join("\n"), context);
   const api = vm.runInContext("({ textAction, getSnapshot, getTargetTab, captureScreenshotResult, acceptPendingDialog })", context);
-  return { api, scriptCalls, cdpTargets, cdpCommands, detached, captures, activations };
+  return { api, scriptCalls, cdpTargets, cdpCommands, detached, captures, activations, hostRequests };
 }
 
 function pageFrames(url) {
@@ -227,6 +232,36 @@ for (const failure of [
     assert.equal(h.captures[0].tabId, 1);
     assert.equal(h.captures[0].options.format, "png");
     assert.equal(h.detached.length, failure.attachError ? 0 : 1);
+  });
+}
+
+for (const url of ["edge://settings/privacy", "chrome://settings/content"]) {
+  test(`merged screenshot harness supports native capture then extension-frame fallback: ${url}`, async () => {
+    const tabs = [{ id: 1, windowId: 10, active: true, url }];
+    const h = harness(pageFrames(extensionUrls[0]), {
+      tabs,
+      attachError: extensionAccessError,
+      protectedWindowMeta: new Map([[10, { ownerPid: 123 }]]),
+    });
+    const native = await h.api.captureScreenshotResult({ windowId: 10 });
+    assert.equal(native.via, "native-window");
+    assert.equal(native.tab.url, url);
+    assert.equal(native.dataUrl, `data:image/png;base64,${png}`);
+    assert.equal(native.bytesApprox, 8);
+    assert.deepEqual(h.hostRequests, [{ method: "nativeScreenshot", windowId: 10, ownerPid: 123 }]);
+    assert.deepEqual(h.cdpTargets, []);
+    assert.deepEqual(h.captures, []);
+
+    tabs[0].url = "https://page.example/";
+    const fallback = await h.api.captureScreenshotResult({ windowId: 10 });
+    assert.equal(fallback.via, "chrome.tabs.captureVisibleTab");
+    assert.equal(fallback.dataUrl, native.dataUrl);
+    assert.equal(fallback.tab.url, tabs[0].url);
+    assert.deepEqual(h.cdpTargets, [1]);
+    assert.equal(h.captures.length, 1);
+    assert.equal(h.captures[0].tabId, 1);
+    assert.equal(h.hostRequests.length, 1);
+    assert.deepEqual(h.activations, []);
   });
 }
 
