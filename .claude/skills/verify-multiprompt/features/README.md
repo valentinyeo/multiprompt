@@ -37,6 +37,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
+- [Pane layout](pane-layout.md): keep the console focus border continuous, the pane gap clear and the gray group line separate from the first session icon.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
