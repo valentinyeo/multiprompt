@@ -190,11 +190,11 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
     assert.match(text, /owner != expectedPid/);
     assert.match(text, /X = hwnd == frame \? bounds.Left \+ 100 : bounds.Right - 160, Y = bounds.Top \+ 22/);
     assert.match(text, /GetForegroundWindow\(\) != hwnd\) throw/);
-    assert.match(text, /!GetGUIThreadInfo\(target, ref info\) \|\| info.active != hwnd \|\| GetAncestor\(info.focus, 3\) != frame \|\| \(hwnd != frame && GetAncestor\(info.focus, 2\) != hwnd\)/);
+    assert.match(text, /!GetGUIThreadInfo\(target, ref info\) \|\| info.Active != hwnd \|\| GetAncestor\(info.Focus, 3\) != frame \|\| \(hwnd != frame && GetAncestor\(info.Focus, 2\) != hwnd\)/);
     assert.doesNotMatch(text, /AttachThreadInput|SetFocus\(/);
   };
   assertOwnedFocus(focus);
-  for (const required of ['bounds.Right - 160', 'owner != expectedPid', 'info.active != hwnd', 'GetAncestor(info.focus, 3) != frame', 'GetAncestor(info.focus, 2) != hwnd']) {
+  for (const required of ['bounds.Right - 160', 'owner != expectedPid', 'info.Active != hwnd', 'GetAncestor(info.Focus, 3) != frame', 'GetAncestor(info.Focus, 2) != hwnd']) {
     assert.throws(() => assertOwnedFocus(focus.replace(required, 'false')));
   }
   assert.throws(() => assertOwnedFocus(focus + 'AttachThreadInput(current, target, true);'));
@@ -553,5 +553,5 @@ test('workspace palette waits for initialization and complete query consumption 
   for (const name of ['GetGUIThreadInfo', 'SetCursorPos', 'WindowFromPoint']) {
     assert.equal((control.match(new RegExp(`static extern (?:bool|IntPtr) ${name}\\(`, 'g')) || []).length, 1);
   }
-  assert.match(control, /info\.size = \(uint\)Marshal\.SizeOf\(typeof\(GuiThreadInfo\)\);[\s\S]*?return info\.focus;/);
+  assert.match(control, /info\.Size = \(uint\)Marshal\.SizeOf\(typeof\(GuiThreadInfo\)\);[\s\S]*?return info\.Focus;/);
 });

@@ -36,7 +36,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
-    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint size, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public Rect caretRect; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     public static void FocusOwnedWindow(IntPtr hwnd, int expectedPid, IntPtr frame) {
         uint owner;
         uint target = GetWindowThreadProcessId(hwnd, out owner);
@@ -57,8 +57,8 @@ public static class VerifyNative {
             Thread.Sleep(100);
         }
         if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
-        GuiThreadInfo info = new GuiThreadInfo { size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
-        if (!GetGUIThreadInfo(target, ref info) || info.active != hwnd || GetAncestor(info.focus, 3) != frame || (hwnd != frame && GetAncestor(info.focus, 2) != hwnd)) throw new InvalidOperationException("Owned window did not receive keyboard focus");
+        GuiThreadInfo info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
+        if (!GetGUIThreadInfo(target, ref info) || info.Active != hwnd || GetAncestor(info.Focus, 3) != frame || (hwnd != frame && GetAncestor(info.Focus, 2) != hwnd)) throw new InvalidOperationException("Owned window did not receive keyboard focus");
     }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
@@ -155,9 +155,9 @@ public static class VerifyNative {
         uint thread = GetWindowThreadProcessId(hwnd, out pid);
         if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
         GuiThreadInfo info = new GuiThreadInfo();
-        info.size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        return info.focus;
+        return info.Focus;
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
