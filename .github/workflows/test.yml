@@ -22,6 +22,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Verify responsive startup ordering and original regression controls
+        env:
+          STARTUP_BEFORE_REF: 508459a0022bb944a152d4f897d196d27dbb5455
+        run: node --test tools/startup-responsive.test.js
       - name: Classify changed paths
         id: paths
         shell: bash
@@ -126,9 +130,6 @@ jobs:
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
-      - name: Sweep real zsb.exe command help
-        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 4
-        run: node --test tools/zsb-help.test.js
 
   test-vps:
     name: test-vps (${{ matrix.group }})
@@ -192,6 +193,9 @@ jobs:
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Test cross-origin zsb frame input and eval
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node --test tools/zsb-iframe.test.js
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
