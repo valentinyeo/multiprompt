@@ -12,7 +12,12 @@ function Refuses([scriptblock]$Action, [string]$Message) {
     Assert $refused $Message
 }
 function Stop-FixtureApps {
-    Get-Process | Where-Object { $processPath = $_.Path; $processPath -and $processPath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue; $null = $_.WaitForExit(5000) }
+    Get-Process | Where-Object {
+        try {
+            $processPath = $_.Path
+            $processPath -and $processPath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)
+        } catch { $false }
+    } | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue; $null = $_.WaitForExit(5000) }
 }
 function Wait-File([string]$Path) {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
