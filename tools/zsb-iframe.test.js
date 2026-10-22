@@ -121,10 +121,34 @@ function harness({ redirected = false, inaccessible = false, attachError, inputE
       return fn({ tabId });
     },
   });
-  const names = ["clickAction", "framesAction", "evalAction", "runInDataTab", "runInTab", "runInFrame", "runInAllFrames", "errorText", "locateSelectorAcrossFrames", "frameViewportOffset", "locateSelectorForTrustedInput", "locateChildFrameRect", "signalParentFrame", "clickSelector", "dispatchTrustedClick", "evalInPage"];
+  const names = ["isExtensionTab", "isExtensionFrameAccessError", "clickAction", "framesAction", "evalAction", "runInDataTab", "runInTab", "runInFrame", "runInAllFrames", "errorText", "locateSelectorAcrossFrames", "frameViewportOffset", "locateSelectorForTrustedInput", "locateChildFrameRect", "signalParentFrame", "clickSelector", "dispatchTrustedClick", "evalInPage"];
   vm.runInContext(names.map(declaration).join("\n"), context);
   return { api: context, chrome, calls, scripts, scrolls, domEvents, frames, contexts, listeners, timers, tab };
 }
+
+test("IGSH-459 extracted frame helpers skip extension origins without losing page frames", async () => {
+  const h = harness();
+  const frames = await h.chrome.webNavigation.getAllFrames();
+  h.chrome.webNavigation.getAllFrames = async () => [
+    ...frames,
+    { frameId: 99, parentFrameId: 0, url: "chrome-extension://foreign/frame.html" },
+  ];
+  const result = await h.api.runInAllFrames(h.tab.id, function frameUrl() { return location.href; });
+  assert.deepEqual(Array.from(result, ({ frameId, result }) => [frameId, result]), frames.map(({ frameId, url }) => [frameId, url]));
+  assert.deepEqual(h.scripts.map(({ target }) => target.frameIds[0]), frames.map(({ frameId }) => frameId));
+});
+
+test("IGSH-459 extracted data-tab helper recognizes extension refusals and preserves other errors", async () => {
+  const h = harness({ attachError: "Cannot access a chrome-extension:// URL of different extension" });
+  h.tab.url = "data:text/html,top";
+  assert.equal(await h.api.evalAction({ code: "'data fallback'" }), "data fallback");
+  assert.equal(h.scripts.length, 1);
+  assert.deepEqual(Array.from(h.scripts[0].target.frameIds), [0]);
+  const failed = harness({ attachError: "Another debugger is already attached" });
+  failed.tab.url = "data:text/html,top";
+  await assert.rejects(failed.api.evalAction({ code: "1" }), /Another debugger is already attached/);
+  assert.equal(failed.scripts.length, 0);
+});
 
 for (const redirected of [false, true]) {
   test(`IGSH-305 trusted nested cross-origin click uses frame identity${redirected ? " after redirect" : " with duplicate URLs"}`, async () => {

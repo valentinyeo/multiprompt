@@ -527,6 +527,7 @@ pub extern "user32" fn IsWindowVisible(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetWindow(HANDLE, UINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetLastActivePopup(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMessageW(*MSG, HANDLE, UINT, UINT) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetMessageTime() callconv(WINAPI) LONG;
 pub extern "user32" fn TranslateMessage(*const MSG) callconv(WINAPI) BOOL;
 pub extern "user32" fn DispatchMessageW(*const MSG) callconv(WINAPI) LRESULT;
 pub extern "user32" fn DefWindowProcW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;

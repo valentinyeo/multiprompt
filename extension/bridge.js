@@ -383,7 +383,9 @@ async function rememberTargetWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) return;
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
+  await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
   await markZigShellWindow(wid);
 }
 
@@ -395,9 +397,10 @@ async function protectWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) throw new Error("protectWindow requires --window <id>");
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
-  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
+  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const owner = protectedWindowMeta.get(wid);
   if (shellId != null && owner?.shellId != null &&
@@ -1567,7 +1570,11 @@ function isPaneBeaconTab(tab) {
 }
 
 function isExtensionTab(tab) {
-  return [tab?.url, tab?.pendingUrl].some((url) => /^(chrome|moz)-extension:\/\//i.test(url || ""));
+  return [tab?.url, tab?.pendingUrl].some((url) => /^[a-z][a-z0-9+.-]*-extension:\/\//i.test(url || ""));
+}
+
+function isBrowserInternalTab(tab) {
+  return /^(?:chrome|edge|chrome-search|chrome-untrusted|devtools):/i.test(tab?.pendingUrl || tab?.url || "");
 }
 
 function paneContentTab(tabs) {
@@ -1641,7 +1648,7 @@ async function resolveExplicitTargetTab(windowId, message, required) {
 }
 
 async function ensureBackgroundTabFocusEmulation(tab) {
-  if (!tab?.id || tab.active || focusEmulatedTabs.has(tab.id)) return tab;
+  if (!tab?.id || tab.active || isBrowserInternalTab(tab) || focusEmulatedTabs.has(tab.id)) return tab;
   try {
     await withCdpSession(tab.id, (debuggee) =>
       chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }));
@@ -1717,6 +1724,9 @@ async function runInActiveTab(func, args = [], message) {
 
 async function textAction(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    throw new Error(`text is unavailable on browser-internal pages (${tab.pendingUrl || tab.url}): the browser blocks extension access; use screenshot for a native pane capture`);
+  }
   try {
     const limit = numberOr(message.limit, 2000);
     const frameResults = await runInAllFrames(tab.id, getVisibleText, [limit]);
@@ -1812,16 +1822,27 @@ async function evalAction(message) {
   });
 }
 
+function isExtensionFrameAccessError(error) {
+  return /Cannot access a chrome-extension:\/\/ URL of different extension/i.test(error?.message || String(error));
+}
+
 async function runInDataTab(tabId, func, args) {
-  return withCdpSession(tabId, async (debuggee) => {
-    const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
-      expression: `(${func.toString()})(...${JSON.stringify(args)})`,
-      returnByValue: true,
-      awaitPromise: true,
+  try {
+    return await withCdpSession(tabId, async (debuggee) => {
+      const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+        expression: `(${func.toString()})(...${JSON.stringify(args)})`,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
+      return reply.result?.value;
     });
-    if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
-    return reply.result?.value;
-  });
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+  }
+  const [entry] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func, args });
+  if (entry?.error) throw new Error(entry.error.message || String(entry.error));
+  return entry?.result;
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -1850,8 +1871,7 @@ async function runInFrame(tabId, frameId, func, args = []) {
 
 async function runInAllFrames(tabId, func, args = []) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
-  const results = await Promise.all((frames || []).filter((frame) =>
-    !/^(chrome|moz)-extension:\/\//i.test(frame.url || "")).map(async (frame) => {
+  const results = await Promise.all((frames || []).filter((frame) => !isExtensionTab(frame)).map(async (frame) => {
     try {
       return { frameId: frame.frameId, result: await runInFrame(tabId, frame.frameId, func, args) };
     } catch (error) {
@@ -2328,13 +2348,39 @@ function keyDescriptor(raw, shift) {
 
 async function captureScreenshotResult(message) {
   const tab = await getTargetTab(message);
-  const data = await captureScreenshotViaCdp(tab.id, 10000);
-  const dataUrl = `data:image/png;base64,${data}`;
+  if (isBrowserInternalTab(tab)) {
+    const current = await chrome.tabs.get(tab.id);
+    if (!current.active || current.windowId !== message.windowId || !isBrowserInternalTab(current)) {
+      throw new Error("native screenshot requires the browser-internal tab to be selected in its hosted pane; refusing to capture another tab");
+    }
+    const owner = protectedWindowMeta.get(current.windowId);
+    const capture = await requestHostReply("nativeScreenshot", { windowId: current.windowId, ownerPid: owner?.ownerPid });
+    return { ...capture, tab: compactTab(current) };
+  }
+  let dataUrl;
+  let via = "Page.captureScreenshot";
+  try {
+    const data = await captureScreenshotViaCdp(tab.id, 10000);
+    dataUrl = `data:image/png;base64,${data}`;
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    try {
+      if (activeTab?.id !== tab.id) await chrome.tabs.update(tab.id, { active: true });
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      via = "chrome.tabs.captureVisibleTab";
+    } finally {
+      if (activeTab?.id && activeTab.id !== tab.id) {
+        const [current] = await chrome.tabs.query({ active: true, windowId: tab.windowId }).catch(() => []);
+        if (current?.id === tab.id) await chrome.tabs.update(activeTab.id, { active: true }).catch(() => {});
+      }
+    }
+  }
   return {
     tab: compactTab(tab),
     dataUrl,
-    bytesApprox: Math.ceil(data.length * 0.75),
-    via: "Page.captureScreenshot",
+    bytesApprox: Math.ceil(dataUrl.slice(dataUrl.indexOf(",") + 1).length * 0.75),
+    via,
   };
 }
 
@@ -2564,7 +2610,9 @@ function withCdpSession(tabId, operation) {
 }
 
 async function tryAcceptPendingDialog(debuggee) {
-  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch((error) => {
+    if (isExtensionFrameAccessError(error)) throw error;
+  });
 }
 
 async function acceptPendingDialog(tabId) {
@@ -2583,7 +2631,9 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
           chrome.debugger.sendCommand(debuggee, "Page.enable", {}),
           2000,
           "CDP Page.enable timed out",
-        ).catch(() => {});
+        ).catch((error) => {
+          if (isExtensionFrameAccessError(error)) throw error;
+        });
         const result = await withTimeout(
           chrome.debugger.sendCommand(debuggee, "Page.captureScreenshot", {
             format: "png",
@@ -2598,6 +2648,7 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
         return result.data;
       });
     } catch (error) {
+      if (isExtensionFrameAccessError(error)) throw error;
       lastError = error;
       if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, attempt * 120));
     }
@@ -2674,9 +2725,10 @@ function normalizeConsoleEvent(method, params) {
 
 async function resolveWindow(message) {
   await loadProtectedWindows();
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup"] });
   const normalIds = new Set(windows.filter((win) => !win.type || win.type === "normal").map((win) => win.id));
-  const tabs = (await chrome.tabs.query({})).filter((tab) => normalIds.has(tab.windowId) && !isExtensionTab(tab));
+  const paneIds = new Set(windows.filter((win) => normalIds.has(win.id) || win.type === "popup").map((win) => win.id));
+  const tabs = (await chrome.tabs.query({})).filter((tab) => paneIds.has(tab.windowId) && !isExtensionTab(tab));
   const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const match = typeof message?.match === "string" ? message.match : "";
@@ -2687,10 +2739,16 @@ async function resolveWindow(message) {
         (owner?.shellId == null || (owner.shellId === shellId && (ownerPid == null || owner.ownerPid === ownerPid)));
     });
     if (new Set(beacons.map((tab) => tab.windowId)).size > 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
-    if (beacons.length > 0) return { windowId: beacons[0].windowId, tab: compactTab(beacons[0]) };
+    if (beacons.length > 0) {
+      const windowId = beacons[0].windowId;
+      if (!normalIds.has(windowId)) {
+        await markZigShellWindow(windowId, { shellId, ownerPid: ownerPid ?? protectedWindowMeta.get(windowId)?.ownerPid });
+      }
+      return { windowId, tab: compactTab(beacons[0]) };
+    }
   }
   if (shellId != null) {
-    const owned = windows.filter((win) => normalIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
+    const owned = windows.filter((win) => paneIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
       (ownerPid == null || protectedWindowMeta.get(win.id)?.ownerPid === ownerPid));
     if (owned.length > 1) throw new Error(`ambiguous multiprompt pane windows for shell ${shellId}`);
     if (owned.length === 1) {
@@ -2699,7 +2757,7 @@ async function resolveWindow(message) {
     }
   }
   if (match) {
-    const hits = shellId != null ? [] : tabs.filter((tab) => typeof tab.url === "string" && tab.url.includes(match));
+    const hits = shellId != null ? [] : tabs.filter((tab) => normalIds.has(tab.windowId) && typeof tab.url === "string" && tab.url.includes(match));
     if (hits.length === 0) throw new Error(`no window with tab url matching: ${match}`);
     if (new Set(hits.map((tab) => tab.windowId)).size !== 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
     return { windowId: hits[0].windowId, tab: compactTab(hits[0]) };

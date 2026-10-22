@@ -312,6 +312,9 @@ pub const Shell = struct {
     browser_pending_url: [BROWSER_PENDING_URL_CAP]u8 = std.mem.zeroes([BROWSER_PENDING_URL_CAP]u8),
     browser_pending_url_len: u32 = 0,
     browser_launch_tick: u64 = 0,
+    browser_first_launch_tick: u64 = 0,
+    browser_connection_id: u64 = 0,
+    browser_open_failed: bool = false,
     browser_suspended: bool = false,
     browser_native: bool = true,
     browser_split_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
@@ -2243,6 +2246,8 @@ pub const BrowserResolveJob = struct {
     shell_id: u32,
     nonce: [40]u8 = std.mem.zeroes([40]u8),
     nonce_len: usize = 0,
+    connection_id: u64 = 0,
+    window_id: i64 = 0,
 };
 
 pub const BrowserResolveInflight = struct {
@@ -2254,6 +2259,14 @@ pub const BrowserResolveInflight = struct {
 
 pub var g_browser_resolve_inflight: [16]BrowserResolveInflight = [_]BrowserResolveInflight{.{}} ** 16;
 pub const BROWSER_RESOLVE_STALE_MS: u64 = 10_000;
+
+pub const CancelledBrowserLaunch = struct {
+    nonce: [40]u8 = std.mem.zeroes([40]u8),
+    nonce_len: usize = 0,
+    deadline: u64 = 0,
+};
+
+pub var g_cancelled_browser_launches: [MAX_SHELLS]CancelledBrowserLaunch = [_]CancelledBrowserLaunch{.{}} ** MAX_SHELLS;
 
 pub const BrowserDockJob = struct {
     shell_id: u32,
@@ -2274,7 +2287,7 @@ pub var g_updating_browser_visibility: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 
-pub const BrowserPlaceholder = enum { none, opening, not_open };
+pub const BrowserPlaceholder = enum { none, opening, not_open, failed };
 
 pub var g_slot_placeholder_shell_id: u32 = 0;
 pub var g_slot_placeholder_since: u64 = 0;

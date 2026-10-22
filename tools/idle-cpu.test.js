@@ -27,7 +27,8 @@ function run(code) {
 test('production placeholder schedules only its actual visible state transition', () => {
   run(`const std = @import("std");
 const UINT = u32;
-const BrowserPlaceholder = enum { none, opening, not_open };
+const BrowserPlaceholder = enum { none, opening, not_open, failed };
+const BROWSER_PLACEHOLDER_NOT_OPEN_MS = 20_000;
 ${body('browserPlaceholderDelay')}
 test "deadline, pending launch, completed and covered states" {
     try std.testing.expectEqual(@as(?UINT, 20000), browserPlaceholderDelay(.opening, 0, false));
@@ -37,6 +38,7 @@ test "deadline, pending launch, completed and covered states" {
     try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.opening, 0, true));
     try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.not_open, 30000, false));
     try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.none, 0, false));
+    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.failed, 20000, false));
 }`);
 });
 
