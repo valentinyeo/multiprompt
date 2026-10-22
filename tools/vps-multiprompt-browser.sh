@@ -37,7 +37,6 @@ print_help() {
       screenshot|shoturl) deadline=60 ;;
       selftest) deadline=180 ;;
     esac
-    printf 'Total reply deadline: %ss; override with ZSB_TIMEOUT (finite seconds > 0, at most 86400).\n' "$deadline"
     case "$1" in
       text|get-text|snapshot|links)
         local unit=characters default_limit=2000
@@ -46,28 +45,27 @@ print_help() {
         printf '  --limit N  Maximum %s (default: %s)\n' "$unit" "$default_limit"
         printf '  --full     No practical limit\n  --tab ID   Read a tab in this session by ID, title, or URL match\n'
         printf '  Without --tab, read the target:true tab from zsb tabs (which may not be active).\n'
-        return
         ;;
-      navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)'; return ;;
-      workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)'; return ;;
+      navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)' ;;
+      workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)' ;;
       session-open) echo 'usage: zsb session-open --workspace <name> --group <name> --host <host name> --tmux <session> --name <tab title>'
         echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
         echo '  --tmux accepts 1-63 letters, digits, hyphens, underscores or dots.'
         echo '  --name accepts 1-63 UTF-16 units, without control characters.'
         echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
-        return ;;
-      selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)'; return ;;
-      pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)'; return ;;
-      extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)'; return ;;
-      tabs) echo 'usage: zsb tabs [--close ID]'; return ;;
-      url) echo 'usage: zsb url [--tab ID]'; return ;;
-      frames) echo 'usage: zsb frames [--tab ID] (read-only frameId, parentFrameId and URL)'; return ;;
-      find) echo 'usage: zsb find <text> [--tab ID]'; return ;;
-      click) echo 'usage: zsb click <selector> [--tab ID] (reports via=cdp or frame-dom-fallback, and trusted)'; return ;;
-      screenshot) echo 'usage: zsb screenshot [-o FILE | --output FILE] [--tab ID]'; return ;;
-      console) echo 'usage: zsb console [-n N | --limit N] [--clear]'; return ;;
-      routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]'; return ;;
-      resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]'; return ;;
+        ;;
+      selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
+      pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
+      extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)' ;;
+      tabs) echo 'usage: zsb tabs [--close ID]' ;;
+      url) echo 'usage: zsb url [--tab ID]' ;;
+      frames) echo 'usage: zsb frames [--tab ID] (read-only frameId, parentFrameId and URL)' ;;
+      find) echo 'usage: zsb find <text> [--tab ID]' ;;
+      click) echo 'usage: zsb click <selector> [--tab ID] (reports via=cdp or frame-dom-fallback, and trusted)' ;;
+      screenshot) echo 'usage: zsb screenshot [-o FILE | --output FILE] [--tab ID]' ;;
+      console) echo 'usage: zsb console [-n N | --limit N] [--clear]' ;;
+      routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]' ;;
+      resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]' ;;
       cdp)
         cat <<'CDP_HELP'
 usage: zsb cdp <method> [params-json]
@@ -77,24 +75,27 @@ Examples:
   zsb cdp Page.enable
   zsb cdp Runtime.evaluate '{"expression":"document.title"}'
 CDP_HELP
-        return ;;
-      open) echo 'usage: zsb open [url]'; return ;;
+        ;;
+      open) echo 'usage: zsb open [url]' ;;
       sidebar|status|doctor|back|forward|reload|active-tab|shoturl|native|version|browser-drop-gesture)
-        printf 'usage: zsb %s\n' "$1"; return ;;
-      activate) echo 'usage: zsb activate <tabId> [--target-only]'; return ;;
-      close-tab) echo 'usage: zsb close-tab <id|match>'; return ;;
-      tab) echo 'usage: zsb tab close <id|match>'; return ;;
-      insert) echo 'usage: zsb insert <text>'; return ;;
-      eval|script) printf 'usage: zsb %s [--frame ID] <js> [--tab ID]\n' "$1"; return ;;
-      key) echo 'usage: zsb key <combo>'; return ;;
-      cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]'; return ;;
-      profile-clone) echo 'usage: zsb profile-clone <src> <dst>'; return ;;
-      create-pane-window) echo 'usage: zsb create-pane-window <url> [--app] [--bounds L T W H]'; return ;;
-      theme) echo 'usage: zsb theme <name>'; return ;;
-      protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]'; return ;;
-      manifest) echo 'usage: zsb manifest <exe> <extension-id>'; return ;;
-      type) echo 'usage: zsb type [--tab ID] [--keys] <text> | <selector> <text>'; return ;;
+        printf 'usage: zsb %s\n' "$1" ;;
+      activate) echo 'usage: zsb activate <tabId> [--target-only]' ;;
+      close-tab) echo 'usage: zsb close-tab <id|match>' ;;
+      tab) echo 'usage: zsb tab close <id|match>' ;;
+      insert) echo 'usage: zsb insert <text>' ;;
+      eval|script) printf 'usage: zsb %s [--frame ID] <js> [--tab ID]\n' "$1" ;;
+      key) echo 'usage: zsb key <combo>' ;;
+      cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]' ;;
+      profile-clone) echo 'usage: zsb profile-clone <src> <dst>' ;;
+      create-pane-window) echo 'usage: zsb create-pane-window <url> [--app] [--bounds L T W H]' ;;
+      theme) echo 'usage: zsb theme <name>' ;;
+      protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]' ;;
+      manifest) echo 'usage: zsb manifest <exe> <extension-id>' ;;
+      type) echo 'usage: zsb type [--tab ID] [--keys] <text> | <selector> <text>' ;;
+      *) print_help ;;
     esac
+    printf 'Total reply deadline: %ss; override with ZSB_TIMEOUT (finite seconds > 0, at most 86400).\n' "$deadline"
+    return
   fi
   cat <<'EOF'
 usage: zsb <command> [args] (also: multiprompt-browser)
