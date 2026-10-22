@@ -680,7 +680,10 @@ pub fn threadTitleHeight() i32 {
 }
 
 pub fn threadTitleTop() i32 {
-    return if (threadTitleHeight() > 0) @import("window_layout.zig").paneOuterMargin() else 0;
+    if (threadTitleHeight() == 0) return 0;
+    var rc: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    return @import("window_layout.zig").activePaneContentRect(rc).top;
 }
 
 pub fn armBrowserVisibilitySettle(ticks: i32) void {

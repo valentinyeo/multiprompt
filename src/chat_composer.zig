@@ -150,7 +150,6 @@ const browserSlotReserved = @import("browser_pane.zig").browserSlotReserved;
 const browserSplitPermilleForActiveShell = @import("browser_pane.zig").browserSplitPermilleForActiveShell;
 const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
-const paneFocusInset = @import("browser_pane.zig").paneFocusInset;
 const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
@@ -211,7 +210,7 @@ pub fn chatViewLayout() ChatViewLayout {
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const gap = uiScaled(14);
     const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
-    const slot = @import("window_layout.zig").activePaneRects(rc).primary;
+    const slot = @import("window_layout.zig").activePaneContentRect(rc);
     const full_width = app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
     const content = chat_style.contentColumn(slot.left, slot.right - slot.left, false, browserSplitPermilleForActiveShell(), if (full_width) slot.right - slot.left else uiScaled(760), 0);
     const left = content.left;

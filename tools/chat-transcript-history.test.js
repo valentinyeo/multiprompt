@@ -431,7 +431,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
   assert.match(fn('chatTranscriptWndProc'), /Could not load the conversation, retrying/);
   assert.match(fn('chatImageReady'), /chatRelayoutPreservingScroll/);
-  assert.match(fn('chatViewLayout'), /activePaneRects\(rc\)\.primary/);
+  assert.match(fn('chatViewLayout'), /activePaneContentRect\(rc\)/);
   assert.match(fn('activePaneRects'), /browserSlotReserved/);
   assert.doesNotMatch(fn('chatViewLayout'), /centeredConsoleColumn|chatBrowserVisible/);
   assert.doesNotMatch(src, /CHAT_LOAD_MAX_TRIES/);
