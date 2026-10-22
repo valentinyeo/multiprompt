@@ -315,6 +315,10 @@ test('browser emulation map drives the real native CLI and extension only on Git
     assert.ok(driver.includes(args), args);
   }
   assert.match(driver, /requests\.some\(request => request\.url === '\/next' && \/iPhone\/\.test\(request\.userAgent\) && request\.mobileHint === '\?1' && request\.platformHint === '"iOS"'\)/);
+  assert.ok(driver.includes("['click', '#menu-toggle']"));
+  assert.match(driver, /addEventListener\("resize",\(\)=>\{window\.menuOpen=false;window\.resizeCount\+\+/);
+  assert.match(driver, /assert\.equal\(menu\.open, true/);
+  assert.match(driver, /assert\.equal\(menu\.resizeCount, menuBefore\.resizeCount/);
   assert.match(driver, /userAgentMobile:navigator\.userAgentData\.mobile/);
   assert.match(driver, /assert\.equal\(state\.userAgentMobile, true\)/);
   assert.match(driver, /assert\.equal\(state\.userAgentPlatform, platform\)/);

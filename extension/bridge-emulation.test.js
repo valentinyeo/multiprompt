@@ -36,9 +36,16 @@ function harness({ timeoutMs } = {}) {
     assert.ok(attached.has(tabId), `${method} needs an attached debugger`);
     calls.push({ tabId, method, params: JSON.parse(JSON.stringify(params || {})) });
     if (method === failMethod) throw new Error('synthetic CDP failure');
+    if (method === 'Synthetic.enableUnknownFailure') throw new Error('original command failure');
     if (method === heldMethod) await new Promise(resolve => { release = resolve; });
     const enabled = commandState.get(tabId) || new Set();
-    if (!method.startsWith('Emulation.')) enabled.add(method);
+    if (method.endsWith('.enable') || /^(Network.setBlockedURLs|Debugger.pause|Synthetic.enableUnknown)$/.test(method)) enabled.add(method);
+    if (method.endsWith('.disable')) {
+      const domain = method.split('.')[0];
+      for (const entry of enabled) if (entry.startsWith(`${domain}.`)) enabled.delete(entry);
+    }
+    if (method === 'Network.setBlockedURLs' && params.urls.length === 0) enabled.delete(method);
+    if (method === 'Debugger.resume') enabled.delete('Debugger.pause');
     commandState.set(tabId, enabled);
     const state = overrides.get(tabId) || {};
     if (method === 'Emulation.setDeviceMetricsOverride') state.metrics = params;
@@ -49,7 +56,14 @@ function harness({ timeoutMs } = {}) {
     if (method === 'Emulation.setTouchEmulationEnabled') state.touch = params.enabled;
     overrides.set(tabId, state);
     if (method === 'Page.captureScreenshot') return { data: 'iVBORsynthetic' };
+    if (method === 'Runtime.evaluate') return { result: { value: 42 } };
+    if (method === 'Synthetic.enableUnknown') return { acted: true, actionCount: 1 };
     return {};
+  };
+  chrome.tabs.get = async tabId => ({ id: tabId, url: 'https://example.test' });
+  chrome.scripting.executeScript = async ({ func }) => {
+    if (func.name === 'evalInPage') throw new Error('Content Security Policy unsafe-eval');
+    return [{ result: { found: true, editable: true, x: 20, y: 30, text: 'Menu' } }];
   };
   const context = vm.createContext({ chrome, console, URL, navigator: { userAgent: 'Synthetic Desktop' }, setTimeout: (fn, ms) => setTimeout(fn, timeoutMs && ms === 15000 ? timeoutMs : ms), clearTimeout });
   vm.runInContext(fs.readFileSync(process.env.BRIDGE_SOURCE || path.join(__dirname, 'bridge.js'), 'utf8'), context);
@@ -83,8 +97,8 @@ test('device emulation persists through CDP, screenshot and top-level navigation
   assert.equal(h.overrides.get(1).touch, true);
   await h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate', params: { expression: '1' } });
   assert.equal(await h.screenshot(1), 'iVBORsynthetic');
-  assert.equal(h.calls.filter(call => call.method === 'attach').length, 3);
-  assert.equal(h.calls.filter(call => call.method === 'detach').length, 2);
+  assert.equal(h.calls.filter(call => call.method === 'attach').length, 1);
+  assert.equal(h.calls.filter(call => call.method === 'detach').length, 0);
   await h.navigate(1);
   assert.equal(h.overrides.get(1).metrics.width, 390);
   assert.match(h.overrides.get(1).userAgent, /iPhone/);
@@ -179,7 +193,7 @@ test('extension release version is unused and matches self-test documentation', 
   assert.ok(docs.includes(`version **${manifest.version}**`));
 });
 
-test('ordinary CDP command state is reset while emulation is restored', async () => {
+test('ordinary CDP command state is reset explicitly while emulation is preserved', async () => {
   const h = harness();
   await h.run({ method: 'emulate', device: 'iphone' });
   const operations = [
@@ -191,9 +205,10 @@ test('ordinary CDP command state is reset while emulation is restored', async ()
     () => h.run({ method: 'console', clear: true }),
   ];
   for (const operation of operations) {
-    const detaches = h.calls.filter(call => call.method === 'detach').length;
+    const start = h.calls.length;
     await operation();
-    assert.equal(h.calls.filter(call => call.method === 'detach').length, detaches + 1, 'detach resets every command-enabled domain');
+    assert.equal(h.calls.slice(start).filter(call => call.method === 'detach').length, 0, 'known command state is reset without detaching');
+    assert.equal(h.calls.slice(start).filter(call => /Emulation\.(clear|setDeviceMetrics|setUserAgent|setTouch)/.test(call.method)).length, 0);
     assert.equal(h.commandState.get(1).size, 0);
     assert.equal(h.attached.has(1), true);
     assert.equal(h.emulated(1), true);
@@ -274,10 +289,107 @@ test('ordinary CDP timeout resets command state and failed restore releases the 
   h.release();
   await new Promise(resolve => setImmediate(resolve));
   h.fail('Emulation.setDeviceMetricsOverride');
-  await assert.rejects(h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate' }), /synthetic CDP failure/);
+  const reply = await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  assert.match(reply.warning, /emulation lost.*synthetic CDP failure/i);
+  assert.equal(reply.emulationLost, true);
   assert.equal(h.attached.has(1), false);
   assert.equal(h.emulated(1), false);
   h.fail(undefined);
   await h.navigate(1);
   assert.equal(h.attached.has(1), false);
+});
+
+
+test('built-in commands never bounce an emulated viewport and release only their enabled domains', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  for (const operation of [
+    () => h.run({ method: 'click', selector: '#menu' }),
+    () => h.run({ method: 'key', combo: 'Enter' }),
+    () => h.run({ method: 'type', selector: '#field', text: 'hello' }),
+    () => h.run({ method: 'eval', code: '42' }),
+    () => h.screenshot(1),
+    () => h.run({ method: 'console', clear: true }),
+  ]) {
+    const start = h.calls.length;
+    await operation();
+    const calls = h.calls.slice(start);
+    assert.equal(calls.filter(call => call.method === 'detach').length, 0);
+    assert.equal(calls.filter(call => /Emulation\.(clear|setDeviceMetrics|setUserAgent|setTouch)/.test(call.method)).length, 0);
+    const enabled = calls.filter(call => call.method.endsWith('.enable')).map(call => call.method.replace('.enable', '.disable')).sort();
+    assert.deepEqual(calls.filter(call => call.method.endsWith('.disable')).map(call => call.method).sort(), enabled);
+    assert.equal(h.commandState.get(1).size, 0);
+    assert.equal(h.overrides.get(1).metrics.width, 390);
+  }
+  await h.run({ method: 'emulate', device: 'off' });
+});
+
+test('raw CDP known enabling methods disable explicitly and unknown enabling state falls back to reset', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  for (const domain of ['Fetch', 'Network', 'Debugger', 'DOM', 'CSS', 'Overlay', 'Page', 'Runtime', 'Log']) {
+    const start = h.calls.length;
+    await h.run({ method: 'cdp', cdpMethod: `${domain}.enable` });
+    const calls = h.calls.slice(start);
+    assert.ok(calls.some(call => call.method === `${domain}.disable`), `${domain}.enable must be undone`);
+    assert.equal(calls.filter(call => call.method === 'detach').length, 0);
+    assert.equal(h.commandState.get(1).size, 0);
+  }
+  const start = h.calls.length;
+  await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  assert.equal(h.calls.slice(start).filter(call => call.method === 'detach').length, 1);
+  assert.equal(h.overrides.get(1).metrics.width, 390);
+  assert.equal(h.commandState.get(1).size, 0);
+  await h.run({ method: 'emulate', device: 'off' });
+});
+
+test('restore failure preserves command result and reports lost emulation without retrying the action', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  h.fail('Emulation.setDeviceMetricsOverride');
+  const result = await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  assert.equal(result.acted, true);
+  assert.equal(result.actionCount, 1);
+  assert.match(result.warning, /emulation lost.*synthetic CDP failure/i);
+  assert.equal(result.emulationLost, true);
+  assert.equal(h.calls.filter(call => call.method === 'Synthetic.enableUnknown').length, 1);
+  assert.equal(h.emulated(1), false);
+  assert.equal(h.attached.has(1), false);
+  await assert.rejects(h.run({ method: 'key', combo: 'Enter' }), /emulation lost.*zsb emulate/i);
+  h.fail(undefined);
+  const recovered = await h.run({ method: 'emulate', device: 'iphone' });
+  assert.match(recovered.warning, /emulation lost/i);
+  assert.equal(recovered.emulating, true);
+  await h.run({ method: 'key', combo: 'Enter' });
+  await h.run({ method: 'emulate', device: 'off' });
+});
+
+test('cleanup failure never replaces the original command error', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  h.fail('Emulation.setDeviceMetricsOverride');
+  await assert.rejects(h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknownFailure' }), /original command failure/);
+  assert.equal(h.emulated(1), false);
+  assert.equal(h.attached.has(1), false);
+});
+
+
+test('built-in domain cleanup survives command errors and timeouts without viewport resets', async () => {
+  for (const timeout of [false, true]) {
+    const h = harness({ timeoutMs: 20 });
+    await h.run({ method: 'emulate', device: 'iphone' });
+    const start = h.calls.length;
+    if (timeout) h.hold('Runtime.enable');
+    else h.fail('Log.enable');
+    await assert.rejects(h.run({ method: 'console', clear: true }), timeout ? /timed out/ : /synthetic CDP failure/);
+    if (timeout) {
+      h.release();
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(h.commandState.get(1).size, 0);
+    assert.equal(h.calls.slice(start).filter(call => call.method === 'detach' || /Emulation\.(clear|setDeviceMetrics|setUserAgent|setTouch)/.test(call.method)).length, 0);
+    assert.equal(h.overrides.get(1).metrics.width, 390);
+    h.fail(undefined);
+    await h.run({ method: 'emulate', device: 'off' });
+  }
 });

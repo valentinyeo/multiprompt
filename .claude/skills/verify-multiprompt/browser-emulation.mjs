@@ -31,7 +31,7 @@ const pending = new Map();
 const server = http.createServer((request, response) => {
   requests.push({ url: request.url, userAgent: request.headers['user-agent'], mobileHint: request.headers['sec-ch-ua-mobile'], platformHint: request.headers['sec-ch-ua-platform'] });
   response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
-  response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device preview verification</title><style>body{font:20px sans-serif;background:#eef4ff;color:#123;padding:16px}main{max-width:600px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{display:block;padding:24px;background:#cde}</style><main><h1>Device preview verification</h1><p>This synthetic page checks persistent mobile previews.</p><a id="next" href="/next">Navigate to the next page</a><pre id="state"></pre></main><script>function update(){document.querySelector("#state").textContent=JSON.stringify({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,userAgent:navigator.userAgent},null,2)}update();addEventListener("resize",update)</script>');
+  response.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device preview verification</title><style>body{font:20px sans-serif;background:#eef4ff;color:#123;padding:16px}main{max-width:600px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{display:block;padding:24px;background:#cde}</style><main><h1>Device preview verification</h1><p>This synthetic page checks persistent mobile previews.</p><button id="menu-toggle" onclick="window.menuOpen=true;document.getElementById('menu').hidden=false">Open mobile menu</button><p id="menu" hidden>Mobile menu is open</p><a id="next" href="/next">Navigate to the next page</a><pre id="state"></pre></main><script>window.menuOpen=false;window.resizeCount=0;addEventListener("resize",()=>{window.menuOpen=false;window.resizeCount++;document.getElementById("menu").hidden=true});function update(){document.querySelector("#state").textContent=JSON.stringify({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,userAgent:navigator.userAgent},null,2)}update();addEventListener("resize",update)</script>`);
 });
 
 async function waitFor(check, label, timeout = 60000) {
@@ -131,6 +131,18 @@ try {
   await cli(['emulate', 'iphone']);
   mobile(await measure('iphone'), 390, 844, /iPhone/, 'iOS');
   await screenshot('action');
+  await cli(['eval', 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))']);
+  const menuBefore = await cli(['eval', '({resizeCount:window.resizeCount,open:window.menuOpen})']);
+  assert.equal(menuBefore.open, false);
+  await cli(['click', '#menu-toggle']);
+  await screenshot('menu');
+  await cli(['console', '--clear']);
+  const menu = await cli(['eval', 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve({open:window.menuOpen,visible:!document.getElementById("menu").hidden,resizeCount:window.resizeCount,width:innerWidth}))))']);
+  assert.equal(menu.open, true, 'mobile menu remains open after trusted click, screenshot and console');
+  assert.equal(menu.visible, true);
+  assert.equal(menu.resizeCount, menuBefore.resizeCount, 'built-in commands must not resize the emulated page');
+  assert.equal(menu.width, 390);
+  await fs.writeFile(path.join(evidence, 'menu.json'), JSON.stringify({ before: menuBefore, after: menu }, null, 2));
   await cli(['click', '#next']);
   await waitFor(async () => (await measure('navigated')).url.endsWith('/next'), 'real link navigation');
   mobile(await measure('after-navigation'), 390, 844, /iPhone/, 'iOS');
@@ -170,7 +182,7 @@ try {
   assert.equal(offReloaded.touch, baseline.touch);
   assert.equal(offReloaded.userAgentMobile, baseline.userAgentMobile);
   assert.equal(offReloaded.userAgentPlatform, baseline.userAgentPlatform);
-  result.checks.push('iphone viewport/UA/client hints/touch', 'ordinary CDP screenshot retains emulation', 'real link navigation and request UA', 'reload persistence', 'pixel preset', 'custom mobile and desktop sizes', 'off restores desktop through reload', 'local native help');
+  result.checks.push('resize-sensitive mobile menu survives click screenshot and console', 'iphone viewport/UA/client hints/touch', 'ordinary CDP screenshot retains emulation', 'real link navigation and request UA', 'reload persistence', 'pixel preset', 'custom mobile and desktop sizes', 'off restores desktop through reload', 'local native help');
   result.browser = await cdp('Browser.getVersion');
   result.extensionId = extensionId;
   result.status = 'passed';
