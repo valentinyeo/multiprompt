@@ -225,29 +225,31 @@ public sealed class VerifyJob : IDisposable {
 }
 '@
 
-if ($Feature -eq 'browser-emulation') {
-    $Evidence = [IO.Path]::GetFullPath($Evidence)
-    New-Item -ItemType Directory -Force $Evidence | Out-Null
-    $browserJob = New-Object VerifyJob
-    $driver = $null
-    try {
-        $node = (Get-Command node.exe -ErrorAction Stop).Source
-        $scriptPath = (Resolve-Path '.claude/skills/verify-multiprompt/browser-emulation.mjs').Path
-        $driver = $browserJob.Start($node, $pwd.Path, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), ('"' + $scriptPath + '"'))
-        if (-not $driver.WaitForExit(600000)) { throw 'Browser verification timed out' }
-        if ($driver.ExitCode -ne 0) { throw ('Browser verification failed: ' + (Get-Content (Join-Path $Evidence 'stderr.log') -Raw)) }
-    } finally {
-        try {
-            $beforeStop = $browserJob.ReadAccounting()
-            $stopped = $browserJob.Stop()
-            @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'process-tree.json')
-        } finally {
-            if ($null -ne $driver) { $driver.Dispose() }
-            $browserJob.Dispose()
+switch ($Feature) {
+        'browser-emulation' {
+            $Evidence = [IO.Path]::GetFullPath($Evidence)
+            New-Item -ItemType Directory -Force $Evidence | Out-Null
+            $browserJob = New-Object VerifyJob
+            $driver = $null
+            try {
+                $node = (Get-Command node.exe -ErrorAction Stop).Source
+                $scriptPath = (Resolve-Path '.claude/skills/verify-multiprompt/browser-emulation.mjs').Path
+                $driver = $browserJob.Start($node, $pwd.Path, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), ('"' + $scriptPath + '"'))
+                if (-not $driver.WaitForExit(600000)) { throw 'Browser verification timed out' }
+                if ($driver.ExitCode -ne 0) { throw ('Browser verification failed: ' + (Get-Content (Join-Path $Evidence 'stderr.log') -Raw)) }
+            } finally {
+                try {
+                    $beforeStop = $browserJob.ReadAccounting()
+                    $stopped = $browserJob.Stop()
+                    @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'process-tree.json')
+                } finally {
+                    if ($null -ne $driver) { $driver.Dispose() }
+                    $browserJob.Dispose()
+                }
+            }
+            Write-Output 'VERIFIED browser-emulation with real native CLI and zero active job processes'
+            return
         }
-    }
-    Write-Output 'VERIFIED browser-emulation with real native CLI and zero active job processes'
-    return
 }
 
 $Evidence = [IO.Path]::GetFullPath($Evidence)
