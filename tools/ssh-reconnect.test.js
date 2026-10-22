@@ -1028,7 +1028,7 @@ test "ISSUE-511 no qualifying probe tabs" {
 });
 
 test('ISSUE-511 confirming probe wins the production reconnect tick on an old transport', async () => {
-  await zig(probeRuntime(`
+  const code = probeRuntime(`
 test "ISSUE-511 tick waits for confirming gone" {
     fake_now = 10000;
     shells[0].ssh_reconnect.ok();
@@ -1067,7 +1067,11 @@ test "ISSUE-511 tick waits for confirming gone" {
     try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
     try std.testing.expectEqual(before, spawns);
 }
-`), 'ISSUE-511 tick waits');
+`);
+  await zig(code, 'ISSUE-511 tick waits');
+  const oldTick = code.replace('shell.ssh_reconnect.expireProbeWait(now, shell.spawn_tick);', 'if (shell.ssh_reconnect.awaiting_probe and now -| shell.spawn_tick >= 45_000) shell.ssh_reconnect.awaiting_probe = false;');
+  assert.notEqual(oldTick, code);
+  await zig(oldTick, 'ISSUE-511 tick waits', true, 1);
 });
 
 
