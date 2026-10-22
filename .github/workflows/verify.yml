@@ -18,6 +18,7 @@ on:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
       - tools/verify-multiprompt.test.js
+      - tools/start-maximized.test.js
       - tools/verify-scratch.test.ps1
       - tools/favorites-groups.test.js
       - src/**
@@ -95,7 +96,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js
+        run: node --test tools/verify-multiprompt.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
@@ -120,6 +121,9 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Test maximized startup decision
+        if: env.FEATURE == 'appearance' && env.RELEASE_TAG == ''
+        run: zig test src/launch_plan.zig --test-filter IGSH-587
       - name: Prepare job-only signed local release
         if: env.FEATURE == 'safe-updates'
         shell: powershell

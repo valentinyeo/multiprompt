@@ -513,6 +513,8 @@ fn spawnReopen() void {
     cmd[p] = 0;
     var si = std.mem.zeroes(win.STARTUPINFOW);
     si.cb = @sizeOf(win.STARTUPINFOW);
+    si.dwFlags = 0x1;
+    si.wShowWindow = 3;
     var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
     if (win.CreateProcessW(@ptrCast(&g_exe), @ptrCast(&cmd), null, null, 0, 0x00000008 | 0x08000000, null, null, &si, &pi) == 0) return;
     if (pi.hProcess != null) _ = win.CloseHandle(pi.hProcess);

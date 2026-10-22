@@ -10,7 +10,7 @@ test('R1 cold launch only applies staged bits, background check never waits befo
   const startup = body(read('src/update_release.zig'), 'pub fn startup(', 'pub fn beginCheck()');
   assert.doesNotMatch(startup, /spawn\("Check"|65_000|GetExitCodeProcess/);
   assert.match(startup, /hasStaged\(\)/);
-  assert.match(read('src/main.zig'), /ShowWindow\(hwnd, SW_SHOW\)[\s\S]*update_release\.beginCheck\(\)/);
+  assert.match(read('src/main.zig'), /ShowWindow\(hwnd, @import\("launch_plan.zig"\)\.firstShowCommand\(\)\)[\s\S]*update_release\.beginCheck\(\)/);
 });
 test('R2 ready dispatched before sign-in guard; rollback has no readiness deadline', () => {
   const main = read('src/main.zig');

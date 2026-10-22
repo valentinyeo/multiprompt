@@ -282,6 +282,8 @@ pub fn spawnRelaunchHelper(exe_path: []const u16, pids: []const u32) bool {
     exe_z[exe_path.len] = 0;
     var si = std.mem.zeroes(win.STARTUPINFOW);
     si.cb = @sizeOf(win.STARTUPINFOW);
+    si.dwFlags = 0x1;
+    si.wShowWindow = 3;
     var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
     const flags: u32 = 0x00000008 | 0x08000000;
     if (win.CreateProcessW(&exe_z, @ptrCast(&cmd), null, null, 0, flags, null, null, &si, &pi) == 0) return false;

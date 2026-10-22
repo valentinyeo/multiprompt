@@ -236,6 +236,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_usage_telemetry_tests.step);
+    const launch_plan_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/launch_plan.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    const run_launch_plan_tests = b.addRunArtifact(launch_plan_tests);
+    test_step.dependOn(&run_launch_plan_tests.step);
+    vps_test_step.dependOn(&run_launch_plan_tests.step);
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
