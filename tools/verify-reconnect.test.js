@@ -6,6 +6,11 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const workflow = read('.github/workflows/verify-reconnect.yml');
 const drive = read('tools/verify-reconnect/drive.ps1');
 const desktop = read('tools/verify-reconnect/desktop.cs');
+const fakeSsh = read('tools/verify-reconnect/fake-ssh.c');
+assert.match(drive, /WriteAllText\("\$state\/sessions\.next", ""\)/);
+assert.match(fakeSsh, /no server running on/);
+assert.match(fakeSsh, /if \(sessions\[0\]\)/);
+assert.match(fakeSsh, /strstr\(cmd, "2>&1"\) && strstr\(cmd, "no server running"\)/);
 assert.match(workflow, /workflow_dispatch:/);
 assert.match(workflow, /exe_source:[\s\S]*default: build/);
 assert.match(workflow, /pull_request:[\s\S]*src\/ssh_reconnect\.zig[\s\S]*src\/chat_send\.zig[\s\S]*src\/console\.zig/);
@@ -22,11 +27,17 @@ assert.match(drive, /\$changed = \$sampled -or \$focusEvents -gt 0/);
 assert.match(drive, /Measure-Reconnect 'A'[\s\S]*Composer\(\$main\)[\s\S]*Measure-Reconnect 'F'[\s\S]*case='B'/);
 assert.match(drive, /\[ReconnectDesktop\]::StartSpy\(\)/);
 assert.match(drive, /\$goneCount -eq 1 -and \$attempts -eq 0/);
+assert.match(drive, /\$observationTimer = \[Diagnostics\.Stopwatch\]::StartNew\(\)/);
 assert.match(drive, /Start-Sleep -Seconds 60/);
+assert.match(drive, /while \(\$observationTimer\.Elapsed\.TotalSeconds -lt 60\) \{ Start-Sleep -Milliseconds 10 \}/);
+assert.match(drive, /\$observeSeconds = \$observationTimer\.Elapsed\.TotalSeconds/);
 assert.match(drive, /ssh-reconnect attempt=/);
 assert.match(drive, /ssh-reconnect ended id=/);
-assert.match(drive, /respawnShellInPlace ok kind=tmux idx=1 new_id=/);
+assert.ok(drive.includes('respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)='));
 assert.match(drive, /ssh-path\.txt/);
+assert.match(drive, /\$process -and \$process\.Path -eq \$Ssh/);
+assert.match(drive, /transport_paths=@\(\(Transport 'verify-one'\)\.Path, \(Transport 'verify-two'\)\.Path\)/);
+assert.doesNotMatch(drive, /\$text\.Contains\("ssh: selected working executable:/);
 assert.doesNotMatch(drive, /chat_view_mode=/);
 assert.match(drive, /cv=\$false[\s\S]*cv=\$false/);
 assert.match(desktop, /Class\(h\)=="ConsoleWindowClass"/);
@@ -46,16 +57,16 @@ for (const section of ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Main
 assert.match(skill, /never runs on the Linux server/);
 assert.match(skill, /\.github\/workflows\/verify-reconnect\.yml/);
 assert.match(skill, /tools\/verify-reconnect\//);
-const baseline = ['appearance.md', 'command-palette.md', 'inbox.md', 'sessions.md', 'workspaces.md'];
+const baseline = ['browser-pane-stuck.md', 'appearance.md', 'command-palette.md', 'inbox.md', 'session-open.md', 'sessions.md', 'workspaces.md'];
 const reconnect = ['ended-remote-session.md', 'saved-remote-workspace.md', 'ssh-tab-reconnect.md'];
-const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f !== 'README.md');
-assert.deepEqual(features.sort(), [...baseline, ...reconnect].sort());
+const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f.endsWith('.md') && f !== 'README.md');
+for (const file of [...baseline, ...reconnect]) assert.ok(features.includes(file), `required feature: ${file}`);
 const index = read('.claude/skills/verify-multiprompt/features/README.md');
 for (const file of features) {
   assert.ok(index.includes(`](${file})`), file);
   assert.deepEqual(read(`.claude/skills/verify-multiprompt/features/${file}`).match(/^## .+$/gm), [
     '## Sub-features', '## How to get to it (user POV)',
-    baseline.includes(file) ? '## Driving it with control.ps1' : '## Driving it with the Windows reconnect harness',
+    reconnect.includes(file) ? '## Driving it with the Windows reconnect harness' : '## Driving it with control.ps1',
     '## Gotchas',
   ]);
 }

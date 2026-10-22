@@ -30,6 +30,7 @@ const PIPE_NOWAIT: windows.DWORD = 0x00000001;
 const PIPE_UNLIMITED_INSTANCES: windows.DWORD = 255;
 const ERROR_FILE_NOT_FOUND: windows.DWORD = 2;
 const ERROR_PIPE_BUSY: windows.DWORD = 231;
+const ERROR_NO_DATA: windows.DWORD = 232;
 const ERROR_PIPE_CONNECTED: windows.DWORD = 535;
 const SOCKET = usize;
 const INVALID_SOCKET: SOCKET = ~@as(SOCKET, 0);
@@ -91,7 +92,7 @@ extern "kernel32" fn CreateFileA(
 ) callconv(.winapi) windows.HANDLE;
 
 extern "kernel32" fn WaitNamedPipeA(lpNamedPipeName: [*:0]const u8, nTimeOut: windows.DWORD) callconv(.winapi) BOOL;
-extern "kernel32" fn FlushFileBuffers(hFile: windows.HANDLE) callconv(.winapi) BOOL;
+extern "kernel32" fn SetNamedPipeHandleState(hNamedPipe: windows.HANDLE, lpMode: *const windows.DWORD, lpMaxCollectionCount: ?*const windows.DWORD, lpCollectDataTimeout: ?*const windows.DWORD) callconv(.winapi) BOOL;
 extern "kernel32" fn CloseHandle(hObject: windows.HANDLE) callconv(.winapi) BOOL;
 
 extern "kernel32" fn CreateMutexA(lpMutexAttributes: ?*anyopaque, bInitialOwner: BOOL, lpName: [*:0]const u8) callconv(.winapi) ?windows.HANDLE;
@@ -146,7 +147,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer args.deinit();
 
     _ = args.next();
-    g_window_id = resolveWindowFromEnv(allocator);
     var command = args.next() orelse "native";
     var profile_override: ?[]const u8 = null;
     while (true) {
@@ -162,9 +162,37 @@ pub fn main(init: std.process.Init.Minimal) !void {
         command = args.next() orelse badArgs(command);
     }
 
-    if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
+    var help_args = args;
+    if (help_args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return commandHelp(command);
+        if ((std.mem.eql(u8, command, "tab") and std.mem.eql(u8, arg, "close")) or
+            (std.mem.eql(u8, command, "tabs") and std.mem.eql(u8, arg, "--close")))
+        {
+            if (help_args.next()) |flag| {
+                if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) {
+                    return commandHelp(if (std.mem.eql(u8, command, "tab")) "tab close" else "tabs --close");
+                }
+            }
+        }
+    }
+    if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
+        if (args.next() != null) badArgs(command);
+        return usage();
+    }
 
+    if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
+
+    const is_script = std.mem.eql(u8, command, "cdp") and blk: {
+        var script_args = args;
+        const flag = script_args.next() orelse break :blk false;
+        break :blk std.mem.eql(u8, flag, "--script") or std.mem.eql(u8, flag, "--script-json");
+    };
     const is_native_host = std.mem.eql(u8, command, "native") or std.mem.startsWith(u8, command, "chrome-extension://");
+    if (!is_native_host) {
+        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{is_script});
+        watchdog.detach();
+    }
+    if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
     const is_legacy_host = std.mem.eql(u8, command, "chrome-extension://" ++ legacy_extension_id ++ "/");
     const profile_env = if (is_legacy_host or profile_override != null) null else std.process.Environ.getAlloc(init.environ, allocator, "MULTIPROMPT_BROWSER_PROFILE") catch |err| switch (err) {
         error.EnvironmentVariableMissing => null,
@@ -306,9 +334,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else {
             try sendBrowserRequest(allocator, "tabs", "", null);
         }
+    } else if (std.mem.eql(u8, command, "reset")) {
+        if (args.next() != null) badArgs(command);
+        try sendBrowserRequest(allocator, "reset", "", null);
     } else if (std.mem.eql(u8, command, "active-tab")) {
         if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "activeTab", "", null);
+    } else if (std.mem.eql(u8, command, "frames")) {
+        var fields = std.array_list.Managed(u8).init(allocator);
+        defer fields.deinit();
+        const tab = parseOnlyTabArg(&args) catch badArgs(command);
+        if (tab) |target| try appendTabTargetField(&fields, target);
+        try sendBrowserRequest(allocator, "frames", fields.items, null);
     } else if (std.mem.eql(u8, command, "url")) {
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
@@ -369,7 +406,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "snapshot", fields.items, null);
     } else if (std.mem.eql(u8, command, "find")) {
         const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const parsed = collectTextAndTabArgs(allocator, &args, first, false) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
@@ -383,7 +420,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "find", fields.items, null);
     } else if (std.mem.eql(u8, command, "click")) {
         const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const parsed = collectTextAndTabArgs(allocator, &args, first, false) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
@@ -395,29 +432,26 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "click", fields.items, null);
     } else if (std.mem.eql(u8, command, "type")) {
-        var first = args.next() orelse badArgs(command);
-        var tab: ?[]const u8 = null;
-        if (std.mem.eql(u8, first, "--tab")) {
-            tab = args.next() orelse badArgs(command);
-            first = args.next() orelse badArgs(command);
-        }
-        const keys = std.mem.eql(u8, first, "--keys");
-        if (keys) first = args.next() orelse badArgs(command);
-        const second = args.next();
-        const text = try joinRemainingArgs(allocator, &args, second orelse first);
-        defer allocator.free(text);
+        const first = args.next() orelse badArgs(command);
+        const parsed = collectTextAndTabArgs(allocator, &args, first, true) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
+        defer allocator.free(parsed.text);
+        const text = parsed.text[parsed.second_offset orelse 0 ..];
 
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
-        if (second != null) {
+        if (parsed.second_offset) |offset| {
             try fields.appendSlice("\"selector\":");
-            try appendJsonString(&fields, first);
+            try appendJsonString(&fields, parsed.text[0 .. offset - 1]);
             try fields.appendSlice(",");
         }
         try fields.appendSlice("\"text\":");
         try appendJsonString(&fields, text);
-        if (tab) |target| try appendTabTargetField(&fields, target);
-        if (keys) try fields.appendSlice(",\"keys\":true");
+        if (parsed.tab) |target| try appendTabTargetField(&fields, target);
+        if (parsed.keys) try fields.appendSlice(",\"keys\":true");
+        if (parsed.raw_enter) try fields.appendSlice(",\"rawEnter\":true");
         try sendBrowserRequest(allocator, "type", fields.items, null);
     } else if (std.mem.eql(u8, command, "insert")) {
         const first = args.next() orelse badArgs(command);
@@ -447,19 +481,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "cursor", fields.items, null);
     } else if (std.mem.eql(u8, command, "eval") or std.mem.eql(u8, command, "script")) {
-        const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const fields = buildEvalFields(allocator, &args) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
-        defer allocator.free(parsed.text);
-
-        var fields = std.array_list.Managed(u8).init(allocator);
-        defer fields.deinit();
-        try fields.appendSlice("\"code\":");
-        try appendJsonString(&fields, parsed.text);
-        if (parsed.tab) |target| try appendTabTargetField(&fields, target);
-        try sendBrowserRequest(allocator, "eval", fields.items, null);
+        defer allocator.free(fields);
+        try sendBrowserRequest(allocator, "eval", fields, null);
     } else if (std.mem.eql(u8, command, "key")) {
         const first = args.next() orelse badArgs(command);
         const combo = try joinRemainingArgs(allocator, &args, first);
@@ -513,8 +540,37 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "shoturl", if (user_initiated) "\"userInitiated\":true" else "", null);
     } else if (std.mem.eql(u8, command, "cdp")) {
         const cdp_method = args.next() orelse badArgs(command);
+        if (std.mem.eql(u8, cdp_method, "--script") or std.mem.eql(u8, cdp_method, "--script-json")) {
+            const source = args.next() orelse badArgs(command);
+            var output_path: ?[]const u8 = null;
+            if (args.next()) |flag| {
+                if (!std.mem.eql(u8, flag, "--out")) badArgs(command);
+                output_path = args.next() orelse badArgs(command);
+                if (output_path.?.len == 0) badArgs(command);
+            }
+            if (args.next() != null) badArgs(command);
+            const script = if (std.mem.eql(u8, cdp_method, "--script-json"))
+                try allocator.dupe(u8, source)
+            else
+                try readCdpScript(allocator, source);
+            defer allocator.free(script);
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, script, .{}) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => badArgs(command),
+            };
+            defer parsed.deinit();
+            if (parsed.value != .array) badArgs(command);
+            var fields = std.array_list.Managed(u8).init(allocator);
+            defer fields.deinit();
+            try fields.appendSlice("\"script\":");
+            try fields.appendSlice(script);
+            const response = try requestBrowser(allocator, "cdp", fields.items, GetTickCount64() + 320_000);
+            defer allocator.free(response);
+            try writeCdpScriptResponse(allocator, response, output_path);
+            return;
+        }
         const params_json = args.next();
-        if (args.next() != null or cdp_method.len == 0) badArgs(command);
+        if (args.next() != null or cdp_method.len == 0 or std.mem.startsWith(u8, cdp_method, "--")) badArgs(command);
         if (params_json) |params| {
             const parsed = std.json.parseFromSlice(std.json.Value, allocator, params, .{}) catch |err| switch (err) {
                 error.OutOfMemory => return err,
@@ -575,9 +631,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try fields.print("\"ownerPid\":{d}", .{pid});
         }
         try sendBrowserRequest(allocator, "resolveWindow", fields.items, null);
-    } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
-        if (args.next() != null) badArgs(command);
-        return usage();
     } else if (std.mem.eql(u8, command, "manifest")) {
         const exe_path = args.next() orelse badArgs(command);
         const extension_id = args.next() orelse badArgs(command);
@@ -626,21 +679,26 @@ const usage_text =
     \\  links [--limit n|--full] [--tab <id|match>] Return links across frames
     \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
     \\  find <text> [--tab <id|match>] Find text snippets across frames
-    \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
-    \\  type <text>                    Type trusted text at the focused editable
-    \\  type <selector> <text>         Click a selector and replace it with trusted text
-    \\  type --keys [selector] <text>  Type individual keys for keyboard-driven typeaheads
+    \\  click <selector> [--tab <id|match>]  Click across frames; reports via=cdp (trusted) or frame-dom-fallback (untrusted)
+    \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable; newlines become line breaks
+    \\  type <selector> <text> [--tab <id|match>]  Click a selector and replace it with trusted text
+    \\  type --keys [selector] <text> [--tab <id|match>]  Type individual keys for keyboard-driven typeaheads
+    \\  type --raw-enter [--keys] [selector] <text> [--tab <id|match>]  Press Enter at each newline (submits chat composers)
+    \\    --tab, --keys, and --raw-enter may appear in any order, each at most once
     \\  insert <text>                  Insert trusted text at the page cursor
     \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
-    \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
+    \\  frames [--tab <id|match>]      List frameId, parentFrameId and URL (read-only)
+    \\  eval [--frame <frameId>] <js> [--tab <id|match>]  Execute JavaScript in that frame's MAIN world; default top frame; awaits promises
     \\  key <combo>                    Send a native key chord, e.g. "Alt+2" or "Ctrl+B"
     \\  screenshot [-o file.png] [--tab <id|match>] Return a PNG or save it
     \\  console [-n N|--clear]         Return recent console and page-log entries
     \\  shoturl                        Upload active tab screenshot and paste its link into the owning shell
     \\  cdp <method> [params-json]     Send a Chrome DevTools Protocol command
+    \\  cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
     \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
     \\  manifest <exe> <extension-id>  Print a Native Messaging manifest
     \\  version                        Print version
+    \\  reset                          Reconnect bridge and clear stuck CDP sessions (keeps pane open)
     \\  help                           Print help
     \\
     \\Remote recovery after SSH/WiFi drops: reconnect the multiprompt SSH/tmux
@@ -1107,6 +1165,17 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     return null;
 }
 
+fn commandDeadline(is_script: bool) void {
+    if (is_script) {
+        Sleep(360_000);
+        writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb script exceeded its 360 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
+        std.process.exit(1);
+    }
+    Sleep(60_000);
+    writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb command exceeded its 60 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
+    std.process.exit(1);
+}
+
 fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {
     const profile_mutex = if (g_profile_token.len > 0) blk: {
         var name_buf: [128]u8 = undefined;
@@ -1151,6 +1220,85 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
 
         try writeNativeMessageLocked(&context, response);
     }
+}
+
+fn readCdpScript(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const from_stdin = std.mem.eql(u8, path, "-");
+    const path_z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_z);
+    const file = if (from_stdin) std.Io.File.stdin().handle else CreateFileA(path_z.ptr, GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+    if (file == INVALID_HANDLE_VALUE) return error.OpenScriptFailed;
+    defer if (!from_stdin) {
+        _ = CloseHandle(file);
+    };
+    var bytes = std.array_list.Managed(u8).init(allocator);
+    errdefer bytes.deinit();
+    var buffer: [4096]u8 = undefined;
+    while (true) {
+        var read: windows.DWORD = 0;
+        if (ReadFile(file, &buffer, buffer.len, &read, null) == 0) {
+            if (GetLastError() == 109) break;
+            return error.ReadScriptFailed;
+        }
+        if (read == 0) break;
+        if (bytes.items.len + read > 1024 * 1024) return error.ScriptTooLarge;
+        try bytes.appendSlice(buffer[0..read]);
+    }
+    return bytes.toOwnedSlice();
+}
+
+fn writeCdpScriptResponse(allocator: std.mem.Allocator, response: []const u8, output_path: ?[]const u8) !void {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object or !getBool(parsed.value.object.get("ok"))) {
+        try writeStdout(response);
+        try writeStdout("\n");
+        std.process.exit(1);
+    }
+    if (getString(parsed.value.object.get("extensionVersion"))) |loaded| {
+        if (!std.mem.eql(u8, loaded, version)) {
+            const message = try std.fmt.allocPrint(allocator, "extension version {s} does not match bridge {s}: reload the extension in chrome://extensions; script was not replayed", .{ loaded, version });
+            defer allocator.free(message);
+            const failure = try makeBridgeCliErrorResponse(allocator, "cdp", message, null);
+            defer allocator.free(failure);
+            try writeStdout(failure);
+            try writeStdout("\n");
+            std.process.exit(1);
+        }
+    }
+    const result = parsed.value.object.get("result") orelse return error.InvalidCdpScriptResponse;
+    if (result != .array) return error.InvalidCdpScriptResponse;
+    const json = try std.json.Stringify.valueAlloc(allocator, result, .{});
+    defer allocator.free(json);
+    if (output_path) |path| {
+        try writeFileBytes(allocator, path, json);
+    } else {
+        try writeStdout(json);
+        try writeStdout("\n");
+    }
+}
+
+test "IGSH-221 native script file input and complete JSON output round trip" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(base);
+    const input_path = try std.fmt.allocPrint(allocator, "{s}\\steps.json", .{base});
+    defer allocator.free(input_path);
+    const output_path = try std.fmt.allocPrint(allocator, "{s}\\results.json", .{base});
+    defer allocator.free(output_path);
+    const script = "[{\"method\":\"Profiler.enable\"},{\"waitMs\":500}]";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "steps.json", .data = script });
+    const input = try readCdpScript(allocator, input_path);
+    defer allocator.free(input);
+    try std.testing.expectEqualStrings(script, input);
+    const result = "[{\"method\":\"Profiler.stop\",\"result\":{\"profile\":{\"samples\":[1,2,3]}}}]";
+    try writeCdpScriptResponse(allocator, "{\"ok\":true,\"result\":" ++ result ++ "}", output_path);
+    const saved = try tmp.dir.readFileAlloc(std.testing.io, "results.json", allocator, .limited(4096));
+    defer allocator.free(saved);
+    try std.testing.expectEqualStrings(result, saved);
 }
 
 fn sendBrowserRequest(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, output_path: ?[]const u8) !void {
@@ -1490,16 +1638,18 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
     var last_mismatch: ?[]u8 = null;
     defer if (last_mismatch) |reply| allocator.free(reply);
 
+    const command_deadline = GetTickCount64() + (if (std.mem.eql(u8, method, "screenshot") or std.mem.eql(u8, method, "shoturl")) @as(u64, 40_000) else @as(u64, 20_000));
     var version_deadline: ?u64 = null;
     var request_attempts: u32 = browser_request_attempts;
     var attempt: u32 = 0;
     while (attempt < request_attempts) : (attempt += 1) {
-        const raw_response = requestBrowser(allocator, method, fields_json, null) catch |err| {
+        const raw_response = requestBrowser(allocator, method, fields_json, command_deadline) catch |err| {
             if (attempt + 1 < request_attempts and isRetryableBrowserRequestError(err)) {
                 Sleep(75 * (attempt + 1));
                 continue;
             }
 
+            if (err == error.BrowserRequestTimeout) return makeBridgeCliErrorResponse(allocator, method, "browser bridge deadline exceeded; run zsb reset to reconnect without reopening the pane", null);
             var message_buf: [128]u8 = undefined;
             const message = if (g_profile_token.len > 0)
                 std.fmt.bufPrint(&message_buf, "no browser bridge for profile {s}: {s}", .{ g_profile_token, @errorName(err) }) catch "no browser bridge for profile"
@@ -1516,7 +1666,7 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
                     if (reply.value == .object and !std.mem.eql(u8, method, "extensionReload")) {
                         if (reply.value.object.get("extensionVersion")) |loaded| {
                             if (loaded == .string and !std.mem.eql(u8, loaded.string, version)) {
-                                if (version_deadline == null) version_deadline = GetTickCount64() + 15_000;
+                                if (version_deadline == null) version_deadline = @min(command_deadline, GetTickCount64() + 15_000);
                                 const healed = waitForExtensionVersion(allocator, version_deadline.?);
                                 switch (versionHealDecision(getBool(reply.value.object.get("ok")), healed)) {
                                     .original => return raw_response,
@@ -1758,6 +1908,7 @@ test "issue: CLI requests advertise the bridge version and preserve request fiel
 }
 
 fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
+    const until = deadline orelse (GetTickCount64() + 20_000);
     const pid = GetCurrentProcessId();
     const tick = GetTickCount64();
 
@@ -1772,7 +1923,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     const reply_pipe = CreateNamedPipeA(
         reply_pipe_name.ptr,
         PIPE_ACCESS_INBOUND,
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | (if (deadline != null) PIPE_NOWAIT else PIPE_WAIT),
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_NOWAIT,
         1,
         max_native_message,
         max_native_message,
@@ -1790,7 +1941,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     var pipe_name_buf: [128]u8 = undefined;
     const command_pipe_name = try isolatedPipeName(&pipe_name_buf, g_profile_token);
     const command_pipe = blk: {
-        const until = @min(deadline orelse std.math.maxInt(u64), GetTickCount64() + 1500);
+        const connect_until = @min(until, GetTickCount64() + 1500);
         while (true) {
             const pipe = CreateFileA(
                 command_pipe_name.ptr,
@@ -1804,32 +1955,27 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
             if (pipe != INVALID_HANDLE_VALUE) break :blk pipe;
             const err = GetLastError();
             if (err != ERROR_FILE_NOT_FOUND and err != ERROR_PIPE_BUSY) return error.PipeUnavailable;
-            const remaining = until -| GetTickCount64();
-            if (remaining == 0) return error.PipeUnavailable;
+            const remaining = connect_until -| GetTickCount64();
+            if (remaining == 0) return if (GetTickCount64() >= until) error.BrowserRequestTimeout else error.PipeUnavailable;
             if (WaitNamedPipeA(command_pipe_name.ptr, @intCast(@min(50, remaining))) == 0) {
-                Sleep(@intCast(@min(10, until -| GetTickCount64())));
+                Sleep(@intCast(@min(10, connect_until -| GetTickCount64())));
             }
         }
     };
     defer _ = CloseHandle(command_pipe);
 
     try writeAll(command_pipe, request);
-    if (deadline) |until| {
-        while (GetTickCount64() < until) {
-            _ = ConnectNamedPipe(reply_pipe, null);
-            const response = readPipeMessage(allocator, reply_pipe) catch {
-                Sleep(10);
-                continue;
-            };
-            if (response.len > 0) return response;
-            allocator.free(response);
+    while (GetTickCount64() < until) {
+        _ = ConnectNamedPipe(reply_pipe, null);
+        const response = readPipeMessage(allocator, reply_pipe) catch {
             Sleep(10);
-        }
-        return error.ExtensionReloadTimeout;
+            continue;
+        };
+        if (response.len > 0) return response;
+        allocator.free(response);
+        Sleep(10);
     }
-    try waitForPipeClient(reply_pipe);
-
-    return readPipeMessage(allocator, reply_pipe);
+    return error.BrowserRequestTimeout;
 }
 
 fn saveScreenshotResponse(allocator: std.mem.Allocator, response: []const u8, output_path: []const u8) !void {
@@ -2024,10 +2170,51 @@ fn runPipeServer(allocator: std.mem.Allocator, context: *HostContext, command_pi
 fn waitForPipeClient(pipe: windows.HANDLE) !void {
     if (ConnectNamedPipe(pipe, null) == 0) {
         switch (GetLastError()) {
-            ERROR_PIPE_CONNECTED => return,
+            ERROR_PIPE_CONNECTED, ERROR_NO_DATA => return,
             else => return error.PipeConnectFailed,
         }
     }
+}
+
+test "ISSUE-394 reply pipe reads a message after the client has closed" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var name_buf: [128]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buf, "\\\\.\\pipe\\multiprompt-issue-394-{d}-{d}", .{ GetCurrentProcessId(), GetTickCount64() });
+    const server = CreateNamedPipeA(
+        name.ptr,
+        PIPE_ACCESS_INBOUND,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        4096,
+        4096,
+        0,
+        null,
+    );
+    try std.testing.expect(server != INVALID_HANDLE_VALUE);
+    defer _ = CloseHandle(server);
+
+    const message = "{\"ok\":true,\"result\":\"fast reply\"}";
+    {
+        const client = CreateFileA(
+            name.ptr,
+            GENERIC_WRITE,
+            0,
+            null,
+            OPEN_EXISTING,
+            0,
+            null,
+        );
+        try std.testing.expect(client != INVALID_HANDLE_VALUE);
+        defer _ = CloseHandle(client);
+        try writeAll(client, message);
+    }
+
+    try waitForPipeClient(server);
+    const reply = try readPipeMessage(allocator, server);
+    defer allocator.free(reply);
+    try std.testing.expectEqualStrings(message, reply);
 }
 
 fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
@@ -2054,8 +2241,9 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
     }
     defer _ = CloseHandle(pipe);
 
-    try writeAll(pipe, payload);
-    _ = FlushFileBuffers(pipe);
+    const mode: windows.DWORD = PIPE_NOWAIT;
+    if (SetNamedPipeHandleState(pipe, &mode, null, null) == 0) return true;
+    writeAll(pipe, payload) catch {};
     return true;
 }
 
@@ -2151,6 +2339,27 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
         return makeResultResponse(allocator, id, "{\"unlocked\":false}");
     }
 
+    if (std.mem.eql(u8, method, "nativeScreenshot")) {
+        const window_id = getI64(object.get("windowId")) orelse return makeErrorResponse(allocator, id, "native screenshot requires windowId");
+        const owner_pid = getI64(object.get("ownerPid")) orelse return makeErrorResponse(allocator, id, "native screenshot requires a registered hosted pane owner");
+        const png = @import("bridge_capture.zig").capture(allocator, window_id, owner_pid) catch |err| {
+            const message = try std.fmt.allocPrint(allocator, "native pane screenshot failed: {s}", .{@errorName(err)});
+            defer allocator.free(message);
+            return makeErrorResponse(allocator, id, message);
+        };
+        defer allocator.free(png);
+        const encoder = std.base64.standard.Encoder;
+        const data = try allocator.alloc(u8, encoder.calcSize(png.len));
+        defer allocator.free(data);
+        _ = encoder.encode(data, png);
+        var result = std.array_list.Managed(u8).init(allocator);
+        defer result.deinit();
+        try result.appendSlice("{\"via\":\"native-window\",\"dataUrl\":\"data:image/png;base64,");
+        try result.appendSlice(data);
+        try result.print("\",\"bytesApprox\":{d}}}", .{png.len});
+        return makeResultResponse(allocator, id, result.items);
+    }
+
     if (std.mem.eql(u8, method, "getUploadConfig")) {
         return makeUploadConfigResponse(allocator, id);
     }
@@ -2162,8 +2371,58 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     return makeErrorResponse(allocator, id, "unknown method");
 }
 
+test "native screenshot requires exact pane identity instead of returning unknown method" {
+    const missing_window = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\"}");
+    defer std.testing.allocator.free(missing_window);
+    try std.testing.expect(std.mem.indexOf(u8, missing_window, "native screenshot requires windowId") != null);
+    const missing_owner = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\",\"windowId\":42}");
+    defer std.testing.allocator.free(missing_owner);
+    try std.testing.expect(std.mem.indexOf(u8, missing_owner, "registered hosted pane owner") != null);
+}
+
+fn commandLookup(command: []const u8) []const u8 {
+    return if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+}
+
+fn commandHelp(command: []const u8) !void {
+    const lookup = commandLookup(command);
+    if (std.mem.eql(u8, lookup, "cdp")) {
+        return writeStdout(
+            \\usage: zsb cdp <method> [params-json]
+            \\       zsb cdp --script <file.json|-> [--out FILE]
+            \\Send a Chrome DevTools Protocol command. Params must be a JSON object.
+            \\Scripts run ordered steps in ONE attached session on the same target tab.
+            \\Steps: {"method":"Profiler.enable","params":{}}, {"waitMs":500},
+            \\       {"method":"Page.reload","waitEvent":"Page.loadEventFired","timeoutMs":15000}.
+            \\Use - for stdin; print a JSON result array or write it to --out FILE.
+            \\Errors stop at failedStep (1-based) and include completed results; no replay.
+            \\Step timeout defaults to 15000 ms; total timeout budget is at most 300000 ms.
+            \\
+            \\Examples:
+            \\  zsb cdp Page.enable
+            \\  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+            \\  zsb cdp --script profile.json --out results.json
+            \\
+        );
+    }
+    var lines = std.mem.splitScalar(u8, usage_text, '\n');
+    var found = false;
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "  ")) continue;
+        const candidate = line[2..];
+        if (!std.mem.startsWith(u8, candidate, lookup) or
+            (candidate.len > lookup.len and candidate[lookup.len] != ' ')) continue;
+        try writeStdout("usage: ");
+        try writeStdout(if (std.mem.eql(u8, command, "tab")) "tab close" else command);
+        try writeStdout(candidate[lookup.len..]);
+        try writeStdout("\n");
+        found = true;
+    }
+    if (!found) badArgs(command);
+}
+
 fn badArgs(command: []const u8) noreturn {
-    const lookup = if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+    const lookup = commandLookup(command);
     var usage_line: ?[]const u8 = null;
     var lines = std.mem.splitScalar(u8, usage_text, '\n');
     var commands = false;
@@ -2315,27 +2574,103 @@ fn parseOnlyTabArg(args: anytype) !?[]const u8 {
     return tab;
 }
 
+fn buildEvalFields(allocator: std.mem.Allocator, args: anytype) ![]u8 {
+    var code = std.array_list.Managed(u8).init(allocator);
+    defer code.deinit();
+    var tab: ?[]const u8 = null;
+    var frame_id: ?u32 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--frame")) {
+            if (frame_id != null) return error.InvalidArguments;
+            const value = args.next() orelse return error.InvalidArguments;
+            if (value.len == 0) return error.InvalidArguments;
+            for (value) |digit| {
+                if (digit < '0' or digit > '9') return error.InvalidArguments;
+            }
+            frame_id = std.fmt.parseInt(u32, value, 10) catch return error.InvalidArguments;
+        } else if (std.mem.eql(u8, arg, "--tab")) {
+            if (tab != null) return error.InvalidArguments;
+            tab = args.next() orelse return error.InvalidArguments;
+            if (tab.?.len == 0 or std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
+        } else {
+            if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
+            if (code.items.len > 0) try code.append(' ');
+            try code.appendSlice(arg);
+        }
+    }
+    if (code.items.len == 0) return error.InvalidArguments;
+    var fields = std.array_list.Managed(u8).init(allocator);
+    errdefer fields.deinit();
+    try fields.appendSlice("\"code\":");
+    try appendJsonString(&fields, code.items);
+    if (tab) |target| try appendTabTargetField(&fields, target);
+    if (frame_id) |id| try fields.print(",\"frameId\":{d}", .{id});
+    return fields.toOwnedSlice();
+}
+
+test "IGSH-305 eval frame and tab flags serialize without changing JavaScript" {
+    inline for (.{ "--frame 43 --tab 7 document.title", "--tab 7 document.title --frame 43", "document.title --frame 43 --tab 7" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        const fields = try buildEvalFields(std.testing.allocator, &args);
+        defer std.testing.allocator.free(fields);
+        try std.testing.expectEqualStrings("\"code\":\"document.title\",\"tab\":\"7\",\"frameId\":43", fields);
+    }
+    inline for (.{ "document.title", "--frame 0 document.title" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        const fields = try buildEvalFields(std.testing.allocator, &args);
+        defer std.testing.allocator.free(fields);
+        try std.testing.expect(std.mem.startsWith(u8, fields, "\"code\":\"document.title\""));
+    }
+}
+
+test "IGSH-305 eval rejects invalid or repeated frame flags and missing code" {
+    inline for (.{ "", "--frame", "--frame 43", "--frame -1 x", "--frame +1 x", "--frame 1.5 x", "--frame x x", "--frame 4294967296 x", "--frame 0 --frame 43 x", "--tab", "--tab --frame 43 x", "--tab 1 --tab 2 x", "--unknown x" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        try std.testing.expectError(error.InvalidArguments, buildEvalFields(std.testing.allocator, &args));
+    }
+}
+
 const TextTabArgs = struct {
     text: []u8,
     tab: ?[]const u8 = null,
+    second_offset: ?usize = null,
+    keys: bool = false,
+    raw_enter: bool = false,
 };
 
-fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8) !TextTabArgs {
+fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8, allow_type_flags: bool) !TextTabArgs {
     var text = std.array_list.Managed(u8).init(allocator);
     errdefer text.deinit();
     var tab: ?[]const u8 = null;
+    var keys = false;
+    var raw_enter = false;
+    var text_count: usize = 0;
+    var second_offset: ?usize = null;
     var current: ?[]const u8 = first;
     while (current) |arg| : (current = args.next()) {
         if (std.mem.eql(u8, arg, "--tab")) {
             if (tab != null) return error.InvalidArguments;
             tab = args.next() orelse return error.InvalidArguments;
+            if (std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
+        } else if (allow_type_flags and std.mem.eql(u8, arg, "--keys")) {
+            if (keys) return error.InvalidArguments;
+            keys = true;
+        } else if (allow_type_flags and std.mem.eql(u8, arg, "--raw-enter")) {
+            if (raw_enter) return error.InvalidArguments;
+            raw_enter = true;
         } else {
-            if (text.items.len > 0) try text.append(' ');
+            if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
+            if (text_count > 0) try text.append(' ');
+            if (text_count == 1) second_offset = text.items.len;
+            text_count += 1;
             try text.appendSlice(arg);
         }
     }
     if (text.items.len == 0) return error.InvalidArguments;
-    return .{ .text = try text.toOwnedSlice(), .tab = tab };
+    return .{ .text = try text.toOwnedSlice(), .tab = tab, .second_offset = second_offset, .keys = keys, .raw_enter = raw_enter };
 }
 
 fn appendTabTargetField(fields: *std.array_list.Managed(u8), target: []const u8) !void {

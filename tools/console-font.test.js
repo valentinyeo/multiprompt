@@ -9,33 +9,31 @@ const state = read('src/app_state.zig');
 const consoleSource = read('src/console.zig');
 const main = read('src/main.zig').split('pub fn main(init: std.process.Init) void {')[1];
 
-test('upstream Hack Regular and Bold and their complete license are embedded', () => {
-  for (const file of ['Hack-Regular.ttf', 'Hack-Bold.ttf', 'LICENSE-Hack.md']) {
-    assert.ok(fs.statSync(path.join(root, 'src/fonts', file)).size > 0, file);
-    assert.ok((consoleSource + read('src/fonts.zig')).includes(`@embedFile("fonts/${file}")`), file);
+test('the bundled shell font and its license are embedded and GDI can match its face for conhost', () => {
+  assert.match(consoleSource, /@import\("fonts\.zig"\)\.MONO_SEMIBOLD \}/);
+  assert.ok(consoleSource.includes('@embedFile("fonts/LICENSE-NordwandMono.txt")'));
+  assert.match(read('src/fonts/LICENSE-NordwandMono.txt'), /SIL Open Font License, Version 1\.1/i);
+  const bytes = fs.readFileSync(path.join(root, 'src/fonts/NordwandMono-SemiBold.ttf'));
+  assert.equal(bytes.readUInt32BE(0), 0x00010000);
+  const tables = {};
+  for (let i = 0; i < bytes.readUInt16BE(4); i++) {
+    const record = 12 + i * 16;
+    tables[bytes.toString('ascii', record, record + 4)] = bytes.readUInt32BE(record + 8);
   }
-  assert.match(read('src/fonts/LICENSE-Hack.md'), /Bitstream Vera Sans Mono Copyright/);
-  assert.match(read('src/fonts/LICENSE-Hack.md'), /MIT License/);
-  for (const face of ['Regular', 'Bold']) {
-    const bytes = fs.readFileSync(path.join(root, `src/fonts/Hack-${face}.ttf`));
-    assert.equal(bytes.readUInt32BE(0), 0x00010000);
-    const tableCount = bytes.readUInt16BE(4);
-    let nameOffset;
-    for (let i = 0; i < tableCount; i++) {
-      const record = 12 + i * 16;
-      if (bytes.toString('ascii', record, record + 4) === 'name') nameOffset = bytes.readUInt32BE(record + 8);
-    }
-    assert.notEqual(nameOffset, undefined);
-    const names = [];
-    for (let i = 0; i < bytes.readUInt16BE(nameOffset + 2); i++) {
-      const record = nameOffset + 6 + i * 12;
-      if (bytes.readUInt16BE(record) !== 3 || bytes.readUInt16BE(record + 6) !== 1) continue;
-      const start = nameOffset + bytes.readUInt16BE(nameOffset + 4) + bytes.readUInt16BE(record + 10);
-      names.push(Buffer.from(bytes.subarray(start, start + bytes.readUInt16BE(record + 8))).swap16().toString('utf16le'));
-    }
-    assert.ok(names.length > 0);
-    assert.ok(names.every(name => name === 'Hack'));
+  const names = [];
+  for (let i = 0; i < bytes.readUInt16BE(tables.name + 2); i++) {
+    const record = tables.name + 6 + i * 12;
+    if (bytes.readUInt16BE(record) !== 3 || bytes.readUInt16BE(record + 6) !== 1) continue;
+    const start = tables.name + bytes.readUInt16BE(tables.name + 4) + bytes.readUInt16BE(record + 10);
+    names.push(Buffer.from(bytes.subarray(start, start + bytes.readUInt16BE(record + 8))).swap16().toString('utf16le'));
   }
+  assert.deepEqual(names, ['Nordwand Mono MP SemiBold']);
+  assert.equal(bytes.readUInt16BE(tables['OS/2'] + 4), 600);
+  assert.equal(bytes.readUInt32BE(tables['OS/2'] + 78) & 1, 1);
+  assert.equal(bytes.readUInt32BE(tables['OS/2'] + 82) >>> 30, 3);
+  assert.match(read('src/fonts.zig'), /SHELL_FACE = MONO_FACE;/);
+  assert.match(read('src/fonts.zig'), /SHELL_WEIGHT = 600;/);
+  assert.equal(fs.existsSync(path.join(root, 'src/fonts/Hack-Regular.ttf')), false);
 });
 
 test('font registration is visible to separate conhost processes and balanced on exit', () => {
@@ -55,7 +53,8 @@ test('font registration is visible to separate conhost processes and balanced on
   assert.match(read('src/session.zig'), /reclaimShell\(/);
 });
 
-test('font cache uses Unicode local app data paths and skips same-sized files', () => {
+test('font cache uses Unicode local app data paths, content-named font files and skips same-sized files', () => {
+  assert.match(consoleSource, /"NordwandMono-SemiBold-\{x:0>16\}\.ttf", \.\{std\.hash\.Wyhash\.hash\(0, @import\("fonts\.zig"\)\.MONO_SEMIBOLD\)\}/);
   assert.match(consoleSource, /GetEnvironmentVariableW\(L\("LOCALAPPDATA"\)/);
   assert.match(consoleSource, /L\("\\\\ZigShell\\\\fonts"\)/);
   assert.match(consoleSource, /GetFileSizeEx\(existing, &size\) != 0 and size == file\[1\]\.len/);
@@ -64,7 +63,7 @@ test('font cache uses Unicode local app data paths and skips same-sized files', 
   assert.doesNotMatch(consoleSource.slice(consoleSource.indexOf('pub fn registerBundledConsoleFonts'), consoleSource.indexOf('fn applyThemedConsoleFont')), /RegSet|RegCreate/);
 });
 
-test('all saved indices migrate to Hack without changing size', () => {
+test('all saved indices migrate to the shell font without changing size', () => {
   assert.match(state, /DEV_CONSOLE_FONTS = \[_\]\[\]const u8\{DEFAULT_CONSOLE_FONT\}/);
   assert.match(state, /DEFAULT_CONSOLE_FONT = @import\("fonts\.zig"\)\.SHELL_FACE/);
   assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono MP SemiBold"/);
@@ -85,19 +84,19 @@ test('the embedded theme names only bundled fonts and preserves its console heig
   const parts = expression.split('++ DEFAULT_CONSOLE_FONT ++').map(part => part.split('\n')
     .filter(line => /^\s*\\\\/.test(line)).map(line => line.replace(/^\s*\\\\/, '')).join('\n'));
   assert.equal(parts.length, 2);
-  const theme = JSON.parse(parts.join('Hack'));
+  const theme = JSON.parse(parts.join('Nordwand Mono MP SemiBold'));
   for (const key of ['title_font', 'subtitle_font', 'close_font']) assert.equal(theme.fonts[key], 'IBM Plex Sans');
-  assert.equal(theme.fonts.console_font, 'Hack');
+  assert.equal(theme.fonts.console_font, 'Nordwand Mono MP SemiBold');
   assert.equal(theme.fonts.console_font_height, 18);
-  assert.equal(theme.fonts.console_font_weight, 400);
+  assert.equal(theme.fonts.console_font_weight, 600);
 });
 
-test('console height stays unchanged, weight is Regular and readback logs once without verbose mode', () => {
+test('console height stays unchanged, weight is SemiBold and readback logs once without verbose mode', () => {
   assert.match(state, /"console_font_height": 18/);
-  assert.match(state, /"console_font_weight": 400/);
+  assert.match(state, /"console_font_weight": 600/);
   assert.match(consoleSource, /themed\.FontWeight = @import\("fonts\.zig"\)\.SHELL_WEIGHT/);
   assert.match(consoleSource, /std\.mem\.span\(L\(@import\("fonts\.zig"\)\.SHELL_FACE\)\)/);
-  assert.match(consoleSource, /if \(i < 2\)/);
+  assert.match(consoleSource, /if \(i == 0\)/);
   const readback = consoleSource.slice(consoleSource.indexOf('var f2: CONSOLE_FONT_INFOEX'));
   assert.match(readback, /base_font_h == 0/);
   assert.match(readback, /if \(GetCurrentConsoleFontEx\(h, 0, &f2\) != 0\) \{\s*var log_font = true;/);
@@ -109,8 +108,8 @@ test('console height stays unchanged, weight is Regular and readback logs once w
   assert.match(read('src/diagnostics.zig'), /if \(!verboseLoggingEnabled\(\) and !std\.mem\.startsWith\(u8, msg, "\[consolefont\] "\) and !std\.mem\.startsWith\(u8, msg, "\[focus-trace\] "\)\) return;/);
 });
 
-test('spawn and respawn apply the console theme before hiding and parenting the window', () => {
-  for (const name of ['spawnShellWithSession', 'respawnShellInPlace']) {
+test('spawn and worker respawn apply the console theme before revealing the window', () => {
+  for (const name of ['spawnShellWithSession']) {
     const start = consoleSource.indexOf(`pub fn ${name}(`);
     assert.ok(start >= 0, name);
     const end = consoleSource.indexOf('\npub fn ', start + 1);
@@ -121,6 +120,12 @@ test('spawn and respawn apply the console theme before hiding and parenting the 
     assert.ok(apply >= 0 && hide > apply && parent > hide, name);
     assert.equal(body.match(/applyBlackConsoleBackground\(pi\.dwProcessId\)/g).length, 1, name);
   }
+  const worker = consoleSource.slice(consoleSource.indexOf('fn startupShellWorker('), consoleSource.indexOf('fn discardStartupShell('));
+  assert.ok(worker.indexOf('ShowWindow(job.hwnd, SW_HIDE)') < worker.indexOf('SetParent(job.hwnd, job.owner)'));
+  const complete = consoleSource.slice(consoleSource.indexOf('pub fn finishStartupShell('));
+  assert.ok(complete.indexOf('applyBlackConsoleBackground(job.pid)') < complete.indexOf('showShellConsole(idx, SW_SHOW'));
+  const reconnect = consoleSource.slice(consoleSource.indexOf('pub fn respawnShellInPlace('), consoleSource.indexOf('pub fn markSshTabDisconnected('));
+  assert.match(reconnect, /Thread\.spawn\([^;]*startupShellWorker/);
 });
 
 test('Chat View uses the bundled mono face for code and Plex for prose', () => {
@@ -143,23 +148,56 @@ test('CI runs the console font regression', () => {
 });
 
 
-test('Hack payloads match pinned upstream hashes and are not registered privately for conhost', () => {
-  const crypto = require('node:crypto');
-  const hashes = {
-    'Hack-Regular.ttf': '15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125',
-    'Hack-Bold.ttf': '5bbf531eff7f8a0c2559c9a0656718e2828a012a9b1f60b5f54006d59a4de8d4',
-  };
-  for (const [file, hash] of Object.entries(hashes)) {
-    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'src/fonts', file))).digest('hex'), hash);
-    assert.ok(read('THIRD_PARTY_NOTICES.md').includes(hash));
-  }
+test('the shell font payload is the reproducible generator output and only it is registered for conhost', () => {
+  const digest = require('node:crypto').createHash('sha256');
+  digest.update(fs.readFileSync(path.join(root, 'src/fonts/NordwandMono-SemiBold.ttf')));
+  assert.equal(digest.digest('hex'), 'dada384b7332520a6bdc2af15c27a927a5161b68f0f7022f2fb7d591255f0370');
+  assert.match(read('tools/fonts/add-terminal-glyphs.py'), /ulCodePageRange1 = CODE_PAGE_RANGE1/);
+  assert.match(read('THIRD_PARTY_NOTICES.md'), /OEM 437/);
+  assert.doesNotMatch(read('THIRD_PARTY_NOTICES.md'), /Hack/);
   const registration = consoleSource.slice(consoleSource.indexOf('pub fn registerBundledConsoleFonts'), consoleSource.indexOf('pub fn unregisterBundledConsoleFonts'));
-  assert.doesNotMatch(registration, /Nordwand/);
+  assert.doesNotMatch(registration, /Hack|NordwandMono-Regular|NordwandMono-Bold/);
   assert.match(read('src/fonts.zig'), /MONO_SEMIBOLD = @embedFile\("fonts\/NordwandMono-SemiBold.ttf"\)/);
 });
 
-test('mintty requests Hack outside the developer theme too', () => {
+test('mintty requests the shell font outside the developer theme too', () => {
   const launch = consoleSource.slice(consoleSource.indexOf('mintty.exe'), consoleSource.indexOf('pub fn spawnShell('));
   assert.ok(launch.indexOf('"Font", std.mem.span(L(@import("fonts.zig").SHELL_FACE))') < launch.indexOf('if (devThemeOn())'));
   assert.ok(launch.includes('"FontHeight", minttyFontHeightFromConsoleHeight()'));
+});
+
+test('ISSUE-508 shell cap preserves the pre-Hack effective width', () => {
+  const pane = read('src/browser_pane.zig');
+  const column = pane.slice(pane.indexOf('pub fn centeredConsoleColumn('), pane.indexOf('\ntest "centeredConsoleColumn'));
+  const cap = Number(column.match(/var w = @min\(DEV_SHELL_COLS \* cell_w, uiScaled\((\d+)\)\) \+ 4;/)?.[1]);
+  const cols = Number(state.match(/pub const DEV_SHELL_COLS: i32 = (\d+);/)[1]);
+  const height = Number(state.match(/"console_font_height": (\d+)/)[1]);
+  const bytes = fs.readFileSync(path.join(root, 'src/fonts/NordwandMono-SemiBold.ttf'));
+  const tables = {};
+  for (let i = 0; i < bytes.readUInt16BE(4); i++) {
+    const record = 12 + i * 16;
+    tables[bytes.toString('ascii', record, record + 4)] = bytes.readUInt32BE(record + 8);
+  }
+  const advance = bytes.readUInt16BE(tables.hmtx);
+  const cellHeight = bytes.readUInt16BE(tables['OS/2'] + 74) + bytes.readUInt16BE(tables['OS/2'] + 76);
+  const oldCellWidth = Math.round(height * advance / cellHeight);
+  assert.equal(oldCellWidth, 8);
+  assert.equal(cap, cols * oldCellWidth);
+  assert.equal(cap + 4, 804);
+  assert.match(column, /const avail = client_right - sidebar_w - edge_pad \* 2;/);
+  assert.match(column, /if \(w > avail\) w = avail;/);
+  assert.match(column, /sidebar_w \+ edge_pad \+ @divTrunc\(avail - w, 2\)/);
+});
+
+test('ISSUE-508 full width remains per-session and bypasses the shell cap without changing Chat View', () => {
+  const layout = read('src/window_layout.zig');
+  const full = layout.indexOf('if (app_state.shells[app_state.active_shell].full_width)');
+  const centered = layout.indexOf('const col = centeredConsoleColumn(', full);
+  assert.ok(full >= 0 && centered > full);
+  const branch = layout.slice(full, centered);
+  assert.match(branch, /const fw_w = rc.right - SIDEBAR_W\(\);/);
+  assert.match(branch, /verifyShellWindowSize\(sh0, SIDEBAR_W\(\), fw_top, fw_w, fw_h\);\s*return;/);
+  const chat = read('src/chat_composer.zig');
+  assert.match(chat, /const full_width = app_state\.ISSUE_440_FULL_WIDTH_CHAT and app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.full_width;/);
+  assert.match(chat, /if \(full_width\) col\.width else uiScaled\(760\)/);
 });

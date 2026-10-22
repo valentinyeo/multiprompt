@@ -63,21 +63,86 @@ The installer stops and disables `zigshell-watcher.service`, backs up and remove
 its old user unit and script, and preserves unrelated tmux hooks using index 514.
 The tmux snippet enables activity and ten-second silence monitoring, with
 `activity-action any` and `silence-action any`: tmux's default `other` misses the
-current window even when attached. These options also enable tmux's normal alert
-bells or messages. Detached alert flags are cleared to rearm monitoring.
+current window even when attached. `visual-activity off` and `visual-silence off`
+avoid status-line alert messages. In tmux 3.4, `off` still sends a terminal bell;
+`bell-action` controls bell alerts, not activity/silence bells, so it is unchanged.
+Only detached sessions need their latched alert flags cleared to rearm monitoring.
+Attached current windows do not latch these flags.
 
 The existing relay hosts one blocking FIFO reader; no new service or pane-output
-stream is used. Native tmux one-shot timers debounce and throttle events before a shell
-builtin queues a bounded, NUL-framed record in the relay's private directory.
+stream is used. Hidden session environment variables hold debounce/readiness state;
+monitoring stays enabled. Native three-second debounce and fifteen-second rearm
+timers restore readiness and clear flags only if the session is still detached.
+The attachment check is evaluated when the timer fires, not when it is scheduled.
+Rearming uses `run-shell -bC`, with no shell or tmux client process. As in the
+previous design, tmux 3.4 can lose a native timer's commands if the client owning
+its command queue disconnects before it fires. A shell-backed rearm survived that
+case in scratch experiments but exceeded the CPU budget; it is not used here.
+A shell builtin queues each bounded, NUL-framed event in the relay's private directory.
 One shared Python sender detects agents directly through `/proc`, reads titles only
 on title/attach events using the exact hook socket and pane, applies semantic
 marker and title rules, then sends the unchanged TCP messages to localhost:19548,
 one per connection with no newline. Session creation detects the agent;
 client attachment resends AGENT and semantic TITLE, replacing periodic rebroadcast.
 There is no periodic agent reclassification; activity and silence events detect
-the current process again before applying marker suppression. Activity monitoring
-is disabled between native rearm timers, so short bursts wholly inside a resend
-window can be coalesced, including after completion. Silence still sees all output.
+the current process again before applying marker suppression. Activity delivery
+is gated between rearm timers, so short bursts wholly inside a resend window can be
+coalesced, including after completion. Ten seconds without output still ends a
+reported burst with DONE; a burst shorter than the three-second debounce emits
+neither ACTIVE nor DONE.
+
+### Why hooks must not change options
+
+In tmux 3.4, `options_push_changes()` in `options.c` redraws **every attached
+client** for any `set-option`, including window/pane user options and unchanged
+values. `kill-session -C` redraws its session even when no alert flags were set.
+By contrast, `set-environment` and a native `run-shell -C` timer do not request a
+redraw. See upstream [option changes](https://github.com/tmux/tmux/blob/3.4/options.c#L1103),
+[alert clearing](https://github.com/tmux/tmux/blob/3.4/cmd-kill-session.c#L54), and
+[alert handling](https://github.com/tmux/tmux/blob/3.4/alerts.c#L248).
+The hook bodies therefore never write options or clear alerts on attached sessions.
+The configuration-time options still cause a one-time redraw when sourced.
+
+An isolated six-client experiment issued each action once per second for ten
+seconds. Baseline, hidden-environment writes, and native environment-only timers
+ran six status jobs each; window-option writes ran 60, user-option writes 49,
+and alert clearing 15. Even repeatedly setting `bell-action none` ran 54 jobs:
+changing another option is not a redraw-free workaround.
+
+### Scratch measurements and remaining CPU limit
+
+Tmux 3.4, isolated socket `igsh514b`, 47 real PTY-attached clients in separate
+sessions, eight panes producing output at 5 Hz in 24-second bursts every 50 seconds,
+and 39 idle panes. Each sample lasted 60 seconds after a 20-second warmup, with
+`status-interval 15` and `status-right '#(printf . >> MARKER; printf marker) %H:%M'`.
+The marker replaces the expensive RSS pipeline to expose hook CPU rather than
+hide it in status-job noise. CPU is the server's user/system time plus waited
+children and the FIFO sender thread; message delivery was captured locally.
+The two off/on pairs below were separate sequential experiments.
+
+| Design | Status jobs/min, off / on | CPU s/min, off / on |
+| --- | ---: | ---: |
+| Previous hooks | 188 / 431 | 3.83 / 7.88 |
+| Environment-gated native timers | 206 / 197 | 4.11 / 6.10 |
+
+The redraw amplification is eliminated, but **the under-0.5 CPU s/min target is
+not met** at this load: remaining overhead is about 1.98 CPU s/min, mostly in the
+server, while native activity alerts still dispatch on every output. A
+shell-backed rearm also removed status amplification but added process overhead
+and failed the same CPU target. Meeting that budget at this output rate needs a
+further change to activity observation, not more option or environment tuning.
+
+Additional scratch controls: turning visual alerts on ran 390 status jobs/min
+and 8.09 CPU s/min, versus 188 jobs and 4.09 CPU s/min off. A scratch-only
+constant-marker writer using native `set-buffer` / `save-buffer` / `delete-buffer`
+avoided enqueue forks but still used 5.83 CPU s/min versus 4.04 off. It was not
+implemented as a notification transport: eliminating forks alone did not solve
+the remaining per-output native-alert cost.
+
+With the original RSS `ps | head | awk` status job plus a marker, an earlier
+47-client sample reproduced 237 jobs/min with hooks off and 566 with the previous
+hooks; an environment-only native-timer candidate ran 236. These are scratch
+measurements, not a claim about production CPU or a live rollout.
 
 The installer enables the user service and writes
 `~/.local/state/multiprompt/relay-v1` after it starts. Browser (ZSB) requests

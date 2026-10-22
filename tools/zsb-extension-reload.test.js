@@ -201,7 +201,7 @@ fn runPipeServer(_: std.mem.Allocator, _: *HostContext, _: [*:0]const u8) void {
 fn routeReplyPipe(_: std.mem.Allocator, _: []const u8) !bool { return false; }
 fn handleJsonMessage(_: std.mem.Allocator, _: []const u8) ![]u8 { unreachable; }
 fn makeErrorResponse(_: std.mem.Allocator, _: ?std.json.Value, _: []const u8) ![]u8 { unreachable; }
-${'fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {\n' + section(bridge, '    const stdin = std.Io.File.stdin().handle;', 'fn sendBrowserRequest(')}
+${'fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {\n' + section(bridge, '    const stdin = std.Io.File.stdin().handle;', '\n}\n') + '\n}\n'}
 fn makeResultResponse(allocator: std.mem.Allocator, _: ?std.json.Value, result: []const u8) ![]u8 { return allocator.dupe(u8, result); }
 fn nativePing(allocator: std.mem.Allocator) ![]u8 {
     const method = "ping";
@@ -238,7 +238,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next().?;
-${section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n'}
+${section(bridge, '    var profile_override:', '    var help_args = args;') + '    if (profile_override != null) return error.InvalidArguments;\n'}
     if (${section(bridge, 'std.mem.eql(u8, command, "extension-reload")) {', '    } else if (std.mem.eql(u8, command, "shoturl"))')}
     } else return error.InvalidArguments;
 }

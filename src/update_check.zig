@@ -32,6 +32,18 @@ pub fn versionDiffers(running: []const u8, installed: []const u8) bool {
     return installed.len > 0 and !std.mem.eql(u8, running, installed);
 }
 
+pub fn versionNewer(running: []const u8, candidate: []const u8) bool {
+    var old = std.mem.splitScalar(u8, running, '.');
+    var next = std.mem.splitScalar(u8, candidate, '.');
+    var order: std.math.Order = .eq;
+    for (0..3) |_| {
+        const a = std.fmt.parseInt(u32, old.next() orelse return false, 10) catch return false;
+        const b = std.fmt.parseInt(u32, next.next() orelse return false, 10) catch return false;
+        if (order == .eq) order = std.math.order(b, a);
+    }
+    return old.next() == null and next.next() == null and order == .gt;
+}
+
 pub fn parsePidList(text: []const u8, out: []u32) usize {
     var count: usize = 0;
     var it = std.mem.tokenizeAny(u8, text, ", ");
@@ -214,6 +226,11 @@ fn stopOldHelpers(dir: []const u16) void {
     }
 }
 
+pub fn stopForUpdate(path: []const u16) void {
+    stopOldHelpers(path[0..wideDirLen(path)]);
+    usage_telemetry_mode.stopForRelaunch();
+}
+
 fn wideContains(hay: []const u16, needle: []const u8) ?usize {
     if (hay.len < needle.len) return null;
     var i: usize = 0;
@@ -362,4 +379,13 @@ test "old helper names" {
     try std.testing.expect(isOldHelperName("multiprompt-telemetry-old-20261010.exe"));
     try std.testing.expect(isOldHelperName("ZigShell-Bridge.exe"));
     try std.testing.expect(!isOldHelperName("multiprompt.exe"));
+}
+
+test "release versions compare numerically and reject downgrades" {
+    try std.testing.expect(versionNewer("1.9.999", "1.10.0"));
+    try std.testing.expect(versionNewer("1.99.99", "2.0.0"));
+    try std.testing.expect(!versionNewer("2.0.0", "1.99.99"));
+    try std.testing.expect(!versionNewer("1.2.3", "1.2.3"));
+    try std.testing.expect(!versionNewer("1.2.3", "1.2.4-beta"));
+    try std.testing.expect(!versionNewer("1.2.3", "1.2.4.1"));
 }

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -9,9 +9,19 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
+switch ($Feature) {
+        'safe-updates' {
+            if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before update journey' }
+            if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable version mismatch before update journey' }
+            & "$PSScriptRoot/../../../tools/update-release-journey.ps1" -Exe $Exe -Evidence $Evidence
+            return
+        }
+}
+
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -55,6 +65,42 @@ public static class VerifyNative {
             Thread.Sleep(30);
         }
         Thread.Sleep(250);
+    }
+    public static void OpenAndCloseBrowserPane() {
+        var inputs = new List<Input>();
+        Action<ushort, uint> key = (code, flags) => {
+            Input input = new Input(); input.type = 1;
+            input.data.keyboard = new Keyboard { key = code, flags = flags };
+            inputs.Add(input);
+        };
+        foreach (string query in new string[] { "open browser", "close browser pane" }) {
+            key(0x11, 0); key(0x4B, 0); key(0x4B, 2); key(0x11, 2);
+            foreach (char c in query) {
+                short mapping = VkKeyScan(c);
+                if (mapping == -1 || (mapping & 0x700) != 0) throw new InvalidOperationException("Batch query requires an unshifted keyboard mapping: " + c);
+                key((ushort)(mapping & 0xff), 0); key((ushort)(mapping & 0xff), 2);
+            }
+            key(0x0D, 0); key(0x0D, 2);
+        }
+        Input[] batch = inputs.ToArray();
+        if (SendInput((uint)batch.Length, batch, Marshal.SizeOf(typeof(Input))) != (uint)batch.Length) throw new InvalidOperationException("SendInput batch failed");
+    }
+    delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    public static bool PaneVisible(IntPtr owner) {
+        Rect frame;
+        if (!GetWindowRect(owner, out frame)) return false;
+        bool visible = false;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            if (GetProp(hwnd, "ZigShellPaneOwner") != owner || !IsWindowVisible(hwnd)) return true;
+            Rect pane;
+            if (GetWindowRect(hwnd, out pane) && pane.Right > pane.Left && pane.Bottom > pane.Top &&
+                pane.Left < frame.Right && pane.Right > frame.Left && pane.Top < frame.Bottom && pane.Bottom > frame.Top) visible = true;
+            return true;
+        }, IntPtr.Zero);
+        return visible;
     }
     public static string Title(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(512); GetWindowText(hwnd, text, text.Capacity); return text.ToString();
@@ -178,6 +224,7 @@ $process = $null
 $job = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
+$script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -188,6 +235,21 @@ function Save-Json($Value, [string]$Name) {
 function Record([string]$Action) {
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
+}
+
+function Prepare-ScratchEvidence([string]$Path) {
+    $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
+            Save-Json @($script:scratchLinks) 'scratch-links.json'
+            $entry.Delete()
+            Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } else {
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+        }
+    }
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20) {
@@ -215,6 +277,65 @@ function Read-Inbox {
         try { return Get-Content $path -Raw | ConvertFrom-Json } catch { return $null }
     }
     return $null
+}
+
+function Read-BrowserPane {
+    $state = Read-Inbox
+    if ($null -eq $state) { return $null }
+    return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
+}
+
+function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0) {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and
+            (($State -eq 'open' -and $pane.browser_state -in @('opening', 'connected')) -or $pane.browser_state -eq $State) -and
+            (($State -in @('open', 'opening', 'connected') -and $pane.browser_connection_id -gt $PreviousId) -or
+             ($State -in @('closed', 'failed') -and $pane.browser_connection_id -eq 0))
+    } "browser-pane-stuck ${Step}: $State and connection identity" 25
+    $pane = Read-BrowserPane
+    if ($pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
+    Save-Json $pane ("browser-pane-$Step.json")
+    $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id }
+    Write-Host "browser-pane-stuck $Step PASS"
+    return $pane
+}
+
+function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and
+            $pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)
+    } "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25
+    Doctor
+    Record "Activate main window after browser-pane-stuck ${Step} docking"
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5
+}
+
+function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
+    Palette 'open browser'
+    Press @(0x0D) 'Enter: Open Browser Pane'
+    $pane = Assert-BrowserPane 'open' $Step $PreviousId
+    Focus-BrowserPaneOwner $Step $pane.browser_connection_id
+    return $pane
+}
+
+function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
+    $connected = Assert-BrowserPane 'connected' 'connected-pane-docked' ($ConnectionId - 1)
+    if ($connected.browser_connection_id -ne $ConnectionId) { throw 'Docking replaced the browser connection' }
+    Wait-Until { [VerifyNative]::PaneVisible($script:window) } 'docked browser pane is visible inside the app'
+    $deadline = [DateTime]::UtcNow.AddSeconds(21)
+    do {
+        $pane = Read-BrowserPane
+        if ($null -eq $pane -or $pane.browser_state -ne 'connected' -or $pane.browser_connection_id -ne $ConnectionId -or
+            $pane.browser_window_id -ne 0 -or -not [VerifyNative]::PaneVisible($script:window)) {
+            throw 'Connected pane closed, hid, or lost its identity past the opening deadline'
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $pane = Assert-BrowserPane 'connected' 'connected-pane-stays-visible' ($ConnectionId - 1)
+    Snapshot 'connected'
 }
 
 function Doctor {
@@ -257,6 +378,10 @@ function Assert-Foreground {
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'owned app foreground for keyboard input'
     Assert-Foreground
     Record $Label
     [VerifyNative]::Chord($Keys)
@@ -272,6 +397,40 @@ function Type-Text([string]$Text) {
 function Palette([string]$Query) {
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
+}
+
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
+    Doctor
+    Assert-Foreground
+    Record ('zsb ' + ($Arguments -join ' '))
+    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))
+    $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")
+    [IO.File]::WriteAllBytes((Join-Path $Evidence ($Name + '.request.bin')), $wire)
+    $client = New-Object Net.Sockets.TcpClient
+    $reply = New-Object IO.MemoryStream
+    try {
+        $connecting = $client.ConnectAsync('127.0.0.1', $Port)
+        if (-not $connecting.Wait(5000)) { throw 'zsb local bridge connection timed out' }
+        [void]$connecting.GetAwaiter().GetResult()
+        $stream = $client.GetStream()
+        $stream.WriteTimeout = 5000
+        $stream.Write($wire, 0, $wire.Length)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $buffer = New-Object byte[] 65536
+        do {
+            $remaining = 90000 - $timer.ElapsedMilliseconds
+            if ($remaining -le 0) { throw 'zsb reply exceeded 90 seconds' }
+            $stream.ReadTimeout = [int]$remaining
+            $count = $stream.Read($buffer, 0, $buffer.Length)
+            if ($reply.Length + $count -gt 16 * 1024 * 1024) { throw 'zsb reply exceeded 16 MiB' }
+            $reply.Write($buffer, 0, $count)
+        } while ($count -gt 0)
+        $raw = [Text.Encoding]::UTF8.GetString($reply.ToArray())
+        [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '.reply.json')), $raw)
+        $response = $raw | ConvertFrom-Json
+        if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
+        return $response
+    } finally { $reply.Dispose(); $client.Dispose() }
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot) {
@@ -306,7 +465,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
@@ -314,6 +473,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     $env:USERPROFILE = Join-Path $scratch 'profile'
     $env:HOME = $env:USERPROFILE
+    $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
     $job = New-Object VerifyJob
@@ -341,6 +501,35 @@ try {
             $light = Sidebar-Luminance 'after'
             if ($light -lt $dark + 60) { throw "Visible sidebar did not become light: $dark -> $light" }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
+        }
+        'chat-tables' {
+            $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'
+            $command += ' && echo table-ready>"' + (Join-Path $scratch 'table-ready.txt') + '"'
+            Type-Text $command
+            Press @(0x0D) 'Enter: print table and persist console completion marker in CMD'
+            Wait-Until { Test-Path (Join-Path $scratch 'table-ready.txt') } 'real console table command completed'
+            Press @(0x12, 0x43) 'Alt+C: open formatted Chat View'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_tab -ge 0 -and $state.active_tab -lt @($state.tabs).Count } 'saved initial table tab'
+            $tableTab = (Read-Session).active_tab
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Wait-Until { (Test-Path $log) -and (Get-Content $log -Raw) -match 'CHAT_TABLE rows=1 columns=2 .*source=box' } 'formatted table built from real console output'
+            Wait-Until { (Read-Session).tabs[$tableTab].cv } 'Chat View preference persisted for table tab'
+            Snapshot 'before'
+            $buildsBefore = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            $tabsBefore = @((Read-Session).tabs).Count
+            Palette 'new cmd'
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: create another real CMD tab'
+            Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 -and (Read-Session).active_tab -ne $tableTab } 'new CMD tab active and saved'
+            Snapshot 'away'
+            $awayLogLength = (Get-Content $log -Raw).Length
+            Press @(0x11, 0x10, 0x09) 'Ctrl+Shift+Tab: return to table Chat View'
+            Wait-Until { (Read-Session).active_tab -eq $tableTab -and (Read-Session).tabs[$tableTab].cv } 'original Chat View tab active again'
+            Wait-Until { $text = Get-Content $log -Raw; $text.Length -gt $awayLogLength -and $text.Substring($awayLogLength) -match '\[switch\] chat painted in' } 'returned Chat View painted'
+            Snapshot 'after'
+            $buildsAfter = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            if ($buildsAfter -ne $buildsBefore) { throw "Unchanged table rebuilt across tab switch: $buildsBefore -> $buildsAfter" }
+            $result.checks += @{ name = 'console-table-switch-return'; tableTab = $tableTab; buildsBefore = $buildsBefore; buildsAfter = $buildsAfter; marker = (Get-Content (Join-Path $scratch 'table-ready.txt') -Raw).Trim(); chatViewSaved = $true }
         }
         'sessions' {
             $before = @( (Read-Session).tabs ).Count
@@ -374,6 +563,95 @@ try {
             $result.checks += @{ name = 'create-switch-return'; workspacesBefore = $before; workspacesAfter = (Read-Session).workspace_count; activeWorkspace = $created; title = [VerifyNative]::Title($script:window) }
             Snapshot 'after'
         }
+        'session-open' {
+            $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; only background tab creation and idempotency are verified'; observed = 'pending'; tabRemoved = $null }
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
+            $initial = Read-Session
+            if (@($initial.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' }).Count -ne 0) { throw 'verify-1 already exists before the journey' }
+            $initialGroupIds = @()
+            if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
+            $groupCount = $initialGroupIds.Count
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Snapshot 'group-action'
+            Press @(0x0D) 'Enter: New group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups'] -or @($state.groups).Count -ne $groupCount + 1) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
+                $newGroups.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($newGroups[0].name) -and $state.tabs[$initial.active_tab].group_id -eq $newGroups[0].id
+            } 'user-created group name and original tab membership saved'
+            $baseline = Read-Session
+            $group = @($baseline.groups | Where-Object { $_.id -notin $initialGroupIds })[0]
+            $result.groupSetup = @{ name = $group.name; id = $group.id; customNameExercised = $false; reason = 'Palette creation does not reliably focus an inline rename editor; using the default name read from session.json' }
+            Record ('Use persisted group ' + $group.name + '; custom name path not exercised')
+            $workspaceBefore = $baseline.active_workspace
+            $activeTabBefore = $baseline.active_tab
+            $activeBefore = $baseline.tabs[$activeTabBefore]
+            if ($activeBefore.group_id -ne $group.id) { throw 'New group does not contain the original active tab' }
+            $titleBefore = [VerifyNative]::Title($script:window)
+            $foregroundBefore = [VerifyNative]::GetForegroundWindow()
+            $foregroundTitleBefore = [VerifyNative]::Title($foregroundBefore)
+            Save-Json $baseline 'session-before.json'
+            Snapshot 'before'
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $script:zsbPort = 0
+            Wait-Until {
+                if (-not (Test-Path $log)) { return $false }
+                $listener = [regex]::Match((Get-Content $log -Raw), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+                if (-not $listener.Success) { return $false }
+                $script:zsbPort = [int]$listener.Groups[1].Value
+                @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
+            } 'app-owned loopback tunnel-inbound listener' 30
+            $listed = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list'
+            $workspaceName = $baseline.workspaces[$workspaceBefore].name
+            if (-not $workspaceName) { $workspaceName = 'Workspace ' + ($workspaceBefore + 1) }
+            $workspaces = @($listed.workspaces | Where-Object { $_.id -eq $workspaceBefore -and $_.name -ceq $workspaceName -and $_.active -eq $true })
+            if ($workspaces.Count -ne 1) { throw 'workspace-list did not report the saved active workspace' }
+            $listedGroups = @($workspaces[0].groups | Where-Object { $_.id -eq $group.id -and $_.name -ceq $group.name })
+            if ($listedGroups.Count -ne 1) { throw 'workspace-list did not report the user-created group' }
+            if (@($listed.hosts).Count -lt 1 -or -not ($listed.hosts[0] -is [string]) -or -not $listed.hosts[0]) { throw 'workspace-list reported no usable host name' }
+            $hostName = $listed.hosts[0]
+            $openArgs = @('session-open', '--workspace', $workspaceName, '--group', $group.name, '--host', $hostName, '--tmux', 'verify-1', '--name', 'Verify 1')
+            $assertSaved = {
+                $state = Read-Session
+                if ($null -eq $state) { throw 'session.json is not readable' }
+                $tabs = @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' })
+                if ($tabs.Count -ne 1 -or @($state.tabs).Count -ne @($baseline.tabs).Count + 1) { throw 'Expected exactly one new verify-1 tab' }
+                $tab = $tabs[0]
+                $tabWorkspace = 0
+                if ($tab.PSObject.Properties['workspace']) { $tabWorkspace = $tab.workspace }
+                if ($tab.kind -cne 'tmux' -or $tab.name -cne 'Verify 1' -or $tab.group_id -ne $group.id -or $tabWorkspace -ne $workspaceBefore) { throw 'Saved tmux tab title, group or workspace mismatch' }
+                if (@($state.groups).Count -ne $groupCount + 1 -or @($state.groups | Where-Object { $_.id -eq $group.id -and $_.name -ceq $group.name }).Count -ne 1) { throw 'Saved group changed' }
+                if ($state.active_workspace -ne $workspaceBefore -or $state.active_tab -ne $activeTabBefore -or $state.tabs[$activeTabBefore].name -cne $activeBefore.name -or $state.tabs[$activeTabBefore].kind -cne $activeBefore.kind) { throw 'Background request changed the active workspace or active tab' }
+                if ([VerifyNative]::GetForegroundWindow() -ne $foregroundBefore -or [VerifyNative]::Title($foregroundBefore) -cne $foregroundTitleBefore -or [VerifyNative]::Title($script:window) -cne $titleBefore) { throw 'Background request changed foreground window or title' }
+                $script:sessionOpenSaved = $state
+                return $true
+            }
+            Snapshot 'action'
+            $created = Invoke-Zsb $openArgs $script:zsbPort 'session-open-created'
+            if ($created.created -ne $true -or $created.tab -le 0) { throw 'session-open did not reply ok/created with a tab ID' }
+            Wait-Until $assertSaved 'exact saved background tab and unchanged selection after creation'
+            Save-Json $script:sessionOpenSaved 'session-created.json'
+            $repeated = Invoke-Zsb $openArgs $script:zsbPort 'session-open-repeated'
+            if ($repeated.existing -ne $true -or $repeated.tab -ne $created.tab -or $repeated.workspace -cne $workspaceName) { throw 'Repeated session-open was not an existing:true no-op for the same tab and workspace' }
+            Wait-Until $assertSaved 'repeat no-op with exactly one saved tab and unchanged selection'
+            Save-Json $script:sessionOpenSaved 'session-repeated.json'
+            $script:sshFailure = $null
+            Wait-Until {
+                $failure = [regex]::Match((Get-Content $log -Raw), ('ssh-reconnect disconnect id=' + $created.tab + ' reason=(process-exit-event|process-exit-poll|startup-console-missing) exit_code=(\d+) known=true'))
+                if (-not $failure.Success -or [uint64]$failure.Groups[2].Value -in @(0, 259)) { return $false }
+                $script:sshFailure = @{ reason = $failure.Groups[1].Value; exitCode = [uint64]$failure.Groups[2].Value; logLine = $failure.Value }
+                return $true
+            } 'observed failed SSH attach for the created tab' 60
+            $result.sshBoundary.observed = $script:sshFailure
+            Wait-Until $assertSaved 'failed SSH tab preserved in saved state with unchanged active tab and foreground'
+            $result.sshBoundary.tabRemoved = $false
+            Save-Json $script:sessionOpenSaved 'session-after.json'
+            $result.checks += @{ name = 'session-open-background-idempotent'; workspace = $workspaceName; group = $group.name; groupId = $group.id; host = $hostName; port = $script:zsbPort; created = $created; repeated = $repeated; tmux = 'verify-1'; title = 'Verify 1'; matchingTabs = 1; tabsBefore = @($baseline.tabs).Count; tabsAfter = @($script:sessionOpenSaved.tabs).Count; activeWorkspaceBefore = $workspaceBefore; activeWorkspaceAfter = $script:sessionOpenSaved.active_workspace; activeTabBefore = $activeTabBefore; activeTabAfter = $script:sessionOpenSaved.active_tab; foregroundBefore = $foregroundBefore.ToInt64(); foregroundAfter = [VerifyNative]::GetForegroundWindow().ToInt64(); windowTitleBefore = $titleBefore; windowTitleAfter = [VerifyNative]::Title($script:window) }
+            Snapshot 'after'
+        }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
             Wait-Until { [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox window state'
@@ -388,6 +666,40 @@ try {
             Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
             Snapshot 'returned'
         }
+        'browser-pane-stuck' {
+            $script:browserShellId = (Read-Inbox).shells[0].sid
+            if (Test-Path (Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension/manifest.json')) { throw 'Expected no browser extension in the isolated profile' }
+            Press @(0x12, 0x43) 'Alt+C: open Chat View'
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.cv -eq $true }).Count -eq 1 } 'Chat View saved for the initial session'
+            $first = Open-BrowserPane 'initial-open'
+            Snapshot 'action'
+            Press @(0x12, 0x41) 'Alt+A: close browser pane'
+            $closed = Assert-BrowserPane 'closed' 'shortcut-close'
+            $second = Open-BrowserPane 'reopen-after-shortcut' $first.browser_connection_id
+            Palette 'close all browser panes'
+            Press @(0x0D) 'Enter: Close All Browser Panes'
+            $closed = Assert-BrowserPane 'closed' 'palette-close-all'
+            if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Close All left a browser pane open' }
+            Doctor
+            Assert-Foreground
+            Record 'reopen-after-close-all: batch palette open then close before adoption timers'
+            [VerifyNative]::OpenAndCloseBrowserPane()
+            $closed = Assert-BrowserPane 'closed' 'palette-close-pane'
+            $fourth = Open-BrowserPane 'reopen-after-close-pane' $second.browser_connection_id
+            if ($fourth.browser_connection_id -le $second.browser_connection_id + 1) { throw 'Palette batch did not open and cancel an intermediate connection' }
+            Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
+            Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
+            $shiftToggleCooldown = [Diagnostics.Stopwatch]::StartNew()
+            $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
+            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
+            Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
+            $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
+            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
+            Palette 'close all browser panes'
+            Press @(0x0D) 'Enter: Close All Browser Panes'
+            $closed = Assert-BrowserPane 'closed' 'final-close'
+            Snapshot 'after'
+        }
         'command-palette' {
             Palette 'interface'
             Snapshot 'action'
@@ -401,6 +713,32 @@ try {
             Wait-Until { $state = Read-Session; -not ($state.PSObject.Properties.Name -contains 'ui_scale') -or $state.ui_scale -eq 100 } 'UI scale reset to default'
             Snapshot 'reset'
             $result.checks += @{ name = 'palette-increase-reset'; increasedScale = 110; resetScale = 100 }
+            Palette 'restart to update'
+            Snapshot 'update-command'
+            $image = New-Object Drawing.Bitmap((Join-Path $Evidence 'update-command.png'))
+            $selectedTextPixels = 0
+            try {
+                $top = $image.Height
+                $bottom = 0
+                for ($y = [int]($image.Height * 0.2); $y -lt [int]($image.Height * 0.8); $y++) {
+                    $pixel = $image.GetPixel([int]($image.Width / 2), $y)
+                    if ($pixel.R -lt 50 -and $pixel.G -gt 70 -and $pixel.G -lt 160 -and $pixel.B -gt 150) {
+                        $top = [Math]::Min($top, $y)
+                        $bottom = [Math]::Max($bottom, $y)
+                    }
+                }
+                for ($y = $top; $y -le $bottom; $y++) {
+                    for ($x = [int]($image.Width * 0.3); $x -lt [int]($image.Width * 0.7); $x++) {
+                        $pixel = $image.GetPixel($x, $y)
+                        if ($pixel.R -gt 180 -and $pixel.G -gt 180 -and $pixel.B -gt 180) { $selectedTextPixels++ }
+                    }
+                }
+                if ($selectedTextPixels -lt 40) { throw 'Update command row is blank or unreadable' }
+            } finally { $image.Dispose() }
+            Press @(0x0D) 'Enter: Restart to update with no update ready'
+            Doctor
+            Snapshot 'update-idle'
+            $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
         }
     }
     Doctor
@@ -427,7 +765,18 @@ try {
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
             } finally {
-                if (Test-Path $scratch) { Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force }
+                if (Test-Path $scratch) {
+                    Prepare-ScratchEvidence $scratch
+                    $data = Join-Path $Evidence 'data'
+                    New-Item -ItemType Directory -Force $data | Out-Null
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while ($true) {
+                        try { Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break } catch {
+                            if ([DateTime]::UtcNow -ge $deadline) { throw }
+                            Start-Sleep -Milliseconds 200
+                        }
+                    }
+                }
             }
         }
         if (Test-Path $scratch) {

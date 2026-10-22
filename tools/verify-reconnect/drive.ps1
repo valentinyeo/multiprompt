@@ -90,7 +90,7 @@ function Measure-Reconnect([string]$Case, [string]$Suffix, $Before, [IntPtr]$Com
             [void]$typed.Append($letter)
         }
         $slice = (Read-Log).Substring($offset)
-        $match = [regex]::Match($slice, 'respawnShellInPlace ok kind=tmux idx=1 new_id=(\d+)')
+        $match = [regex]::Match($slice, 'respawnShellInPlace ok kind=tmux idx=1 (?:new_id|id)=(\d+)')
         $current = Transport 'verify-two'
         if ($match.Success -and $current -and $current.Id -ne $old.Id -and $slice -match "ssh-reconnect ok id=$($match.Groups[1].Value)\b") { $connected = $true; break }
         Start-Sleep -Milliseconds 100
@@ -132,10 +132,9 @@ try {
     Copy-Item "$settings/session.json" "$Output/seed-session.json"
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void](Wait-For 'two live transports and connected debug lines' {
+    [void](Wait-For 'two owned transports and attach commands' {
         $text = Read-Log
         if ((Transport 'verify-one') -and (Transport 'verify-two') -and
-            $text.Contains("ssh: selected working executable: $Ssh") -and
             ($text -match "session='verify-one'") -and ($text -match "session='verify-two'")) { $true }
     })
     [void][ReconnectDesktop]::SetForegroundWindow($main)
@@ -147,7 +146,7 @@ try {
         Stop-Process -Id $readyTransport.Id -Force
         [void](Wait-For "tab $number confirmed connected" {
             $ready = (Read-Log).Substring($readyOffset)
-            $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) new_id=(\d+)")
+            $spawn = [regex]::Match($ready, "respawnShellInPlace ok kind=tmux idx=$($number - 1) (?:new_id|id)=(\d+)")
             if ($spawn.Success -and $ready -match "ssh-reconnect ok id=$($spawn.Groups[1].Value)\b") { $true }
         })
     }
@@ -158,7 +157,7 @@ try {
     $before = [ReconnectDesktop]::Focus($main)
     if ($before[0] -ne $main.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: app or embedded console must be foreground' }
     if ($before[1] -ne $inputSurface.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
-    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; transport_paths=@((Transport 'verify-one').Path, (Transport 'verify-two').Path); two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
     $positiveControl = @([regex]::Matches((Read-Log), '\[reposition\]')).Count
     if ($positiveControl -lt 1) { throw 'Doctor: console layout positive control missing' }
     if ([ReconnectDesktop]::Owner($inputSurface) -ne (Transport 'verify-one').Id) { throw 'Doctor: active console is not tab one' }
@@ -182,9 +181,9 @@ try {
     Measure-Reconnect 'F' '-F' $beforeF $composer
     $offsetB = (Read-Log).Length
     $current = Transport 'verify-two'
-    [IO.File]::WriteAllText("$state/sessions.next", "verify-one`n")
+    [IO.File]::WriteAllText("$state/sessions.next", "")
     Move-Item "$state/sessions.next" "$state/sessions.txt" -Force
-    @{case='B'; action='delete session then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
+    @{case='B'; action='delete last sessions then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
     Stop-Process -Id $current.Id -Force
     $deadline = [DateTime]::UtcNow.AddSeconds(40)
     $ended = $null
@@ -195,9 +194,11 @@ try {
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
     $observeOffset = (Read-Log).Length
-    $observeStart = [DateTime]::UtcNow
+    $observationTimer = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 60
-    $observeSeconds = ([DateTime]::UtcNow - $observeStart).TotalSeconds
+    while ($observationTimer.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 10 }
+    $observationTimer.Stop()
+    $observeSeconds = $observationTimer.Elapsed.TotalSeconds
     $sliceB = (Read-Log).Substring($offsetB)
     $observation = (Read-Log).Substring($observeOffset)
     $goneCount = @([regex]::Matches($sliceB, 'ssh-reconnect ended id=\d+ reason=session-gone')).Count

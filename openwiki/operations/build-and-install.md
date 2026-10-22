@@ -11,9 +11,25 @@ zig build -Dtarget=aarch64-windows-gnu
 
 Push the branch and read `gh pr checks`; GitHub Actions runs the Windows suite, bench and server-tool tests. Never run `tools/test-windows-wine.sh` or `tools/chat-bench/run.mjs` on the shared server. The Wine wrapper compiles ARM64, runs the Windows desktop suite and then `test-vps`; the bench launches the app under Wine. Both entry points exit 2 before starting work unless `GITHUB_ACTIONS=true` (set automatically by Actions) or `MULTIPROMPT_ALLOW_LOCAL_HEAVY=1` on a machine you own. Keep local checks lightweight, such as `node --test tools/heavy-guard.test.js`; leave builds and full test suites to GitHub Actions.
 
+CI partitions the desktop suite into four `-Dtest-group=1` through `-Dtest-group=4` shards and the server suite into two `-Dtest-vps-group=1` through `-Dtest-vps-group=2` shards. Omitting either option runs every group in that suite. VPS shard 1 also runs the account Worker dry-run build, Worker tests and session restore fixtures. SSH compile fixtures run concurrently in isolated temporary directories, bounded by available CPU parallelism per file.
+
 The version is `APP_VERSION` in `src/main.zig`; the title bar and the `MPVERSION` marker derive from it. End-user history is in `src/changelog.zig`. Extension changes must increase `extension/manifest.json`'s version; the native bridge reads the same version at build time.
 
 After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publishes the new version as the latest GitHub Release, with the extension ZIP and SHA-256 checksums. Existing version tags are not republished. Keep credentials, runtime state, screenshots and build outputs out of commits. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for configuration and checks.
+
+## Automatic desktop updates
+
+The window appears without waiting for GitHub. Checks and downloads run in the background at launch and every three hours. Only an already staged, verified release can install at cold launch before tabs restore, and only when no other workspace window is running.
+
+Updates accept stable releases published by `github-actions[bot]` in `valentinyeo/multiprompt`. The embedded Ed25519 public key must verify the detached `SHA256SUMS.txt.sig` before any checksums are trusted. Native ARM64 or x64 app and bridge executables and the extension ZIP must match the signed manifest exactly. Authenticode policy remains additional: a signed installation requires a valid update signature from the same publisher.
+
+While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** save sessions and restart on request; an active download finishes before the swap. Installation stops the old telemetry and bridge helpers and retains `<app>.previous.exe`. The new app reports ready when its window responds, including the sign-in screen; failed startup restores app, bridge, and extension files and suppresses that release. Rollback starts the old app without a readiness kill deadline. An unusually slow exit remains supervised and reopens the old app after it finishes.
+
+Extension files are updated in the configured unpacked extension directory (or the standard existing installation), excluding `themes/current`, just as the manual installer does. Existing extension reload/self-heal remains responsible for loading those files in the browser.
+
+Publishable builds use `zig build -Drelease=true`, which refuses the fake all-zero public key in `src/release_signing_public_key.txt`; ordinary test builds do not need signing credentials. Release publication requires `MULTIPROMPT_RELEASE_SIGNING_KEY`, a base64 raw 32-byte Ed25519 seed held only in a GitHub secret, matching the embedded public key. The release job signs and self-verifies the checksum manifest before uploading it.
+
+`pub const IGSH_246 = true;` in `src/update_release.zig` is the default-on switch. Set the process environment variable `IGSH_246=0` to disable release checks and installs without changing the executable. The install directory must be writable; network, permission and verification failures leave the current app running. Baseline UI verification disables release updates to keep its revision fixed. The `safe-updates` journey instead uses signed local fake releases and an ephemeral job-only key to prove real staged apply, consecutive swaps and rollback.
 
 ## Install a release
 

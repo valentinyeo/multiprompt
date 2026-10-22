@@ -53,6 +53,65 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.801", .items = &.{
+        .{ .text = "Run several browser debugging commands in one session, with event waits and complete profiling results saved to a file.", .ticket = "IGSH-221" },
+    } },
+    .{ .ver = "0.28.800", .items = &.{
+        .{ .text = "Typing multi-line text with zsb now adds line breaks instead of pressing Enter, so chat messages are no longer sent by accident.", .ticket = "IGSH-212" },
+    } },
+    .{ .ver = "0.28.799", .items = &.{
+        .{ .text = "Browser commands now stop with a clear error instead of hanging, and `zsb reset` reconnects the browser bridge without reopening your pane.", .ticket = "IGSH-154" },
+        .{ .text = "zsb keeps working on browser settings pages: tab tracking stays intact, screenshots capture the hosted pane, and text requests explain the browser restriction.", .ticket = "IGSH-240" },
+        .{ .text = "Browser commands now stop waiting with a clear timeout error instead of hanging, with configurable deadlines and faster status checks.", .ticket = "IGSH-278" },
+        .{ .text = "Browser text, snapshots and screenshots keep working on pages where another extension injected its own frame.", .ticket = "IGSH-459" },
+        .{ .text = "Idle chat windows no longer repeatedly check foreground ownership when no session visit can be recorded.", .ticket = "IGSH-513" },
+        .{ .text = "Browser panes that cannot connect can now be closed and reopened, or retried after a short timeout, without losing their URL.", .ticket = "IGSH-523" },
+        .{ .text = "Your saved session accepts typing and clicks while connections and other tabs load in the background.", .ticket = "IGSH-543" },
+        .{ .text = "Browser panes no longer appear as separate taskbar windows during launch.", .ticket = "IGSH-543" },
+        .{ .text = "Loading tabs stay intact when selected or closed, and reconnects no longer interrupt startup.", .ticket = "IGSH-543" },
+        .{ .text = "Sign-in pauses loading cleanly, and terminal launch failures now show an error.", .ticket = "IGSH-543" },
+        .{ .text = "Reduced duplicate pull-request CI builds and secret scans, and cancelled superseded lightweight checks while preserving arm64 release coverage and existing check names.", .ticket = "IGSH-544" },
+    } },
+    .{ .ver = "0.28.798", .items = &.{
+        .{ .text = "Browser commands now click reliably inside embedded pages and can run JavaScript in a chosen frame.", .ticket = "IGSH-305" },
+        .{ .text = "Chat View now hides internal reminder blocks without losing the surrounding conversation text.", .ticket = "IGSH-437" },
+    } },
+    .{ .ver = "0.28.797", .items = &.{
+        .{ .text = "Typing with zsb now targets the requested tab and rejects unknown flags instead of inserting them into your text.", .ticket = "IGSH-228" },
+        .{ .text = "Browser commands now show help without connecting to your browser or changing anything.", .ticket = "IGSH-232" },
+        .{ .text = "Ctrl+Shift+X inserts the current or most recent browser tab URL into the Chat View message box with a space, ready to keep typing without sending.", .ticket = "IGSH-493" },
+        .{ .text = "Development checks reuse fewer runners without dropping any tests.", .ticket = "IGSH-519" },
+        .{ .text = "Agents can now list workspaces and open an existing remote tmux session as a background tab in a named workspace group.", .ticket = "IGSH-535" },
+        .{ .text = "Chat View now preserves underscores in links and inline code while keeping normal underscore emphasis.", .ticket = "IGSH-537" },
+    } },
+    .{ .ver = "0.28.796", .items = &.{
+        .{ .text = "Chat sync checks now recognize user messages containing literal Markdown characters instead of incorrectly reporting them as missing.", .ticket = "IGSH-406" },
+        .{ .text = "Benchmark results from GitHub can be verified for installation from Linux regardless of checkout line endings.", .ticket = "IGSH-513" },
+        .{ .text = "Healthy remote tabs check their connection less often while idle, while disconnected tabs still retry promptly.", .ticket = "IGSH-513" },
+        .{ .text = "The window no longer flickers when other programs open or switch browser windows.", .ticket = "IGSH-521" },
+    } },
+    .{ .ver = "0.28.795", .items = &.{
+        .{ .text = "Unsent Chat View drafts now stay with their own session across switches and restarts, with a DRAFT label in the sidebar.", .ticket = "IGSH-498" },
+        .{ .text = "The shell view is back to its old maximum width, while full width still fills the window.", .ticket = "IGSH-508" },
+        .{ .text = "Tab activity notifications no longer repeatedly refresh terminal status bars.", .ticket = "IGSH-514" },
+    } },
+    .{ .ver = "0.28.794", .items = &.{
+        .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
+        .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },
+        .{ .text = "Multiprompt redraws as fast as before and keeps its smoother edges.", .ticket = "IGSH-444" },
+    } },
+    .{ .ver = "0.28.793", .items = &.{
+        .{ .text = "Taking a browser screenshot with Ctrl+Shift+S keeps the message box focused with the cursor after the link and one space, without opening the window menu.", .ticket = "IGSH-509" },
+    } },
+    .{ .ver = "0.28.792", .items = &.{
+        .{ .text = "Chat View sends waiting messages one at a time and keeps their order after restarting.", .ticket = "IGSH-460" },
+        .{ .text = "Messages that cannot be confirmed show Send again instead of staying queued forever.", .ticket = "IGSH-460" },
+    } },
+    .{ .ver = "0.28.791", .items = &.{
+        .{ .text = "The Chat View find box now correctly types symbols and accented letters with your keyboard layout.", .ticket = "IGSH-407" },
+        .{ .text = "Disconnected tabs use less CPU while waiting to reconnect.", .ticket = "IGSH-513" },
+        .{ .text = "Remote tab activity notifications now use terminal events instead of repeatedly scanning every tab.", .ticket = "IGSH-514" },
+    } },
     .{ .ver = "0.28.790", .items = &.{
         .{ .text = "Browser commands wait for the connection to become ready and no longer lose fast replies.", .ticket = "IGSH-394" },
         .{ .text = "Compare chat switching performance between two releases with repeatable benchmark reports.", .ticket = "IGSH-507" },

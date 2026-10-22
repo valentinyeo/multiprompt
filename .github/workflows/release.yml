@@ -4,7 +4,6 @@ on:
   push:
     branches: [master]
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
     inputs:
       tag:
@@ -16,6 +15,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -61,7 +61,7 @@ jobs:
           curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }}
+        run: zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }}
       - name: Package
         run: |
           mkdir dist
@@ -91,6 +91,10 @@ jobs:
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
           (cd dist && sha256sum *.exe *.zip > SHA256SUMS.txt)
+      - name: Sign checksum manifest
+        env:
+          MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
+        run: node tools/sign-release.mjs
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

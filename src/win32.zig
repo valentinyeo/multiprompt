@@ -264,12 +264,14 @@ pub const WM_APP_CHAT_COPY_SELECTION: u32 = WM_APP + 148;
 pub const WM_APP_CHAT_SELECT_ALL: u32 = WM_APP + 149;
 pub const WM_APP_VOICE_REPLAY: u32 = WM_APP + 142;
 pub const WM_APP_LADDER_DONE: u32 = WM_APP + 180;
+pub const WM_APP_ZSB_WORKSPACE: u32 = WM_APP + 153;
 pub const WM_APP_ZSB_WHO: u32 = WM_APP + 151;
 pub const WM_APP_BROWSER_DOCKED: u32 = WM_APP + 152;
 pub const WM_APP_LAYOUT_READY: u32 = WM_APP + 150;
 pub const WM_APP_FAVORITE_TOGGLE: u32 = WM_APP + 200;
 pub const WM_APP_UPDATE_CHANGED: u32 = WM_APP + 201;
 pub const WM_APP_CHAT_PERMISSION: u32 = WM_APP + 203;
+pub const WM_APP_CHAT_TAB_URL: u32 = WM_APP + 205;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;
@@ -382,6 +384,7 @@ pub const MSG = extern struct {
     pt: POINT,
 };
 pub const RECT = extern struct { left: LONG, top: LONG, right: LONG, bottom: LONG };
+pub const WINDOWPOS = extern struct { hwnd: HANDLE, hwndInsertAfter: HANDLE, x: i32, y: i32, cx: i32, cy: i32, flags: UINT };
 pub const SYSTEMTIME = extern struct {
     year: WORD,
     month: WORD,
@@ -524,6 +527,7 @@ pub extern "user32" fn IsWindowVisible(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetWindow(HANDLE, UINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetLastActivePopup(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMessageW(*MSG, HANDLE, UINT, UINT) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetMessageTime() callconv(WINAPI) LONG;
 pub extern "user32" fn TranslateMessage(*const MSG) callconv(WINAPI) BOOL;
 pub extern "user32" fn DispatchMessageW(*const MSG) callconv(WINAPI) LRESULT;
 pub extern "user32" fn DefWindowProcW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
@@ -1423,3 +1427,8 @@ pub extern "gdi32" fn GetFontData(HANDLE, DWORD, DWORD, ?*anyopaque, DWORD) call
 pub extern "user32" fn UpdateWindow(hWnd: HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceCounter(value: *i64) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceFrequency(value: *i64) callconv(WINAPI) BOOL;
+
+pub extern "kernel32" fn GetEnvironmentStringsW() callconv(WINAPI) ?[*:0]u16;
+pub extern "kernel32" fn FreeEnvironmentStringsW([*:0]u16) callconv(WINAPI) BOOL;
+pub extern "user32" fn MsgWaitForMultipleObjects(DWORD, ?[*]const HANDLE, BOOL, DWORD, DWORD) callconv(WINAPI) DWORD;
+pub extern "user32" fn PeekMessageW(*MSG, HANDLE, UINT, UINT, UINT) callconv(WINAPI) BOOL;

@@ -24,6 +24,7 @@ const EXTERNAL_WINDOW_BOUNDS = { left: 90, top: 90, width: 1400, height: 900 };
 let port;
 const debuggedTabs = new Set();
 const cdpOperationChains = new Map();
+const cdpSessionCancels = new Map();
 const screenshotCdpDetachTimers = new Map();
 const screenshotCdpDetachInFlight = new Map();
 const screenshotCdpPageEnabledTabs = new Set();
@@ -68,9 +69,10 @@ let extensionReloadTimer;
 function connect() {
   if (port) return port;
 
-  port = chrome.runtime.connectNative(HOST);
+  const connectedPort = chrome.runtime.connectNative(HOST);
+  port = connectedPort;
 
-  port.onMessage.addListener((message) => {
+  connectedPort.onMessage.addListener((message) => {
     console.log("multiprompt browser bridge:", message);
     bridgeVersionCheckChain = bridgeVersionCheckChain.then(async () => {
       await checkBridgeVersion(message);
@@ -84,7 +86,8 @@ function connect() {
     });
   });
 
-  port.onDisconnect.addListener(() => {
+  connectedPort.onDisconnect.addListener(() => {
+    if (port !== connectedPort) return;
     console.warn("multiprompt browser bridge disconnected:", chrome.runtime.lastError?.message);
     port = undefined;
     rejectPendingHostReplies(chrome.runtime.lastError?.message || "native host disconnected");
@@ -288,17 +291,20 @@ async function handleHostMessage(message) {
   try {
     if (extensionOutdated && message.method !== "extensionReload") console.warn(EXTENSION_OUTDATED_ERROR);
     const actionTimeoutMs = message.method === "screenshot" || message.method === "shoturl" ? 35000 : 15000;
-    const result = await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
+    const result = message.method === "cdp" && message.script !== undefined
+      ? await dispatch(message)
+      : await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
     if (result?.error === "page_error") {
       sendResponse(message, { ok: false, error: "page_error", result });
       return;
     }
     sendResponse(message, { ok: true, result });
-    if (message.method === "extensionReload") scheduleExtensionReload();
+    if (message.method === "extensionReload" || (message.method === "reset" && result.reloadScheduled)) scheduleExtensionReload();
   } catch (error) {
     sendResponse(message, {
       ok: false,
       error: error?.message || String(error),
+      ...(error?.failedStep ? { failedStep: error.failedStep, results: error.results || [] } : {}),
     });
     if (reloadPending) scheduleExtensionReload();
   }
@@ -327,12 +333,16 @@ async function dispatch(message) {
       return reloadAction(message);
     case "extensionReload":
       return { reloadScheduled: true };
+    case "reset":
+      return resetBridge(message);
     case "setTheme":
       return applyBrowserTheme(message);
     case "tabs":
       return listTabs(message);
     case "activeTab":
       return compactTab(await getTargetTab(message));
+    case "frames":
+      return framesAction(message);
     case "url":
       return urlAction(message);
     case "activate":
@@ -381,7 +391,9 @@ async function rememberTargetWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) return;
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
+  await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
   await markZigShellWindow(wid);
 }
 
@@ -393,9 +405,10 @@ async function protectWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) throw new Error("protectWindow requires --window <id>");
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
-  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
+  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const owner = protectedWindowMeta.get(wid);
   if (shellId != null && owner?.shellId != null &&
@@ -1565,7 +1578,11 @@ function isPaneBeaconTab(tab) {
 }
 
 function isExtensionTab(tab) {
-  return [tab?.url, tab?.pendingUrl].some((url) => /^(chrome|moz)-extension:\/\//i.test(url || ""));
+  return [tab?.url, tab?.pendingUrl].some((url) => /^[a-z][a-z0-9+.-]*-extension:\/\//i.test(url || ""));
+}
+
+function isBrowserInternalTab(tab) {
+  return /^(?:chrome|edge|chrome-search|chrome-untrusted|devtools):/i.test(tab?.pendingUrl || tab?.url || "");
 }
 
 function paneContentTab(tabs) {
@@ -1639,7 +1656,7 @@ async function resolveExplicitTargetTab(windowId, message, required) {
 }
 
 async function ensureBackgroundTabFocusEmulation(tab) {
-  if (!tab?.id || tab.active || focusEmulatedTabs.has(tab.id)) return tab;
+  if (!tab?.id || tab.active || isBrowserInternalTab(tab) || focusEmulatedTabs.has(tab.id)) return tab;
   try {
     await withCdpSession(tab.id, (debuggee) =>
       chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }));
@@ -1715,6 +1732,9 @@ async function runInActiveTab(func, args = [], message) {
 
 async function textAction(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    throw new Error(`text is unavailable on browser-internal pages (${tab.pendingUrl || tab.url}): the browser blocks extension access; use screenshot for a native pane capture`);
+  }
   try {
     const limit = numberOr(message.limit, 2000);
     const frameResults = await runInAllFrames(tab.id, getVisibleText, [limit]);
@@ -1767,20 +1787,29 @@ function pageErrorResult(tab, error) {
   };
 }
 
+async function framesAction(message) {
+  const tab = await getTargetTab(message);
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+  return { tab: compactTab(tab), frames: (frames || []).map(({ frameId, parentFrameId, url }) => ({ frameId, parentFrameId, url })) };
+}
+
 async function evalAction(message) {
   const tab = await getTargetTab(message);
-  if (/^data:/i.test(tab.url || "")) {
+  const frameId = message.frameId ?? 0;
+  if (!Number.isInteger(frameId) || frameId < 0) throw new Error("invalid frameId");
+  if (frameId === 0 && /^data:/i.test(tab.url || "")) {
     return runInDataTab(tab.id, evalInPage, [stringOr(message.code, "")]);
   }
   const code = stringOr(message.code, "");
   const blockedByCsp = (error) => /unsafe-eval|content security policy|\bCSP\b/i.test(errorText(error));
   try {
     const [entry] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id, frameIds: [frameId] },
       world: "MAIN",
       func: evalInPage,
       args: [code],
     });
+    if (!entry) throw new Error(`no evaluation result for frame ${frameId}`);
     if (entry?.error) throw new Error(entry.error.message || String(entry.error));
     if (typeof entry?.result !== "string" || !/^EvalError:/i.test(entry.result) || !blockedByCsp(entry.result)) {
       return entry?.result;
@@ -1789,6 +1818,7 @@ async function evalAction(message) {
     if (!blockedByCsp(error)) throw error;
   }
 
+  if (frameId !== 0) throw new Error(`eval in frame ${frameId} blocked by Content Security Policy`);
   return withCdpSession(tab.id, async (debuggee) => {
     const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
       expression: `(${evalInPage.toString()})(${JSON.stringify(code)}, () => { "use strict"; return (${code}); })`,
@@ -1800,16 +1830,27 @@ async function evalAction(message) {
   });
 }
 
+function isExtensionFrameAccessError(error) {
+  return /Cannot access a chrome-extension:\/\/ URL of different extension/i.test(error?.message || String(error));
+}
+
 async function runInDataTab(tabId, func, args) {
-  return withCdpSession(tabId, async (debuggee) => {
-    const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
-      expression: `(${func.toString()})(...${JSON.stringify(args)})`,
-      returnByValue: true,
-      awaitPromise: true,
+  try {
+    return await withCdpSession(tabId, async (debuggee) => {
+      const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+        expression: `(${func.toString()})(...${JSON.stringify(args)})`,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
+      return reply.result?.value;
     });
-    if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || "data page scripting failed");
-    return reply.result?.value;
-  });
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+  }
+  const [entry] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func, args });
+  if (entry?.error) throw new Error(entry.error.message || String(entry.error));
+  return entry?.result;
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -1838,8 +1879,7 @@ async function runInFrame(tabId, frameId, func, args = []) {
 
 async function runInAllFrames(tabId, func, args = []) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
-  const results = await Promise.all((frames || []).filter((frame) =>
-    !/^(chrome|moz)-extension:\/\//i.test(frame.url || "")).map(async (frame) => {
+  const results = await Promise.all((frames || []).filter((frame) => !isExtensionTab(frame)).map(async (frame) => {
     try {
       return { frameId: frame.frameId, result: await runInFrame(tabId, frame.frameId, func, args) };
     } catch (error) {
@@ -1882,25 +1922,39 @@ async function clickAction(message) {
   const tab = await getTargetTab(message);
   await runInTab(tab.id, installCursorApi, [cursorOptionsFrom(message)]).catch(() => {});
   const selector = stringOr(message.selector, "");
-  const target = await locateSelectorAcrossFrames(tab.id, selector, false);
+  let target = await locateSelectorAcrossFrames(tab.id, selector, false);
   const offset = await frameViewportOffset(tab.id, target.frameId);
-  if (!offset) {
-    const fallback = await runInFrame(tab.id, target.frameId, clickSelector, [selector]);
-    return { ...fallback, trusted: false, frameId: target.frameId, via: "frame-dom-fallback" };
+  let reason = "frame coordinates unavailable";
+  if (offset) {
+    if (target.frameId !== 0) {
+      target = { ...await runInFrame(tab.id, target.frameId, locateSelectorForTrustedInput, [selector, false, false, false]), frameId: target.frameId };
+    }
+    const x = Number(target.x) + Number(offset.x);
+    const y = Number(target.y) + Number(offset.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error(`invalid cross-frame click coordinates: target=${JSON.stringify(target)} offset=${JSON.stringify(offset)}`);
+    }
+    let inputStarted = false;
+    try {
+      await withCdpSession(tab.id, (debuggee) => {
+        inputStarted = true;
+        return dispatchTrustedClick(debuggee, x, y);
+      });
+      return { clicked: true, trusted: true, selector, text: target.text, frameId: target.frameId, via: "cdp", x, y };
+    } catch (error) {
+      if (inputStarted || /timed out/i.test(errorText(error))) throw error;
+      reason = `debugger unavailable: ${errorText(error)}`;
+    }
   }
-  const x = Number(target.x) + Number(offset.x);
-  const y = Number(target.y) + Number(offset.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new Error(`invalid cross-frame click coordinates: target=${JSON.stringify(target)} offset=${JSON.stringify(offset)}`);
-  }
-  await withCdpSession(tab.id, (debuggee) => dispatchTrustedClick(debuggee, x, y));
-  return { clicked: true, trusted: true, selector, text: target.text, frameId: target.frameId };
+  const fallback = await runInFrame(tab.id, target.frameId, clickSelector, [selector]);
+  return { ...fallback, trusted: false, frameId: target.frameId, via: "frame-dom-fallback", reason };
 }
 
 async function typeAction(message) {
   const tab = await getTargetTab(message);
   const selector = stringOr(message.selector, "");
   const text = stringOr(message.text, "");
+  const rawEnter = message.rawEnter === true;
   let target = null;
   if (selector) {
     await runInTab(tab.id, installCursorApi, [cursorOptionsFrom(message)]).catch(() => {});
@@ -1917,12 +1971,12 @@ async function typeAction(message) {
       await dispatchSelectAll(debuggee);
     }
     if (message.keys === true) {
-      await dispatchTrustedKeys(debuggee, text);
+      await dispatchTrustedKeys(debuggee, text, rawEnter);
     } else {
-      await dispatchTrustedText(debuggee, text);
+      await dispatchTrustedText(debuggee, text, rawEnter);
     }
   });
-  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", selector: selector || undefined, frameId: target?.frameId, length: text.length };
+  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", rawEnter, selector: selector || undefined, frameId: target?.frameId, length: text.length };
 }
 
 async function locateSelectorAcrossFrames(tabId, selector, requireEditable) {
@@ -1950,7 +2004,15 @@ async function frameViewportOffset(tabId, frameId) {
     visited.add(current.frameId);
     const parent = byId.get(current.parentFrameId);
     if (!parent) return null;
-    const rect = await runInFrame(tabId, parent.frameId, locateChildFrameRect, [current.url]).catch(() => null);
+    const token = crypto.randomUUID();
+    let rect = null;
+    try {
+      await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "listen"]);
+      await runInFrame(tabId, current.frameId, signalParentFrame, [token]);
+      rect = await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "rect"]);
+    } catch (_) {
+      await runInFrame(tabId, parent.frameId, locateChildFrameRect, [token, "cancel"]).catch(() => {});
+    }
     if (!rect) return null;
     x += rect.x;
     y += rect.y;
@@ -1966,8 +2028,13 @@ async function insertAction(message) {
   return { inserted: text.length, trusted: true };
 }
 
-async function dispatchTrustedText(debuggee, text) {
-  const lines = text.split("\n");
+async function dispatchTrustedText(debuggee, text, rawEnter = false) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  if (!rawEnter) {
+    if (normalized.length > 0) await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: normalized });
+    return;
+  }
+  const lines = normalized.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].length > 0) {
       await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: lines[i] });
@@ -1976,10 +2043,11 @@ async function dispatchTrustedText(debuggee, text) {
   }
 }
 
-async function dispatchTrustedKeys(debuggee, text) {
+async function dispatchTrustedKeys(debuggee, text, rawEnter = false) {
   for (const character of text.replace(/\r\n?/g, "\n")) {
     if (character === "\n") {
-      await dispatchEnter(debuggee);
+      if (rawEnter) await dispatchEnter(debuggee);
+      else await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: "\n" });
       continue;
     }
     const common = printableKeyDescriptor(character);
@@ -2295,13 +2363,39 @@ function keyDescriptor(raw, shift) {
 
 async function captureScreenshotResult(message) {
   const tab = await getTargetTab(message);
-  const data = await captureScreenshotViaCdp(tab.id, 10000);
-  const dataUrl = `data:image/png;base64,${data}`;
+  if (isBrowserInternalTab(tab)) {
+    const current = await chrome.tabs.get(tab.id);
+    if (!current.active || current.windowId !== message.windowId || !isBrowserInternalTab(current)) {
+      throw new Error("native screenshot requires the browser-internal tab to be selected in its hosted pane; refusing to capture another tab");
+    }
+    const owner = protectedWindowMeta.get(current.windowId);
+    const capture = await requestHostReply("nativeScreenshot", { windowId: current.windowId, ownerPid: owner?.ownerPid });
+    return { ...capture, tab: compactTab(current) };
+  }
+  let dataUrl;
+  let via = "Page.captureScreenshot";
+  try {
+    const data = await captureScreenshotViaCdp(tab.id, 10000);
+    dataUrl = `data:image/png;base64,${data}`;
+  } catch (error) {
+    if (!isExtensionFrameAccessError(error)) throw error;
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    try {
+      if (activeTab?.id !== tab.id) await chrome.tabs.update(tab.id, { active: true });
+      dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      via = "chrome.tabs.captureVisibleTab";
+    } finally {
+      if (activeTab?.id && activeTab.id !== tab.id) {
+        const [current] = await chrome.tabs.query({ active: true, windowId: tab.windowId }).catch(() => []);
+        if (current?.id === tab.id) await chrome.tabs.update(activeTab.id, { active: true }).catch(() => {});
+      }
+    }
+  }
   return {
     tab: compactTab(tab),
     dataUrl,
-    bytesApprox: Math.ceil(data.length * 0.75),
-    via: "Page.captureScreenshot",
+    bytesApprox: Math.ceil(dataUrl.slice(dataUrl.indexOf(",") + 1).length * 0.75),
+    via,
   };
 }
 
@@ -2500,38 +2594,82 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation) {
-  const previous = cdpOperationChains.get(tabId) || Promise.resolve();
-  const current = previous.catch(() => {}).then(async () => {
+function withCdpSession(tabId, operation, timeoutMs = 10000) {
+  if (cdpOperationChains.get(tabId)) {
+    return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
+  }
+  let cancel;
+  const cancelled = new Promise((_, reject) => { cancel = reject; });
+  const current = Promise.resolve().then(async () => {
     clearScreenshotCdpDetachTimer(tabId);
-    const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
-    if (pendingDetach) await pendingDetach.catch(() => {});
-
     const debuggee = { tabId };
-    if (debuggedTabs.has(tabId)) {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
-    }
-    await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
-    debuggedTabs.add(tabId);
+    const checkSession = () => {
+      if (cdpOperationChains.get(tabId) !== current) throw new Error("CDP session reset; retry command");
+    };
     try {
-      await chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true });
-      return await withTimeout(operation(debuggee), 15000, "CDP operation timed out");
+      const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
+      if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
+      checkSession();
+      if (debuggedTabs.has(tabId)) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
+      checkSession();
+      debuggedTabs.add(tabId);
+      await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+      checkSession();
+      await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
+      checkSession();
+      return await (timeoutMs === null ? operation(debuggee, checkSession) : withTimeout(operation(debuggee, checkSession), timeoutMs, "CDP operation timed out; run zsb reset"));
     } finally {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
+      if (cdpOperationChains.get(tabId) === current) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
     }
   });
   cdpOperationChains.set(tabId, current);
-  return current.finally(() => {
-    if (cdpOperationChains.get(tabId) === current) cdpOperationChains.delete(tabId);
+  cdpSessionCancels.set(tabId, cancel);
+  return Promise.race([current, cancelled]).finally(() => {
+    if (cdpOperationChains.get(tabId) === current) {
+      cdpOperationChains.delete(tabId);
+      cdpSessionCancels.delete(tabId);
+    }
   });
 }
 
+async function resetBridge(message) {
+  const windowId = messageWindowId(message);
+  const tabs = await chrome.tabs.query(windowId == null ? {} : { windowId });
+  let reloadScheduled = false;
+  await Promise.all(tabs.map(async ({ id: tabId }) => {
+    cdpSessionCancels.get(tabId)?.(new Error("CDP session reset; retry command"));
+    cdpSessionCancels.delete(tabId);
+    cdpOperationChains.delete(tabId);
+    clearScreenshotCdpDetachTimer(tabId);
+    screenshotCdpDetachInFlight.delete(tabId);
+    await withTimeout(chrome.debugger.detach({ tabId }), 1000, "CDP reset detach timed out").catch((error) => {
+      if (error?.message === "CDP reset detach timed out") reloadScheduled = true;
+    });
+    debuggedTabs.delete(tabId);
+    screenshotCdpPageEnabledTabs.delete(tabId);
+    focusEmulatedTabs.delete(tabId);
+    consoleCaptureTabs.delete(tabId);
+  }));
+  const oldPort = port;
+  port = undefined;
+  oldPort?.disconnect();
+  bridgeVersionCheckChain = Promise.resolve();
+  connect();
+  return { reset: true, windowId, tabs: tabs.length, reloadScheduled };
+}
+
 async function tryAcceptPendingDialog(debuggee) {
-  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+  await chrome.debugger.sendCommand(debuggee, "Page.handleJavaScriptDialog", { accept: true }).catch((error) => {
+    if (isExtensionFrameAccessError(error)) throw error;
+  });
 }
 
 async function acceptPendingDialog(tabId) {
@@ -2550,7 +2688,9 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
           chrome.debugger.sendCommand(debuggee, "Page.enable", {}),
           2000,
           "CDP Page.enable timed out",
-        ).catch(() => {});
+        ).catch((error) => {
+          if (isExtensionFrameAccessError(error)) throw error;
+        });
         const result = await withTimeout(
           chrome.debugger.sendCommand(debuggee, "Page.captureScreenshot", {
             format: "png",
@@ -2565,6 +2705,7 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
         return result.data;
       });
     } catch (error) {
+      if (isExtensionFrameAccessError(error)) throw error;
       lastError = error;
       if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, attempt * 120));
     }
@@ -2574,11 +2715,91 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
 
 async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
+  if (message.script !== undefined) {
+    validateCdpScript(message.script);
+    return withCdpSession(tabId, async (debuggee, checkSession) => {
+      const results = [];
+      for (const [index, step] of message.script.entries()) {
+        try {
+          checkSession();
+          results.push(await runCdpScriptStep(debuggee, step, checkSession));
+        } catch (cause) {
+          const error = new Error(`CDP script step ${index + 1} (${step.method || step.waitEvent || "waitMs"}) failed: ${errorText(cause)}`);
+          error.failedStep = index + 1;
+          error.results = results;
+          throw error;
+        }
+      }
+      return results;
+    }, null);
+  }
   const cdpMethod = stringOr(message.cdpMethod, "");
   if (!cdpMethod) throw new Error("missing cdpMethod");
 
   return withCdpSession(tabId, (debuggee) =>
     chrome.debugger.sendCommand(debuggee, cdpMethod, message.params || {}));
+}
+
+function validateCdpScript(script) {
+  if (!Array.isArray(script) || script.length === 0 || script.length > 1000) {
+    throw new Error("CDP script must be an array of 1-1000 steps");
+  }
+  let budget = 0;
+  for (const [index, step] of script.entries()) {
+    const invalid = (reason) => {
+      const error = new Error(`CDP script step ${index + 1}: ${reason}`);
+      error.failedStep = index + 1;
+      throw error;
+    };
+    if (!step || typeof step !== "object" || Array.isArray(step)) invalid("expected an object");
+    if (Object.keys(step).some((key) => !["method", "params", "waitEvent", "timeoutMs", "waitMs"].includes(key))) invalid("unknown field");
+    if (step.method !== undefined && (typeof step.method !== "string" || !step.method.trim())) invalid("invalid method");
+    if (step.waitEvent !== undefined && (typeof step.waitEvent !== "string" || !step.waitEvent.trim())) invalid("invalid waitEvent");
+    if (step.params !== undefined && (!step.method || !step.params || typeof step.params !== "object" || Array.isArray(step.params))) invalid("params must be an object with a method");
+    if (step.waitMs !== undefined) {
+      if (!Number.isInteger(step.waitMs) || step.waitMs < 0 || step.waitMs > 300000 || Object.keys(step).length !== 1) invalid("waitMs must be a standalone delay (0-300000)");
+      budget += step.waitMs;
+    } else {
+      if (!step.method && !step.waitEvent) invalid("missing method, waitEvent or waitMs");
+      const timeout = step.timeoutMs ?? 15000;
+      if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 300000) invalid("timeoutMs must be 1-300000");
+      budget += timeout;
+    }
+    if (budget > 300000) invalid("total script timeout budget exceeds 300000 ms");
+  }
+}
+
+async function runCdpScriptStep(debuggee, step, checkSession) {
+  if (step.waitMs !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+    return { waitMs: step.waitMs };
+  }
+  let listener;
+  let active = true;
+  try {
+    return await withTimeout((async () => {
+      if (step.waitEvent?.startsWith("Page.")) await chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+      if (!active) return;
+      checkSession();
+      let event;
+      if (step.waitEvent) {
+        event = new Promise((resolve) => {
+          listener = (source, method, params) => {
+            if (source.tabId === debuggee.tabId && !source.sessionId && method === step.waitEvent) resolve(params || {});
+          };
+          chrome.debugger.onEvent.addListener(listener);
+        });
+      }
+      const result = step.method ? await chrome.debugger.sendCommand(debuggee, step.method, step.params || {}) : undefined;
+      return {
+        ...(step.method ? { method: step.method, result: result ?? {} } : { waitEvent: step.waitEvent }),
+        ...(event ? { event: await event } : {}),
+      };
+    })(), step.timeoutMs ?? 15000, "CDP step timed out");
+  } finally {
+    active = false;
+    if (listener) chrome.debugger.onEvent.removeListener(listener);
+  }
 }
 
 async function consoleAction(message) {
@@ -2641,9 +2862,10 @@ function normalizeConsoleEvent(method, params) {
 
 async function resolveWindow(message) {
   await loadProtectedWindows();
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup"] });
   const normalIds = new Set(windows.filter((win) => !win.type || win.type === "normal").map((win) => win.id));
-  const tabs = (await chrome.tabs.query({})).filter((tab) => normalIds.has(tab.windowId) && !isExtensionTab(tab));
+  const paneIds = new Set(windows.filter((win) => normalIds.has(win.id) || win.type === "popup").map((win) => win.id));
+  const tabs = (await chrome.tabs.query({})).filter((tab) => paneIds.has(tab.windowId) && !isExtensionTab(tab));
   const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const match = typeof message?.match === "string" ? message.match : "";
@@ -2654,10 +2876,16 @@ async function resolveWindow(message) {
         (owner?.shellId == null || (owner.shellId === shellId && (ownerPid == null || owner.ownerPid === ownerPid)));
     });
     if (new Set(beacons.map((tab) => tab.windowId)).size > 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
-    if (beacons.length > 0) return { windowId: beacons[0].windowId, tab: compactTab(beacons[0]) };
+    if (beacons.length > 0) {
+      const windowId = beacons[0].windowId;
+      if (!normalIds.has(windowId)) {
+        await markZigShellWindow(windowId, { shellId, ownerPid: ownerPid ?? protectedWindowMeta.get(windowId)?.ownerPid });
+      }
+      return { windowId, tab: compactTab(beacons[0]) };
+    }
   }
   if (shellId != null) {
-    const owned = windows.filter((win) => normalIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
+    const owned = windows.filter((win) => paneIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
       (ownerPid == null || protectedWindowMeta.get(win.id)?.ownerPid === ownerPid));
     if (owned.length > 1) throw new Error(`ambiguous multiprompt pane windows for shell ${shellId}`);
     if (owned.length === 1) {
@@ -2666,7 +2894,7 @@ async function resolveWindow(message) {
     }
   }
   if (match) {
-    const hits = shellId != null ? [] : tabs.filter((tab) => typeof tab.url === "string" && tab.url.includes(match));
+    const hits = shellId != null ? [] : tabs.filter((tab) => normalIds.has(tab.windowId) && typeof tab.url === "string" && tab.url.includes(match));
     if (hits.length === 0) throw new Error(`no window with tab url matching: ${match}`);
     if (new Set(hits.map((tab) => tab.windowId)).size !== 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
     return { windowId: hits[0].windowId, tab: compactTab(hits[0]) };
@@ -2992,7 +3220,7 @@ function getFocusedEditableTarget() {
   return { editable, tag: element?.tagName?.toLowerCase() || "" };
 }
 
-async function locateSelectorForTrustedInput(selector, requireEditable, allowMissing = false) {
+async function locateSelectorForTrustedInput(selector, requireEditable, allowMissing = false, scroll = true) {
   if (!selector) throw new Error("missing selector");
   const element = document.querySelector(selector);
   if (!element) {
@@ -3007,7 +3235,7 @@ async function locateSelectorForTrustedInput(selector, requireEditable, allowMis
     throw new Error(`selector is not editable: ${selector}`);
   }
 
-  element.scrollIntoView({ block: "center", inline: "center" });
+  if (scroll) element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) throw new Error(`selector is not visible: ${selector}`);
   const x = Math.round(rect.left + rect.width / 2);
@@ -3028,17 +3256,45 @@ async function locateSelectorForTrustedInput(selector, requireEditable, allowMis
   return { found: true, x, y, text: text.slice(0, 160) };
 }
 
-function locateChildFrameRect(childUrl) {
-  const frames = Array.from(document.querySelectorAll("iframe,frame"));
-  const wanted = String(childUrl || "");
-  const element = frames.find((frame) => {
-    try { return new URL(frame.src || frame.getAttribute("src") || "", location.href).href === wanted; }
-    catch { return false; }
-  });
-  if (!element) return null;
-  element.scrollIntoView({ block: "nearest", inline: "nearest" });
-  const rect = element.getBoundingClientRect();
-  return { x: rect.left + element.clientLeft, y: rect.top + element.clientTop };
+async function locateChildFrameRect(token, action) {
+  const key = `__zsbFrameRect_${token}`;
+  if (action === "listen") {
+    let finish;
+    const promise = new Promise((resolve) => { finish = resolve; });
+    const receive = (event) => {
+      if (event.data?.zsbFrameToken !== token) return;
+      const element = Array.from(document.querySelectorAll("iframe,frame"))
+        .find((frame) => frame.contentWindow === event.source);
+      if (element) finish(element);
+    };
+    const cleanup = () => {
+      window.removeEventListener("message", receive);
+      clearTimeout(timer);
+      delete window[key];
+      finish(null);
+    };
+    const timer = setTimeout(cleanup, 1500);
+    window[key] = { promise, cleanup };
+    window.addEventListener("message", receive);
+    return true;
+  }
+  const pending = window[key];
+  if (!pending) return null;
+  try {
+    if (action === "cancel") return null;
+    const element = await pending.promise;
+    if (!element?.isConnected) return null;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return { x: rect.left + element.clientLeft, y: rect.top + element.clientTop };
+  } finally {
+    pending.cleanup();
+  }
+}
+
+function signalParentFrame(token) {
+  window.parent.postMessage({ zsbFrameToken: token }, "*");
 }
 
 async function clickSelector(selector) {
@@ -3046,22 +3302,26 @@ async function clickSelector(selector) {
   const element = document.querySelector(selector);
   if (!element) throw new Error(`selector not found: ${selector}`);
 
-  element.scrollIntoView({ block: "center", inline: "center" });
-
+  element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) throw new Error(`selector is not visible: ${selector}`);
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  const common = { bubbles: true, cancelable: true, composed: true, view: window, clientX, clientY, button: 0 };
+  const pointer = { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true };
   const cursor = window.__browserCliCursor;
   if (cursor && !window.__browserCliCursorDisabled) {
-    const rect = element.getBoundingClientRect();
-    const cx = Math.round(rect.left + rect.width / 2);
-    const cy = Math.round(rect.top + rect.height / 2);
-    const moveMs = cursor.moveTo(cx, cy) || 0;
+    const moveMs = cursor.moveTo(clientX, clientY) || 0;
     await new Promise((resolve) => setTimeout(resolve, moveMs + 30));
     cursor.press(true);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    element.click();
-    cursor.press(false);
-  } else {
-    element.click();
   }
+  const pointerDown = element.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1, pressure: 0.5 }));
+  const mouseDown = pointerDown && element.dispatchEvent(new MouseEvent("mousedown", { ...common, buttons: 1 }));
+  if (mouseDown) element.focus({ preventScroll: true });
+  element.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0, pressure: 0 }));
+  if (pointerDown) element.dispatchEvent(new MouseEvent("mouseup", { ...common, buttons: 0 }));
+  element.dispatchEvent(new PointerEvent("click", { ...pointer, buttons: 0, detail: 1 }));
+  if (cursor) cursor.press(false);
 
   const label = (
     element.getAttribute("aria-label") ||

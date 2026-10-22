@@ -243,7 +243,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
 | Alt+A | Toggle the Edge browser pane for this tab |
+| Alt+Shift+A | Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane) |
 | Ctrl+Shift+S | Screenshot browser tab, paste link + space, focus Chat View composer or shell |
+| Ctrl+Shift+X | Insert current browser tab URL (or most recent) + space at the Chat View caret; never send |
 | Ctrl+Shift+L / Ctrl+L | Focus browser address bar |
 | Alt+Q | Jump between shell and browser pane |
 | Ctrl+K → Browser engine | Switch every pane between dedicated Edge and dedicated Chrome profiles |
@@ -265,7 +267,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | (agent-reported) Session ETA countdown | Sidebar row shows time left + a progress line; toggle either from Ctrl+K → ETA Countdown Numbers / ETA Progress Line |
 | Ctrl+K → Estimate Accuracy | See how each agent's time estimates compare to how long tasks actually took |
 | Ctrl+K → Restart multiprompt | Save session and relaunch the app |
-| Ctrl+K → Update: Relaunch | Relaunch onto the installed new version (same as the sidebar card) |
+| Ctrl+K → Restart to update | Restart when an update is ready (same as the sidebar card) |
 | F1 | This shortcuts overview |
 
 ### Clipboard

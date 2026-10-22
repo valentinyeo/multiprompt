@@ -78,6 +78,44 @@ class ChatSyncAuditTest(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         self.assertEqual([item['pane_line'] for item in candidates], [1, 3, 5])
 
+    def test_igsh380_build_progress_banner_is_not_a_chat_turn(self):
+        capture = ['● Build in progress (~7 min); preparing preview images',
+                   '● Build in progress: the compiler found a real error',
+                   '● The build is still running; I will check it shortly',
+                   '❯ please check the actual build progress',
+                   '❯ Build in progress (~7 min); keep this user prompt'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['pane_line'] for item in candidates], [2, 3, 4, 5])
+
+    def test_igsh380_monitor_queue_records_are_not_missing_chat(self):
+        reader = audit.load_reader()
+        notice = 'Monitor "neutral helper" stream ended'
+        content = '<task-notification><summary>' + notice + '</summary></task-notification>'
+        events = [dict(type='queue-operation', operation=operation, content=content,
+                       timestamp='2026-01-01T00:00:00Z') for operation in ('enqueue', 'remove')]
+        events.append(dict(type='attachment', attachment=dict(type='queued_command', prompt=content)))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            capture = '● ' + notice + '\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else '{"probe":0,"present":false}\n'
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command):
+                evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=notice))
+                self.assertEqual([item['record'] for item in evidence], ['task_notification', 'task_notification'])
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit')), [])
+                events.append(dict(type='assistant', message=dict(role='assistant', content=notice)))
+                path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+                wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+                reader.response.return_value = wire
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'))
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
+
     def test_ticket_deduplication_keeps_open_tickets_and_refiles_done(self):
         finding = dict(kind='raw_markup', session='neutral-session', transcript='/neutral.jsonl',
                        transcript_lines=[dict(line=12, timestamp='2026-10-17T15:06:45Z')], text='neutral example')

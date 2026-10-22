@@ -505,8 +505,8 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             var end = pos + 1;
             while (end < span.text.end and text[end] != ' ' and text[end] != '\t' and text[end] != '\r' and text[end] != '\n') : (end += 1) {}
             var target = span.target;
-            if (target == null) {
-                if (raw_link != null and raw_link.?.start < pos) raw_link = link_detect.next(text, pos);
+            if (raw_link != null and raw_link.?.end <= pos) raw_link = link_detect.next(text, pos);
+            if (target == null and !style.code) {
                 if (raw_link) |link| {
                     if (link.start == pos) {
                         target = .{ .start = link.start, .end = link.end };
@@ -561,30 +561,42 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     return null;
 }
 
-fn chatTableCellSize(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.TableSize {
-    const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, 0));
-    defer _ = SelectObject(hdc, old);
-    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-    var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
-    var buf: [512]chat_markdown.Span = undefined;
-    const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
-    defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
-    const n = chat_markdown.inlineSpans(text, spans);
-    var width: i32 = 0;
-    for (spans[0..n]) |span| {
-        var style = span.style;
-        style.bold = style.bold or bold;
-        _ = SelectObject(hdc, chatRichFont(style, 0));
-        width += chatTextWidth(hdc, text[span.text.start..span.text.end]);
-        height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+const TableMeasureBackend = struct {
+    pub const Font = HANDLE;
+    hdc: HANDLE,
+
+    pub fn font(_: *TableMeasureBackend, style: chat_markdown.Style) Font {
+        return chatRichFont(style, 0);
     }
-    return .{ .width = width, .height = height };
+
+    pub fn select(self: *TableMeasureBackend, value: Font) Font {
+        return SelectObject(self.hdc, value);
+    }
+
+    pub fn lineHeight(self: *TableMeasureBackend) i32 {
+        var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        return chatLineHeight(DrawTextW(self.hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    }
+
+    pub fn width(self: *TableMeasureBackend, text: []const u16) i32 {
+        return chatTextWidth(self.hdc, text);
+    }
+};
+
+const TableMeasurer = @import("chat_table_measure.zig").Measurer(TableMeasureBackend);
+var table_metrics: TableMeasurer.Metrics = .{};
+
+pub fn resetTableMetrics() void {
+    table_metrics = .{};
 }
 
 fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*chat_markdown.TableLayout {
     const start = GetTickCount64();
     const before = app_state.g_chat_tables.builds;
-    const table = app_state.g_chat_tables.layout(std.heap.page_allocator, text, offset, .{ .view_w = @max(1, width), .font_pt = app_state.g_chat_font_pt, .scale = uiScaled(1024), .pad_x = uiScaled(10), .pad_y = uiScaled(6) }, hdc, chatTableCellSize) catch return null;
+    table_metrics.invalidate(app_state.g_chat_font_pt, uiScaled(1024));
+    var measure = TableMeasurer{ .backend = .{ .hdc = hdc }, .metrics = &table_metrics };
+    defer measure.deinit();
+    const table = app_state.g_chat_tables.layout(std.heap.page_allocator, text, offset, .{ .view_w = @max(1, width), .font_pt = app_state.g_chat_font_pt, .scale = uiScaled(1024), .pad_x = uiScaled(10), .pad_y = uiScaled(6) }, &measure, TableMeasurer.cell) catch return null;
     if (app_state.g_chat_tables.builds != before) {
         chatPerf("table layout", start, text.len);
         var log: [192]u8 = undefined;
@@ -827,6 +839,49 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);
+}
+
+test "IGSH-537 clicking either side of a URL underscore opens the exact address" {
+    @setEvalBranchQuota(10000);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = w("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv");
+    const old_font = SelectObject(dc, chatRichFont(.{}, 0));
+    defer _ = SelectObject(dc, old_font);
+    const prefix_w = chatTextWidth(dc, w("https://claude.ai/code/session_"));
+    var line_h: i32 = 0;
+    _ = chatRichText(dc, w("Ag"), .{ .left = 0, .top = 0, .right = 100, .bottom = 0 }, 0, false, null, 0, &line_h, false);
+    for ([_]struct { width: i32, x: i32, y: i32 }{
+        .{ .width = 4096, .x = 2, .y = 2 },
+        .{ .width = 4096, .x = prefix_w + 2, .y = 2 },
+        .{ .width = prefix_w, .x = 2, .y = line_h + 2 },
+    }) |point| {
+        const target = chatRichText(dc, text, .{ .left = 0, .top = 0, .right = point.width, .bottom = 100 }, 0, false, .{ .x = point.x, .y = point.y }, 17, null, false) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(usize, 17), target.start);
+        try std.testing.expectEqual(@as(usize, 17 + text.len), target.end);
+        var bytes: [256]u8 = undefined;
+        const len = clickedLinkUrl(text[target.start - 17 .. target.end - 17], &bytes).?;
+        try std.testing.expectEqualStrings("https://claude.ai/code/session_01N1njvWuiAc1XNXRSYaUTCv", bytes[0..len]);
+    }
+    const area = RECT{ .left = 0, .top = 0, .right = 4096, .bottom = 100 };
+    try std.testing.expect(chatRichText(dc, w("`https://example.test/session_code_01`"), area, 0, false, .{ .x = 2, .y = 2 }, 0, null, false) == null);
+    const url = w("https://example.test/session_next_02");
+    const space_w = chatTextWidth(dc, w(" "));
+    for ([_]struct { text: []const u16, prefix: []const u16, code: bool = false }{
+        .{ .text = w("https://example.test/session_first_01. https://example.test/session_next_02"), .prefix = w("https://example.test/session_first_01.") },
+        .{ .text = w("`https://example.test/session_code_01` https://example.test/session_next_02"), .prefix = w("https://example.test/session_code_01"), .code = true },
+        .{ .text = w("[first](https://example.test/session_label_01) https://example.test/session_next_02"), .prefix = w("first") },
+        .{ .text = w("<https://example.test/session_auto_01> https://example.test/session_next_02"), .prefix = w("https://example.test/session_auto_01") },
+    }) |sequence| {
+        _ = SelectObject(dc, chatRichFont(.{ .code = sequence.code }, 0));
+        const next_x = chatTextWidth(dc, sequence.prefix) + space_w + 2;
+        const target = chatRichText(dc, sequence.text, area, 0, false, .{ .x = next_x, .y = 2 }, 17, null, false) orelse return error.TestUnexpectedResult;
+        const start = std.mem.indexOf(u16, sequence.text, url).?;
+        try std.testing.expectEqual(@as(usize, 17) + start, target.start);
+        try std.testing.expectEqual(@as(usize, 17) + start + url.len, target.end);
+        try std.testing.expectEqualSlices(u16, url, sequence.text[target.start - 17 .. target.end - 17]);
+    }
 }
 
 pub fn chatFindY(index: usize, position: ?usize) i32 {
@@ -1777,6 +1832,21 @@ pub fn chatComposerInsertAtCaret(text: []const u16) ?u32 {
     return @intCast(insert.caret);
 }
 
+pub fn chatInsertBrowserTabUrl() void {
+    if (app_state.active_shell >= app_state.shell_count or app_state.g_edit_hwnd != null or
+        app_state.g_search_active or app_state.g_inbox_active or app_state.g_shortcuts_active or
+        app_state.g_changelog_active or app_state.g_url_picker_active or app_state.g_all_sessions_active or app_state.g_snippet_create_active) return;
+    const url = @import("browser_pane.zig").browserTabUrlForChat() orelse {
+        showHeaderNoticeAscii("No browser tab URL available", 2000, false);
+        return;
+    };
+    var wide: [512]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&wide, url) catch return;
+    if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+    if (!app_state.g_chat_active) return;
+    if (chatComposerInsertAtCaret(wide[0..len])) |caret| requestShotFocus(app_state.active_shell, caret);
+}
+
 pub fn requestShotFocus(idx: usize, caret: ?u32) void {
     if (idx != app_state.active_shell) {
         debugLog("[paste-focus] skip: target tab is no longer active");
@@ -1846,6 +1916,8 @@ pub fn shotFocusTick() void {
     debugLog(std.fmt.bufPrint(&log, "[paste-focus] attach foreground={} target={}", .{ attached_fg, attached_target }) catch "[paste-focus] attach");
     keybd_event(VK_MENU, 0, 0, 0);
     const foreground_ok = if (chat) SetForegroundWindow(app_state.g_main_hwnd) else activateConsoleForeground(target);
+    keybd_event(0xFF, 0, 0, 0);
+    keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
     keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     _ = SetFocus(target);
     const landed = if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == (if (chat) app_state.g_main_hwnd else target) and GetFocus() == target;
@@ -2912,7 +2984,9 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const mem_dc = CreateCompatibleDC(hdc);
             if (mem_dc == null) return 0;
             defer _ = DeleteDC(mem_dc);
-            const bmp = CreateCompatibleBitmap(hdc, w, h);
+            const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = w, .height = -h } };
+            var bits: ?*anyopaque = null;
+            const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
             if (bmp == null) return 0;
             defer _ = DeleteObject(bmp);
             const old_bmp = SelectObject(mem_dc, bmp);
@@ -3651,4 +3725,19 @@ test "ISSUE-458 real window captures table thumb drags until release and cancels
     _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | 2000);
     try std.testing.expectEqual(@as(i32, 0), layout.scroll);
     try std.testing.expect(!app_state.g_chat_sel_dragging);
+}
+
+test "IGSH-436 production table layout reuses its cached build" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    defer app_state.g_chat_tables.clear(std.heap.page_allocator);
+    app_state.g_chat_tables.clear(std.heap.page_allocator);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| 1 | 2 |");
+    const before = app_state.g_chat_tables.builds;
+    const first = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 2), first.table.columns);
+    try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
+    const second = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(first, second);
+    try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
 }

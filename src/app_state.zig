@@ -259,6 +259,8 @@ pub const Shell = struct {
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
     locked: bool = false,
+    console_inflight: bool = false,
+    launch_failed: bool = false,
     disconnected: bool = false,
     chat_view_on: bool = false,
     chat_shell_override: bool = false,
@@ -272,6 +274,7 @@ pub const Shell = struct {
     wait_handle: HANDLE,
     wake_id: u32 = 0,
     shell_id: u32,
+    title_id: u32 = 0,
     chat_id: u64 = 0,
     favicon_hicon: ?HANDLE,
     favicon_path: [512]u8,
@@ -310,6 +313,9 @@ pub const Shell = struct {
     browser_pending_url: [BROWSER_PENDING_URL_CAP]u8 = std.mem.zeroes([BROWSER_PENDING_URL_CAP]u8),
     browser_pending_url_len: u32 = 0,
     browser_launch_tick: u64 = 0,
+    browser_first_launch_tick: u64 = 0,
+    browser_connection_id: u64 = 0,
+    browser_open_failed: bool = false,
     browser_suspended: bool = false,
     browser_native: bool = true,
     browser_split_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
@@ -489,7 +495,7 @@ pub const DEFAULT_DEV_THEME_JSON =
     \\    "subtitle_weight": 400,
     \\    "close_weight": 400,
     \\    "console_font_height": 18,
-    \\    "console_font_weight": 400
+    \\    "console_font_weight": 600
     \\  },
     \\  "colors": {
     \\    "sidebar_bg": "#03080E",
@@ -683,6 +689,7 @@ pub const HitTarget = union(enum) {
 };
 
 pub const ClosedShell = struct {
+    chat_id: u64 = 0,
     kind: ShellKind,
     name: [64]u16,
     name_len: u32,
@@ -776,7 +783,7 @@ pub const AgentSessionBreakdown = struct {
     }
 };
 
-pub const UPDATE_CARD_H: i32 = 54;
+pub const UPDATE_CARD_H: i32 = 76;
 pub const UPDATE_CHECK_MS: u32 = 30000;
 pub var g_update_watch_stop: HANDLE = null;
 pub var g_update_watch_thread: ?std.Thread = null;
@@ -958,6 +965,8 @@ pub var g_browser_adopt_fg_locked: bool = false;
 pub var g_browser_pending_activate_sid: u32 = 0;
 pub var g_browser_settle_ticks: i32 = 0;
 pub var g_console_geometry_settle_ticks: i32 = 0;
+pub var g_last_browser_tab_url: [512]u8 = @splat(0);
+pub var g_last_browser_tab_url_len: usize = 0;
 pub var g_browser_url_poll_pending: bool = false;
 pub var g_browser_url_poll_shell_id: u32 = 0;
 pub var g_browser_url_poll_window_id: i64 = 0;
@@ -971,6 +980,7 @@ pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bott
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
+pub var g_pane_ring_state: u8 = 0;
 pub var g_browser_edge_mask_rects: [BROWSER_EDGE_MASK_COUNT]RECT = [_]RECT{std.mem.zeroes(RECT)} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_shown: [BROWSER_EDGE_MASK_COUNT]bool = [_]bool{false} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_nextunread_count: u32 = 0;
@@ -1232,7 +1242,7 @@ pub const SEARCH_CHANGELOG_OFFSET: usize = 6241;
 pub const SEARCH_BROWSER_BACK_OFFSET: usize = 6242;
 pub const SEARCH_BROWSER_FORWARD_OFFSET: usize = 6243;
 pub const SEARCH_BROWSER_MODE_OFFSET: usize = 6244;
-pub const SEARCH_UPDATE_OFFSET: usize = 6275;
+pub const SEARCH_UPDATE_OFFSET: usize = 6385;
 pub const SEARCH_RESTART_OFFSET: usize = 6245;
 pub const SEARCH_ZSB_REBIND_OFFSET: usize = 6246;
 pub const SEARCH_SHELL_DIAG_OFFSET: usize = 6247;
@@ -1307,6 +1317,7 @@ pub const SEARCH_CHAT_SELECT_ALL_OFFSET: usize = 6364;
 pub const SEARCH_CHAT_AC_OFFSET: usize = 6356;
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
+pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
 pub const SEARCH_CHAT_QUEUE_CLEAR_OFFSET: usize = 6366;
 pub const SEARCH_CHAT_RETRY_UNSENT_OFFSET: usize = 6367;
 pub const SEARCH_CHAT_DISCARD_UNSENT_OFFSET: usize = 6368;
@@ -1367,7 +1378,8 @@ pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;
 pub const SEARCH_TABCTX_CHAT_ALLOW: usize = 7180;
 pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
-pub const SEARCH_TABCTX_START_SESSION: usize = 7183;
+pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
+pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -1388,6 +1400,8 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_chat_id: u64 = 0;
+pub var g_pending_background_workspace: ?u8 = null;
 
 pub const MAX_CUSTOM_CMDS: usize = 32;
 pub const CustomCmd = struct {
@@ -1567,6 +1581,8 @@ pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
 pub var g_dictation_transcript_len: usize = 0;
+pub var g_dictation_draft_owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+pub var g_dictation_draft_owner_len: usize = 0;
 pub var g_dictation_error: [160]u16 = std.mem.zeroes([160]u16);
 pub var g_dictation_error_len: usize = 0;
 pub var g_pending_tmux_cmd: [1024]u8 = std.mem.zeroes([1024]u8);
@@ -1631,14 +1647,36 @@ pub var g_app_closing: bool = false;
 
 pub const SPAWN_TITLE_CAP: usize = 1024;
 
+var next_console_title_id: u32 = 1;
+
 pub fn allocateShellId() ?u32 {
     return allocateShellIdFrom(&next_shell_id, shells[0..shell_count]);
 }
 
 fn allocateShellIdFrom(next: *u32, current: anytype) ?u32 {
+    while (next.* != 0) {
+        const id = next.*;
+        next.* +%= 1;
+        var used = false;
+        for (current) |shell| {
+            if (shell.shell_id == id) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) return id;
+    }
+    return null;
+}
+
+pub fn allocateConsoleTitleId() ?u32 {
+    return allocateConsoleTitleIdFrom(&next_console_title_id, shells[0..shell_count]);
+}
+
+fn allocateConsoleTitleIdFrom(next: *u32, current: anytype) ?u32 {
     var used: [SPAWN_TITLE_CAP]bool = @splat(false);
     for (current) |shell| {
-        if (shell.shell_id < SPAWN_TITLE_CAP) used[shell.shell_id] = true;
+        if (shell.title_id < SPAWN_TITLE_CAP) used[shell.title_id] = true;
     }
     var candidate: u32 = if (next.* == 0 or next.* >= SPAWN_TITLE_CAP) 1 else next.*;
     for (1..SPAWN_TITLE_CAP) |_| {
@@ -1652,24 +1690,38 @@ fn allocateShellIdFrom(next: *u32, current: anytype) ?u32 {
     return null;
 }
 
-test "ISSUE-511 shell ids wrap skip used ids and remain bounded over long sessions" {
+test "ISSUE-511 shell ids never recycle after close and stop at exhaustion" {
     const Used = struct { shell_id: u32 };
-    const current = [_]Used{ .{ .shell_id = 1 }, .{ .shell_id = 2 }, .{ .shell_id = 1023 } };
-    var next: u32 = 1023;
+    const current = [_]Used{ .{ .shell_id = 1 }, .{ .shell_id = 2 } };
+    var next: u32 = 1;
     try std.testing.expectEqual(@as(?u32, 3), allocateShellIdFrom(&next, &current));
+    const empty: []const Used = &.{};
+    for (4..SPAWN_TITLE_CAP * 4) |expected| {
+        try std.testing.expectEqual(@as(?u32, @intCast(expected)), allocateShellIdFrom(&next, empty));
+    }
+    next = std.math.maxInt(u32);
+    try std.testing.expectEqual(@as(?u32, std.math.maxInt(u32)), allocateShellIdFrom(&next, empty));
+    try std.testing.expectEqual(@as(?u32, null), allocateShellIdFrom(&next, empty));
+}
+
+test "ISSUE-511 console title ids wrap skip live titles and stay bounded" {
+    const Used = struct { title_id: u32 = 0 };
+    const current = [_]Used{ .{ .title_id = 1 }, .{ .title_id = 2 }, .{ .title_id = 1023 } };
+    var next: u32 = 1023;
+    try std.testing.expectEqual(@as(?u32, 3), allocateConsoleTitleIdFrom(&next, &current));
     for (0..SPAWN_TITLE_CAP * 4) |_| {
-        const id = allocateShellIdFrom(&next, &current).?;
+        const id = allocateConsoleTitleIdFrom(&next, &current).?;
         try std.testing.expect(id > 2 and id < SPAWN_TITLE_CAP - 1);
     }
     for ([_]u32{ 0, 1024, std.math.maxInt(u32) }) |invalid| {
         next = invalid;
-        try std.testing.expectEqual(@as(?u32, 3), allocateShellIdFrom(&next, &current));
+        try std.testing.expectEqual(@as(?u32, 3), allocateConsoleTitleIdFrom(&next, &current));
     }
-    var full: [SPAWN_TITLE_CAP - 1]Used = undefined;
-    for (&full, 1..) |*shell, id| shell.shell_id = @intCast(id);
-    try std.testing.expectEqual(@as(?u32, null), allocateShellIdFrom(&next, &full));
-    full[511].shell_id = 0;
-    try std.testing.expectEqual(@as(?u32, 512), allocateShellIdFrom(&next, &full));
+    var full: [SPAWN_TITLE_CAP - 1]Used = @splat(.{});
+    for (&full, 1..) |*shell, id| shell.title_id = @intCast(id);
+    try std.testing.expectEqual(@as(?u32, null), allocateConsoleTitleIdFrom(&next, &full));
+    full[511].title_id = 0;
+    try std.testing.expectEqual(@as(?u32, 512), allocateConsoleTitleIdFrom(&next, &full));
 }
 
 pub const SPAWN_TITLES = blk: {
@@ -2272,6 +2324,8 @@ pub const BrowserResolveJob = struct {
     shell_id: u32,
     nonce: [40]u8 = std.mem.zeroes([40]u8),
     nonce_len: usize = 0,
+    connection_id: u64 = 0,
+    window_id: i64 = 0,
 };
 
 pub const BrowserResolveInflight = struct {
@@ -2283,6 +2337,14 @@ pub const BrowserResolveInflight = struct {
 
 pub var g_browser_resolve_inflight: [16]BrowserResolveInflight = [_]BrowserResolveInflight{.{}} ** 16;
 pub const BROWSER_RESOLVE_STALE_MS: u64 = 10_000;
+
+pub const CancelledBrowserLaunch = struct {
+    nonce: [40]u8 = std.mem.zeroes([40]u8),
+    nonce_len: usize = 0,
+    deadline: u64 = 0,
+};
+
+pub var g_cancelled_browser_launches: [MAX_SHELLS]CancelledBrowserLaunch = [_]CancelledBrowserLaunch{.{}} ** MAX_SHELLS;
 
 pub const BrowserDockJob = struct {
     shell_id: u32,
@@ -2303,7 +2365,7 @@ pub var g_updating_browser_visibility: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 
-pub const BrowserPlaceholder = enum { none, opening, not_open };
+pub const BrowserPlaceholder = enum { none, opening, not_open, failed };
 
 pub var g_slot_placeholder_shell_id: u32 = 0;
 pub var g_slot_placeholder_since: u64 = 0;
@@ -2404,6 +2466,7 @@ pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
     generation: u64 = 0,
     history: chat_history.History = .{},
+    tables: chat_markdown.TableCache = .{},
     pending: bool = false,
     retired: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
@@ -2424,6 +2487,7 @@ pub const ChatHistoryEntry = struct {
     result: ?chat_history.History = null,
 };
 pub var g_chat_tables: chat_markdown.TableCache = .{};
+pub var g_chat_tables_shell_id: u32 = 0;
 pub var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
 pub var g_chat_history_generation: u64 = 0;
 pub var g_chat_cache_generation: u64 = 0;
@@ -2651,6 +2715,7 @@ pub const ChatOutboxEntry = struct {
     channel_sent: bool = false,
     channel_pending: bool = false,
     sent_tick_ms: i64 = 0,
+    expires_ms: i64 = 0,
     channel_sent_ms: i64 = 0,
     channel_retries: u8 = 0,
     channel_history_revision: u64 = std.math.maxInt(u64),
@@ -2678,7 +2743,7 @@ pub var g_chat_echo_layout_ids: [CHAT_OUTBOX_MAX_PER_KEY]u64 = @splat(0);
 pub var g_chat_echo_layout_count: usize = 0;
 pub var g_chat_scroll_bottom_pending: bool = false;
 pub var g_chat_outbox_timer_on: bool = false;
-pub var g_ssh_reconnect_timer_on: bool = false;
+pub var g_ssh_reconnect_timer_ms: u32 = 0;
 
 pub var g_chat_outbox_revision: u64 = 0;
 
@@ -3091,6 +3156,7 @@ pub var g_favorite_chord_held: bool = false;
 pub var g_browser_focus_chord_held: bool = false;
 pub var g_palette_chord_held: bool = false;
 pub var g_screenshot_chord_held: bool = false;
+pub var g_tab_url_chord_held: bool = false;
 pub var g_dictation_toggle_chord_held: bool = false;
 pub var g_browser_toggle_last_handled_event_time: u32 = 0;
 pub const BROWSER_TOGGLE_DEBOUNCE_MS: u32 = 1500;
@@ -3211,6 +3277,15 @@ pub const ZsbWorkerCtx = struct {
     req: [ZSB_WIRE_CAP]u8,
     req_len: usize,
 };
+
+pub var g_zsb_workspace_mutex: SpinMutex = .{};
+pub var g_zsb_workspace_pending = false;
+pub var g_zsb_workspace_done = false;
+pub var g_zsb_workspace_args: [11][256]u8 = undefined;
+pub var g_zsb_workspace_arg_lens: [11]usize = undefined;
+pub var g_zsb_workspace_argc: usize = 0;
+pub var g_zsb_workspace_response: [256 * 1024]u8 = undefined;
+pub var g_zsb_workspace_response_len: usize = 0;
 
 pub var g_zsb_who_mutex: SpinMutex = .{};
 pub var g_zsb_who_pending = false;

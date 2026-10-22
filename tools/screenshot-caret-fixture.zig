@@ -108,7 +108,8 @@ fn isCtrlDown() bool {
 fn GetAsyncKeyState(key: i32) i16 {
     return if ((key == VK_MENU and alt) or (key == 0x10 and shift)) @bitCast(@as(u16, 0x8000)) else 0;
 }
-fn keybd_event(_: u8, _: u8, flags: u32, _: usize) void {
+fn keybd_event(key: u8, _: u8, flags: u32, _: usize) void {
+    if (key != VK_MENU) return;
     if (flags == 0) alt_down += 1 else alt_up += 1;
 }
 fn SetForegroundWindow(hwnd: HANDLE) u32 {

@@ -462,6 +462,10 @@ pub fn appendJsonEscaped(out: []u8, pos: *usize, value: []const u8) void {
 }
 
 fn lockWorkspaceRegistry() HANDLE {
+    return lockWorkspaceRegistryWithTimeout(if (app_state.g_main_hwnd != null and @import("launch_cache.zig").pending and !app_state.g_account_locked) 0 else 5000);
+}
+
+fn lockWorkspaceRegistryWithTimeout(timeout: DWORD) HANDLE {
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return null;
     var name_buf: [96]u8 = undefined;
@@ -469,7 +473,7 @@ fn lockWorkspaceRegistry() HANDLE {
     var wide: [96]u16 = std.mem.zeroes([96]u16);
     for (name, 0..) |c, i| wide[i] = c;
     const mutex = CreateMutexW(null, 0, @ptrCast(&wide)) orelse return null;
-    const result = WaitForSingleObject(mutex, 5000);
+    const result = WaitForSingleObject(mutex, timeout);
     if (result != 0 and result != 0x80) {
         _ = CloseHandle(mutex);
         return null;
@@ -989,8 +993,39 @@ pub fn removeMyHostedEntriesAndSave() void {
     if (removed) writeWorkspaceRegistryFile();
 }
 
-pub fn reconcileWorkspaceRegistry(force_scan: bool) void {
-    const registry_lock = lockWorkspaceRegistry() orelse return;
+var startup_registry_retries: u32 = 0;
+var startup_registry_waiting = false;
+var startup_registry_ready = std.atomic.Value(bool).init(false);
+
+fn startupRegistryWaitWorker() void {
+    if (lockWorkspaceRegistryWithTimeout(5000)) |mutex| unlockWorkspaceRegistry(mutex);
+    startup_registry_ready.store(true, .release);
+}
+
+pub fn reconcileStartupWorkspaceRegistry(force_scan: bool) bool {
+    if (startup_registry_waiting) {
+        if (!startup_registry_ready.load(.acquire)) return false;
+        startup_registry_waiting = false;
+        startup_registry_retries = 0;
+        _ = reconcileWorkspaceRegistry(force_scan);
+        return true;
+    }
+    if (reconcileWorkspaceRegistry(force_scan)) {
+        startup_registry_retries = 0;
+        return true;
+    }
+    startup_registry_retries += 1;
+    if (startup_registry_retries < 100) return false;
+    startup_registry_retries = 0;
+    startup_registry_ready.store(false, .release);
+    const thread = std.Thread.spawn(.{}, startupRegistryWaitWorker, .{}) catch return true;
+    startup_registry_waiting = true;
+    thread.detach();
+    return false;
+}
+
+pub fn reconcileWorkspaceRegistry(force_scan: bool) bool {
+    const registry_lock = lockWorkspaceRegistry() orelse return false;
     defer unlockWorkspaceRegistry(registry_lock);
     mergeWorkspaceRegistryFromDisk();
     scanLiveWorkspaceWindows(force_scan);
@@ -1033,6 +1068,7 @@ pub fn reconcileWorkspaceRegistry(force_scan: bool) void {
     syncCurrentWorkspaceToRegistry();
     upsertMySlotEntries();
     writeWorkspaceRegistryFile();
+    return true;
 }
 
 fn inferWorkspaceNameFromSessionFile(id: []const u8, out: *[64]u8) u32 {
@@ -2170,15 +2206,17 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
 
 pub fn reopenLastClosedShell() void {
     if (app_state.g_closed_count == 0) return;
-    app_state.g_closed_count -= 1;
-    const entry = app_state.g_closed_history[app_state.g_closed_count];
+    const entry = app_state.g_closed_history[app_state.g_closed_count - 1];
 
     const ts: ?[]const u8 = if (entry.tmux_session_len > 0) entry.tmux_session[0..entry.tmux_session_len] else null;
     const cwd: ?[]const u8 = if (entry.cached_cwd_len > 0) entry.cached_cwd[0..entry.cached_cwd_len] else null;
 
     app_state.g_pending_tmux_host = entry.tmux_host;
     defer app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_chat_id = entry.chat_id;
+    defer app_state.g_pending_chat_id = 0;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
+        app_state.g_closed_count -= 1;
         if ((entry.was_manual or entry.was_sem) and entry.name_len > 0) {
             const new_idx = app_state.shell_count - 1;
             @memcpy(app_state.shells[new_idx].name[0..entry.name_len], entry.name[0..entry.name_len]);
@@ -4138,5 +4176,5 @@ fn collapseOtherWindowsIntoThis() void {
         Sleep(150);
         if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("collapse: absorb failed for ", id);
     }
-    reconcileWorkspaceRegistry(true);
+    _ = reconcileWorkspaceRegistry(true);
 }

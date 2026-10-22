@@ -18,7 +18,7 @@ function execute(t, code, modules = []) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   copyZig(modules, dir);
   fs.writeFileSync(path.join(dir, 'test.zig'), code);
-  const result = spawnSync('zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
+  const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -130,7 +130,7 @@ test "legacy uniqueness" {
 `);
 });
 
-test('legacy outbox migration survives rename and purges ambiguous same-named keys', (t) => {
+test('legacy outbox migration survives rename and retains ambiguous keys without delivering them', (t) => {
   execute(t, keys + `
 const Entry = struct { key: [CHAT_OUTBOX_KEY_CAP]u8 = undefined, key_len: u32 = 0 };
 var g_chat_outbox: std.ArrayList(Entry) = .empty;
@@ -152,8 +152,9 @@ test "migrate only unique legacy outbox" {
     shells[0].name_len = 0;
     shell_count = 2;
     try g_chat_outbox.append(std.testing.allocator, entry);
-    try std.testing.expect(chatOutboxPurgeOrphans());
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(!chatOutboxPurgeOrphans());
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(?u32, null), chatOutboxShellForKey("cmd:"));
 }
 `);
 });
@@ -161,6 +162,9 @@ test "migrate only unique legacy outbox" {
 test('legacy drafts migrate only to a unique tab and preserve new-key drafts', (t) => {
   execute(t, keys + `
 const HANDLE = ?*anyopaque;
+const draft_model = @import("chat_drafts.zig");
+var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
+var chat_draft_loading = false;
 var g_chat_composer_hwnd: HANDLE = @ptrFromInt(1);
 var g_main_hwnd: HANDLE = @ptrFromInt(2);
 var active_shell: u32 = 0;
@@ -185,6 +189,7 @@ var new_draft = false;
 var unreadable = false;
 var malformed = false;
 fn chatDraftFlush() void {}
+fn chatDraftWriteFile(_: []const u8, _: []const u8) bool { return true; }
 fn chatComposerAutoGrow() void {}
 fn SetWindowTextW(_: HANDLE, text: [*:0]const u16) i32 {
     const s = std.mem.span(text);
@@ -212,34 +217,38 @@ fn win32WidePath(out: []u16, p: []const u8) ?[:0]u16 {
 }
 fn GetFileAttributesW(_: [*:0]const u16) u32 { return if (unreadable) 0 else 0xFFFF_FFFF; }
 fn DeleteFileW(_: [*:0]const u16) i32 { deleted += 1; return 1; }
-` + body('chatDraftBindToActive') + `
+` + body('chatDraftKeyForShell') + '\n' + body('chatDraftLoad') + '\n' + body('chatDraftBindToActive') + `
 test "legacy draft migration" {
     chatDraftBindToActive();
     try std.testing.expectEqual(@as(usize, 0), composer_len);
     try std.testing.expectEqual(@as(usize, 0), deleted);
     shell_count = 1;
     g_chat_draft_owner_len = 0;
+    chat_drafts.deinit(); chat_drafts = draft_model.Store.init(std.heap.page_allocator);
     unreadable = true;
     chatDraftBindToActive();
     try std.testing.expectEqual(@as(usize, 0), composer_len);
     try std.testing.expectEqual(@as(usize, 0), deleted);
     unreadable = false;
     g_chat_draft_owner_len = 0;
+    chat_drafts.deinit(); chat_drafts = draft_model.Store.init(std.heap.page_allocator);
     malformed = true;
     chatDraftBindToActive();
     try std.testing.expectEqual(@as(usize, 0), deleted);
     malformed = false;
     g_chat_draft_owner_len = 0;
+    chat_drafts.deinit(); chat_drafts = draft_model.Store.init(std.heap.page_allocator);
     chatDraftBindToActive();
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("legacy"), composer[0..composer_len]);
     try std.testing.expectEqual(@as(usize, 1), deleted);
-    try std.testing.expect(g_chat_draft_dirty);
+    try std.testing.expect(!chat_drafts.entries.get(g_chat_draft_owner[0..g_chat_draft_owner_len]).?.dirty);
     new_draft = true;
     g_chat_draft_owner_len = 0;
+    chat_drafts.deinit(); chat_drafts = draft_model.Store.init(std.heap.page_allocator);
     chatDraftBindToActive();
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new"), composer[0..composer_len]);
     try std.testing.expectEqual(@as(usize, 1), deleted);
     try std.testing.expect(!g_chat_draft_dirty);
 }
-`);
+`, ['chat_drafts.zig']);
 });

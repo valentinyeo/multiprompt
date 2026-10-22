@@ -29,6 +29,14 @@ json_error() {
 
 print_help() {
   if [ -n "${1:-}" ]; then
+    local deadline=15
+    case "$1" in
+      status|version) deadline=5 ;;
+      doctor) deadline=20 ;;
+      text|get-text|snapshot|cdp|eval|script) deadline=30 ;;
+      screenshot|shoturl) deadline=60 ;;
+      selftest) deadline=180 ;;
+    esac
     case "$1" in
       text|get-text|snapshot|links)
         local unit=characters default_limit=2000
@@ -37,39 +45,92 @@ print_help() {
         printf '  --limit N  Maximum %s (default: %s)\n' "$unit" "$default_limit"
         printf '  --full     No practical limit\n  --tab ID   Read a tab in this session by ID, title, or URL match\n'
         printf '  Without --tab, read the target:true tab from zsb tabs (which may not be active).\n'
-        return
         ;;
-      navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)'; return ;;
-      selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)'; return ;;
-      pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)'; return ;;
-      extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)'; return ;;
-      tabs) echo 'usage: zsb tabs [--close ID]'; return ;;
-      url) echo 'usage: zsb url [--tab ID]'; return ;;
-      find) echo 'usage: zsb find <text> [--tab ID]'; return ;;
-      click) echo 'usage: zsb click <selector> [--tab ID]'; return ;;
-      screenshot) echo 'usage: zsb screenshot [-o FILE | --output FILE] [--tab ID]'; return ;;
-      console) echo 'usage: zsb console [-n N | --limit N] [--clear]'; return ;;
-      routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]'; return ;;
-      resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]'; return ;;
-      type) echo 'usage: zsb type [--tab ID] [--keys] <text> | <selector> <text>'; return ;;
+      navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)' ;;
+      workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)' ;;
+      session-open) echo 'usage: zsb session-open --workspace <name> --group <name> --host <host name> --tmux <session> --name <tab title>'
+        echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
+        echo '  --tmux accepts 1-63 letters, digits, hyphens, underscores or dots.'
+        echo '  --name accepts 1-63 UTF-16 units, without control characters.'
+        echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
+        ;;
+      selftest) echo 'usage: zsb selftest (JSON summary plus human result; nonzero on failure)' ;;
+      pane-info) echo 'usage: zsb pane-info (hosting multiprompt tab, active, visible, windowId)' ;;
+      reset) echo 'usage: zsb reset (reconnect bridge and clear stuck CDP sessions; keeps the pane open)' ;;
+      extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)' ;;
+      tabs) echo 'usage: zsb tabs [--close ID]' ;;
+      url) echo 'usage: zsb url [--tab ID]' ;;
+      frames) echo 'usage: zsb frames [--tab ID] (read-only frameId, parentFrameId and URL)' ;;
+      find) echo 'usage: zsb find <text> [--tab ID]' ;;
+      click) echo 'usage: zsb click <selector> [--tab ID] (reports via=cdp or frame-dom-fallback, and trusted)' ;;
+      screenshot) echo 'usage: zsb screenshot [-o FILE | --output FILE] [--tab ID]' ;;
+      console) echo 'usage: zsb console [-n N | --limit N] [--clear]' ;;
+      routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]' ;;
+      resolve-window) echo 'usage: zsb resolve-window [--match TEXT] [--focused]' ;;
+      cdp)
+        cat <<'CDP_HELP'
+usage: zsb cdp <method> [params-json]
+       zsb cdp --script <file.json|-> [--out FILE]
+Send a Chrome DevTools Protocol command. Params must be a JSON object.
+Scripts run ordered steps in ONE attached session on the same target tab.
+Steps: {"method":"Profiler.enable","params":{}}, {"waitMs":500},
+       {"method":"Page.reload","waitEvent":"Page.loadEventFired","timeoutMs":15000}.
+Use - for stdin; print a JSON result array or write it to local --out FILE.
+Errors stop at failedStep (1-based) and include completed results; no replay.
+Step timeout defaults to 15000 ms; total timeout budget is at most 300000 ms.
+Script total reply deadline: 360s; ZSB_TIMEOUT overrides this default.
+
+Examples:
+  zsb cdp Page.enable
+  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+  zsb cdp --script profile.json --out results.json
+CDP_HELP
+        ;;
+      open) echo 'usage: zsb open [url]' ;;
+      sidebar|status|doctor|back|forward|reload|active-tab|shoturl|native|version|browser-drop-gesture)
+        printf 'usage: zsb %s\n' "$1" ;;
+      activate) echo 'usage: zsb activate <tabId> [--target-only]' ;;
+      close-tab) echo 'usage: zsb close-tab <id|match>' ;;
+      tab) echo 'usage: zsb tab close <id|match>' ;;
+      insert) echo 'usage: zsb insert <text>' ;;
+      eval|script) printf 'usage: zsb %s [--frame ID] <js> [--tab ID]\n' "$1" ;;
+      key) echo 'usage: zsb key <combo>' ;;
+      cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]' ;;
+      profile-clone) echo 'usage: zsb profile-clone <src> <dst>' ;;
+      create-pane-window) echo 'usage: zsb create-pane-window <url> [--app] [--bounds L T W H]' ;;
+      theme) echo 'usage: zsb theme <name>' ;;
+      protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]' ;;
+      manifest) echo 'usage: zsb manifest <exe> <extension-id>' ;;
+      type) printf '%s\n' 'usage: zsb type [--tab ID] [--keys] [--raw-enter] <text> | <selector> <text>' 'Newlines become line breaks; --raw-enter presses Enter at each newline (submits chat composers).' 'Options may appear in any order, each at most once.' ;;
+      *) print_help ;;
     esac
+    printf 'Total reply deadline: %ss; override with ZSB_TIMEOUT (finite seconds > 0, at most 86400).\n' "$deadline"
+    return
   fi
   cat <<'EOF'
 usage: zsb <command> [args] (also: multiprompt-browser)
 
 Commands and flags:
+  workspace-list                    List workspaces, groups, tabs and host names as JSON
+  session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE
+                                    Attach a remote tmux tab in the background, idempotently
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
+  reset                             Reconnect bridge and clear stuck CDP sessions (keeps pane open)
   extension-reload                  Reload unpacked extension code (no app restart)
   active-tab | activate <id> | close-tab <id> | tab close <id>
   url [--tab ID]                    Read a tab URL
+  frames [--tab ID]                 List frameId, parentFrameId and URL (read-only)
+  eval --frame ID <js> [--tab ID]    Evaluate JavaScript in a chosen frame's MAIN world
   text [--limit N | --full] [--tab ID]      Read visible text (default: 2000 chars)
   snapshot [--limit N | --full] [--tab ID]  Read page state (default: 2000 chars)
   links [--limit N | --full] [--tab ID]     Read links (default: 50 links)
   find <text> [--tab ID]            Find text in the target tab
   click <selector> [--tab ID]       Click an element
-  type [--keys] <text> | <selector> <text>  Type into the page
+  type [--tab ID] [--keys] [--raw-enter] <text> | <selector> <text>  Type into the page; newlines become line breaks
+                                    --raw-enter presses Enter at each newline (submits chat composers)
+                                    Options may appear in any order, each at most once.
   key <combo>                       Send a key combination
   screenshot [-o FILE | --output FILE] [--tab ID]
   console [-n N | --limit N] [--clear]
@@ -80,9 +141,15 @@ Commands and flags:
   status | doctor | back | forward | reload | shoturl
   cursor [on | off | move X Y | click X Y]
   insert <text> | eval <code> | cdp <method> [params-json]
+  cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
 
 Unqualified reads and actions use the target:true tab in zsb tabs, not necessarily active:true.
-Use zsb <command> --help for command flags (literal-text commands pass --help as text).
+Use zsb <command> --help or -h for local command help without contacting the browser.
+Reply deadlines (total seconds from send, not idle time):
+  Default 15; status/version 5; doctor 20; text/get-text/snapshot/cdp/eval/script 30;
+  screenshot/shoturl 60; selftest 180 total across its requests; cdp --script 360.
+  ZSB_TIMEOUT overrides these defaults: finite seconds greater than 0, at most 86400.
+  Expiry returns nonzero with JSON error reply_timeout, elapsed time, deadline and a recovery hint.
 Remote recovery: reconnect SSH/tmux, open or rebind this session's pane, then run zsb status.
 EOF
 }
@@ -98,19 +165,22 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "${1:-}" in
-  type|insert|find|eval|key|cdp) ;;
-  *)
-    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
-      print_help "$1"
-      exit 0
-    fi
-    ;;
-esac
+if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+  print_help "$1"
+  exit 0
+fi
+if { [ "$1" = tab ] && [ "${2:-}" = close ]; } || { [ "$1" = tabs ] && [ "${2:-}" = --close ]; }; then
+  if [ "${3:-}" = "--help" ] || [ "${3:-}" = "-h" ]; then
+    print_help "$1"
+    exit 0
+  fi
+fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ -n "${TMUX:-}" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ]; then
+  sess="workspace"
+elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
 fi
 if [ -z "$sess" ]; then
@@ -128,6 +198,7 @@ import base64
 import datetime
 import html
 import json
+import math
 import os
 import subprocess
 import struct
@@ -137,6 +208,15 @@ import urllib.parse
 import uuid
 
 session, port, wrapper = sys.argv[1:]
+try:
+    timeout = float(os.environ.get("ZSB_TIMEOUT", "180"))
+    if not math.isfinite(timeout) or not 0 < timeout <= 86400:
+        raise ValueError()
+except ValueError:
+    print(json.dumps({"ok": False, "error": "bad_args", "message": "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400", "session": session, "port": int(port)}))
+    sys.exit(1)
+started = time.monotonic()
+deadline = started + timeout
 stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 title = f"zsb selftest {session} {stamp}"
 marker = "zsb-selftest-" + uuid.uuid4().hex
@@ -154,9 +234,18 @@ window_id = None
 
 
 def request(*args):
-    # Use the same validated transport as ordinary CLI commands.
-    run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
-                         env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port})
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError()
+    try:
+        run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
+                             timeout=remaining,
+                             env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port,
+                                  "ZSB_TIMEOUT": str(remaining)})
+    except subprocess.TimeoutExpired:
+        raise TimeoutError() from None
+    if time.monotonic() >= deadline:
+        raise TimeoutError()
     if run.returncode:
         raise ValueError(run.stderr.strip().removeprefix("multiprompt-browser: "))
     raw = run.stdout
@@ -208,6 +297,8 @@ def step(name, action):
     try:
         details = action() or {}
         summary["steps"][name] = {"pass": True, **details}
+    except TimeoutError:
+        raise
     except Exception as exc:
         summary["steps"][name] = {"pass": False, "error": str(exc)}
 
@@ -226,7 +317,7 @@ def open_page():
                 break
         except ValueError:
             pass
-        time.sleep(0.5)
+        time.sleep(min(0.5, max(0, deadline - time.monotonic())))
     tab = find_test_tab()
     if tab.get("title") != title or tab.get("target") is False:
         raise ValueError("selftest page is not this session's target browser tab")
@@ -297,16 +388,27 @@ def close_page():
 
 
 try:
-    step("open", open_page)
-    for name, action in [("text", read_page), ("type", type_input),
-                         ("click", click_button), ("screenshot", screenshot)]:
-        if tab_id is None:
-            summary["steps"][name] = {"pass": False, "skipped": "open did not identify a test tab"}
-        else:
-            step(name, action)
-    step("hosting", hosting)
-finally:
-    step("close", close_page)
+    try:
+        step("open", open_page)
+        for name, action in [("text", read_page), ("type", type_input),
+                             ("click", click_button), ("screenshot", screenshot)]:
+            if tab_id is None:
+                summary["steps"][name] = {"pass": False, "skipped": "open did not identify a test tab"}
+            else:
+                step(name, action)
+        step("hosting", hosting)
+    finally:
+        if time.monotonic() < deadline:
+            step("close", close_page)
+    if time.monotonic() >= deadline:
+        raise TimeoutError()
+except TimeoutError:
+    hint = "Reconnect this SSH session and reopen/rebind its browser pane; selftest cleanup may be incomplete."
+    message = f"multiprompt selftest reply timeout after {time.monotonic() - started:.3f}s (deadline {timeout:g}s). {hint}"
+    print("multiprompt-browser: " + message, file=sys.stderr)
+    print(json.dumps({"ok": False, "error": "reply_timeout", "message": message,
+                      "session": session, "port": int(port), "hint": hint}))
+    sys.exit(1)
 summary["ok"] = all(result["pass"] for result in summary["steps"].values())
 print(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))
 state = "visible" if summary["visible"] else "not visible"
@@ -322,37 +424,111 @@ PY_SELFTEST
 fi
 
 send_zsb() {
-  python3 - "$sess" "$port" "$@" <<'PY_REQUEST'
+  python3 - "$sess" "$port" "$@" 3<&0 <<'PY_REQUEST'
 import base64
 import json
+import math
+import os
+import pathlib
 import socket
 import sys
+import time
 
 session, port, *args = sys.argv[1:]
 fix = "Restart/reconnect multiprompt and this SSH session; if it persists, reload the multiprompt extension in the browser (chrome://extensions)."
 
 
-def fail(code, message, reply=None):
+def fail(code, message, reply=None, hint=None):
     message = " ".join(str(message).split())
     print("multiprompt-browser: " + message, file=sys.stderr)
     print(json.dumps(reply if reply is not None else
                      {"ok": False, "error": code, "message": message,
-                      "session": session, "port": int(port)}))
+                      "session": session, "port": int(port), **({"hint": hint} if hint else {})}))
     sys.exit(1)
 
 
-payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
+script_mode = args[0] == "cdp" and len(args) > 1 and args[1] == "--script"
+default_timeout = {"status": 5, "version": 5, "doctor": 20,
+                   "text": 30, "get-text": 30, "snapshot": 30, "cdp": 30, "eval": 30, "script": 30,
+                   "screenshot": 60, "shoturl": 60}.get(args[0], 15)
+if script_mode:
+    default_timeout = 360
 try:
-    sock = socket.create_connection(("localhost", int(port)), timeout=5)
+    timeout = float(os.environ.get("ZSB_TIMEOUT", default_timeout))
+    if not math.isfinite(timeout) or not 0 < timeout <= 86400:
+        raise ValueError()
+except ValueError:
+    fail("bad_args", "ZSB_TIMEOUT must be finite seconds greater than 0 and at most 86400")
+
+
+if args[0] == "workspace-list":
+    if len(args) != 1:
+        fail("bad_args", "usage: zsb workspace-list")
+elif args[0] == "session-open":
+    flags = {"--workspace", "--group", "--host", "--tmux", "--name"}
+    values = {}
+    if len(args) != 11:
+        fail("bad_args", "session-open requires --workspace, --group, --host, --tmux and --name")
+    for flag, value in zip(args[1::2], args[2::2]):
+        if flag not in flags or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+            fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
+        values[flag] = value
+    tmux = values["--tmux"]
+    if len(tmux) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in tmux):
+        fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+    if len(values["--name"].encode("utf-16-le")) // 2 > 63:
+        fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
+    if any(len(value.encode()) > 256 for value in values.values()):
+        fail("bad_args", "session-open argument too long")
+
+output_path = None
+if script_mode:
+    if len(args) not in {3, 5} or (len(args) == 5 and (args[3] != "--out" or not args[4])):
+        fail("bad_args", "usage: zsb cdp --script <file.json|-> [--out FILE]")
+    if len(args) == 5:
+        output_path = args[4]
+    try:
+        with os.fdopen(3, "r", encoding="utf-8") if args[2] == "-" else open(args[2], encoding="utf-8") as source:
+            script = source.read(1024 * 1024 + 1)
+        if len(script.encode()) > 1024 * 1024:
+            fail("bad_args", "CDP script exceeds 1 MiB")
+        steps = json.loads(script)
+        if not isinstance(steps, list):
+            fail("bad_args", "CDP script must be a JSON array")
+        script = json.dumps(steps, separators=(",", ":"))
+    except (OSError, ValueError) as exc:
+        fail("bad_args", f"cannot read CDP script: {exc}")
+    args = ["cdp", "--script-json", script]
+
+if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
+    try:
+        timeout = float(os.environ["ZSB_TIMEOUT_SECONDS"])
+        if not 0 < timeout <= 300:
+            raise ValueError()
+    except ValueError:
+        fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
+started = time.monotonic()
+deadline = started + timeout
+payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
+if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
+    fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
+try:
+    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
-        sock.settimeout(90)
+        sock.settimeout(max(0.001, deadline - time.monotonic()))
         sock.sendall(f"ZSB:{session}:{payload}\n".encode())
         chunks, size = [], 0
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout()
+            sock.settimeout(remaining)
             chunk = sock.recv(65536)
+            if time.monotonic() >= deadline:
+                raise socket.timeout()
             if not chunk:
                 break
             size += len(chunk)
@@ -360,7 +536,7 @@ try:
                 fail("reply_too_large", "multiprompt reply exceeded 16 MiB. Retry with a smaller output limit.")
             chunks.append(chunk)
 except socket.timeout:
-    fail("reply_timeout", "multiprompt app/bridge did not answer before the timeout. " + fix)
+    fail("reply_timeout", f"multiprompt app/bridge deadline exceeded; run zsb reset to reconnect without reopening the pane. Reply timeout after {time.monotonic() - started:.3f}s (deadline {timeout:g}s). " + fix, hint=fix)
 except OSError:
     fail("connection_closed", "multiprompt connection closed before the reply completed (app stopped or bridge changed). " + fix)
 raw = b"".join(chunks).decode(errors="replace")
@@ -377,6 +553,15 @@ except ValueError:
     if first.startswith(("multiprompt-browser [--window", "usage:")):
         fail("bad_args", f"the bridge rejected the arguments of '{args[0]}' and printed its usage ({first}). Check the command and its flags; the app and pane are fine.")
     fail("invalid_reply", f"multiprompt app/bridge returned an invalid reply (possibly interrupted by an update). Reply started with: {first}. " + fix)
+if script_mode and isinstance(reply, list):
+    if output_path:
+        try:
+            pathlib.Path(output_path).write_text(raw.rstrip() + "\n", encoding="utf-8")
+        except OSError as exc:
+            fail("write_failed", f"cannot write CDP results: {exc}")
+    else:
+        print(raw.rstrip())
+    sys.exit(0)
 if not isinstance(reply, dict) or not isinstance(reply.get("ok"), bool):
     fail("invalid_reply", "multiprompt app/bridge returned an invalid reply (possibly incompatible versions). " + fix)
 loaded, bridge = reply.get("extensionVersion"), reply.get("bridgeVersion")
@@ -388,7 +573,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane."
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:
@@ -477,6 +662,7 @@ except Exception as exc:
     print(f"multiprompt-browser: screenshot PNG base64 decode failed: {exc}", file=sys.stderr)
     sys.exit(1)
 
+pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 pathlib.Path(out_path).write_bytes(png)
 report = {"ok": True, "path": out_path, "bytes": len(png)}
 via = result.get("via") or ("Page.captureScreenshot" if result.get("data") else "")

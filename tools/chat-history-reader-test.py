@@ -803,6 +803,25 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(reader.clean_command_markup('one<pasted_content id="x">two</pasted_content id="x">three'), 'one two three')
         self.assertEqual(reader.clean_command_markup('before\n<pasted_content id="x">\nplease check the build\n</pasted_content id="x">\nafter'), 'before\nplease check the build\nafter')
 
+    def test_igsh437_reminders_are_hidden_without_losing_conversation_text(self):
+        reminder = '<system-reminder>\nSynthetic background task completed.\n</system-reminder>'
+        for role in ('user', 'assistant'):
+            for content in (reminder, 'Before\n\n' + reminder,
+                            reminder + '\nAfter', 'Before\n' + reminder + '\nAfter'):
+                with self.subTest(role=role, content=content):
+                    event = dict(type=role, message=dict(role=role, content=[dict(type='text', text=content)]))
+                    rows = reader.conversation_rows(event, 'claude')
+                    expected = content.replace(reminder + '\n', '').replace(reminder, '')
+                    self.assertEqual([row['text'] for row in rows], [expected] if expected.strip() else [])
+
+    def test_igsh437_inline_mentions_incomplete_tags_and_task_handling_are_preserved(self):
+        for content in ('Explain <system-reminder>example</system-reminder> literally.',
+                        '<system-reminder>incomplete example'):
+            event = dict(type='user', message=dict(role='user', content=content))
+            self.assertEqual(reader.conversation_event(event, 'claude')['text'], content)
+        event = dict(type='user', message=dict(role='user', content='<task-notification>synthetic task</task-notification>'))
+        self.assertIsNone(reader.conversation_event(event, 'claude'))
+
     def test_igsh349_queued_command_uses_latest_exact_queue_stamp(self):
         text = 'please check the build'
         self.query['settlement'] = True
@@ -1571,6 +1590,61 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn('stdin history', p.stdout)
         self.assertTrue(p.stdout.endswith('@@MP_END@@\n'))
+
+
+class IGSH412ResumedSessionTest(unittest.TestCase):
+    def test_igsh412_resumed_process_shapes(self):
+        resumed = '11111111-1111-4111-8111-111111111111'
+        duplicated = '22222222-2222-4222-8222-222222222222'
+        shapes = [
+            ('projects-4', resumed, {10: (1, ['bash']), 11: (10, [
+                'claude', '--resume', resumed, '--dangerously-skip-permissions', '--effort', 'medium'])}),
+            ('term-1bc197', duplicated, {10: (1, [
+                'claude', '--dangerously-skip-permissions', '--resume', duplicated,
+                '--dangerously-skip-permissions', '--effort', 'medium'])}),
+            ('grandchild', resumed, {10: (1, ['bash']), 11: (10, ['bash']), 12: (11, [
+                'claude', '--resume', resumed, '--dangerously-skip-permissions'])}),
+        ]
+        for session, sid, table in shapes:
+            for scenario in ('stale-map', 'no-map', 'new-map', 'new-open', 'missing-resume', 'no-map-missing'):
+                with self.subTest(session=session, scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                    home = Path(directory)
+                    folder = home / '.claude/projects/-work-original'
+                    folder.mkdir(parents=True)
+                    resumed_path = folder / (sid + '.jsonl')
+                    resumed_path.write_text('{}\n')
+                    neighbour = home / '.claude/projects/-work-current/neighbour.jsonl'
+                    neighbour.parent.mkdir(parents=True)
+                    neighbour.write_text('{}\n')
+                    pid = reader.agent_pid_for_panes([10], table, 'claude')
+                    metadata = home / '.claude/sessions' / f'{pid}.json'
+                    metadata.parent.mkdir(parents=True)
+                    if scenario not in ('no-map', 'no-map-missing'):
+                        metadata.write_text(json.dumps(dict(sessionId='fresh', cwd='/work/current')))
+                    expected = (sid, resumed_path)
+                    opened = None
+                    if scenario in ('new-map', 'new-open'):
+                        new_path = folder / 'fresh.jsonl'
+                        new_path.write_text('{}\n')
+                        expected = ('fresh', new_path)
+                        if scenario == 'new-open':
+                            opened = new_path
+                    if scenario in ('missing-resume', 'no-map-missing'):
+                        resumed_path.unlink()
+                        expected = None
+                    original_read_bytes = Path.read_bytes
+                    def proc_cmdline(path):
+                        if str(path) == f'/proc/{pid}/cmdline':
+                            return ('\0'.join(table[pid][1]) + '\0').encode()
+                        return original_read_bytes(path)
+                    with patch.object(reader, 'HOME', home), patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': ''}), \
+                            patch.object(reader, 'process_table', return_value=table), \
+                            patch.object(reader, 'read_process_cwd', return_value='/work/current'), \
+                            patch.object(reader, 'open_claude_transcript', return_value=opened), \
+                            patch.object(Path, 'read_bytes', proc_cmdline), \
+                            patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')):
+                        self.assertEqual(reader.resolve_tmux_agent('claude', session, pid), expected)
+                        self.assertEqual(reader.resolve_tmux_agent('claude', session), expected)
 
 
 if __name__ == '__main__':

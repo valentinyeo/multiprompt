@@ -58,7 +58,14 @@ int main(int argc, char **argv) {
     if (strstr(cmd, "tmux list-clients")) {
         clients();
         if (strstr(cmd, "tmux list-sessions")) {
-            for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) printf("@@S %s\n", p);
+            if (sessions[0]) {
+                for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) printf("@@S %s\n", p);
+                if (strstr(cmd, "@@LS_OK@@")) puts("@@LS_OK@@");
+            } else {
+                const char *error = "no server running on /tmp/tmux-1000/default";
+                fprintf(stderr, "%s\n", error);
+                if (strstr(cmd, "2>&1") && strstr(cmd, "no server running") && strstr(cmd, "@@LS_OK@@")) puts("@@LS_OK@@");
+            }
         }
         puts("@@MP_LIVE@@"); return 0;
     }
