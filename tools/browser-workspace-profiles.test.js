@@ -116,3 +116,13 @@ test('IGSH-224 workspace rename stays in the palette and captures its stable tar
   assert.match(main, /findMyWorkspaceSlot\(app_state\.g_search_rename_workspace_id\[0\.\.app_state\.g_search_rename_workspace_len\]\)/);
   assert.match(read('src/shortcuts.zig'), /if \(\(kb\.flags & 0x10\) == 0\)/);
 });
+
+test('IGSH-224 workspace reopening cannot select a frame transport alias instead of the durable workspace', () => {
+  const palette = read('src/command_palette.zig');
+  const lookup = palette.slice(palette.indexOf('fn workspaceMatchesSearch('), palette.indexOf('pub fn tmuxHostMatchesQuery('));
+  assert.match(lookup, /app_state\.g_single_window/);
+  assert.match(lookup, /getInstanceName\(\)/);
+  assert.match(lookup, /findMyWorkspaceSlot\(e\.id\[0\.\.e\.id_len\]\) == null\) return false/);
+  assert.ok(lookup.indexOf('return false') < lookup.indexOf('if (query.len == 0) return true'));
+  assert.doesNotMatch(palette, /app_state\.g_search_len == 0 or workspaceMatchesSearch/);
+});

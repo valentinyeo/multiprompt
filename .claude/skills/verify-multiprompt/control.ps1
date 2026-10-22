@@ -669,6 +669,8 @@ function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [st
     if (@(Get-ChildItem (Split-Path $Root) -Directory).Count -ne 6) { throw 'Lifecycle created an unexpected profile root' }
     $script:profileObservations += $script:profileObservation
     Save-Json $script:profileObservations 'workspace-lifecycle.json'
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -eq $script:window } 'original owned workspace foreground for lifecycle screenshot'
     Snapshot $Stage
 }
 
