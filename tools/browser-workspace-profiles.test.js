@@ -63,9 +63,24 @@ test('IGSH-224 profile completion has its own native message ID', () => {
 
 test('IGSH-224 full browser checks build the native executable before sweeping real CLI help', () => {
   const build = read('build.zig');
-  assert.match(build, /const bridge_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\)/);
-  assert.match(build, /bridge_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
-  assert.match(build, /bridge_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath/);
-  assert.match(build, /test_step\.dependOn\(&bridge_help_tests\.step\)/);
+  assert.match(build, /const zsb_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\)/);
+  assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath/);
+  assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\)/);
   assert.doesNotMatch(read('.github/workflows/test.yml'), /run: node --test tools\/zsb-help\.test\.js/);
+});
+
+test('IGSH-224 conversions retain durable workspace IDs independently of window transport IDs', () => {
+  const pane = read('src/browser_pane.zig');
+  const session = read('src/session.zig');
+  const workspaces = read('src/workspaces.zig');
+  const identity = pane.slice(pane.indexOf('fn workspaceProfileIdentityForShell('), pane.indexOf('pub fn workspaceProfileForShell('));
+  assert.match(identity, /if \(ws < app_state\.g_lws_count and app_state\.g_ws_id_len\[ws\] > 0\)/);
+  assert.match(session, /\\"workspace_id\\":\\"/);
+  assert.match(session, /copyString\(json, "workspace_id", &app_state\.g_ws_ids\[0\]\)/);
+  const leave = workspaces.slice(workspaces.indexOf('fn leaveSingleWindowMode('), workspaces.indexOf('pub fn newWorkspace('));
+  assert.match(leave, /app_state\.g_ws_ids\[0\] = original_ids\[active_slot\]/);
+  assert.match(leave, /app_state\.g_ws_id_len\[0\] = original_id_lengths\[active_slot\]/);
+  assert.doesNotMatch(leave, /app_state\.g_ws_id_len\[ws\] = 0/);
+  assert.match(workspaces, /const workspace_id = if \(src_wid_len\[src_ws\] > 0\)/);
 });

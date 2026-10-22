@@ -310,7 +310,7 @@ fn workspaceProfileIdentityForShell(idx: u32, buf: *[32]u8) ![]const u8 {
     if (!browser_workspace_profile.IGSH_224) return "";
     if (idx >= app_state.shell_count) return error.MissingWorkspace;
     const ws = app_state.shells[idx].workspace;
-    const id = if (app_state.g_single_window and ws < app_state.g_lws_count and app_state.g_ws_id_len[ws] > 0)
+    const id = if (ws < app_state.g_lws_count and app_state.g_ws_id_len[ws] > 0)
         app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]]
     else if (!app_state.g_single_window or ws == 0)
         @import("startup.zig").getInstanceName()

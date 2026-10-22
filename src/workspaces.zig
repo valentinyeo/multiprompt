@@ -3090,10 +3090,12 @@ pub fn toggleSingleWindowMode() void {
             const name_len = @min(name.len, app_state.g_ws_names[0].len);
             if (name_len > 0) @memcpy(app_state.g_ws_names[0][0..name_len], name[0..name_len]);
             app_state.g_ws_name_len[0] = @intCast(name_len);
-            const id = getInstanceName();
-            const id_len = @min(id.len, app_state.g_ws_ids[0].len);
-            if (id_len > 0) @memcpy(app_state.g_ws_ids[0][0..id_len], id[0..id_len]);
-            app_state.g_ws_id_len[0] = @intCast(id_len);
+            if (app_state.g_ws_id_len[0] == 0) {
+                const id = getInstanceName();
+                const id_len = @min(id.len, app_state.g_ws_ids[0].len);
+                if (id_len > 0) @memcpy(app_state.g_ws_ids[0][0..id_len], id[0..id_len]);
+                app_state.g_ws_id_len[0] = @intCast(id_len);
+            }
             for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
         }
         var max_ws: u8 = 0;
@@ -3130,6 +3132,7 @@ fn leaveSingleWindowMode() bool {
     defer unlockWorkspaceRegistry(registry_lock);
     if (app_state.g_lws_count == 0) app_state.g_lws_count = 1;
     const active_slot: u8 = if (app_state.g_active_workspace < app_state.g_lws_count) app_state.g_active_workspace else 0;
+    ensureWorkspaceSlotId(active_slot);
     const original_ids = app_state.g_ws_ids;
     const original_id_lengths = app_state.g_ws_id_len;
     var exports_ready = false;
@@ -3149,22 +3152,23 @@ fn leaveSingleWindowMode() bool {
     var ws: u8 = 0;
     while (ws < app_state.g_lws_count) : (ws += 1) {
         if (ws == active_slot) continue;
-        if (std.mem.eql(u8, app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], getInstanceName())) {
-            app_state.g_ws_id_len[ws] = 0;
-        }
         ensureWorkspaceSlotId(ws);
         const entry = &split_entries[split_count];
         entry.id_len = @min(app_state.g_ws_id_len[ws], @as(u32, @intCast(entry.id.len)));
         if (entry.id_len > 0) @memcpy(entry.id[0..entry.id_len], app_state.g_ws_ids[ws][0..entry.id_len]);
+        if (std.mem.eql(u8, entry.id[0..entry.id_len], getInstanceName())) {
+            const alias = std.fmt.bufPrint(&entry.id, "split-{d}-{d}", .{ GetTickCount64(), ws }) catch return false;
+            entry.id_len = @intCast(alias.len);
+        }
         var name_buf: [32]u8 = undefined;
         const name = workspaceDisplayName(ws, &name_buf);
         entry.name_len = @intCast(@min(name.len, entry.name.len));
         if (entry.name_len > 0) @memcpy(entry.name[0..entry.name_len], name[0..entry.name_len]);
-        if (!exportSlotSessionFile(ws)) return false;
+        if (!exportSlotSessionFile(ws, entry.id[0..entry.id_len])) return false;
         split_count += 1;
     }
 
-    if (!saveWorkspaceModeOrder(active_slot)) return false;
+    if (!saveWorkspaceModeOrder()) return false;
     exports_ready = true;
     var si: u32 = app_state.shell_count;
     while (si > 0) {
@@ -3183,11 +3187,9 @@ fn leaveSingleWindowMode() bool {
     app_state.g_ws_names[0] = std.mem.zeroes([32]u8);
     if (active_name_len > 0) @memcpy(app_state.g_ws_names[0][0..active_name_len], active_name_buf[0..active_name_len]);
     app_state.g_ws_name_len[0] = @intCast(active_name_len);
-    app_state.g_ws_ids[0] = std.mem.zeroes([32]u8);
+    app_state.g_ws_ids[0] = original_ids[active_slot];
+    app_state.g_ws_id_len[0] = original_id_lengths[active_slot];
     const current_id = getInstanceName();
-    const current_id_len = @min(current_id.len, app_state.g_ws_ids[0].len);
-    if (current_id_len > 0) @memcpy(app_state.g_ws_ids[0][0..current_id_len], current_id[0..current_id_len]);
-    app_state.g_ws_id_len[0] = @intCast(current_id_len);
     var clear_ws: u8 = 1;
     while (clear_ws < MAX_LWS) : (clear_ws += 1) {
         app_state.g_ws_name_len[clear_ws] = 0;
@@ -3449,7 +3451,7 @@ fn workspaceModeOrderPath(buf: *[512]u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}\\workspace-order{s}.json", .{ dir, if (IS_DEV) "-dev" else "" }) catch null;
 }
 
-fn saveWorkspaceModeOrder(split_active: ?u8) bool {
+fn saveWorkspaceModeOrder() bool {
     var path_buf: [512]u8 = undefined;
     const path = workspaceModeOrderPath(&path_buf) orelse return false;
     var json: [2048]u8 = undefined;
@@ -3463,7 +3465,7 @@ fn saveWorkspaceModeOrder(split_active: ?u8) bool {
         }
         json[pos] = '"';
         pos += 1;
-        const id = if (split_active != null and ws == split_active.?) getInstanceName() else app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]];
+        const id = app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]];
         appendJsonEscaped(&json, &pos, id);
         json[pos] = '"';
         pos += 1;
@@ -3526,20 +3528,20 @@ fn restoreWorkspaceModeOrder() void {
 }
 
 pub fn persistWorkspaceOrder() void {
-    _ = saveWorkspaceModeOrder(null);
+    _ = saveWorkspaceModeOrder();
     syncInProcessWorkspacesToRegistry();
     publishInboxState();
     saveSession();
     updateMainWindowTitle();
 }
 
-fn exportSlotSessionFile(slot: u8) bool {
+fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
     if (slot >= app_state.g_lws_count) return false;
     ensureWorkspaceSlotId(slot);
     const wid = app_state.g_ws_ids[slot][0..app_state.g_ws_id_len[slot]];
     if (wid.len == 0) return false;
     var path_buf: [512]u8 = undefined;
-    const path = getSessionPathForWorkspace(&path_buf, wid) orelse return false;
+    const path = getSessionPathForWorkspace(&path_buf, transport_id) orelse return false;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
 
@@ -3792,6 +3794,12 @@ fn exportSlotSessionFile(slot: u8) bool {
     const t3 = "}]";
     @memcpy(json_buf[pos .. pos + t3.len], t3);
     pos += t3.len;
+    const identity_prefix = ",\"workspace_id\":\"";
+    @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+    pos += identity_prefix.len;
+    appendJsonEscaped(&json_buf, &pos, wid);
+    json_buf[pos] = '"';
+    pos += 1;
 
     var wrote_group = false;
     for (0..app_state.group_count) |gi| {
@@ -3886,7 +3894,7 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     @memcpy(name_copy[0..nm.len], nm);
     const name = name_copy[0..nm.len];
 
-    const exported = exportSlotSessionFile(slot);
+    const exported = exportSlotSessionFile(slot, id);
     if (!exported) {
         showHeaderNoticeAscii("Could not hibernate workspace - tabs left open", 4500, true);
         return;
@@ -4085,6 +4093,8 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         src_focus[swi] = parseWorkspaceFocus(obj);
     }
 
+    if (src_wid_len[0] == 0) src_wid_len[0] = json_reader.copyString(parsed.value, "workspace_id", &src_wids[0]);
+
     for (0..tab_count) |t| {
         if (findLocalTmuxTab(tabs[t].tmux_host, tabs[t].tmux_session[0..tabs[t].tmux_session_len]) != null) continue;
         if (tabs[t].pid != 0 and !tabs[t].keep_alive) {
@@ -4122,8 +4132,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         const name_len = @min(name.len, @as(usize, 31));
         @memcpy(app_state.g_ws_names[slot][0..name_len], name[0..name_len]);
         app_state.g_ws_name_len[slot] = @intCast(name_len);
-        const id_len = @min(id.len, app_state.g_ws_ids[slot].len);
-        @memcpy(app_state.g_ws_ids[slot][0..id_len], id[0..id_len]);
+        const workspace_id = if (src_wid_len[0] > 0) src_wids[0][0..src_wid_len[0]] else id;
+        const id_len = @min(workspace_id.len, app_state.g_ws_ids[slot].len);
+        @memcpy(app_state.g_ws_ids[slot][0..id_len], workspace_id[0..id_len]);
         app_state.g_ws_id_len[slot] = @intCast(id_len);
         app_state.g_ws_last_shell[slot] = 0;
         app_state.g_ws_focus[slot] = .none;
@@ -4150,8 +4161,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 app_state.g_ws_id_len[slot] = 0;
                 if (!first_slot_assigned) {
                     first_slot_assigned = true;
-                    const icap = @min(id.len, app_state.g_ws_ids[slot].len);
-                    @memcpy(app_state.g_ws_ids[slot][0..icap], id[0..icap]);
+                    const workspace_id = if (src_wid_len[src_ws] > 0) src_wids[src_ws][0..src_wid_len[src_ws]] else id;
+                    const icap = @min(workspace_id.len, app_state.g_ws_ids[slot].len);
+                    @memcpy(app_state.g_ws_ids[slot][0..icap], workspace_id[0..icap]);
                     app_state.g_ws_id_len[slot] = @intCast(icap);
                 } else if (src_wid_len[src_ws] > 0 and findMyWorkspaceSlot(src_wids[src_ws][0..src_wid_len[src_ws]]) == null) {
                     const wl = src_wid_len[src_ws];
