@@ -1743,7 +1743,7 @@ pub fn sshAutoReconnectTick() void {
             sshReconnectOk(@intCast(i));
         }
         if (shell.disconnected and shell.ssh_reconnect.phase == .connected) sshReconnectArm(@intCast(i), "link-disconnected");
-        if (shell.ssh_reconnect.awaiting_probe and now -| shell.spawn_tick >= 45_000) shell.ssh_reconnect.awaiting_probe = false;
+        shell.ssh_reconnect.expireProbeWait(now, shell.spawn_tick);
         const host = shell.tmux_host;
         if (!attempted[host] and reconnecting[host] < 3 and shell.ssh_reconnect.due(now)) {
             if (sshNetworkVeto(@intCast(i), now)) continue;
@@ -1840,6 +1840,7 @@ fn sshProbeStart() void {
         job.count += 1;
     }
     if (job.count == 0) {
+        ssh_probe_pending_request = false;
         std.heap.page_allocator.destroy(job);
         return;
     }
@@ -1869,7 +1870,7 @@ fn sshProbeThread(job: *SshProbeJob) void {
         if (!@import("console.zig").appendSshExe(&wide, &pos)) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ")) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, @import("console.zig").tmuxSshTarget(item.host))) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; tmux list-sessions -F '@@S #{session_name}' 2>/dev/null && printf '@@LS_OK@@\\n'; printf '@@MP_LIVE@@\\n'\"")) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \\\"$listing\\\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \\\"$listing\\\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n'\"")) continue;
         const a = std.heap.page_allocator;
         const cmd = std.unicode.utf16LeToUtf8Alloc(a, wide[0..pos]) catch continue;
         defer a.free(cmd);
@@ -1924,12 +1925,11 @@ fn sshProbeFinish() void {
         if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
         const process_alive = shell.process != null and shellProcessAliveForRead(idx);
-        if (shell.ssh_reconnect.observeGone(item.session_gone, process_alive)) {
+        if (shell.ssh_reconnect.observeGone(item.session_gone, process_alive, GetTickCount64())) {
             sshSessionEnded(idx);
             continue;
         }
         if (shell.ssh_reconnect.gone_results > 0) {
-            shell.ssh_reconnect.awaiting_probe = true;
             sshRequestSessionProbe();
             continue;
         }
@@ -1945,6 +1945,8 @@ fn sshProbeFinish() void {
             if (shell.ssh_reconnect.phase != .reconnecting and !shell.ssh_reconnect.create_session and shell.ssh_reconnect.healthy_attach) sshDisconnect(idx, "tmux-detached");
         } else if (process_alive) {
             shell.ssh_reconnect.healthy_attach = true;
+            shell.ssh_reconnect.ever_healthy = true;
+            shell.ssh_reconnect.creating_session = false;
             if (shell.disconnected) sshReconnectOk(idx);
         }
     }

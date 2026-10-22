@@ -146,9 +146,9 @@ try {
     if (!$connected) { throw 'Background tab never completed reconnect' }
     $offsetB = (Read-Log).Length
     $current = Transport 'verify-two'
-    [IO.File]::WriteAllText("$state/sessions.next", "verify-one`n")
+    [IO.File]::WriteAllText("$state/sessions.next", "")
     Move-Item "$state/sessions.next" "$state/sessions.txt" -Force
-    @{case='B'; action='delete session then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
+    @{case='B'; action='delete last sessions then kill transport'; pid=$current.Id; log_offset=$offsetB; utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content "$Output/action-B.json"
     Stop-Process -Id $current.Id -Force
     $deadline = [DateTime]::UtcNow.AddSeconds(40)
     $ended = $null

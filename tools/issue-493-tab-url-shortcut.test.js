@@ -91,5 +91,11 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);
   assert.match(read('build.zig'), /"node", "--test"[^\n]*"tools\/issue-493-tab-url-shortcut\.test\.js"/);
-  assert.match(read('changelog.d/IGSH-493-tab-url-shortcut.md'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
+  const fragmentPath = path.join(__dirname, '..', 'changelog.d/IGSH-493-tab-url-shortcut.md');
+  const entry = fs.existsSync(fragmentPath)
+    ? fs.readFileSync(fragmentPath, 'utf8').trim()
+    : read('src/changelog.zig').split('\n')
+      .find(line => line.includes('.ticket = "IGSH-493"'))?.match(/\.text = "([^"]*)"/)?.[1];
+  assert.ok(entry, 'URL shortcut needs an unreleased fragment or its published changelog entry');
+  assert.match(entry, /^Ctrl\+Shift\+X inserts[^\n]+without sending\.$/);
 });

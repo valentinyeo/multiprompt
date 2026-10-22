@@ -136,7 +136,7 @@ test('ISSUE-521 automatic reconnect paths never relayout the window or steal foc
 
 test('ISSUE-521 healthy probes confirm missing sessions before ending and skip ended tabs', () => {
   const worker = body('sshProbeThread', send);
-  assert.match(worker, /tmux list-sessions -F '@@S #\{session_name\}' 2>\/dev\/null && printf '@@LS_OK@@/);
+  assert.match(worker, /listing=\$\(tmux list-sessions -F '@@S #\{session_name\}' 2>&1\); if \[ \$\? -eq 0 \]/);
   assert.match(worker, /\.sessionGone\(/);
   const finish = body('sshProbeFinish', send);
   assert.match(finish, /if \(shell\.ssh_reconnect\.observeGone\(item\.session_gone, process_alive\)\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
@@ -227,19 +227,20 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
   assert.match(body('sessionGone', reconnect), /attached\(output, "@@LS_OK@@"\)/);
   assert.match(body('sshProbeThread', send), /job\.healthy\[item\.host\] = [^\n]*"@@LS_OK@@"/);
   const observe = body('observeGone', reconnect);
-  assert.match(observe, /phase != \.reconnecting and !self\.create_session and self\.healthy_attach/);
+  assert.match(observe, /!self\.create_session and !self\.creating_session and \(self\.ever_healthy or self\.healthy_attach or self\.restored_session\)/);
   assert.match(observe, /gone and eligible and !process_alive/);
   assert.match(observe, /self\.gone_results >= 2/);
   const finish = body('sshProbeFinish', send);
   assert.match(finish, /const process_alive = shell\.process != null and shellProcessAliveForRead\(idx\)/);
   assert.match(finish, /if \(item\.session_gone and process_alive\) continue/);
-  assert.match(finish, /gone_results > 0\) \{\s*shell\.ssh_reconnect\.awaiting_probe = true;\s*sshRequestSessionProbe\(\);\s*continue/);
+  assert.match(finish, /gone_results > 0\) \{\s*sshRequestSessionProbe\(\);\s*continue/);
   assert.match(body('sshSessionEnded', send), /or \(shell\.process != null and shellProcessAliveForRead\(idx\)\)\) return/);
   assert.match(reconnect, /test "ISSUE-511 gone requires two consecutive results/);
   assert.match(reconnect, /test "ISSUE-511 creating reconnecting and never attached/);
   const respawn = body('respawnShellInPlace', read('console.zig'));
-  assert.match(respawn, /ssh_reconnect\.healthy_attach = false/);
-  assert.match(respawn, /ssh_reconnect\.gone_results = 0/);
+  assert.doesNotMatch(respawn, /ssh_reconnect\.(?:ever_healthy|restored_session|gone_results) =/);
+  assert.match(body('start', reconnect), /self\.healthy_attach = false/);
+  assert.match(body('sshAutoReconnectTick', send), /expireProbeWait\(now, shell\.spawn_tick\)/);
   assert.match(finish, /phase != \.reconnecting and !shell\.ssh_reconnect\.create_session and shell\.ssh_reconnect\.healthy_attach\) sshDisconnect/);
 });
 

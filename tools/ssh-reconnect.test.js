@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
@@ -29,7 +29,7 @@ async function zig(code, filter, state = true, expected = 0) {
     });
     assert.equal(result.status, expected, result.stdout + result.stderr);
     if (expected === 0) assert.match(result.stderr, /All \d+ tests passed/);
-    else assert.match(result.stderr, /expected 15000, found 1000/);
+    else assert.match(result.stderr, /FAIL \(|expected 15000, found 1000/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -903,7 +903,7 @@ test "ISSUE-511 protected gone results" {
         alive = mode == 0;
         if (mode == 1) shells[0].ssh_reconnect.phase = .reconnecting;
         if (mode == 2) shells[0].ssh_reconnect.create_session = true;
-        if (mode == 3) shells[0].ssh_reconnect.healthy_attach = false;
+        if (mode == 3) shells[0].ssh_reconnect = .{};
         const before = kills;
         for (0..3) |_| {
             ssh_probe_next_tick = 0;
@@ -989,4 +989,111 @@ test('ISSUE-513 idle wakeup oracle rejects the original one-second healthy recon
   const code = runtime(idleTimerChecks).replace(body('armSshReconnectTimerIfNeeded'), original) + '\nvar g_ssh_reconnect_timer_on = false;\n';
   await zig(code, 'ISSUE-513 healthy', true, 1);
 });
+
+test('ISSUE-511 lifecycle and confirmation timeout execute pure production state', async () => {
+  await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-511 import" { _ = reconnect; }', 'ISSUE-511');
+});
+
+test('ISSUE-511 lifecycle oracles reject 9542152 state behavior', async () => {
+  const prior = spawnSync('git', ['show', '9542152332e0355927c3ca11d96c6b3cdd019fc2:src/ssh_reconnect.zig'], { cwd: root, encoding: 'utf8' });
+  assert.equal(prior.status, 0, prior.stderr);
+  const current = fs.readFileSync(path.join(root, 'src/ssh_reconnect.zig'), 'utf8');
+  const tests = current.slice(current.indexOf('\nfn testGoneLifecycle('));
+  let baseline = prior.stdout.slice(0, prior.stdout.indexOf('\ntest "'));
+  baseline = baseline.replace('    healthy_attach: bool = false,', '    healthy_attach: bool = false,\n    ever_healthy: bool = false,\n    restored_session: bool = false,\n    creating_session: bool = false,');
+  baseline = baseline.replace('process_alive: bool) bool {\n        const eligible', 'process_alive: bool, now: u64) bool {\n        _ = now;\n        const eligible');
+  baseline = baseline.replace('    pub fn end(self: *State) void {', `    pub fn expireProbeWait(self: *State, now: u64, spawn_tick: u64) void {
+        if (self.awaiting_probe and now -| spawn_tick >= 45_000) self.awaiting_probe = false;
+    }
+    pub fn end(self: *State) void {`);
+  for (const scenario of ['healthy respawn', 'restored named', 'no server']) {
+    await zig(baseline + tests, 'ISSUE-511 lifecycle ' + scenario, false, 1);
+  }
+  await zig(baseline + tests, 'ISSUE-511 confirmation hold', false, 1);
+});
+
+test('ISSUE-511 empty probe clears urgent request and restores quiet non-tmux timer', async () => {
+  await zig(probeRuntime(`
+test "ISSUE-511 no qualifying probe tabs" {
+    shells[0].kind = .vps;
+    sshRequestSessionProbe();
+    try std.testing.expect(ssh_probe_pending_request);
+    sshProbeStart();
+    try std.testing.expect(!ssh_probe_pending_request);
+    armSshReconnectTimerIfNeeded();
+    try std.testing.expectEqual(@as(u32, 15000), timer_ms);
+    try std.testing.expect(ssh_probe_job == null);
+}
+`), 'ISSUE-511 no qualifying');
+});
+
+test('ISSUE-511 confirming probe wins the production reconnect tick on an old transport', async () => {
+  await zig(probeRuntime(`
+test "ISSUE-511 tick waits for confirming gone" {
+    fake_now = 10000;
+    shells[0].ssh_reconnect.ok();
+    alive = false;
+    sshDisconnect(0, "process-exit-event");
+    fake_now = shells[0].ssh_reconnect.next_tick;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), spawns);
+    shells[0].ssh_reconnect.healthy_attach = false;
+    fake_exit_code = 1;
+    sshDisconnect(0, "process-exit-event");
+    fake_now += 1000;
+    const stale = ssh_probe_job orelse return error.MissingOldProbe;
+    stale.finished.store(true, .release);
+    _ = stale.owners.fetchSub(1, .acq_rel);
+    sshAutoReconnectTick();
+    const first = ssh_probe_job orelse return error.MissingFirstProbe;
+    fake_now = 60000;
+    first.healthy[0] = true;
+    first.items[0].session_gone = true;
+    first.finished.store(true, .release);
+    _ = first.owners.fetchSub(1, .acq_rel);
+    const before = spawns;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(before, spawns);
+    try std.testing.expectEqual(@as(u8, 1), shells[0].ssh_reconnect.gone_results);
+    const second = ssh_probe_job orelse return error.MissingImmediateConfirmation;
+    fake_now += 1000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(before, spawns);
+    second.healthy[0] = true;
+    second.items[0].session_gone = true;
+    second.finished.store(true, .release);
+    _ = second.owners.fetchSub(1, .acq_rel);
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
+    try std.testing.expectEqual(before, spawns);
+}
+`), 'ISSUE-511 tick waits');
+});
+
+
+test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown listing failures', () => {
+  const line = body('sshProbeThread').split('\n').find(line => line.includes('tmux list-clients'));
+  const literal = line.match(/, ("(?:\\.|[^"\\])*")\)\) continue;/);
+  assert.ok(literal, 'remote probe command literal');
+  const windowsArgument = JSON.parse(literal[1]).trim();
+  const command = windowsArgument.slice(1, -1).replaceAll('\\"', '"');
+  const prefix = 'tmux() { if [ "$1" = list-clients ]; then return 1; fi; printf \'%s\\n\' "$MP_LISTING"; return "$MP_STATUS"; }; ';
+  for (const [listing, status, complete] of [
+    ['@@S work\n@@S other', 0, true],
+    ['no server running on /tmp/tmux-1000/default', 1, true],
+    ['error connecting to /tmp/tmux-1000/default (No such file or directory)', 1, true],
+    ['error connecting to /tmp/tmux-1000/default (Permission denied)', 1, false],
+    ['error connecting to /tmp/tmux-1000/default (Connection refused)', 1, false],
+    ['tmux: command not found', 127, false],
+    ['Permission denied', 1, false],
+  ]) {
+    const result = spawnSync('sh', ['-c', prefix + command], { encoding: 'utf8', env: { ...process.env, MP_LISTING: listing, MP_STATUS: String(status) } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.split(/\r?\n/).includes('@@LS_OK@@'), complete, listing);
+    assert.ok(result.stdout.split(/\r?\n/).includes('@@MP_LIVE@@'), listing);
+    if (status === 0) assert.ok(result.stdout.includes('@@S work\n@@S other'), result.stdout);
+    if (!complete) assert.ok(result.stderr.includes(listing), result.stderr);
+  }
+});
+
 });

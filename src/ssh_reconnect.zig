@@ -17,6 +17,10 @@ pub const State = struct {
     awaiting_probe: bool = false,
     create_session: bool = false,
     healthy_attach: bool = false,
+    ever_healthy: bool = false,
+    restored_session: bool = false,
+    creating_session: bool = false,
+    gone_probe_deadline: ?u64 = null,
     gone_results: u8 = 0,
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
@@ -76,6 +80,8 @@ pub const State = struct {
 
     pub fn start(self: *State) void {
         if (self.phase == .closed or self.phase == .ended) return;
+        self.ever_healthy = self.ever_healthy or self.healthy_attach;
+        self.healthy_attach = false;
         self.phase = .reconnecting;
         self.attempts +|= 1;
         self.veto_until = null;
@@ -85,6 +91,8 @@ pub const State = struct {
         if (self.phase == .closed or self.phase == .reconnecting) return;
         if (self.phase == .ended) self.create_session = true;
         self.awaiting_probe = false;
+        self.gone_results = 0;
+        self.gone_probe_deadline = null;
         self.phase = .disconnected;
         self.next_tick = now;
         self.delay_ms = 0;
@@ -92,13 +100,25 @@ pub const State = struct {
 
     pub fn ok(self: *State) void {
         if (self.phase == .closed or self.phase == .ended) return;
-        self.* = .{ .healthy_attach = true };
+        self.* = .{ .healthy_attach = true, .ever_healthy = true };
     }
 
-    pub fn observeGone(self: *State, gone: bool, process_alive: bool) bool {
-        const eligible = self.phase != .reconnecting and !self.create_session and self.healthy_attach;
+    pub fn observeGone(self: *State, gone: bool, process_alive: bool, now: u64) bool {
+        const eligible = self.phase != .reconnecting and self.phase != .closed and self.phase != .ended and
+            !self.create_session and !self.creating_session and (self.ever_healthy or self.healthy_attach or self.restored_session);
         self.gone_results = if (gone and eligible and !process_alive) self.gone_results +| 1 else 0;
+        self.awaiting_probe = self.gone_results > 0;
+        self.gone_probe_deadline = if (self.awaiting_probe) self.gone_probe_deadline orelse now + 20_000 else null;
         return self.gone_results >= 2;
+    }
+
+    pub fn expireProbeWait(self: *State, now: u64, spawn_tick: u64) void {
+        if (!self.awaiting_probe) return;
+        if (self.gone_results > 0) {
+            if (now >= (self.gone_probe_deadline orelse return)) self.awaiting_probe = false;
+        } else if (now -| spawn_tick >= 45_000) {
+            self.awaiting_probe = false;
+        }
     }
 
     pub fn end(self: *State) void {
@@ -330,21 +350,93 @@ test "ISSUE-512 confirmed failures explain their cause and manual retry still sk
 
 test "ISSUE-511 gone requires two consecutive results and never overrides a live transport" {
     var state: State = .{ .healthy_attach = true };
-    try std.testing.expect(!state.observeGone(true, false));
-    try std.testing.expect(!state.observeGone(false, false));
-    try std.testing.expect(!state.observeGone(true, false));
-    try std.testing.expect(!state.observeGone(true, true));
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(!state.observeGone(false, false, 0));
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(!state.observeGone(true, true, 0));
     try std.testing.expectEqual(@as(u8, 0), state.gone_results);
-    try std.testing.expect(!state.observeGone(true, false));
-    try std.testing.expect(state.observeGone(true, false));
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(state.observeGone(true, false, 0));
 }
 
 test "ISSUE-511 creating reconnecting and never attached tabs cannot be gone" {
     for ([_]State{ .{}, .{ .phase = .reconnecting, .healthy_attach = true }, .{ .create_session = true, .healthy_attach = true } }) |initial| {
         var state = initial;
-        for (0..4) |_| try std.testing.expect(!state.observeGone(true, false));
+        for (0..4) |_| try std.testing.expect(!state.observeGone(true, false, 0));
         state.ok();
-        try std.testing.expect(!state.observeGone(true, false));
-        try std.testing.expect(state.observeGone(true, false));
+        try std.testing.expect(!state.observeGone(true, false, 0));
+        try std.testing.expect(state.observeGone(true, false, 0));
+    }
+}
+
+fn testGoneLifecycle(restored: bool, output: []const u8) !void {
+    var state: State = .{ .restored_session = restored };
+    if (!restored) state.ok();
+    const gone = sessionGone(output, "work", true, 0);
+    try std.testing.expect(gone);
+    for (0..3) |i| {
+        try std.testing.expect(!state.observeGone(gone, true, @intCast(i)));
+        try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+    }
+    state.confirmDisconnect(100, "process-exit-event", false);
+    state.lost(100, 0);
+    try std.testing.expect(state.due(state.next_tick));
+    state.start();
+    state.healthy_attach = false;
+    state.confirmDisconnect(2000, "process-exit-event", false);
+    state.lost(2000, 0);
+    state.awaiting_probe = true;
+    try std.testing.expect(!state.observeGone(gone, false, 60_000));
+    state.expireProbeWait(61_000, 1100);
+    try std.testing.expect(!state.due(61_000));
+    try std.testing.expectEqual(@as(u8, 1), state.gone_results);
+    if (state.observeGone(gone, false, 62_000)) state.end();
+    try std.testing.expectEqual(Phase.ended, state.phase);
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+}
+
+test "ISSUE-511 lifecycle healthy respawn attach exit confirms ended" {
+    try testGoneLifecycle(false, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 lifecycle restored named tab confirms ended" {
+    try testGoneLifecycle(true, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 lifecycle no server confirms ended and live transport is vetoed" {
+    try testGoneLifecycle(false, "@@LS_OK@@\n@@MP_LIVE@@\n");
+    try testGoneLifecycle(true, "@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 confirmation hold starts at first gone not spawn and times out to backoff" {
+    var state: State = .{};
+    state.ok();
+    state.lost(100, 0);
+    try std.testing.expect(!state.observeGone(true, false, 60_000));
+    state.expireProbeWait(79_999, 0);
+    try std.testing.expect(!state.due(79_999));
+    state.expireProbeWait(80_000, 0);
+    try std.testing.expect(state.due(80_000));
+    state.start();
+    try std.testing.expectEqual(@as(u8, 1), state.gone_results);
+    state.lost(81_000, 0);
+    if (state.observeGone(true, false, 82_000)) state.end();
+    try std.testing.expectEqual(Phase.ended, state.phase);
+}
+
+test "ISSUE-511 creating sessions stay protected after failed creation respawn" {
+    for ([_]State{
+        .{ .ever_healthy = true, .create_session = true },
+        .{ .restored_session = true, .creating_session = true },
+        .{ .ever_healthy = true, .creating_session = true },
+    }) |initial| {
+        var state = initial;
+        state.start();
+        state.lost(100, 0);
+        for (0..3) |i| try std.testing.expect(!state.observeGone(true, false, @intCast(i)));
+        try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+        state.ok();
+        try std.testing.expect(!state.observeGone(true, false, 1000));
+        try std.testing.expect(state.observeGone(true, false, 2000));
     }
 }

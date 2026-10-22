@@ -941,6 +941,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.tmux_host = tab.tmux_host;
             @memcpy(shell.tmux_session[0..tab.tmux_session.len], tab.tmux_session);
             shell.tmux_session_len = @intCast(tab.tmux_session.len);
+            shell.ssh_reconnect.restored_session = tab.tmux_session.len > 0;
             shell.disconnected = true;
             app_state.shells[app_state.shell_count] = shell;
             app_state.shell_count += 1;

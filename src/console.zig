@@ -1806,6 +1806,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     var cmd_buf: [2048]u16 = undefined;
+    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
     const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, false) orelse return false;
 
     {
@@ -1938,6 +1939,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .favicon_path_len = 0,
         .tmux_host = app_state.g_pending_tmux_host,
         .spawn_tick = if (isRemoteShellKind(kind)) GetTickCount64() else 0,
+        .ssh_reconnect = .{
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .creating_session = creating_session,
+        },
         .full_width = false,
         .browser_split_permille = BROWSER_SPLIT_DEFAULT_PERMILLE,
         .last_active = 0,
@@ -2000,8 +2005,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_group_id = app_state.shells[idx].group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
     if (app_state.shells[idx].ssh_reconnect.phase != .reconnecting) app_state.shells[idx].ssh_reconnect.start();
-    app_state.shells[idx].ssh_reconnect.healthy_attach = false;
-    app_state.shells[idx].ssh_reconnect.gone_results = 0;
     const saved_ssh_reconnect = app_state.shells[idx].ssh_reconnect;
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;

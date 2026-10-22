@@ -806,6 +806,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     if (tab.tmux_session_len > 0) {
         @memcpy(shell.tmux_session[0..tab.tmux_session_len], tab.tmux_session[0..tab.tmux_session_len]);
         shell.tmux_session_len = tab.tmux_session_len;
+        shell.ssh_reconnect.restored_session = tab.kind == .tmux;
     }
     if (tab.cwd_len > 0) {
         @memcpy(shell.cached_cwd[0..tab.cwd_len], tab.cwd[0..tab.cwd_len]);
