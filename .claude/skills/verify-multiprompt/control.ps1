@@ -186,14 +186,13 @@ public static class VerifyNative {
         uint foregroundPid;
         uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
         bool attachedForeground = false, attachedTarget = false;
+        Key(0x12, 0, 0);
         try {
             if (foregroundThread != 0 && foregroundThread != currentThread) {
                 attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
-                if (!attachedForeground) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             }
             if (targetThread != currentThread && targetThread != foregroundThread) {
                 attachedTarget = AttachThreadInput(currentThread, targetThread, true);
-                if (!attachedTarget) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             }
             AllowSetForegroundWindow(pid);
             BringWindowToTop(hwnd);
@@ -202,7 +201,9 @@ public static class VerifyNative {
         } finally {
             if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
             if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
+            Key(0x12, 0, 2);
         }
+        if (GetForegroundWindow() != hwnd || GetFocusedWindow(hwnd) == IntPtr.Zero) throw new InvalidOperationException("Owned browser did not receive foreground keyboard focus");
     }
     public static IntPtr GetFocusedWindow(IntPtr hwnd) {
         uint pid;
