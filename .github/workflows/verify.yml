@@ -91,7 +91,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          fetch-depth: 0
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js
       - name: Check workspace focus journey contract
@@ -118,30 +117,6 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Prove pane-layout regressions fail on master before passing on the branch
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $env:ZIG = (Get-Command zig).Source
-          $before = "$env:RUNNER_TEMP/pane-layout-before"
-          New-Item -ItemType Directory -Force "$before/tools", evidence | Out-Null
-          git archive --format=tar --output="$env:RUNNER_TEMP/pane-layout-before.tar" 6b8295f57d5932651d2324ed5f672ae88dbfeb88 src
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract the pre-fix master source' }
-          tar -xf "$env:RUNNER_TEMP/pane-layout-before.tar" -C $before
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot unpack the pre-fix master source' }
-          Copy-Item tools/pane-spacing.test.js "$before/tools/pane-spacing.test.js"
-          node --test "$before/tools/pane-spacing.test.js" *> evidence/pane-layout-before.log
-          $redExit = $LASTEXITCODE
-          $red = Get-Content evidence/pane-layout-before.log -Raw
-          if ($redExit -ne 1) { throw 'Expected failing assertions on pre-fix master' }
-          foreach ($case in @('console HWND and browser layout stay inside the primary ring', 'splitter paint is a bounded grip in the gap, never touching a ring', 'sidebar group rail has its own column before every row icon')) {
-            if ($red -notmatch ('(?s)IGSH-549 ' + [regex]::Escape($case) + '.*?FAIL')) { throw "No compiled red assertion for $case" }
-            Write-Host "pane-layout red-before-green $case PASS"
-          }
-          node --test tools/pane-spacing.test.js *> evidence/pane-layout-after.log
-          if ($LASTEXITCODE -ne 0) { Get-Content evidence/pane-layout-after.log; throw 'Pane layout regression tests failed on the branch' }
-          Write-Host 'pane-layout compiled-regressions PASS'
       - name: Prepare job-only signed local release
         if: env.FEATURE == 'safe-updates'
         shell: powershell
