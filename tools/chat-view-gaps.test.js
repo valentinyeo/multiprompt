@@ -300,7 +300,7 @@ test "IGSH-403 click preserves Unicode in a detected transcript link" {
 });
 
 test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', (t) => {
-  const production = ['chatReceivedBlocks', 'chatSelRange', 'chatSelectionClear', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
+  const production = ['chatReceivedBlocks', 'chatSelRange', 'chatSelectionClear', 'chatSelectionDisplay', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
     .replaceAll('std.heap.page_allocator', 'copy_allocator');
   const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
@@ -312,6 +312,10 @@ var g_chat_received: chat_markdown.BlockCache = .{};
 var g_chat_capture: [262200]u16 = @splat('x');
 var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
+var g_chat_echo_layout_count: usize = 0;
+var g_chat_echo_layout_ids: [1]u64 = .{0};
+var g_chat_outbox: struct { items: []const struct { text: []const u16 } } = .{ .items = &.{} };
+fn chatOutboxIndexById(_: u64) ?usize { return null; }
 var g_chat_blocks: [2]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }, .{ .start = 0, .len = 0, .role = .user }};
 var g_chat_sel_active = false;
 var g_chat_sel_anchor: usize = 0;

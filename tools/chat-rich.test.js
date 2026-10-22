@@ -165,3 +165,24 @@ test('IGSH-404 every Chat View copy path owns selection-sized storage and report
   assert.match(build, /"node", "--test", "tools\/chat-view-gaps\.test\.js"/);
   assert.match(build, /test_step\.dependOn\(&chat_view_gaps_tests\.step\)/);
 });
+
+test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlighting and copying', () => {
+  const display = body('chatSelectionDisplay');
+  assert.match(display, /chatBlockDisplayRange/);
+  assert.match(display, /g_chat_echo_layout_ids/);
+  assert.match(display, /chatOutboxIndexById/);
+  assert.match(display, /g_chat_last_len \+ 1/);
+  for (const name of ['chatSelectAll', 'chatSelectionToClipboard', 'chatTranscriptSelectionBlockAt']) {
+    assert.match(body(name), /g_chat_block_count \+ g_chat_echo_layout_count/);
+    assert.match(body(name), /chatSelectionDisplay/);
+  }
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionDisplay/);
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
+  assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
+  assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text, text_rc, false, true, null, offset,/);
+  assert.match(body('chatTranscriptWndProc'), /chatPaintEcho\([^;]*display\.start\)/);
+  assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
+  assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
+  assert.match(body('chatRelayout'), /old_echo_ids[^]*chatSelectionClear\(\)/);
+});
