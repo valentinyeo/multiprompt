@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -169,6 +169,9 @@ public sealed class VerifyJob : IDisposable {
         return handle;
     }
     public System.Diagnostics.Process Start(string exe, string directory, string stdout, string stderr) {
+        return Start(exe, directory, stdout, stderr, "--single-window --no-window-restore");
+    }
+    public System.Diagnostics.Process Start(string exe, string directory, string stdout, string stderr, string arguments) {
         if (started || job == IntPtr.Zero) throw new InvalidOperationException("Job is not available for launch");
         IntPtr output = IntPtr.Zero, error = IntPtr.Zero, input = IntPtr.Zero;
         ProcessInfo native = new ProcessInfo();
@@ -179,7 +182,7 @@ public sealed class VerifyJob : IDisposable {
             StartupInfo startup = new StartupInfo();
             startup.Size = Marshal.SizeOf(typeof(StartupInfo)); startup.Flags = 0x100;
             startup.Input = input; startup.Output = output; startup.Error = error;
-            Check(CreateProcess(exe, new StringBuilder("\"" + exe + "\" --single-window --no-window-restore"), IntPtr.Zero, IntPtr.Zero, true, 4, IntPtr.Zero, directory, ref startup, out native));
+            Check(CreateProcess(exe, new StringBuilder("\"" + exe + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 4, IntPtr.Zero, directory, ref startup, out native));
             Check(AssignProcessToJobObject(job, native.Process));
             process = System.Diagnostics.Process.GetProcessById((int)native.Pid);
             IntPtr handle = process.Handle;
@@ -221,6 +224,33 @@ public sealed class VerifyJob : IDisposable {
     }
 }
 '@
+
+switch ($Feature) {
+        'browser-emulation' {
+            $Evidence = [IO.Path]::GetFullPath($Evidence)
+            New-Item -ItemType Directory -Force $Evidence | Out-Null
+            $browserJob = New-Object VerifyJob
+            $driver = $null
+            try {
+                $node = (Get-Command node.exe -ErrorAction Stop).Source
+                $scriptPath = (Resolve-Path '.claude/skills/verify-multiprompt/browser-emulation.mjs').Path
+                $driver = $browserJob.Start($node, $pwd.Path, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), ('"' + $scriptPath + '"'))
+                if (-not $driver.WaitForExit(600000)) { throw 'Browser verification timed out' }
+                if ($driver.ExitCode -ne 0) { throw ('Browser verification failed: ' + (Get-Content (Join-Path $Evidence 'stderr.log') -Raw)) }
+            } finally {
+                try {
+                    $beforeStop = $browserJob.ReadAccounting()
+                    $stopped = $browserJob.Stop()
+                    @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'process-tree.json')
+                } finally {
+                    if ($null -ne $driver) { $driver.Dispose() }
+                    $browserJob.Dispose()
+                }
+            }
+            Write-Output 'VERIFIED browser-emulation with real native CLI and zero active job processes'
+            return
+        }
+}
 
 $Evidence = [IO.Path]::GetFullPath($Evidence)
 $Exe = (Resolve-Path $Exe).Path
