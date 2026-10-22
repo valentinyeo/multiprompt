@@ -103,6 +103,8 @@ pub fn build(b: *std.Build) void {
     const bridge_opts = b.addOptions();
     bridge_opts.addOption([]const u8, "extension_version", manifest.value.version);
     bridge_exe.root_module.addOptions("bridge_config", bridge_opts);
+    bridge_exe.root_module.linkSystemLibrary("gdiplus", .{});
+    bridge_exe.root_module.linkSystemLibrary("ole32", .{});
     bridge_exe.subsystem = .Console;
     b.installArtifact(bridge_exe);
 
@@ -461,6 +463,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&zsb_who_tests.step);
     const zsb_selftest_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-selftest.test.js", "tools/zsb-selftest-docs.test.js" });
     vps_test_step.dependOn(&zsb_selftest_tests.step);
+    const internal_page_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-internal-pages.test.js" });
+    test_step.dependOn(&internal_page_tests.step);
+    vps_test_step.dependOn(&internal_page_tests.step);
     const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js" });
     test_step.dependOn(&bridge_routing_tests.step);
     const zsb_extension_frames_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-extension-frames.test.js" });
@@ -529,12 +534,17 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
+    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    if (b.graph.host.result.os.tag == .windows) {
+        zsb_deadline_tests.step.dependOn(&bridge_install.step);
+        zsb_deadline_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+    }
+    test_step.dependOn(&zsb_deadline_tests.step);
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
-    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
     vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);

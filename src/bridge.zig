@@ -92,7 +92,7 @@ extern "kernel32" fn CreateFileA(
 ) callconv(.winapi) windows.HANDLE;
 
 extern "kernel32" fn WaitNamedPipeA(lpNamedPipeName: [*:0]const u8, nTimeOut: windows.DWORD) callconv(.winapi) BOOL;
-extern "kernel32" fn FlushFileBuffers(hFile: windows.HANDLE) callconv(.winapi) BOOL;
+extern "kernel32" fn SetNamedPipeHandleState(hNamedPipe: windows.HANDLE, lpMode: *const windows.DWORD, lpMaxCollectionCount: ?*const windows.DWORD, lpCollectDataTimeout: ?*const windows.DWORD) callconv(.winapi) BOOL;
 extern "kernel32" fn CloseHandle(hObject: windows.HANDLE) callconv(.winapi) BOOL;
 
 extern "kernel32" fn CreateMutexA(lpMutexAttributes: ?*anyopaque, bInitialOwner: BOOL, lpName: [*:0]const u8) callconv(.winapi) ?windows.HANDLE;
@@ -182,9 +182,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
 
-    if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
-
     const is_native_host = std.mem.eql(u8, command, "native") or std.mem.startsWith(u8, command, "chrome-extension://");
+    if (!is_native_host) {
+        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{});
+        watchdog.detach();
+    }
+    if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
     const is_legacy_host = std.mem.eql(u8, command, "chrome-extension://" ++ legacy_extension_id ++ "/");
     const profile_env = if (is_legacy_host or profile_override != null) null else std.process.Environ.getAlloc(init.environ, allocator, "MULTIPROMPT_BROWSER_PROFILE") catch |err| switch (err) {
         error.EnvironmentVariableMissing => null,
@@ -326,6 +329,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else {
             try sendBrowserRequest(allocator, "tabs", "", null);
         }
+    } else if (std.mem.eql(u8, command, "reset")) {
+        if (args.next() != null) badArgs(command);
+        try sendBrowserRequest(allocator, "reset", "", null);
     } else if (std.mem.eql(u8, command, "active-tab")) {
         if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "activeTab", "", null);
@@ -664,6 +670,7 @@ const usage_text =
     \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
     \\  manifest <exe> <extension-id>  Print a Native Messaging manifest
     \\  version                        Print version
+    \\  reset                          Reconnect bridge and clear stuck CDP sessions (keeps pane open)
     \\  help                           Print help
     \\
     \\Remote recovery after SSH/WiFi drops: reconnect the multiprompt SSH/tmux
@@ -1130,6 +1137,12 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     return null;
 }
 
+fn commandDeadline() void {
+    Sleep(60_000);
+    writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb command exceeded its 60 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
+    std.process.exit(1);
+}
+
 fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {
     const profile_mutex = if (g_profile_token.len > 0) blk: {
         var name_buf: [128]u8 = undefined;
@@ -1513,16 +1526,18 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
     var last_mismatch: ?[]u8 = null;
     defer if (last_mismatch) |reply| allocator.free(reply);
 
+    const command_deadline = GetTickCount64() + (if (std.mem.eql(u8, method, "screenshot") or std.mem.eql(u8, method, "shoturl")) @as(u64, 40_000) else @as(u64, 20_000));
     var version_deadline: ?u64 = null;
     var request_attempts: u32 = browser_request_attempts;
     var attempt: u32 = 0;
     while (attempt < request_attempts) : (attempt += 1) {
-        const raw_response = requestBrowser(allocator, method, fields_json, null) catch |err| {
+        const raw_response = requestBrowser(allocator, method, fields_json, command_deadline) catch |err| {
             if (attempt + 1 < request_attempts and isRetryableBrowserRequestError(err)) {
                 Sleep(75 * (attempt + 1));
                 continue;
             }
 
+            if (err == error.BrowserRequestTimeout) return makeBridgeCliErrorResponse(allocator, method, "browser bridge deadline exceeded; run zsb reset to reconnect without reopening the pane", null);
             var message_buf: [128]u8 = undefined;
             const message = if (g_profile_token.len > 0)
                 std.fmt.bufPrint(&message_buf, "no browser bridge for profile {s}: {s}", .{ g_profile_token, @errorName(err) }) catch "no browser bridge for profile"
@@ -1539,7 +1554,7 @@ fn requestBrowserWithRetry(allocator: std.mem.Allocator, method: []const u8, fie
                     if (reply.value == .object and !std.mem.eql(u8, method, "extensionReload")) {
                         if (reply.value.object.get("extensionVersion")) |loaded| {
                             if (loaded == .string and !std.mem.eql(u8, loaded.string, version)) {
-                                if (version_deadline == null) version_deadline = GetTickCount64() + 15_000;
+                                if (version_deadline == null) version_deadline = @min(command_deadline, GetTickCount64() + 15_000);
                                 const healed = waitForExtensionVersion(allocator, version_deadline.?);
                                 switch (versionHealDecision(getBool(reply.value.object.get("ok")), healed)) {
                                     .original => return raw_response,
@@ -1781,6 +1796,7 @@ test "issue: CLI requests advertise the bridge version and preserve request fiel
 }
 
 fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
+    const until = deadline orelse (GetTickCount64() + 20_000);
     const pid = GetCurrentProcessId();
     const tick = GetTickCount64();
 
@@ -1795,7 +1811,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     const reply_pipe = CreateNamedPipeA(
         reply_pipe_name.ptr,
         PIPE_ACCESS_INBOUND,
-        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | (if (deadline != null) PIPE_NOWAIT else PIPE_WAIT),
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_NOWAIT,
         1,
         max_native_message,
         max_native_message,
@@ -1813,7 +1829,7 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     var pipe_name_buf: [128]u8 = undefined;
     const command_pipe_name = try isolatedPipeName(&pipe_name_buf, g_profile_token);
     const command_pipe = blk: {
-        const until = @min(deadline orelse std.math.maxInt(u64), GetTickCount64() + 1500);
+        const connect_until = @min(until, GetTickCount64() + 1500);
         while (true) {
             const pipe = CreateFileA(
                 command_pipe_name.ptr,
@@ -1827,32 +1843,27 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
             if (pipe != INVALID_HANDLE_VALUE) break :blk pipe;
             const err = GetLastError();
             if (err != ERROR_FILE_NOT_FOUND and err != ERROR_PIPE_BUSY) return error.PipeUnavailable;
-            const remaining = until -| GetTickCount64();
-            if (remaining == 0) return error.PipeUnavailable;
+            const remaining = connect_until -| GetTickCount64();
+            if (remaining == 0) return if (GetTickCount64() >= until) error.BrowserRequestTimeout else error.PipeUnavailable;
             if (WaitNamedPipeA(command_pipe_name.ptr, @intCast(@min(50, remaining))) == 0) {
-                Sleep(@intCast(@min(10, until -| GetTickCount64())));
+                Sleep(@intCast(@min(10, connect_until -| GetTickCount64())));
             }
         }
     };
     defer _ = CloseHandle(command_pipe);
 
     try writeAll(command_pipe, request);
-    if (deadline) |until| {
-        while (GetTickCount64() < until) {
-            _ = ConnectNamedPipe(reply_pipe, null);
-            const response = readPipeMessage(allocator, reply_pipe) catch {
-                Sleep(10);
-                continue;
-            };
-            if (response.len > 0) return response;
-            allocator.free(response);
+    while (GetTickCount64() < until) {
+        _ = ConnectNamedPipe(reply_pipe, null);
+        const response = readPipeMessage(allocator, reply_pipe) catch {
             Sleep(10);
-        }
-        return error.ExtensionReloadTimeout;
+            continue;
+        };
+        if (response.len > 0) return response;
+        allocator.free(response);
+        Sleep(10);
     }
-    try waitForPipeClient(reply_pipe);
-
-    return readPipeMessage(allocator, reply_pipe);
+    return error.BrowserRequestTimeout;
 }
 
 fn saveScreenshotResponse(allocator: std.mem.Allocator, response: []const u8, output_path: []const u8) !void {
@@ -2118,8 +2129,9 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
     }
     defer _ = CloseHandle(pipe);
 
-    try writeAll(pipe, payload);
-    _ = FlushFileBuffers(pipe);
+    const mode: windows.DWORD = PIPE_NOWAIT;
+    if (SetNamedPipeHandleState(pipe, &mode, null, null) == 0) return true;
+    writeAll(pipe, payload) catch {};
     return true;
 }
 
@@ -2215,6 +2227,27 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
         return makeResultResponse(allocator, id, "{\"unlocked\":false}");
     }
 
+    if (std.mem.eql(u8, method, "nativeScreenshot")) {
+        const window_id = getI64(object.get("windowId")) orelse return makeErrorResponse(allocator, id, "native screenshot requires windowId");
+        const owner_pid = getI64(object.get("ownerPid")) orelse return makeErrorResponse(allocator, id, "native screenshot requires a registered hosted pane owner");
+        const png = @import("bridge_capture.zig").capture(allocator, window_id, owner_pid) catch |err| {
+            const message = try std.fmt.allocPrint(allocator, "native pane screenshot failed: {s}", .{@errorName(err)});
+            defer allocator.free(message);
+            return makeErrorResponse(allocator, id, message);
+        };
+        defer allocator.free(png);
+        const encoder = std.base64.standard.Encoder;
+        const data = try allocator.alloc(u8, encoder.calcSize(png.len));
+        defer allocator.free(data);
+        _ = encoder.encode(data, png);
+        var result = std.array_list.Managed(u8).init(allocator);
+        defer result.deinit();
+        try result.appendSlice("{\"via\":\"native-window\",\"dataUrl\":\"data:image/png;base64,");
+        try result.appendSlice(data);
+        try result.print("\",\"bytesApprox\":{d}}}", .{png.len});
+        return makeResultResponse(allocator, id, result.items);
+    }
+
     if (std.mem.eql(u8, method, "getUploadConfig")) {
         return makeUploadConfigResponse(allocator, id);
     }
@@ -2224,6 +2257,15 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     }
 
     return makeErrorResponse(allocator, id, "unknown method");
+}
+
+test "native screenshot requires exact pane identity instead of returning unknown method" {
+    const missing_window = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\"}");
+    defer std.testing.allocator.free(missing_window);
+    try std.testing.expect(std.mem.indexOf(u8, missing_window, "native screenshot requires windowId") != null);
+    const missing_owner = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\",\"windowId\":42}");
+    defer std.testing.allocator.free(missing_owner);
+    try std.testing.expect(std.mem.indexOf(u8, missing_owner, "registered hosted pane owner") != null);
 }
 
 fn commandLookup(command: []const u8) []const u8 {

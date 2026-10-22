@@ -286,7 +286,10 @@ function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
         $pane = Read-BrowserPane
         $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::PaneVisible($script:window)
     } 'browser docked before keyboard input' 25
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'browser launch returned foreground to app'
     return Assert-BrowserPane 'open' $Step $PreviousId
 }
 
@@ -347,6 +350,10 @@ function Assert-Foreground {
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'owned app foreground for keyboard input'
     Assert-Foreground
     Record $Label
     [VerifyNative]::Chord($Keys)
@@ -681,7 +688,13 @@ try {
                 if (Test-Path (Join-Path $scratch 'roaming/ZigShell')) {
                     $data = Join-Path $Evidence 'data/roaming'
                     New-Item -ItemType Directory -Force $data | Out-Null
-                    Copy-Item (Join-Path $scratch 'roaming/ZigShell') (Join-Path $data 'ZigShell') -Recurse -Force
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while ($true) {
+                        try { Copy-Item (Join-Path $scratch 'roaming/ZigShell') (Join-Path $data 'ZigShell') -Recurse -Force; break } catch {
+                            if ([DateTime]::UtcNow -ge $deadline) { throw }
+                            Start-Sleep -Milliseconds 200
+                        }
+                    }
                 }
             }
         }

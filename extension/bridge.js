@@ -24,6 +24,7 @@ const EXTERNAL_WINDOW_BOUNDS = { left: 90, top: 90, width: 1400, height: 900 };
 let port;
 const debuggedTabs = new Set();
 const cdpOperationChains = new Map();
+const cdpSessionCancels = new Map();
 const screenshotCdpDetachTimers = new Map();
 const screenshotCdpDetachInFlight = new Map();
 const screenshotCdpPageEnabledTabs = new Set();
@@ -68,9 +69,10 @@ let extensionReloadTimer;
 function connect() {
   if (port) return port;
 
-  port = chrome.runtime.connectNative(HOST);
+  const connectedPort = chrome.runtime.connectNative(HOST);
+  port = connectedPort;
 
-  port.onMessage.addListener((message) => {
+  connectedPort.onMessage.addListener((message) => {
     console.log("multiprompt browser bridge:", message);
     bridgeVersionCheckChain = bridgeVersionCheckChain.then(async () => {
       await checkBridgeVersion(message);
@@ -84,7 +86,8 @@ function connect() {
     });
   });
 
-  port.onDisconnect.addListener(() => {
+  connectedPort.onDisconnect.addListener(() => {
+    if (port !== connectedPort) return;
     console.warn("multiprompt browser bridge disconnected:", chrome.runtime.lastError?.message);
     port = undefined;
     rejectPendingHostReplies(chrome.runtime.lastError?.message || "native host disconnected");
@@ -294,7 +297,7 @@ async function handleHostMessage(message) {
       return;
     }
     sendResponse(message, { ok: true, result });
-    if (message.method === "extensionReload") scheduleExtensionReload();
+    if (message.method === "extensionReload" || (message.method === "reset" && result.reloadScheduled)) scheduleExtensionReload();
   } catch (error) {
     sendResponse(message, {
       ok: false,
@@ -327,6 +330,8 @@ async function dispatch(message) {
       return reloadAction(message);
     case "extensionReload":
       return { reloadScheduled: true };
+    case "reset":
+      return resetBridge(message);
     case "setTheme":
       return applyBrowserTheme(message);
     case "tabs":
@@ -383,7 +388,9 @@ async function rememberTargetWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) return;
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
+  await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
   await markZigShellWindow(wid);
 }
 
@@ -395,9 +402,10 @@ async function protectWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) throw new Error("protectWindow requires --window <id>");
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
-  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
+  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const owner = protectedWindowMeta.get(wid);
   if (shellId != null && owner?.shellId != null &&
@@ -1570,6 +1578,10 @@ function isExtensionTab(tab) {
   return [tab?.url, tab?.pendingUrl].some((url) => /^[a-z][a-z0-9+.-]*-extension:\/\//i.test(url || ""));
 }
 
+function isBrowserInternalTab(tab) {
+  return /^(?:chrome|edge|chrome-search|chrome-untrusted|devtools):/i.test(tab?.pendingUrl || tab?.url || "");
+}
+
 function paneContentTab(tabs) {
   const active = tabs.find((tab) => tab.active && !isExtensionTab(tab));
   if (active && !isPaneBeaconTab(active)) return active;
@@ -1641,7 +1653,7 @@ async function resolveExplicitTargetTab(windowId, message, required) {
 }
 
 async function ensureBackgroundTabFocusEmulation(tab) {
-  if (!tab?.id || tab.active || focusEmulatedTabs.has(tab.id)) return tab;
+  if (!tab?.id || tab.active || isBrowserInternalTab(tab) || focusEmulatedTabs.has(tab.id)) return tab;
   try {
     await withCdpSession(tab.id, (debuggee) =>
       chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }));
@@ -1717,6 +1729,9 @@ async function runInActiveTab(func, args = [], message) {
 
 async function textAction(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    throw new Error(`text is unavailable on browser-internal pages (${tab.pendingUrl || tab.url}): the browser blocks extension access; use screenshot for a native pane capture`);
+  }
   try {
     const limit = numberOr(message.limit, 2000);
     const frameResults = await runInAllFrames(tab.id, getVisibleText, [limit]);
@@ -2338,6 +2353,15 @@ function keyDescriptor(raw, shift) {
 
 async function captureScreenshotResult(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    const current = await chrome.tabs.get(tab.id);
+    if (!current.active || current.windowId !== message.windowId || !isBrowserInternalTab(current)) {
+      throw new Error("native screenshot requires the browser-internal tab to be selected in its hosted pane; refusing to capture another tab");
+    }
+    const owner = protectedWindowMeta.get(current.windowId);
+    const capture = await requestHostReply("nativeScreenshot", { windowId: current.windowId, ownerPid: owner?.ownerPid });
+    return { ...capture, tab: compactTab(current) };
+  }
   let dataUrl;
   let via = "Page.captureScreenshot";
   try {
@@ -2561,33 +2585,75 @@ function clearScreenshotCdpDetachTimer(tabId) {
 }
 
 function withCdpSession(tabId, operation) {
-  const previous = cdpOperationChains.get(tabId) || Promise.resolve();
-  const current = previous.catch(() => {}).then(async () => {
+  if (cdpOperationChains.get(tabId)) {
+    return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
+  }
+  let cancel;
+  const cancelled = new Promise((_, reject) => { cancel = reject; });
+  const current = Promise.resolve().then(async () => {
     clearScreenshotCdpDetachTimer(tabId);
-    const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
-    if (pendingDetach) await pendingDetach.catch(() => {});
-
     const debuggee = { tabId };
-    if (debuggedTabs.has(tabId)) {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
-    }
-    await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
-    debuggedTabs.add(tabId);
+    const checkSession = () => {
+      if (cdpOperationChains.get(tabId) !== current) throw new Error("CDP session reset; retry command");
+    };
     try {
-      await chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true });
-      return await withTimeout(operation(debuggee), 15000, "CDP operation timed out");
+      const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
+      if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
+      checkSession();
+      if (debuggedTabs.has(tabId)) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
+      checkSession();
+      debuggedTabs.add(tabId);
+      await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+      checkSession();
+      await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
+      checkSession();
+      return await withTimeout(operation(debuggee), 10000, "CDP operation timed out; run zsb reset");
     } finally {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
+      if (cdpOperationChains.get(tabId) === current) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
     }
   });
   cdpOperationChains.set(tabId, current);
-  return current.finally(() => {
-    if (cdpOperationChains.get(tabId) === current) cdpOperationChains.delete(tabId);
+  cdpSessionCancels.set(tabId, cancel);
+  return Promise.race([current, cancelled]).finally(() => {
+    if (cdpOperationChains.get(tabId) === current) {
+      cdpOperationChains.delete(tabId);
+      cdpSessionCancels.delete(tabId);
+    }
   });
+}
+
+async function resetBridge(message) {
+  const windowId = messageWindowId(message);
+  const tabs = await chrome.tabs.query(windowId == null ? {} : { windowId });
+  let reloadScheduled = false;
+  await Promise.all(tabs.map(async ({ id: tabId }) => {
+    cdpSessionCancels.get(tabId)?.(new Error("CDP session reset; retry command"));
+    cdpSessionCancels.delete(tabId);
+    cdpOperationChains.delete(tabId);
+    clearScreenshotCdpDetachTimer(tabId);
+    screenshotCdpDetachInFlight.delete(tabId);
+    await withTimeout(chrome.debugger.detach({ tabId }), 1000, "CDP reset detach timed out").catch((error) => {
+      if (error?.message === "CDP reset detach timed out") reloadScheduled = true;
+    });
+    debuggedTabs.delete(tabId);
+    screenshotCdpPageEnabledTabs.delete(tabId);
+    focusEmulatedTabs.delete(tabId);
+    consoleCaptureTabs.delete(tabId);
+  }));
+  const oldPort = port;
+  port = undefined;
+  oldPort?.disconnect();
+  bridgeVersionCheckChain = Promise.resolve();
+  connect();
+  return { reset: true, windowId, tabs: tabs.length, reloadScheduled };
 }
 
 async function tryAcceptPendingDialog(debuggee) {
@@ -2706,9 +2772,10 @@ function normalizeConsoleEvent(method, params) {
 
 async function resolveWindow(message) {
   await loadProtectedWindows();
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup"] });
   const normalIds = new Set(windows.filter((win) => !win.type || win.type === "normal").map((win) => win.id));
-  const tabs = (await chrome.tabs.query({})).filter((tab) => normalIds.has(tab.windowId) && !isExtensionTab(tab));
+  const paneIds = new Set(windows.filter((win) => normalIds.has(win.id) || win.type === "popup").map((win) => win.id));
+  const tabs = (await chrome.tabs.query({})).filter((tab) => paneIds.has(tab.windowId) && !isExtensionTab(tab));
   const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const match = typeof message?.match === "string" ? message.match : "";
@@ -2719,10 +2786,16 @@ async function resolveWindow(message) {
         (owner?.shellId == null || (owner.shellId === shellId && (ownerPid == null || owner.ownerPid === ownerPid)));
     });
     if (new Set(beacons.map((tab) => tab.windowId)).size > 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
-    if (beacons.length > 0) return { windowId: beacons[0].windowId, tab: compactTab(beacons[0]) };
+    if (beacons.length > 0) {
+      const windowId = beacons[0].windowId;
+      if (!normalIds.has(windowId)) {
+        await markZigShellWindow(windowId, { shellId, ownerPid: ownerPid ?? protectedWindowMeta.get(windowId)?.ownerPid });
+      }
+      return { windowId, tab: compactTab(beacons[0]) };
+    }
   }
   if (shellId != null) {
-    const owned = windows.filter((win) => normalIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
+    const owned = windows.filter((win) => paneIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
       (ownerPid == null || protectedWindowMeta.get(win.id)?.ownerPid === ownerPid));
     if (owned.length > 1) throw new Error(`ambiguous multiprompt pane windows for shell ${shellId}`);
     if (owned.length === 1) {
@@ -2731,7 +2804,7 @@ async function resolveWindow(message) {
     }
   }
   if (match) {
-    const hits = shellId != null ? [] : tabs.filter((tab) => typeof tab.url === "string" && tab.url.includes(match));
+    const hits = shellId != null ? [] : tabs.filter((tab) => normalIds.has(tab.windowId) && typeof tab.url === "string" && tab.url.includes(match));
     if (hits.length === 0) throw new Error(`no window with tab url matching: ${match}`);
     if (new Set(hits.map((tab) => tab.windowId)).size !== 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
     return { windowId: hits[0].windowId, tab: compactTab(hits[0]) };
