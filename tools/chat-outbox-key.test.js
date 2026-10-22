@@ -18,7 +18,7 @@ function execute(t, code, modules = []) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   copyZig(modules, dir);
   fs.writeFileSync(path.join(dir, 'test.zig'), code);
-  const result = spawnSync('zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
+  const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
