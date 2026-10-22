@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addOptions("build_config", stable_opts);
 
     b.installArtifact(exe);
+    b.step("update-verifier", "Build the signed-update release verifier").dependOn(&b.addInstallArtifact(exe, .{}).step);
 
     const probe = b.addExecutable(.{ .name = "font-probe", .root_module = b.createModule(.{
         .root_source_file = b.path("src/font_probe.zig"),
@@ -653,15 +654,15 @@ pub fn build(b: *std.Build) void {
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
-            dependency == &chat_cpu_regression.step)
+            dependency == &chat_cpu_regression.step or dependency == &version_stamp_tests.step or
+            dependency == &window_flicker_tests.step or dependency == &bridge_version_heal_tests.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
             dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
             1
-        else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step or
-            dependency == &frequent_integration_tests.step)
+        else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step)
             4
-        else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
+        else if (dependency == &run_sync_protocol_tests.step or dependency == &frequent_integration_tests.step or
             dependency == &console_font_lifecycle_tests.step or dependency == &launch_regression.step or
             dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
             dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step or

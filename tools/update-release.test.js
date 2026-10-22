@@ -37,6 +37,10 @@ test('Windows behavioral update tests are required by CI', () => {
   assert.match(update, /name: Wait for x64 update verifier/);
   assert.match(update, /ARTIFACT: update-verifier-x64-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/);
   assert.match(update, /AddMinutes\(4\)/);
+  assert.ok(update.indexOf('name: Prepare unsigned update fixtures') < update.indexOf('name: Wait for x64 update verifier'));
+  assert.match(build, /run: zig build update-verifier -Dtarget=x86_64-windows-gnu -Drelease=true --summary all/);
+  assert.ok(build.indexOf('actions/upload-artifact@') < build.indexOf('name: Build release executable for x64'));
+  assert.ok(read('build.zig').includes('b.step("update-verifier", "Build the signed-update release verifier").dependOn(&b.addInstallArtifact(exe, .{}).step)'));
   assert.match(update, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Could not list update artifacts' \}/);
   assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
   assert.match(update, /fail-fast: false/);

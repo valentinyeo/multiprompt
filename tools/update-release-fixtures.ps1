@@ -1,7 +1,8 @@
-param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root, [switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:OS -ne 'Windows_NT') { throw 'Fixtures run only in GitHub Windows' }
 New-Item -ItemType Directory -Force $Root | Out-Null
+if (-not (Test-Path -LiteralPath "$Root/extension.zip")) {
 $source = @'
 using System;
 using System.Diagnostics;
@@ -42,5 +43,7 @@ New-Item -ItemType Directory -Force "$Root/extension/themes/current" | Out-Null
 [IO.File]::WriteAllText("$Root/extension/manifest.json", '{"version":"2.0.0"}')
 [IO.File]::WriteAllText("$Root/extension/themes/current/manifest.json", '{"version":"9.0.0"}')
 Compress-Archive -Path "$Root/extension/*" -DestinationPath "$Root/extension.zip"
+}
+if ($PrepareOnly) { return }
 node "$PSScriptRoot/update-release-fixtures.mjs" $Root
 if ($LASTEXITCODE -ne 0) { throw 'Could not sign throwaway fixtures' }

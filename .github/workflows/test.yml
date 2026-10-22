@@ -252,6 +252,9 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Prepare unsigned update fixtures
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures" -PrepareOnly
       - name: Wait for x64 update verifier
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         env:
@@ -522,9 +525,9 @@ jobs:
       - name: Prepare throwaway update-test signing key
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der
-      - name: Build release executable for x64
+      - name: Build update verifier for x64
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
+        run: zig build update-verifier -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         with:
@@ -535,6 +538,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+      - name: Build release executable for x64
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
 
   test-result:
     name: test

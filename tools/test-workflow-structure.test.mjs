@@ -19,6 +19,8 @@ function verifyRouting(text) {
       assert.ok(job.indexOf('name: Wait for x64 update verifier') < job.indexOf('uses: actions/download-artifact@'));
       assert.match(job, /if \(\$artifacts\.artifacts \| Where-Object \{ \$_\.name -eq \$env:ARTIFACT -and -not \$_\.expired \}\) \{ break \}/);
       assert.match(job, /Timed out waiting for x64 update verifier/);
+      assert.ok(job.indexOf('name: Prepare unsigned update fixtures') < job.indexOf('name: Wait for x64 update verifier'));
+      assert.match(job, /update-release-fixtures\.ps1[^\n]+-PrepareOnly/);
     }
     const steps = job.split(/(?=^      - )/m).filter(step => step.startsWith('      - '));
     const checkout = steps.findIndex(step => step.includes('uses: actions/checkout@'));
@@ -48,7 +50,7 @@ test('each test job classifies after full-history checkout and gates all heavy s
   assert.match(build, /run\.has_side_effects = true;\s*run\.expectExitCode\(0\);/);
   assert.match(build, /b\.dupe\("--test-reporter=tap"\)/);
   assert.match(build, /b\.dupe\("--test-reporter-destination=stderr"\)/);
-  assert.match(build, /dependency == &run_sync_protocol_tests\.step or dependency == &version_stamp_tests\.step/);
+  assert.match(build, /dependency == &run_sync_protocol_tests\.step or dependency == &frequent_integration_tests\.step/);
 });
 
 test('routing checks reject the removed dependency, missing history, classifier and heavy guards', () => {
