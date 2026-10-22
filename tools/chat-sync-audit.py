@@ -43,7 +43,7 @@ def pane_candidates(capture):
             continue
         if re.match(r'^(?:Running \d+ shell commands?\b|Compacted while idle\b|Background command "|Monitor event:)', text):
             continue
-        if re.match(r'^Build in progress \(~?\d+(?:\.\d+)? min\); ', text):
+        if line.startswith('● ') and re.match(r'^Build in progress \(~?\d+(?:\.\d+)? min\); ', text):
             continue
         if re.fullmatch(r'[A-Z][a-z]+ing \d+ [^,…]+(?:(?:, [a-z]+ing \d+ [^,…]+)+…?|…)', text):
             continue

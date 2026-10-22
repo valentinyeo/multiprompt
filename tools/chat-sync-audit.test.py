@@ -82,9 +82,10 @@ class ChatSyncAuditTest(unittest.TestCase):
         capture = ['● Build in progress (~7 min); preparing preview images',
                    '● Build in progress: the compiler found a real error',
                    '● The build is still running; I will check it shortly',
-                   '❯ please check the actual build progress'] + [''] * 8
+                   '❯ please check the actual build progress',
+                   '❯ Build in progress (~7 min); keep this user prompt'] + [''] * 8
         candidates = audit.pane_candidates('\n'.join(capture) + '\n')
-        self.assertEqual([item['pane_line'] for item in candidates], [2, 3, 4])
+        self.assertEqual([item['pane_line'] for item in candidates], [2, 3, 4, 5])
 
     def test_igsh380_monitor_queue_records_are_not_missing_chat(self):
         reader = audit.load_reader()
