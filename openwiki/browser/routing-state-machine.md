@@ -1,5 +1,7 @@
 # Browser routing and isolation
 
+The browser pane stays docked in place and cannot be dragged away or maximized to full screen.
+
 The browser engine uses dedicated `%LOCALAPPDATA%\ZigShell\EdgeUserData` or `ChromeUserData` profiles. Normal browser windows, OS URL launches, and installed web apps do not share that profile. Tabs created inside a protected pane remain in it; navigation provenance is not used to eject them into the user's normal browser.
 
 Each browser-control command requires an exact session and browser window binding. App-level `workspace-list` and `session-open` bypass browser routing; see [workspace and tmux tabs](zsb-selftest.md#workspace-and-tmux-tabs). `multiprompt-browser` (`zsb` compatibility alias) uses the current tmux session only when `TMUX` is present. Outside tmux, set `ZSB_SESSION` explicitly. An ambient attached session never authorizes a headless caller.

@@ -1,0 +1,197 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
+const directory = '.claude/skills/verify-multiprompt';
+const pane = read('src/browser_pane.zig');
+const main = read('src/main.zig');
+const win = read('src/win32.zig');
+const driver = read(`${directory}/control.ps1`);
+const workflow = read('.github/workflows/verify.yml');
+const map = read(`${directory}/features/browser-pane-locked.md`);
+
+function body(source, name) {
+  const start = source.indexOf(`fn ${name}(`);
+  assert.notEqual(start, -1, `${name} exists`);
+  const end = source.indexOf('\n}', start);
+  assert.notEqual(end, -1, `${name} has a body`);
+  return source.slice(start, end + 2);
+}
+
+function guardContract(source) {
+  const style = body(source, 'lockedBrowserStyle');
+  for (const flag of ['WS_CAPTION', 'WS_THICKFRAME', 'WS_BORDER', 'WS_MAXIMIZEBOX', 'WS_MINIMIZEBOX']) assert.ok(style.includes(flag));
+  assert.match(style, /style & ~@as\(isize,/);
+  assert.match(body(source, 'browserDockWorker'), /lockedBrowserStyle\(GetWindowLongPtrW\(hwnd, GWL_STYLE\)\)/);
+  const decision = body(source, 'browserDockGuardAction');
+  assert.match(decision, /if \(!docked\) return \.none;\s*if \(zoomed\) return \.restore;/);
+  assert.match(decision, /if \(!browserRectMatchesTarget\([^\n]+\)\) return \.reposition;\s*return \.none;/);
+  const filter = body(source, 'dockedBrowserIndex');
+  assert.match(filter, /GetPropW\(hwnd, L\("ZigShellPaneOwner"\)\) != app_state.g_main_hwnd/);
+  assert.match(filter, /browser_hwnd == hwnd and !app_state.shells\[i\].browser_docking/);
+  const callback = body(source, 'browserDockWinEvent');
+  assert.match(callback, /EVENT_OBJECT_LOCATIONCHANGE and \(object != win.OBJID_WINDOW or child != 0\)/);
+  assert.match(callback, /dockedBrowserIndex\(hwnd\) orelse return/);
+  assert.match(callback, /EVENT_SYSTEM_MOVESIZESTART[\s\S]*PostMessageW\(hwnd, win.WM_CANCELMODE, 0, 0\)/);
+  assert.match(callback, /PostMessageW\(hwnd, win.WM_KEYDOWN, win.VK_ESCAPE,/);
+  assert.match(callback, /PostMessageW\(hwnd, win.WM_KEYUP, win.VK_ESCAPE,/);
+  assert.match(callback, /EVENT_SYSTEM_MOVESIZEEND/);
+  assert.match(callback, /if \(browser_dock_guard_pending\) return/);
+  assert.match(callback, /GetWindowRect\(hwnd, &current\)/);
+  assert.match(callback, /browserDockGuardAction\(true, win.IsZoomed\(hwnd\) != 0, current, target\) == \.none\) return/);
+  assert.match(callback, /browser_dock_guard_pending = PostMessageW\(app_state.g_main_hwnd, win.WM_APP_BROWSER_DOCK_GUARD, 0, 0\) != 0/);
+  assert.doesNotMatch(callback, /SetWindowPos|ReleaseCapture|SendMessageW/);
+  const handler = body(source, 'handleBrowserDockGuard');
+  assert.match(handler, /browser_dock_guard_pending = false/);
+  assert.match(handler, /if \(action == \.none\) continue/);
+  assert.match(handler, /if \(action == \.restore\) _ = ShowWindowAsync\(hwnd, win.SW_RESTORE\)/);
+  assert.match(handler, /parkBrowserWindow\(hwnd\)/);
+  assert.match(handler, /positionActiveBrowser\(\)/);
+  assert.doesNotMatch(handler, /SetWindowPos|setBrowserWindowPosAsync/);
+  assert.match(body(source, 'browserDockGuardTarget'), /g_monitor_transition.active or app_state.g_chat_browser_swap.shell_id != 0/);
+  assert.match(body(source, 'browserDockGuardTarget'), /idx != app_state.active_shell[\s\S]*browserChromeHiddenForOverlay\(\)[\s\S]*foregroundIsOurs\(\)/);
+  assert.match(body(source, 'browserDockGuardTarget'), /browserDockTarget\(calcBrowserLayout\(\)/);
+  const positioning = body(source, 'positionActiveBrowser');
+  assert.match(positioning, /browserDockTarget\(layout, native\)/);
+  assert.equal((positioning.match(/browserWindowNeedsPosition\(/g) || []).length, 2);
+  assert.match(positioning, /setBrowserWindowPosAsync\(/);
+  const install = body(source, 'installBrowserDockHooks');
+  assert.match(install, /SetWinEventHook\(win.EVENT_SYSTEM_MOVESIZESTART, win.EVENT_SYSTEM_MOVESIZEEND, null, browserDockWinEvent, 0, 0, win.WINEVENT_OUTOFCONTEXT\)/);
+  assert.match(install, /SetWinEventHook\(win.EVENT_OBJECT_LOCATIONCHANGE, win.EVENT_OBJECT_LOCATIONCHANGE, null, browserDockWinEvent, 0, 0, win.WINEVENT_OUTOFCONTEXT\)/);
+  const uninstall = body(source, 'uninstallBrowserDockHooks');
+  for (const hook of ['browser_move_size_hook', 'browser_location_hook']) assert.ok(uninstall.includes(`win.UnhookWinEvent(${hook})`));
+}
+
+test('dock guard source contract reuses idempotent positioning and cancels on the browser thread', () => {
+  guardContract(pane);
+  for (const [before, after] of [
+    ['fn lockedBrowserStyle(', 'fn oldBrowserStyle('],
+    [' | win.WS_MAXIMIZEBOX', ''],
+    ['if (!docked) return .none;', ''],
+    ['if (zoomed) return .restore;', ''],
+    ['!browserRectMatchesTarget(current,', 'browserRectMatchesTarget(current,'],
+    ['object != win.OBJID_WINDOW', 'object == win.OBJID_WINDOW'],
+    ['const idx = dockedBrowserIndex(hwnd) orelse return;', 'const idx: u32 = 0;'],
+    ['PostMessageW(hwnd, win.WM_CANCELMODE, 0, 0)', 'ReleaseCapture()'],
+    ['if (browser_dock_guard_pending) return;', ''],
+    ['_ = ShowWindowAsync(hwnd, win.SW_RESTORE);', '{}'],
+    ['win.WINEVENT_OUTOFCONTEXT', '1'],
+  ]) {
+    assert.ok(pane.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => guardContract(pane.replaceAll(before, after)), `reject ${before}`);
+  }
+});
+
+test('dock guard is installed and removed with the app lifetime and dispatched on the main thread', () => {
+  assert.match(main, /app_state.g_main_hwnd = hwnd;\s*@import\("browser_pane.zig"\).installBrowserDockHooks\(\);\s*defer @import\("browser_pane.zig"\).uninstallBrowserDockHooks\(\)/);
+  assert.match(main, /if \(msg == @import\("win32.zig"\).WM_APP_BROWSER_DOCK_GUARD\) \{\s*@import\("browser_pane.zig"\).handleBrowserDockGuard\(\)/);
+  assert.match(main, /uninstallForegroundHook\(\);\s*@import\("browser_pane.zig"\).uninstallBrowserDockHooks\(\)/);
+  for (const [name, value] of [['EVENT_SYSTEM_MOVESIZESTART', '0x000A'], ['EVENT_SYSTEM_MOVESIZEEND', '0x000B'], ['EVENT_OBJECT_LOCATIONCHANGE', '0x800B'], ['WM_CANCELMODE', '0x001F']]) {
+    assert.match(win, new RegExp(`pub const ${name}: \\w+ = ${value};`));
+  }
+  const messages = [...win.matchAll(/pub const (WM_APP_\w+): u32 = WM_APP \+ (\d+);/g)];
+  const guard = messages.find(match => match[1] === 'WM_APP_BROWSER_DOCK_GUARD');
+  assert.ok(guard);
+  assert.equal(messages.filter(match => match[2] === guard[2]).length, 1);
+});
+
+test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op and non-docked windows', () => {
+  assert.ok(main.includes('_ = @import("browser_pane.zig");'));
+  for (const name of [
+    'locked browser style removes maximize and minimize boxes',
+    'docked browser moved rect triggers snap back',
+    'docked browser zoomed pane triggers restore even at matching rect',
+    'docked browser matching rect is an idempotent no-op',
+    'non-docked browser window is ignored even when zoomed and moved',
+  ]) assert.ok(pane.includes(`test "${name}"`), name);
+});
+
+function journeyContract(source) {
+  const journey = source.slice(source.indexOf("        'browser-pane-locked' {"), source.indexOf("        'browser-pane-stuck' {"));
+  assert.ok(journey.length > 0);
+  for (const step of [
+    'verified release tag=$env:RELEASE_TAG version=$ExpectedVersion',
+    "Open-BrowserPane 'locked-open'", 'GetWindowRect($browser, [ref]$dockRect)',
+    'Focus-LockedBrowser $browser', 'Get-LockedBrowserStrip $browser $dockRect',
+    'DragBrowserStrip($browser, $script:window, $strip)',
+    "Assert-LockedBrowserRect $browser $dockRect 'drag-blocked'",
+    '[VerifyNative]::GetForegroundWindow() -ne $browser',
+    '[VerifyNative]::Chord(@(0x5B, 0x26))',
+    "Assert-LockedBrowserRect $browser $dockRect 'win-up-blocked'",
+    'DoubleClickBrowserStrip($browser, $script:window, $strip)',
+    "Assert-LockedBrowserRect $browser $dockRect 'maximize-blocked'",
+    "Snapshot 'after'",
+  ]) assert.ok(journey.includes(step), step);
+  assert.doesNotMatch(journey, /Press @|MoveWindow|PostMessage|SendMessage/);
+  const mouse = source.slice(source.indexOf('    static void MouseAt('), source.indexOf('    public static void ClickClient('));
+  assert.match(mouse, /SendInput\(1,/);
+  assert.match(mouse, /flags = flags \| 0xC001/);
+  assert.match(mouse, /GetProp\(pane, "ZigShellPaneOwner"\) != owner/);
+  assert.match(mouse, /GetForegroundWindow\(\) != pane/);
+  assert.match(mouse, /GetAncestor\(WindowFromPoint\(point\), 2\) != pane/);
+  assert.match(mouse, /MouseAt\(point.X, point.Y, 2\)/);
+  assert.match(mouse, /step <= 20/);
+  assert.match(mouse, /point.X - 300 \* step \/ 20, point.Y \+ 200 \* step \/ 20/);
+  assert.match(mouse, /finally \{ MouseAt\(point.X - 300, point.Y \+ 200, 4\); \}/);
+  assert.match(mouse, /new uint\[\] \{ 2, 4, 2, 4 \}/);
+  const exact = source.slice(source.indexOf('function Assert-LockedBrowserRect('), source.indexOf('function Get-LockedBrowserStrip('));
+  assert.match(exact, /ElapsedMilliseconds -ge 1000/);
+  assert.match(exact, /-not \[VerifyNative\]::IsZoomed\(\$Browser\)/);
+  for (const edge of ['Left', 'Top', 'Right', 'Bottom']) assert.ok(exact.includes(`$current.${edge} -eq $DockRect.${edge}`));
+  assert.match(exact, /exact dock rectangle and not zoomed" 5/);
+  assert.match(exact, /Write-Host "browser-pane-locked \$Step PASS"/);
+  const strip = source.slice(source.indexOf('function Get-LockedBrowserStrip('), source.indexOf('function Assert-ConnectedPaneStaysVisible('));
+  assert.match(strip, /\$DockRect.Top \+ 8/);
+  assert.match(strip, /ControlType.TabItem.*ControlType.Button.*ControlType.Edit/);
+  assert.match(strip, /Strip UIA ancestry does not reach the owned browser/);
+}
+
+test('real-input journey requires exact dock geometry after drag and each maximize gesture', () => {
+  journeyContract(driver);
+  for (const [before, after] of [
+    ['point.X - 300 * step / 20', 'point.X'],
+    ['MouseAt(point.X, point.Y, 2)', 'MouseAt(point.X, point.Y, 0)'],
+    ['$current.Right -eq $DockRect.Right', '$true'],
+    ['-not [VerifyNative]::IsZoomed($Browser)', '$true'],
+    ["Assert-LockedBrowserRect $browser $dockRect 'win-up-blocked'", ''],
+    ['[VerifyNative]::Chord(@(0x5B, 0x26))', '[VerifyNative]::Chord(@(0x26))'],
+    ['verified release tag=$env:RELEASE_TAG', 'verified release'],
+  ]) {
+    assert.ok(driver.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => journeyContract(driver.replaceAll(before, after)), `reject ${before}`);
+  }
+});
+
+test('pane-lock journey is mapped, indexed, allowed and included in the pull-request matrix', () => {
+  assert.match(driver, /ValidateSet\([^\n]*'browser-pane-locked'/);
+  assert.match(driver, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'\)\)/);
+  const features = JSON.parse(workflow.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)[1]);
+  for (const feature of ['appearance', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout']) assert.ok(features.includes(feature));
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n]*'browser-pane-locked'/);
+  assert.ok(workflow.includes('tools/check-browser-pane-locked.test.js'));
+  assert.ok(read(`${directory}/features/README.md`).includes('](browser-pane-locked.md)'));
+  assert.ok(read(`${directory}/SKILL.md`).includes('`browser-pane-locked`'));
+  for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) assert.ok(map.includes(`## ${section}`));
+  for (const marker of ['drag-blocked PASS', 'maximize-blocked PASS', 'tag=... version=...']) assert.ok(map.includes(marker));
+});
+
+test('existing browser recovery static contracts remain unchanged', async () => {
+  await import('./check-browser-pane-stuck.mjs');
+});
+
+
+test('changed code is comment-free and the user-facing fragment follows the changelog format', async () => {
+  const { strip } = await import('./strip-comments.mjs');
+  for (const [file, language] of [
+    ['src/browser_pane.zig', 'zig'], ['src/main.zig', 'zig'], ['src/win32.zig', 'zig'],
+    [`${directory}/control.ps1`, 'powershell'], ['.github/workflows/verify.yml', 'yaml'],
+    ['tools/check-browser-pane-locked.test.js', 'javascript'], ['tools/verify-multiprompt.test.js', 'javascript'],
+  ]) assert.equal(strip(read(file), language).commentLines, 0, file);
+  const fragment = read('changelog.d/IGSH-566-browser-pane-locked.md').trim();
+  assert.equal(fragment.split('\n').length, 1);
+  assert.equal(fragment, 'The browser pane stays in place: it can no longer be dragged away or maximized to full screen.');
+  assert.match(read('openwiki/browser/routing-state-machine.md'), /cannot be dragged away or maximized to full screen/);
+});

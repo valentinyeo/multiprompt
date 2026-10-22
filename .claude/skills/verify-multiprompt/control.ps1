@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-workspaces', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'browser-workspaces', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -18,7 +18,7 @@ switch ($Feature) {
         }
 }
 
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -151,6 +151,35 @@ public static class VerifyNative {
         }, IntPtr.Zero);
         if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
         return pane;
+    }
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    static void MouseAt(int x, int y, uint flags) {
+        int left = GetSystemMetrics(76), top = GetSystemMetrics(77);
+        int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
+        if (width <= 1 || height <= 1 || x < left || x >= left + width || y < top || y >= top + height) throw new InvalidOperationException("Mouse target outside the desktop");
+        Input input = new Input(); input.type = 0;
+        input.data.mouse = new Mouse { x = (int)Math.Round((x - left) * 65535.0 / (width - 1)), y = (int)Math.Round((y - top) * 65535.0 / (height - 1)), flags = flags | 0xC001 };
+        if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Browser strip SendInput failed");
+    }
+    static void RequireBrowserStrip(IntPtr pane, IntPtr owner, Point point) {
+        if (GetProp(pane, "ZigShellPaneOwner") != owner || GetAncestor(pane, 3) != owner ||
+            GetForegroundWindow() != pane || GetAncestor(WindowFromPoint(point), 2) != pane) throw new InvalidOperationException("Refusing mouse input outside the focused owned browser strip");
+    }
+    public static void DragBrowserStrip(IntPtr pane, IntPtr owner, Point point) {
+        RequireBrowserStrip(pane, owner, point);
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 2);
+        try {
+            for (int step = 1; step <= 20; step++) {
+                MouseAt(point.X - 300 * step / 20, point.Y + 200 * step / 20, 0);
+                Thread.Sleep(20);
+            }
+        } finally { MouseAt(point.X - 300, point.Y + 200, 4); }
+    }
+    public static void DoubleClickBrowserStrip(IntPtr pane, IntPtr owner, Point point) {
+        RequireBrowserStrip(pane, owner, point);
+        MouseAt(point.X, point.Y, 0);
+        foreach (uint flags in new uint[] { 2, 4, 2, 4 }) MouseAt(point.X, point.Y, flags);
     }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
@@ -588,6 +617,57 @@ function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     $pane = Assert-BrowserPane 'open' $Step $PreviousId
     Focus-BrowserPaneOwner $Step $pane.browser_connection_id
     return $pane
+}
+
+function Focus-LockedBrowser([IntPtr]$Browser) {
+    Doctor
+    if ([VerifyNative]::GetProp($Browser, 'ZigShellPaneOwner') -ne $script:window -or
+        [VerifyNative]::PaneWindow($script:window) -ne $Browser) { throw 'Browser lock ownership changed' }
+    [uint32]$browserPid = 0
+    [void][VerifyNative]::GetWindowThreadProcessId($Browser, [ref]$browserPid)
+    Wait-Until {
+        [VerifyNative]::FocusOwnedWindow($Browser, $browserPid, $script:window)
+        [VerifyNative]::GetForegroundWindow() -eq $Browser
+    } 'locked browser has real keyboard focus' 5
+}
+
+function Assert-LockedBrowserRect([IntPtr]$Browser, $DockRect, [string]$Step) {
+    $settle = [Diagnostics.Stopwatch]::StartNew()
+    Wait-Until {
+        $current = New-Object VerifyNative+Rect
+        $settle.ElapsedMilliseconds -ge 1000 -and
+            [VerifyNative]::GetProp($Browser, 'ZigShellPaneOwner') -eq $script:window -and
+            [VerifyNative]::PaneWindow($script:window) -eq $Browser -and
+            -not [VerifyNative]::IsZoomed($Browser) -and
+            [VerifyNative]::GetWindowRect($Browser, [ref]$current) -and
+            $current.Left -eq $DockRect.Left -and $current.Top -eq $DockRect.Top -and
+            $current.Right -eq $DockRect.Right -and $current.Bottom -eq $DockRect.Bottom
+    } "browser-pane-locked ${Step}: exact dock rectangle and not zoomed" 5
+    $current = New-Object VerifyNative+Rect
+    if (-not [VerifyNative]::GetWindowRect($Browser, [ref]$current)) { throw 'Locked browser rect unavailable' }
+    Save-Json @{ hwnd = $Browser.ToInt64(); dock = $DockRect; actual = $current; zoomed = [VerifyNative]::IsZoomed($Browser); tolerance = 0 } ("browser-pane-locked-$Step.json")
+    $result.checks += @{ name = "browser-pane-locked $Step"; rect = $current; tolerance = 0 }
+    Write-Host "browser-pane-locked $Step PASS"
+}
+
+function Get-LockedBrowserStrip([IntPtr]$Browser, $DockRect) {
+    $point = New-Object VerifyNative+Point
+    $point.X = $DockRect.Right - 160
+    $point.Y = $DockRect.Top + 8
+    if ($point.X -le $DockRect.Left -or $point.Y -ge $DockRect.Bottom) { throw 'Browser strip is too small' }
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint([Windows.Point]::new($point.X, $point.Y))
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $observed = @()
+    while ($null -ne $hit) {
+        $type = $hit.Current.ControlType.ProgrammaticName
+        $observed += @{ type = $type; name = $hit.Current.Name; handle = $hit.Current.NativeWindowHandle }
+        if ($type -in @('ControlType.TabItem', 'ControlType.Button', 'ControlType.Edit', 'ControlType.Hyperlink', 'ControlType.MenuItem')) { throw "Strip target is a control, not empty title area: $type" }
+        if ($hit.Current.NativeWindowHandle -eq $Browser.ToInt64()) { break }
+        $hit = $walker.GetParent($hit)
+    }
+    if ($null -eq $hit) { throw 'Strip UIA ancestry does not reach the owned browser' }
+    Save-Json @{ point = $point; ancestry = $observed } 'browser-pane-locked-strip.json'
+    return $point
 }
 
 function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
@@ -1081,7 +1161,7 @@ try {
         $state = Read-Inbox
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout')) {
+    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked')) {
         $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires installed Edge' }
         $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
@@ -1714,6 +1794,37 @@ try {
             $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale)
             Save-Json $proof 'pane-layout-pixels.json'
             $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-found', 'row-icon-found', 'group-line-clears-icon'); pixels = $proof }
+            Snapshot 'after'
+        }
+        'browser-pane-locked' {
+            Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
+            $script:browserShellId = (Read-Inbox).shells[0].sid
+            $pane = Open-BrowserPane 'locked-open'
+            $browser = [VerifyNative]::PaneWindow($script:window)
+            if ($browser -eq [IntPtr]::Zero) { throw 'No visible owned docked browser HWND' }
+            $dockRect = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetWindowRect($browser, [ref]$dockRect) -or [VerifyNative]::IsZoomed($browser)) { throw 'Initial browser dock rect unavailable or zoomed' }
+            Save-Json @{ hwnd = $browser.ToInt64(); rect = $dockRect; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'browser-pane-locked-dock.json'
+            Focus-LockedBrowser $browser
+            $strip = Get-LockedBrowserStrip $browser $dockRect
+            Snapshot 'action'
+            Doctor
+            Record 'Real SendInput drag: empty browser top strip 300px left and 200px down'
+            [VerifyNative]::DragBrowserStrip($browser, $script:window, $strip)
+            Assert-LockedBrowserRect $browser $dockRect 'drag-blocked'
+            Snapshot 'drag-blocked'
+            Focus-LockedBrowser $browser
+            Doctor
+            if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before Win+Up' }
+            Record 'Real SendInput Win+Up with the docked browser focused'
+            [VerifyNative]::Chord(@(0x5B, 0x26))
+            Assert-LockedBrowserRect $browser $dockRect 'win-up-blocked'
+            Focus-LockedBrowser $browser
+            $strip = Get-LockedBrowserStrip $browser $dockRect
+            Doctor
+            Record 'Real SendInput double-click on the same empty browser top strip'
+            [VerifyNative]::DoubleClickBrowserStrip($browser, $script:window, $strip)
+            Assert-LockedBrowserRect $browser $dockRect 'maximize-blocked'
             Snapshot 'after'
         }
         'browser-pane-stuck' {

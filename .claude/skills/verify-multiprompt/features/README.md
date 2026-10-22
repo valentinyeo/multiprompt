@@ -14,7 +14,7 @@ Read the matching feature before dispatching. Each file uses four sections: sub-
 
 Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; a new workflow can first run through the PR trigger, defaulting to appearance. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
-Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Coordinates never target input.
+Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. The browser-pane-locked journey alone targets an ownership-checked empty browser strip with real mouse input.
 
 ## Proof and failure reporting
 
@@ -39,6 +39,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
 - [Pane layout](pane-layout.md): keep the console focus border continuous, the pane gap clear and the gray group line separate from the first session icon.
+- [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
