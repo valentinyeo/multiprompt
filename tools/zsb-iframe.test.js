@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { randomUUID } = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(process.env.ZSB_IFRAME_BRIDGE_JS || path.join(root, "extension/bridge.js"), "utf8");
@@ -220,6 +221,22 @@ test("IGSH-305 frames is a read-only frame list with parent IDs, not Target acce
   assert.equal(result.frames[2].url, "https://embed.test/app");
   assert.equal(h.calls.length, 0);
   assert.equal(h.scripts.length, 0);
+});
+
+test("IGSH-305 SSH help exposes frames and frame eval without a session or transport", () => {
+  const wrapper = process.env.ZSB_IFRAME_WRAPPER || path.join(root, "tools/vps-multiprompt-browser.sh");
+  for (const flag of ["--help", "-h"]) {
+    for (const command of ["frames", "eval", "script", "click"]) {
+      const result = spawnSync("bash", [wrapper, command, flag], {
+        encoding: "utf8", timeout: 5000, env: { ...process.env, TMUX: "", ZSB_SESSION: "" },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(result.stdout.startsWith(`usage: zsb ${command} `), result.stdout);
+      if (command === "eval" || command === "script") assert.match(result.stdout, /--frame ID/);
+      if (command === "frames") assert.match(result.stdout, /parentFrameId/);
+      if (command === "click") assert.match(result.stdout, /frame-dom-fallback/);
+    }
+  }
 });
 
 test("IGSH-305 CLI exposes frame eval and read-only frames, and CI runs these regressions", () => {
