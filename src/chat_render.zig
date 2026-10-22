@@ -173,7 +173,7 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const cancelPendingNativeBrowserFocus = @import("focus.zig").cancelPendingNativeBrowserFocus;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
-const navigateBrowserPaneWithActivation = @import("browser_pane.zig").navigateBrowserPaneWithActivation;
+const openSessionLink = @import("browser_pane.zig").openSessionLink;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
 const requestWebView2Focus = @import("browser_pane.zig").requestWebView2Focus;
 const pointInRect = @import("chat_composer.zig").pointInRect;
@@ -1760,7 +1760,7 @@ fn chatImageAt(x: i32, y: i32, out: []u8) ?[]const u8 {
 
 fn chatOpenUrlBytes(url: []const u8) void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    navigateBrowserPaneWithActivation(app_state.active_shell, url, true);
+    if (!openSessionLink(app_state.active_shell, url)) return;
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
 
@@ -3340,6 +3340,23 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
     return chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y }, disp.start, null);
 }
 
+fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
+    const range = link orelse return null;
+    return buf[range.start..range.end];
+}
+
+test "IGSH-574 Copy link uses only the clicked URL without trailing punctuation" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const buf = w("See https://example.com/a). and more text");
+    const link = link_detect.next(buf, 0) orelse return error.TestUnexpectedResult;
+    const copied = chatContextLinkText(buf, link) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, w("https://example.com/a"), copied);
+    var bytes: [128]u8 = undefined;
+    const n = clickedLinkUrl(buf[link.start..link.end], &bytes) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("https://example.com/a", bytes[0..n]);
+    try std.testing.expect(chatContextLinkText(buf, null) == null);
+}
+
 fn clickedLinkUrl(url: []const u16, bytes: []u8) ?usize {
     var it = std.unicode.Utf16LeIterator.init(url);
     var n: usize = 0;
@@ -3398,7 +3415,7 @@ pub fn openClickedLink(url: []const u16) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     var bytes: [8192]u8 = undefined;
     const n = clickedLinkUrl(url, &bytes) orelse return;
-    navigateBrowserPaneWithActivation(app_state.active_shell, bytes[0..n], true);
+    if (!openSessionLink(app_state.active_shell, bytes[0..n])) return;
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
 
@@ -3873,6 +3890,15 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const menu = CreatePopupMenu();
             if (menu == null) return 0;
             defer _ = DestroyMenu(menu);
+            const link_text: ?[]u16 = if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
+                std.heap.page_allocator.dupe(u16, text) catch {
+                    showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+                    return 0;
+                }
+            else
+                null;
+            defer if (link_text) |text| std.heap.page_allocator.free(text);
+            if (link_text != null) _ = AppendMenuW(menu, MF_STRING, 7, L("Copy link"));
             const echo_id = chatEchoAt(GET_X(lp), GET_Y(lp));
             if (echo_id) |id| {
                 if (chatOutboxIndexById(id)) |ei| {
@@ -3913,6 +3939,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
             switch (cmd) {
+                7 => if (link_text) |text| chatCopyTextToClipboard(text),
                 1 => chatCopyTextToClipboard(if (copy_target == .selection) selection_text else message_text),
                 2 => chatSelectAll(),
                 3 => chatCopyTextToClipboard(message_text),

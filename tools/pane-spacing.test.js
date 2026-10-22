@@ -34,7 +34,7 @@ function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
     fn(read('drawing'), 'uiScaled'),
-    ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
+    ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
@@ -131,7 +131,7 @@ fn positionWebView2() void {}
 fn positionActiveBrowser() void {
     const layout = calcBrowserLayout() orelse return;
     const bh: HANDLE = @ptrFromInt(3);
-${fn(browser, 'positionActiveBrowser').slice(fn(browser, 'positionActiveBrowser').indexOf('    var pt = POINT'), fn(browser, 'positionActiveBrowser').indexOf('\n    } else {'))}
+${fn(browser, 'positionActiveBrowser').slice(fn(browser, 'positionActiveBrowser').indexOf('    const native = app_state.shells[app_state.active_shell].browser_native;'), fn(browser, 'positionActiveBrowser').indexOf('\n    } else {'))}
     }
 }
 const pane_style = struct {
@@ -458,7 +458,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     for (const [name, mutate] of [
-      ['native focus inset', text => text.replace('const target_x = pt.x;', 'const target_x = pt.x + uiScaled(10);')],
+      ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],
       ['corner displacement', text => text.replace('moveBrowserEdgeMask(side, rc.left, rc.top,', 'moveBrowserEdgeMask(side, rc.left + 1, rc.top,')],
       ['old splitter origin', text => text.replace('x - pane.left - @divTrunc(style.paneGap(), 2)', 'x - SIDEBAR_W()')],
       ['dead shell full width', text => text.replace('const full_width = app_state.shells[app_state.active_shell].full_width;', 'const full_width = false;')],

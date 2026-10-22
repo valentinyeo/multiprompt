@@ -81,7 +81,7 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
-const navigateBrowserPaneWithActivation = @import("browser_pane.zig").navigateBrowserPaneWithActivation;
+const openSessionLink = @import("browser_pane.zig").openSessionLink;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
 const hideActiveBrowser = @import("browser_pane.zig").hideActiveBrowser;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
@@ -406,7 +406,7 @@ pub fn openUrlByIndex(idx: u32) void {
     if (len + 1 > 2100) return;
     var url8: [2100]u8 = undefined;
     for (0..len) |i| url8[i] = if (app_state.g_url_picker_storage[off + i] < 128) @intCast(app_state.g_url_picker_storage[off + i]) else '?';
-    navigateBrowserPaneWithActivation(app_state.active_shell, url8[0..len], true);
+    if (!openSessionLink(app_state.active_shell, url8[0..len])) return;
     if (webView2OwnsActiveShell()) {
         requestWebView2Focus();
     } else {

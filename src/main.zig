@@ -595,6 +595,7 @@ const SEARCH_BROWSER_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_URL_OF
 const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_INSTRUCT_OFFSET;
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
+const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -957,7 +958,7 @@ const browserHistoryNav = @import("browser_pane.zig").browserHistoryNav;
 const runActiveBrowserShotUrl = @import("browser_pane.zig").runActiveBrowserShotUrl;
 const pollBrowserUrlTick = @import("browser_pane.zig").pollBrowserUrlTick;
 const navigateBrowserPane = @import("browser_pane.zig").navigateBrowserPane;
-const navigateBrowserPaneWithActivation = @import("browser_pane.zig").navigateBrowserPaneWithActivation;
+const openSessionLink = @import("browser_pane.zig").openSessionLink;
 const openBrowserPaneForShell = @import("browser_pane.zig").openBrowserPaneForShell;
 const setBrowserUrlFromSearch = @import("browser_pane.zig").setBrowserUrlFromSearch;
 const calcBrowserLayout = @import("browser_pane.zig").calcBrowserLayout;
@@ -1269,7 +1270,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.815";
+pub const APP_VERSION = "0.28.818";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1376,6 +1377,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         handleBrowserWindowResolved(@ptrFromInt(@as(usize, @bitCast(lp))));
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_BROWSER_DOCK_GUARD) {
+        @import("browser_pane.zig").handleBrowserDockGuard();
+        return 0;
+    }
     if (msg == WM_APP_BROWSER_DOCKED) {
         const job: *BrowserDockJob = @ptrFromInt(@as(usize, @bitCast(lp)));
         finishBrowserDock(job);
@@ -1425,6 +1430,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         return 0;
     }
     switch (msg) {
+        WM_SYSCOMMAND => {
+            if ((wp & 0xFFF0) == @import("win32.zig").SC_MAXIMIZE and activeBrowserHasForegroundFocus()) return 0;
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        },
         WM_APP_UPDATE_CHANGED => {
             if (wp != 0) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
@@ -4250,6 +4259,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_WIN_SNAP => {
+            if (wp == 2 and activeBrowserHasForegroundFocus()) return 0;
             var mi: MONITORINFO = std.mem.zeroes(MONITORINFO);
             mi.cbSize = @sizeOf(MONITORINFO);
             const mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -5411,6 +5421,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (target == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET) {
+                    app_state.g_external_browser_links = !app_state.g_external_browser_links;
+                    saveSession();
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    syncMouseHookForUrlClicks();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (target == SEARCH_BROWSER_AUTOSUSPEND_OFFSET) {
                     app_state.g_browser_autosuspend = !app_state.g_browser_autosuspend;
                     if (app_state.g_browser_autosuspend and app_state.g_browser_suspend_min == 0) app_state.g_browser_suspend_min = BROWSER_SUSPEND_DEFAULT_MIN;
@@ -5559,7 +5581,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     showActiveShellAfterOverlay();
                     if (target == SEARCH_LADDER_DASH_OFFSET) {
                         if (app_state.g_ai_pace.from_ladder and app_state.g_ai_pace.ladder_dashboard_len > 0) {
-                            navigateBrowserPaneWithActivation(app_state.active_shell, app_state.g_ai_pace.ladder_dashboard[0..app_state.g_ai_pace.ladder_dashboard_len], true);
+                            _ = openSessionLink(app_state.active_shell, app_state.g_ai_pace.ladder_dashboard[0..app_state.g_ai_pace.ladder_dashboard_len]);
                         } else {
                             showHeaderNoticeAscii("Token Ladder: no dashboard link yet", 3000, false);
                         }
@@ -7759,6 +7781,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_chat_code_font = null;
             uninstallHook();
             uninstallForegroundHook();
+            @import("browser_pane.zig").uninstallBrowserDockHooks();
             closeWebView2();
             resetGdiCache();
             if (app_state.g_urlbar_hwnd != null) {
@@ -7984,6 +8007,8 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
+    @import("browser_pane.zig").installBrowserDockHooks();
+    defer @import("browser_pane.zig").uninstallBrowserDockHooks();
     defer if (app_state.g_account_instance_mutex != null) {
         _ = ReleaseMutex(app_state.g_account_instance_mutex);
         _ = CloseHandle(app_state.g_account_instance_mutex);

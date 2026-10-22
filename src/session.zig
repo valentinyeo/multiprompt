@@ -621,6 +621,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + setting.len], setting);
         pos += setting.len;
     }
+    if (!app_state.g_external_browser_links and pos + 36 < json_buf.len) {
+        const setting = ",\"external_browser_links\":false";
+        @memcpy(json_buf[pos .. pos + setting.len], setting);
+        pos += setting.len;
+    }
     if (!app_state.g_eta_numbers_on and pos + 32 < json_buf.len) {
         const etn = ",\"eta_numbers\":false";
         @memcpy(json_buf[pos .. pos + etn.len], etn);
@@ -1541,6 +1546,7 @@ pub fn restoreSession() u32 {
     if (app_state.g_chat_view_mode == .everywhere and json_reader.boolTrue(json, "chat_active")) app_state.g_chat_view_restore_on = true;
     app_state.g_igsh354_paste_focus = !json_reader.boolFalse(json, "igsh354_paste_focus");
     app_state.g_voice_always_listen = !json_reader.boolFalse(json, "voice_always_listen");
+    app_state.g_external_browser_links = !json_reader.boolFalse(json, "external_browser_links");
     if (json_reader.boolFalse(json, "eta_numbers")) app_state.g_eta_numbers_on = false;
     if (json_reader.boolFalse(json, "eta_progress")) app_state.g_eta_progress_on = false;
     const voice_speed = json_reader.string(json_reader.field(json, "voice_speed")) orelse "";
