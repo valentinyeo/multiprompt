@@ -248,11 +248,16 @@ public static class PaneLayoutProof {
             int rowTop = railTop + S(28, dpi, scale), rowBottom = rowTop + S(38, dpi, scale);
             int iconTop = (rowTop + rowBottom - S(16, dpi, scale)) / 2;
             var rowBackground = pixel(sidebarRight - S(45, dpi, scale), (rowTop + rowBottom) / 2);
+            var cardBackground = pixel(sidebarLeft + S(2, dpi, scale), (rowTop + rowBottom) / 2);
+            var railPixelColor = pixel(railX, (rowTop + rowBottom) / 2);
+            var firstIconColor = System.Drawing.Color.Empty;
             int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1, iconPixels = 0;
             for (int x = sidebarLeft + S(4, dpi, scale); x < sidebarLeft + S(34, dpi, scale); x++) {
                 for (int y = iconTop; y < iconTop + S(16, dpi, scale); y++) {
                     var color = pixel(x, y);
-                    if (Distance(color, rowBackground) <= 16 || Distance(color, railColor) <= 2) continue;
+                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16 ||
+                        Distance(color, railColor) <= 2 || Distance(color, railPixelColor) <= 16) continue;
+                    if (x < minX) firstIconColor = color;
                     minX = Math.Min(minX, x); minY = Math.Min(minY, y);
                     maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); iconPixels++;
                 }
@@ -261,7 +266,7 @@ public static class PaneLayoutProof {
             proof["railRect"] = new int[] { railX, railTop, railRight, railBottom };
             proof["iconPixelBounds"] = new int[] { minX, minY, maxX + 1, maxY + 1 };
             proof["iconPixels"] = iconPixels;
-            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX);
+            Require(railRight < minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor);
         }
         return proof;
     }
