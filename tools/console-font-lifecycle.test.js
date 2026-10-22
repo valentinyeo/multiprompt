@@ -629,7 +629,6 @@ test('IGSH-457 console lifecycle harness includes Starred workspace dependencies
   assert.doesNotMatch(source, /@import\("inbox.zig"\)/);
 });
 
-test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold after events and queued sync work', () => {
 test('IGSH-522 console lifecycle harness resolves workspace focus handoff dependencies', () => {
   const source = harness();
   assert.doesNotMatch(source, /@import\("focus\.zig"\)/);
@@ -641,7 +640,7 @@ test('IGSH-522 console lifecycle harness resolves workspace focus handoff depend
   assert.match(source, /!app_state\.g_restoring and !app_state\.g_account_applying and foregroundIsOurs\(\)/);
 });
 
-test('extracted production console lifecycle keeps literal Hack after events and queued sync work', () => {
+test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold after events and queued sync work', () => {
   const dir = fs.mkdtempSync(path.join(process.env.CONSOLE_FONT_TEST_TMP || os.tmpdir(), 'console-font-lifecycle-'));
   try {
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
