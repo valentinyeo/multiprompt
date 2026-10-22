@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.802", .items = &.{
+        .{ .text = "Server address, port and username changes now sync between your laptops while keeping your local credentials and backing up your SSH settings.", .ticket = "IGSH-252" },
+        .{ .text = "Chat sync checks no longer report missing conversations for resumed Claude sessions.", .ticket = "IGSH-412" },
+        .{ .text = "Chat tables stay quick when you switch between tabs.", .ticket = "IGSH-436" },
+        .{ .text = "Tabs opened at launch are saved again, so they come back after a restart.", .ticket = "IGSH-543" },
+    } },
     .{ .ver = "0.28.801", .items = &.{
         .{ .text = "Run several browser debugging commands in one session, with event waits and complete profiling results saved to a file.", .ticket = "IGSH-221" },
     } },
