@@ -252,11 +252,10 @@ public static class PaneLayoutProof {
             var railPixelColor = pixel(railX, (rowTop + rowBottom) / 2);
             var firstIconColor = System.Drawing.Color.Empty;
             int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1, iconPixels = 0;
-            for (int x = sidebarLeft + S(4, dpi, scale); x < sidebarLeft + S(34, dpi, scale); x++) {
+            for (int x = railRight; x < sidebarLeft + S(34, dpi, scale); x++) {
                 for (int y = iconTop; y < iconTop + S(16, dpi, scale); y++) {
                     var color = pixel(x, y);
-                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16 ||
-                        Distance(color, railColor) <= 2 || Distance(color, railPixelColor) <= 16) continue;
+                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16) continue;
                     if (x < minX) firstIconColor = color;
                     minX = Math.Min(minX, x); minY = Math.Min(minY, y);
                     maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); iconPixels++;
