@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
@@ -13,7 +13,7 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
-async function zig(code, filter, state = true, expected = 0) {
+async function zig(code, filter, state = true, expected = 0, failure = /expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
@@ -29,7 +29,7 @@ async function zig(code, filter, state = true, expected = 0) {
     });
     assert.equal(result.status, expected, result.stdout + result.stderr);
     if (expected === 0) assert.match(result.stderr, /All \d+ tests passed/);
-    else assert.match(result.stderr, /expected 15000, found 1000/);
+    else assert.match(result.stderr, failure);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -39,7 +39,7 @@ const std = @import("std");
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
-    kind: ShellKind = .tmux, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
+    kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
@@ -118,13 +118,35 @@ fn repositionActive() void {}
 fn fetchTmuxSessions() void {}
 ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 = 60000; ' + body('hostProbeBusy', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + body('reconnectAllowed', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + ' };'}
 `;
-function runtime(tests) {
+function runtime(tests, input = source) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
+  return prelude + functions.map(name => body(name, input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
 }
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
+  const loadingChecks = `
+test "ISSUE-543 loading remote tabs" {
+    for ([_]ShellKind{ .tmux, .vps, .vps2 }) |kind| {
+        shells[0] = .{ .kind = kind, .console_inflight = true, .process = null };
+        sshAutoReconnectTick();
+        sshDisconnect(0, "test");
+        markSshTabDisconnected(0);
+        sshReconnectNow(0);
+        sshReconnectArm(null, "resume");
+        try std.testing.expect(!shells[0].disconnected);
+        try std.testing.expectEqual(@as(usize, 0), spawns);
+        try std.testing.expectEqual(@as(usize, 0), kills);
+    }
+}
+`;
+  test('ISSUE-543 loading remote tabs ignore timer disconnect manual reconnect and resume signals', async () => {
+    await zig(runtime(loadingChecks), 'ISSUE-543 loading');
+  });
+  test('ISSUE-543 negative control: original reconnect tick disconnects a loading tab', async () => {
+    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })).join('\n').replaceAll('app_state.', '');
+    await zig(runtime(loadingChecks, original), 'ISSUE-543 loading', true, 1, /TestUnexpectedResult/);
+  });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
     if (modern) {
       await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-501 imported logic" { _ = reconnect; }', 'ISSUE-501');
@@ -266,17 +288,17 @@ fn sshProbeThread(_: *SshProbeJob) void {}
       body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + tests;
   }
 
-  function startupRuntime(tests) {
-    const spawn = body('spawnShellWithSession');
-    const start = spawn.indexOf('    if (CreateProcessW(');
-    const end = spawn.indexOf('    var style = GetWindowLongPtrW(', start);
-    assert.ok(start >= 0 && end > start);
-    const acquisition = spawn.slice(start, end).replace('    if (cmd_hwnd != null) {\n', '');
-    const registrationStart = spawn.indexOf('    registerShellExitWait(idx);');
-    const registrationEnd = spawn.indexOf('\n\n    if (!', registrationStart);
-    assert.ok(registrationStart >= 0 && registrationEnd > registrationStart);
-    const registration = spawn.slice(registrationStart, registrationEnd).replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect');
-    return runtime('') + `
+function startupRuntime(tests) {
+  const spawn = body('spawnShellWithSession');
+  const start = spawn.indexOf('    if (!asynchronous and CreateProcessW(');
+  const end = spawn.indexOf('    var style = GetWindowLongPtrW(', start);
+  assert.ok(start >= 0 && end > start);
+  const acquisition = spawn.slice(start, end).replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
+  const registrationStart = spawn.indexOf('    registerShellExitWait(idx);');
+  const registrationEnd = spawn.indexOf('\n\n    if (!', registrationStart);
+  assert.ok(registrationStart >= 0 && registrationEnd > registrationStart);
+  const registration = spawn.slice(registrationStart, registrationEnd).replaceAll('@import("chat_send.zig").sshDisconnect', 'sshDisconnect');
+  return runtime('') + `
 const HANDLE = ?*anyopaque;
 const STARTUPINFOW = struct { cb: u32 = 0 };
 const PROCESS_INFORMATION = struct { hProcess: HANDLE = @ptrFromInt(1), hThread: HANDLE = @ptrFromInt(2), dwProcessId: u32 = 7 };
@@ -302,6 +324,7 @@ fn spawnStartup(kind: ShellKind) bool {
     const title_id: usize = 0;
     const cmd_ptr = null;
     const cwd_ptr = null;
+    const asynchronous = false;
     var si: STARTUPINFOW = .{};
     var pi: PROCESS_INFORMATION = .{};
 ${acquisition}

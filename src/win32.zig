@@ -527,6 +527,7 @@ pub extern "user32" fn IsWindowVisible(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetWindow(HANDLE, UINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetLastActivePopup(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMessageW(*MSG, HANDLE, UINT, UINT) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetMessageTime() callconv(WINAPI) LONG;
 pub extern "user32" fn TranslateMessage(*const MSG) callconv(WINAPI) BOOL;
 pub extern "user32" fn DispatchMessageW(*const MSG) callconv(WINAPI) LRESULT;
 pub extern "user32" fn DefWindowProcW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
@@ -1429,3 +1430,8 @@ pub extern "gdi32" fn GetFontData(HANDLE, DWORD, DWORD, ?*anyopaque, DWORD) call
 pub extern "user32" fn UpdateWindow(hWnd: HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceCounter(value: *i64) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceFrequency(value: *i64) callconv(WINAPI) BOOL;
+
+pub extern "kernel32" fn GetEnvironmentStringsW() callconv(WINAPI) ?[*:0]u16;
+pub extern "kernel32" fn FreeEnvironmentStringsW([*:0]u16) callconv(WINAPI) BOOL;
+pub extern "user32" fn MsgWaitForMultipleObjects(DWORD, ?[*]const HANDLE, BOOL, DWORD, DWORD) callconv(WINAPI) DWORD;
+pub extern "user32" fn PeekMessageW(*MSG, HANDLE, UINT, UINT, UINT) callconv(WINAPI) BOOL;

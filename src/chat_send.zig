@@ -1639,7 +1639,7 @@ pub fn armSshReconnectTimerIfNeeded() void {
     var urgent = any;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         any = true;
         if (shell.disconnected or shell.ssh_reconnect.phase != .connected) urgent = true;
     }
@@ -1658,7 +1658,7 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
         if (affected != null and affected.? != i) continue;
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
         } else if (shell.process == null or !shellProcessAliveForRead(i)) {
@@ -1672,7 +1672,7 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
 pub fn sshDisconnect(idx: u32, reason: []const u8) void {
     if (idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
-    if (shell.ssh_reconnect.phase == .closed) return;
+    if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) return;
     var exit_code: DWORD = std.math.maxInt(DWORD);
     const got_code = shell.process != null and GetExitCodeProcess(shell.process, &exit_code) != 0;
     var buf: [224]u8 = undefined;
@@ -1685,7 +1685,7 @@ pub fn sshReconnectNow(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
-    if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
+    if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
     shell.ssh_reconnect.manual(GetTickCount64());
     shell.disconnected = true;
     sshReconnectAttempt(idx);
@@ -1693,7 +1693,7 @@ pub fn sshReconnectNow(idx: u32) void {
 
 fn sshReconnectAttempt(idx: u32) void {
     const shell = &app_state.shells[idx];
-    if (shell.ssh_reconnect.phase != .disconnected) return;
+    if (shell.console_inflight or shell.ssh_reconnect.phase != .disconnected) return;
     shell.ssh_reconnect.start();
     var buf: [160]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect attempt={d} id={d} delay_ms={d}", .{ shell.ssh_reconnect.attempts, shell.shell_id, shell.ssh_reconnect.delay_ms }) catch return);
@@ -1722,7 +1722,7 @@ pub fn sshAutoReconnectTick() void {
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
         } else if (shell.process != null and !shellProcessAliveForRead(i)) {
@@ -1784,7 +1784,7 @@ fn sshProbeStart() void {
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
     for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if (shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.tmux_session_len == 0 or GetTickCount64() -| shell.spawn_tick < 3000) continue;
+        if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.tmux_session_len == 0 or GetTickCount64() -| shell.spawn_tick < 3000) continue;
         job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len };
         job.count += 1;
     }

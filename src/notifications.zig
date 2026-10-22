@@ -181,7 +181,13 @@ pub fn logNotifyListenerStatus(label: []const u8, port: u16, err: i32) void {
     debugLog(buf[0..pos]);
 }
 
+pub const ListenerStatus = enum(u8) { pending, ready, failed };
+pub var listener_status = std.atomic.Value(ListenerStatus).init(.pending);
+
 pub fn notifyListenerThread() void {
+    defer if (listener_status.load(.acquire) == .pending) {
+        listener_status.store(.failed, .release);
+    };
     crash_recorder.guardThread();
     var wsa: WSADATA = undefined;
     if (WSAStartup(0x0202, &wsa) != 0) {
@@ -217,6 +223,7 @@ pub fn notifyListenerThread() void {
         return;
     }
     app_state.g_notify_bound_port = bound_port;
+    listener_status.store(.ready, .release);
     logNotifyListenerStatus("listening", bound_port, 0);
 
     while (true) {

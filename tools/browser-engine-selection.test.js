@@ -54,7 +54,10 @@ test("Ctrl+K exposes the global dedicated-browser choice", () => {
 });
 
 test("Ctrl+K has an explicit browser-pane recovery command", () => {
-  assert.match(source, /SEARCH_BROWSER_TOGGLE_OFFSET => "open browser pane"/);
+  assert.match(
+    functionBody("palettePrimaryLabel", "asciiStartsWithCI"),
+    /SEARCH_BROWSER_TOGGLE_OFFSET => if \(active_shell < shell_count and shells\[active_shell\]\.browser_open_failed\) "retry browser pane" else if \(active_shell < shell_count and shells\[active_shell\]\.browser_hwnd == null and shells\[active_shell\]\.browser_launch_tick != 0\) "close browser pane" else "open browser pane"/,
+  );
   assert.match(source, /L\("Open Browser Pane"\)/);
   assert.match(
     source,

@@ -16,7 +16,7 @@ async function setup(t) {
   fs.writeFileSync(exe, pe);
   const run = { ...goodRun(), status: 'PASS', pass: true, failures: [], config: structuredClone(defaults), exe,
     binary: { version: '0.28.739', exeSha256: hash(exe) },
-    runnerHashes: Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c', ssh: 'ssh-fixture.c' }).map(([key, file]) => [key, hash(path.join(__dirname, 'chat-bench', file))])) };
+    runnerHashes: Object.fromEntries(Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' }).map(([key, file]) => [key, hash(path.join(__dirname, 'chat-bench', file))])) };
   const receipt = path.join(dir, 'results.json');
   const log = path.join(dir, 'lh.jsonl');
   fs.writeFileSync(log, '');
@@ -113,8 +113,6 @@ for (const [name, mutate, reason] of [
   ['stale runner', r => { r.runnerHashes.run = '0'.repeat(64); }, /runnerHashes.run/],
   ['stale reader service', r => { r.runnerHashes.service = '0'.repeat(64); }, /runnerHashes.service/],
   ['stale browser fixture', r => { r.runnerHashes.browser = '0'.repeat(64); }, /runnerHashes.browser/],
-  ['stale ssh fixture', r => { r.runnerHashes.ssh = '0'.repeat(64); }, /runnerHashes.ssh/],
-  ['missing ssh fixture', r => { delete r.runnerHashes.ssh; }, /runnerHashes.ssh/],
   ['missing warm switch', r => { r.switches = r.switches.filter(s => s.phase !== 'warm' || s.index !== 1); }, /missing warm switch/],
   ['missing cold switch', r => { r.switches = r.switches.filter(s => s.phase !== 'cold' || s.index !== 1); }, /missing cold switch/],
   ['missing numeric tab index despite matching fixture index', r => { r.fixtures.tabs[0].index = 99; r.switches.filter(s => s.index === 0).forEach(s => { s.index = 99; }); }, /switch for tab 0/],

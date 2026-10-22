@@ -192,6 +192,9 @@ pub fn build(b: *std.Build) void {
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
+    const changelog_entry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/changelog-entry.test.js", "tools/changelog-fragment-reads.test.js" });
+    test_step.dependOn(&changelog_entry_tests.step);
+    vps_test_step.dependOn(&changelog_entry_tests.step);
     const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
     test_step.dependOn(&smooth_shapes_tests.step);
     vps_test_step.dependOn(&smooth_shapes_tests.step);
@@ -456,6 +459,12 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
+    if (b.graph.host.result.os.tag == .windows) {
+        const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
+        zsb_help_tests.step.dependOn(&bridge_install.step);
+        zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+        test_step.dependOn(&zsb_help_tests.step);
+    }
     const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
     test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -470,6 +479,9 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&zsb_selftest_tests.step);
     const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js" });
     test_step.dependOn(&bridge_routing_tests.step);
+    const zsb_extension_frames_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-extension-frames.test.js" });
+    test_step.dependOn(&zsb_extension_frames_tests.step);
+    vps_test_step.dependOn(&zsb_extension_frames_tests.step);
     const bridge_profile_tests = b.addSystemCommand(&.{ "node", "--test", "tools/bridge-profile-pipes.test.js" });
     bridge_profile_tests.step.dependOn(&bridge_install.step);
     bridge_profile_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
@@ -538,6 +550,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
+    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
@@ -570,6 +584,10 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_drop_tests.step);
     const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
     vps_test_step.dependOn(&crash_reports_tests.step);
+    const idle_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-513-idle-front.test.js" });
+    idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&idle_front_tests.step);
+    vps_test_step.dependOn(&idle_front_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
         "node",                                   "--test",                              "--test-concurrency=4",
         "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",

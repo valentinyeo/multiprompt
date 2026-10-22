@@ -22,6 +22,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Verify responsive startup ordering and original regression controls
+        env:
+          STARTUP_BEFORE_REF: 508459a0022bb944a152d4f897d196d27dbb5455
+        run: node --test tools/startup-responsive.test.js
       - name: Classify changed paths
         id: paths
         shell: bash
@@ -42,11 +46,17 @@ jobs:
           import fs from 'node:fs';
           const paths = fs.readFileSync(`${process.env.RUNNER_TEMP}/changed-paths`, 'utf8').split('\0').filter(Boolean);
           const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
-          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path));
+          const unusedTools = new Set(['tools/ci-cost.mjs']);
+          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path) && !unusedTools.has(path));
           for (const [paths, expected] of [
             [['README.md', 'openwiki/operations/build.md'], false],
             [['changelog.d/IGSH-519-checks.md', 'CHANGELOG.md'], false],
             [['docs/guide.md', 'docs-site/src/pages/index.astro'], false],
+            [['tools/ci-cost.mjs'], false],
+            [['tools/ci-cost.mjs', 'README.md'], false],
+            [['tools/ci-cost.mjs', 'tools/release-version.mjs'], true],
+            [['tools/app-source.js'], true],
+            [['tools/font-probe-dwrite.cpp'], true],
             [['README.md', 'build.zig'], true],
             [['src/testdata/history.md'], true],
             [['.github/workflows/test.yml'], true],
@@ -94,14 +104,30 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Restore Zig toolchain (PR)
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig toolchain
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig (PR)
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
       - name: Cache Zig
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -126,9 +152,6 @@ jobs:
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
-      - name: Sweep real zsb.exe command help
-        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 4
-        run: node --test tools/zsb-help.test.js
 
   test-vps:
     name: test-vps (${{ matrix.group }})
@@ -164,14 +187,30 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Restore Zig toolchain (PR)
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig toolchain
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig (PR)
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
       - name: Cache Zig
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -192,6 +231,9 @@ jobs:
       - name: Run server tool tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Test cross-origin zsb frame input and eval
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node --test tools/zsb-iframe.test.js
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
@@ -203,9 +245,24 @@ jobs:
         if: matrix.group == 1
         run: node --test service/test/infra.test.js service/test/worker.test.js
 
+  build-arm64:
+    name: build-arm64
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Build release executables for arm64
+        run: zig build -Dtarget=aarch64-windows-gnu
+
   test-result:
     name: test
-    needs: [changes, test, test-vps]
+    needs: [changes, test, test-vps, build-arm64]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -216,22 +273,24 @@ jobs:
           HEAVY: ${{ needs.changes.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
+          ARM64: ${{ github.event_name == 'pull_request' && needs.build-arm64.result || 'success' }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1
             case "$2" in
               false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] ;;
+              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
               *) return 1 ;;
             esac
           }
-          require_jobs success true success success
-          require_jobs success false skipped skipped
+          require_jobs success true success success success
+          require_jobs success false skipped skipped skipped
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success; then exit 1; fi
-            if require_jobs success true success "$result"; then exit 1; fi
+            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success success; then exit 1; fi
+            if require_jobs success true success "$result" success; then exit 1; fi
+            if require_jobs success true success success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success; then exit 1; fi
+          if require_jobs success invalid success success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS"
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$ARM64"
