@@ -559,7 +559,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
             defer fields.deinit();
             try fields.appendSlice("\"script\":");
             try fields.appendSlice(script);
-            // A lost reply must not replay commands that may already have changed the page.
             const response = try requestBrowser(allocator, "cdp", fields.items, null);
             defer allocator.free(response);
             try writeCdpScriptResponse(allocator, response, output_path);
@@ -1228,7 +1227,7 @@ fn readCdpScript(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     while (true) {
         var read: windows.DWORD = 0;
         if (ReadFile(file, &buffer, buffer.len, &read, null) == 0) {
-            if (GetLastError() == 109) break; // Redirected stdin closes with ERROR_BROKEN_PIPE.
+            if (GetLastError() == 109) break;
             return error.ReadScriptFailed;
         }
         if (read == 0) break;

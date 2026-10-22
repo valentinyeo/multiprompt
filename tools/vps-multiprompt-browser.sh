@@ -78,6 +78,7 @@ Steps: {"method":"Profiler.enable","params":{}}, {"waitMs":500},
 Use - for stdin; print a JSON result array or write it to local --out FILE.
 Errors stop at failedStep (1-based) and include completed results; no replay.
 Step timeout defaults to 15000 ms; total timeout budget is at most 300000 ms.
+Script total reply deadline: 360s; ZSB_TIMEOUT overrides this default.
 
 Examples:
   zsb cdp Page.enable
@@ -146,7 +147,7 @@ Unqualified reads and actions use the target:true tab in zsb tabs, not necessari
 Use zsb <command> --help or -h for local command help without contacting the browser.
 Reply deadlines (total seconds from send, not idle time):
   Default 15; status/version 5; doctor 20; text/get-text/snapshot/cdp/eval/script 30;
-  screenshot/shoturl 60; selftest 180 total across its requests.
+  screenshot/shoturl 60; selftest 180 total across its requests; cdp --script 360.
   ZSB_TIMEOUT overrides these defaults: finite seconds greater than 0, at most 86400.
   Expiry returns nonzero with JSON error reply_timeout, elapsed time, deadline and a recovery hint.
 Remote recovery: reconnect SSH/tmux, open or rebind this session's pane, then run zsb status.
@@ -446,9 +447,12 @@ def fail(code, message, reply=None, hint=None):
     sys.exit(1)
 
 
+script_mode = args[0] == "cdp" and len(args) > 1 and args[1] == "--script"
 default_timeout = {"status": 5, "version": 5, "doctor": 20,
                    "text": 30, "get-text": 30, "snapshot": 30, "cdp": 30, "eval": 30, "script": 30,
                    "screenshot": 60, "shoturl": 60}.get(args[0], 15)
+if script_mode:
+    default_timeout = 360
 try:
     timeout = float(os.environ.get("ZSB_TIMEOUT", default_timeout))
     if not math.isfinite(timeout) or not 0 < timeout <= 86400:
@@ -477,7 +481,6 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-script_mode = args[0] == "cdp" and len(args) > 1 and args[1] == "--script"
 output_path = None
 if script_mode:
     if len(args) not in {3, 5} or (len(args) == 5 and (args[3] != "--out" or not args[4])):

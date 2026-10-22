@@ -104,7 +104,6 @@ test('IGSH-221 scripts hold ownership across delays and exceed the old session d
   assert.ok(methods.indexOf('Profiler.start') < methods.indexOf('Runtime.evaluate'));
   assert.equal(methods.filter(c => c === 'attach').length, 2);
   assert.deepEqual(methods.slice(0, 5), ['attach', 'Emulation.setFocusEmulationEnabled', 'Profiler.enable', 'Profiler.start', 'detach']);
-  // Only the single command may create the legacy whole-operation deadline.
   assert.equal(h.scheduled.filter(ms => ms === 15000).length, 1);
 });
 

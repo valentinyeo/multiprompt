@@ -2777,7 +2777,6 @@ async function runCdpScriptStep(debuggee, step) {
   let active = true;
   try {
     return await withTimeout((async () => {
-      // Page lifecycle events are not emitted until Page is enabled in this session.
       if (step.waitEvent?.startsWith("Page.")) await chrome.debugger.sendCommand(debuggee, "Page.enable", {});
       if (!active) return;
       let event;
