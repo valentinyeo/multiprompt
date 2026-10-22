@@ -509,6 +509,7 @@ function Assert-Foreground {
 }
 
 function Press([int[]]$Keys, [string]$Label) {
+    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }
     Doctor
     Wait-Until {
         [void][VerifyNative]::SetForegroundWindow($script:window)
