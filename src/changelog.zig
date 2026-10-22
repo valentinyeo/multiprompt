@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.800", .items = &.{
+        .{ .text = "Typing multi-line text with zsb now adds line breaks instead of pressing Enter, so chat messages are no longer sent by accident.", .ticket = "IGSH-212" },
+    } },
     .{ .ver = "0.28.799", .items = &.{
         .{ .text = "Browser commands now stop with a clear error instead of hanging, and `zsb reset` reconnects the browser bridge without reopening your pane.", .ticket = "IGSH-154" },
         .{ .text = "zsb keeps working on browser settings pages: tab tracking stays intact, screenshots capture the hosted pane, and text requests explain the browser restriction.", .ticket = "IGSH-240" },
