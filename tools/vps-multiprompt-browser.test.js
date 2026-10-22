@@ -7,7 +7,7 @@ const { spawn } = require('node:child_process');
 const test = require('node:test');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
 
-async function run(args, reply, script = wrapper) {
+async function run(args, reply, script = wrapper, env = {}) {
   const sockets = new Set();
   const server = net.createServer(socket => {
     sockets.add(socket);
@@ -24,7 +24,7 @@ async function run(args, reply, script = wrapper) {
   if (reply === null) await new Promise(resolve => server.close(resolve));
   try {
     const child = spawn('bash', [script, ...args], {
-      env: { ...process.env, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port) },
+      env: { ...process.env, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port), ...env },
     });
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => stdout += chunk);
@@ -118,13 +118,8 @@ test('tunnel down, app gone, closed pane and structured bridge failures exit non
 });
 
 test('stalled and abruptly truncated connections return actionable errors', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-timeout-'));
-  try {
-    const script = path.join(dir, 'zsb.sh');
-    fs.writeFileSync(script, fs.readFileSync(wrapper, 'utf8').replace('sock.settimeout(90)', 'sock.settimeout(0.05)'));
-    failed(await run(['status'], () => {}, script), /timeout/, /[Rr]econnect/);
-    failed(await run(['tabs'], socket => { socket.write('{"ok":'); socket.destroy(); }), /invalid reply|connection closed/, /[Rr]econnect/);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  failed(await run(['status'], () => {}, wrapper, { ZSB_TIMEOUT: '0.05' }), /timeout/, /[Rr]econnect/);
+  failed(await run(['tabs'], socket => { socket.write('{"ok":'); socket.destroy(); }), /invalid reply|connection closed/, /[Rr]econnect/);
 });
 
 test('version mismatch names both versions and the reload fix; explicit reload is allowed', async () => {
