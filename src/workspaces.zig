@@ -4093,7 +4093,13 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         src_focus[swi] = parseWorkspaceFocus(obj);
     }
 
-    if (src_wid_len[0] == 0) src_wid_len[0] = json_reader.copyString(parsed.value, "workspace_id", &src_wids[0]);
+    if (src_wid_len[0] == 0) {
+        var id_buf: [64]u8 = undefined;
+        const saved_len = json_reader.copyString(parsed.value, "workspace_id", &id_buf);
+        const id_len = @min(saved_len, src_wids[0].len);
+        @memcpy(src_wids[0][0..id_len], id_buf[0..id_len]);
+        src_wid_len[0] = @intCast(id_len);
+    }
 
     for (0..tab_count) |t| {
         if (findLocalTmuxTab(tabs[t].tmux_host, tabs[t].tmux_session[0..tabs[t].tmux_session_len]) != null) continue;

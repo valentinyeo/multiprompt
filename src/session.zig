@@ -1515,8 +1515,12 @@ pub fn restoreSession() u32 {
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
     var restored_active_ws: u8 = 0;
-    if (!app_state.g_single_window) {
-        app_state.g_ws_id_len[0] = json_reader.copyString(json, "workspace_id", &app_state.g_ws_ids[0]);
+    if (!json_reader.boolTrue(json, "single_window")) {
+        var id_buf: [64]u8 = undefined;
+        const saved_len = json_reader.copyString(json, "workspace_id", &id_buf);
+        const id_len = @min(saved_len, app_state.g_ws_ids[0].len);
+        @memcpy(app_state.g_ws_ids[0][0..id_len], id_buf[0..id_len]);
+        app_state.g_ws_id_len[0] = @intCast(id_len);
         if (app_state.g_ws_id_len[0] == 0) {
             const id = @import("startup.zig").getInstanceName();
             const len = @min(id.len, app_state.g_ws_ids[0].len);

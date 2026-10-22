@@ -77,7 +77,8 @@ test('IGSH-224 conversions retain durable workspace IDs independently of window 
   const identity = pane.slice(pane.indexOf('fn workspaceProfileIdentityForShell('), pane.indexOf('pub fn workspaceProfileForShell('));
   assert.match(identity, /if \(ws < app_state\.g_lws_count and app_state\.g_ws_id_len\[ws\] > 0\)/);
   assert.match(session, /\\"workspace_id\\":\\"/);
-  assert.match(session, /copyString\(json, "workspace_id", &app_state\.g_ws_ids\[0\]\)/);
+  assert.match(session, /if \(!json_reader\.boolTrue\(json, "single_window"\)\) \{[\s\S]*?copyString\(json, "workspace_id", &id_buf\)/);
+  assert.match(session, /@memcpy\(app_state\.g_ws_ids\[0\]\[0\.\.id_len\], id_buf\[0\.\.id_len\]\)/);
   const leave = workspaces.slice(workspaces.indexOf('fn leaveSingleWindowMode('), workspaces.indexOf('pub fn newWorkspace('));
   assert.match(leave, /app_state\.g_ws_ids\[0\] = original_ids\[active_slot\]/);
   assert.match(leave, /app_state\.g_ws_id_len\[0\] = original_id_lengths\[active_slot\]/);

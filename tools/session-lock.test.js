@@ -37,7 +37,7 @@ test("ordinary and destructive close paths reject a locked live session", () => 
 });
 
 test("workspace close hibernates locked sessions and restores their lock", () => {
-  const exported = bodyOf("fn exportSlotSessionFile(slot: u8) bool {");
+  const exported = bodyOf("fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {");
   assert.match(exported, /if \(shells\[i\]\.locked\)[\s\S]*?\\\"locked\\\":true/);
 
   const hibernate = bodyOf("fn hibernateWorkspaceShell(idx: u32) void {");
@@ -52,7 +52,7 @@ test("workspace close hibernates locked sessions and restores their lock", () =>
 });
 
 test("empty workspace closes atomically and can be absorbed again", () => {
-  const exported = bodyOf("fn exportSlotSessionFile(slot: u8) bool {");
+  const exported = bodyOf("fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {");
   assert.doesNotMatch(exported, /exported == 0/,
     "an empty tabs array is still a valid workspace export");
   assert.match(exported, /writeFileAtomicW\(path, json_buf\[0\.\.pos\]\)/);
