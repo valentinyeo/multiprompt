@@ -4354,7 +4354,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else {
                         const id = if (app_state.g_ws_id_len[0] > 0) app_state.g_ws_ids[0][0..app_state.g_ws_id_len[0]] else getInstanceName();
                         if (!std.mem.eql(u8, id, app_state.g_search_rename_workspace_id[0..app_state.g_search_rename_workspace_len])) return 0;
-                        @import("workspaces.zig").setWindowDisplayNameUtf8(name[0..len]);
+                        @import("workspaces.zig").setWindowDisplayNameWide(app_state.g_search_buf[start..end]);
                         saveWorkspaceRegistry();
                     }
                 } else {
