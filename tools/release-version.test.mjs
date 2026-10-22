@@ -138,13 +138,18 @@ test('aggregate routing requires the update and Worker jobs and rejects every un
   assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
-test('four Windows and two VPS jobs retain the upstream test graph with independent Worker checks', () => {
+test('four Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
-  assert.deepEqual(matrices, [[1, 2, 3, 4], [1, 2]]);
+  assert.deepEqual(matrices, [[1, 2, 3, 4], [1, 2, 3]]);
   assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
   assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
+  for (const [option, count, array] of [['test-group', 4, 'test_groups'], ['test-vps-group', 3, 'vps_groups']]) {
+    assert.ok(build.includes(`"Run one ${array === 'test_groups' ? 'desktop' : 'server'} test group (1-${count})"`));
+    assert.ok(build.includes(`if (group < 1 or group > ${array}.len) @panic("${option} must be between 1 and ${count}")`));
+    assert.ok(build.includes(`for (${array}) |group| ${array === 'test_groups' ? 'test_step' : 'vps_test_step'}.dependOn(group)`));
+  }
   assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
   assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
   const vps = tests.split('\n  test-vps:\n')[1].split(/\n  [\w-]+:\n/)[0];
