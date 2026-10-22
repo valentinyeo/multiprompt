@@ -2185,7 +2185,8 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         var url_buf: [BROWSER_PENDING_URL_CAP]u8 = undefined;
         const len: usize = app_state.shells[idx].browser_pending_url_len;
         @memcpy(url_buf[0..len], app_state.shells[idx].browser_pending_url[0..len]);
-        const activate = app_state.g_browser_pending_activate_sid == shell_id;
+        const activate = app_state.g_browser_pending_activate_sid == shell_id and
+            idx == app_state.active_shell and foregroundIsOurs() and !browserChromeHiddenForOverlay();
         app_state.g_browser_pending_activate_sid = 0;
         if (!std.mem.eql(u8, url_buf[0..len], "about:blank")) navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
     }

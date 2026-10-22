@@ -3589,6 +3589,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            app_state.g_browser_pending_activate_sid = 0;
             app_state.g_focus_authorized_hwnd = null;
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;

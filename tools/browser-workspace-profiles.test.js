@@ -153,3 +153,19 @@ test('IGSH-224 collapse preserves default-named sibling sessions until absorptio
   assert.match(read('src/main.zig'), /g_current_workspace_restore = app_state.g_quit_all_in_progress/);
   assert.match(workspaces, /pub fn gcDefaultNamedWindowOnClose\(\) void \{[\s\S]*?if \(app_state.g_current_workspace_restore\) return;/);
 });
+
+test('IGSH-224 a reopened browser cannot reuse deferred activation after the user opens the palette', () => {
+  const main = read('src/main.zig');
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
+  const cleared = /g_browser_pending_activate_sid = 0;/;
+  assert.match(open, cleared);
+  assert.throws(() => assert.match(open.replace(cleared, ''), cleared));
+  const pane = read('src/browser_pane.zig');
+  const resolve = pane.slice(pane.indexOf('pub fn handleBrowserWindowResolved('), pane.indexOf('fn bindBrowserWindowIdForShell('));
+  const reauthorized = /const activate = app_state\.g_browser_pending_activate_sid == shell_id and\s*idx == app_state\.active_shell and foregroundIsOurs\(\) and !browserChromeHiddenForOverlay\(\);/;
+  assert.match(resolve, reauthorized);
+  for (const guard of ['idx == app_state.active_shell and ', 'foregroundIsOurs() and ', '!browserChromeHiddenForOverlay()']) {
+    assert.throws(() => assert.match(resolve.replace(guard, guard.startsWith('!') ? 'true' : ''), reauthorized));
+  }
+  assert.match(resolve, /g_browser_pending_activate_sid = 0;\s*if \(!std\.mem\.eql\(u8, url_buf\[0\.\.len\], "about:blank"\)\) navigateBrowserPaneWithActivation\(idx, url_buf\[0\.\.len\], activate\)/);
+});

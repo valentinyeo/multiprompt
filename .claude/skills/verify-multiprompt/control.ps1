@@ -35,10 +35,8 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
     [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint size, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public Rect caretRect; }
-    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     public static void FocusOwnedWindow(IntPtr hwnd, int expectedPid, IntPtr frame) {
         uint owner;
         uint target = GetWindowThreadProcessId(hwnd, out owner);
@@ -69,7 +67,6 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
-    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
@@ -158,9 +155,9 @@ public static class VerifyNative {
         uint thread = GetWindowThreadProcessId(hwnd, out pid);
         if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
         GuiThreadInfo info = new GuiThreadInfo();
-        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+        info.size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
         if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        return info.Focus;
+        return info.focus;
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
@@ -511,61 +508,6 @@ function Type-Text([string]$Text) {
     [VerifyNative]::Text($Text)
 }
 
-function Click-WorkspacePill([int]$Workspace) {
-    Wait-Until {
-        $state = Read-Session
-        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
-    } "visible unsnoozed workspace pill $Workspace at default layout"
-    Doctor
-    Assert-Foreground
-    Record ("Click workspace pill for stored workspace $Workspace")
-    [void][VerifyNative]::DwmFlush()
-    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
-}
-
-function Focus-Palette([string]$Query, [int]$Target) {
-    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $start = (Get-Content $log -Raw).Length
-    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
-    Wait-Until {
-        $trace = (Get-Content $log -Raw).Substring($start)
-        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-    } 'command palette initialized and owned frame focused'
-    Type-Text $Query
-    Wait-Until {
-        (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
-    } "palette query consumed and expected command $Target selected"
-}
-
-function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
-    Wait-Until {
-        $state = Read-Session
-        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]($state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv) -ne $Chat) { return $false }
-        $foreground = [VerifyNative]::GetForegroundWindow()
-        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
-        if (-not $Chat) {
-            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and [VerifyNative]::Title($foreground).EndsWith(('ZigShell-' + $state.tabs[$Tab].shell_id), [StringComparison]::Ordinal)
-        }
-        $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Composer)
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        $foreground -eq $script:window -and $element.Current.ProcessId -eq $process.Id -and -not $element.Current.IsOffscreen -and $focused.Current.NativeWindowHandle -eq $Composer
-    } "workspace $Workspace session $Tab Chat View=$Chat visible and input ready"
-}
-
-function Wait-ConsoleText([string]$Command) {
-    Wait-Until {
-        $foreground = [VerifyNative]::GetForegroundWindow()
-        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window -or [VerifyNative]::Class($foreground) -ne 'ConsoleWindowClass') { return $false }
-        $console = [System.Windows.Automation.AutomationElement]::FromHandle($foreground)
-        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
-        $document = $console.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-        if ($null -eq $document) { return $false }
-        $pattern = $document.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-        $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
-        $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
-    } "console visibly contains staged command: $Command"
-}
-
 function Focus-WorkspaceShell {
     Doctor
     Record 'Focus the verified owned app frame for workspace keyboard commands'
@@ -623,10 +565,84 @@ function Focus-WorkspaceFrame {
     } 'exact owned workspace frame receives keyboard focus'
 }
 
+function Click-WorkspacePill([int]$Workspace) {
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
+    } "visible unsnoozed workspace pill $Workspace at default layout"
+    Doctor
+    Assert-Foreground
+    Record ("Click workspace pill for stored workspace $Workspace")
+    [void][VerifyNative]::DwmFlush()
+    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
+function Focus-Palette([string]$Query, [int]$Target) {
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $start = (Get-Content $log -Raw).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    Wait-Until {
+        $trace = (Get-Content $log -Raw).Substring($start)
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+    } 'command palette initialized and owned frame focused'
+    Type-Text $Query
+    Wait-Until {
+        (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
+    } "palette query consumed and expected command $Target selected"
+}
+
+function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
+    Wait-Until {
+        $state = Read-Session
+        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]($state.tabs[$Tab].PSObject.Properties['cv'] -and $state.tabs[$Tab].cv) -ne $Chat) { return $false }
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
+        if (-not $Chat) {
+            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and [VerifyNative]::Title($foreground).EndsWith(('ZigShell-' + $state.tabs[$Tab].shell_id), [StringComparison]::Ordinal)
+        }
+        $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Composer)
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $foreground -eq $script:window -and $element.Current.ProcessId -eq $process.Id -and -not $element.Current.IsOffscreen -and $focused.Current.NativeWindowHandle -eq $Composer
+    } "workspace $Workspace session $Tab Chat View=$Chat visible and input ready"
+}
+
+function Wait-ConsoleText([string]$Command) {
+    Wait-Until {
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window -or [VerifyNative]::Class($foreground) -ne 'ConsoleWindowClass') { return $false }
+        $console = [System.Windows.Automation.AutomationElement]::FromHandle($foreground)
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+        $document = $console.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -eq $document) { return $false }
+        $pattern = $document.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
+        $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
+    } "console visibly contains staged command: $Command"
+}
+
 function Palette([string]$Query) {
     if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }
+    if ($Feature -eq 'browser-workspaces') {
+        $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+        $start = (Get-Content $log -Raw).Length
+    }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    if ($Feature -eq 'browser-workspaces') {
+        Wait-Until {
+            $trace = (Get-Content $log -Raw).Substring($start)
+            $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and
+                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
+                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+        } 'workspace palette initialized and owned frame focused'
+    }
     Type-Text $Query
+    if ($Feature -eq 'browser-workspaces') {
+        Wait-Until {
+            (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=\d+(?:\r?\n|$)') -and
+                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
+                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+        } 'workspace palette consumed the full query with a matching command'
+    }
 }
 
 function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace') {
@@ -764,6 +780,12 @@ function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [st
     if (@(Get-ChildItem (Split-Path $Root) -Directory).Count -ne 6) { throw 'Lifecycle created an unexpected profile root' }
     $script:profileObservations += $script:profileObservation
     Save-Json $script:profileObservations 'workspace-lifecycle.json'
+    $extensionStates = foreach ($profile in Get-ChildItem (Split-Path $Root) -Directory) {
+        $preferences = Get-Content (Join-Path $profile.FullName 'Default/Secure Preferences') -Raw | ConvertFrom-Json
+        $extension = $preferences.extensions.settings.PSObject.Properties[$script:extensionIds[0]].Value
+        @{ root = $profile.FullName; developerMode = $preferences.extensions.ui.developer_mode; disableReasons = @($extension.disable_reasons) }
+    }
+    Save-Json @($extensionStates) ($Stage + '.extension-states.json')
     [void][VerifyNative]::SetForegroundWindow($script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -eq $script:window } 'original owned workspace foreground for lifecycle screenshot'
     Snapshot $Stage

@@ -534,3 +534,24 @@ test('IGSH-522: hidden pills are shown through the palette and every focus trans
   assert.match(read('src/sidebar.zig'), /g_hide_sidebar or app_state.g_hide_pills\) return null/);
   assert.match(read('src/command_palette.zig'), /defer \{[\s\S]*?\[palette\] ready chars=\{d\} count=\{d\} target=\{d\}/);
 });
+
+test('workspace palette waits for initialization and complete query consumption under exact frame focus', () => {
+  const palette = control.slice(control.indexOf('function Palette('), control.indexOf('function Invoke-Zsb('));
+  const assertReady = text => {
+    assert.equal((text.match(/Wait-Until \{/g) || []).length, 2);
+    assert.ok(text.indexOf('Wait-Until {') < text.indexOf('Type-Text $Query'));
+    assert.ok(text.lastIndexOf('Wait-Until {') > text.indexOf('Type-Text $Query'));
+    assert.ok(text.includes('[palette\\] ready chars=0'));
+    assert.ok(text.includes("$Query.Length + ' count=[1-9]\\d*"));
+    assert.equal((text.match(/GetFocusedWindow\(\$script:window\) -eq \$script:window/g) || []).length, 2);
+    assert.equal((text.match(/GetForegroundWindow\(\) -eq \$script:window/g) || []).length, 2);
+  };
+  assertReady(palette);
+  for (const required of ['Type-Text $Query', '$Query.Length', 'GetFocusedWindow($script:window) -eq $script:window', 'GetForegroundWindow() -eq $script:window']) {
+    assert.throws(() => assertReady(palette.replace(required, '$true')));
+  }
+  for (const name of ['GetGUIThreadInfo', 'SetCursorPos', 'WindowFromPoint']) {
+    assert.equal((control.match(new RegExp(`static extern (?:bool|IntPtr) ${name}\\(`, 'g')) || []).length, 1);
+  }
+  assert.match(control, /info\.size = \(uint\)Marshal\.SizeOf\(typeof\(GuiThreadInfo\)\);[\s\S]*?return info\.focus;/);
+});
