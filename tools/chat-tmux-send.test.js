@@ -69,6 +69,7 @@ fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool) bool {
 fn GetTickCount64() u64 { return 12345; }
 fn findShellById(_: u32) ?u32 { return 0; }
 fn chatOutboxChanged() void { notices += 1; }
+fn chatSteerAfterDelivery(_: u32, _: usize) void {}
 fn reset() void {
     storage[0] = .{}; shells[0].kind = .tmux; test_key = .{}; test_key.tmux[0] = 't';
     starts = 0; pastes = 0; local_pastes = 0; enters = 0; verifies = 0;
@@ -170,8 +171,9 @@ test('turning the switch off executes the original console path', () => {
   assert.match(result.stderr, /All 1 tests passed/);
 });
 test('IGSH-564 force send routes tmux through the existing key worker and presses Claude keys', () => {
-  assert.match(body('chatEchoPushQueuedNow'), /chatTmuxSendEligible\((?:app_state\.)?active_shell\)[^]*chatAgentKey\((?:app_state\.)?active_shell, 0x18\)/);
-  assert.match(body('chatEchoPushQueuedNow'), /sendClaudeSendQueuedNowToShell\((?:app_state\.)?active_shell\)/);
+  assert.match(body('chatEchoPushQueuedNow'), /chatEchoPushQueuedForShell\((?:app_state\.)?active_shell\)/);
+  assert.match(body('chatEchoPushQueuedForShell'), /chatTmuxSendEligible\(idx\)[^]*chatAgentKey\(idx, 0x18\)/);
+  assert.match(body('chatEchoPushQueuedForShell'), /sendClaudeSendQueuedNowToShell\(idx\)/);
   assert.match(body('chatAgentKey'), /std\.Thread\.spawn\(\.\{\}, chatStopTmuxThread, \.\{ key, digit \}\)/);
   assert.match(body('chatStopTmuxThread'), /digit == 0x18[^]*"send_queued"/);
   assert.match(body('chatStopTmuxThread'), /const permission = digit != 0x1B and digit != 0x18;/);
