@@ -30,6 +30,7 @@ The remote wrapper bounds the entire reply using a monotonic clock from the star
 | `text`, `get-text`, `snapshot`, `cdp`, `eval`, `script` | 30 |
 | `screenshot`, `shoturl` | 60 |
 | `selftest` (all requests and cleanup combined) | 180 |
+| `cdp --script` | 360 |
 
 The longer read/script/CDP budgets accommodate pane recovery (up to 12 seconds) plus page work (up to 15 seconds). Screenshots allow capture retries and the extension's 35-second action budget; `doctor` allows pane recovery rather than serving as a quick liveness probe. Existing app-side limits still apply: a larger wrapper deadline does not extend those limits. The current CLI has no per-command `--timeout` flag; CDP JSON parameters are forwarded unchanged.
 
