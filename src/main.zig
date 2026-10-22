@@ -3589,6 +3589,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            app_state.g_browser_pending_activate_sid = 0;
             app_state.g_focus_authorized_hwnd = null;
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
@@ -3679,6 +3680,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_remind_input_mode = false;
             app_state.g_search_rename_input_mode = false;
             app_state.g_search_rename_sid = 0;
+            app_state.g_search_rename_workspace_len = 0;
             app_state.g_search_rename_select_all = false;
             app_state.g_search_remind_preset_mode = false;
             app_state.g_search_reminders_mode = false;
@@ -3737,6 +3739,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_remind_input_mode = false;
             app_state.g_search_rename_input_mode = false;
             app_state.g_search_rename_sid = 0;
+            app_state.g_search_rename_workspace_len = 0;
             app_state.g_search_rename_select_all = false;
             app_state.g_search_remind_preset_mode = false;
             app_state.g_search_reminders_mode = false;
@@ -3782,6 +3785,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_session_overview_mode = false;
             app_state.g_search_rename_input_mode = false;
             app_state.g_search_rename_sid = 0;
+            app_state.g_search_rename_workspace_len = 0;
             app_state.g_search_rename_select_all = false;
             app_state.g_browser_url_mode = false;
             app_state.g_search_len = 0;
@@ -4321,19 +4325,46 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (app_state.g_search_active and app_state.g_search_rename_input_mode) {
-                const idx = findShellById(app_state.g_search_rename_sid) orelse {
-                    showHeaderNoticeAscii("Rename target is gone", 3000, true);
-                    return 0;
-                };
                 var start: usize = 0;
                 var end: usize = @intCast(app_state.g_search_len);
                 while (start < end and (app_state.g_search_buf[start] == ' ' or app_state.g_search_buf[start] == '\t')) start += 1;
                 while (end > start and (app_state.g_search_buf[end - 1] == ' ' or app_state.g_search_buf[end - 1] == '\t')) end -= 1;
                 if (end == start) {
-                    showHeaderNoticeAscii("Enter a session name", 3000, true);
+                    showHeaderNoticeAscii(if (app_state.g_search_rename_workspace_len > 0) "Enter a workspace name" else "Enter a session name", 3000, true);
                     return 0;
                 }
-                _ = applyCanonicalSessionRename(idx, app_state.g_search_buf[start..end], true);
+                if (app_state.g_search_rename_workspace_len > 0) {
+                    const ws = if (app_state.g_single_window)
+                        findMyWorkspaceSlot(app_state.g_search_rename_workspace_id[0..app_state.g_search_rename_workspace_len]) orelse {
+                            showHeaderNoticeAscii("Workspace no longer open", 3000, true);
+                            return 0;
+                        }
+                    else
+                        @as(u8, 0);
+                    var name: [32]u8 = undefined;
+                    const len = @min(end - start, name.len);
+                    for (app_state.g_search_buf[start .. start + len], 0..) |c, i| name[i] = if (c < 128) @intCast(c) else '?';
+                    if (app_state.g_single_window) {
+                        if (@import("workspaces.zig").isOtherWorkspaceSlot(ws) or std.ascii.eqlIgnoreCase(name[0..len], "Other")) {
+                            showHeaderNoticeAscii("Other is the permanent catch-all", 3500, true);
+                            return 0;
+                        }
+                        @memcpy(app_state.g_ws_names[ws][0..len], name[0..len]);
+                        app_state.g_ws_name_len[ws] = @intCast(len);
+                        syncInProcessWorkspacesToRegistry();
+                    } else {
+                        const id = if (app_state.g_ws_id_len[0] > 0) app_state.g_ws_ids[0][0..app_state.g_ws_id_len[0]] else getInstanceName();
+                        if (!std.mem.eql(u8, id, app_state.g_search_rename_workspace_id[0..app_state.g_search_rename_workspace_len])) return 0;
+                        @import("workspaces.zig").setWindowDisplayNameWide(app_state.g_search_buf[start..end]);
+                        saveWorkspaceRegistry();
+                    }
+                } else {
+                    const idx = findShellById(app_state.g_search_rename_sid) orelse {
+                        showHeaderNoticeAscii("Rename target is gone", 3000, true);
+                        return 0;
+                    };
+                    _ = applyCanonicalSessionRename(idx, app_state.g_search_buf[start..end], true);
+                }
                 saveSession();
                 publishInboxState();
                 updateMainWindowTitle();
@@ -6217,13 +6248,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
-                if (target >= SEARCH_RENAMEWIN_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    app_state.g_pending_new_tab_group = 0;
-                    showActiveShellAfterOverlay();
-                    startWindowRename();
+                if (target == SEARCH_RENAMEWIN_OFFSET) {
+                    if (app_state.g_starred_workspace) return 0;
+                    const ws = if (app_state.g_single_window) app_state.g_active_workspace else 0;
+                    if (app_state.g_single_window) @import("workspaces.zig").ensureWorkspaceSlotId(ws);
+                    const id = if (app_state.g_ws_id_len[ws] > 0) app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]] else getInstanceName();
+                    @memcpy(app_state.g_search_rename_workspace_id[0..id.len], id);
+                    app_state.g_search_rename_workspace_len = @intCast(id.len);
+                    app_state.g_search_rename_input_mode = true;
+                    app_state.g_search_rename_select_all = true;
+                    app_state.g_search_rename_sid = 0;
+                    var name_buf: [32]u8 = undefined;
+                    const name = if (app_state.g_single_window) workspaceDisplayName(ws, &name_buf) else app_state.g_window_display_name_u8[0..app_state.g_window_display_name_u8_len];
+                    app_state.g_search_len = @intCast(@min(name.len, app_state.g_search_buf.len));
+                    for (name[0..app_state.g_search_len], 0..) |c, i| app_state.g_search_buf[i] = c;
+                    updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -6251,8 +6290,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
                             switchToWorkspace(findMyWorkspaceSlot(id).?);
                         } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
-                            if (absorbWorkspaceIntoSlots(id, name)) {
-                                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
+                            if (absorbWorkspaceIntoSlots(id, name)) |slot| {
+                                switchToWorkspace(slot);
                             } else {
                                 newWorkspace();
                             }
@@ -6661,6 +6700,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_ZSB_BIND => {
             handleZsbBindRequest();
+            return 0;
+        },
+        @import("win32.zig").WM_APP_BROWSER_PROFILE_READY => {
+            @import("browser_pane.zig").handleWorkspaceProfileReady(wp);
             return 0;
         },
         WM_APP_DIAG => {
@@ -8235,6 +8278,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .publish => {
             if (!@import("workspaces.zig").reconcileStartupWorkspaceRegistry(false)) return false;
+            @import("browser_pane.zig").adoptLegacyBrowserProfiles();
             publishInboxState();
         },
         .updates => {

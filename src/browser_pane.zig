@@ -3,6 +3,7 @@ const Shell = @import("app_state.zig").Shell;
 const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
 const GetMessageTime = @import("win32.zig").GetMessageTime;
 const std = @import("std");
+const browser_workspace_profile = @import("browser_workspace_profile.zig");
 const json_reader = @import("json_reader.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
 const BROWSER_EDGE_MASKS = @import("main.zig").BROWSER_EDGE_MASKS;
@@ -304,6 +305,74 @@ fn browserUserDataDir() []const u8 {
         .chrome => chromeUserDataDir(),
     };
 }
+
+var legacy_profiles_ready = false;
+
+pub fn adoptLegacyBrowserProfiles() void {
+    if (!browser_workspace_profile.IGSH_224) return;
+    const ws = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else app_state.g_active_workspace;
+    if (ws >= app_state.g_lws_count) return;
+    @import("workspaces.zig").ensureWorkspaceSlotId(ws);
+    const id = app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]];
+    var local: [1024]u8 = undefined;
+    const n = GetEnvironmentVariableA("LOCALAPPDATA", &local, local.len);
+    if (n == 0 or n >= local.len) return;
+    for ([_][]const u8{ "edge", "chrome" }) |engine| {
+        browser_workspace_profile.adoptLegacyProfile(local[0..n], engine, id) catch {
+            showHeaderNoticeAscii("Existing browser profile ownership could not be saved; browser launch refused", 12000, true);
+            return;
+        };
+    }
+    legacy_profiles_ready = true;
+}
+
+fn workspaceProfileIdentityForShell(idx: u32, buf: *[32]u8) ![]const u8 {
+    if (!browser_workspace_profile.IGSH_224) return "";
+    if (idx >= app_state.shell_count) return error.MissingWorkspace;
+    const ws = app_state.shells[idx].workspace;
+    const id = if (ws < app_state.g_lws_count and app_state.g_ws_id_len[ws] > 0)
+        app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]]
+    else if (!app_state.g_single_window or ws == 0)
+        @import("startup.zig").getInstanceName()
+    else
+        return error.MissingWorkspaceId;
+    return browser_workspace_profile.token(buf, browserEngineToken(), id);
+}
+
+pub fn workspaceProfileForShell(idx: u32, buf: *[32]u8) ![]const u8 {
+    const desired = try workspaceProfileIdentityForShell(idx, buf);
+    if (browser_workspace_profile.IGSH_224 and app_state.shells[idx].browser_hwnd != null and
+        !std.mem.eql(u8, desired, &app_state.shells[idx].browser_profile_token)) return error.WorkspaceProfileChanged;
+    return desired;
+}
+
+pub fn reconcileBrowserWorkspace(idx: u32) void {
+    if (!browser_workspace_profile.IGSH_224 or idx >= app_state.shell_count) return;
+    var expected: [32]u8 = undefined;
+    const desired = workspaceProfileIdentityForShell(idx, &expected) catch {
+        closeBrowserForShell(idx);
+        return;
+    };
+    if (!std.mem.eql(u8, desired, &app_state.shells[idx].browser_profile_token)) {
+        deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
+        if (app_state.shells[idx].browser_hwnd != null or app_state.shells[idx].browser_window_id != 0 or app_state.shells[idx].browser_bind_nonce_len > 0) closeBrowserForShell(idx);
+    }
+}
+
+threadlocal var browser_command_profile: []const u8 = "";
+var browser_notice_profile: [32]u8 = std.mem.zeroes([32]u8);
+
+fn showWorkspaceBrowserProfile(idx: u32, force: bool) void {
+    if (!browser_workspace_profile.IGSH_224 or idx != app_state.active_shell) return;
+    var token_buf: [32]u8 = undefined;
+    const value = workspaceProfileForShell(idx, &token_buf) catch return;
+    if (!force and std.mem.eql(u8, value, &browser_notice_profile)) return;
+    @memcpy(&browser_notice_profile, value);
+    var notice_buf: [96]u8 = undefined;
+    const notice = std.fmt.bufPrint(&notice_buf, "Browser profile: {s}", .{value}) catch return;
+    showHeaderNoticeAscii(notice, 8000, false);
+}
+
 
 fn browserEngineToken() []const u8 {
     return switch (app_state.g_browser_engine) {
@@ -884,6 +953,7 @@ pub fn browserUrlIsRealPage(url: []const u8) bool {
 }
 
 fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, launch_idx: ?u32) void {
+    if (browser_workspace_profile.IGSH_224 and !legacy_profiles_ready) return;
     var params: [2048]u16 = std.mem.zeroes([2048]u16);
     var pos: usize = 0;
     appendBrowserWideAscii(&params, &pos, "--silent-debugger-extension-api ");
@@ -892,8 +962,24 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         showHeaderNoticeAscii("Isolated browser profile path is unavailable", 5000, true);
         return;
     }
+    var profile_path: [1024]u8 = std.mem.zeroes([1024]u8);
+    var seed_path: [1024]u8 = std.mem.zeroes([1024]u8);
+    if (browser_workspace_profile.IGSH_224) {
+        var token_buf: [32]u8 = undefined;
+        const profile_token = workspaceProfileForShell(launch_idx orelse app_state.active_shell, &token_buf) catch {
+            showHeaderNoticeAscii("Browser workspace ID is unavailable; launch refused", 5000, true);
+            return;
+        };
+        var local_buf: [1024]u8 = undefined;
+        const local_n = GetEnvironmentVariableA("LOCALAPPDATA", &local_buf, local_buf.len);
+        if (local_n == 0 or local_n >= local_buf.len) return;
+        _ = browser_workspace_profile.path(&profile_path, local_buf[0..local_n], browserEngineToken(), profile_token) catch return;
+        if (user_data_dir.len >= seed_path.len) return;
+        @memcpy(seed_path[0..user_data_dir.len], user_data_dir);
+        showWorkspaceBrowserProfile(launch_idx orelse app_state.active_shell, true);
+    }
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
-    appendBrowserWideAscii(&params, &pos, user_data_dir);
+    appendBrowserWideAscii(&params, &pos, if (browser_workspace_profile.IGSH_224) std.mem.sliceTo(&profile_path, 0) else user_data_dir);
     appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode ");
     const extension_path = edgeExtensionPath();
     if (extension_path.len > 0) {
@@ -951,7 +1037,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         const len = @min(std.mem.indexOf(u8, title, "</title>") orelse 0, nonce.len - 1);
         for (title[0..len], 0..) |c, i| nonce[i] = c;
     }
-    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd }) catch return;
+    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd, seed_path, profile_path }) catch return;
     thread.detach();
 }
 
@@ -972,8 +1058,14 @@ fn browserLaunchEvent(_: HANDLE, _: DWORD, hwnd: HANDLE, object: i32, child: i32
     _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: HANDLE) void {
+fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: HANDLE, seed: [1024]u8, profile: [1024]u8) void {
     const win = @import("win32.zig");
+    if (browser_workspace_profile.IGSH_224) {
+        browser_workspace_profile.ensureWorkspaceProfile(std.heap.page_allocator, std.mem.sliceTo(&seed, 0), std.mem.sliceTo(&profile, 0)) catch |err| {
+            debugLog2("Workspace browser preparation failed: ", @errorName(err));
+            return;
+        };
+    }
     const co = CoInitializeEx(null, COINIT_APARTMENTTHREADED);
     defer if (co >= 0) CoUninitialize();
     launch_guard_nonce = nonce;
@@ -997,6 +1089,18 @@ fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: 
 }
 
 pub fn spawnBrowserCliHidden(cmd: []const u8) void {
+    spawnBrowserCliForShell(app_state.active_shell, cmd);
+}
+
+pub fn spawnBrowserCliForShell(idx: u32, cmd: []const u8) void {
+    var token_buf: [32]u8 = undefined;
+    const profile_token = workspaceProfileForShell(idx, &token_buf) catch return;
+    var qualified_buf: [WIN32_COMMAND_LINE_CAP]u8 = undefined;
+    const qualified = browser_workspace_profile.command(&qualified_buf, cmd, profile_token) catch return;
+    spawnBrowserCliQualified(qualified);
+}
+
+fn spawnBrowserCliQualified(cmd: []const u8) void {
     const owned = std.heap.page_allocator.dupe(u8, cmd) catch return;
     const thread = std.Thread.spawn(.{}, spawnBrowserCliWorker, .{owned}) catch {
         std.heap.page_allocator.free(owned);
@@ -1077,7 +1181,26 @@ pub fn syncEdgeProfileTheme() void {
     writeCurrentThemeManifest();
     var cmd_buf: [768]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" theme {s}", .{ bridgeExePath(), currentThemeToken() }) catch return;
-    spawnBrowserCliHidden(cmd);
+    if (!browser_workspace_profile.IGSH_224) {
+        spawnBrowserCliQualified(cmd);
+        return;
+    }
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].browser_hwnd == null) continue;
+        var value_buf: [32]u8 = undefined;
+        const value = workspaceProfileForShell(@intCast(i), &value_buf) catch continue;
+        var already_sent = false;
+        for (0..i) |j| {
+            if (app_state.shells[j].browser_hwnd == null) continue;
+            var prior_buf: [32]u8 = undefined;
+            const prior = workspaceProfileForShell(@intCast(j), &prior_buf) catch continue;
+            if (std.mem.eql(u8, value, prior)) {
+                already_sent = true;
+                break;
+            }
+        }
+        if (!already_sent) spawnBrowserCliForShell(@intCast(i), cmd);
+    }
 }
 
 pub fn browserHistoryNav(forward: bool) void {
@@ -1107,13 +1230,16 @@ pub fn runActiveBrowserShotUrl() void {
     spawnBrowserCliHidden(cmd);
 }
 
-fn browserUrlPollThread() void {
+fn browserUrlPollThread(profile: [32]u8) void {
+    browser_command_profile = std.mem.sliceTo(&profile, 0);
     crash_recorder.guardThread();
     defer app_state.g_browser_url_poll_pending = false;
     const window_id = app_state.g_browser_url_poll_window_id;
     if (window_id == 0) return;
     var cmd_buf: [1024]u8 = undefined;
-    const cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" --window {d} active-tab", .{ bridgeExePath(), window_id }) catch return;
+    const raw_cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" --window {d} active-tab", .{ bridgeExePath(), window_id }) catch return;
+    var qualified_buf: [1200]u8 = undefined;
+    const cmd = browser_workspace_profile.command(&qualified_buf, raw_cmd, browser_command_profile) catch return;
 
     var sa = SECURITY_ATTRIBUTES{
         .nLength = @sizeOf(SECURITY_ATTRIBUTES),
@@ -1189,7 +1315,12 @@ pub fn pollBrowserUrlTick() void {
     app_state.g_browser_url_poll_pending = true;
     app_state.g_browser_url_poll_shell_id = app_state.shells[app_state.active_shell].shell_id;
     app_state.g_browser_url_poll_window_id = app_state.shells[app_state.active_shell].browser_window_id;
-    const t = std.Thread.spawn(.{}, browserUrlPollThread, .{}) catch {
+    var profile: [32]u8 = std.mem.zeroes([32]u8);
+    _ = workspaceProfileForShell(app_state.active_shell, &profile) catch {
+        app_state.g_browser_url_poll_pending = false;
+        return;
+    };
+    const t = std.Thread.spawn(.{}, browserUrlPollThread, .{profile}) catch {
         app_state.g_browser_url_poll_pending = false;
         return;
     };
@@ -1267,7 +1398,7 @@ pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate
             debugLog("browser navigate: command too long; refusing desktop Edge fallback");
             return;
         };
-        spawnBrowserCliHidden(cmd);
+        spawnBrowserCliForShell(idx, cmd);
         app_state.shells[idx].browser_pending_url_len = 0;
         if (app_state.g_browser_pending_activate_sid == app_state.shells[idx].shell_id) app_state.g_browser_pending_activate_sid = 0;
     } else {
@@ -1451,21 +1582,28 @@ fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
 pub fn browserWinFilePathA(buf: *[640]u8, shell_id: u32) ?[]const u8 {
     const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
     if (appdata_len == 0 or appdata_len >= 490) return null;
-    const suffix = std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}.txt", .{shell_id}) catch return null;
+    const suffix = if (browser_workspace_profile.IGSH_224)
+        std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}-{d}.txt", .{ GetCurrentProcessId(), shell_id }) catch return null
+    else
+        std.fmt.bufPrint(buf[appdata_len..], "\\ZigShell\\browserwin-{d}.txt", .{shell_id}) catch return null;
     return buf[0 .. appdata_len + suffix.len];
 }
 
 fn writeBrowserWindowIdFile(shell_id: u32, wid: i64) void {
     var pbuf: [640]u8 = undefined;
     const path = browserWinFilePathA(&pbuf, shell_id) orelse return;
-    const h = win32OpenWrite(path) orelse return;
-    var numbuf: [24]u8 = undefined;
-    const s = std.fmt.bufPrint(&numbuf, "{d}\n", .{wid}) catch {
-        _ = CloseHandle(h);
-        return;
-    };
-    win32WriteAll(h, s);
-    _ = CloseHandle(h);
+    const idx = findShellById(shell_id) orelse return;
+    var token_buf: [32]u8 = undefined;
+    const profile = workspaceProfileForShell(idx, &token_buf) catch return;
+    var numbuf: [80]u8 = undefined;
+    const s = if (browser_workspace_profile.IGSH_224)
+        std.fmt.bufPrint(&numbuf, "{d}\n{s}\n", .{ wid, profile }) catch return
+    else
+        std.fmt.bufPrint(&numbuf, "{d}\n", .{wid}) catch return;
+    if (!@import("file_io.zig").writeFileAtomicW(path, s)) {
+        deleteBrowserWindowIdFile(shell_id);
+        debugLog("browser local window/profile binding could not be published atomically");
+    }
 }
 
 fn deleteBrowserWindowIdFile(shell_id: u32) void {
@@ -1736,7 +1874,7 @@ fn freezeBrowserPaneForShell(idx: u32) void {
     if (window_id == 0) return;
     var cmd_buf: [320]u8 = undefined;
     const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "frozen") orelse return;
-    spawnBrowserCliHidden(cmd);
+    spawnBrowserCliForShell(idx, cmd);
     app_state.shells[idx].browser_frozen = true;
     setBrowserFrozenMarkerForShell(idx, true);
 }
@@ -1749,7 +1887,7 @@ pub fn wakeBrowserPaneFromFreeze(idx: u32) void {
     if (window_id == 0) return;
     var cmd_buf: [320]u8 = undefined;
     const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "active") orelse return;
-    spawnBrowserCliHidden(cmd);
+    spawnBrowserCliForShell(idx, cmd);
 }
 
 fn browserPaneSessionBusyPure(
@@ -1893,7 +2031,13 @@ fn deleteSessionDirFiles(glob: []const u8) void {
 
 pub fn cleanupStalePanewinFiles() void {
     deleteSessionDirFiles("panewin-*.txt");
-    deleteSessionDirFiles("browserwin-*.txt");
+    if (browser_workspace_profile.IGSH_224) {
+        var pattern_buf: [80]u8 = undefined;
+        const pattern = std.fmt.bufPrint(&pattern_buf, "browserwin-{d}-*.txt", .{GetCurrentProcessId()}) catch return;
+        deleteSessionDirFiles(pattern);
+    } else {
+        deleteSessionDirFiles("browserwin-*.txt");
+    }
     deleteSessionDirFiles("webview-*.flag");
 }
 pub fn bridgeExePath() []const u8 {
@@ -1920,7 +2064,9 @@ pub fn bridgeExePath() []const u8 {
     return "zigshell-bridge.exe";
 }
 
-fn resolveBrowserWindowIdFromCommand(cmd_slice: []const u8) ?i64 {
+fn resolveBrowserWindowIdFromCommand(raw_cmd: []const u8) ?i64 {
+    var qualified_buf: [1024]u8 = undefined;
+    const cmd_slice = browser_workspace_profile.command(&qualified_buf, raw_cmd, browser_command_profile) catch return null;
     var sa = SECURITY_ATTRIBUTES{
         .nLength = @sizeOf(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = null,
@@ -2022,6 +2168,10 @@ pub fn startBrowserWindowResolve(idx: u32) void {
     const slot = browserResolveSlot(&app_state.g_browser_resolve_inflight, shell_id, now) orelse return;
     const job = std.heap.page_allocator.create(BrowserResolveJob) catch return;
     job.* = .{ .shell_id = shell_id, .connection_id = app_state.shells[idx].browser_connection_id };
+    _ = workspaceProfileForShell(idx, &job.profile) catch {
+        std.heap.page_allocator.destroy(job);
+        return;
+    };
     const nonce_len = @min(@as(usize, app_state.shells[idx].browser_bind_nonce_len), job.nonce.len);
     if (nonce_len > 0) @memcpy(job.nonce[0..nonce_len], app_state.shells[idx].browser_bind_nonce[0..nonce_len]);
     job.nonce_len = nonce_len;
@@ -2034,6 +2184,7 @@ pub fn startBrowserWindowResolve(idx: u32) void {
 }
 
 fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
+    browser_command_profile = std.mem.sliceTo(&job.profile, 0);
     crash_recorder.guardThread();
     const resolved = if (job.nonce_len > 0)
         resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
@@ -2062,7 +2213,8 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         var url_buf: [BROWSER_PENDING_URL_CAP]u8 = undefined;
         const len: usize = app_state.shells[idx].browser_pending_url_len;
         @memcpy(url_buf[0..len], app_state.shells[idx].browser_pending_url[0..len]);
-        const activate = app_state.g_browser_pending_activate_sid == shell_id;
+        const activate = app_state.g_browser_pending_activate_sid == shell_id and
+            idx == app_state.active_shell and foregroundIsOurs() and !browserChromeHiddenForOverlay();
         app_state.g_browser_pending_activate_sid = 0;
         if (!std.mem.eql(u8, url_buf[0..len], "about:blank")) navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
     }
@@ -2084,7 +2236,7 @@ fn bindBrowserWindowIdForShell(idx: u32, wid: i64) void {
     writePaneSessionFileForShell(idx);
     var cmd_buf: [512]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" --window {d} protect-window --shell-id {d} --owner-pid {d}", .{ bridgeExePath(), wid, app_state.shells[idx].shell_id, GetCurrentProcessId() }) catch null;
-    if (cmd) |c| spawnBrowserCliHidden(c);
+    if (cmd) |c| spawnBrowserCliForShell(idx, c);
     if (verboseLoggingEnabled()) {
         var lbuf: [72]u8 = undefined;
         const ls = std.fmt.bufPrint(&lbuf, "[browser-bind] shell_id={d} windowId={d}", .{ app_state.shells[idx].shell_id, wid }) catch "";
@@ -2267,6 +2419,13 @@ fn browserBeaconUrl(buf: []u8, nonce: []const u8) []const u8 {
 fn isolatedBrowserHasLivePane(skip_idx: u32) bool {
     for (0..app_state.shell_count) |i| {
         if (i == skip_idx or webView2OwnsShell(@intCast(i))) continue;
+        if (browser_workspace_profile.IGSH_224) {
+            var a: [32]u8 = undefined;
+            var b: [32]u8 = undefined;
+            const current = workspaceProfileForShell(skip_idx, &a) catch return false;
+            const other = workspaceProfileForShell(@intCast(i), &b) catch continue;
+            if (!std.mem.eql(u8, current, other)) continue;
+        }
         const bh = app_state.shells[i].browser_hwnd orelse continue;
         if (IsWindow(bh) != 0) return true;
     }
@@ -2289,7 +2448,7 @@ fn requestInactivePaneWindow(idx: u32, beacon_url: []const u8) bool {
         if (app_state.shells[idx].browser_native) "" else " --app",
         bounds,
     }) catch return false;
-    spawnBrowserCliHidden(cmd);
+    spawnBrowserCliForShell(idx, cmd);
     return true;
 }
 
@@ -2306,8 +2465,89 @@ fn unlockForegroundAfterRequestLaunch() void {
     app_state.g_browser_adopt_fg_locked = false;
 }
 
+const WorkspaceProfileJob = struct {
+    shell_id: u32,
+    owner: HANDLE,
+    user_initiated: bool,
+    token: [32]u8 = undefined,
+    seed: [1024]u8 = std.mem.zeroes([1024]u8),
+    destination: [1024]u8 = std.mem.zeroes([1024]u8),
+    failure: ?anyerror = null,
+};
+
+fn prepareWorkspaceBrowser(idx: u32, user_initiated: bool) bool {
+    if (!browser_workspace_profile.IGSH_224) return true;
+    if (!legacy_profiles_ready) return false;
+    if (app_state.shells[idx].browser_profile_preparing) return false;
+    const job = std.heap.page_allocator.create(WorkspaceProfileJob) catch return false;
+    job.* = .{ .shell_id = app_state.shells[idx].shell_id, .owner = app_state.g_main_hwnd, .user_initiated = user_initiated };
+    const value = workspaceProfileForShell(idx, &job.token) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    var local: [1024]u8 = undefined;
+    const n = GetEnvironmentVariableA("LOCALAPPDATA", &local, local.len);
+    if (n == 0 or n >= local.len) {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    }
+    const dest = browser_workspace_profile.path(&job.destination, local[0..n], browserEngineToken(), value) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    const seed = browserUserDataDir();
+    if (std.ascii.eqlIgnoreCase(seed, dest) or (@import("browser_profile_clone.zig").workspaceReady(std.heap.page_allocator, dest) catch false)) {
+        std.heap.page_allocator.destroy(job);
+        return true;
+    }
+    if (seed.len == 0 or seed.len >= job.seed.len) {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    }
+    @memcpy(job.seed[0..seed.len], seed);
+    app_state.shells[idx].browser_profile_preparing = true;
+    const thread = std.Thread.spawn(.{}, workspaceProfilePrepareWorker, .{job}) catch {
+        app_state.shells[idx].browser_profile_preparing = false;
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    showHeaderNoticeAscii("Preparing this workspace's browser profile without caches...", 8000, false);
+    return false;
+}
+
+fn workspaceProfilePrepareWorker(job: *WorkspaceProfileJob) void {
+    browser_workspace_profile.ensureWorkspaceProfile(std.heap.page_allocator, std.mem.sliceTo(&job.seed, 0), std.mem.sliceTo(&job.destination, 0)) catch |err| {
+        job.failure = err;
+    };
+    if (job.owner == null or PostMessageW(job.owner, @import("win32.zig").WM_APP_BROWSER_PROFILE_READY, @intFromPtr(job), 0) == 0) {
+        std.heap.page_allocator.destroy(job);
+    }
+}
+
+pub fn handleWorkspaceProfileReady(pointer: usize) void {
+    const job: *WorkspaceProfileJob = @ptrFromInt(pointer);
+    defer std.heap.page_allocator.destroy(job);
+    const idx = findShellById(job.shell_id) orelse return;
+    app_state.shells[idx].browser_profile_preparing = false;
+    if (job.failure) |err| {
+        var message: [200]u8 = undefined;
+        const text = std.fmt.bufPrint(&message, "Workspace browser profile refused: {s}. Close the shared browser and check disk space.", .{@errorName(err)}) catch return;
+        showHeaderNoticeAscii(text, 12000, true);
+        return;
+    }
+    var current: [32]u8 = undefined;
+    const value = workspaceProfileForShell(idx, &current) catch return;
+    if (!std.mem.eql(u8, value, &job.token)) {
+        if (idx == app_state.active_shell) launchBrowserForShellEx(idx, false);
+        return;
+    }
+    launchBrowserForShellEx(idx, job.user_initiated and idx == app_state.active_shell and foregroundIsOurs() and !browserChromeHiddenForOverlay());
+}
+
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
+    reconcileBrowserWorkspace(idx);
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     const launch_now = GetTickCount64();
     if (app_state.shells[idx].browser_relaunch_after_tick != 0 and launch_now < app_state.shells[idx].browser_relaunch_after_tick) return;
@@ -2316,6 +2556,8 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
         forgetCrashedBrowserPane(idx, launch_now);
         return;
     }
+    if (!prepareWorkspaceBrowser(idx, user_initiated)) return;
+    _ = workspaceProfileIdentityForShell(idx, &app_state.shells[idx].browser_profile_token) catch return;
     ensureBrowserDefaultUrl(idx);
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_native = app_state.g_browser_native_default;
@@ -2818,6 +3060,12 @@ pub fn updateBrowserVisibility() void {
     defer app_state.g_updating_browser_visibility = false;
     browserTrace("updVis enter");
     if (app_state.g_app_closing) return;
+    reconcileBrowserWorkspace(app_state.active_shell);
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
+        showWorkspaceBrowserProfile(app_state.active_shell, false);
+    } else {
+        @memset(&browser_notice_profile, 0);
+    }
     if (app_state.g_monitor_transition.active) {
         parkBrowserForMonitorTransition();
         return;

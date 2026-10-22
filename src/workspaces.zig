@@ -191,6 +191,7 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const browserUrlSlice = @import("browser_pane.zig").browserUrlSlice;
+const reconcileBrowserWorkspace = @import("browser_pane.zig").reconcileBrowserWorkspace;
 const hideBrowserFloatingChrome = @import("browser_pane.zig").hideBrowserFloatingChrome;
 const parkStrayBrowserPanes = @import("browser_pane.zig").parkStrayBrowserPanes;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
@@ -1465,6 +1466,7 @@ pub fn moveTabToPill(tab_idx: u32, slot: u8) void {
     if (!app_state.g_single_window or slot >= app_state.g_lws_count or app_state.g_ws_snoozed[slot] or tab_idx >= app_state.shell_count) return;
     const was_active = tab_idx == app_state.active_shell;
     app_state.shells[tab_idx].workspace = slot;
+    reconcileBrowserWorkspace(tab_idx);
     app_state.shells[tab_idx].group_id = 0;
     commitPillMove(slot, was_active);
 }
@@ -1475,6 +1477,7 @@ pub fn moveSelectedTabsToPill(slot: u8) void {
     for (0..app_state.shell_count) |i| {
         if (!app_state.shells[i].selected) continue;
         app_state.shells[i].workspace = slot;
+        reconcileBrowserWorkspace(@intCast(i));
         app_state.shells[i].group_id = 0;
         app_state.shells[i].selected = false;
         if (i == app_state.active_shell) follow = true;
@@ -1490,6 +1493,7 @@ pub fn moveGroupToPill(gidx: u32, slot: u8) void {
         if (@import("sidebar.zig").tabGroupId(i) != gid) continue;
         if (app_state.g_starred_workspace and app_state.shells[i].workspace != slot) app_state.shells[i].group_id = 0;
         app_state.shells[i].workspace = slot;
+        reconcileBrowserWorkspace(@intCast(i));
         if (i == app_state.active_shell) follow = true;
     }
     commitPillMove(slot, follow);
@@ -1544,8 +1548,7 @@ fn closedWorkspaceMoveTargetSlot(workspace_idx: u32) ?u8 {
 
     scanLiveWorkspaceWindows(false);
     if (!workspaceCanMoveIntoClosedStandalone(workspace_idx)) return null;
-    if (!absorbWorkspaceIntoSlots(id, name_copy[0..name_len])) return null;
-    return findMyWorkspaceSlot(id);
+    return absorbWorkspaceIntoSlots(id, name_copy[0..name_len]);
 }
 
 pub fn moveTabToClosedWorkspace(tab_idx: u32, workspace_idx: u32) void {
@@ -1636,7 +1639,7 @@ pub fn restoreRegisteredWorkspaceWindows() void {
         const name = cand_names[ci][0..cand_name_len[ci]];
         if (findAndFocusWorkspaceWindow(id, name)) continue;
         if (app_state.g_single_window) {
-            if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("startup absorb failed: ", id);
+            if (absorbWorkspaceIntoSlots(id, name) == null) debugLog2("startup absorb failed: ", id);
             continue;
         }
         spawnWorkspaceWindow(id);
@@ -3108,10 +3111,12 @@ pub fn toggleSingleWindowMode() void {
             const name_len = @min(name.len, app_state.g_ws_names[0].len);
             if (name_len > 0) @memcpy(app_state.g_ws_names[0][0..name_len], name[0..name_len]);
             app_state.g_ws_name_len[0] = @intCast(name_len);
-            const id = getInstanceName();
-            const id_len = @min(id.len, app_state.g_ws_ids[0].len);
-            if (id_len > 0) @memcpy(app_state.g_ws_ids[0][0..id_len], id[0..id_len]);
-            app_state.g_ws_id_len[0] = @intCast(id_len);
+            if (app_state.g_ws_id_len[0] == 0) {
+                const id = getInstanceName();
+                const id_len = @min(id.len, app_state.g_ws_ids[0].len);
+                if (id_len > 0) @memcpy(app_state.g_ws_ids[0][0..id_len], id[0..id_len]);
+                app_state.g_ws_id_len[0] = @intCast(id_len);
+            }
             for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
         }
         var max_ws: u8 = 0;
@@ -3148,6 +3153,7 @@ fn leaveSingleWindowMode() bool {
     defer unlockWorkspaceRegistry(registry_lock);
     if (app_state.g_lws_count == 0) app_state.g_lws_count = 1;
     const active_slot: u8 = if (app_state.g_active_workspace < app_state.g_lws_count) app_state.g_active_workspace else 0;
+    ensureWorkspaceSlotId(active_slot);
     const original_ids = app_state.g_ws_ids;
     const original_id_lengths = app_state.g_ws_id_len;
     var exports_ready = false;
@@ -3167,22 +3173,23 @@ fn leaveSingleWindowMode() bool {
     var ws: u8 = 0;
     while (ws < app_state.g_lws_count) : (ws += 1) {
         if (ws == active_slot) continue;
-        if (std.mem.eql(u8, app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], getInstanceName())) {
-            app_state.g_ws_id_len[ws] = 0;
-        }
         ensureWorkspaceSlotId(ws);
         const entry = &split_entries[split_count];
         entry.id_len = @min(app_state.g_ws_id_len[ws], @as(u32, @intCast(entry.id.len)));
         if (entry.id_len > 0) @memcpy(entry.id[0..entry.id_len], app_state.g_ws_ids[ws][0..entry.id_len]);
+        if (std.mem.eql(u8, entry.id[0..entry.id_len], getInstanceName())) {
+            const alias = std.fmt.bufPrint(&entry.id, "split-{d}-{d}", .{ GetTickCount64(), ws }) catch return false;
+            entry.id_len = @intCast(alias.len);
+        }
         var name_buf: [32]u8 = undefined;
         const name = workspaceDisplayName(ws, &name_buf);
         entry.name_len = @intCast(@min(name.len, entry.name.len));
         if (entry.name_len > 0) @memcpy(entry.name[0..entry.name_len], name[0..entry.name_len]);
-        if (!exportSlotSessionFile(ws)) return false;
+        if (!exportSlotSessionFile(ws, entry.id[0..entry.id_len])) return false;
         split_count += 1;
     }
 
-    if (!saveWorkspaceModeOrder(active_slot)) return false;
+    if (!saveWorkspaceModeOrder()) return false;
     exports_ready = true;
     var si: u32 = app_state.shell_count;
     while (si > 0) {
@@ -3201,11 +3208,9 @@ fn leaveSingleWindowMode() bool {
     app_state.g_ws_names[0] = std.mem.zeroes([32]u8);
     if (active_name_len > 0) @memcpy(app_state.g_ws_names[0][0..active_name_len], active_name_buf[0..active_name_len]);
     app_state.g_ws_name_len[0] = @intCast(active_name_len);
-    app_state.g_ws_ids[0] = std.mem.zeroes([32]u8);
+    app_state.g_ws_ids[0] = original_ids[active_slot];
+    app_state.g_ws_id_len[0] = original_id_lengths[active_slot];
     const current_id = getInstanceName();
-    const current_id_len = @min(current_id.len, app_state.g_ws_ids[0].len);
-    if (current_id_len > 0) @memcpy(app_state.g_ws_ids[0][0..current_id_len], current_id[0..current_id_len]);
-    app_state.g_ws_id_len[0] = @intCast(current_id_len);
     var clear_ws: u8 = 1;
     while (clear_ws < MAX_LWS) : (clear_ws += 1) {
         app_state.g_ws_name_len[clear_ws] = 0;
@@ -3467,7 +3472,7 @@ fn workspaceModeOrderPath(buf: *[512]u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}\\workspace-order{s}.json", .{ dir, if (IS_DEV) "-dev" else "" }) catch null;
 }
 
-fn saveWorkspaceModeOrder(split_active: ?u8) bool {
+fn saveWorkspaceModeOrder() bool {
     var path_buf: [512]u8 = undefined;
     const path = workspaceModeOrderPath(&path_buf) orelse return false;
     var json: [2048]u8 = undefined;
@@ -3481,7 +3486,7 @@ fn saveWorkspaceModeOrder(split_active: ?u8) bool {
         }
         json[pos] = '"';
         pos += 1;
-        const id = if (split_active != null and ws == split_active.?) getInstanceName() else app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]];
+        const id = app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]];
         appendJsonEscaped(&json, &pos, id);
         json[pos] = '"';
         pos += 1;
@@ -3544,20 +3549,20 @@ fn restoreWorkspaceModeOrder() void {
 }
 
 pub fn persistWorkspaceOrder() void {
-    _ = saveWorkspaceModeOrder(null);
+    _ = saveWorkspaceModeOrder();
     syncInProcessWorkspacesToRegistry();
     publishInboxState();
     saveSession();
     updateMainWindowTitle();
 }
 
-fn exportSlotSessionFile(slot: u8) bool {
+fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
     if (slot >= app_state.g_lws_count) return false;
     ensureWorkspaceSlotId(slot);
     const wid = app_state.g_ws_ids[slot][0..app_state.g_ws_id_len[slot]];
     if (wid.len == 0) return false;
     var path_buf: [512]u8 = undefined;
-    const path = getSessionPathForWorkspace(&path_buf, wid) orelse return false;
+    const path = getSessionPathForWorkspace(&path_buf, transport_id) orelse return false;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
 
@@ -3816,6 +3821,12 @@ fn exportSlotSessionFile(slot: u8) bool {
     const t3 = "}]";
     @memcpy(json_buf[pos .. pos + t3.len], t3);
     pos += t3.len;
+    const identity_prefix = ",\"workspace_id\":\"";
+    @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+    pos += identity_prefix.len;
+    appendJsonEscaped(&json_buf, &pos, wid);
+    json_buf[pos] = '"';
+    pos += 1;
 
     var wrote_group = false;
     for (0..app_state.group_count) |gi| {
@@ -3910,7 +3921,12 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     @memcpy(name_copy[0..nm.len], nm);
     const name = name_copy[0..nm.len];
 
-    const exported = exportSlotSessionFile(slot);
+    var transport_buf: [32]u8 = undefined;
+    const transport_id = if (std.mem.eql(u8, id, getInstanceName()))
+        std.fmt.bufPrint(&transport_buf, "split-{d}-{d}", .{ GetTickCount64(), slot }) catch return
+    else
+        id;
+    const exported = exportSlotSessionFile(slot, transport_id);
     if (!exported) {
         showHeaderNoticeAscii("Could not hibernate workspace - tabs left open", 4500, true);
         return;
@@ -3934,9 +3950,9 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         var stamp_buf: [32]u8 = undefined;
         const stamp = workspaceDeleteStamp(&stamp_buf);
         var path_buf: [512]u8 = undefined;
-        if (getSessionPathForWorkspace(&path_buf, id)) |path| archiveWorkspaceFile(path, stamp);
+        if (getSessionPathForWorkspace(&path_buf, transport_id)) |path| archiveWorkspaceFile(path, stamp);
     } else {
-        addOrUpdateWorkspaceHosted(id, name, false, "");
+        addOrUpdateWorkspaceHosted(transport_id, name, false, "");
     }
     syncCurrentWorkspaceToRegistry();
     writeWorkspaceRegistryFile();
@@ -4062,31 +4078,31 @@ test "workspace absorption remaps colliding group ids without losing metadata" {
     try std.testing.expectEqual(@as(u32, 3), app_state.group_count);
 }
 
-pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool {
-    if (!app_state.g_single_window) return false;
-    if (id.len == 0 or std.mem.eql(u8, id, getInstanceName())) return false;
+pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) ?u8 {
+    if (!app_state.g_single_window) return null;
+    if (id.len == 0 or std.mem.eql(u8, id, getInstanceName())) return null;
 
     var path_buf: [512]u8 = undefined;
-    const path = getSessionPathForWorkspace(&path_buf, id) orelse return false;
+    const path = getSessionPathForWorkspace(&path_buf, id) orelse return null;
     var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
     var n: usize = 0;
     {
-        const h = win32OpenRead(path) orelse return false;
+        const h = win32OpenRead(path) orelse return null;
         defer _ = CloseHandle(h);
         n = win32ReadAll(h, &json_buf);
     }
-    if (n == 0) return false;
+    if (n == 0) return null;
     const json = json_buf[0..n];
-    if (!sessionFileIsValid(json)) return false;
+    if (!sessionFileIsValid(json)) return null;
 
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const tab_count = parseSessionTabs(json, &tabs);
-    var parsed = json_reader.parse(std.heap.page_allocator, json) catch return false;
+    var parsed = json_reader.parse(std.heap.page_allocator, json) catch return null;
     defer parsed.deinit();
     const entries = json_reader.field(parsed.value, "tabs");
     const empty_workspace = tab_count == 0 and entries == .array and entries.array.items.len == 0;
-    if (tab_count == 0 and !empty_workspace) return false;
-    if (!importWorkspaceGroups(json, tabs[0..tab_count])) return false;
+    if (tab_count == 0 and !empty_workspace) return null;
+    if (!importWorkspaceGroups(json, tabs[0..tab_count])) return null;
     logSavedTabsAudit("absorbWorkspace:parsed", tabs[0..tab_count]);
 
     var src_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
@@ -4109,6 +4125,14 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         src_wid_len[swi] = wcap;
         src_last_shell[swi] = @intCast(@min(json_reader.uint(obj, "last_shell"), std.math.maxInt(u32)));
         src_focus[swi] = parseWorkspaceFocus(obj);
+    }
+
+    if (src_wid_len[0] == 0) {
+        var id_buf: [64]u8 = undefined;
+        const saved_len = json_reader.copyString(parsed.value, "workspace_id", &id_buf);
+        const id_len = @min(saved_len, src_wids[0].len);
+        @memcpy(src_wids[0][0..id_len], id_buf[0..id_len]);
+        src_wid_len[0] = @intCast(id_len);
     }
 
     for (0..tab_count) |t| {
@@ -4136,20 +4160,23 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     app_state.g_restoring = true;
 
     var spawned: u32 = 0;
+    var restored_slot: ?u8 = null;
     if (empty_workspace) {
         if (app_state.g_lws_count >= MAX_LWS) {
             app_state.g_restoring = was_restoring;
-            return false;
+            return null;
         }
         const slot = app_state.g_lws_count;
         app_state.g_lws_count += 1;
+        restored_slot = slot;
         const saved_name = src_names[0][0..@min(src_name_len[0], 31)];
         const name = if (saved_name.len > 0) saved_name else fallback_name;
         const name_len = @min(name.len, @as(usize, 31));
         @memcpy(app_state.g_ws_names[slot][0..name_len], name[0..name_len]);
         app_state.g_ws_name_len[slot] = @intCast(name_len);
-        const id_len = @min(id.len, app_state.g_ws_ids[slot].len);
-        @memcpy(app_state.g_ws_ids[slot][0..id_len], id[0..id_len]);
+        const workspace_id = if (src_wid_len[0] > 0) src_wids[0][0..src_wid_len[0]] else id;
+        const id_len = @min(workspace_id.len, app_state.g_ws_ids[slot].len);
+        @memcpy(app_state.g_ws_ids[slot][0..id_len], workspace_id[0..id_len]);
         app_state.g_ws_id_len[slot] = @intCast(id_len);
         app_state.g_ws_last_shell[slot] = 0;
         app_state.g_ws_focus[slot] = .none;
@@ -4176,8 +4203,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 app_state.g_ws_id_len[slot] = 0;
                 if (!first_slot_assigned) {
                     first_slot_assigned = true;
-                    const icap = @min(id.len, app_state.g_ws_ids[slot].len);
-                    @memcpy(app_state.g_ws_ids[slot][0..icap], id[0..icap]);
+                    const workspace_id = if (src_wid_len[src_ws] > 0) src_wids[src_ws][0..src_wid_len[src_ws]] else id;
+                    const icap = @min(workspace_id.len, app_state.g_ws_ids[slot].len);
+                    @memcpy(app_state.g_ws_ids[slot][0..icap], workspace_id[0..icap]);
                     app_state.g_ws_id_len[slot] = @intCast(icap);
                 } else if (src_wid_len[src_ws] > 0 and findMyWorkspaceSlot(src_wids[src_ws][0..src_wid_len[src_ws]]) == null) {
                     const wl = src_wid_len[src_ws];
@@ -4287,6 +4315,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 app_state.shells[idx].claude_cwd_len = tabs[t].claude_cwd_len;
             }
             restoreBrowserStateFromSavedTab(@intCast(idx), &tabs[t]);
+            if (restored_slot == null) restored_slot = slot;
             spawned += 1;
         } else {
             debugLog("absorbWorkspace: spawn FAILED");
@@ -4304,8 +4333,13 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.g_ws_focus[s] = .none;
         }
         app_state.g_lws_count = entry_lws;
-        return false;
+        return null;
     }
+
+    const target_slot = restored_slot orelse return null;
+    const restored_id = app_state.g_ws_ids[target_slot];
+    const restored_id_len = app_state.g_ws_id_len[target_slot];
+    const restored_other = isOtherWorkspaceSlot(target_slot);
 
     var stamp_buf: [32]u8 = undefined;
     const stamp = workspaceDeleteStamp(&stamp_buf);
@@ -4328,7 +4362,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     app_state.g_sidebar_scroll = 0;
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-    return true;
+    return findMyWorkspaceSlot(restored_id[0..restored_id_len]) orelse if (restored_other) otherPillSlot() else null;
 }
 
 fn collapseOtherWindowsIntoThis() void {
@@ -4363,7 +4397,7 @@ fn collapseOtherWindowsIntoThis() void {
             }
         }
         debugLog2("collapse: closing sibling workspace ", id);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        _ = PostMessageW(target, @import("win32.zig").WM_APP_QUIT_ALL, 0, 0);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) {
@@ -4371,7 +4405,7 @@ fn collapseOtherWindowsIntoThis() void {
             continue;
         }
         Sleep(150);
-        if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("collapse: absorb failed for ", id);
+        if (absorbWorkspaceIntoSlots(id, name) == null) debugLog2("collapse: absorb failed for ", id);
     }
     _ = reconcileWorkspaceRegistry(true);
 }

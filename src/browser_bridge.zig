@@ -23,6 +23,7 @@ const InvalidateRect = @import("win32.zig").InvalidateRect;
 const CreateProcessW = @import("win32.zig").CreateProcessW;
 const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
+const SetHandleInformation = @import("win32.zig").SetHandleInformation;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
 const FindFirstFileW = @import("win32.zig").FindFirstFileW;
 const FindNextFileW = @import("win32.zig").FindNextFileW;
@@ -840,6 +841,7 @@ fn queueZsbBindRequestEx(session: []const u8, force: bool, info_only: bool, info
         if (app_state.g_zsb_bind_done) {
             const found = app_state.g_zsb_bind_found;
             if (info) |out| out.* = app_state.g_zsb_bind_info;
+            if (found) zsb_profile_token = app_state.g_zsb_bind_info.profile;
             app_state.g_zsb_bind_done = false;
             app_state.g_zsb_bind_found = false;
             app_state.g_zsb_bind_force = false;
@@ -922,9 +924,16 @@ pub fn handleZsbBindRequest() void {
     const session = session_buf[0..session_len];
     var found = false;
     if (findZsbPaneTarget(session)) |ti| {
+        @import("browser_pane.zig").reconcileBrowserWorkspace(ti);
+        var profile: [32]u8 = std.mem.zeroes([32]u8);
+        _ = @import("browser_pane.zig").workspaceProfileForShell(ti, &profile) catch {
+            finishZsbBindRequest(false);
+            return;
+        };
         if (info_only) {
             while (!app_state.g_zsb_bind_mutex.tryLock()) Sleep(0);
             app_state.g_zsb_bind_info = .{
+                .profile = profile,
                 .name = app_state.shells[ti].name,
                 .name_len = app_state.shells[ti].name_len,
                 .shell_id = app_state.shells[ti].shell_id,
@@ -956,6 +965,7 @@ pub fn handleZsbBindRequest() void {
         }
         while (!app_state.g_zsb_bind_mutex.tryLock()) Sleep(0);
         app_state.g_zsb_bind_info.window_id = app_state.shells[ti].browser_window_id;
+        app_state.g_zsb_bind_info.profile = profile;
         app_state.g_zsb_bind_mutex.unlock();
     }
     if (!found) debugLog2("zsb bind: no live browser pane for session=", session);
@@ -1126,7 +1136,9 @@ fn zsbSendWebView2Status(client: SOCKET, session: []const u8) void {
 fn zsbUnfreezeBlocking(window_id: i64) void {
     if (window_id == 0) return;
     var cmd_buf: [320]u8 = undefined;
-    const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "active") orelse return;
+    const raw_cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "active") orelse return;
+    var qualified: [512]u8 = undefined;
+    const cmd = @import("browser_workspace_profile.zig").command(&qualified, raw_cmd, std.mem.sliceTo(&zsb_profile_token, 0)) catch return;
     var cmd_w: [400]u16 = undefined;
     const cmd_ws = win32WidePath(&cmd_w, cmd) orelse return;
     var si = std.mem.zeroes(STARTUPINFOW);
@@ -1464,7 +1476,10 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
     }
 }
 
+threadlocal var zsb_profile_token: [32]u8 = std.mem.zeroes([32]u8);
+
 fn zsbBuildBridgeCmd(window_id: i64, argv: []const []const u8, cmd_buf: []u8) ?[]const u8 {
+    if (argv.len == 0 or argv[0].len == 0 or argv[0][0] == '-') return null;
     const exe = bridgeExePath();
     var cp: usize = 0;
 
@@ -1476,6 +1491,10 @@ fn zsbBuildBridgeCmd(window_id: i64, argv: []const []const u8, cmd_buf: []u8) ?[
     cmd_buf[cp] = '"';
     cp += 1;
 
+    if (zsb_profile_token[0] != 0) {
+        const profile_flag = std.fmt.bufPrint(cmd_buf[cp..], " --profile {s}", .{std.mem.sliceTo(&zsb_profile_token, 0)}) catch return null;
+        cp += profile_flag.len;
+    }
     const flag_s = std.fmt.bufPrint(cmd_buf[cp..], " --window {d}", .{window_id}) catch return null;
     cp += flag_s.len;
 
@@ -1763,6 +1782,10 @@ fn tunnelInboundThread(srv_usize: usize) void {
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
+        if (SetHandleInformation(@ptrFromInt(client), 1, 0) == 0) {
+            _ = closesocket(client);
+            continue;
+        }
 
         var buf: [ZSB_WIRE_CAP]u8 = undefined;
         var total: usize = 0;
@@ -1823,6 +1846,10 @@ pub fn startTunnelInboundListener() void {
     if (WSAStartup(0x0202, &wsa) != 0) return;
     const srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv == INVALID_SOCKET) return;
+    if (SetHandleInformation(@ptrFromInt(srv), 1, 0) == 0) {
+        _ = closesocket(srv);
+        return;
+    }
     const yes: i32 = 1;
     _ = setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, @ptrCast(&yes), @sizeOf(i32));
     var addr = SOCKADDR_IN{

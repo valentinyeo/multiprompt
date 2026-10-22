@@ -49,3 +49,23 @@ test('a switch that leaves two browser panes on screen fails the bench', () => {
   r.switches = [{ ...shot }];
   assert(evaluate(r, config).failures.includes('cold tab 0: browser panes on screen not counted'));
 });
+
+test('docked bench fixtures bind the workspace profile before injecting their foreign HWND', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/chat_session.zig', import.meta.url), 'utf8');
+  const tick = source.slice(source.indexOf('pub fn chatBenchTick()'), source.indexOf('pub fn chatBenchPaint()'));
+  const binding = /_ = @import\("browser_pane.zig"\)\.workspaceProfileForShell\(idx, &profile\) catch return;\s+@memcpy\(&shell\.browser_profile_token, &profile\);/;
+  assert.match(tick, binding);
+  assert(tick.search(binding) < tick.indexOf('shell.browser_hwnd = FindWindowW('));
+  assert(tick.indexOf('shell.browser_hwnd = FindWindowW(') < tick.indexOf('switchToShell(idx)'));
+});
+
+test('cold and warm docked fixtures require both a foreign and live browser HWND', () => {
+  const r = run();
+  r.fixtures.tabs = [{ index: 0, browser: 'docked' }];
+  for (const phase of ['cold', 'warm']) for (const browser_foreign of [false, true]) for (const browser_live of [false, true]) {
+    r.switches = [{ phase, index: 0, geometry: { browser_foreign, browser_live }, foreignBrowsersOnScreen: 1 }];
+    const failures = evaluate(r, { ...defaults, browserTabs: true }).failures;
+    assert.equal(failures.includes(`${phase} tab 0: missing foreign docked browser HWND`), !browser_foreign || !browser_live);
+  }
+});

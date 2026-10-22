@@ -2233,7 +2233,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const placeholder = if (app_state.g_search_ws_sort_mode)
                 L("Drag rows to reorder (or Ctrl+Up/Down). Enter switches.")
             else if (app_state.g_search_rename_input_mode)
-                L("Enter a session name...")
+                (if (app_state.g_search_rename_workspace_len > 0) L("Enter a workspace name...") else L("Enter a session name..."))
             else if (app_state.g_browser_url_mode)
                 L("Enter browser URL...")
             else if (app_state.g_search_remind_input_mode)
@@ -2289,7 +2289,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(95, 95, 95) else RGB(155, 155, 155)));
                 _ = SelectObject(hdc, font_subtitle);
                 var rename_hint_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = DrawTextW(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs multiprompt, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = DrawTextW(hdc, if (app_state.g_search_rename_workspace_len > 0) L("Workspace name  ·  Ctrl+A selects all  ·  Enter saves  ·  Esc cancels") else L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs multiprompt, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) {
                 _ = SetTextColor(hdc, customColorOr("hint", RGB(100, 100, 100)));
                 _ = SelectObject(hdc, font_subtitle);

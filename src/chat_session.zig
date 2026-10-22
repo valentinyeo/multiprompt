@@ -198,6 +198,9 @@ pub fn chatBenchTick() void {
                 shell.browser_enabled = !std.mem.eql(u8, mode, "none");
                 shell.browser_native = true;
                 if (fields.next()) |title| {
+                    var profile: [32]u8 = undefined;
+                    _ = @import("browser_pane.zig").workspaceProfileForShell(idx, &profile) catch return;
+                    @memcpy(&shell.browser_profile_token, &profile);
                     var title_wide: [96]u16 = @splat(0);
                     const len = std.unicode.utf8ToUtf16Le(title_wide[0..95], title) catch 0;
                     title_wide[len] = 0;
