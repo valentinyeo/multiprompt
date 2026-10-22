@@ -135,6 +135,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.wake_id = @intCast(@min(uint(obj, "wake_id"), std.math.maxInt(u32)));
         tab.pid = @truncate(uint(obj, "pid"));
         tab.group_id = @truncate(uint(obj, "group_id"));
+        tab.starred_group_id = @truncate(uint(obj, "starred_group_id"));
         tab.tmux_host = @truncate(uint(obj, "tmux_host"));
         const workspace = uint(obj, "workspace");
         tab.workspace = if (workspace < max_workspaces) @intCast(workspace) else 0;

@@ -47,7 +47,7 @@ var g_chat_skill_body_len: usize = 0;
 var active_shell: u32 = 0;
 var shell_count: u32 = 2;
 const ShellKind = enum { tmux };
-const Shell = struct { chat_id: u64 = 0, shell_id: u32 = 0, kind: ShellKind = .tmux, tmux_host: u8 = 0, tmux_session: [64]u8 = [_]u8{'s','a','m','e'} ++ [_]u8{0} ** 60, tmux_session_len: u32 = 4, browser_hwnd: ?usize = null, name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic } = .manual, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0, group_id: u32 = 0 };
+const Shell = struct { chat_id: u64 = 0, shell_id: u32 = 0, kind: ShellKind = .tmux, tmux_host: u8 = 0, tmux_session: [64]u8 = [_]u8{'s','a','m','e'} ++ [_]u8{0} ** 60, tmux_session_len: u32 = 4, browser_hwnd: ?usize = null, name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic } = .manual, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0, group_id: u32 = 0, starred_group_id: u32 = 0, favorite: bool = false, workspace: u8 = 0 };
 var shells = [_]Shell{ .{.chat_id = 101, .shell_id = 1}, .{.chat_id = 202, .shell_id = 2} };
 var composer_text: [16400]u16 = @splat(0);
 var files = std.StringHashMap([]u8).init(std.heap.page_allocator);
@@ -226,7 +226,7 @@ ${closedType[0].replace('pub const', 'const')}
 ${groupType[0]}
 var groups: [1]TabGroup = undefined;
 fn findGroupIdx(_: u32) ?u32 { return null; }
-fn restoreClosedShellGroup(_: u32, _: TabGroup) void {}
+fn restoreSessionGroup(_: TabGroup, _: u8, _: bool) u32 { return 0; }
 const MAX_CLOSED_HISTORY = 10;
 const empty_shell: Shell = .{};
 var g_closed_history: [MAX_CLOSED_HISTORY]ClosedShell = undefined;

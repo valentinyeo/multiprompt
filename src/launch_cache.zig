@@ -92,6 +92,7 @@ pub fn restore() void {
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
         shell.group_id = row.group_id;
+        shell.starred_group_id = row.starred_group_id;
         shell.ai_agent = row.agent;
         shell.pinned_top = row.pinned;
         shell.favorite = row.favorite;
@@ -236,6 +237,7 @@ pub fn save() void {
         .kind = @intFromEnum(shell.kind),
         .workspace = shell.workspace,
         .group_id = shell.group_id,
+        .starred_group_id = shell.starred_group_id,
         .agent = shell.ai_agent,
         .pinned = shell.pinned_top,
         .favorite = shell.favorite,

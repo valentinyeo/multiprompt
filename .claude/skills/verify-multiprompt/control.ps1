@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -695,6 +695,55 @@ try {
             Wait-Until { (Read-Session).active_workspace -eq $created } 'new workspace active again'
             $result.checks += @{ name = 'create-switch-return'; workspacesBefore = $before; workspacesAfter = (Read-Session).workspace_count; activeWorkspace = $created; title = [VerifyNative]::Title($script:window) }
             Snapshot 'after'
+        }
+        'favorites-groups' {
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.single_window -and $state.active_workspace -eq 0 -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -ceq 'cmd' } 'initial CMD session saved in first workspace'
+            $initial = Read-Session
+            $tabIndex = $initial.active_tab
+            if ($tabIndex -ne 0 -or ($initial.tabs[$tabIndex].PSObject.Properties['favorite'] -and $initial.tabs[$tabIndex].favorite)) { throw 'Favorites journey requires the fresh unstarred CMD session' }
+            $initialGroupIds = @()
+            if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
+            Press @(0x12, 0x53) 'Alt+S: favorite initial CMD session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].favorite -eq $true } 'favorite true saved in session.json'
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
+            Type-Text 'new group'
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: New home group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups']) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
+                $newGroups.Count -eq 1 -and $newGroups[0].id -gt 0 -and $state.tabs[$tabIndex].group_id -eq $newGroups[0].id
+            } 'new home group H persisted on original tab'
+            $homeState = Read-Session
+            $homeGroupId = $homeState.tabs[$tabIndex].group_id
+            $homeGroupIds = @($homeState.groups | ForEach-Object { $_.id })
+            Press @(0x1B) 'Escape: finish home group inline rename without changing its name'
+            Press @(0x12, 0x31) 'Alt+1: Starred workspace'
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu in Starred workspace'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: New Favorites group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.tabs[$tabIndex].PSObject.Properties['starred_group_id']) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $homeGroupIds })
+                $newGroups.Count -eq 1 -and $newGroups[0].id -gt 0 -and $newGroups[0].id -ne $homeGroupId -and $state.tabs[$tabIndex].group_id -eq $homeGroupId -and $state.tabs[$tabIndex].starred_group_id -eq $newGroups[0].id
+            } 'independent Favorites group F saved while home group stays H'
+            $starred = Read-Session
+            $favoritesGroupId = $starred.tabs[$tabIndex].starred_group_id
+            Save-Json $starred 'session-starred-grouped.json'
+            Press @(0x1B) 'Escape: finish Favorites group inline rename without changing its name'
+            Snapshot 'starred-grouped'
+            Press @(0x12, 0x32) 'Alt+2: return to home workspace'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.active_workspace -eq 0 -and $state.active_tab -eq $tabIndex -and $state.tabs[$tabIndex].group_id -eq $homeGroupId -and $state.tabs[$tabIndex].starred_group_id -eq $favoritesGroupId -and $state.tabs[$tabIndex].favorite -eq $true
+            } 'home return retains H and independent Favorites F'
+            Save-Json (Read-Session) 'session-home-returned.json'
+            Snapshot 'after'
+            $result.checks += @{ name = 'favorites-groups-independent'; group_id = $homeGroupId; starred_group_id = $favoritesGroupId; tab = $tabIndex }
         }
         'session-open' {
             $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; only background tab creation and idempotency are verified'; observed = 'pending'; tabRemoved = $null }

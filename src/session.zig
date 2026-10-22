@@ -330,6 +330,12 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + lf.len], lf);
             pos += lf.len;
         }
+        if (app_state.shells[i].starred_group_id != 0) {
+            const key = ",\"starred_group_id\":";
+            @memcpy(json_buf[pos .. pos + key.len], key);
+            pos += key.len;
+            pos += writeUintTo(json_buf[pos..], app_state.shells[i].starred_group_id);
+        }
         if (app_state.shells[i].group_id != 0) {
             const gp = ",\"group_id\":";
             @memcpy(json_buf[pos .. pos + gp.len], gp);
@@ -827,6 +833,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.visits = tab.visits;
     shell.claude_session = tab.claude_session;
     shell.group_id = tab.group_id;
+    shell.starred_group_id = tab.starred_group_id;
     shell.tmux_host = tab.tmux_host;
     shell.workspace = tab.workspace;
     shell.last_active = if (tab.last_active != 0) tab.last_active else nowFileTime();
@@ -1226,6 +1233,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].wake_id = tabs[t].wake_id;
     app_state.shells[idx].chat_id = tabs[t].chat_id;
     app_state.shells[idx].group_id = tabs[t].group_id;
+    app_state.shells[idx].starred_group_id = tabs[t].starred_group_id;
     app_state.shells[idx].workspace = tabs[t].workspace;
     app_state.shells[idx].last_active = if (tabs[t].last_active != 0) tabs[t].last_active else nowFileTime();
     app_state.shells[idx].last_viewed = tabs[t].last_viewed;
@@ -1605,6 +1613,9 @@ pub fn restoreSession() u32 {
     }
 
     for (0..app_state.shell_count) |si| {
+        if (app_state.shells[si].starred_group_id != 0 and findGroupIdx(app_state.shells[si].starred_group_id) == null) {
+            app_state.shells[si].starred_group_id = 0;
+        }
         if (app_state.shells[si].group_id != 0 and findGroupIdx(app_state.shells[si].group_id) == null) {
             app_state.shells[si].group_id = 0;
         }
@@ -1694,4 +1705,42 @@ fn writeStartupLastgood(path_buf: [520]u8, len: usize, bytes: []u8) void {
     const file = win32OpenWrite(path_buf[0..len]) orelse return;
     defer _ = CloseHandle(file);
     win32WriteAll(file, bytes);
+}
+
+test "IGSH-556 saved session round trip keeps both group ids and legacy defaults" {
+    const saved_count = app_state.shell_count;
+    const saved_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.shells[0] = saved_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].favorite = true;
+    app_state.shells[0].group_id = 17;
+    app_state.shells[0].starred_group_id = 29;
+    var temp: [512]u8 = undefined;
+    const len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(len > 0 and len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\igsh-556-{d}-{d}.json", .{ temp[0..len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(saveSessionTo(path, 0));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 1), parseSessionTabs(bytes, &tabs));
+    try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
+    try std.testing.expectEqual(@as(u32, 29), tabs[0].starred_group_id);
+    try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\",\"group_id\":17}]}", &tabs));
+    try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
+    try std.testing.expectEqual(@as(u32, 0), tabs[0].starred_group_id);
 }
