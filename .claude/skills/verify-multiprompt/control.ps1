@@ -1310,6 +1310,7 @@ try {
             $foreignKey = 'zss-' + $foreignTab.shell_id
             $token = 'e-' + (Split-Path $targetRoot -Leaf)
             Wait-Until { [IO.Directory]::GetFiles('\\.\pipe\') -contains ('\\.\pipe\multiprompt-browser-isolated-' + $token) } 'reopened workspace native host registered its exact profile pipe' 60
+            Focus-BrowserPaneOwner 'workspace-reopened-zsb' (Read-BrowserPane).browser_connection_id
             $routed = Invoke-Zsb @('url') $script:zsbPort 'zsb-target-url' $targetKey
             if ($routed.result.url -cne $bookmark) { throw 'zsb reached the wrong workspace browser host' }
             Press @(0x12, 0x32) 'Alt+2: select another workspace before requesting the parked target'

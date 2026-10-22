@@ -230,6 +230,19 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
 });
 
+test('workspace zsb requests restore the main frame after lifecycle screenshots and workspace switches', () => {
+  const lifecycle = control.slice(control.indexOf("        'browser-workspaces' {"), control.indexOf("        'inbox' {"));
+  const targetHandoff = /Assert-WorkspaceProfile 'reopened'[^\n]*[\s\S]*?Focus-BrowserPaneOwner 'workspace-reopened-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$routed = Invoke-Zsb/;
+  const parkedHandoff = /Wait-Until \{ \(Read-Session\).active_workspace -eq 0 \} 'foreign workspace selected'\s+Focus-BrowserPaneOwner 'workspace-parked-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$parked = Invoke-Zsb[^\n]*\s+\$foreign = Invoke-Zsb/;
+  assert.match(lifecycle, targetHandoff);
+  assert.match(lifecycle, parkedHandoff);
+  const handoff = "            Focus-BrowserPaneOwner 'workspace-reopened-zsb' (Read-BrowserPane).browser_connection_id\n";
+  const withoutHandoff = lifecycle.replace(handoff, '');
+  assert.throws(() => assert.match(withoutHandoff, targetHandoff));
+  assert.throws(() => assert.match(withoutHandoff.replace("            Assert-WorkspaceProfile 'reopened'", handoff + "            Assert-WorkspaceProfile 'reopened'"), targetHandoff));
+  assert.throws(() => assert.match(lifecycle.replace("            Focus-BrowserPaneOwner 'workspace-parked-zsb' (Read-BrowserPane).browser_connection_id\n", ''), parkedHandoff));
+});
+
 test('audit verification is isolated from unchanged desktop journeys and retains fixture evidence', () => {
   const auditJob = workflow.slice(workflow.indexOf('  chat-sync-audit:'), workflow.indexOf('  verify:'));
   assert.match(auditJob, /if: inputs\.feature == 'chat-sync-audit'/);
