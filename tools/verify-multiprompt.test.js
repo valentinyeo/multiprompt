@@ -359,7 +359,7 @@ test('IGSH-522: workspace return grants a bounded owned-input handoff, never bac
       assert.throws(() => assertsWorkspaceFocusHandoff(broken));
     }
   }
-  const focusJourney = control.slice(control.indexOf("        'workspace-focus' {"), control.indexOf("        'inbox' {"));
+  const focusJourney = control.slice(control.indexOf("        'workspace-focus' {"), control.indexOf("        'chat-view' {"));
   const returning = focusJourney.slice(focusJourney.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
   assert.ok(returning.includes("Type-Text 'workspace-focus-chat'"));
   assert.ok(returning.includes("$expectedText = 'before-workspace-focus-chat'"));
@@ -406,7 +406,7 @@ test('IGSH-522: optional saved cv is false under StrictMode without weakening Ch
 });
 
 function assertsFocusJourneyReadiness(source) {
-  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'chat-view' {"));
   const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
   const palette = source.slice(source.indexOf('function Focus-Palette('), source.indexOf('function Wait-WorkspaceSurface('));
   const surface = source.slice(source.indexOf('function Wait-WorkspaceSurface('), source.indexOf('function Wait-ConsoleText('));

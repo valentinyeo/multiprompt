@@ -785,50 +785,6 @@ try {
             $result.checks += @{ name = 'session-open-background-idempotent'; workspace = $workspaceName; group = $group.name; groupId = $group.id; host = $hostName; port = $script:zsbPort; created = $created; repeated = $repeated; tmux = 'verify-1'; title = 'Verify 1'; matchingTabs = 1; tabsBefore = @($baseline.tabs).Count; tabsAfter = @($script:sessionOpenSaved.tabs).Count; activeWorkspaceBefore = $workspaceBefore; activeWorkspaceAfter = $script:sessionOpenSaved.active_workspace; activeTabBefore = $activeTabBefore; activeTabAfter = $script:sessionOpenSaved.active_tab; foregroundBefore = $foregroundBefore.ToInt64(); foregroundAfter = [VerifyNative]::GetForegroundWindow().ToInt64(); windowTitleBefore = $titleBefore; windowTitleAfter = [VerifyNative]::Title($script:window) }
             Snapshot 'after'
         }
-        'chat-view' {
-            $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'The fresh offline CMD has no signed-in agent or received conversation; the separate native painter proof uses a synthetic envelope without seeding app state' }
-            Palette 'interface'
-            Press @(0x28) 'Down: UI Size: Decrease'
-            Press @(0x28) 'Down: UI Size: Reset'
-            Press @(0x0D) 'Enter: persist default UI size before Chat View'
-            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'saved initial tab before Chat View'
-            $baseline = Read-Session
-            if ($baseline.PSObject.Properties['ui_scale'] -and $baseline.ui_scale -ne 100) { throw 'Chat View baseline UI size is not 100' }
-            Save-Json $baseline 'session-before.json'
-            Press @(0x12, 0x43) 'Alt+C: open Chat View'
-            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
-            Wait-Until {
-                $state = Read-Session
-                $state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv -eq $true
-            } 'Chat View enabled in app-written session'
-            Wait-Until {
-                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-                @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -eq 1
-            } 'visible native Chat View transcript control'
-            Save-Json (Read-Session) 'session-opened.json'
-            Snapshot 'action'
-            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before closing'
-            Press @(0x12, 0x43) 'Alt+C: close Chat View'
-            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
-            Wait-Until {
-                $state = Read-Session
-                -not $state.tabs[$state.active_tab].PSObject.Properties['cv'] -or $state.tabs[$state.active_tab].cv -eq $false
-            } 'Chat View disabled in app-written session'
-            Save-Json (Read-Session) 'session-closed.json'
-            Snapshot 'closed'
-            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before reopening'
-            Press @(0x12, 0x43) 'Alt+C: reopen Chat View'
-            Wait-Until {
-                $state = Read-Session
-                $state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv -eq $true
-            } 'Chat View re-enabled in app-written session'
-            $after = Read-Session
-            if ($after.active_tab -ne $baseline.active_tab -or @($after.tabs).Count -ne @($baseline.tabs).Count) { throw 'Chat View changed the selected tab or tab count' }
-            Save-Json $after 'session-after.json'
-            Snapshot 'after'
-            $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
-        }
         'workspace-focus' {
             Wait-Until {
                 $state = Read-Session
@@ -961,6 +917,50 @@ try {
             $result.checks += @{ name = 'workspace-focus-shell'; marker = (Get-Content $marker -Raw).Trim(); activeTab = $shellState.active_tab; savedFocus = $shellState.workspaces[0].focus }
             Write-Output 'workspace-focus shell PASS'
             Snapshot 'after'
+        }
+        'chat-view' {
+            $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'The fresh offline CMD has no signed-in agent or received conversation; the separate native painter proof uses a synthetic envelope without seeding app state' }
+            Palette 'interface'
+            Press @(0x28) 'Down: UI Size: Decrease'
+            Press @(0x28) 'Down: UI Size: Reset'
+            Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'saved initial tab before Chat View'
+            $baseline = Read-Session
+            if ($baseline.PSObject.Properties['ui_scale'] -and $baseline.ui_scale -ne 100) { throw 'Chat View baseline UI size is not 100' }
+            Save-Json $baseline 'session-before.json'
+            Press @(0x12, 0x43) 'Alt+C: open Chat View'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-Until {
+                $state = Read-Session
+                $state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv -eq $true
+            } 'Chat View enabled in app-written session'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -eq 1
+            } 'visible native Chat View transcript control'
+            Save-Json (Read-Session) 'session-opened.json'
+            Snapshot 'action'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before closing'
+            Press @(0x12, 0x43) 'Alt+C: close Chat View'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-Until {
+                $state = Read-Session
+                -not $state.tabs[$state.active_tab].PSObject.Properties['cv'] -or $state.tabs[$state.active_tab].cv -eq $false
+            } 'Chat View disabled in app-written session'
+            Save-Json (Read-Session) 'session-closed.json'
+            Snapshot 'closed'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before reopening'
+            Press @(0x12, 0x43) 'Alt+C: reopen Chat View'
+            Wait-Until {
+                $state = Read-Session
+                $state.tabs[$state.active_tab].PSObject.Properties['cv'] -and $state.tabs[$state.active_tab].cv -eq $true
+            } 'Chat View re-enabled in app-written session'
+            $after = Read-Session
+            if ($after.active_tab -ne $baseline.active_tab -or @($after.tabs).Count -ne @($baseline.tabs).Count) { throw 'Chat View changed the selected tab or tab count' }
+            Save-Json $after 'session-after.json'
+            Snapshot 'after'
+            $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'

@@ -51,7 +51,7 @@ function auditWorkspaceFocusJourney(source) {
   assert.match(reader, /length.ToUInt64\(\) >= \(ulong\)\(text.Capacity - 1\)\) throw/);
   assert.match(reader, /return text.ToString\(\);/);
   assert.doesNotMatch(reader, /GetWindowText\(|SetFocus\(|SetForegroundWindow\(/);
-  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'chat-view' {"));
   assert.doesNotMatch(journey, /ValuePattern|GetCurrentPattern/);
   for (const expected of ["'before-'", '$expectedText', "($expectedText + '-pill')"]) {
     assert.ok(journey.includes(`[VerifyNative]::EditText([IntPtr]$composerHandle) -ceq ${expected}`), `exact composer text: ${expected}`);

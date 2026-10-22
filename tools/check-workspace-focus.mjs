@@ -131,7 +131,7 @@ for (const [before, after] of [
 }
 
 function journeyOptionalChatContract(source) {
-  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'chat-view' {"));
   assert.match(journey, /\$tab\.PSObject\.Properties\.Name -contains 'cv' -and \$tab\.cv/);
   assert.doesNotMatch(journey, /\(Read-Session\)\.tabs\[[^\]]+\]\.cv/);
   const wait = journey.match(/Wait-Until \{\s*\$state = Read-Session\s*([^\n]+)\s*\} 'test session Chat View enabled'/);
@@ -164,7 +164,7 @@ for (const [before, after] of [
 
 function workspaceLayoutContract(source) {
   const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
-  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'chat-view' {"));
   const conditions = [pills, focus].map(text => {
     const expression = text.split('\n').find(line => line.includes("$state.PSObject.Properties['hide_pills'] -and"));
     assert.ok(expression, 'saved pill visibility must remain required');
