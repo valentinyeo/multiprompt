@@ -238,12 +238,17 @@ public static class GroupRailProof {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int left = origin.X - frame.Left + S(8, dpi, scale);
-            int top = origin.Y - frame.Top + S(8, dpi, scale) + 34;
             int railLeft = left + S(4, dpi, scale), railRight = left + S(7, dpi, scale);
+            var rail = System.Drawing.Color.FromArgb(145, 149, 157);
+            int top = -1;
+            int searchTop = origin.Y - frame.Top + S(8, dpi, scale);
+            for (int y = searchTop; y < searchTop + S(180, dpi, scale); y++) {
+                if (Distance(image.GetPixel(railLeft, y), rail) <= 2) { top = y; break; }
+            }
+            if (top < 0) throw new InvalidOperationException("group-rail gray header rail not found");
             int rowHeight = S(38, dpi, scale), firstRow = top + 28;
             int rowTop = firstRow + selected * rowHeight, rowBottom = rowTop + rowHeight;
             int referenceX = origin.X - frame.Left + S(220, dpi, scale) - S(44, dpi, scale);
-            var rail = System.Drawing.Color.FromArgb(145, 149, 157);
             var highlight = image.GetPixel(referenceX, (rowTop + rowBottom) / 2);
             if (highlight.B <= highlight.R + 10) throw new InvalidOperationException("group-rail expected a visible blue selected highlight");
             int headerPixels = 0, unselectedPixels = 0, selectedMismatch = 0, selectedRail = 0, strayPixels = 0;
