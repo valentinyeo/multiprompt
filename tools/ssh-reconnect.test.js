@@ -645,31 +645,29 @@ test "ISSUE-501 worker releases abandoned allocation" {
 });
 
 
-test('ISSUE-511 restored tabs cap in-flight reconnects at three per host and one new start per tick', async () => {
+test('IGSH-568 reconnects keep starting while earlier attempts on the same host are in flight', async () => {
   const code = runtime(`
-test "ISSUE-511 forty restored tabs" {
+test "IGSH-568 forty disconnected tabs" {
     for (&shells, 0..) |*shell, i| {
         shell.* = .{ .process = null, .disconnected = true, .tmux_host = @intCast(i % 2) };
         shell.ssh_reconnect.manual(fake_now);
     }
-    for (0..10) |tick| {
+    for (0..20) |tick| {
         sshAutoReconnectTick();
-        try std.testing.expectEqual(@as(usize, @min(tick + 1, 3)) * 2, spawns);
+        try std.testing.expectEqual(@as(usize, tick + 1) * 2, spawns);
         fake_now += 1000;
     }
-    shells[0].ssh_reconnect.ok();
-    shells[0].disconnected = false;
     sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 7), spawns);
+    try std.testing.expectEqual(@as(usize, 40), spawns);
     var in_flight = [_]u8{0} ** 2;
     for (shells) |shell| {
         if (shell.ssh_reconnect.phase == .reconnecting) in_flight[shell.tmux_host] += 1;
     }
-    try std.testing.expectEqual([_]u8{ 3, 3 }, in_flight);
+    try std.testing.expectEqual([_]u8{ 20, 20 }, in_flight);
 }
 `).replace('var shells = [_]Shell{.{}};', 'var shells: [40]Shell = @splat(.{});')
     .replace('var shell_count: u32 = 1;', 'var shell_count: u32 = 40;');
-  await zig(code, 'ISSUE-511 forty');
+  await zig(code, 'IGSH-568 forty');
 });
 
 test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', async () => {
