@@ -314,7 +314,10 @@ test('browser emulation map drives the real native CLI and extension only on Git
   for (const args of ["['emulate', 'iphone']", "['emulate', 'pixel']", "['emulate', '360x740', '--mobile']", "['emulate', '800x600']", "['emulate', 'off']", "['click', '#next']", "['reload']"]) {
     assert.ok(driver.includes(args), args);
   }
-  assert.match(driver, /requests\.some\(request => request\.url === '\/next' && \/iPhone\/\.test\(request\.userAgent\)\)/);
+  assert.match(driver, /requests\.some\(request => request\.url === '\/next' && \/iPhone\/\.test\(request\.userAgent\) && request\.mobileHint === '\?1' && request\.platformHint === '"iOS"'\)/);
+  assert.match(driver, /userAgentMobile:navigator\.userAgentData\.mobile/);
+  assert.match(driver, /assert\.equal\(state\.userAgentMobile, true\)/);
+  assert.match(driver, /assert\.equal\(state\.userAgentPlatform, platform\)/);
   assert.match(driver, /assert\.equal\(restored\.width, baseline\.width\)/);
   assert.match(driver, /assert\.equal\(offReloaded\.touch, baseline\.touch\)/);
   assert.match(driver, /cdp\('Browser\.close'\)/);

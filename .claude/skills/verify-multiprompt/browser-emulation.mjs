@@ -29,7 +29,7 @@ let windowId;
 let sequence = 0;
 const pending = new Map();
 const server = http.createServer((request, response) => {
-  requests.push({ url: request.url, userAgent: request.headers['user-agent'] });
+  requests.push({ url: request.url, userAgent: request.headers['user-agent'], mobileHint: request.headers['sec-ch-ua-mobile'], platformHint: request.headers['sec-ch-ua-platform'] });
   response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
   response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Device preview verification</title><style>body{font:20px sans-serif;background:#eef4ff;color:#123;padding:16px}main{max-width:600px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{display:block;padding:24px;background:#cde}</style><main><h1>Device preview verification</h1><p>This synthetic page checks persistent mobile previews.</p><a id="next" href="/next">Navigate to the next page</a><pre id="state"></pre></main><script>function update(){document.querySelector("#state").textContent=JSON.stringify({width:innerWidth,height:innerHeight,touch:navigator.maxTouchPoints,userAgent:navigator.userAgent},null,2)}update();addEventListener("resize",update)</script>');
 });
@@ -65,7 +65,7 @@ async function cli(args, scoped = true) {
 }
 
 async function measure(name) {
-  const state = await cli(['eval', '({width:innerWidth,height:innerHeight,screenWidth:screen.width,screenHeight:screen.height,userAgent:navigator.userAgent,touch:navigator.maxTouchPoints,url:location.href})']);
+  const state = await cli(['eval', '({width:innerWidth,height:innerHeight,screenWidth:screen.width,screenHeight:screen.height,userAgent:navigator.userAgent,userAgentMobile:navigator.userAgentData.mobile,userAgentPlatform:navigator.userAgentData.platform,touch:navigator.maxTouchPoints,url:location.href})']);
   await fs.writeFile(path.join(evidence, `${name}.json`), JSON.stringify(state, null, 2));
   return state;
 }
@@ -77,10 +77,12 @@ async function screenshot(name) {
   await fs.writeFile(path.join(evidence, `${name}.png`), png);
 }
 
-function mobile(state, width, height, agent) {
+function mobile(state, width, height, agent, platform) {
   assert.equal(state.width, width);
   assert.equal(state.height, height);
   assert.match(state.userAgent, agent);
+  assert.equal(state.userAgentMobile, true);
+  assert.equal(state.userAgentPlatform, platform);
   assert.ok(state.touch > 0);
 }
 
@@ -127,42 +129,48 @@ try {
   const baseline = await measure('baseline');
   await screenshot('before');
   await cli(['emulate', 'iphone']);
-  mobile(await measure('iphone'), 390, 844, /iPhone/);
+  mobile(await measure('iphone'), 390, 844, /iPhone/, 'iOS');
   await screenshot('action');
   await cli(['click', '#next']);
   await waitFor(async () => (await measure('navigated')).url.endsWith('/next'), 'real link navigation');
-  mobile(await measure('after-navigation'), 390, 844, /iPhone/);
-  assert.ok(requests.some(request => request.url === '/next' && /iPhone/.test(request.userAgent)), 'navigation request uses mobile UA');
+  mobile(await measure('after-navigation'), 390, 844, /iPhone/, 'iOS');
+  assert.ok(requests.some(request => request.url === '/next' && /iPhone/.test(request.userAgent) && request.mobileHint === '?1' && request.platformHint === '"iOS"'), 'navigation request uses mobile UA and client hints');
   await cli(['reload']);
   await waitFor(async () => {
     const state = await measure('reloaded');
     return state.width === 390 && state.touch > 0;
   }, 'mobile state after reload');
-  mobile(await measure('after-reload'), 390, 844, /iPhone/);
+  mobile(await measure('after-reload'), 390, 844, /iPhone/, 'iOS');
   await screenshot('after');
   await cli(['emulate', 'pixel']);
-  mobile(await measure('pixel'), 412, 915, /Android.*Pixel/);
+  mobile(await measure('pixel'), 412, 915, /Android.*Pixel/, 'Android');
   await cli(['emulate', '360x740', '--mobile']);
-  mobile(await measure('custom-mobile'), 360, 740, /Mobile/);
+  mobile(await measure('custom-mobile'), 360, 740, /Mobile/, 'Android');
   await cli(['emulate', '800x600']);
   const desktopSize = await measure('custom-desktop');
   assert.equal(desktopSize.width, 800);
   assert.equal(desktopSize.height, 600);
   assert.equal(desktopSize.userAgent, baseline.userAgent);
   assert.equal(desktopSize.touch, baseline.touch);
+  assert.equal(desktopSize.userAgentMobile, baseline.userAgentMobile);
+  assert.equal(desktopSize.userAgentPlatform, baseline.userAgentPlatform);
   await cli(['emulate', 'off']);
   const restored = await measure('off');
   assert.equal(restored.width, baseline.width);
   assert.equal(restored.height, baseline.height);
   assert.equal(restored.userAgent, baseline.userAgent);
   assert.equal(restored.touch, baseline.touch);
+  assert.equal(restored.userAgentMobile, baseline.userAgentMobile);
+  assert.equal(restored.userAgentPlatform, baseline.userAgentPlatform);
   await screenshot('off');
   await cli(['reload']);
   await waitFor(async () => (await measure('off-reloaded')).width === baseline.width, 'off remains off after reload');
   const offReloaded = await measure('after-off-reload');
   assert.equal(offReloaded.userAgent, baseline.userAgent);
   assert.equal(offReloaded.touch, baseline.touch);
-  result.checks.push('iphone viewport/UA/touch', 'ordinary CDP screenshot retains emulation', 'real link navigation and request UA', 'reload persistence', 'pixel preset', 'custom mobile and desktop sizes', 'off restores desktop through reload', 'local native help');
+  assert.equal(offReloaded.userAgentMobile, baseline.userAgentMobile);
+  assert.equal(offReloaded.userAgentPlatform, baseline.userAgentPlatform);
+  result.checks.push('iphone viewport/UA/client hints/touch', 'ordinary CDP screenshot retains emulation', 'real link navigation and request UA', 'reload persistence', 'pixel preset', 'custom mobile and desktop sizes', 'off restores desktop through reload', 'local native help');
   result.browser = await cdp('Browser.getVersion');
   result.extensionId = extensionId;
   result.status = 'passed';
