@@ -33,14 +33,25 @@ function harness() {
   const row = block(palette, 'if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes"', '    ');
   const declaration = state.match(new RegExp(`pub const ${offset}: usize = \\d+;`));
   assert.ok(declaration, 'Missing Close All Browser Panes command offset');
-  const production = ['closeBrowserForShell', 'closeWebView2', 'webView2OwnsShell', 'webView2OwnsActiveShell', 'shellZsbSessionKey']
+  const production = ['cancelledBrowserLaunchSlot', 'resetBrowserConnection', 'closeBrowserForShell', 'closeWebView2', 'webView2OwnsShell', 'webView2OwnsActiveShell', 'shellZsbSessionKey']
     .map(name => fn(browser, name)).join('\n\n');
   const matching = ['u16ToLower', 'asciiContainsQueryInsensitive', 'labelsMatchQuery'].map(name => fn(palette, name)).join('\n\n');
   return `const std = @import("std");
 const app_state = @This();
 const HANDLE = ?usize;
 const WM_CLOSE = 16;
+const TIMER_BROWSER_PLACEHOLDER = 4;
 const TIMER_BROWSER_URL_POLL = 1;
+const BROWSER_PLACEHOLDER_NOT_OPEN_MS = 20_000;
+const CancelledBrowserLaunch = struct {
+    nonce: [40]u8 = @splat(0),
+    nonce_len: usize = 0,
+    deadline: u64 = 0,
+};
+var g_cancelled_browser_launches = [_]CancelledBrowserLaunch{.{}} ** 7;
+var g_browser_resolve_inflight = [_]struct { shell_id: u32 = 0 }{.{}} ** 7;
+var g_browser_pending_activate_sid: u32 = 0;
+var g_slot_placeholder_since: u64 = 0;
 const TIMER_WEBVIEW2_FOCUS = 2;
 const TIMER_REFOCUS = 3;
 ${declaration[0]}
@@ -55,6 +66,12 @@ const Shell = struct {
     browser_url_len: u32 = 0,
     browser_docking: bool = false,
     browser_launch_tick: u64 = 0,
+    browser_first_launch_tick: u64 = 0,
+    browser_connection_id: u64 = 0,
+    browser_open_failed: bool = false,
+    browser_bind_nonce: [40]u8 = @splat(0),
+    browser_bind_nonce_len: usize = 0,
+    browser_pending_url_len: u32 = 0,
     browser_suspended: bool = false,
     browser_health_misses: u8 = 0,
     browser_relaunch_after_tick: u64 = 0,
@@ -96,6 +113,9 @@ var saves: u32 = 0;
 var refocuses: u32 = 0;
 fn cancelBrowserAdoptionForShell(idx: u32) void { cancelled[idx] += 1; }
 fn hideBrowserEdgeMasks() void {}
+fn GetTickCount64() u64 { return 1000; }
+fn cancelBrowserVisibilitySettle() void {}
+fn publishInboxState() void {}
 fn IsWindow(hwnd: HANDLE) i32 { return @intFromBool(hwnd != null); }
 fn hideBrowserWindowHard(hwnd: HANDLE) void { hidden[hwnd.?] = true; }
 fn PostMessageW(hwnd: HANDLE, msg: u32, _: usize, _: isize) i32 {
@@ -166,6 +186,7 @@ fn prepare(webview_owner: u32) void {
             .browser_suspended = i == 3,
             .browser_docking = i == 4,
             .browser_launch_tick = if (i == 4) 123 else 0,
+            .browser_first_launch_tick = if (i == 4) 123 else 0,
             .browser_health_misses = 2,
             .browser_relaunch_after_tick = 456,
             .browser_window_id = if (i == 3 or i == 4) 0 else @intCast(i + 10),
@@ -211,6 +232,7 @@ test "production palette handler closes every session through native teardown an
             try std.testing.expectEqual(@as(HANDLE, null), shell.browser_hwnd);
             try std.testing.expect(!shell.browser_docking and !shell.browser_suspended);
             try std.testing.expectEqual(@as(u64, 0), shell.browser_launch_tick);
+            try std.testing.expectEqual(@as(u64, 0), shell.browser_first_launch_tick);
             try std.testing.expectEqual(@as(u8, 0), shell.browser_health_misses);
             try std.testing.expectEqual(@as(u64, 0), shell.browser_relaunch_after_tick);
             try std.testing.expectEqual(@as(i64, 0), shell.browser_window_id);

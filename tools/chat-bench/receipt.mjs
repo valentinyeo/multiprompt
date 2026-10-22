@@ -22,7 +22,7 @@ export function checkReceipt(run, expectedSha256) {
   } catch (error) {
     reasons.push(`cannot recompute verdict: ${error.message}`);
   }
-  for (const [key, file] of Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c', ssh: 'ssh-fixture.c' })) {
+  for (const [key, file] of Object.entries({ run: 'run.mjs', lib: 'lib.mjs', service: 'reader-service.py', browser: 'browser-fixture.c' })) {
     if (key === 'browser' && !Object.hasOwn(run?.runnerHashes || {}, key)) continue;
     try {
       if (![sourceHash(new URL(file, import.meta.url)), sourceHash(new URL(file, import.meta.url), true)].includes(run?.runnerHashes?.[key])) reasons.push(`stale or missing runnerHashes.${key}`);

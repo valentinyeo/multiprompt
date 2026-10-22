@@ -1,6 +1,6 @@
 # Browser CLI selftest
 
-Run `zsb selftest` inside the multiprompt-owned tmux session, or set `ZSB_SESSION` explicitly outside tmux. Install `tools/vps-multiprompt-browser.sh` as `multiprompt-browser` on your own remote host and provide a `zsb` alias. Python 3 and the reverse SSH tunnel are required. The native bridge and unpacked browser extension must both be version **1.0.68**; reload the extension after updating it.
+Run `zsb selftest` inside the multiprompt-owned tmux session, or set `ZSB_SESSION` explicitly outside tmux. Install `tools/vps-multiprompt-browser.sh` as `multiprompt-browser` on your own remote host and provide a `zsb` alias. Python 3 and the reverse SSH tunnel are required. The native bridge and unpacked browser extension must both be version **1.0.69**; reload the extension after updating it.
 
 The selftest creates an example.com marker tab, installs an input/button fixture, and checks:
 
@@ -17,6 +17,27 @@ Commands target the exact test tab. On failure, cleanup is still attempted; exis
 Output contains one JSON summary and a human result line. Every step has `pass:true/false`; hosting diagnostics include `tab_name`, `active`, `visible`, and `windowId`. Exit 0 means all steps passed; exit 1 means a step failed, including cleanup. `visible` checks the pane's live on-screen rectangle and minimized state, not whether another application occludes it.
 
 `zsb pane-info` returns the hosting snapshot without creating a test page. `zsb extension-reload` acknowledges a scheduled profile-wide extension reload, not that new code has loaded. Old workers may require a manual reload through `chrome://extensions`. Missing or outdated loaded versions report an explicit error rather than silently accepting empty tab lists.
+
+## Reply deadlines
+
+The remote wrapper bounds the entire reply using a monotonic clock from the start of sending, including all received fragments. Bytes arriving slowly do not reset the deadline. Connecting to the IPv4 tunnel has a separate maximum of 5 seconds.
+
+| Commands | Default total seconds |
+| --- | ---: |
+| `status`, `version` | 5 |
+| Other commands, including `open` | 15 |
+| `doctor` | 20 |
+| `text`, `get-text`, `snapshot`, `cdp`, `eval`, `script` | 30 |
+| `screenshot`, `shoturl` | 60 |
+| `selftest` (all requests and cleanup combined) | 180 |
+
+The longer read/script/CDP budgets accommodate pane recovery (up to 12 seconds) plus page work (up to 15 seconds). Screenshots allow capture retries and the extension's 35-second action budget; `doctor` allows pane recovery rather than serving as a quick liveness probe. Existing app-side limits still apply: a larger wrapper deadline does not extend those limits. The current CLI has no per-command `--timeout` flag; CDP JSON parameters are forwarded unchanged.
+
+Set `ZSB_TIMEOUT` to override any default in seconds, for example `ZSB_TIMEOUT=2.5 zsb open https://example.com` or `ZSB_TIMEOUT=60 zsb eval 'somePromise'`. Values must be finite numbers greater than zero and at most 86400; an empty or invalid value returns JSON `error:"bad_args"` before sending. Local help does not contact the tunnel.
+
+On expiry, the wrapper exits nonzero and prints JSON `{"ok":false,"error":"reply_timeout","message":"…after 5.001s (deadline 5s)…","session":"…","port":19548,"hint":"…"}`. `status` and `version` therefore fail promptly even if the app or bridge stops answering. Reconnect the SSH session, open/rebind its pane, then retry `status`; use `doctor` when intentionally allowing pane recovery. A timeout does not cancel app-side work, so check the tab list before repeating an `open`. If selftest exhausts its shared deadline, cleanup may be incomplete; its timeout hint says so.
+
+Regression coverage: `tools/zsb-deadline.test.js` exercises silent and continuously trickling TCP peers without building the app.
 
 ## Session identity
 
