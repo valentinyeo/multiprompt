@@ -78,19 +78,22 @@ public static class VerifyNative {
     }
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr owner, EnumWindow callback, IntPtr data);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     public static bool PaneVisible(IntPtr owner) {
         Rect frame;
         if (!GetWindowRect(owner, out frame)) return false;
         bool visible = false;
-        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+        EnumWindow inspect = delegate(IntPtr hwnd, IntPtr data) {
             if (GetProp(hwnd, "ZigShellPaneOwner") != owner || !IsWindowVisible(hwnd)) return true;
             Rect pane;
             if (GetWindowRect(hwnd, out pane) && pane.Right > pane.Left && pane.Bottom > pane.Top &&
                 pane.Left < frame.Right && pane.Right > frame.Left && pane.Top < frame.Bottom && pane.Bottom > frame.Top) visible = true;
             return true;
-        }, IntPtr.Zero);
+        };
+        EnumWindows(inspect, IntPtr.Zero);
+        EnumChildWindows(owner, inspect, IntPtr.Zero);
         return visible;
     }
     public static string Title(IntPtr hwnd) {
@@ -675,7 +678,11 @@ try {
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
             } finally {
-                if (Test-Path $scratch) { Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force }
+                if (Test-Path (Join-Path $scratch 'roaming/ZigShell')) {
+                    $data = Join-Path $Evidence 'data/roaming'
+                    New-Item -ItemType Directory -Force $data | Out-Null
+                    Copy-Item (Join-Path $scratch 'roaming/ZigShell') (Join-Path $data 'ZigShell') -Recurse -Force
+                }
             }
         }
         if (Test-Path $scratch) {
@@ -687,7 +694,7 @@ try {
                 }
             }
         }
-        $result.cleanup = 'owned process tree stopped; scratch copied to evidence/data then removed'
+        $result.cleanup = 'owned process tree stopped; app data copied to evidence/data/roaming/ZigShell then scratch removed'
         $result.scratchRemoved = -not (Test-Path $scratch)
         if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }
         Write-Output $result.cleanup
