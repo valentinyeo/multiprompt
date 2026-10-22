@@ -25,6 +25,8 @@ let port;
 const debuggedTabs = new Set();
 const cdpOperationChains = new Map();
 const cdpSessionCancels = new Map();
+const emulatedTabs = new Map();
+const lostEmulationTabs = new Map();
 const screenshotCdpDetachTimers = new Map();
 const screenshotCdpDetachInFlight = new Map();
 const screenshotCdpPageEnabledTabs = new Set();
@@ -122,6 +124,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.debugger.onDetach.addListener((source) => {
   if (!Number.isInteger(source.tabId)) return;
   debuggedTabs.delete(source.tabId);
+  emulatedTabs.delete(source.tabId);
   screenshotCdpPageEnabledTabs.delete(source.tabId);
   clearScreenshotCdpDetachTimer(source.tabId);
 });
@@ -189,6 +192,12 @@ chrome.tabs.onCreated.addListener((tab) => {
 });
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0) return;
+  if (emulatedTabs.has(details.tabId)) {
+    withCdpSession(details.tabId, async (debuggee, isActive) => {
+      const emulation = emulatedTabs.get(details.tabId);
+      if (emulation) await applyDeviceEmulation(debuggee, emulation, isActive);
+    }, true).catch((error) => console.warn("multiprompt emulation navigation failed:", errorText(error)));
+  }
   const record = agentNavigateTabs.get(details.tabId);
   const qualifiers = details.transitionQualifiers || [];
   const explicitUserNavigation = qualifiers.includes("from_address_bar") || qualifiers.includes("forward_back");
@@ -208,6 +217,9 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   agentNavigateTabs.delete(details.tabId);
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
+  lostEmulationTabs.delete(tabId);
+  emulatedTabs.delete(tabId);
+  debuggedTabs.delete(tabId);
   agentNavigateTabs.delete(tabId);
   userOwnedTabs.delete(tabId);
   suspectExternalTabCreates.delete(tabId);
@@ -311,6 +323,17 @@ async function handleHostMessage(message) {
 }
 
 async function dispatch(message) {
+  const targetsTab = Number.isInteger(message?.windowId) && message.windowId > 0 && !["createPaneWindow", "setTheme", "protectWindow", "reset"].includes(message.method);
+  const tabId = targetsTab && lostEmulationTabs.size ? (await getTargetTab(message).catch(() => null))?.id : null;
+  const warning = lostEmulationTabs.get(tabId);
+  if (warning && ["screenshot", "eval", "click", "key", "type"].includes(message.method)) throw new Error(warning);
+  const result = await dispatchAction(message);
+  const lost = targetsTab && lostEmulationTabs.size ? lostEmulationTabs.get((await getTargetTab(message).catch(() => null))?.id) : null;
+  if (lost || warning) return { ...(result !== null && typeof result === "object" ? result : { result }), warning: lost || warning, emulationLost: Boolean(lost) };
+  return result;
+}
+
+async function dispatchAction(message) {
   if (message?.method !== "protectWindow") await rememberTargetWindow(message);
   switch (message.method) {
     case "ping":
@@ -380,6 +403,8 @@ async function dispatch(message) {
     }
     case "cdp":
       return sendCdp(message);
+    case "emulate":
+      return emulateAction(message);
     case "resolveWindow":
       return resolveWindow(message);
     default:
@@ -2594,39 +2619,104 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation, timeoutMs = 10000) {
-  if (cdpOperationChains.get(tabId)) {
+function withCdpSession(tabId, operation, retainEmulation = false, resetState = false, timeoutMs = retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000) {
+  if (cdpOperationChains.get(tabId) && !emulatedTabs.has(tabId)) {
     return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
   }
+  let reset = false;
   let cancel;
-  const cancelled = new Promise((_, reject) => { cancel = reject; });
-  const current = Promise.resolve().then(async () => {
+  const previousCancel = cdpSessionCancels.get(tabId);
+  const cancelled = new Promise((_, reject) => {
+    cancel = error => { reset = true; reject(error); previousCancel?.(error); };
+  });
+  const checkSession = () => {
+    if (reset) throw new Error("CDP session reset; retry command");
+  };
+  const previous = cdpOperationChains.get(tabId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    checkSession();
     clearScreenshotCdpDetachTimer(tabId);
+    const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
+    if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
+    checkSession();
+
     const debuggee = { tabId };
-    const checkSession = () => {
-      if (cdpOperationChains.get(tabId) !== current) throw new Error("CDP session reset; retry command");
+    let active = true;
+    let succeeded = false;
+    const cleanup = [];
+    const sendCommand = async (method, params, resets = []) => {
+      cleanup.push(...resets);
+      try {
+        return await chrome.debugger.sendCommand(debuggee, method, params);
+      } finally {
+        if (!reset && !active && emulatedTabs.has(tabId) && debuggedTabs.has(tabId)) {
+          for (const [reset, values] of [...resets].reverse()) {
+            await chrome.debugger.sendCommand(debuggee, reset, values).catch(() => {});
+          }
+        }
+      }
     };
     try {
-      const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
-      if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
-      checkSession();
-      if (debuggedTabs.has(tabId)) {
+      if (debuggedTabs.has(tabId) && !emulatedTabs.has(tabId)) {
         await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        if (reset) return;
         debuggedTabs.delete(tabId);
         screenshotCdpPageEnabledTabs.delete(tabId);
       }
-      checkSession();
-      debuggedTabs.add(tabId);
-      await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+      if (!debuggedTabs.has(tabId)) {
+        debuggedTabs.add(tabId);
+        await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+        checkSession();
+      }
       checkSession();
       await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
       checkSession();
-      return await (timeoutMs === null ? operation(debuggee, checkSession) : withTimeout(operation(debuggee, checkSession), timeoutMs, "CDP operation timed out; run zsb reset"));
+      const result = timeoutMs === null
+        ? await operation(debuggee, () => active && !reset, sendCommand)
+        : await withTimeout(operation(debuggee, () => active && !reset, sendCommand), timeoutMs, "CDP operation timed out; run zsb reset");
+      succeeded = true;
+      return result;
     } finally {
-      if (cdpOperationChains.get(tabId) === current) {
+      active = false;
+      checkSession();
+      const emulation = emulatedTabs.get(tabId);
+      let cleanupError;
+      if (emulation && !retainEmulation && !resetState) {
+        for (const [method, params] of cleanup.reverse()) {
+          try {
+            await withTimeout(chrome.debugger.sendCommand(debuggee, method, params), 5000, "CDP cleanup timed out");
+          } catch (error) {
+            cleanupError = error;
+          }
+        }
+      }
+      if (reset) return;
+      if ((retainEmulation && !succeeded) || !emulatedTabs.has(tabId) || resetState || cleanupError) {
+        emulatedTabs.delete(tabId);
         await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        if (reset) return;
         debuggedTabs.delete(tabId);
         screenshotCdpPageEnabledTabs.delete(tabId);
+        if (emulation && !retainEmulation) {
+          let restoring = true;
+          try {
+            if (cleanupError) throw cleanupError;
+            await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
+            debuggedTabs.add(tabId);
+            await withTimeout(applyDeviceEmulation(debuggee, emulation, () => restoring && !reset), 15000, "CDP emulation restore timed out");
+            checkSession();
+            emulatedTabs.set(tabId, emulation);
+          } catch (error) {
+            if (reset) return;
+            try { await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset"); } catch (_) {}
+            debuggedTabs.delete(tabId);
+            const warning = `Emulation lost: ${errorText(error)}. Run zsb emulate to restore it.`;
+            lostEmulationTabs.set(tabId, warning);
+            console.warn(warning);
+          } finally {
+            restoring = false;
+          }
+        }
       }
     }
   });
@@ -2648,6 +2738,8 @@ async function resetBridge(message) {
     cdpSessionCancels.get(tabId)?.(new Error("CDP session reset; retry command"));
     cdpSessionCancels.delete(tabId);
     cdpOperationChains.delete(tabId);
+    emulatedTabs.delete(tabId);
+    lostEmulationTabs.delete(tabId);
     clearScreenshotCdpDetachTimer(tabId);
     screenshotCdpDetachInFlight.delete(tabId);
     await withTimeout(chrome.debugger.detach({ tabId }), 1000, "CDP reset detach timed out").catch((error) => {
@@ -2682,10 +2774,11 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await withCdpSession(tabId, async (debuggee) => {
+      return await withCdpSession(tabId, async (debuggee, isActive, sendCommand) => {
         await tryAcceptPendingDialog(debuggee);
+        if (!isActive()) throw new Error("CDP operation expired");
         await withTimeout(
-          chrome.debugger.sendCommand(debuggee, "Page.enable", {}),
+          sendCommand("Page.enable", {}, [["Page.disable", {}]]),
           2000,
           "CDP Page.enable timed out",
         ).catch((error) => {
@@ -2713,11 +2806,81 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
   throw new Error(`CDP screenshot failed after ${maxAttempts} attempts: ${errorText(lastError)}`);
 }
 
+const EMULATION_DEVICES = Object.freeze({
+  iphone: {
+    width: 390, height: 844, deviceScaleFactor: 3,
+    userAgentMetadata: { brands: [], fullVersionList: [], platform: "iOS", platformVersion: "17.0.0", architecture: "", model: "iPhone", mobile: true },
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  },
+  pixel: {
+    width: 412, height: 915, deviceScaleFactor: 2.625,
+    userAgentMetadata: { brands: [{ brand: "Chromium", version: "130" }], fullVersionList: [{ brand: "Chromium", version: "130.0.0.0" }], platform: "Android", platformVersion: "14.0.0", architecture: "", model: "Pixel 8", mobile: true },
+    userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+  },
+});
+
+async function applyDeviceEmulation(debuggee, emulation, isActive) {
+  const commands = [
+    ["Emulation.setDeviceMetricsOverride", emulation.metrics],
+    ["Emulation.setUserAgentOverride", { userAgent: emulation.userAgent, ...(emulation.userAgentMetadata ? { userAgentMetadata: emulation.userAgentMetadata } : {}) }],
+    ["Emulation.setTouchEmulationEnabled", { enabled: emulation.metrics.mobile, maxTouchPoints: emulation.metrics.mobile ? 5 : 1 }],
+  ];
+  for (const [method, params] of commands) {
+    if (!isActive()) throw new Error("CDP emulation operation expired");
+    await chrome.debugger.sendCommand(debuggee, method, params);
+  }
+}
+
+async function emulateAction(message) {
+  const device = typeof message.device === "string" ? message.device : "";
+  if (device === "off" && message.mobile === true) throw new Error("emulate off does not accept --mobile");
+  const preset = Object.hasOwn(EMULATION_DEVICES, device) ? EMULATION_DEVICES[device] : null;
+  const dimensions = /^(\d+)x(\d+)$/.exec(device);
+  if (device !== "off" && !preset && (!dimensions ||
+      dimensions.slice(1).some((value) => Number(value) < 1 || Number(value) > 10000))) {
+    throw new Error("emulate requires iphone, pixel, WIDTHxHEIGHT (1-10000), or off");
+  }
+  const tabId = (await getTargetTab(message)).id;
+  return withCdpSession(tabId, async (debuggee, isActive) => {
+    if (device === "off") {
+      try {
+        await chrome.debugger.sendCommand(debuggee, "Emulation.clearDeviceMetricsOverride", {});
+        await chrome.debugger.sendCommand(debuggee, "Emulation.setUserAgentOverride", { userAgent: "" });
+        await chrome.debugger.sendCommand(debuggee, "Emulation.setTouchEmulationEnabled", { enabled: false });
+      } finally {
+        emulatedTabs.delete(tabId);
+        lostEmulationTabs.delete(tabId);
+      }
+      return { tabId, emulating: false };
+    }
+    const mobile = Boolean(preset) || message.mobile === true;
+    const emulation = {
+      metrics: {
+        width: preset?.width || Number(dimensions[1]),
+        height: preset?.height || Number(dimensions[2]),
+        deviceScaleFactor: preset?.deviceScaleFactor || (mobile ? 3 : 1),
+        mobile,
+      },
+      userAgent: preset?.userAgent || (mobile ? EMULATION_DEVICES.pixel.userAgent : ""),
+      userAgentMetadata: mobile ? (preset || EMULATION_DEVICES.pixel).userAgentMetadata : undefined,
+    };
+    await applyDeviceEmulation(debuggee, emulation, isActive);
+    if (isActive()) {
+      emulatedTabs.set(tabId, emulation);
+      lostEmulationTabs.delete(tabId);
+    }
+    return { tabId, emulating: true, device, ...emulation.metrics, userAgent: emulation.userAgent };
+  }, true);
+}
+
 async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
   if (message.script !== undefined) {
     validateCdpScript(message.script);
-    return withCdpSession(tabId, async (debuggee, checkSession) => {
+    return withCdpSession(tabId, async (debuggee, isActive) => {
+      const checkSession = () => {
+        if (!isActive()) throw new Error("CDP session reset; retry command");
+      };
       const results = [];
       for (const [index, step] of message.script.entries()) {
         try {
@@ -2731,13 +2894,49 @@ async function sendCdp(message) {
         }
       }
       return results;
-    }, null);
+    }, false, true, null);
   }
   const cdpMethod = stringOr(message.cdpMethod, "");
   if (!cdpMethod) throw new Error("missing cdpMethod");
 
-  return withCdpSession(tabId, (debuggee) =>
-    chrome.debugger.sendCommand(debuggee, cdpMethod, message.params || {}));
+  const domain = cdpMethod.split(".")[0];
+  const knownDomain = ["Fetch", "Network", "Debugger", "DOM", "CSS", "Overlay", "Page", "Runtime", "Log"].includes(domain);
+  const resets = {
+    "Network.setBlockedURLs": [["Network.setBlockedURLs", { urls: [] }]],
+    "Network.setExtraHTTPHeaders": [["Network.setExtraHTTPHeaders", { headers: {} }]],
+    "Network.setCacheDisabled": [["Network.setCacheDisabled", { cacheDisabled: false }]],
+    "Network.setBypassServiceWorker": [["Network.setBypassServiceWorker", { bypass: false }]],
+    "DOM.getDocument": [["DOM.disable", {}]],
+    "DOM.getFlattenedDocument": [["DOM.disable", {}]],
+    "Emulation.setFocusEmulationEnabled": [["Emulation.setFocusEmulationEnabled", { enabled: true }]],
+    "Debugger.pause": [["Debugger.disable", {}], ["Debugger.resume", {}]],
+    "Emulation.setGeolocationOverride": [["Emulation.clearGeolocationOverride", {}]],
+    "Emulation.setTimezoneOverride": [["Emulation.setTimezoneOverride", { timezoneId: "" }]],
+    "Emulation.setLocaleOverride": [["Emulation.setLocaleOverride", { locale: "" }]],
+    "Emulation.setEmulatedMedia": [["Emulation.setEmulatedMedia", { media: "", features: [] }]],
+    "Emulation.setCPUThrottlingRate": [["Emulation.setCPUThrottlingRate", { rate: 1 }]],
+    "Emulation.setScriptExecutionDisabled": [["Emulation.setScriptExecutionDisabled", { value: false }]],
+    "Emulation.setDefaultBackgroundColorOverride": [["Emulation.setDefaultBackgroundColorOverride", {}]],
+    "Emulation.setEmulatedVisionDeficiency": [["Emulation.setEmulatedVisionDeficiency", { type: "none" }]],
+    "Emulation.setEmitTouchEventsForMouse": [["Emulation.setEmitTouchEventsForMouse", { enabled: false }]],
+  };
+  let cleanup = Object.hasOwn(resets, cdpMethod) ? resets[cdpMethod] : null;
+  if (knownDomain && cdpMethod.endsWith(".enable")) cleanup = [[`${domain}.disable`, {}]];
+  const readOnly = knownDomain && /\.(get[A-Z]|capture[A-Z]|evaluate$|callFunctionOn$|querySelector|describeNode$|resolveNode$|requestNode$|disable$)/.test(cdpMethod) || cdpMethod === "Emulation.clearGeolocationOverride";
+  const ownOverride = ["Emulation.setDeviceMetricsOverride", "Emulation.clearDeviceMetricsOverride", "Emulation.setUserAgentOverride", "Emulation.setTouchEmulationEnabled"].includes(cdpMethod);
+  return withCdpSession(tabId, (debuggee, isActive, sendCommand) => {
+    const emulation = emulatedTabs.get(tabId);
+    if (emulation) {
+      const ownOverrides = {
+        "Emulation.setDeviceMetricsOverride": emulation.metrics,
+        "Emulation.setUserAgentOverride": { userAgent: emulation.userAgent, ...(emulation.userAgentMetadata ? { userAgentMetadata: emulation.userAgentMetadata } : {}) },
+        "Emulation.setTouchEmulationEnabled": { enabled: emulation.metrics.mobile, maxTouchPoints: emulation.metrics.mobile ? 5 : 1 },
+      };
+      if (Object.hasOwn(ownOverrides, cdpMethod)) cleanup = [[cdpMethod, ownOverrides[cdpMethod]]];
+      if (cdpMethod === "Emulation.clearDeviceMetricsOverride") cleanup = [["Emulation.setDeviceMetricsOverride", emulation.metrics]];
+    }
+    return sendCommand(cdpMethod, message.params || {}, cleanup || []);
+  }, false, !cleanup && !readOnly && !ownOverride);
 }
 
 function validateCdpScript(script) {
@@ -2809,11 +3008,12 @@ async function consoleAction(message) {
   const entries = consoleEntriesByTab.get(tab.id) || [];
   consoleEntriesByTab.set(tab.id, entries);
 
-  await withCdpSession(tab.id, async (debuggee) => {
+  await withCdpSession(tab.id, async (debuggee, isActive, sendCommand) => {
     consoleCaptureTabs.add(tab.id);
     try {
-      await chrome.debugger.sendCommand(debuggee, "Runtime.enable", {});
-      await chrome.debugger.sendCommand(debuggee, "Log.enable", {});
+      await sendCommand("Runtime.enable", {}, [["Runtime.disable", {}]]);
+      if (!isActive()) throw new Error("CDP operation expired");
+      await sendCommand("Log.enable", {}, [["Log.disable", {}]]);
       if (message?.clear === true) {
         await chrome.debugger.sendCommand(debuggee, "Runtime.discardConsoleEntries", {}).catch(() => {});
       } else {

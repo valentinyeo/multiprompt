@@ -475,7 +475,7 @@ pub fn build(b: *std.Build) void {
     const internal_page_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-internal-pages.test.js" });
     test_step.dependOn(&internal_page_tests.step);
     vps_test_step.dependOn(&internal_page_tests.step);
-    const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js" });
+    const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js", "extension/bridge-emulation.test.js" });
     test_step.dependOn(&bridge_routing_tests.step);
     const zsb_extension_frames_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-extension-frames.test.js" });
     test_step.dependOn(&zsb_extension_frames_tests.step);

@@ -46,6 +46,8 @@ function harness(frames, {
     cdpOperationChains: new Map(),
     cdpSessionCancels: new Map(),
     debuggedTabs: new Set(),
+    emulatedTabs: new Map(),
+    lostEmulationTabs: new Map(),
     screenshotCdpDetachTimers: new Map(),
     screenshotCdpDetachInFlight: new Map(),
     screenshotCdpPageEnabledTabs: new Set(),

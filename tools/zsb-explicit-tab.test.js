@@ -23,6 +23,7 @@ function browserHarness(ownsWindow) {
   const tab = { id: tabId, windowId, active: true, title: 'Laptop fixture', url: 'https://fixture.test/' };
   const foreign = { id: tabId + 1, windowId: windowId + 1, active: true, title: 'Foreign', url: 'https://foreign.test/' };
   const context = vm.createContext({
+    lostEmulationTabs: new Map(),
     chrome: {
       windows: { get: async id => ({ id, type: 'normal' }) },
       tabs: { query: async options => {

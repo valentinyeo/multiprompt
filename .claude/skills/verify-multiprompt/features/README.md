@@ -30,6 +30,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
+- [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, with failed SSH explicitly outside remote verification.

@@ -1,6 +1,6 @@
 # Browser CLI selftest
 
-Run `zsb selftest` inside the multiprompt-owned tmux session, or set `ZSB_SESSION` explicitly outside tmux. Install `tools/vps-multiprompt-browser.sh` as `multiprompt-browser` on your own remote host and provide a `zsb` alias. Python 3 and the reverse SSH tunnel are required. The native bridge and unpacked browser extension must both be version **1.0.73**; reload the extension after updating it.
+Run `zsb selftest` inside the multiprompt-owned tmux session, or set `ZSB_SESSION` explicitly outside tmux. Install `tools/vps-multiprompt-browser.sh` as `multiprompt-browser` on your own remote host and provide a `zsb` alias. Python 3 and the reverse SSH tunnel are required. The native bridge and unpacked browser extension must both be version **1.0.82**; reload the extension after updating it.
 
 The selftest creates an example.com marker tab, installs an input/button fixture, and checks:
 
@@ -57,3 +57,11 @@ zsb session-open --workspace "Research" --group "Ops" --host "remote-1" --tmux "
 All flags are required in any order and names match exactly. This reuses the normal SSH/tmux attachment path for an existing remote session, opens in the background, preserves focus and group expansion, and saves the manual title and group placement. An existing tab for the same host/session in any workspace returns `{"ok":true,"existing":true,"tab":42,"workspace":"Research"}` with its current workspace name and without changes; a new tab returns `{"ok":true,"created":true,"tab":42}`. Session identity stays global across workspaces. Unknown workspace, group or host names return `ok:false`, the corresponding `unknown_workspace`, `unknown_group` or `unknown_host` error, and `valid_names`.
 
 Tmux names accept 1–63 ASCII letters, digits, hyphens, underscores and dots. Tab titles accept 1–63 UTF-16 units and no control characters. Both app-level commands use the existing reverse SSH bridge, need no current tmux session, `ZSB_SESSION`, browser pane or extension, and support per-command `--help`. Browser-control commands retain their exact-session binding rules. Regression coverage: `tools/zsb-session-open.test.js` and the unit tests in `src/browser_bridge.zig` and `src/tmux_identity.zig`.
+
+## Device previews
+
+Run `zsb emulate iphone` (390 by 844) or `zsb emulate pixel` (412 by 915) to preview the target tab with a mobile viewport, user agent and touch. Use `zsb emulate 390x844 --mobile` for a custom mobile size, or `zsb emulate 800x600` for a desktop size. Dimensions range from 1 to 10000 pixels. `zsb emulate --help` is available locally without a pane or tunnel.
+
+The preview stays on that tab through page links, reloads and ordinary zsb CDP or screenshot commands. Reload an already-open page if its content depends on the request's user agent. Run `zsb emulate off` to restore the normal desktop viewport, user agent and touch settings. New tabs are independent; `zsb navigate` can open a new tab rather than navigate the emulated one.
+
+Closing the tab, externally detaching its debugger, or restarting the extension/browser ends its preview. This changes Chromium's page environment, not the browser engine. F12 and browser DevTools shortcuts are browser-chrome controls and remain outside zsb's page-key automation.
