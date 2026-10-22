@@ -599,6 +599,9 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             kb.vkCode != VK_MENU and kb.vkCode != 0xA4 and kb.vkCode != 0xA5 and kb.vkCode != 0xFF and
             foregroundIsOurs())
         {
+            app_state.g_focus_authorized_hwnd = null;
+            app_state.g_focus_authorized_until = 0;
+            app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
         }
 

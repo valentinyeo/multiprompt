@@ -264,6 +264,9 @@ fn focusGuardLanded(hwnd: HANDLE) void {
     {
         if (app_state.g_focus_return_hwnd != hwnd) app_state.g_focus_typing_tick = 0;
         app_state.g_focus_return_hwnd = focusGuardSurface(hwnd);
+        app_state.g_focus_authorized_hwnd = null;
+        app_state.g_focus_authorized_until = 0;
+        app_state.g_focus_browser_shell_id = 0;
     }
 }
 

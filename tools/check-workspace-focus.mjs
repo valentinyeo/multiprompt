@@ -89,7 +89,7 @@ function hookFocusAuthorityContract(source, focus) {
   assert.match(attribution, /defer app_state\.g_focus_user_action_tick = prior_focus_action;/);
   assert.match(attribution, /app_state\.g_focus_user_action_tick = 0;/);
   assert.match(attribution, /if \(\(kb\.flags & 0x10\) == 0\) \{[^}]*focusGuardNoteInput\(surface, GetTickCount64\(\), true\);[^}]*foregroundHwndIsOurs\(fg\)/);
-  const injected = attribution.match(/\} else if \(([\s\S]*?)\)\s*\{\s*app_state\.g_focus_user_action_tick = GetTickCount64\(\);\s*\}/);
+  const injected = attribution.match(/\} else if \(([\s\S]*?)\)\s*\{\s*(?:app_state\.g_focus_(?:authorized_hwnd|authorized_until|browser_shell_id) = (?:null|0);\s*)*app_state\.g_focus_user_action_tick = GetTickCount64\(\);\s*\}/);
   assert.ok(injected, 'owned injected shortcut commands need dispatch authority, not physical typing history');
   assert.doesNotMatch(injected[0], /focusGuardNoteInput|g_focus_input_tick =|g_focus_return_hwnd =/);
   const allows = new Function('wp', 'key', 'owned', `return ${injected[1]
@@ -118,7 +118,7 @@ const focusSource = read('src/focus.zig');
 hookFocusAuthorityContract(shortcuts, focusSource);
 for (const [before, after] of [
   ['} else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and', '} else if ((wp == WM_KEYDOWN) and'],
-  ['foregroundIsOurs())\n        {\n            app_state.g_focus_user_action_tick = GetTickCount64();', 'true)\n        {\n            app_state.g_focus_user_action_tick = GetTickCount64();'],
+  ['foregroundIsOurs())\n        {\n            app_state.g_focus_authorized_hwnd = null;', 'true)\n        {\n            app_state.g_focus_authorized_hwnd = null;'],
   ['kb.vkCode != VK_MENU and ', ''],
   ['kb.vkCode != 0xA4 and ', ''],
   ['kb.vkCode != 0xA5 and ', ''],
@@ -249,4 +249,39 @@ for (const [before, after] of [
 const workflow = read('.github/workflows/verify.yml');
 assert.ok(workflow.includes('      - tools/check-workspace-focus.mjs'));
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
+function authorizationLifetimeContract(focus, shortcuts, main) {
+  const clears = /app_state\.g_focus_authorized_hwnd = null;\s*app_state\.g_focus_authorized_until = 0;\s*app_state\.g_focus_browser_shell_id = 0;/;
+  const landed = focus.slice(focus.indexOf('fn focusGuardLanded('), focus.indexOf('pub noinline fn AttachThreadInput('));
+  assert.match(landed, /now <= app_state\.g_focus_authorized_until and \(hwnd == app_state\.g_focus_authorized_hwnd or requested_pane\)/);
+  assert.match(landed, /app_state\.g_focus_return_hwnd = focusGuardSurface\(hwnd\);/);
+  assert.match(landed.slice(landed.indexOf('app_state.g_focus_return_hwnd = focusGuardSurface(hwnd);')), clears, 'landing consumes the handoff, not just its remembered return surface');
+  const injected = shortcuts.slice(shortcuts.indexOf('} else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and'), shortcuts.indexOf('        const find_key_up ='));
+  assert.match(injected.slice(0, injected.indexOf('app_state.g_focus_user_action_tick = GetTickCount64();')), clears, 'new owned injected shortcuts supersede stale handoffs before dispatch');
+  assert.match(injected, /foregroundIsOurs\(\)/);
+  assert.doesNotMatch(injected, /focusGuardNoteInput|g_focus_input_tick =|g_focus_return_hwnd =/);
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
+  assert.match(open.slice(0, open.indexOf('if (app_state.g_all_sessions_active)')), clears, 'all palette entry paths clear old authority before any guarded activation');
+  const input = focus.slice(focus.indexOf('pub fn focusGuardNoteInput('), focus.indexOf('pub fn focusGuardReadMouse('));
+  assert.match(input, clears, 'physical shortcuts also cancel old authority');
+}
+
+authorizationLifetimeContract(focusSource, shortcuts, main);
+for (const [index, before] of [
+  [0, 'app_state.g_focus_authorized_hwnd = null;'],
+  [0, 'app_state.g_focus_authorized_until = 0;'],
+  [0, 'app_state.g_focus_browser_shell_id = 0;'],
+  [1, 'app_state.g_focus_authorized_hwnd = null;'],
+  [1, 'app_state.g_focus_authorized_until = 0;'],
+  [1, 'app_state.g_focus_browser_shell_id = 0;'],
+  [2, 'app_state.g_focus_authorized_hwnd = null;'],
+  [2, 'app_state.g_focus_authorized_until = 0;'],
+  [2, 'app_state.g_focus_browser_shell_id = 0;'],
+]) {
+  const sources = [focusSource, shortcuts, main];
+  const start = sources[index].indexOf(index === 0 ? 'fn focusGuardLanded(' : index === 1 ? '} else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and' : '        WM_APP_SEARCH_OPEN => {');
+  const broken = sources[index].slice(0, start) + sources[index].slice(start).replace(before, '');
+  assert.notEqual(broken, sources[index]);
+  sources[index] = broken;
+  assert.throws(() => authorizationLifetimeContract(...sources), assert.AssertionError, `reject stale authorization: ${index} ${before}`);
+}
 console.log('workspace-focus static checks passed (owned injected shortcut authority, strict optional journey reads, exact native focus, read-only waits, negative controls; Windows CI still required)');

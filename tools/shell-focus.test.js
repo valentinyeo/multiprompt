@@ -145,3 +145,32 @@ test('overlay hides cannot reactivate the console after palette frame handoff', 
   }
   assert.throws(() => auditOverlayHide(source.replace('SetWindowPos(app_state.shells[i].hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)', 'ShowWindow(app_state.shells[i].hwnd, SW_HIDE)')));
 });
+
+test('landed handoffs consume authority without losing the exact return surface', () => {
+  const focus = fs.readFileSync(path.resolve(__dirname, '..', 'src/focus.zig'), 'utf8');
+  const landed = focus.match(/fn focusGuardLanded\(hwnd: HANDLE\) void \{([^]*?)\n\}/)?.[1];
+  assert.ok(landed);
+  const run = new Function('hwnd', 'app_state', 'GetTickCount64', 'focusGuardSurface', landed
+    .replace('now -| app_state.g_focus_user_action_tick', 'Math.max(0, now - app_state.g_focus_user_action_tick)')
+    .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+  for (const target of ['console', 'composer', 'pane']) {
+    const state = {
+      active_shell: 0, shell_count: 1, shells: [{ shell_id: 7, browser_hwnd: 'pane' }],
+      g_focus_browser_shell_id: target === 'pane' ? 7 : 0,
+      g_focus_authorized_hwnd: target === 'pane' ? null : target,
+      g_focus_authorized_until: 2500, g_focus_user_action_tick: 0,
+      g_focus_paste_target: null, g_focus_return_hwnd: 'old', g_focus_typing_tick: 900,
+    };
+    const before = { ...state };
+    run('unrelated', state, () => 1300, hwnd => hwnd);
+    assert.deepEqual(state, before, 'unrelated landing must not consume a pending handoff');
+    run(target, state, () => 2501, hwnd => hwnd);
+    assert.deepEqual(state, before, 'expired authority must not change remembered focus');
+    run(target, state, () => 1300, hwnd => hwnd);
+    assert.equal(state.g_focus_return_hwnd, target);
+    assert.equal(state.g_focus_typing_tick, 0);
+    assert.equal(state.g_focus_authorized_hwnd, null);
+    assert.equal(state.g_focus_authorized_until, 0);
+    assert.equal(state.g_focus_browser_shell_id, 0);
+  }
+});
