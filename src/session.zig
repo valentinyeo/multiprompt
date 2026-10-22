@@ -852,7 +852,11 @@ pub fn saveSession() void {
     logSessionAudit("saveSession:before-write");
     var path_buf: [512]u8 = undefined;
     const path = getSessionPath(&path_buf) orelse return;
-    if (saveSessionTo(path, null) and (!@import("launch_cache.zig").pending or @import("launch_cache.zig").tabs_restored)) publishSessionLayout();
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) {
+        _ = saveSessionTo(path, null);
+        return;
+    }
+    if (saveSessionTo(path, null)) publishSessionLayout();
 }
 
 pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
