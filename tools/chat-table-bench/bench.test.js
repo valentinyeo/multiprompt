@@ -15,6 +15,15 @@ test('benchmark comparison leaves revision build files intact and uses repeated 
   assert.match(summary, /1\.1/);
 });
 
+test('standalone samples amortize runner noise with longer warmup and measurement', () => {
+  const main = read('tools/chat-table-bench/main.zig');
+  assert.match(main, /const warmup_builds: usize = 500;/);
+  assert.match(main, /const measured_builds: usize = 20_000;/);
+  assert.match(main, /for \(0\.\.warmup_builds \+ measured_builds\)/);
+  assert.match(main, /if \(index >= warmup_builds\) total_ticks \+= end - start;/);
+  assert.match(main, /CHAT_TABLE_SAMPLE builds=\{d\}[\s\S]*\.\{ measured_builds, total_ticks, frequency \}/);
+});
+
 test('normal test graph contains a small cache test but no timing benchmark', () => {
   const render = read('src/chat_render.zig');
   assert.doesNotMatch(render, /test "IGSH-436 table build benchmark"|0\.\.2000|CHAT_TABLE_BENCH/);
@@ -27,7 +36,7 @@ test('table changes do not add a shard-wide bridge installation dependency', () 
 });
 
 const { summarize } = require('./summary');
-const samples = (before, after) => Object.fromEntries([['before', before], ['after', after]].map(([name, ticks]) => [name, ticks.map((value, index) => ({ sample: index + 1, builds: 2000, ticks: value, frequency: 1000000 }))]));
+const samples = (before, after) => Object.fromEntries([['before', before], ['after', after]].map(([name, ticks]) => [name, ticks.map((value, index) => ({ sample: index + 1, builds: 20000, ticks: value, frequency: 1000000 }))]));
 
 test('regression guard accepts faster paired samples on slow shared runners', () => {
   assert.equal(summarize(samples(Array(7).fill(10000000), Array(7).fill(7000000))).ratio, 0.7);
@@ -39,7 +48,7 @@ test('regression guard accepts equal paired samples', () => {
 
 test('regression guard accepts slightly slower paired samples within noise', () => {
   assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(105))).ratio, 1.05);
-  assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(110))).ratio, 1.1);
+  assert.ok(Math.abs(summarize(samples(Array(7).fill(100), Array(7).fill(110))).ratio - 1.1) <= Number.EPSILON);
 });
 
 test('regression guard rejects clearly slower median or inconsistent paired samples', () => {
@@ -54,6 +63,9 @@ test('regression guard rejects malformed samples', () => {
   invalid.after[0].sample = 2;
   assert.throws(() => summarize(invalid), /sequence/);
   invalid.after[0].sample = 1;
+  invalid.after[0].builds = 2000;
+  assert.throws(() => summarize(invalid), /build count/);
+  invalid.after[0].builds = 20000;
   invalid.after[0].ticks = NaN;
   assert.throws(() => summarize(invalid), /ticks/);
 });

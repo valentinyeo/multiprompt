@@ -71,7 +71,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -275,12 +275,12 @@ jobs:
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
       - name: Build the account Worker
-        if: matrix.group == 1
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         working-directory: service
         timeout-minutes: 2
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
-        if: matrix.group == 1
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node --test service/test/infra.test.js service/test/worker.test.js
 
   build-arm64:

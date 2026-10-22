@@ -32,3 +32,16 @@ test('local command help reuses command syntax and includes CDP examples', () =>
   assert.match(help, /Runtime\.evaluate.*expression/);
   assert.doesNotMatch(help, /sendBrowserRequest|runNativeHost|resolveWindowFromEnv|CreateFile/);
 });
+
+test('native help sweep shares the shard that installs the bridge executable', () => {
+  const root = path.resolve(__dirname, '..');
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  assert.match(build, /bridge_bad_args_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  const routing = build.slice(build.indexOf('for (test_step.dependencies.items)'), build.indexOf('test_step.dependencies.clearRetainingCapacity()'));
+  assert.doesNotMatch(routing, /dependency == &bridge_bad_args_tests\.step/);
+  assert.match(routing, /else\s*2;\s*test_groups\[group\]\.dependOn\(dependency\)/);
+  assert.match(build, /const zsb_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\)/);
+  assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath\(\.bin, "zigshell-bridge\.exe"\)\)/);
+  assert.doesNotMatch(routing, /dependency == &zsb_help_tests\.step/);
+});
