@@ -1461,10 +1461,11 @@ pub fn calcBrowserLayout() ?BrowserLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const panes = @import("window_layout.zig").activePaneRects(rc);
-    const console_x = panes.primary.left;
-    const console_top = panes.primary.top + threadTitleHeight();
-    const console_w = panes.primary.right - console_x;
-    const console_h = panes.primary.bottom - console_top;
+    const content = @import("window_layout.zig").activePaneContentRect(rc);
+    const console_x = content.left;
+    const console_top = content.top + threadTitleHeight();
+    const console_w = content.right - console_x;
+    const console_h = content.bottom - console_top;
     const browser_x = panes.browser.left;
     const browser_top = panes.browser.top;
     const browser_w = panes.browser.right - browser_x;
@@ -3629,13 +3630,12 @@ pub fn paintBrowserSplitter(hdc: HANDLE) void {
     if (!browserSlotReserved()) return;
     const layout = calcBrowserLayout() orelse return;
     const cx = @divTrunc(layout.splitter_left + layout.splitter_right, 2);
-    var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &client_rc);
+    const cy = @divTrunc(layout.splitter_top + layout.splitter_bottom, 2);
     var split_rc = RECT{
         .left = cx,
-        .top = 0,
+        .top = @max(layout.splitter_top, cy - uiScaled(16)),
         .right = cx + uiScaled(1),
-        .bottom = client_rc.bottom,
+        .bottom = @min(layout.splitter_bottom, cy + uiScaled(16)),
     };
     const br = CreateSolidBrush(customColorOr("overlay_divider", if (app_state.g_amoled_theme) RGB(40, 40, 40) else if (app_state.g_light_theme) RGB(220, 220, 220) else if (app_state.g_edge_gray_theme) RGB(72, 72, 72) else if (app_state.g_mid_theme) RGB(85, 85, 85) else RGB(60, 60, 60)));
     _ = FillRect(hdc, &split_rc, br);
@@ -3700,11 +3700,10 @@ pub fn paintActivePaneBorder(hdc: HANDLE) void {
         .top = layout.browser_y,
         .right = layout.browser_x + layout.browser_w,
         .bottom = layout.browser_y + layout.browser_h,
-    } else RECT{
-        .left = layout.console_x,
-        .top = layout.browser_y,
-        .right = layout.console_x + layout.console_w,
-        .bottom = layout.browser_y + layout.browser_h,
+    } else blk: {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(app_state.g_main_hwnd, &rc);
+        break :blk @import("window_layout.zig").activePaneRects(rc).primary;
     };
     const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
     const old_pen = SelectObject(hdc, pen);

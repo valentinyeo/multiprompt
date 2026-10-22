@@ -1759,6 +1759,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
         var gi: usize = 0;
         while (gi < app_state.group_count) : (gi += 1) {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             if (app_state.g_search_len > 0 and !u16ContainsInsensitive(app_state.groups[gi].name[0..app_state.groups[gi].name_len], app_state.g_search_buf[0..app_state.g_search_len])) continue;
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_GROUP_OFFSET + gi;
@@ -1955,7 +1956,7 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        const tc_grouped = if (tc_idx) |ti| (app_state.shells[ti].group_id != 0) else false;
+        const tc_grouped = if (tc_idx) |ti| (@import("sidebar.zig").tabGroupId(ti) != 0) else false;
         if (sel_mode) {
             if (app_state.group_count < MAX_GROUPS) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
@@ -1974,6 +1975,7 @@ pub fn updateSearchResults() void {
                 }
             }
             for (0..app_state.group_count) |gi| {
+                if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
                 if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
                 var glbuf: [72]u8 = undefined;
                 var gli: usize = 0;
@@ -2033,6 +2035,7 @@ pub fn updateSearchResults() void {
                 }
             }
             for (0..app_state.group_count) |gi| {
+                if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
                 if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
                 var glbuf: [72]u8 = undefined;
                 var gli: usize = 0;

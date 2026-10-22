@@ -443,11 +443,11 @@ fn tabPassesUnreadFilter(i: usize) bool {
 
 pub fn isTabHidden(idx: u32) bool {
     if (idx >= app_state.shell_count) return false;
-    if (app_state.g_starred_workspace) return !@import("workspaces.zig").starredShellVisible(idx);
-    if (app_state.g_single_window and (app_state.shells[idx].workspace != app_state.g_active_workspace or app_state.g_ws_snoozed[app_state.shells[idx].workspace])) return true;
-    if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention and idx != app_state.active_shell) return true;
-    if (!tabPassesUnreadFilter(idx)) return true;
-    const gid = app_state.shells[idx].group_id;
+    if (app_state.g_starred_workspace and !@import("workspaces.zig").starredShellVisible(idx)) return true;
+    if (!app_state.g_starred_workspace and app_state.g_single_window and (app_state.shells[idx].workspace != app_state.g_active_workspace or app_state.g_ws_snoozed[app_state.shells[idx].workspace])) return true;
+    if (!app_state.g_starred_workspace and app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention and idx != app_state.active_shell) return true;
+    if (!app_state.g_starred_workspace and !tabPassesUnreadFilter(idx)) return true;
+    const gid = tabGroupId(idx);
     if (gid == 0) return false;
     if (findGroupIdx(gid)) |gi| return app_state.groups[gi].collapsed;
     return false;
@@ -802,10 +802,30 @@ pub fn findCloseNeighborInWorkspace(closed_idx: u32, ws: u8) ?u32 {
     return null;
 }
 
+pub fn tabGroupId(idx: usize) u32 {
+    return if (app_state.g_starred_workspace) app_state.shells[idx].starred_group_id else app_state.shells[idx].group_id;
+}
+
+pub fn setTabGroupId(idx: usize, gid: u32) void {
+    if (app_state.g_starred_workspace) app_state.shells[idx].starred_group_id = gid else app_state.shells[idx].group_id = gid;
+}
+
+fn tabInCurrentWorkspace(idx: usize) bool {
+    if (app_state.g_starred_workspace) return @import("workspaces.zig").starredShellVisible(idx);
+    return !app_state.g_single_window or app_state.shells[idx].workspace == app_state.g_active_workspace;
+}
+
+pub fn groupInCurrentWorkspace(gid: u32) bool {
+    for (0..app_state.shell_count) |i| {
+        if (tabInCurrentWorkspace(i) and tabGroupId(i) == gid) return true;
+    }
+    return false;
+}
+
 pub fn groupFirstShellIdx(gid: u32) ?u32 {
     if (gid == 0) return null;
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].group_id == gid) return @intCast(i);
+        if (tabGroupId(i) == gid) return @intCast(i);
     }
     return null;
 }
@@ -814,7 +834,7 @@ fn groupLastShellIdx(gid: u32) ?u32 {
     if (gid == 0) return null;
     var last: ?u32 = null;
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].group_id == gid) last = @intCast(i);
+        if (tabGroupId(i) == gid) last = @intCast(i);
     }
     return last;
 }
@@ -840,7 +860,7 @@ pub fn clearTabSelection() bool {
 
 pub fn selectedTabsIncludeGrouped() bool {
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].selected and app_state.shells[i].group_id != 0) return true;
+        if (app_state.shells[i].selected and tabGroupId(i) != 0) return true;
     }
     return false;
 }
@@ -848,7 +868,7 @@ pub fn selectedTabsIncludeGrouped() bool {
 fn applyGroupToSelectedTabs(gid: u32) void {
     for (0..app_state.shell_count) |i| {
         if (app_state.shells[i].selected) {
-            app_state.shells[i].group_id = gid;
+            setTabGroupId(i, gid);
             app_state.shells[i].selected = false;
         }
     }
@@ -862,7 +882,7 @@ pub fn assignTabOrSelectionToGroup(captured_sid: u32, gid: u32) bool {
         return true;
     }
     if (findShellById(captured_sid)) |ti| {
-        app_state.shells[ti].group_id = gid;
+        setTabGroupId(ti, gid);
         app_state.shells[ti].selected = false;
         pruneEmptyGroups();
         normalizeGroupOrder();
@@ -876,14 +896,14 @@ pub fn removeTabOrSelectionFromGroup(captured_sid: u32) bool {
     if (selectedTabCount() > 0) {
         for (0..app_state.shell_count) |si| {
             if (app_state.shells[si].selected) {
-                changed = changed or app_state.shells[si].group_id != 0;
-                app_state.shells[si].group_id = 0;
+                changed = changed or tabGroupId(si) != 0;
+                setTabGroupId(si, 0);
                 app_state.shells[si].selected = false;
             }
         }
     } else if (findShellById(captured_sid)) |ti| {
-        changed = app_state.shells[ti].group_id != 0;
-        app_state.shells[ti].group_id = 0;
+        changed = tabGroupId(ti) != 0;
+        setTabGroupId(ti, 0);
         app_state.shells[ti].selected = false;
     } else {
         return false;
@@ -896,12 +916,12 @@ pub fn removeTabOrSelectionFromGroup(captured_sid: u32) bool {
 pub fn moveShellToIndexWithGroup(src: u32, dst: u32, new_gid: u32) ?u32 {
     if (src >= app_state.shell_count or dst >= app_state.shell_count) return null;
     if (src == dst) {
-        app_state.shells[src].group_id = new_gid;
+        setTabGroupId(src, new_gid);
         return src;
     }
 
     var moved = app_state.shells[src];
-    moved.group_id = new_gid;
+    if (app_state.g_starred_workspace) moved.starred_group_id = new_gid else moved.group_id = new_gid;
     if (src < dst) {
         var i = src;
         while (i < dst) : (i += 1) app_state.shells[i] = app_state.shells[i + 1];
@@ -933,7 +953,7 @@ pub fn moveShellToGroupStart(src: u32, gid: u32) ?u32 {
 pub fn moveActiveTabStep(dir: i32) bool {
     if (app_state.shell_count < 2 or app_state.active_shell >= app_state.shell_count) return false;
     const cur = app_state.active_shell;
-    const cur_gid = app_state.shells[cur].group_id;
+    const cur_gid = tabGroupId(cur);
 
     if (cur_gid != 0 and findGroupIdx(cur_gid) != null) {
         const first = groupFirstShellIdx(cur_gid) orelse cur;
@@ -942,13 +962,13 @@ pub fn moveActiveTabStep(dir: i32) bool {
             if (cur > first) {
                 _ = moveShellToIndexWithGroup(cur, cur - 1, cur_gid);
             } else {
-                app_state.shells[cur].group_id = 0;
+                setTabGroupId(cur, 0);
             }
         } else {
             if (cur < last) {
                 _ = moveShellToIndexWithGroup(cur, cur + 1, cur_gid);
             } else {
-                app_state.shells[cur].group_id = 0;
+                setTabGroupId(cur, 0);
             }
         }
         pruneEmptyGroups();
@@ -958,20 +978,20 @@ pub fn moveActiveTabStep(dir: i32) bool {
     if (dir < 0) {
         if (cur == 0) return false;
         const target = cur - 1;
-        const target_gid = app_state.shells[target].group_id;
+        const target_gid = tabGroupId(target);
         if (target_gid == 0) {
             _ = moveShellToIndexWithGroup(cur, target, 0);
         } else {
-            app_state.shells[cur].group_id = target_gid;
+            setTabGroupId(cur, target_gid);
         }
     } else {
         if (cur + 1 >= app_state.shell_count) return false;
         const target = cur + 1;
-        const target_gid = app_state.shells[target].group_id;
+        const target_gid = tabGroupId(target);
         if (target_gid == 0) {
             _ = moveShellToIndexWithGroup(cur, target, 0);
         } else {
-            app_state.shells[cur].group_id = target_gid;
+            setTabGroupId(cur, target_gid);
         }
     }
     pruneEmptyGroups();
@@ -1038,6 +1058,7 @@ pub fn createDefaultGroup() u32 {
 pub fn deleteGroup(gid: u32) void {
     for (0..app_state.shell_count) |i| {
         if (app_state.shells[i].group_id == gid) app_state.shells[i].group_id = 0;
+        if (app_state.shells[i].starred_group_id == gid) app_state.shells[i].starred_group_id = 0;
     }
     const gidx_opt = findGroupIdx(gid);
     if (gidx_opt) |gidx| {
@@ -1055,7 +1076,7 @@ pub fn pruneEmptyGroups() void {
         const gid = app_state.groups[gi].id;
         var has_member = false;
         for (0..app_state.shell_count) |i| {
-            if (app_state.shells[i].group_id == gid) {
+            if (app_state.shells[i].group_id == gid or app_state.shells[i].starred_group_id == gid) {
                 has_member = true;
                 break;
             }
@@ -1071,6 +1092,7 @@ pub fn pruneEmptyGroups() void {
 }
 
 pub fn normalizeGroupOrder() void {
+    if (app_state.g_starred_workspace) return;
     if (app_state.shell_count < 2) return;
     const active_pid: DWORD = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].pid else 0;
 
@@ -1116,7 +1138,8 @@ pub fn applyPendingGroup() void {
     defer app_state.g_pending_new_tab_group = 0;
     if (app_state.shell_count == 0) return;
     if (findGroupIdx(app_state.g_pending_new_tab_group) == null) return;
-    app_state.shells[app_state.shell_count - 1].group_id = app_state.g_pending_new_tab_group;
+    if (app_state.g_starred_workspace) app_state.shells[app_state.shell_count - 1].favorite = true;
+    setTabGroupId(app_state.shell_count - 1, app_state.g_pending_new_tab_group);
     normalizeGroupOrder();
     saveSession();
 }
@@ -1190,8 +1213,8 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
     var sgc: u32 = 0;
 
     for (0..app_state.shell_count) |i| {
-        if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
-        const gid = app_state.shells[i].group_id;
+        if (!tabInCurrentWorkspace(i)) continue;
+        const gid = tabGroupId(i);
         if (gid == 0) {
             if (!tabPassesUnreadFilter(i)) continue;
             if (bc < MAX_SHELLS) {
@@ -1225,8 +1248,8 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
                 var g_pass: u32 = 0;
                 var g_muted: bool = true;
                 for (0..app_state.shell_count) |j| {
-                    if (app_state.shells[j].group_id != gid) continue;
-                    if (app_state.g_single_window and app_state.shells[j].workspace != app_state.g_active_workspace) continue;
+                    if (tabGroupId(j) != gid) continue;
+                    if (!tabInCurrentWorkspace(j)) continue;
                     if (tabPassesUnreadFilter(j)) {
                         g_pass += 1;
                     }
@@ -1282,8 +1305,8 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
             var mbrs: [MAX_SHELLS]u32 = undefined;
             var mc: u32 = 0;
             for (0..app_state.shell_count) |i| {
-                if (app_state.shells[i].group_id != gid) continue;
-                if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
+                if (tabGroupId(i) != gid) continue;
+                if (!tabInCurrentWorkspace(i)) continue;
                 if (mc < MAX_SHELLS) {
                     mbrs[mc] = @intCast(i);
                     mc += 1;
@@ -1363,8 +1386,22 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight();
     if (app_state.g_starred_workspace) {
+        for (0..app_state.group_count) |gi| {
+            const gid = app_state.groups[gi].id;
+            if (!groupInCurrentWorkspace(gid)) continue;
+            out[count] = .{ .kind = .header, .gidx = @intCast(gi), .shell_idx = 0, .y = y };
+            count += 1;
+            y += GROUP_HEADER_H;
+            if (app_state.groups[gi].collapsed) continue;
+            for (0..app_state.shell_count) |i| {
+                if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid) continue;
+                out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
+                count += 1;
+                y += tabRowH();
+            }
+        }
         for (0..app_state.shell_count) |i| {
-            if (!@import("workspaces.zig").starredShellVisible(i)) continue;
+            if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0) continue;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1495,7 +1532,7 @@ pub fn rowTotalHeight(row: Row) i32 {
 pub fn sidebarTierForDrop(hit: HitTarget) ?SidebarTier {
     return switch (hit) {
         .section => |tier| tier,
-        .tab => |idx| if (idx < app_state.shell_count and app_state.shells[idx].group_id == 0) shellSidebarTier(idx) else null,
+        .tab => |idx| if (idx < app_state.shell_count and tabGroupId(idx) == 0) shellSidebarTier(idx) else null,
         .header => null,
         else => null,
     };
@@ -1720,10 +1757,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 } else {
                     _ = SelectObject(hdc, font_title);
                     const chev: LPCWSTR = if (app_state.groups[gidx].collapsed) L("\u{25B8}") else L("\u{25BE}");
-                    var chev_rc = RECT{ .left = 6, .top = y, .right = 22, .bottom = y + GROUP_HEADER_H };
+                    var chev_rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.left + uiScaled(28), .bottom = y + GROUP_HEADER_H };
                     _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER);
 
-                    var name_rc = RECT{ .left = 26, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + GROUP_HEADER_H };
+                    var name_rc = RECT{ .left = column.left + uiScaled(32), .top = y, .right = column.right - uiScaled(8), .bottom = y + GROUP_HEADER_H };
                     if (app_state.groups[gidx].name_len > 0) {
                         _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | 0x8000);
                     } else {
@@ -1823,9 +1860,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawSessionLockIcon(hdc, sw - 8, y + 10, customColorOr("muted", if (app_state.g_light_theme) RGB(92, 101, 116) else RGB(164, 173, 188)));
                 }
             } else if (LOOK_UNIFIED) {
-                const fav_size: i32 = 16;
-                const fav_gap: i32 = 8;
-                const left_pad: i32 = 10;
+                const fav_size: i32 = uiScaled(16);
+                const fav_gap: i32 = uiScaled(8);
+                const left_pad: i32 = column.left + uiScaled(12);
                 const icon: HANDLE = app_state.shells[i].favicon_hicon orelse switch (app_state.shells[i].kind) {
                     .cmd => app_state.g_icon_cmd,
                     .pwsh => app_state.g_icon_pwsh,
@@ -2079,11 +2116,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 if (row.kind != .header) continue;
                 var bottom = row.y + GROUP_HEADER_H;
                 for (rows_arr[ri + 1 .. row_count]) |member| {
-                    if (member.kind != .tab or app_state.shells[member.shell_idx].group_id != app_state.groups[row.gidx].id) break;
+                    if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
                     bottom = member.y + tabRowH();
                 }
                 const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
-                var rail = RECT{ .left = column.left, .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(3), .bottom = bottom - app_state.g_sidebar_scroll };
+                var rail = RECT{ .left = column.left + uiScaled(4), .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(7), .bottom = bottom - app_state.g_sidebar_scroll };
                 _ = FillRect(hdc, &rail, brush);
                 _ = DeleteObject(brush);
             }
@@ -2764,7 +2801,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     } else if (is_groupmove_group) {
                         const gi = result_idx - SEARCH_GROUPMOVE_GROUP_OFFSET;
                         if (gi < app_state.group_count) {
-                            const current_gid: u32 = if (selectedTabCount() > 0) 0 else if (findShellById(app_state.g_groupmove_tab_sid)) |ti| app_state.shells[ti].group_id else 0;
+                            const current_gid: u32 = if (selectedTabCount() > 0) 0 else if (findShellById(app_state.g_groupmove_tab_sid)) |ti| tabGroupId(ti) else 0;
                             _ = SelectObject(hdc, font_title);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.groups[gi].id == current_gid) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                             var gg_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
@@ -4542,4 +4579,77 @@ test "IGSH-457 Starred sidebar equals inbox split live without moving sessions" 
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
     try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+}
+
+test "IGSH-556 Favorites and home grouping keep independent memberships and group rows" {
+    const saved_shells = app_state.shells[0..2].*;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.groups;
+    const saved_group_count = app_state.group_count;
+    const saved_next = app_state.next_group_id;
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_workspace = app_state.g_active_workspace;
+    const saved_active = app_state.active_shell;
+    const saved_inbox_count = app_state.g_inbox_row_count;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    defer {
+        app_state.shells[0..2].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.groups = saved_groups;
+        app_state.group_count = saved_group_count;
+        app_state.next_group_id = saved_next;
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_workspace;
+        app_state.active_shell = saved_active;
+        app_state.g_inbox_row_count = saved_inbox_count;
+        app_state.g_ws_snoozed = saved_snoozed;
+    }
+    app_state.shell_count = 2;
+    app_state.group_count = 0;
+    app_state.next_group_id = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 0;
+    app_state.active_shell = 0;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_ws_snoozed = @splat(false);
+    for (0..2) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(i + 1);
+        app_state.shells[i].favorite = true;
+    }
+    const home = createDefaultGroup();
+    app_state.shells[0].group_id = home;
+    app_state.g_starred_workspace = true;
+    const starred = createDefaultGroup();
+    try std.testing.expect(assignTabOrSelectionToGroup(1, starred));
+    try std.testing.expectEqual(home, app_state.shells[0].group_id);
+    try std.testing.expectEqual(starred, app_state.shells[0].starred_group_id);
+    try std.testing.expect(!groupInCurrentWorkspace(home));
+    try std.testing.expect(groupInCurrentWorkspace(starred));
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(starred, app_state.groups[rows[0].gidx].id);
+    try std.testing.expectEqual(.tab, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    app_state.groups[findGroupIdx(starred).?].collapsed = true;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expect(isTabHidden(0));
+    app_state.g_starred_workspace = false;
+    try std.testing.expect(!groupInCurrentWorkspace(starred));
+    try std.testing.expect(groupInCurrentWorkspace(home));
+    const other_home = createDefaultGroup();
+    try std.testing.expect(assignTabOrSelectionToGroup(1, other_home));
+    try std.testing.expectEqual(other_home, app_state.shells[0].group_id);
+    try std.testing.expectEqual(starred, app_state.shells[0].starred_group_id);
+    try std.testing.expect(findGroupIdx(starred) != null);
+    app_state.g_starred_workspace = true;
+    try std.testing.expectEqual(@as(?u32, 1), moveShellToIndexWithGroup(1, 1, starred));
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[1].group_id);
+    try std.testing.expectEqual(starred, app_state.shells[1].starred_group_id);
+    try std.testing.expect(removeTabOrSelectionFromGroup(1));
+    try std.testing.expectEqual(other_home, app_state.shells[0].group_id);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[0].starred_group_id);
 }

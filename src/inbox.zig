@@ -690,6 +690,10 @@ const favoriteSplitMatches = @import("workspace_view.zig").splitMatches;
 pub fn toggleFavorite(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     app_state.shells[idx].favorite = toggledFavorite(app_state.shells[idx].favorite);
+    if (!app_state.shells[idx].favorite) {
+        app_state.shells[idx].starred_group_id = 0;
+        @import("sidebar.zig").pruneEmptyGroups();
+    }
     publishInboxStateNow();
     if (!app_state.g_restoring) saveSession();
     if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();

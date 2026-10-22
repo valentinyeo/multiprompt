@@ -1490,7 +1490,8 @@ pub fn moveGroupToPill(gidx: u32, slot: u8) void {
     const gid = app_state.groups[gidx].id;
     var follow = false;
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].group_id != gid) continue;
+        if (@import("sidebar.zig").tabGroupId(i) != gid) continue;
+        if (app_state.g_starred_workspace and app_state.shells[i].workspace != slot) app_state.shells[i].group_id = 0;
         app_state.shells[i].workspace = slot;
         reconcileBrowserWorkspace(@intCast(i));
         if (i == app_state.active_shell) follow = true;
@@ -2135,6 +2136,17 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     if (flen > 0) @memcpy(transfer.favicon_path[0..flen], shell.favicon_path[0..flen]);
     transfer.favicon_path_len = flen;
 
+    transfer.starred_group_id = shell.starred_group_id;
+    if (findGroupIdx(shell.starred_group_id)) |gi| {
+        const group = app_state.groups[gi];
+        transfer.starred_group_name_len = @min(group.name_len, 63);
+        for (0..transfer.starred_group_name_len) |ni| {
+            const wc = group.name[ni];
+            transfer.starred_group_name[ni] = if (wc >= 32 and wc < 127) @intCast(wc) else '?';
+        }
+        transfer.starred_group_color = group.color | (if (group.color_set) @as(u8, 128) else 0);
+        transfer.starred_group_collapsed = if (group.collapsed) 1 else 0;
+    }
     if (preserve_group and shell.group_id != 0) {
         transfer.group_id = shell.group_id;
         if (findGroupIdx(shell.group_id)) |sgidx| {
@@ -2208,11 +2220,11 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     return true;
 }
 
-fn restoreClosedShellGroup(new_idx: u32, saved: @TypeOf(app_state.groups[0])) void {
+pub fn restoreSessionGroup(saved: @TypeOf(app_state.groups[0]), workspace: u8, starred: bool) u32 {
     var gi = findGroupIdx(saved.id);
     if (gi) |_| {
-        for (app_state.shells[0..new_idx]) |shell| {
-            if (shell.group_id == saved.id and shell.workspace != app_state.shells[new_idx].workspace) {
+        for (app_state.shells[0..app_state.shell_count]) |shell| {
+            if ((!starred and (shell.starred_group_id == saved.id or (shell.group_id == saved.id and shell.workspace != workspace))) or (starred and shell.group_id == saved.id)) {
                 gi = null;
                 break;
             }
@@ -2222,12 +2234,16 @@ fn restoreClosedShellGroup(new_idx: u32, saved: @TypeOf(app_state.groups[0])) vo
         const gid = createGroup(saved.name[0..saved.name_len]);
         gi = findGroupIdx(gid);
         if (gi) |idx| {
+            if (findGroupIdx(saved.id) == null) {
+                app_state.groups[idx].id = saved.id;
+                app_state.next_group_id = @max(app_state.next_group_id, saved.id + 1);
+            }
             app_state.groups[idx].color = saved.color;
             app_state.groups[idx].color_set = saved.color_set;
             app_state.groups[idx].collapsed = saved.collapsed;
         }
     }
-    if (gi) |idx| app_state.shells[new_idx].group_id = app_state.groups[idx].id;
+    return if (gi) |idx| app_state.groups[idx].id else 0;
 }
 
 pub fn reopenLastClosedShell() void {
@@ -2242,7 +2258,9 @@ pub fn reopenLastClosedShell() void {
     app_state.g_pending_chat_id = entry.chat_id;
     defer app_state.g_pending_chat_id = 0;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
-        if (entry.group) |saved| restoreClosedShellGroup(app_state.shell_count - 1, saved);
+        app_state.shells[app_state.shell_count - 1].favorite = entry.favorite;
+        if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
+        if (entry.starred_group) |saved| app_state.shells[app_state.shell_count - 1].starred_group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, true);
         app_state.g_closed_count -= 1;
         if ((entry.was_manual or entry.was_sem) and entry.name_len > 0) {
             const new_idx = app_state.shell_count - 1;
@@ -2250,7 +2268,7 @@ pub fn reopenLastClosedShell() void {
             app_state.shells[new_idx].name_len = entry.name_len;
             app_state.shells[new_idx].name_source = if (entry.was_manual) .manual else .semantic;
         }
-        if (entry.group != null) saveSession();
+        if (entry.group != null or entry.starred_group != null or entry.favorite) saveSession();
     }
 }
 
@@ -3671,6 +3689,12 @@ fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
             @memcpy(json_buf[pos .. pos + lf.len], lf);
             pos += lf.len;
         }
+        if (app_state.shells[i].starred_group_id != 0) {
+            const key = ",\"starred_group_id\":";
+            @memcpy(json_buf[pos .. pos + key.len], key);
+            pos += key.len;
+            pos += writeUintTo(json_buf[pos..], app_state.shells[i].starred_group_id);
+        }
         if (app_state.shells[i].group_id != 0) {
             const gp = ",\"group_id\":";
             @memcpy(json_buf[pos .. pos + gp.len], gp);
@@ -3808,7 +3832,7 @@ fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
     for (0..app_state.group_count) |gi| {
         var used = false;
         for (0..app_state.shell_count) |si| {
-            if (app_state.shells[si].workspace == slot and app_state.shells[si].group_id == app_state.groups[gi].id) {
+            if (app_state.shells[si].workspace == slot and (app_state.shells[si].group_id == app_state.groups[gi].id or app_state.shells[si].starred_group_id == app_state.groups[gi].id)) {
                 used = true;
                 break;
             }
@@ -3998,7 +4022,7 @@ fn importWorkspaceGroups(json: []const u8, tabs: []SavedTab) bool {
         if (id_value != .integer or id_value.integer <= 0 or id_value.integer > std.math.maxInt(u32) or name_value != .string) return false;
         const old_id: u32 = @intCast(id_value.integer);
         var used = false;
-        for (tabs) |tab| if (tab.group_id == old_id) {
+        for (tabs) |tab| if (tab.group_id == old_id or tab.starred_group_id == old_id) {
             used = true;
         };
         if (!used) continue;
@@ -4022,12 +4046,14 @@ fn importWorkspaceGroups(json: []const u8, tabs: []SavedTab) bool {
         count += 1;
     }
     for (tabs) |*tab| {
-        const old_id = tab.group_id;
-        tab.group_id = 0;
-        for (0..count) |i| if (old_ids[i] == old_id) {
-            tab.group_id = new_ids[i];
-            break;
-        };
+        inline for (.{ "group_id", "starred_group_id" }) |key| {
+            const old_id = @field(tab, key);
+            @field(tab, key) = 0;
+            for (0..count) |i| if (old_ids[i] == old_id) {
+                @field(tab, key) = new_ids[i];
+                break;
+            };
+        }
     }
     success = true;
     return true;
@@ -4260,6 +4286,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) ?u8 {
             app_state.shells[idx].claude_session = tabs[t].claude_session;
             app_state.shells[idx].wake_id = tabs[t].wake_id;
             app_state.shells[idx].group_id = tabs[t].group_id;
+            app_state.shells[idx].starred_group_id = tabs[t].starred_group_id;
             app_state.shells[idx].workspace = slot;
             for (tabs[0..tab_count], 0..) |saved, saved_idx| {
                 if (saved.workspace == src_ws and saved.shell_id != 0 and saved.shell_id == src_last_shell[src_ws] and

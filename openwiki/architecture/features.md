@@ -64,6 +64,8 @@ Windows Terminal adds ~30-50 MB overhead per instance. Raw cmd.exe is ~2-3 MB. W
 - **Auto-close tabs**: When a shell process exits (e.g. `exit` command), its tab is automatically removed.
 - **Cross-workspace Inbox** (Ctrl+Shift+I): Superhuman-style triage view of every shell across all running ZigShell windows. Top tabs filter by workspace (`ALL` + one per window, each showing its needs-reply count); rows sort in 3 tiers (v0.28.227): unread (blue dot) first, then actively-working (spinner), then read/idle — recency within each tier, flat across workspaces; every row has a last-active timestamp (stamped at spawn, persisted per-tab as "la" in the session file) (splits filter by workspace; no grouping in ALL); stable ws/sid tiebreak prevents live-refresh jitter. `j`/`k` move, `Enter` jumps to the shell (focusing its own window cross-process), `h`/`l` switch workspace tab, `1-9` jump to a row, `Esc` closes. Each window publishes its shells to `%APPDATA%\ZigShell\inbox-<id>.json` (one file per window, no merge races) on every state change + a 30s heartbeat, deleted on clean exit; the inbox aggregates these files and drops any whose owning window is no longer alive. Cross-window jump uses `WM_APP_FOCUS_SHELL` (wParam = shell_id) + `AllowSetForegroundWindow`.
 
+Favorites (Alt+1) has its own session groups using the existing group actions, independently of each session’s home workspace group.
+
 ## Future Features
 
 - Bookmarkable shell configs (like `?cwd=&cmd=` URLs)

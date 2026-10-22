@@ -13,8 +13,13 @@ test("PINNED and RECENTS are drop targets without stealing custom-group state", 
 
   assert.match(helper, /\.section => \|tier\| tier/,
     "dropping on a section label must select that tier");
-  assert.match(helper, /\.tab => \|idx\| if \(idx < shell_count and shells\[idx\]\.group_id == 0\) shellSidebarTier\(idx\) else null/,
+  assert.match(helper, /\.tab => \|idx\| if \(idx < shell_count and tabGroupId\(idx\) == 0\) shellSidebarTier\(idx\) else null/,
     "only ungrouped session rows should inherit a global pin tier");
+  const groupStart = source.indexOf("fn tabGroupId(idx: usize) u32 {");
+  assert.notEqual(groupStart, -1);
+  const groupHelper = source.slice(groupStart, source.indexOf("\n}", groupStart) + 2);
+  assert.match(groupHelper, /return if \(g_starred_workspace\) shells\[idx\]\.starred_group_id else shells\[idx\]\.group_id;/,
+    "drop targets must use the group membership of the current workspace");
   assert.match(helper, /\.header => null/,
     "a group header is a membership target and must preserve pin and lock state");
 });

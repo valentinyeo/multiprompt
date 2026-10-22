@@ -1950,7 +1950,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .tmux_session = std.mem.zeroes([64]u8),
         .tmux_session_len = 0,
         .muted = false,
-        .favorite = false,
+        .favorite = app_state.g_starred_workspace and app_state.g_pending_new_tab_group != 0,
         .inbox_excluded = false,
         .keep_alive = false,
         .cached_cwd = std.mem.zeroes([512]u8),
@@ -2036,6 +2036,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_tmux = app_state.shells[idx].tmux_session;
     const saved_tmux_len = app_state.shells[idx].tmux_session_len;
     const saved_group_id = app_state.shells[idx].group_id;
+    const saved_starred_group_id = app_state.shells[idx].starred_group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
     if (app_state.shells[idx].ssh_reconnect.phase != .reconnecting) app_state.shells[idx].ssh_reconnect.start();
     const saved_ssh_reconnect = app_state.shells[idx].ssh_reconnect;
@@ -2171,6 +2172,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .favicon_path = saved_favicon_path,
         .favicon_path_len = saved_favicon_path_len,
         .group_id = saved_group_id,
+        .starred_group_id = saved_starred_group_id,
         .selected = false,
         .tmux_host = saved_tmux_host,
         .spawn_tick = GetTickCount64(),
@@ -2253,15 +2255,10 @@ fn positionReconnectedConsole(idx: u32) bool {
     const pane = @import("browser_pane.zig");
     var rc: RECT = std.mem.zeroes(RECT);
     if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
-    rc.left = SIDEBAR_W();
-    rc.top = app_state.DEV_TOP_PAD + pane.threadTitleHeight();
-    rc.bottom -= app_state.DEV_TOP_PAD;
-    if (pane.browserSlotReserved()) {
-        const layout = pane.calcBrowserLayout() orelse return false;
-        const inset: i32 = if (shell.browser_native) pane.paneFocusInset() else 0;
-        rc = .{ .left = layout.console_x + inset, .top = layout.console_y + inset, .right = layout.console_x + layout.console_w - inset, .bottom = layout.console_y + layout.console_h - inset };
-    } else if (!shell.full_width) {
-        const col = pane.centeredConsoleColumn(rc.right, SIDEBAR_W(), if (SIDEBAR_W() == 0) pane.consoleEdgePad() else 0, pane.consoleCellW());
+    rc = @import("window_layout.zig").activePaneContentRect(rc);
+    rc.top += pane.threadTitleHeight();
+    if (!shell.full_width) {
+        const col = pane.centeredConsoleColumn(rc.right, rc.left, 0, pane.consoleCellW());
         rc.left = col.left;
         rc.right = col.left + col.width;
     }
@@ -2423,6 +2420,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.was_sem = (app_state.shells[idx].name_source == .semantic);
         entry.closed_at = GetTickCount64();
         entry.group = if (findGroupIdx(app_state.shells[idx].group_id)) |gi| app_state.groups[gi] else null;
+        entry.starred_group = if (findGroupIdx(app_state.shells[idx].starred_group_id)) |gi| app_state.groups[gi] else null;
+        entry.favorite = app_state.shells[idx].favorite;
         app_state.g_closed_history[app_state.g_closed_count] = entry;
         app_state.g_closed_count += 1;
     }
@@ -2521,7 +2520,7 @@ pub fn clampSidebarScroll() void {
 
 pub fn ensureActiveVisible() void {
     if (app_state.shell_count == 0 or app_state.active_shell >= app_state.shell_count) return;
-    const agid = app_state.shells[app_state.active_shell].group_id;
+    const agid = @import("sidebar.zig").tabGroupId(app_state.active_shell);
     if (agid != 0) {
         if (findGroupIdx(agid)) |gidx| {
             if (app_state.groups[gidx].collapsed) app_state.groups[gidx].collapsed = false;

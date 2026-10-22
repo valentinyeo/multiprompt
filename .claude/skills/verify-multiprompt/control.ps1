@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'browser-workspaces', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-workspaces', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -19,7 +19,7 @@ switch ($Feature) {
 }
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -66,7 +66,10 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
@@ -139,6 +142,16 @@ public static class VerifyNative {
         }, IntPtr.Zero);
         return visible;
     }
+    public static IntPtr PaneWindow(IntPtr owner) {
+        IntPtr pane = IntPtr.Zero;
+        int count = 0;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            if (GetProp(hwnd, "ZigShellPaneOwner") == owner && IsWindowVisible(hwnd)) { pane = hwnd; count++; }
+            return true;
+        }, IntPtr.Zero);
+        if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
+        return pane;
+    }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");
@@ -172,6 +185,114 @@ public static class VerifyNative {
     }
     public static string Class(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(256); GetClassName(hwnd, text, text.Capacity); return text.ToString();
+    }
+}
+public static class PaneLayoutProof {
+    static int S(int value, uint dpi, int scale) { return (int)((long)value * dpi * scale / 9600); }
+    static void Require(bool ok, string step, string detail) {
+        if (!ok) throw new InvalidOperationException("pane-layout " + step + " FAIL: " + detail);
+        Console.WriteLine("pane-layout " + step + " PASS");
+    }
+    static int Distance(System.Drawing.Color a, System.Drawing.Color b) {
+        return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+    }
+    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Rect client,
+        VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale) {
+        var proof = new Dictionary<string, object>();
+        using (var image = new System.Drawing.Bitmap(path)) {
+            int ox = frame.Left, oy = frame.Top;
+            Func<int, int, System.Drawing.Color> pixel = (x, y) => image.GetPixel(x - ox, y - oy);
+            int gap = S(8, dpi, scale), pad = S(6, dpi, scale), border = S(1, dpi, scale);
+            int sidebarLeft = client.Left + gap;
+            int sidebarRight = client.Left + S(220, dpi, scale) - gap / 2;
+            int left = sidebarRight + gap + pad, right = browser.Left - gap - pad;
+            int top = client.Top + gap + pad, bottom = client.Bottom - gap - pad;
+            int radius = S(8, dpi, scale), tolerance = Math.Max(1, border);
+            var histogram = new Dictionary<int, int>();
+            for (int y = top - tolerance; y <= top + tolerance; y++) {
+                for (int x = left + radius; x < right - radius; x++) {
+                    var color = pixel(x, y);
+                    if (Math.Abs(color.R - color.G) > 2 || Math.Abs(color.G - color.B) > 2 || color.R < 40 || color.R > 100) continue;
+                    int key = color.ToArgb();
+                    histogram[key] = histogram.ContainsKey(key) ? histogram[key] + 1 : 1;
+                }
+            }
+            int best = 0, ringKey = 0;
+            foreach (var entry in histogram) if (entry.Value > best) { best = entry.Value; ringKey = entry.Key; }
+            Require(best >= (right - left - 2 * radius) * 0.9, "ring-found", "No long dark-theme focus-color stroke at the console slot top");
+            var ring = System.Drawing.Color.FromArgb(ringKey);
+            proof["ringColor"] = new int[] { ring.R, ring.G, ring.B };
+            proof["ringRect"] = new int[] { left, top, right, bottom };
+            foreach (string side in new string[] { "top", "bottom", "left", "right" }) {
+                bool horizontal = side == "top" || side == "bottom";
+                int start = (horizontal ? left : top) + radius;
+                int end = (horizontal ? right : bottom) - radius;
+                int fixedAt = side == "top" ? top : side == "bottom" ? bottom : side == "left" ? left : right;
+                int missing = 0, longest = 0, run = 0;
+                for (int along = start; along < end; along++) {
+                    bool found = false;
+                    for (int across = fixedAt - tolerance; across <= fixedAt + tolerance; across++) {
+                        if (Distance(pixel(horizontal ? along : across, horizontal ? across : along), ring) <= 3) found = true;
+                    }
+                    if (found) run = 0; else { missing++; run++; longest = Math.Max(longest, run); }
+                }
+                proof[side + "MissingPixels"] = missing;
+                Require(missing == 0, "ring-" + side, "missing=" + missing + " longestGap=" + longest);
+            }
+            Require(console.Left >= left + border && console.Right <= right - border && console.Top >= top + border && console.Bottom <= bottom - border,
+                "console-inside-ring", "HWND=" + console.Left + "," + console.Top + "," + console.Right + "," + console.Bottom);
+            int gapLeft = browser.Left - gap, middleX = gapLeft + gap / 2;
+            int middleY = (client.Top + client.Bottom) / 2;
+            var divider = System.Drawing.Color.FromArgb(60, 60, 60);
+            int forbidden = 0, gripPixels = 0;
+            for (int x = gapLeft; x < browser.Left; x++) {
+                for (int y = client.Top; y < client.Bottom; y++) {
+                    var color = pixel(x, y);
+                    bool line = Distance(color, ring) <= 3 || Distance(color, System.Drawing.Color.FromArgb(95, 95, 95)) <= 3 || Distance(color, divider) <= 3;
+                    if (!line) continue;
+                    bool grip = x >= middleX && x < middleX + border && y >= middleY - S(16, dpi, scale) && y < middleY + S(16, dpi, scale);
+                    if (grip && Distance(color, divider) <= 3) gripPixels++; else forbidden++;
+                }
+            }
+            proof["gapRect"] = new int[] { gapLeft, client.Top, browser.Left, client.Bottom };
+            proof["gripPixels"] = gripPixels;
+            Require(forbidden == 0 && gapLeft > right + border, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
+            var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
+            int railX = -1, railTop = -1, railBottom = -1, longestRail = 0;
+            for (int x = sidebarLeft; x < sidebarLeft + S(36, dpi, scale); x++) {
+                int run = 0;
+                for (int y = client.Top + S(20, dpi, scale); y < client.Top + S(220, dpi, scale); y++) {
+                    if (Distance(pixel(x, y), railColor) <= 2) run++; else run = 0;
+                    if (run > longestRail) { longestRail = run; railX = x; railBottom = y + 1; railTop = y + 1 - run; }
+                }
+            }
+            Require(longestRail >= S(40, dpi, scale), "group-line-found", "longest vertical group-color run=" + longestRail);
+            int railRight = railX + 1;
+            while (railRight < sidebarLeft + S(40, dpi, scale) && Distance(pixel(railRight, (railTop + railBottom) / 2), railColor) <= 2) railRight++;
+            int rowTop = railTop + S(28, dpi, scale), rowBottom = rowTop + S(38, dpi, scale);
+            var rowBackground = pixel(sidebarRight - S(45, dpi, scale), (rowTop + rowBottom) / 2);
+            var cardBackground = pixel(sidebarLeft + S(2, dpi, scale), (rowTop + rowBottom) / 2);
+            var sidebarBackground = pixel(sidebarRight - S(45, dpi, scale), railBottom + S(2, dpi, scale));
+            string backgroundColors = " rowBackground=" + rowBackground + " cardBackground=" + cardBackground + " sidebarBackground=" + sidebarBackground;
+            var railPixelColor = pixel(railX, (rowTop + rowBottom) / 2);
+            var firstIconColor = System.Drawing.Color.Empty;
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1, iconPixels = 0;
+            for (int x = railRight; x < sidebarLeft + S(34, dpi, scale); x++) {
+                for (int y = rowTop + S(4, dpi, scale); y < rowBottom - S(4, dpi, scale); y++) {
+                    var color = pixel(x, y);
+                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16 || Distance(color, sidebarBackground) <= 16) continue;
+                    if (x < minX) firstIconColor = color;
+                    minX = Math.Min(minX, x); minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); iconPixels++;
+                }
+            }
+            Require(iconPixels >= S(16, dpi, scale) && maxY - minY >= S(8, dpi, scale), "row-icon-found", "No visible CMD icon pixels in the first grouped row" + backgroundColors);
+            proof["railRect"] = new int[] { railX, railTop, railRight, railBottom };
+            proof["iconPixelBounds"] = new int[] { minX, minY, maxX + 1, maxY + 1 };
+            proof["iconPixels"] = iconPixels;
+            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor + backgroundColors);
+        }
+        return proof;
     }
 }
 public sealed class VerifyJob : IDisposable {
@@ -993,6 +1114,55 @@ try {
             $result.checks += @{ name = 'create-switch-return'; workspacesBefore = $before; workspacesAfter = (Read-Session).workspace_count; activeWorkspace = $created; title = [VerifyNative]::Title($script:window) }
             Snapshot 'after'
         }
+        'favorites-groups' {
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.single_window -and $state.active_workspace -eq 0 -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -ceq 'cmd' } 'initial CMD session saved in first workspace'
+            $initial = Read-Session
+            $tabIndex = $initial.active_tab
+            if ($tabIndex -ne 0 -or ($initial.tabs[$tabIndex].PSObject.Properties['favorite'] -and $initial.tabs[$tabIndex].favorite)) { throw 'Favorites journey requires the fresh unstarred CMD session' }
+            $initialGroupIds = @()
+            if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
+            Press @(0x12, 0x53) 'Alt+S: favorite initial CMD session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].favorite -eq $true } 'favorite true saved in session.json'
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
+            Type-Text 'new group'
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: New home group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups']) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
+                $newGroups.Count -eq 1 -and $newGroups[0].id -gt 0 -and $state.tabs[$tabIndex].group_id -eq $newGroups[0].id
+            } 'new home group H persisted on original tab'
+            $homeState = Read-Session
+            $homeGroupId = $homeState.tabs[$tabIndex].group_id
+            $homeGroupIds = @($homeState.groups | ForEach-Object { $_.id })
+            Press @(0x1B) 'Escape: finish home group inline rename without changing its name'
+            Press @(0x12, 0x31) 'Alt+1: Starred workspace'
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu in Starred workspace'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: New Favorites group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.tabs[$tabIndex].PSObject.Properties['starred_group_id']) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $homeGroupIds })
+                $newGroups.Count -eq 1 -and $newGroups[0].id -gt 0 -and $newGroups[0].id -ne $homeGroupId -and $state.tabs[$tabIndex].group_id -eq $homeGroupId -and $state.tabs[$tabIndex].starred_group_id -eq $newGroups[0].id
+            } 'independent Favorites group F saved while home group stays H'
+            $starred = Read-Session
+            $favoritesGroupId = $starred.tabs[$tabIndex].starred_group_id
+            Save-Json $starred 'session-starred-grouped.json'
+            Press @(0x1B) 'Escape: finish Favorites group inline rename without changing its name'
+            Snapshot 'starred-grouped'
+            Press @(0x12, 0x32) 'Alt+2: return to home workspace'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.active_workspace -eq 0 -and $state.active_tab -eq $tabIndex -and $state.tabs[$tabIndex].group_id -eq $homeGroupId -and $state.tabs[$tabIndex].starred_group_id -eq $favoritesGroupId -and $state.tabs[$tabIndex].favorite -eq $true
+            } 'home return retains H and independent Favorites F'
+            Save-Json (Read-Session) 'session-home-returned.json'
+            Snapshot 'after'
+            $result.checks += @{ name = 'favorites-groups-independent'; group_id = $homeGroupId; starred_group_id = $favoritesGroupId; tab = $tabIndex }
+        }
         'session-open' {
             $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; only background tab creation and idempotency are verified'; observed = 'pending'; tabRemoved = $null }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
@@ -1432,6 +1602,58 @@ try {
             Press @(0x1B) 'Esc: return from Inbox'
             Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
             Snapshot 'returned'
+        }
+        'pane-layout' {
+            Select-Theme 'dark' 'pane-layout-dark'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one real CMD session'
+            $initial = Read-Session
+            if ($initial.tabs[0].PSObject.Properties['cv'] -and $initial.tabs[0].cv) { throw 'pane-layout requires the console, not Chat View' }
+            $script:browserShellId = (Read-Inbox).shells[0].sid
+            Focus-Palette 'move to group' 6301
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: New group containing CMD'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[0].group_id -eq $state.groups[0].id
+            } 'CMD membership in the user-created gray group'
+            Press @(0x1B) 'Esc: leave inline group rename using the saved default name'
+            $pane = Open-BrowserPane 'pane-layout-open'
+            Press @(0x5B, 0x26) 'Win+Up: maximize main window'
+            Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'maximized main window'
+            Press @(0x11, 0x31) 'Ctrl+1: return to the CMD console'
+            Wait-WorkspaceSurface $initial.active_workspace 0 $false
+            $console = [VerifyNative]::GetForegroundWindow()
+            $browser = [VerifyNative]::PaneWindow($script:window)
+            if ($browser -eq [IntPtr]::Zero) { throw 'No visible owned docked browser HWND' }
+            $consoleElement = [System.Windows.Automation.AutomationElement]::FromHandle($console)
+            if ($consoleElement.Current.IsOffscreen -or $consoleElement.Current.ClassName -ne 'ConsoleWindowClass' -or
+                -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $initial.tabs[0].shell_id), [StringComparison]::Ordinal)) { throw 'UIA cannot see the owned CMD console' }
+            Snapshot 'action'
+            Snapshot 'pane-layout'
+            $frame = New-Object VerifyNative+Rect
+            $client = New-Object VerifyNative+Rect
+            $consoleRect = New-Object VerifyNative+Rect
+            $browserRect = New-Object VerifyNative+Rect
+            $origin = New-Object VerifyNative+Point
+            if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+                -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin) -or -not [VerifyNative]::GetWindowRect($console, [ref]$consoleRect) -or
+                -not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect)) { throw 'pane-layout HWND rectangles unavailable' }
+            $client.Left += $origin.X; $client.Right += $origin.X; $client.Top += $origin.Y; $client.Bottom += $origin.Y
+            $uiaRect = $consoleElement.Current.BoundingRectangle
+            if ([Math]::Abs($uiaRect.Left - $consoleRect.Left) -gt 1 -or [Math]::Abs($uiaRect.Top - $consoleRect.Top) -gt 1 -or
+                [Math]::Abs($uiaRect.Right - $consoleRect.Right) -gt 1 -or [Math]::Abs($uiaRect.Bottom - $consoleRect.Bottom) -gt 1) { throw 'Console UIA and HWND bounds disagree' }
+            Write-Host 'pane-layout console-uia-hwnd PASS'
+            $state = Read-Session
+            if ($state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv) { throw 'Journey accidentally entered Chat View' }
+            $scale = 100
+            if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
+            $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            Save-Json @{ frame = $frame; client = $client; console = $consoleRect; browser = $browserRect; consoleHwnd = $console.ToInt64(); browserHwnd = $browser.ToInt64(); dpi = $dpi; scale = $scale; session = $state } 'pane-layout-rects.json'
+            $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale)
+            Save-Json $proof 'pane-layout-pixels.json'
+            $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-found', 'row-icon-found', 'group-line-clears-icon'); pixels = $proof }
+            Snapshot 'after'
         }
         'browser-pane-stuck' {
             $script:browserShellId = (Read-Inbox).shells[0].sid
