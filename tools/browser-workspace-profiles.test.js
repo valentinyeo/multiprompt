@@ -104,3 +104,15 @@ test('IGSH-224 live browser journey proves every lifecycle stage and background 
   assert.match(observe, /\$live\.Count -ne 1/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|PostMessage/);
 });
+
+test('IGSH-224 workspace rename stays in the palette and captures its stable target instead of requesting native focus', () => {
+  const main = read('src/main.zig');
+  const begin = main.slice(main.indexOf('if (target == SEARCH_RENAMEWIN_OFFSET)'), main.indexOf('if (target >= SEARCH_WORKSPACE_OFFSET)', main.indexOf('if (target == SEARCH_RENAMEWIN_OFFSET)')));
+  assert.ok(begin.length > 0);
+  assert.match(begin, /g_search_rename_input_mode = true/);
+  assert.match(begin, /g_search_rename_workspace_len/);
+  assert.match(begin, /g_ws_ids\[ws\]/);
+  assert.doesNotMatch(begin, /startWindowRename|showActiveShellAfterOverlay|SetFocus|SetForegroundWindow/);
+  assert.match(main, /findMyWorkspaceSlot\(app_state\.g_search_rename_workspace_id\[0\.\.app_state\.g_search_rename_workspace_len\]\)/);
+  assert.match(read('src/shortcuts.zig'), /if \(\(kb\.flags & 0x10\) == 0\)/);
+});

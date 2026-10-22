@@ -34,7 +34,8 @@ Create a second workspace with Ctrl+N to persist the fresh layout, then return
 to the first workspace and open both panes before creating the remaining four.
 Hash all six persisted IDs independently and
 require completion markers, Local State and six real profile processes.
-In the sixth workspace, rename it to IGSH224 Journey, navigate to a synthetic
+In the sixth workspace, rename it to IGSH224 Journey using the existing inline
+palette editor (Ctrl+A, type, Enter), without transferring native focus; navigate to a synthetic
 example.com URL and bookmark it through real keyboard input. Move the workspace
 one position earlier, convert to six standalone windows and back, then close
 and reopen the named workspace. At each stage, assert the same ID, root and

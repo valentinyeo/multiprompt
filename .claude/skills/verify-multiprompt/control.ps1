@@ -556,7 +556,7 @@ function Focus-WorkspaceShell {
 }
 
 function Palette([string]$Query) {
-    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceShell }
+    if ($Feature -in @('browser-workspaces', 'browser-pane-stuck')) { Focus-WorkspaceShell }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
 }
@@ -1111,10 +1111,7 @@ try {
             Palette 'rename workspace'
             Snapshot 'rename-action'
             Press @(0x0D) 'Enter: Rename workspace'
-            Wait-Until {
-                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-                $null -ne $focused -and $focused.Current.ProcessId -eq $process.Id -and $focused.Current.ClassName -eq 'EDIT'
-            } 'native workspace rename editor owns focus'
+            Snapshot 'rename-editor'
             Press @(0x11, 0x41) 'Ctrl+A: replace workspace name'
             Type-Text 'IGSH224 Journey'
             Press @(0x0D) 'Enter: save workspace name'
