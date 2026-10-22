@@ -64,6 +64,14 @@ for (const step of ['initial-open', 'shortcut-close', 'reopen-after-shortcut', '
 for (const observation of ['GetProp(hwnd, "ZigShellPaneOwner")', 'IsWindowVisible(hwnd)', 'GetWindowRect(hwnd, out pane)', 'AddSeconds(21)', 'Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id']) {
   assert.ok(driver.includes(observation), `connected journey observes ${observation}`);
 }
+function browserInputReadyContract(source) {
+  const open = source.slice(source.indexOf('function Open-BrowserPane('), source.indexOf('function Assert-ConnectedPaneStaysVisible('));
+  assert.match(open, /Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible\(\$script:window\)[^}]*\} 'browser docked before keyboard input' 25/);
+  assert.ok(open.indexOf('browser docked before keyboard input') < open.indexOf('browser launch returned foreground to app'));
+  assert.match(source, /function Assert-Foreground \{[^}]*throw 'Refusing input: owned app is not foreground'/);
+}
+browserInputReadyContract(driver);
+assert.throws(() => browserInputReadyContract(driver.replace(/    Wait-Until \{\n        \$pane = Read-BrowserPane[^}]*\} 'browser docked before keyboard input' 25\n/, '')));
 for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'", 'Press @(0x12, 0x10, 0x41)', 'Press @(0x12, 0x10, 0x42)']) {
   assert.ok(driver.includes(input), `real input: ${input}`);
 }

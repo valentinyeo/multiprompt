@@ -279,6 +279,10 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::PaneVisible($script:window)
+    } 'browser docked before keyboard input' 25
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
     return Assert-BrowserPane 'open' $Step $PreviousId
 }
