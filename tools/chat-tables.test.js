@@ -77,6 +77,44 @@ test "table surface: IGSH-436 symbol-only boxed chrome outside a table stays hid
     const tool_header = false;
     try std.testing.expect(${chrome});
 }
+test "table surface: IGSH-436 old visible table survives more than 256 hidden raw blocks" {
+    const a = std.testing.allocator;
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const width = 32;
+    const rows = 1200;
+    const raw = try a.alloc(u16, rows * width);
+    defer a.free(raw);
+    @memset(raw, ' ');
+    const table = [_][]const u16{ w("┌───┬───┐"), w("│ A │ B │"), w("├───┼───┤"), w("│ 1 │ 2 │"), w("└───┴───┘") };
+    for (table, 0..) |line, row| @memcpy(raw[row * width + 2..][0..line.len], line);
+    for (0..596) |i| @memcpy(raw[(table.len + i * 2) * width..][0..8], w("────────"));
+    @memcpy(raw[1197 * width..][0..5], w("After"));
+    const scratch = try a.alloc(u16, raw.len + rows * 2);
+    defer a.free(scratch);
+    const table_rows = try a.alloc(bool, rows);
+    defer a.free(table_rows);
+    chatConsoleTableRows(raw, width, scratch, table_rows);
+    for (0..rows) |row| try std.testing.expectEqual(row < table.len, table_rows[row]);
+    var len: usize = 0;
+    for (0..rows) |row| {
+        const line = std.mem.trim(u16, raw[row * width..][0..width], &.{ ' ', '\t', 0 });
+        const table_line = table_rows[row];
+        const tool_header = false;
+        if (${chrome}) continue;
+        @memcpy(scratch[len..][0..line.len], line);
+        len += line.len;
+        scratch[len] = '\r';
+        scratch[len + 1] = '\n';
+        len += 2;
+    }
+    var blocks: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
+    const count = chatClassifyBlocks(scratch[0..len], &blocks);
+    try std.testing.expectEqual(@as(usize, 2), count);
+    try std.testing.expectEqual(chat_markdown.Kind.table, blocks[0].kind);
+    try std.testing.expectEqual(chat_markdown.Kind.paragraph, blocks[1].kind);
+    chatApplyDisplayGlyphs(scratch[0..len], blocks[0..count]);
+    for (table, 0..) |line, row| try std.testing.expectEqualSlices(u16, line, scratch[row * (line.len + 2)..][0..line.len]);
+}
 test "table surface: narrative rows survive while genuine tool details stay hidden" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expect(!chatLineIsToolDetail(w("│ Event │ Status │")));

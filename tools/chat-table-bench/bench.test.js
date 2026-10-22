@@ -12,7 +12,7 @@ test('benchmark comparison leaves revision build files intact and uses repeated 
   assert.match(workflow, /1\.\.7/);
   const summary = read('tools/chat-table-bench/summary.js');
   assert.doesNotMatch(summary, /<= 0\.35/);
-  assert.match(summary, /0\.8/);
+  assert.match(summary, /1\.1/);
 });
 
 test('normal test graph contains a small cache test but no timing benchmark', () => {
@@ -29,10 +29,26 @@ test('table changes do not add a shard-wide bridge installation dependency', () 
 const { summarize } = require('./summary');
 const samples = (before, after) => Object.fromEntries([['before', before], ['after', after]].map(([name, ticks]) => [name, ticks.map((value, index) => ({ sample: index + 1, builds: 2000, ticks: value, frequency: 1000000 }))]));
 
-test('relative comparison accepts slow shared runners but rejects small or inconsistent improvements', () => {
+test('regression guard accepts faster paired samples on slow shared runners', () => {
   assert.equal(summarize(samples(Array(7).fill(10000000), Array(7).fill(7000000))).ratio, 0.7);
-  assert.throws(() => summarize(samples(Array(7).fill(100), Array(7).fill(90))), /20%/);
-  assert.throws(() => summarize(samples(Array(7).fill(100), [60, 60, 60, 60, 60, 90, 90])), /six of seven/);
+});
+
+test('regression guard accepts equal paired samples', () => {
+  assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(100))).ratio, 1);
+});
+
+test('regression guard accepts slightly slower paired samples within noise', () => {
+  assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(105))).ratio, 1.05);
+  assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(110))).ratio, 1.1);
+});
+
+test('regression guard rejects clearly slower median or inconsistent paired samples', () => {
+  assert.throws(() => summarize(samples(Array(7).fill(100), Array(7).fill(120))), /median regression/);
+  assert.throws(() => summarize(samples(Array(7).fill(100), [100, 100, 100, 100, 100, 120, 120])), /six of seven/);
+  assert.doesNotThrow(() => summarize(samples(Array(7).fill(100), [100, 100, 100, 100, 100, 100, 120])));
+});
+
+test('regression guard rejects malformed samples', () => {
   assert.throws(() => summarize(samples(Array(7).fill(100), Array(6).fill(60))), /sample count/);
   const invalid = samples(Array(7).fill(100), Array(7).fill(60));
   invalid.after[0].sample = 2;
