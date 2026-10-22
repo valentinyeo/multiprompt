@@ -61,10 +61,12 @@ test("empty workspace closes atomically and can be absorbed again", () => {
   assert.match(close, /removeWorkspaceSlot\(slot\)/,
     "closing one empty workspace must remove that exact pill");
 
-  const absorb = bodyOf("fn absorbWorkspaceIntoSlots(id: \[\]const u8, fallback_name: \[\]const u8) bool {");
+  const absorb = bodyOf("fn absorbWorkspaceIntoSlots(id: \[\]const u8, fallback_name: \[\]const u8) ?u8 {");
   assert.match(absorb, /empty_workspace[\s\S]*?g_lws_count \+= 1/,
     "a saved empty workspace must reopen as an empty pill");
   assert.match(absorb, /spawned == 0 and !empty_workspace/);
+  assert.match(absorb, /if \(empty_workspace\) \{[\s\S]*?restored_slot = slot;/);
+  assert.match(absorb, /return findMyWorkspaceSlot\(restored_id\[0\.\.restored_id_len\]\)/);
 });
 
 test("locked sessions keep their close guard and padlock without becoming a sidebar tier", () => {
