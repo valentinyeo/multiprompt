@@ -1922,6 +1922,8 @@ fn sshProbeFinish() void {
     for (job.items[0..job.count]) |item| {
         const idx = @import("inbox.zig").findShellById(item.id) orelse continue;
         const shell = &app_state.shells[idx];
+        var tab_log: [224]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&tab_log, "ssh-probe tab id={d} phase={s} disconnected={} live={} attached={} gone={} incarnation={}", .{ shell.shell_id, @tagName(shell.ssh_reconnect.phase), shell.disconnected, shell.process != null and shellProcessAliveForRead(idx), item.attached, item.session_gone, shell.spawn_tick == item.spawn_tick }) catch "ssh-probe tab log-overflow");
         if (shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
         const process_alive = shell.process != null and shellProcessAliveForRead(idx);
