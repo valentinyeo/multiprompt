@@ -323,7 +323,7 @@ async function handleHostMessage(message) {
 }
 
 async function dispatch(message) {
-  const targetsTab = messageWindowId(message) != null && !["createPaneWindow", "setTheme", "protectWindow", "resolveWindow", "reset"].includes(message.method);
+  const targetsTab = Number.isInteger(message?.windowId) && message.windowId > 0 && !["createPaneWindow", "setTheme", "protectWindow", "resolveWindow", "reset"].includes(message.method);
   const tabId = targetsTab && lostEmulationTabs.size ? (await getTargetTab(message).catch(() => null))?.id : null;
   const warning = lostEmulationTabs.get(tabId);
   if (warning && message.method !== "emulate") throw new Error(warning);

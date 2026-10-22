@@ -4,6 +4,8 @@ multiprompt-browser "$@" | python3 -c '
 import json
 import sys
 
+sys.stdout.reconfigure(newline="")
+sys.stderr.reconfigure(newline="")
 raw = sys.stdin.read()
 try:
     reply = json.loads(raw)
