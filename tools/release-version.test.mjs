@@ -125,8 +125,8 @@ test('four Windows and two VPS jobs retain the upstream test graph and folded se
   assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
   assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
   const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
-  assert.match(vps, /name: Build the account Worker\n        if: matrix.group == 1/);
-  assert.match(vps, /name: Run account Worker tests\n        if: matrix.group == 1/);
+  assert.match(vps, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
+  assert.match(vps, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
   assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
   assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
