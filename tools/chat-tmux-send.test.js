@@ -170,8 +170,8 @@ test('turning the switch off executes the original console path', () => {
   assert.match(result.stderr, /All 1 tests passed/);
 });
 test('IGSH-564 force send routes tmux through the existing key worker and presses Claude keys', () => {
-  assert.match(body('chatEchoPushQueuedNow'), /chatTmuxSendEligible\(app_state\.active_shell\)[^]*chatAgentKey\(app_state\.active_shell, 0x18\)/);
-  assert.match(body('chatEchoPushQueuedNow'), /sendClaudeSendQueuedNowToShell\(app_state\.active_shell\)/);
+  assert.match(body('chatEchoPushQueuedNow'), /chatTmuxSendEligible\((?:app_state\.)?active_shell\)[^]*chatAgentKey\((?:app_state\.)?active_shell, 0x18\)/);
+  assert.match(body('chatEchoPushQueuedNow'), /sendClaudeSendQueuedNowToShell\((?:app_state\.)?active_shell\)/);
   assert.match(body('chatAgentKey'), /std\.Thread\.spawn\(\.\{\}, chatStopTmuxThread, \.\{ key, digit \}\)/);
   assert.match(body('chatStopTmuxThread'), /digit == 0x18[^]*"send_queued"/);
   assert.match(body('chatStopTmuxThread'), /const permission = digit != 0x1B and digit != 0x18;/);
