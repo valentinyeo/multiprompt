@@ -195,13 +195,14 @@ test('ISSUE-508 shell cap preserves the pre-Hack effective width', () => {
 
 test('ISSUE-508 full width remains per-session and bypasses the shell cap without changing Chat View', () => {
   const layout = read('src/window_layout.zig');
-  const full = layout.indexOf('if (app_state.shells[app_state.active_shell].full_width)');
-  const centered = layout.indexOf('const col = centeredConsoleColumn(', full);
-  assert.ok(full >= 0 && centered > full);
-  const branch = layout.slice(full, centered);
-  assert.match(branch, /const fw_w = rc.right - SIDEBAR_W\(\);/);
-  assert.match(branch, /verifyShellWindowSize\(sh0, SIDEBAR_W\(\), fw_top, fw_w, fw_h\);\s*return;/);
+  const centered = layout.indexOf('const col = centeredConsoleColumn(pane.right, pane.left, 0, consoleCellW());');
+  const full = layout.indexOf('const full_width = app_state.shells[app_state.active_shell].full_width;', centered);
+  const placed = layout.indexOf('verifyShellWindowSize(sh, left, con_top, w, h);', full);
+  assert.ok(centered >= 0 && full > centered && placed > full);
+  const branch = layout.slice(full, placed);
+  assert.match(branch, /const w = if \(full_width\) pane\.right - pane\.left else col\.width;/);
+  assert.match(branch, /const left = if \(full_width\) pane\.left else col\.left;/);
   const chat = read('src/chat_composer.zig');
   assert.match(chat, /const full_width = app_state\.ISSUE_440_FULL_WIDTH_CHAT and app_state\.active_shell < app_state\.shell_count and app_state\.shells\[app_state\.active_shell\]\.full_width;/);
-  assert.match(chat, /if \(full_width\) col\.width else uiScaled\(760\)/);
+  assert.match(chat, /if \(full_width\) slot\.right - slot\.left else uiScaled\(760\)/);
 });

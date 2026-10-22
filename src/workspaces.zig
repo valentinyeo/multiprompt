@@ -2204,6 +2204,28 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     return true;
 }
 
+fn restoreClosedShellGroup(new_idx: u32, saved: @TypeOf(app_state.groups[0])) void {
+    var gi = findGroupIdx(saved.id);
+    if (gi) |_| {
+        for (app_state.shells[0..new_idx]) |shell| {
+            if (shell.group_id == saved.id and shell.workspace != app_state.shells[new_idx].workspace) {
+                gi = null;
+                break;
+            }
+        }
+    }
+    if (gi == null and app_state.group_count < MAX_GROUPS) {
+        const gid = createGroup(saved.name[0..saved.name_len]);
+        gi = findGroupIdx(gid);
+        if (gi) |idx| {
+            app_state.groups[idx].color = saved.color;
+            app_state.groups[idx].color_set = saved.color_set;
+            app_state.groups[idx].collapsed = saved.collapsed;
+        }
+    }
+    if (gi) |idx| app_state.shells[new_idx].group_id = app_state.groups[idx].id;
+}
+
 pub fn reopenLastClosedShell() void {
     if (app_state.g_closed_count == 0) return;
     const entry = app_state.g_closed_history[app_state.g_closed_count - 1];
@@ -2216,28 +2238,7 @@ pub fn reopenLastClosedShell() void {
     app_state.g_pending_chat_id = entry.chat_id;
     defer app_state.g_pending_chat_id = 0;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
-        if (entry.group) |saved| {
-            const new_idx = app_state.shell_count - 1;
-            var gi = findGroupIdx(saved.id);
-            if (gi) |_| {
-                for (app_state.shells[0..new_idx]) |shell| {
-                    if (shell.group_id == saved.id and shell.workspace != app_state.shells[new_idx].workspace) {
-                        gi = null;
-                        break;
-                    }
-                }
-            }
-            if (gi == null and app_state.group_count < MAX_GROUPS) {
-                const gid = createGroup(saved.name[0..saved.name_len]);
-                gi = findGroupIdx(gid);
-                if (gi) |idx| {
-                    app_state.groups[idx].color = saved.color;
-                    app_state.groups[idx].color_set = saved.color_set;
-                    app_state.groups[idx].collapsed = saved.collapsed;
-                }
-            }
-            if (gi) |idx| app_state.shells[new_idx].group_id = app_state.groups[idx].id;
-        }
+        if (entry.group) |saved| restoreClosedShellGroup(app_state.shell_count - 1, saved);
         app_state.g_closed_count -= 1;
         if ((entry.was_manual or entry.was_sem) and entry.name_len > 0) {
             const new_idx = app_state.shell_count - 1;

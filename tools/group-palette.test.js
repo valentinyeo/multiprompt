@@ -42,7 +42,7 @@ function harness() {
   const rails = block(sidebar.slice(railStart), 'if (!app_state.g_sidebar_collapsed)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '');
+  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreClosedShellGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '');
   return `const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
@@ -67,7 +67,7 @@ ${block(state, 'pub const ClosedShell = struct')};
 ${block(state, 'pub const ReminderEntry = struct')};
 ${block(state, 'const SavedTab = struct')};
 const Shell = struct {
-    group_id: u32 = 1, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
+    chat_id: u64 = 0, group_id: u32 = 1, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
 };
@@ -75,6 +75,7 @@ var shells = [_]Shell{.{}, .{}, .{}, .{}};
 var g_closed_count: u32 = 0;
 var g_closed_history: [10]ClosedShell = undefined;
 var g_pending_tmux_host: u8 = 0;
+var g_pending_chat_id: u64 = 0;
 fn GetTickCount64() u64 { return 1; }
 fn spawnShellWithSession(_: ShellKind, _: ?[]const u8, _: ?[]const u8, _: ?usize) bool {
     shells[shell_count] = .{};
