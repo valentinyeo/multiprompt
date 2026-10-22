@@ -154,6 +154,8 @@ jobs:
         run: |
           $before = "$env:RUNNER_TEMP/update-review-before"
           New-Item -ItemType Directory -Force $before | Out-Null
+          git fetch origin 1e557042ad06b6371baec41ab803dc759c989378
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git archive --format=tar --output="$env:RUNNER_TEMP/update-review-before.tar" 1e557042ad06b6371baec41ab803dc759c989378 -- src/main.zig src/update_release.zig src/update_release.ps1 src/update_card.zig tools/update-release.test.ps1 .github/workflows/verify.yml .github/workflows/release.yml build.zig
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           tar -xf "$env:RUNNER_TEMP/update-review-before.tar" -C $before
