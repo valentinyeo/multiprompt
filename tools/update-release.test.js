@@ -31,19 +31,24 @@ test('Windows behavioral update tests are required by CI', () => {
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   const update = jobs['test-windows-update'];
   const build = jobs['build-windows'];
+  const source = jobs['test-update-source'];
   assert.match(update, /^    needs: \[changes, build-windows\]\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: windows-latest\n/);
-  assert.doesNotMatch(update, /matrix:|matrix\.group/);
+  assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
+  assert.match(update, /fail-fast: false/);
+  assert.match(source, /needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: ubuntu-latest/);
   assert.doesNotMatch(jobs.test, /Test safe release updates|update-release/);
   assert.equal((workflow.match(/- name: Test safe release updates/g) || []).length, 1);
   assert.match(update, /- name: Test safe release updates\n        if: steps\.rule\.outputs\.kind != 'STAMP'/);
   for (const command of [
     'node --test tools/update-release-review.test.js',
     'node --test tools/update-release.test.js',
+  ]) assert.equal(source.split('\n').filter(line => line.trim() === command).length, 1, command);
+  for (const command of [
     'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
-    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe"',
+    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }}',
   ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
-  assert.match(update, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
-  assert.match(update, /foreach \(\$finding in 1\.\.9\)/);
+  assert.match(source, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
+  assert.match(source, /foreach \(\$finding in 1\.\.9\)/);
   assert.doesNotMatch(update, /zig build|actions\/cache@|actions\/cache\/restore@|Install Zig|ZIG_GLOBAL_CACHE_DIR/);
   assert.match(update, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: update-verifier/);
   assert.match(build, /needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: ubuntu-latest/);
@@ -62,13 +67,21 @@ test('Windows behavioral update tests are required by CI', () => {
   assert.match(signer, /process.env.MULTIPROMPT_TEST_SIGNING_KEY[\s\S]*createPrivateKey\(\{ key: fs.readFileSync\(process.env.MULTIPROMPT_TEST_SIGNING_KEY\)/);
   assert.match(signer, /const publicKey = createPublicKey\(privateKey\)/);
   assert.match(signer, /if \(root === '--prepare-key'\) \{[\s\S]*fs.writeFileSync\(keyPath, privateKey.export\(\{ type: 'pkcs8', format: 'der' \}\)\)/);
-  assert.match(build, /- name: Reject placeholder release signing key\n        if: matrix.arch == 'x64'/);
-  assert.match(build, /trap 'cp "\$RUNNER_TEMP\/release-signing-public-key.txt" "\$key"' EXIT/);
-  assert.match(build, /printf '%s\\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "\$key"/);
-  assert.match(build, /if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "\$RUNNER_TEMP\/placeholder-error.txt" 2>&1; then\n            echo 'Release build did not reject the fake public key loudly'\n            exit 1/);
-  assert.match(build, /grep -F 'Release signing public key is still the all-zero placeholder' "\$RUNNER_TEMP\/placeholder-error.txt"/);
+  assert.match(source, /- name: Reject placeholder release signing key/);
+  assert.match(source, /trap 'cp "\$RUNNER_TEMP\/release-signing-public-key.txt" "\$key"' EXIT/);
+  assert.match(source, /printf '%s\\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "\$key"/);
+  assert.match(source, /if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "\$RUNNER_TEMP\/placeholder-error.txt" 2>&1; then\n            echo 'Release build did not reject the fake public key loudly'\n            exit 1/);
+  assert.match(source, /grep -F 'Release signing public key is still the all-zero placeholder' "\$RUNNER_TEMP\/placeholder-error.txt"/);
   assert.doesNotMatch(read('tools/update-release-fixtures.ps1'), /zig\.exe|zig build/);
   const suite = read('tools/update-release.test.ps1');
+  assert.match(suite, /ValidateSet\('All', 'Lifecycle', 'Rollback'\)/);
+  assert.match(suite, /\$TestGroup = 'All'/);
+  assert.match(suite, /if \(\$TestGroup -ne 'Rollback'\)/);
+  assert.match(suite, /if \(\$TestGroup -ne 'Lifecycle'\)/);
+  assert.match(suite, /Copy-Item "\$Root\/v1\.11\.0\/multiprompt-x64\.exe" \$target -Force/);
+  assert.match(suite, /Copy-Item "\$Root\/v1\.11\.0\/zigshell-bridge-x64\.exe" "\$Root\/zigshell-bridge\.exe" -Force/);
+  assert.match(suite, /if \(\$TestGroup -ne 'Rollback'\) \{\s*Select-Release 'v1.11.0'\s*Assert \(Save-Update \$target '1.10.0'/);
+  assert.match(suite, /Start-Sleep -Seconds 61/);
   for (const name of ['checksum mismatch refused', 'rollback after failed start', 'no automatic restart while running', 'version comparison']) assert.ok(suite.includes(name), name);
 });
 
