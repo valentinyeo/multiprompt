@@ -40,8 +40,35 @@ pub fn nearestBlock(rects: anytype, blocks: anytype, y: i32) ?usize {
     return best;
 }
 
+pub const pending_selection_base: usize = std.math.maxInt(usize) / 2 + 1;
+
 pub fn keepSelection(same_shell: bool, before: []const u16, after: []const u16, end: usize) bool {
     return same_shell and end <= before.len and end <= after.len and std.mem.eql(u16, before[0..end], after[0..end]);
+}
+
+pub fn keepDisplaySelection(same_shell: bool, before: []const u16, after: []const u16, anchor: usize, caret: usize) bool {
+    if (!same_shell) return false;
+    if (@min(anchor, caret) >= pending_selection_base) return true;
+    const end = @max(anchor, caret);
+    return keepSelection(true, before, after, if (end >= pending_selection_base) @min(end, before.len) else end);
+}
+
+test "IGSH-567 pending and mixed selections survive streaming but not changed transcript prefixes or shells" {
+    const before = [_]u16{ 1, 2 };
+    const appended = [_]u16{ 1, 2, 3 };
+    const replaced = [_]u16{ 1, 3, 4 };
+    const pending = pending_selection_base;
+    try std.testing.expect(keepDisplaySelection(true, &before, &appended, pending, pending + 2));
+    try std.testing.expect(keepDisplaySelection(true, &before, &replaced, pending + 2, pending));
+    try std.testing.expect(keepDisplaySelection(true, &before, &appended, 1, pending + 2));
+    try std.testing.expect(keepDisplaySelection(true, &before, &appended, pending + 2, 1));
+    try std.testing.expect(!keepDisplaySelection(true, &before, &replaced, 1, pending + 2));
+    try std.testing.expect(!keepDisplaySelection(true, &before, &.{1}, pending + 2, 1));
+    try std.testing.expect(!keepDisplaySelection(false, &before, &appended, pending, pending + 2));
+    try std.testing.expect(!keepDisplaySelection(false, &before, &appended, 1, pending + 2));
+    try std.testing.expect(keepDisplaySelection(true, &before, &appended, 0, 2));
+    try std.testing.expect(!keepDisplaySelection(true, &before, &replaced, 0, 2));
+    try std.testing.expect(!keepDisplaySelection(true, &before, &appended, 0, 3));
 }
 
 test "ISSUE-438 nearest boundary keeps line ends and outside vertical bounds" {

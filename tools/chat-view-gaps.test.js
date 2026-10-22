@@ -304,6 +304,7 @@ test('ISSUE-404 Copy All does not silently truncate a long loaded conversation',
     .replaceAll('std.heap.page_allocator', 'copy_allocator');
   const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
+const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
 var copy_allocator = std.testing.allocator;
@@ -407,7 +408,7 @@ test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestl
     try std.testing.expect(!notice_error);
     try std.testing.expectEqualStrings("Nothing selected", notice[0..notice_len]);
 }
-`, ['chat_markdown.zig'], 'IGSH-404');
+`, ['chat_markdown.zig', 'chat_hit.zig'], 'IGSH-404');
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 

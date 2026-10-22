@@ -998,11 +998,12 @@ fn refreshChatBlockCache(force: bool) bool {
         chat_style.markScreenMessages(screen_blocks[0..screen_count]);
         chatTableRefresh(screen_blocks[0..screen_count], source);
     }
-    const keep_selection = @import("chat_hit.zig").keepSelection(
+    const keep_selection = @import("chat_hit.zig").keepDisplaySelection(
         app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id,
         app_state.g_chat_capture[0..app_state.g_chat_last_len],
         source,
-        @max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret),
+        app_state.g_chat_sel_anchor,
+        app_state.g_chat_sel_caret,
     );
     app_state.g_chat_cache_shell_id = app_state.shells[app_state.active_shell].shell_id;
     @memcpy(app_state.g_chat_capture[0..len], source);

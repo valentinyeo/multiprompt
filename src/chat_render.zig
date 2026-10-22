@@ -1468,7 +1468,7 @@ pub fn chatRelayout(client_width: i32) void {
             }
         }
     }
-    if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) > app_state.g_chat_last_len and
+    if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
     app_state.g_chat_content_h = y;
@@ -2924,7 +2924,7 @@ fn chatSelectionDisplay(index: usize) ?struct { block: ChatBlock, text: []const 
     }
     const echo = index - app_state.g_chat_block_count;
     if (echo >= app_state.g_chat_echo_layout_count) return null;
-    var start = app_state.g_chat_last_len + 1;
+    var start = chat_hit.pending_selection_base;
     for (0..echo + 1) |i| {
         const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse return null;
         const text = app_state.g_chat_outbox.items[ei].text;
@@ -3138,7 +3138,16 @@ fn chatCopyCapacity(selected_len: usize, block_count: usize) !usize {
 }
 
 fn chatCopyTextAlloc(allocator: std.mem.Allocator, block: ?ChatBlock) ![]u16 {
-    const selected_len = if (block) |b| b.len else if (chatSelRange()) |sel| sel.end - sel.start else 0;
+    var selected_len: usize = if (block) |b| b.len else 0;
+    if (block == null) {
+        const sel = chatSelRange() orelse return allocator.alloc(u16, 0);
+        for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+            const display = chatSelectionDisplay(i) orelse continue;
+            const lo = @max(sel.start, display.start);
+            const hi = @min(sel.end, display.start + display.text.len);
+            selected_len = try std.math.add(usize, selected_len, hi -| lo);
+        }
+    }
     if (selected_len == 0) return allocator.alloc(u16, 0);
     const capacity = try chatCopyCapacity(selected_len, if (block != null) 1 else app_state.g_chat_block_count + app_state.g_chat_echo_layout_count);
     const out = try allocator.alloc(u16, capacity);
@@ -3211,6 +3220,11 @@ test "IGSH-567 pending Waiting to send text uses transcript selection and copy" 
     try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 567, .text = &pending, .state = .queued });
     try std.testing.expectEqual(chat_echo.Label.waiting_to_send, chat_echo.pendingLabel(.offline_queue, false, false));
     chatSelectAll();
+    try std.testing.expectEqual(chat_hit.pending_selection_base, app_state.g_chat_sel_anchor);
+    const stable_start = (chatSelectionDisplay(0) orelse return error.TestUnexpectedResult).start;
+    app_state.g_chat_last_len = 1;
+    try std.testing.expectEqual(stable_start, (chatSelectionDisplay(0) orelse return error.TestUnexpectedResult).start);
+    app_state.g_chat_last_len = 0;
     const copied = try chatCopyTextAlloc(std.testing.allocator, null);
     defer std.testing.allocator.free(copied);
     try std.testing.expectEqualSlices(u16, text, copied);
@@ -3264,10 +3278,13 @@ test "IGSH-567 mixed sent and pending ranges copy across bubbles in both directi
         app_state.g_chat_outbox.items[0].state = state;
         try std.testing.expectEqual(@as(?usize, 1), chatTranscriptSelectionBlockAt(160));
         const caret = chatTranscriptCharAt(null, 81 + uiScaled(CHAT_BUBBLE_PAD), 151 + uiScaled(CHAT_BUBBLE_PAD)) orelse return error.TestUnexpectedResult;
-        try std.testing.expectEqual(sent.len + 1, caret);
+        try std.testing.expectEqual(chat_hit.pending_selection_base, caret);
         chatSelectAll();
+        const copied = try chatCopyTextAlloc(std.testing.allocator, null);
+        defer std.testing.allocator.free(copied);
+        try std.testing.expectEqualSlices(u16, w("Sent\r\n\r\n\u{276f} Pending\r\n\u{1f600}"), copied);
         var n = try chatSelectionToClipboard(&out);
-        try std.testing.expectEqualSlices(u16, w("Sent\r\n\r\n\u{276f} Pending\r\n\u{1f600}"), out[0..n]);
+        try std.testing.expectEqualSlices(u16, copied, out[0..n]);
         const end = chatTranscriptCharAt(null, 90, 500) orelse return error.TestUnexpectedResult;
         app_state.g_chat_sel_anchor = end;
         app_state.g_chat_sel_caret = 2;
