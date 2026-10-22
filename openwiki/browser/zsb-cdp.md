@@ -23,7 +23,7 @@ For example, `profile.json` can contain:
 ]
 ```
 
-All steps run in order in **one attached debugger session**, detached on success or failure. A concurrent CDP command for the same tab waits until the entire script releases ownership. A script uses the same exact-session/window binding and `target:true` tab as a single CDP call, not an arbitrary active browser tab. Use `zsb tabs` and `zsb activate <id> --target-only` to choose a different target within the bound pane. Scripts do not broaden the command allow-list or targeting permissions.
+All steps run in order in **one attached debugger session**, detached on success or failure. A concurrent CDP command for the same tab fails immediately with a busy error. Use `zsb reset` to cancel stuck work; a cancelled script cannot issue later steps. A script uses the same exact-session/window binding and `target:true` tab as a single CDP call, not an arbitrary active browser tab. Use `zsb tabs` and `zsb activate <id> --target-only` to choose a different target within the bound pane. Scripts do not broaden the command allow-list or targeting permissions.
 
 ## Steps and results
 
@@ -34,7 +34,7 @@ All steps run in order in **one attached debugger session**, detached on success
 
 A script must be an array of 1–1000 steps. Unknown fields and invalid steps are rejected before attachment. The sum of command/event timeout budgets and delays cannot exceed 300000 ms. Split larger investigations into separate scripts, remembering that debugger state does not persist across scripts.
 
-The remote wrapper gives scripts a 360-second total reply deadline (single CDP commands default to 30 seconds). `ZSB_TIMEOUT` overrides that deadline using finite seconds greater than zero, at most 86400. Incoming reply bytes do not reset the deadline.
+Native scripts have a 320-second request deadline and a 360-second CLI watchdog, rather than the ordinary command's 20-second request and 60-second watchdog. The app's script subprocess limit is 330 seconds. The remote wrapper gives scripts a 360-second total reply deadline (single CDP commands default to 30 seconds). `ZSB_TIMEOUT` overrides that deadline using finite seconds greater than zero, at most 86400. Incoming reply bytes do not reset the deadline.
 
 On success stdout is a JSON array with one entry per step, or `--out FILE` writes that array without printing it. For the example above, the profile is at `[5].result.profile`; extract it if a profiling viewer expects the profile object itself. On failure execution stops, the command exits nonzero, and stdout contains `{"ok":false,"failedStep":2,"error":"...","results":[...]}` with a **1-based** failed step and completed results. Existing output files are not overwritten on a step failure. Scripts are not automatically replayed after a lost reply or a step failure.
 

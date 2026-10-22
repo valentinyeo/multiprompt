@@ -182,9 +182,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
 
+    const is_script = std.mem.eql(u8, command, "cdp") and blk: {
+        var script_args = args;
+        const flag = script_args.next() orelse break :blk false;
+        break :blk std.mem.eql(u8, flag, "--script") or std.mem.eql(u8, flag, "--script-json");
+    };
     const is_native_host = std.mem.eql(u8, command, "native") or std.mem.startsWith(u8, command, "chrome-extension://");
     if (!is_native_host) {
-        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{});
+        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{is_script});
         watchdog.detach();
     }
     if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
@@ -559,7 +564,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             defer fields.deinit();
             try fields.appendSlice("\"script\":");
             try fields.appendSlice(script);
-            const response = try requestBrowser(allocator, "cdp", fields.items, null);
+            const response = try requestBrowser(allocator, "cdp", fields.items, GetTickCount64() + 320_000);
             defer allocator.free(response);
             try writeCdpScriptResponse(allocator, response, output_path);
             return;
@@ -1160,7 +1165,12 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     return null;
 }
 
-fn commandDeadline() void {
+fn commandDeadline(is_script: bool) void {
+    if (is_script) {
+        Sleep(360_000);
+        writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb script exceeded its 360 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
+        std.process.exit(1);
+    }
     Sleep(60_000);
     writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb command exceeded its 60 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
     std.process.exit(1);

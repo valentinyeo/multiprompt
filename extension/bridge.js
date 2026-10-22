@@ -2717,11 +2717,12 @@ async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
   if (message.script !== undefined) {
     validateCdpScript(message.script);
-    return withCdpSession(tabId, async (debuggee) => {
+    return withCdpSession(tabId, async (debuggee, checkSession) => {
       const results = [];
       for (const [index, step] of message.script.entries()) {
         try {
-          results.push(await runCdpScriptStep(debuggee, step));
+          checkSession();
+          results.push(await runCdpScriptStep(debuggee, step, checkSession));
         } catch (cause) {
           const error = new Error(`CDP script step ${index + 1} (${step.method || step.waitEvent || "waitMs"}) failed: ${errorText(cause)}`);
           error.failedStep = index + 1;
@@ -2768,7 +2769,7 @@ function validateCdpScript(script) {
   }
 }
 
-async function runCdpScriptStep(debuggee, step) {
+async function runCdpScriptStep(debuggee, step, checkSession) {
   if (step.waitMs !== undefined) {
     await new Promise((resolve) => setTimeout(resolve, step.waitMs));
     return { waitMs: step.waitMs };
@@ -2779,6 +2780,7 @@ async function runCdpScriptStep(debuggee, step) {
     return await withTimeout((async () => {
       if (step.waitEvent?.startsWith("Page.")) await chrome.debugger.sendCommand(debuggee, "Page.enable", {});
       if (!active) return;
+      checkSession();
       let event;
       if (step.waitEvent) {
         event = new Promise((resolve) => {

@@ -40,7 +40,7 @@ function harness(command = async () => ({}), timers = {}) {
     },
     stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     errorText: error => error.message || String(error),
-    cdpOperationChains: new Map(), debuggedTabs: new Set(),
+    cdpOperationChains: new Map(), cdpSessionCancels: new Map(), debuggedTabs: new Set(),
     screenshotCdpDetachTimers: new Map(), screenshotCdpDetachInFlight: new Map(),
     screenshotCdpPageEnabledTabs: new Set(),
     setTimeout: (fn, ms) => { scheduled.push(ms); return (timers.setTimeout || setTimeout)(fn, ms); },
@@ -97,14 +97,42 @@ test('IGSH-221 new-document injection survives reload and event is armed before 
 test('IGSH-221 scripts hold ownership across delays and exceed the old session deadline', async () => {
   const h = harness(undefined, { setTimeout: (fn, ms) => setTimeout(fn, ms === 20000 ? 1 : ms) });
   const script = h.run([{ method: 'Profiler.enable', timeoutMs: 1000 }, { waitMs: 20000 }, { method: 'Profiler.start', timeoutMs: 1000 }]);
-  const single = h.single('Runtime.evaluate');
+  await assert.rejects(h.single('Runtime.evaluate'), /CDP session busy.*zsb reset/);
   await script;
-  await single;
+  await h.single('Runtime.evaluate');
   const methods = h.calls.map(c => c[0]).filter(c => c !== 'target');
   assert.ok(methods.indexOf('Profiler.start') < methods.indexOf('Runtime.evaluate'));
   assert.equal(methods.filter(c => c === 'attach').length, 2);
   assert.deepEqual(methods.slice(0, 5), ['attach', 'Emulation.setFocusEmulationEnabled', 'Profiler.enable', 'Profiler.start', 'detach']);
-  assert.equal(h.scheduled.filter(ms => ms === 15000).length, 1);
+  assert.equal(h.scheduled.filter(ms => ms === 10000).length, 1);
+  assert.equal(h.context.cdpSessionCancels.size, 0);
+});
+
+test('IGSH-221 reset cancellation prevents delayed scripts from issuing further commands', async () => {
+  for (const phase of ['delay', 'enable']) {
+    let release;
+    const h = harness(async (_, method) => phase === 'enable' && method === 'Page.enable'
+      ? new Promise(resolve => { release = resolve; }) : {}, {
+      setTimeout: (fn, ms) => ms === 20000 ? (release = fn, undefined) : setTimeout(fn, ms),
+    });
+    const script = h.run(phase === 'delay'
+      ? [{ waitMs: 20000 }, { method: 'Page.reload' }]
+      : [{ method: 'Page.reload', waitEvent: 'Page.loadEventFired', timeoutMs: 1000 }]);
+    await new Promise(resolve => setImmediate(resolve));
+    const current = h.context.cdpOperationChains.get(7);
+    const rejected = assert.rejects(script, /CDP session reset/);
+    h.context.cdpSessionCancels.get(7)(new Error('CDP session reset; retry command'));
+    h.context.cdpSessionCancels.delete(7);
+    h.context.cdpOperationChains.delete(7);
+    await rejected;
+    release({});
+    await assert.rejects(current, /CDP session reset/);
+    assert.ok(!h.calls.some(c => c[0] === 'Page.reload'));
+    assert.equal(h.listeners.size, 0);
+    await h.single('Runtime.evaluate');
+    assert.equal(h.context.cdpOperationChains.size, 0);
+    assert.equal(h.context.cdpSessionCancels.size, 0);
+  }
 });
 
 test('IGSH-221 step failures stop execution, preserve partial results and release ownership', async () => {
@@ -286,7 +314,9 @@ test('IGSH-221 native and remote transports preserve safety, budgets and full JS
   assert.match(native, /readCdpScript\(allocator, source\)/);
   assert.match(native, /std\.Io\.File\.stdin\(\)\.handle/);
   const scriptBranch = native.slice(native.indexOf('if (std.mem.eql(u8, cdp_method, "--script")'), native.indexOf('const params_json = args.next();', native.indexOf('const cdp_method =')));
-  assert.match(scriptBranch, /requestBrowser\(allocator, "cdp", fields.items, null\)/);
+  assert.match(scriptBranch, /requestBrowser\(allocator, "cdp", fields.items, GetTickCount64\(\) \+ 320_000\)/);
+  assert.match(native, /commandDeadline, \.\{is_script\}/);
+  assert.match(native, /if \(is_script\) \{\s+Sleep\(360_000\)/);
   assert.doesNotMatch(scriptBranch, /requestBrowserWithRetry/);
   assert.match(native, /Stringify\.valueAlloc\(allocator, result/);
   assert.match(native, /writeFileBytes\(allocator, path, json\)/);
