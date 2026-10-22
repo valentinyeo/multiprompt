@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.812", .items = &.{
+        .{ .text = "Each workspace now keeps its own browser logins and bookmarks. On upgrade, your restored workspace keeps the existing browser profile in place; new workspaces start with separate empty profiles.", .ticket = "IGSH-224" },
+        .{ .text = "Desktop verification waits for browser readiness and no longer fails when temporary browser files disappear during cleanup.", .ticket = "IGSH-559" },
+    } },
     .{ .ver = "0.28.811", .items = &.{
         .{ .text = "Console focus borders stay visible, pane gaps stay clear, and sidebar group lines no longer cover session icons.", .ticket = "IGSH-549" },
     } },
