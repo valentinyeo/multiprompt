@@ -2871,6 +2871,9 @@ async function sendCdp(message) {
     "Network.setExtraHTTPHeaders": [["Network.setExtraHTTPHeaders", { headers: {} }]],
     "Network.setCacheDisabled": [["Network.setCacheDisabled", { cacheDisabled: false }]],
     "Network.setBypassServiceWorker": [["Network.setBypassServiceWorker", { bypass: false }]],
+    "DOM.getDocument": [["DOM.disable", {}]],
+    "DOM.getFlattenedDocument": [["DOM.disable", {}]],
+    "Emulation.setFocusEmulationEnabled": [["Emulation.setFocusEmulationEnabled", { enabled: true }]],
     "Debugger.pause": [["Debugger.disable", {}], ["Debugger.resume", {}]],
     "Emulation.setGeolocationOverride": [["Emulation.clearGeolocationOverride", {}]],
     "Emulation.setTimezoneOverride": [["Emulation.setTimezoneOverride", { timezoneId: "" }]],
@@ -2894,7 +2897,7 @@ async function sendCdp(message) {
     if (Object.hasOwn(ownOverrides, cdpMethod)) cleanup = [[cdpMethod, ownOverrides[cdpMethod]]];
     if (cdpMethod === "Emulation.clearDeviceMetricsOverride") cleanup = [["Emulation.setDeviceMetricsOverride", emulation.metrics]];
   }
-  const readOnly = /\.(get[A-Z]|capture[A-Z]|evaluate$|callFunctionOn$|querySelector|describeNode$|resolveNode$|requestNode$|disable$|clearGeolocationOverride$)/.test(cdpMethod);
+  const readOnly = knownDomain && /\.(get[A-Z]|capture[A-Z]|evaluate$|callFunctionOn$|querySelector|describeNode$|resolveNode$|requestNode$|disable$)/.test(cdpMethod) || cdpMethod === "Emulation.clearGeolocationOverride";
   return withCdpSession(tabId, (debuggee, isActive, sendCommand) => {
     return sendCommand(cdpMethod, message.params || {}, cleanup || []);
   }, false, !cleanup && !readOnly);

@@ -39,7 +39,7 @@ function harness({ timeoutMs } = {}) {
     if (method === 'Synthetic.enableUnknownFailure') throw new Error('original command failure');
     if (method === heldMethod) await new Promise(resolve => { release = resolve; });
     const enabled = commandState.get(tabId) || new Set();
-    if (method.endsWith('.enable') || /^(Network.setBlockedURLs|Debugger.pause|Synthetic.enableUnknown)$/.test(method)) enabled.add(method);
+    if (method.endsWith('.enable') || /^(Network.setBlockedURLs|Debugger.pause|Synthetic.enableUnknown|DOM.getDocument|DOM.getFlattenedDocument)$/.test(method)) enabled.add(method);
     if (method.endsWith('.disable')) {
       const domain = method.split('.')[0];
       for (const entry of enabled) if (entry.startsWith(`${domain}.`)) enabled.delete(entry);
@@ -288,6 +288,7 @@ test('ordinary CDP timeout resets command state and failed restore releases the 
   assert.equal(h.overrides.get(1).metrics.width, 390);
   h.release();
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.commandState.get(1).size, 0, 'late raw enable is disabled again');
   h.fail('Emulation.setDeviceMetricsOverride');
   const reply = await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
   assert.match(reply.warning, /emulation lost.*synthetic CDP failure/i);
@@ -304,7 +305,11 @@ test('built-in commands never bounce an emulated viewport and release only their
   const h = harness();
   await h.run({ method: 'emulate', device: 'iphone' });
   for (const operation of [
-    () => h.run({ method: 'click', selector: '#menu' }),
+    async () => {
+      const result = await h.run({ method: 'click', selector: '#menu' });
+      assert.equal(result.clicked, true);
+      assert.equal(result.trusted, true);
+    },
     () => h.run({ method: 'key', combo: 'Enter' }),
     () => h.run({ method: 'type', selector: '#field', text: 'hello' }),
     () => h.run({ method: 'eval', code: '42' }),
@@ -392,4 +397,21 @@ test('built-in domain cleanup survives command errors and timeouts without viewp
     h.fail(undefined);
     await h.run({ method: 'emulate', device: 'off' });
   }
+});
+
+
+test('raw CDP implicit DOM enabling and known emulation overrides reset without detaching', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  for (const cdpMethod of ['DOM.getDocument', 'DOM.getFlattenedDocument', 'Emulation.setGeolocationOverride', 'Emulation.setTimezoneOverride', 'Emulation.setEmulatedMedia']) {
+    const start = h.calls.length;
+    await h.run({ method: 'cdp', cdpMethod, params: {} });
+    const calls = h.calls.slice(start);
+    assert.equal(calls.filter(call => call.method === 'detach').length, 0);
+    if (cdpMethod.startsWith('DOM.')) assert.ok(calls.some(call => call.method === 'DOM.disable'));
+    else assert.ok(calls.some((call, index) => index > calls.findIndex(entry => entry.method === cdpMethod) && (call.method === cdpMethod || call.method === 'Emulation.clearGeolocationOverride')));
+    assert.equal(h.commandState.get(1).size, 0);
+    assert.equal(h.overrides.get(1).metrics.width, 390);
+  }
+  await h.run({ method: 'emulate', device: 'off' });
 });
