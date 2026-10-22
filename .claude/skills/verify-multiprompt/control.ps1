@@ -120,6 +120,25 @@ public static class VerifyNative {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    public static Dictionary<string, object> WindowIdentity(IntPtr hwnd) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        return new Dictionary<string, object> {
+            { "handle", hwnd.ToInt64() }, { "pid", pid }, { "thread", thread },
+            { "class", Class(hwnd) }, { "title", Title(hwnd) },
+            { "root", GetAncestor(hwnd, 2).ToInt64() },
+            { "rootOwner", GetAncestor(hwnd, 3).ToInt64() },
+            { "visible", IsWindowVisible(hwnd) }
+        };
+    }
+    public static List<Dictionary<string, object>> DesktopWindows() {
+        var windows = new List<Dictionary<string, object>>();
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            windows.Add(WindowIdentity(hwnd));
+            return true;
+        }, IntPtr.Zero);
+        return windows;
+    }
     public static bool PaneVisible(IntPtr owner) {
         Rect frame;
         if (!GetWindowRect(owner, out frame)) return false;
@@ -714,12 +733,22 @@ function Doctor {
 }
 
 function Snapshot([string]$Name) {
-    $focus = @{ foreground = [VerifyNative]::GetForegroundWindow().ToInt64() }
+    $foreground = [VerifyNative]::GetForegroundWindow()
+    $focus = @{ foreground = $foreground.ToInt64(); capturedAt = [DateTime]::UtcNow.ToString('o') }
+    try {
+        $focus.foregroundWindow = [VerifyNative]::WindowIdentity($foreground)
+        $focus.foregroundRoot = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 2))
+        $focus.foregroundRootOwner = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 3))
+    } catch { $focus.foregroundError = $_.Exception.Message }
     try { $focus.native = [VerifyNative]::GetFocusedWindow($script:window).ToInt64() } catch { $focus.nativeError = $_.Exception.Message }
     try {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         $focus.uia = @{ handle = $focused.Current.NativeWindowHandle; pid = $focused.Current.ProcessId; class = $focused.Current.ClassName }
     } catch { $focus.uiaError = $_.Exception.Message }
+    try { $focus.desktopWindows = @([VerifyNative]::DesktopWindows()) } catch { $focus.desktopError = $_.Exception.Message }
+    try {
+        $focus.processes = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, CreationDate | Select-Object ProcessId, ParentProcessId, Name, CreationDate)
+    } catch { $focus.processError = $_.Exception.Message }
     Save-Json $focus ($Name + '.focus.json')
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)

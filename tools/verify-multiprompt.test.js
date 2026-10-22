@@ -649,6 +649,56 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
   }
 });
 
+test('ISSUE-569 snapshots identify foreign foreground windows and preserve pre-close desktop ancestry', () => {
+  function contract(driver) {
+    const identity = driver.slice(driver.indexOf('    public static Dictionary<string, object> WindowIdentity('), driver.indexOf('    public static bool PaneVisible('));
+    for (const required of [
+      'uint thread = GetWindowThreadProcessId(hwnd, out pid);',
+      '{ "handle", hwnd.ToInt64() }', '{ "pid", pid }', '{ "thread", thread }',
+      '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
+      '{ "root", GetAncestor(hwnd, 2).ToInt64() }',
+      '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
+      '{ "visible", IsWindowVisible(hwnd) }',
+      'public static List<Dictionary<string, object>> DesktopWindows()',
+      'windows.Add(WindowIdentity(hwnd));', 'return true;', 'return windows;',
+    ]) assert.ok(identity.includes(required), required);
+    assert.doesNotMatch(identity, /SetForegroundWindow|SetFocus|ShowWindow|SendInput|Thread\.Sleep|if\s*\(/);
+    const snapshot = driver.slice(driver.indexOf('function Snapshot('), driver.indexOf('function Assert-Foreground'));
+    for (const required of [
+      '$foreground = [VerifyNative]::GetForegroundWindow()',
+      'foreground = $foreground.ToInt64()', 'capturedAt = [DateTime]::UtcNow.ToString(\'o\')',
+      '$focus.foregroundWindow = [VerifyNative]::WindowIdentity($foreground)',
+      '$focus.foregroundRoot = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 2))',
+      '$focus.foregroundRootOwner = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 3))',
+      '$focus.desktopWindows = @([VerifyNative]::DesktopWindows())',
+      '$focus.processes = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, CreationDate | Select-Object ProcessId, ParentProcessId, Name, CreationDate)',
+      '$focus.foregroundError = $_.Exception.Message', '$focus.desktopError = $_.Exception.Message',
+      '$focus.processError = $_.Exception.Message',
+      "Save-Json $focus ($Name + '.focus.json')",
+    ]) assert.ok(snapshot.includes(required), required);
+    assert.ok(snapshot.indexOf('$focus.processes') < snapshot.indexOf('Save-Json $focus'));
+    assert.ok(snapshot.indexOf('Save-Json $focus') < snapshot.indexOf('$element.FindAll'));
+    assert.doesNotMatch(snapshot, /SetForegroundWindow|SetFocus|ShowWindow|Start-Process|Wait-Until|Start-Sleep|CommandLine|ExecutablePath/);
+    assert.match(driver, /Snapshot 'before'/);
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    assert.match(recipe, /Snapshot 'action'\s+Restart-SessionRestore 'normal-close' \$false/);
+    assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
+  }
+  contract(control);
+  for (const required of [
+    '{ "pid", pid }', '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
+    '{ "root", GetAncestor(hwnd, 2).ToInt64() }', '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
+    'windows.Add(WindowIdentity(hwnd));', '$focus.foregroundWindow =', '$focus.foregroundRoot =',
+    '$focus.foregroundRootOwner =', '$focus.desktopWindows =', '$focus.processes =',
+    'Select-Object ProcessId, ParentProcessId, Name, CreationDate',
+    '$focus.foregroundError =', '$focus.desktopError =', '$focus.processError =',
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => contract(broken), assert.AssertionError);
+  }
+});
+
 test('ISSUE-569 selection assertions resolve published active identity and require the original workspace', () => {
   const assertion = control.slice(control.indexOf('function Assert-SessionRestoreSelection('), control.indexOf('function Select-Theme('));
   function contract(source) {
