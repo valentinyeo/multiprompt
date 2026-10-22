@@ -44,14 +44,26 @@ public static class VerifyNative {
         uint target = GetWindowThreadProcessId(hwnd, out owner);
         if (owner != expectedPid || Class(hwnd) != "ZigShell" || GetAncestor(hwnd, 3) != hwnd) throw new InvalidOperationException("Focus frame ownership mismatch");
         uint current = GetCurrentThreadId();
-        bool attached = current != target;
-        if (attached && !AttachThreadInput(current, target, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        uint foregroundOwner;
+        uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundOwner);
+        bool foregroundAttached = false;
+        bool targetAttached = false;
         try {
-            if (!SetForegroundWindow(hwnd)) throw new InvalidOperationException("Owned frame could not become foreground");
+            if (foreground != 0 && foreground != current) {
+                if (!AttachThreadInput(current, foreground, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                foregroundAttached = true;
+            }
+            if (target != current && target != foreground) {
+                if (!AttachThreadInput(current, target, true)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                targetAttached = true;
+            }
+            SetForegroundWindow(hwnd);
+            if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
             SetFocus(hwnd);
             if (GetAncestor(GetFocus(), 3) != hwnd) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
         } finally {
-            if (attached) AttachThreadInput(current, target, false);
+            if (targetAttached) AttachThreadInput(current, target, false);
+            if (foregroundAttached) AttachThreadInput(current, foreground, false);
         }
     }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
