@@ -8,18 +8,26 @@ const debugLog = @import("diagnostics.zig").debugLog;
 
 pub const WM_DEFERRED = 0x8000 + 502;
 pub const TIMER_SAVE = 0x502;
+pub const TIMER_STARTUP = 0x543;
 pub var queue: plan.Queue = .{};
 pub var pending = false;
 pub var cached = false;
 var started: i64 = 0;
 var frequency: i64 = 1;
 var chat_id: u64 = 0;
+pub var selected_shell_id: u32 = 0;
+pub var selected_live_shell_id: u32 = 0;
+var cached_ids: [state.MAX_SHELLS]u32 = @splat(0);
+var cached_count: usize = 0;
+var closed_shells: [state.MAX_SHELLS]u32 = @splat(0);
+var closed_count: usize = 0;
 var sidebar_painted = false;
 var chat_painted = false;
 var announced = false;
 var dirty = false;
 var busy = std.atomic.Value(bool).init(false);
 var last_hash: u64 = 0;
+var first_input = false;
 
 pub fn begin() void {
     pending = true;
@@ -31,6 +39,13 @@ fn elapsed() u64 {
     var now: i64 = 0;
     _ = win.QueryPerformanceCounter(&now);
     return @intCast(@divTrunc((now -| started) * 1000, @max(1, frequency)));
+}
+
+pub fn acceptedInput(message: u32) void {
+    if (first_input or state.g_account_locked or !plan.isInput(message)) return;
+    first_input = true;
+    var buf: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "startup first-input ms={d}", .{elapsed()}) catch return);
 }
 
 pub fn step(expected: plan.Step) void {
@@ -69,7 +84,10 @@ pub fn restore() void {
     }
     for (s.rows, 0..) |row, i| {
         var shell = state.empty_shell;
+        shell.console_inflight = true;
         shell.shell_id = row.id;
+        state.next_shell_id = @max(state.next_shell_id, row.id +| 1);
+        cached_ids[i] = row.id;
         shell.chat_id = row.chat_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
@@ -105,6 +123,7 @@ pub fn restore() void {
         @import("chat_composer.zig").openChatView();
         @import("chat_composer.zig").layoutChatControls();
     }
+    cached_count = s.rows.len;
     cached = true;
     debugLog("launch snapshot-restored");
     var log_buf: [128]u8 = undefined;
@@ -126,16 +145,49 @@ pub fn deferred() void {
     var buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "launch deferred-start ms={d}", .{elapsed()}) catch return);
     if (cached) {
-        state.shell_count = 0;
+        const selected_id = if (state.active_shell < state.shell_count) state.shells[state.active_shell].shell_id else 0;
+        if (state.active_shell < state.shell_count) selected_shell_id = state.shells[state.active_shell].shell_id;
+        for (cached_ids[0..cached_count]) |id| {
+            var present = false;
+            for (state.shells[0..state.shell_count]) |shell| {
+                if (shell.shell_id == id) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) {
+                closed_shells[closed_count] = id;
+                closed_count += 1;
+            }
+        }
+        var kept: u32 = 0;
+        state.next_shell_id = 1;
+        for (0..state.shell_count) |i| {
+            const shell = state.shells[i];
+            if (std.mem.indexOfScalar(u32, cached_ids[0..cached_count], shell.shell_id) != null) continue;
+            state.shells[kept] = shell;
+            if (shell.shell_id == selected_id) selected_live_shell_id = shell.shell_id;
+            state.next_shell_id = @max(state.next_shell_id, shell.shell_id +| 1);
+            kept += 1;
+        }
+        state.shell_count = kept;
         state.active_shell = 0;
         state.group_count = 0;
     }
+}
+
+pub fn closedDuringStartup(shell_id: u32) bool {
+    return pending and shell_id != 0 and std.mem.indexOfScalar(u32, closed_shells[0..closed_count], shell_id) != null;
 }
 
 pub fn bindRestoredChat() void {
     if (!cached or !state.g_chat_active or state.active_shell >= state.shell_count or state.shells[state.active_shell].chat_id != chat_id) return;
     if (chat_id == 0) return;
     const entry = @import("chat_session.zig").chatHistoryEntry(@import("chat_session.zig").chatFileIdentity()) orelse return;
+    if (entry.history.text.items.len != 0 or entry.history.blocks.items.len != 0) {
+        state.g_chat_cache_shell_id = state.shells[state.active_shell].shell_id;
+        return;
+    }
     const a = std.heap.page_allocator;
     entry.history.text.appendSlice(a, state.g_chat_capture[0..state.g_chat_last_len]) catch return;
     entry.history.blocks.appendSlice(a, state.g_chat_blocks[0..state.g_chat_block_count]) catch return;

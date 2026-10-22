@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.798", .items = &.{
+        .{ .text = "Browser commands now click reliably inside embedded pages and can run JavaScript in a chosen frame.", .ticket = "IGSH-305" },
+        .{ .text = "Chat View now hides internal reminder blocks without losing the surrounding conversation text.", .ticket = "IGSH-437" },
+    } },
     .{ .ver = "0.28.797", .items = &.{
         .{ .text = "Typing with zsb now targets the requested tab and rejects unknown flags instead of inserting them into your text.", .ticket = "IGSH-228" },
         .{ .text = "Browser commands now show help without connecting to your browser or changing anything.", .ticket = "IGSH-232" },

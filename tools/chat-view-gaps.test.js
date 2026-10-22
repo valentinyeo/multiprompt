@@ -29,7 +29,7 @@ function prepare(t, name, modules = []) {
 }
 
 function zig(args, dir) {
-  return spawnSync('zig', [...args, '-j1', '--cache-dir', path.join(dir, 'zig-cache'), '--global-cache-dir', process.env.ZIG_GLOBAL_CACHE_DIR || path.join(dir, 'zig-global-cache')], {
+  return spawnSync(process.env.ZIG || 'zig', [...args, '-j1', '--cache-dir', path.join(dir, 'zig-cache'), '--global-cache-dir', process.env.ZIG_GLOBAL_CACHE_DIR || path.join(dir, 'zig-global-cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
 }

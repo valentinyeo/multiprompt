@@ -108,8 +108,8 @@ test('console height stays unchanged, weight is SemiBold and readback logs once 
   assert.match(read('src/diagnostics.zig'), /if \(!verboseLoggingEnabled\(\) and !std\.mem\.startsWith\(u8, msg, "\[consolefont\] "\) and !std\.mem\.startsWith\(u8, msg, "\[focus-trace\] "\)\) return;/);
 });
 
-test('spawn and respawn apply the console theme before hiding and parenting the window', () => {
-  for (const name of ['spawnShellWithSession', 'respawnShellInPlace']) {
+test('spawn and worker respawn apply the console theme before revealing the window', () => {
+  for (const name of ['spawnShellWithSession']) {
     const start = consoleSource.indexOf(`pub fn ${name}(`);
     assert.ok(start >= 0, name);
     const end = consoleSource.indexOf('\npub fn ', start + 1);
@@ -120,6 +120,12 @@ test('spawn and respawn apply the console theme before hiding and parenting the 
     assert.ok(apply >= 0 && hide > apply && parent > hide, name);
     assert.equal(body.match(/applyBlackConsoleBackground\(pi\.dwProcessId\)/g).length, 1, name);
   }
+  const worker = consoleSource.slice(consoleSource.indexOf('fn startupShellWorker('), consoleSource.indexOf('fn discardStartupShell('));
+  assert.ok(worker.indexOf('ShowWindow(job.hwnd, SW_HIDE)') < worker.indexOf('SetParent(job.hwnd, job.owner)'));
+  const complete = consoleSource.slice(consoleSource.indexOf('pub fn finishStartupShell('));
+  assert.ok(complete.indexOf('applyBlackConsoleBackground(job.pid)') < complete.indexOf('showShellConsole(idx, SW_SHOW'));
+  const reconnect = consoleSource.slice(consoleSource.indexOf('pub fn respawnShellInPlace('), consoleSource.indexOf('pub fn markSshTabDisconnected('));
+  assert.match(reconnect, /Thread\.spawn\([^;]*startupShellWorker/);
 });
 
 test('Chat View uses the bundled mono face for code and Plex for prose', () => {

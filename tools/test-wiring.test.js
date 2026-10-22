@@ -229,3 +229,11 @@ test('the Wine runner stops before Zig when a staged pinned source has no update
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('ISSUE-543 executable help sweep depends on its installed bridge in every shard', () => {
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  assert.match(build, /const zsb_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\);/);
+  assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\);/);
+  assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath\(\.bin, "zigshell-bridge\.exe"\)\);/);
+  assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\);/);
+});
