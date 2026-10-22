@@ -1951,6 +1951,7 @@ async function typeAction(message) {
   const tab = await getTargetTab(message);
   const selector = stringOr(message.selector, "");
   const text = stringOr(message.text, "");
+  const rawEnter = message.rawEnter === true;
   let target = null;
   if (selector) {
     await runInTab(tab.id, installCursorApi, [cursorOptionsFrom(message)]).catch(() => {});
@@ -1967,12 +1968,12 @@ async function typeAction(message) {
       await dispatchSelectAll(debuggee);
     }
     if (message.keys === true) {
-      await dispatchTrustedKeys(debuggee, text);
+      await dispatchTrustedKeys(debuggee, text, rawEnter);
     } else {
-      await dispatchTrustedText(debuggee, text);
+      await dispatchTrustedText(debuggee, text, rawEnter);
     }
   });
-  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", selector: selector || undefined, frameId: target?.frameId, length: text.length };
+  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", rawEnter, selector: selector || undefined, frameId: target?.frameId, length: text.length };
 }
 
 async function locateSelectorAcrossFrames(tabId, selector, requireEditable) {
@@ -2024,8 +2025,13 @@ async function insertAction(message) {
   return { inserted: text.length, trusted: true };
 }
 
-async function dispatchTrustedText(debuggee, text) {
-  const lines = text.split("\n");
+async function dispatchTrustedText(debuggee, text, rawEnter = false) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  if (!rawEnter) {
+    if (normalized.length > 0) await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: normalized });
+    return;
+  }
+  const lines = normalized.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].length > 0) {
       await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: lines[i] });
@@ -2034,10 +2040,11 @@ async function dispatchTrustedText(debuggee, text) {
   }
 }
 
-async function dispatchTrustedKeys(debuggee, text) {
+async function dispatchTrustedKeys(debuggee, text, rawEnter = false) {
   for (const character of text.replace(/\r\n?/g, "\n")) {
     if (character === "\n") {
-      await dispatchEnter(debuggee);
+      if (rawEnter) await dispatchEnter(debuggee);
+      else await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: "\n" });
       continue;
     }
     const common = printableKeyDescriptor(character);

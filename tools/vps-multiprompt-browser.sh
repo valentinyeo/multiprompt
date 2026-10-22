@@ -92,7 +92,7 @@ CDP_HELP
       theme) echo 'usage: zsb theme <name>' ;;
       protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]' ;;
       manifest) echo 'usage: zsb manifest <exe> <extension-id>' ;;
-      type) echo 'usage: zsb type [--tab ID] [--keys] <text> | <selector> <text>' ;;
+      type) printf '%s\n' 'usage: zsb type [--tab ID] [--keys] [--raw-enter] <text> | <selector> <text>' 'Newlines become line breaks; --raw-enter presses Enter at each newline (submits chat composers).' 'Options may appear in any order, each at most once.' ;;
       *) print_help ;;
     esac
     printf 'Total reply deadline: %ss; override with ZSB_TIMEOUT (finite seconds > 0, at most 86400).\n' "$deadline"
@@ -119,7 +119,9 @@ Commands and flags:
   links [--limit N | --full] [--tab ID]     Read links (default: 50 links)
   find <text> [--tab ID]            Find text in the target tab
   click <selector> [--tab ID]       Click an element
-  type [--keys] <text> | <selector> <text>  Type into the page
+  type [--tab ID] [--keys] [--raw-enter] <text> | <selector> <text>  Type into the page; newlines become line breaks
+                                    --raw-enter presses Enter at each newline (submits chat composers)
+                                    Options may appear in any order, each at most once.
   key <combo>                       Send a key combination
   screenshot [-o FILE | --output FILE] [--tab ID]
   console [-n N | --limit N] [--clear]
