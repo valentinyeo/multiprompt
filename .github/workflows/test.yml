@@ -121,9 +121,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -131,9 +131,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -153,6 +153,13 @@ jobs:
       - name: Sweep real zsb.exe command help
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/zsb-help.test.js
+      - name: Bound Zig cache before save
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
+          python3 tools/trim-zig-cache.py --cap-mib 1600
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
 
   test-windows-update:
     needs: [changes, build-windows]
@@ -226,7 +233,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2]
+        group: [1, 2, 3]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -270,9 +277,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-vps-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -280,9 +287,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
@@ -304,6 +311,13 @@ jobs:
       - name: Run session restore fixtures
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/json-reader/benchmark.mjs --fixtures-only
+      - name: Bound Zig cache before save
+        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
+          python3 tools/trim-zig-cache.py --cap-mib 1200
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
 
   test-worker:
     needs: changes
