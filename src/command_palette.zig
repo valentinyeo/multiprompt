@@ -95,6 +95,7 @@ const SEARCH_BROWSER_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_URL_OF
 const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_INSTRUCT_OFFSET;
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
+const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -754,6 +755,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_INSTRUCT_OFFSET => "browser control instructions",
         SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser focus address bar",
         SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "switch shell browser focus",
+        SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET => "external browser links when pane off",
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser auto suspend",
         SEARCH_KEEPAWAKE_OFFSET => "keep tab awake",
         SEARCH_HIBERNATE_NOW_OFFSET => "hibernate browser panes now",
@@ -3829,6 +3831,11 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIBERNATE_NOW_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "External Browser Links When Pane Off", "desktop browser", "default browser", "open links" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes", "close all browsers", "close browser windows", "free browser memory" }, app_state.g_search_buf[0..app_state.g_search_len])) {

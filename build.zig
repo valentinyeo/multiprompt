@@ -450,6 +450,9 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&console_font_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
     test_step.dependOn(&palette_rows_tests.step);
+    const external_browser_links_tests = b.addSystemCommand(&.{ "node", "--test", "tools/external-browser-links.test.js", "tools/external-browser-links-native.test.js" });
+    external_browser_links_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&external_browser_links_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });

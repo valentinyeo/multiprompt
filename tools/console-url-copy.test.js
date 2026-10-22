@@ -35,7 +35,7 @@ test("a physical shell-link click activates and focuses its fresh browser tab", 
   assert.match(handler, /link_detect\.at\(row_slices\[0\.\.count\]/);
   assert.match(handler, /openClickedLink\(final_buf\[0\.\.m\]\);/);
   const shared = source.slice(source.indexOf("fn openClickedLink("), start);
-  assert.match(shared, /navigateBrowserPaneWithActivation\(active_shell, bytes\[0\.\.n\], true\);/);
+  assert.match(shared, /if \(!openSessionLink\(active_shell, bytes\[0\.\.n\]\)\) return;/);
   assert.match(shared, /requestWebView2Focus\(\).*requestNativeBrowserFocus\(\)/);
 });
 
