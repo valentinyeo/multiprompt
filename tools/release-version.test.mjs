@@ -111,8 +111,29 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-arm64\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
   assert.match(tests, /ARM64: \$\{\{ needs\.build-arm64\.result \}\}/);
+});
+
+test('aggregate routing requires the update job and rejects every unsuccessful heavy dependency', () => {
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const aggregate = tests.split('\n  test-result:\n')[1];
+  assert.match(aggregate, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
+  assert.match(aggregate, /UPDATE: \$\{\{ needs\.test-windows-update\.result \}\}/);
+  assert.match(aggregate, /for result in failure cancelled skipped; do/);
+  assert.match(aggregate, /if require_jobs success true success success success "\$result"; then exit 1; fi/);
+  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$ARM64" "\$UPDATE"/);
+  const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
+  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', ARM64: 'success', UPDATE: 'success' };
+  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
+  const result = run({});
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Aggregate routing controls passed/);
+  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', ARM64: 'skipped', UPDATE: 'skipped' }).status, 0);
+  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'ARM64', 'UPDATE']) {
+    for (const status of ['failure', 'cancelled', 'skipped']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
+  }
+  assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
 test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {
