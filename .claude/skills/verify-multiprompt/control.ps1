@@ -555,6 +555,27 @@ function Focus-WorkspaceShell {
     } 'workspace shell owns keyboard input'
 }
 
+function Focus-WorkspaceBrowser([string]$Root) {
+    $script:bookmarkWindow = [IntPtr]::Zero
+    Wait-Until {
+        $browsers = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine -notlike '*--type=*' })
+        if ($browsers.Count -ne 1) { return $false }
+        $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+        $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($node in $nodes) {
+            if ($node.Current.ProcessId -ne $browsers[0].ProcessId -or $node.Current.ClassName -ne 'Chrome_WidgetWin_1' -or $node.Current.NativeWindowHandle -eq 0) { continue }
+            $candidate = [IntPtr]$node.Current.NativeWindowHandle
+            if ([VerifyNative]::GetAncestor($candidate, 3) -ne $script:window) { continue }
+            $script:bookmarkWindow = $candidate
+            return $true
+        }
+        return $false
+    } 'exact profile browser HWND belongs to the owned app' 60
+    Record 'Focus the actual owned Edge window for the keyboard favorite action'
+    [void][VerifyNative]::SetForegroundWindow($script:bookmarkWindow)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow } 'exact workspace browser owns keyboard input'
+}
+
 function Palette([string]$Query) {
     if ($Feature -in @('browser-workspaces', 'browser-pane-stuck')) { Focus-WorkspaceShell }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
@@ -1116,11 +1137,12 @@ try {
             Type-Text 'IGSH224 Journey'
             Press @(0x0D) 'Enter: save workspace name'
             Wait-Until { (Read-Session).workspaces[5].name -ceq 'IGSH224 Journey' } 'workspace rename persisted'
-            Palette 'browser address'
-            Press @(0x0D) 'Enter: focus browser address bar'
+            Palette 'browser open url'
+            Press @(0x0D) 'Enter: browser URL input in the palette'
             Type-Text $bookmark
             Press @(0x0D) 'Enter: navigate to the synthetic bookmark URL'
             Wait-Until { (Read-Session).tabs | Where-Object { $_.PSObject.Properties['burl'] -and $_.burl -eq $bookmark } } 'app observed browser navigation' 60
+            Focus-WorkspaceBrowser $targetRoot
             Press @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
             Snapshot 'bookmark-action'
             Press @(0x0D) 'Enter: save favorite'

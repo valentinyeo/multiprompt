@@ -16,8 +16,8 @@
 Alt+A opens a browser pane. Ctrl+N creates another workspace in single-window
 mode; Alt+2 through Alt+7 select these six workspaces. Ctrl+K exposes Rename
 Workspace, Sort Workspaces (Ctrl+Up moves the selected row), Window Mode,
-Close Workspace and named workspace reopening. Browser Address focuses Edge's
-address bar; Ctrl+D saves a favorite. Agents use zsb with their exact shell key.
+Close Workspace and named workspace reopening. Browser Open URL accepts a URL inside the
+palette; Ctrl+D saves a favorite in the actual owned Edge window. Agents use zsb with their exact shell key.
 
 ## Driving it with control.ps1
 
@@ -35,7 +35,7 @@ to the first workspace and open both panes before creating the remaining four.
 Hash all six persisted IDs independently and
 require completion markers, Local State and six real profile processes.
 In the sixth workspace, rename it to IGSH224 Journey using the existing inline
-palette editor (Ctrl+A, type, Enter), without transferring native focus; navigate to a synthetic
+palette editor (Ctrl+A, type, Enter), without transferring native focus; use Browser Open URL to navigate to a synthetic
 example.com URL and bookmark it through real keyboard input. Move the workspace
 one position earlier, convert to six standalone windows and back, then close
 and reopen the named workspace. At each stage, assert the same ID, root and
