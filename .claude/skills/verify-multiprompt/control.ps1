@@ -340,6 +340,10 @@ function Assert-Foreground {
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'owned app foreground for keyboard input'
     Assert-Foreground
     Record $Label
     [VerifyNative]::Chord($Keys)
