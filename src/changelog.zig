@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.814", .items = &.{
+        .{ .text = "Saved remote sessions start connecting right away when you reopen the app instead of waiting in line.", .ticket = "IGSH-568" },
+    } },
     .{ .ver = "0.28.813", .items = &.{
         .{ .text = "Chat View messages to a busy Claude session are sent right away again and show \"queued in Claude\".", .ticket = "IGSH-564" },
     } },
