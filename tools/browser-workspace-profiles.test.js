@@ -169,3 +169,22 @@ test('IGSH-224 a reopened browser cannot reuse deferred activation after the use
   }
   assert.match(resolve, /g_browser_pending_activate_sid = 0;\s*if \(!std\.mem\.eql\(u8, url_buf\[0\.\.len\], "about:blank"\)\) navigateBrowserPaneWithActivation\(idx, url_buf\[0\.\.len\], activate\)/);
 });
+
+test('IGSH-224 an open palette retains input over owned browser popups but never foreign windows', () => {
+  const shortcuts = read('src/shortcuts.zig');
+  const expression = shortcuts.match(/var is_ours = ([^;]+);/)[1];
+  const evaluate = text => new Function('fg', 'main', 'palette', 'owned', `return ${text.replaceAll('app_state.g_main_hwnd', 'main').replaceAll('app_state.g_search_active', 'palette').replaceAll('foregroundHwndIsOurs(fg)', 'owned').replaceAll(' or ', ' || ').replaceAll(' and ', ' && ')};`);
+  const check = text => {
+    const owns = evaluate(text);
+    for (const palette of [false, true]) {
+      for (const owned of [false, true]) {
+        assert.equal(owns(2, 1, palette, owned), palette && owned);
+        assert.equal(owns(1, 1, palette, owned), true);
+      }
+    }
+  };
+  check(expression);
+  for (const broken of ['fg == app_state.g_main_hwnd', expression.replace('app_state.g_search_active and ', ''), expression.replace('foregroundHwndIsOurs(fg)', 'true')]) {
+    assert.throws(() => check(broken));
+  }
+});

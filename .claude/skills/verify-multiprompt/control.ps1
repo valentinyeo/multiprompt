@@ -637,6 +637,7 @@ function Palette([string]$Query) {
     }
     Type-Text $Query
     if ($Feature -eq 'browser-workspaces') {
+        Focus-WorkspaceFrame
         Wait-Until {
             (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=\d+(?:\r?\n|$)') -and
                 [VerifyNative]::GetForegroundWindow() -eq $script:window -and

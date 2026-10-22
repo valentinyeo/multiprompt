@@ -1103,7 +1103,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (wp != WM_KEYDOWN) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
 
         const fg = GetForegroundWindow();
-        var is_ours = (fg == app_state.g_main_hwnd);
+        var is_ours = (fg == app_state.g_main_hwnd) or (app_state.g_search_active and foregroundHwndIsOurs(fg));
         if (!is_ours) {
             for (0..app_state.shell_count) |i| {
                 if (fg == app_state.shells[i].hwnd) {

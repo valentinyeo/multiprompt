@@ -541,12 +541,14 @@ test('workspace palette waits for initialization and complete query consumption 
     assert.equal((text.match(/Wait-Until \{/g) || []).length, 2);
     assert.ok(text.indexOf('Wait-Until {') < text.indexOf('Type-Text $Query'));
     assert.ok(text.lastIndexOf('Wait-Until {') > text.indexOf('Type-Text $Query'));
+    assert.match(text, /Type-Text \$Query\s+if \(\$Feature -eq 'browser-workspaces'\) \{\s+Focus-WorkspaceFrame\s+Wait-Until/);
     assert.ok(text.includes('[palette\\] ready chars=0'));
     assert.ok(text.includes("$Query.Length + ' count=[1-9]\\d*"));
     assert.equal((text.match(/GetFocusedWindow\(\$script:window\) -eq \$script:window/g) || []).length, 2);
     assert.equal((text.match(/GetForegroundWindow\(\) -eq \$script:window/g) || []).length, 2);
   };
   assertReady(palette);
+  assert.throws(() => assertReady(palette.replace('        Focus-WorkspaceFrame\n        Wait-Until', '        Wait-Until')));
   for (const required of ['Type-Text $Query', '$Query.Length', 'GetFocusedWindow($script:window) -eq $script:window', 'GetForegroundWindow() -eq $script:window']) {
     assert.throws(() => assertReady(palette.replace(required, '$true')));
   }
