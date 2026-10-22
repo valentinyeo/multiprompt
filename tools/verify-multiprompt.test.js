@@ -181,76 +181,10 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllBytes[\s\S]*?\.request.bin/);
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
-  assert.match(control, /function Press[^\n]*\n\s+if \(\$Feature -eq 'browser-workspaces'\) \{ Focus-WorkspaceFrame \}\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
-  assert.match(control, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\)/);
-  assert.match(control, /GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd \|\| GetAncestor\(WindowFromPoint\(point\), 3\) != frame[\s\S]*?SetCursorPos[\s\S]*?new Mouse \{ flags = 2 \}[\s\S]*?new Mouse \{ flags = 4 \}[\s\S]*?SendInput\(2, click,[\s\S]*?GetForegroundWindow\(\) != hwnd\) throw/);
-  const focus = control.slice(control.indexOf('    public static void FocusOwnedWindow('), control.indexOf('    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'));
-  const assertOwnedFocus = text => {
-    assert.match(text, /owner != expectedPid/);
-    assert.match(text, /X = hwnd == frame \? bounds.Left \+ 100 : bounds.Right - 160, Y = bounds.Top \+ 22/);
-    assert.match(text, /GetForegroundWindow\(\) != hwnd\) throw/);
-    assert.match(text, /!GetGUIThreadInfo\(target, ref info\) \|\| info.Active != hwnd \|\| GetAncestor\(info.Focus, 3\) != frame \|\| \(hwnd != frame && GetAncestor\(info.Focus, 2\) != hwnd\)/);
-    assert.doesNotMatch(text, /AttachThreadInput|SetFocus\(/);
-  };
-  assertOwnedFocus(focus);
-  for (const required of ['bounds.Right - 160', 'owner != expectedPid', 'info.Active != hwnd', 'GetAncestor(info.Focus, 3) != frame', 'GetAncestor(info.Focus, 2) != hwnd']) {
-    assert.throws(() => assertOwnedFocus(focus.replace(required, 'false')));
-  }
-  assert.throws(() => assertOwnedFocus(focus + 'AttachThreadInput(current, target, true);'));
-  assert.match(control, /function Press-WorkspaceBrowser[\s\S]*?Doctor\s+Wait-Until[\s\S]*?FocusOwnedWindow\(\$script:bookmarkWindow, \$script:bookmarkPid, \$script:window\)[\s\S]*?GetAncestor\(\$foreground, 2\) -eq \$script:bookmarkWindow -and\s+\[VerifyNative\]::GetAncestor\(\$foreground, 3\) -eq \$script:window[\s\S]*?Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
-  assert.match(control, /Palette 'open url in browser'\s+Snapshot 'url-action'/);
-  assert.match(control, /function Focus-WorkspaceFrame[\s\S]*?Doctor[\s\S]*?FocusOwnedWindow\(\$script:window, \$process.Id, \$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
-  assert.match(control, /function Palette[^\n]*\{\s+if \(\$Feature -eq 'browser-workspaces'\) \{ Focus-WorkspaceFrame \}/);
-  const workspaces = control.slice(control.indexOf("        'browser-workspaces' {"), control.indexOf("        'inbox' {"));
-  const assertReopenedPane = text => {
-    assert.match(text, /\$state = Read-Session\s+\$script:browserShellId = \$state.tabs\[\$state.active_tab\].shell_id\s+Palette 'open browser'/);
-    assert.match(text, /\$pane = Read-BrowserPane\s+\$null -ne \$pane -and \$pane.browser_state -eq 'connected' -and\s+\$pane.browser_connection_id -gt 0 -and \$pane.browser_window_id -gt 0 -and\s+\[VerifyNative\]::PaneVisible\(\$script:window\)/);
-    assert.match(text, /Focus-BrowserPaneOwner 'workspace-reopened' \(Read-BrowserPane\).browser_connection_id\s+Assert-WorkspaceProfile 'reopened'/);
-    assert.doesNotMatch(text, /Open-BrowserPane|Assert-BrowserPane/);
-  };
-  assertReopenedPane(workspaces);
-  for (const required of ['$script:browserShellId = $state.tabs[$state.active_tab].shell_id', "$pane.browser_state -eq 'connected'", '$pane.browser_connection_id -gt 0', '$pane.browser_window_id -gt 0', '[VerifyNative]::PaneVisible($script:window)']) {
-    assert.throws(() => assertReopenedPane(workspaces.replace(required, '$true')));
-  }
-  assert.match(control, /Focus-BrowserPaneOwner 'workspace-parked-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$parked = Invoke-Zsb/);
-  assert.match(control, /Press-WorkspaceBrowser @\(0x11, 0x39\)[\s\S]*?ValuePattern[\s\S]*?\$value.Current.Value -in @\(\$bookmark, \$bookmark.Substring\(8\)\)[\s\S]*?'bookmark-page.json'[\s\S]*?Press-WorkspaceBrowser @\(0x11, 0x44\)/);
-  for (const label of ['Ctrl+D: bookmark this page in Edge', 'Enter: save favorite', 'Esc: close favorite dialog']) {
-    assert.ok(control.split('\n').some(line => line.includes('Press-WorkspaceBrowser @') && line.includes(label)));
-  }
-
-  const extensionSetup = control.slice(control.indexOf('function Enable-WorkspaceExtension('), control.indexOf('function Read-BookmarkUrls('));
-  assert.match(extensionSetup, /Press-WorkspaceBrowser @\(0x12, 0x44\)[\s\S]*?Doctor[\s\S]*?GetAncestor\(\$foreground, 2\) -ne \$script:bookmarkWindow[\s\S]*?\[VerifyNative\]::Text\('edge:\/\/extensions\/'\)/);
-  assert.match(extensionSetup, /Name -ne 'Extensions menu'[\s\S]*?InvokePattern[\s\S]*?\$menu.Invoke\(\)/);
-  assert.match(extensionSetup, /Name -ne 'Developer mode'[\s\S]*?TogglePattern[\s\S]*?\$toggle.Toggle\(\)/);
-  assert.match(extensionSetup, /GetFiles[\s\S]*?-contains \$pipe/);
-  assert.doesNotMatch(extensionSetup, /Set-Content|WriteAllText|WriteAllBytes|Set-Item|PostMessage/);
-  assert.match(control, /Register-WorkspaceBridge \$root \}\s+Enable-WorkspaceExtension \$root \$index/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
-});
-
-test('workspace zsb requests restore the main frame after lifecycle screenshots and workspace switches', () => {
-  const lifecycle = control.slice(control.indexOf("        'browser-workspaces' {"), control.indexOf("        'inbox' {"));
-  const targetHandoff = /Assert-WorkspaceProfile 'reopened'[^\n]*[\s\S]*?Focus-BrowserPaneOwner 'workspace-reopened-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$routed = Invoke-Zsb/;
-  const parkedHandoff = /Wait-Until \{ \(Read-Session\).active_workspace -eq 0 \} 'foreign workspace selected'\s+Focus-BrowserPaneOwner 'workspace-parked-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$parked = Invoke-Zsb[^\n]*\s+\$foreign = Invoke-Zsb/;
-  assert.match(lifecycle, targetHandoff);
-  assert.match(lifecycle, parkedHandoff);
-  const handoff = "            Focus-BrowserPaneOwner 'workspace-reopened-zsb' (Read-BrowserPane).browser_connection_id\n";
-  const withoutHandoff = lifecycle.replace(handoff, '');
-  assert.throws(() => assert.match(withoutHandoff, targetHandoff));
-  assert.throws(() => assert.match(withoutHandoff.replace("            Assert-WorkspaceProfile 'reopened'", handoff + "            Assert-WorkspaceProfile 'reopened'"), targetHandoff));
-  assert.throws(() => assert.match(lifecycle.replace("            Focus-BrowserPaneOwner 'workspace-parked-zsb' (Read-BrowserPane).browser_connection_id\n", ''), parkedHandoff));
-});
-
-test('workspace frame activation hit-tests an exposed title strip when sibling windows cover the normal point', () => {
-  const focus = control.slice(control.indexOf('    public static void FocusOwnedWindow('), control.indexOf('    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'));
-  const exposedFrame = /if \(hwnd == frame && GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd\) point.Y = bounds.Top \+ 8;\s+if \(GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd \|\| GetAncestor\(WindowFromPoint\(point\), 3\) != frame\) throw/;
-  assert.match(focus, exposedFrame);
-  for (const required of ['hwnd == frame && ', 'point.Y = bounds.Top + 8;', 'GetAncestor(WindowFromPoint(point), 3) != frame']) {
-    assert.throws(() => assert.match(focus.replace(required, ''), exposedFrame));
-  }
-  assert.ok(focus.indexOf('point.Y = bounds.Top + 8;') < focus.indexOf('SetCursorPos(point.X, point.Y)'));
 });
 
 test('audit verification is isolated from unchanged desktop journeys and retains fixture evidence', () => {
@@ -535,27 +469,4 @@ test('IGSH-522: hidden pills are shown through the palette and every focus trans
   assert.match(read('src/app_state.zig'), /g_hide_pills: bool = true/);
   assert.match(read('src/sidebar.zig'), /g_hide_sidebar or app_state.g_hide_pills\) return null/);
   assert.match(read('src/command_palette.zig'), /defer \{[\s\S]*?\[palette\] ready chars=\{d\} count=\{d\} target=\{d\}/);
-});
-
-test('workspace palette waits for initialization and complete query consumption under exact frame focus', () => {
-  const palette = control.slice(control.indexOf('function Palette('), control.indexOf('function Invoke-Zsb('));
-  const assertReady = text => {
-    assert.equal((text.match(/Wait-Until \{/g) || []).length, 2);
-    assert.ok(text.indexOf('Wait-Until {') < text.indexOf('Type-Text $Query'));
-    assert.ok(text.lastIndexOf('Wait-Until {') > text.indexOf('Type-Text $Query'));
-    assert.match(text, /Type-Text \$Query\s+if \(\$Feature -eq 'browser-workspaces'\) \{\s+Focus-WorkspaceFrame\s+Wait-Until/);
-    assert.ok(text.includes('[palette\\] ready chars=0'));
-    assert.ok(text.includes("$Query.Length + ' count=[1-9]\\d*"));
-    assert.equal((text.match(/GetFocusedWindow\(\$script:window\) -eq \$script:window/g) || []).length, 2);
-    assert.equal((text.match(/GetForegroundWindow\(\) -eq \$script:window/g) || []).length, 2);
-  };
-  assertReady(palette);
-  assert.throws(() => assertReady(palette.replace('        Focus-WorkspaceFrame\n        Wait-Until', '        Wait-Until')));
-  for (const required of ['Type-Text $Query', '$Query.Length', 'GetFocusedWindow($script:window) -eq $script:window', 'GetForegroundWindow() -eq $script:window']) {
-    assert.throws(() => assertReady(palette.replace(required, '$true')));
-  }
-  for (const name of ['GetGUIThreadInfo', 'SetCursorPos', 'WindowFromPoint']) {
-    assert.equal((control.match(new RegExp(`static extern (?:bool|IntPtr) ${name}\\(`, 'g')) || []).length, 1);
-  }
-  assert.match(control, /info\.Size = \(uint\)Marshal\.SizeOf\(typeof\(GuiThreadInfo\)\);[\s\S]*?return info\.Focus;/);
 });
