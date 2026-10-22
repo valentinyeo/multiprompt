@@ -699,16 +699,37 @@ test "ISSUE-460 failed initial persistence never accepts or displays an undurabl
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
 }
-test "ISSUE-460 channel never appends over a message already held in the shell input" {
+test "ISSUE-460 IGSH-564 dim suggestion text no longer blocks channel typing" {
     defer clear();
     channel_enabled = true;
     input_idle = false;
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("waiting request"), .queued);
     chatOutboxTick();
-    try std.testing.expectEqual(@as(usize, 0), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
     input_idle = true;
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
+}
+test "IGSH-564 idle channel with a suggested reply in the input box still types the message" {
+    defer clear();
+    channel_enabled = true;
+    shells[0].activity = .idle;
+    input_idle = false;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("send despite the suggestion"), .queued);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
+}
+test "IGSH-564 queued message older than ten minutes is still typed, never marked not sent" {
+    defer clear();
+    channel_enabled = true;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("send the aged queued message"), .queued);
+    fake_now_ms += 900_000;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
 }
 test "ISSUE-460 Send again preserves late matching anchors and persists its own deadline" {
     defer clear();
@@ -742,24 +763,25 @@ test "ISSUE-460 production reload retains unmatched sessions and does not overwr
     try reload();
     try std.testing.expectEqualStrings("{invalid", persisted.?);
 }
-test "ISSUE-460 partial timeout budget survives repeated production reloads" {
+test "ISSUE-460 IGSH-564 queued intent survives repeated production reloads past its saved deadline" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("offline request");
     _ = chatEchoEnqueueForShell(0, text, .queued) orelse return error.EnqueueFailed;
     shells[0].disconnected = true;
     const deadline = g_chat_outbox.items[0].expires_ms;
-    for ([_]i64{ 100000, 300000, deadline - 1 }) |now_ms| {
+    for ([_]i64{ 100000, 300000, deadline - 1, deadline, deadline + 900_000 }) |now_ms| {
         fake_now_ms = now_ms;
         try reload();
         chatOutboxTick();
         try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
         try std.testing.expectEqual(deadline, g_chat_outbox.items[0].expires_ms);
     }
-    fake_now_ms = deadline;
-    try reload();
-    chatOutboxTick();
-    try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    shells[0].disconnected = false;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expectEqualSlices(u16, &.{'o'}, written_order[0..writes]);
 }
 test "ISSUE-460 queued evidence releases the next connected message into Claude buffer" {
     defer clear();
@@ -793,7 +815,7 @@ test "ISSUE-460 busy channel sends first immediately then confirms in order (IGS
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 2), channel_starts);
 }
-test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript but never passes not sent" {
+test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript and skips not sent" {
     defer clear();
     channel_enabled = true;
     shells[0].activity = .active;
@@ -815,7 +837,7 @@ test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript but n
     try std.testing.expectEqual(@as(usize, 0), g_chat_block_count);
     try std.testing.expectEqual(ChatEchoState.delivered, g_chat_outbox.items[0].state);
     try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[1].state);
-    for ([_]bool{ false, true }) |written| {
+    for ([_]bool{ false, true }, 0..) |written, attempt| {
         g_chat_outbox.items[0].state = .not_sent;
         g_chat_outbox.items[0].write_started = written;
         g_chat_outbox.items[1].state = .queued;
@@ -823,8 +845,11 @@ test "ISSUE-460 IGSH-564 busy channel buffers second before any transcript but n
         g_chat_outbox.items[1].channel_pending = false;
         g_chat_tmux_send_job = null;
         chatOutboxTick();
-        try std.testing.expectEqual(@as(usize, 2), channel_starts);
-        try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[1].state);
+        try std.testing.expectEqual(@as(usize, 3) + attempt, channel_starts);
+        try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
+        try std.testing.expectEqual(written, g_chat_outbox.items[0].write_started);
+        try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[1].state);
+        try std.testing.expect(g_chat_outbox.items[1].channel_pending);
     }
 }
 test "ISSUE-460 IGSH-564 connected direct input buffers while busy and serializes typing" {
@@ -848,40 +873,64 @@ test "ISSUE-460 IGSH-564 connected direct input buffers while busy and serialize
     try std.testing.expectEqual(@as(usize, 2), enters);
     try std.testing.expectEqual(@as(usize, 0), g_chat_block_count);
 }
-test "ISSUE-460 offline busy and unconfirmed queues all fail within fifteen minutes" {
+test "ISSUE-460 IGSH-564 offline queues and protected sends survive while unprotected sends expire" {
     defer clear();
-    for ([_]ChatEchoState{ .queued, .sending, .delivered }) |state| {
+    g_chat_active = false;
+    defer g_chat_active = true;
+    for ([_]ChatEchoState{ .queued, .sending, .delivered, .sending, .delivered }) |state| {
         try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("waiting request"), state);
     }
     g_chat_outbox.items[1].channel_pending = true;
     g_chat_outbox.items[2].transcript_queued = true;
+    g_chat_verify_echo_id = g_chat_outbox.items[3].id;
     shells[0].activity = .active;
     shells[0].disconnected = true;
     fake_now_ms = 901500;
     chatOutboxTick();
-    for (g_chat_outbox.items) |entry| {
-        try std.testing.expectEqual(ChatEchoState.not_sent, entry.state);
+    const expected = [_]ChatEchoState{ .queued, .sending, .delivered, .not_sent, .not_sent };
+    for (g_chat_outbox.items, expected) |entry, state| {
+        try std.testing.expectEqual(state, entry.state);
+    }
+    try std.testing.expect(!g_chat_outbox.items[0].write_started);
+    try std.testing.expect(g_chat_outbox.items[1].channel_pending);
+    try std.testing.expect(g_chat_outbox.items[2].transcript_queued);
+    for (g_chat_outbox.items[3..]) |entry| {
         try std.testing.expect(chat_echo.pendingActions(entry.state).send_again);
+        try std.testing.expect(entry.retryable);
         try std.testing.expect(!entry.transcript_queued);
     }
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
 }
-test "ISSUE-460 restart preserves elapsed timeout and FIFO without duplicate writes" {
+test "ISSUE-460 IGSH-564 restart keeps aged queues sendable and FIFO without duplicate writes" {
     defer clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .queued);
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .queued);
     try std.testing.expect(saveChatOutbox());
+    shells[0].disconnected = true;
     fake_now_ms = 901500;
-    try reload();
+    for (0..2) |_| {
+        try reload();
+        chatOutboxTick();
+        try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("first request"), g_chat_outbox.items[0].text);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second request"), g_chat_outbox.items[1].text);
+        for (g_chat_outbox.items) |entry| try std.testing.expectEqual(ChatEchoState.queued, entry.state);
+        try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    }
+    shells[0].disconnected = false;
     chatOutboxTick();
-    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("first request"), g_chat_outbox.items[0].text);
-    for (g_chat_outbox.items) |entry| try std.testing.expectEqual(ChatEchoState.not_sent, entry.state);
-    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[1].state);
+    try std.testing.expectEqual(@as(usize, 1), writes);
     try reload();
+    try std.testing.expectEqual(ChatEchoState.not_sent, g_chat_outbox.items[0].state);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[1].state);
     chatOutboxTick();
-    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[1].state);
+    try std.testing.expectEqual(@as(usize, 2), writes);
+    chatOutboxTick();
+    try std.testing.expectEqualSlices(u16, &.{ 'f', 's' }, written_order[0..writes]);
+    try std.testing.expectEqual(@as(usize, 2), enters);
 }
 test "ISSUE-460 two messages buffer while busy and reach the session in order" {
     defer clear();

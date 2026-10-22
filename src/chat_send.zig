@@ -2606,5 +2606,5 @@ test "IGSH-564 busy tmux session still gets the queued message typed" {
     list.items[0].state = .sending;
     try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, true));
     list.items[0].state = .not_sent;
-    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, true));
+    try std.testing.expectEqual(@as(?usize, 1), chatOutboxFirstSendableIndexIn(&list, key, true));
 }
