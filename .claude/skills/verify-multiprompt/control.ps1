@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -227,6 +227,55 @@ public static class VerifyNative {
     }
     public static string Class(IntPtr hwnd) {
         StringBuilder text = new StringBuilder(256); GetClassName(hwnd, text, text.Capacity); return text.ToString();
+    }
+}
+public static class GroupRailProof {
+    static int S(int value, uint dpi, int scale) { return (int)((long)value * dpi * scale / 9600); }
+    static int Distance(System.Drawing.Color a, System.Drawing.Color b) {
+        return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+    }
+    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int selected) {
+        var proof = new Dictionary<string, object>();
+        using (var image = new System.Drawing.Bitmap(path)) {
+            int left = origin.X - frame.Left + S(8, dpi, scale);
+            int top = origin.Y - frame.Top + S(8, dpi, scale) + 34;
+            int railLeft = left + S(4, dpi, scale), railRight = left + S(7, dpi, scale);
+            int rowHeight = S(38, dpi, scale), firstRow = top + 28;
+            int rowTop = firstRow + selected * rowHeight, rowBottom = rowTop + rowHeight;
+            int referenceX = origin.X - frame.Left + S(220, dpi, scale) - S(44, dpi, scale);
+            var rail = System.Drawing.Color.FromArgb(145, 149, 157);
+            var highlight = image.GetPixel(referenceX, (rowTop + rowBottom) / 2);
+            if (highlight.B <= highlight.R + 10) throw new InvalidOperationException("group-rail expected a visible blue selected highlight");
+            int headerPixels = 0, unselectedPixels = 0, selectedMismatch = 0, selectedRail = 0, strayPixels = 0;
+            for (int x = railLeft; x < railRight; x++) {
+                for (int y = top; y < firstRow; y++) if (Distance(image.GetPixel(x, y), rail) <= 2) headerPixels++;
+                int otherTop = firstRow + (1 - selected) * rowHeight;
+                for (int y = otherTop; y < otherTop + rowHeight; y++) if (Distance(image.GetPixel(x, y), rail) <= 2) unselectedPixels++;
+                for (int y = rowTop + 3; y < rowBottom - 3; y++) {
+                    var actual = image.GetPixel(x, y);
+                    var expected = image.GetPixel(referenceX, y);
+                    if (Distance(actual, expected) > 3) selectedMismatch++;
+                    if (Distance(actual, rail) <= 2) selectedRail++;
+                }
+                for (int y = firstRow + 2 * rowHeight; y < firstRow + 3 * rowHeight; y++) {
+                    if (Distance(image.GetPixel(x, y), rail) <= 2) strayPixels++;
+                }
+            }
+            int width = railRight - railLeft;
+            if (headerPixels != width * 28 || unselectedPixels != width * rowHeight) throw new InvalidOperationException("group-rail missing continuous gray header or unselected rail: " + headerPixels + "," + unselectedPixels);
+            proof["selectedClear"] = selectedMismatch == 0 && selectedRail == 0;
+            proof["strayClear"] = strayPixels == 0;
+            proof["selectedMismatch"] = selectedMismatch;
+            proof["selectedRailPixels"] = selectedRail;
+            proof["strayPixels"] = strayPixels;
+            proof["headerPixels"] = headerPixels;
+            proof["unselectedPixels"] = unselectedPixels;
+            proof["railX"] = new int[] { railLeft, railRight };
+            proof["selectedRect"] = new int[] { railLeft, rowTop + 3, railRight, rowBottom - 3 };
+            proof["belowGroupRect"] = new int[] { railLeft, firstRow + 2 * rowHeight, railRight, firstRow + 3 * rowHeight };
+            proof["highlightColor"] = new int[] { highlight.R, highlight.G, highlight.B };
+        }
+        return proof;
     }
 }
 public static class PaneLayoutProof {
@@ -1331,6 +1380,53 @@ try {
             Press @(0x1B) 'Esc: return from Inbox'
             Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
             Snapshot 'returned'
+        }
+        'group-rail' {
+            Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
+            Select-Theme 'dark' 'group-rail-dark'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.active_workspace -eq 0 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD session'
+            Palette 'new cmd'
+            Press @(0x0D) 'Enter: create second CMD session'
+            Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD session saved and selected'
+            Focus-Palette 'move to group' 6301
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: create group for second session'
+            Wait-Until { $state = Read-Session; $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[1].group_id -eq $state.groups[0].id } 'second session in new saved group'
+            Press @(0x1B) 'Esc: finish default group name'
+            $group = (Read-Session).groups[0]
+            Press @(0x11, 0x31) 'Ctrl+1: select first session'
+            Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
+            Focus-Palette 'move to group' 6301
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text $group.name
+            Press @(0x0D) 'Enter: move first session into same group'
+            Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.tabs[0].group_id -eq $group.id -and $state.tabs[1].group_id -eq $group.id -and $state.active_tab -eq 0 } 'two real sessions saved in one group'
+            $state = Read-Session
+            $scale = 100
+            if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
+            $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            $selectedClear = $true
+            $strayClear = $true
+            foreach ($selected in @(0, 1)) {
+                Press @(0x11, (0x31 + $selected)) ('Ctrl+' + ($selected + 1) + ': select grouped session')
+                Wait-Until { (Read-Session).active_tab -eq $selected } 'grouped selection persisted'
+                $shot = 'group-rail-selected-' + $selected
+                Snapshot $shot
+                $frame = New-Object VerifyNative+Rect
+                $origin = New-Object VerifyNative+Point
+                if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'group-rail native geometry unavailable' }
+                $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $selected)
+                Save-Json @{ pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; session = Read-Session; tag = $env:RELEASE_TAG; version = $ExpectedVersion } ($shot + '.json')
+                $selectedClear = $selectedClear -and $proof['selectedClear']
+                $strayClear = $strayClear -and $proof['strayClear']
+                $result.checks += @{ name = $shot; pixels = $proof }
+            }
+            Snapshot 'after'
+            if ($selectedClear) { Write-Host 'group-rail selected-clear PASS' } else { Write-Host 'group-rail selected-clear FAIL' }
+            if ($strayClear) { Write-Host 'group-rail stray-clear PASS' } else { Write-Host 'group-rail stray-clear FAIL' }
+            if (-not $selectedClear -or -not $strayClear) { throw 'group-rail pixel assertions failed' }
         }
         'pane-layout' {
             Select-Theme 'dark' 'pane-layout-dark'
