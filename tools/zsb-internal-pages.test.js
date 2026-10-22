@@ -169,6 +169,10 @@ test('ordinary page capture errors are not replaced with native capture', async 
     captureScreenshotViaCdp: async () => { throw new Error('real screenshot failure'); },
     requestHostReply: () => timers.push('native'),
   });
+  const classifierStart = extension.indexOf('function isExtensionFrameAccessError(');
+  const classifierEnd = extension.indexOf('async function runInDataTab(', classifierStart);
+  assert.ok(classifierStart >= 0 && classifierEnd > classifierStart);
+  vm.runInContext(extension.slice(classifierStart, classifierEnd), context);
   const start = extension.indexOf('async function captureScreenshotResult(');
   vm.runInContext(extension.slice(start, extension.indexOf('async function screenshot(', start)), context);
   await assert.rejects(context.captureScreenshotResult({ windowId: 10 }), /real screenshot failure/);
