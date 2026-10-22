@@ -4,8 +4,8 @@ const command = (program, args) => execFileSync(program, args, { encoding: 'utf8
 if (process.argv[2] === 'regressions') {
   const result = spawnSync(process.execPath, ['--test', 'tools/issue-252-review.test.js'], { encoding: 'utf8', env: { ...process.env, ISSUE_252_BEFORE: '278a12b84bdef461ff4281eb402532c6b456eccb' } });
   assert.equal(result.status, 1, result.stdout + result.stderr);
-  for (const item of ['A', 'B', 'C', 'D', 'E', 'N']) assert.match(result.stdout, new RegExp(`not ok \\d+ - ISSUE-252 ${item} `));
-  assert.match(result.stdout, /# fail 6/);
+  for (const item of ['A', 'B', 'C', 'D', 'E', 'N', 'CI']) assert.match(result.stdout, new RegExp(`not ok \\d+ - ISSUE-252 ${item} `));
+  assert.match(result.stdout, /# fail 7/);
   console.log('ISSUE-252 review negative controls verified');
 } else if (process.argv[2] === 'pr') {
   const head = command('git', ['rev-parse', 'HEAD']).trim();

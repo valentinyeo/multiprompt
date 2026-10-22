@@ -102,3 +102,19 @@ test('ISSUE-252 N token device binding rejects forged records and clock correcti
   assert.match(source, /g_account_hosts_cache/);
   assert.match(body(source, 'accountKnownKeyHosts'), /g_account_hosts_cache.hosts/);
 });
+
+
+test('ISSUE-252 CI owned browser journey refocuses the verified app before guarded input', () => {
+  const source = read('.claude/skills/verify-multiprompt/control.ps1');
+  const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
+  const doctor = press.indexOf('Doctor');
+  const focus = press.indexOf('SetForegroundWindow($script:window)');
+  const wait = press.indexOf('Wait-Until');
+  const guard = press.indexOf('Assert-Foreground');
+  const input = press.indexOf('[VerifyNative]::Chord($Keys)');
+  assert.ok(doctor >= 0 && focus > doctor && wait > focus && guard > wait && input > guard);
+  assert.match(press, /GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
+  const ownership = source.slice(source.indexOf('function Doctor'), source.indexOf('function Snapshot'));
+  assert.match(ownership, /window ownership mismatch/);
+  assert.match(ownership, /executable identity mismatch/);
+});
