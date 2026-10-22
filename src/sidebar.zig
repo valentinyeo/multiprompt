@@ -1757,10 +1757,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 } else {
                     _ = SelectObject(hdc, font_title);
                     const chev: LPCWSTR = if (app_state.groups[gidx].collapsed) L("\u{25B8}") else L("\u{25BE}");
-                    var chev_rc = RECT{ .left = 6, .top = y, .right = 22, .bottom = y + GROUP_HEADER_H };
+                    var chev_rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.left + uiScaled(28), .bottom = y + GROUP_HEADER_H };
                     _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER);
 
-                    var name_rc = RECT{ .left = 26, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + GROUP_HEADER_H };
+                    var name_rc = RECT{ .left = column.left + uiScaled(32), .top = y, .right = column.right - uiScaled(8), .bottom = y + GROUP_HEADER_H };
                     if (app_state.groups[gidx].name_len > 0) {
                         _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | 0x8000);
                     } else {
@@ -1860,9 +1860,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawSessionLockIcon(hdc, sw - 8, y + 10, customColorOr("muted", if (app_state.g_light_theme) RGB(92, 101, 116) else RGB(164, 173, 188)));
                 }
             } else if (LOOK_UNIFIED) {
-                const fav_size: i32 = 16;
-                const fav_gap: i32 = 8;
-                const left_pad: i32 = 10;
+                const fav_size: i32 = uiScaled(16);
+                const fav_gap: i32 = uiScaled(8);
+                const left_pad: i32 = column.left + uiScaled(12);
                 const icon: HANDLE = app_state.shells[i].favicon_hicon orelse switch (app_state.shells[i].kind) {
                     .cmd => app_state.g_icon_cmd,
                     .pwsh => app_state.g_icon_pwsh,
@@ -2120,7 +2120,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     bottom = member.y + tabRowH();
                 }
                 const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
-                var rail = RECT{ .left = column.left, .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(3), .bottom = bottom - app_state.g_sidebar_scroll };
+                var rail = RECT{ .left = column.left + uiScaled(4), .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(7), .bottom = bottom - app_state.g_sidebar_scroll };
                 _ = FillRect(hdc, &rail, brush);
                 _ = DeleteObject(brush);
             }
