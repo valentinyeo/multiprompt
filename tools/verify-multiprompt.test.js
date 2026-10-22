@@ -87,6 +87,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   const startupListener = /\.links => \{\s*launch_cache\.step\(\.links\);\s*if \(std\.Thread\.spawn\(\.\{\}, notifyListenerThread, \.\{\}\)\) \|notify_thread\| \{[^{}]*\} else \|_\| \{[^{}]*\}\s*startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/;
   assert.match(main, startupListener);
   assert.doesNotMatch(main.replace('startTunnelInboundListener();', ''), startupListener);
+  assert.match(main, /startup_phase = @enumFromInt\(@intFromEnum\(startup_phase\) \+ 1\);/);
   assert.match(read('src/launch_plan.zig'), /pub const Deferred = enum \{[^}]*\blinks,\s*tabs,/);
   assert.match(read('src/account_desktop.zig'), /pub fn accountBootstrap\(hwnd: HANDLE\) bool \{\s*if \(app_state\.g_account_bypass\) return true;/);
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
