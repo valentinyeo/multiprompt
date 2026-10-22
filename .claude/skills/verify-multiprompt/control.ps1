@@ -494,10 +494,9 @@ try {
         }
         'chat-tables' {
             $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'
+            $command += ' && echo table-ready>"' + (Join-Path $scratch 'table-ready.txt') + '"'
             Type-Text $command
-            Press @(0x0D) 'Enter: print a real Unicode table in CMD'
-            Type-Text ('echo table-ready>"' + (Join-Path $scratch 'table-ready.txt') + '"')
-            Press @(0x0D) 'Enter: persist console completion marker'
+            Press @(0x0D) 'Enter: print table and persist console completion marker in CMD'
             Wait-Until { Test-Path (Join-Path $scratch 'table-ready.txt') } 'real console table command completed'
             Press @(0x12, 0x43) 'Alt+C: open formatted Chat View'
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_tab -ge 0 -and $state.active_tab -lt @($state.tabs).Count } 'saved initial table tab'
