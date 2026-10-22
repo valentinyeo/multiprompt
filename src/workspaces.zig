@@ -3160,8 +3160,10 @@ fn leaveSingleWindowMode() bool {
         const entry = &split_entries[split_count];
         entry.id_len = @min(app_state.g_ws_id_len[ws], @as(u32, @intCast(entry.id.len)));
         if (entry.id_len > 0) @memcpy(entry.id[0..entry.id_len], app_state.g_ws_ids[ws][0..entry.id_len]);
-        const transport = workspaceExportTransport(&entry.id, entry.id[0..entry.id_len], ws) orelse return false;
-        entry.id_len = @intCast(transport.len);
+        if (std.mem.eql(u8, entry.id[0..entry.id_len], getInstanceName())) {
+            const alias = std.fmt.bufPrint(&entry.id, "split-{d}-{d}", .{ GetTickCount64(), ws }) catch return false;
+            entry.id_len = @intCast(alias.len);
+        }
         var name_buf: [32]u8 = undefined;
         const name = workspaceDisplayName(ws, &name_buf);
         entry.name_len = @intCast(@min(name.len, entry.name.len));
@@ -3537,11 +3539,6 @@ pub fn persistWorkspaceOrder() void {
     updateMainWindowTitle();
 }
 
-fn workspaceExportTransport(buf: *[32]u8, id: []const u8, slot: u8) ?[]const u8 {
-    if (!std.mem.eql(u8, id, getInstanceName())) return id;
-    return std.fmt.bufPrint(buf, "split-{d}-{d}", .{ GetTickCount64(), slot }) catch null;
-}
-
 fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
     if (slot >= app_state.g_lws_count) return false;
     ensureWorkspaceSlotId(slot);
@@ -3902,7 +3899,10 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     const name = name_copy[0..nm.len];
 
     var transport_buf: [32]u8 = undefined;
-    const transport_id = workspaceExportTransport(&transport_buf, id, slot) orelse return;
+    const transport_id = if (std.mem.eql(u8, id, getInstanceName()))
+        std.fmt.bufPrint(&transport_buf, "split-{d}-{d}", .{ GetTickCount64(), slot }) catch return
+    else
+        id;
     const exported = exportSlotSessionFile(slot, transport_id);
     if (!exported) {
         showHeaderNoticeAscii("Could not hibernate workspace - tabs left open", 4500, true);

@@ -192,11 +192,13 @@ test('IGSH-224 an open palette retains input over owned browser popups but never
 test('IGSH-224 close exports transport collisions through the same alias as split and reopens the durable ID', () => {
   const source = read('src/workspaces.zig');
   const close = source.slice(source.indexOf('pub fn closeMyWorkspaceSlot('), source.indexOf('fn deleteMyWorkspaceSlot('));
-  assert.match(close, /workspaceExportTransport\(&transport_buf, id, slot\)/);
+  assert.match(close, /const transport_id = if \(std.mem.eql\(u8, id, getInstanceName\(\)\)\)/);
+  assert.match(close, /std.fmt.bufPrint\(&transport_buf, "split-\{d\}-\{d\}", \.\{ GetTickCount64\(\), slot \}\)/);
   assert.match(close, /exportSlotSessionFile\(slot, transport_id\)/);
   assert.match(close, /addOrUpdateWorkspaceHosted\(transport_id, name, false, ""\)/);
   const split = source.slice(source.indexOf('fn leaveSingleWindowMode('), source.indexOf('pub fn newWorkspace('));
-  assert.match(split, /workspaceExportTransport\(&entry.id,/);
+  assert.match(split, /entry.id\[0\.\.entry.id_len\], getInstanceName\(\)/);
+  assert.match(split, /"split-\{d\}-\{d\}"/);
   assert.match(source, /\"split-\{d\}-\{d\}\"/);
 });
 
@@ -228,10 +230,11 @@ test('IGSH-224 upgrade retains the original shared root with a durable owner bef
   const pane = read('src/browser_pane.zig');
   assert.match(pane, /pub fn adoptLegacyBrowserProfiles\(/);
   const main = read('src/main.zig');
-  const browser = main.slice(main.indexOf('        .browser => {'), main.indexOf('        .browser => {') + 550);
-  assert.match(browser, /adoptLegacyBrowserProfiles\(\);[\s\S]*relaunchActiveRestoredBrowserPane\(\)/);
+  const startup = main.slice(main.indexOf('        .publish => {'), main.indexOf('        .browser => {') + 550);
+  assert.match(startup, /adoptLegacyBrowserProfiles\(\);[\s\S]*restoreRegisteredWorkspaceWindows\(\);[\s\S]*relaunchActiveRestoredBrowserPane\(\)/);
   assert.match(source, /if \(std.ascii.eqlIgnoreCase\(seed, destination\)\) return;/);
   assert.match(source, /ensureWorkspaceProfile\(allocator, "", destination\)/);
+  assert.match(read('src/browser_profile_clone.zig'), /if \(seed.len > 0\) \{\s+const source = try absolute\(allocator, seed\);/);
 });
 
 test('IGSH-224 host evidence includes intermediary parents rather than filtering them away', () => {

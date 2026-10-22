@@ -356,11 +356,13 @@ pub fn ensureWorkspaceProfile(allocator: std.mem.Allocator, seed: []const u8, de
         if (!try plainFile(state)) return error.MissingLocalState;
         return;
     }
-    const source = try absolute(allocator, seed);
-    defer allocator.free(source);
-    if (try attributes(source) != null) {
-        _ = try clone(allocator, seed, destination, .{});
-        return;
+    if (seed.len > 0) {
+        const source = try absolute(allocator, seed);
+        defer allocator.free(source);
+        if (try attributes(source) != null) {
+            _ = try clone(allocator, seed, destination, .{});
+            return;
+        }
     }
     const partial_text = try std.fmt.allocPrint(allocator, "{s}.partial", .{destination});
     defer allocator.free(partial_text);
