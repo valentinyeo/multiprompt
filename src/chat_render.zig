@@ -3137,6 +3137,40 @@ test "Chat View selection copies displayed ranges with CRLF and block joins" {
     try std.testing.expectEqualSlices(u16, expected, out[0..n]);
 }
 
+test "IGSH-567 pending Waiting to send text uses transcript selection and copy" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Pending message");
+    var pending: [text.len]u16 = text[0..text.len].*;
+    const old_outbox = app_state.g_chat_outbox;
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    app_state.g_chat_outbox = .empty;
+    app_state.g_chat_echo_layout_count = 1;
+    app_state.g_chat_echo_layout_ids[0] = 567;
+    app_state.g_chat_echo_layout[0] = .{ .left = 0, .top = 100, .right = 400, .bottom = 200 };
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_scroll_y = 0;
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_outbox = old_outbox;
+        app_state.g_chat_echo_layout_count = old_echo_count;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 567, .text = &pending, .state = .queued });
+    try std.testing.expectEqual(chat_echo.Label.waiting_to_send, chat_echo.pendingLabel(.offline_queue, false, false));
+    chatSelectAll();
+    const copied = try chatCopyTextAlloc(std.testing.allocator, null);
+    defer std.testing.allocator.free(copied);
+    try std.testing.expectEqualSlices(u16, text, copied);
+    app_state.g_chat_sel_anchor = chatTranscriptCharAt(null, 20, 0) orelse return error.TestUnexpectedResult;
+    app_state.g_chat_sel_caret = chatTranscriptCharAt(null, 20, 300) orelse return error.TestUnexpectedResult;
+    app_state.g_chat_sel_active = true;
+    var out: [256]u16 = undefined;
+    const n = try chatSelectionToClipboard(&out);
+    try std.testing.expectEqualSlices(u16, text, out[0..n]);
+}
+
 test "Chat View word and block selection use display ranges" {
     const sample_z = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} hello world");
     const buf = sample_z[0..sample_z.len];
