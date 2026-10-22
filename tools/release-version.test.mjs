@@ -109,35 +109,32 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
+  assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
+  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
-test('aggregate routing requires the update and Worker jobs and rejects every unsuccessful heavy dependency', () => {
+test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
-  assert.match(aggregate, /UPDATE: \$\{\{ needs\.test-windows-update\.result \}\}/);
-  assert.match(aggregate, /WORKER: \$\{\{ needs\.test-worker\.result \}\}/);
+  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
+  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source' })) {
+    assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`));
+  }
+  assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /if require_jobs success true success success success "\$result" success success; then exit 1; fi/);
-  assert.match(aggregate, /if require_jobs success true success success success success "\$result" success; then exit 1; fi/);
-  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE"/);
-  assert.match(aggregate, /UPDATE_SOURCE: \$\{\{ needs\.test-update-source\.result \}\}/);
-  assert.match(aggregate, /if require_jobs success true success success success success success "\$result"; then exit 1; fi/);
+  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE"/);
+  assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success' };
+  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Aggregate routing controls passed/);
-  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', BUILD: 'skipped', UPDATE: 'skipped', WORKER: 'skipped', UPDATE_SOURCE: 'skipped' }).status, 0);
-  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'BUILD', 'UPDATE', 'WORKER', 'UPDATE_SOURCE']) {
-    for (const status of ['failure', 'cancelled', 'skipped']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
+  for (const job of Object.keys(success)) {
+    for (const status of ['failure', 'cancelled', 'skipped', 'invalid', '']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
   }
-  assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
 test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
@@ -157,11 +154,11 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
   const vps = tests.split('\n  test-vps:\n')[1].split(/\n  [\w-]+:\n/)[0];
   const worker = tests.split('\n  test-worker:\n')[1].split(/\n  [\w-]+:\n/)[0];
   assert.doesNotMatch(vps, /Build the account Worker|Run account Worker tests|cache: npm/);
-  assert.match(worker, /needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: ubuntu-latest\n    timeout-minutes: 10/);
+  assert.match(worker, /runs-on: ubuntu-latest\n    timeout-minutes: 10/);
   assert.match(worker, /actions\/checkout@[a-f0-9]{40}\n        with:\n          fetch-depth: 0/);
-  assert.match(worker, /actions\/setup-node@[a-f0-9]{40}\n        with:\n          node-version: 22\n          cache: npm\n          cache-dependency-path: service\/package-lock.json/);
-  assert.match(worker, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        working-directory: service\n        timeout-minutes: 2\n        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build/);
-  assert.match(worker, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        run: node --test service\/test\/infra.test.js service\/test\/worker.test.js/);
+  assert.match(worker, /actions\/setup-node@[a-f0-9]{40}\n        if: steps\.paths\.outputs\.heavy == 'true'\n        with:\n          node-version: 22\n          cache: npm\n          cache-dependency-path: service\/package-lock.json/);
+  assert.match(worker, /name: Build the account Worker\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        working-directory: service\n        timeout-minutes: 2\n        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build/);
+  assert.match(worker, /name: Run account Worker tests\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        run: node --test service\/test\/infra.test.js service\/test\/worker.test.js/);
   for (const name of ['Restore Zig toolchain (PR)', 'Cache Zig toolchain', 'Install Zig 0.16.0']) {
     const step = vps.split(/(?=^      - )/m).find(step => step.startsWith(`      - name: ${name}\n`));
     assert.ok(step);

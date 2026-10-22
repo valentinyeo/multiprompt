@@ -148,13 +148,14 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
     for (const cache of caches) {
+      const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == '`));
+      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == 'pull_request'\n`));
+        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'pull_request'\n`));
       } else {
-        assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
+        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
     }
     if (file === 'test.yml') {
@@ -172,7 +173,7 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
         const steps = job.split(/(?=^      - )/m);
         const trim = steps.filter(step => step.includes('name: Bound Zig cache before save'));
         assert.equal(trim.length, 1);
-        assert.match(trim[0], /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+        assert.match(trim[0], /if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
         assert.match(trim[0], /shell: bash\n/);
         assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 1);
         assert.ok(trim[0].includes('du -sh "$ZIG_GLOBAL_CACHE_DIR"\n'));
@@ -199,7 +200,7 @@ test('test-worker skips Zig installation, account Worker build and tests on STAM
   assert.ok(steps.some(step => step.includes('worker.test.js')));
   assert.ok(steps.some(step => step.includes('wrangler deploy --dry-run')));
   for (const step of steps) {
-    assert.match(step, /if: steps\.rule\.outputs\.kind != 'STAMP'\n/);
+    assert.match(step, /if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n/);
   }
 });
 
@@ -223,9 +224,9 @@ test('build, CI, installer and documentation use the stamp contract', () => {
     assert.ok(job.includes('git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}'));
     assert.ok(job.includes('node tools/version-stamp.mjs check HEAD^ HEAD'));
     const step = name === 'test-windows-update' ? 'Test safe release updates' : name === 'test-worker' ? 'Build the account Worker' : 'Run (?:tests|server tool tests)';
-    assert.match(job, new RegExp(`- name: ${step}\\n        if: steps\\.rule\\.outputs\\.kind != 'STAMP'`));
+    assert.match(job, new RegExp(`- name: ${step}\\n        if: steps\\.paths\\.outputs\\.heavy == 'true' && steps\\.rule\\.outputs\\.kind != 'STAMP'`));
   }
-  assert.equal((workflow.match(/- name: Install Zig 0\.16\.0\n        if: steps\.rule\.outputs\.kind != 'STAMP'/g) || []).length, 3);
+  assert.equal((workflow.match(/- name: Install Zig 0\.16\.0\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'/g) || []).length, 3);
   assert.doesNotMatch(workflow, /Compile stamp/);
   const install = fs.readFileSync(path.join(root, 'tools/install-laptop1.sh'), 'utf8');
   assert.doesNotMatch(install, /Measure-Object|unstamped changelog/);
