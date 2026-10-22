@@ -2493,6 +2493,7 @@ pub const ChatHistoryEntry = struct {
     ready: std.atomic.Value(bool) = .init(false),
     result: ?chat_history.History = null,
 };
+pub var g_chat_received: chat_markdown.BlockCache = .{};
 pub var g_chat_tables: chat_markdown.TableCache = .{};
 pub var g_chat_tables_shell_id: u32 = 0;
 pub var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
@@ -2519,7 +2520,7 @@ pub var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
 pub var g_chat_switch_loading: bool = false;
 pub var g_chat_prepend_pending = false;
 
-pub const ChatHit = struct { x: i32, y: i32, char: ?*usize = null };
+pub const ChatHit = struct { x: i32, y: i32, char: ?*usize = null, find: ?struct { position: usize, y: *i32 } = null };
 
 pub const CHAT_BUBBLE_PAD = 12;
 pub const CHAT_BUBBLE_RADIUS = 4;

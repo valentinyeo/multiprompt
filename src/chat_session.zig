@@ -1,3 +1,4 @@
+const chatTableRefresh = @import("chat_render.zig").chatTableRefresh;
 const chat_switch = @import("chat_switch.zig");
 const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
@@ -850,7 +851,9 @@ pub fn chatFileOnReady() void {
             } else {
                 if (!belongs_to_active or !app_state.g_chat_active) {
                     const tables = if (app_state.g_chat_tables_shell_id == entry.key.shell_id) &app_state.g_chat_tables else &entry.tables;
-                    tables.refresh(std.heap.page_allocator, entry.history.blocks.items, history.blocks.items);
+                    var received: @import("chat_markdown.zig").BlockCache = .{};
+                    defer received.deinit(std.heap.page_allocator);
+                    tables.refreshReceived(std.heap.page_allocator, entry.history.blocks.items, history.blocks.items, entry.history.text.items, history.text.items, &received, null);
                 }
                 entry.history.deinit(std.heap.page_allocator);
                 entry.history = history;
@@ -984,9 +987,16 @@ fn refreshChatBlockCache(force: bool) bool {
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and len == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
     if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
-        app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], entry.?.history.blocks.items);
+        chatTableRefresh(entry.?.history.blocks.items, source);
     } else if (app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id or from_file != app_state.g_chat_blocks_from_file or generation != app_state.g_chat_cache_generation) {
         app_state.g_chat_tables.clear(std.heap.page_allocator);
+        app_state.g_chat_received.clear(std.heap.page_allocator);
+    }
+    var screen_blocks: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
+    const screen_count = if (!from_file and !(keyed and show_screen)) chatClassifyBlocks(source, &screen_blocks) else 0;
+    if (!from_file and !(keyed and show_screen)) {
+        chat_style.markScreenMessages(screen_blocks[0..screen_count]);
+        chatTableRefresh(screen_blocks[0..screen_count], source);
     }
     const keep_selection = @import("chat_hit.zig").keepSelection(
         app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id,
@@ -1018,14 +1028,11 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_block_count = if (len > 0) 1 else 0;
         if (len > 0) app_state.g_chat_blocks[0] = .{ .start = 0, .len = len, .role = .code };
     } else {
-        var screen_blocks: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
-        const screen_count = chatClassifyBlocks(app_state.g_chat_capture[0..len], &screen_blocks);
-        chat_style.markScreenMessages(screen_blocks[0..screen_count]);
-        app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], screen_blocks[0..screen_count]);
         app_state.g_chat_block_count = screen_count;
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
         chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
     }
+    app_state.g_chat_received.retain(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
         var latest: [8192]u16 = undefined;
         const n = chatLatestAgentReply(&latest);
@@ -1095,6 +1102,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_layout_reuse = 0;
     const cached = chatHistoryEntry(chatCacheIdentity());
     chatActivateTables(cached);
+    app_state.g_chat_received.clear(std.heap.page_allocator);
     app_state.g_chat_block_count = 0;
     app_state.g_chat_last_len = 0;
     app_state.g_chat_last_hash = 0;
