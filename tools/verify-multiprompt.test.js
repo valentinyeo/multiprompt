@@ -227,7 +227,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.doesNotMatch(extensionSetup, /Set-Content|WriteAllText|WriteAllBytes|Set-Item|PostMessage/);
   assert.match(control, /Register-WorkspaceBridge \$root \}\s+Enable-WorkspaceExtension \$root \$index/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
-  assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
+  assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
 });
 
 test('workspace zsb requests restore the main frame after lifecycle screenshots and workspace switches', () => {
@@ -276,7 +276,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
 
 test('maintained verification code contains no removable code comments', async () => {
   const { strip } = await import('./strip-comments.mjs');
-  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript']]) {
+  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript'], [read('tools/verify-scratch.test.ps1'), 'powershell']]) {
     assert.equal(strip(source, language).commentLines, 0);
   }
 });
@@ -359,7 +359,7 @@ test('IGSH-376 browser journey retains upstream focus and scratch preparation co
   const settledBeforeForeground = /\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s+Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s+return \$pane/;
   assert.match(open, settledBeforeForeground);
   assert.doesNotMatch(open.replace('Focus-BrowserPaneOwner $Step $pane.browser_connection_id', ''), settledBeforeForeground);
-  const prepareBeforeCopy = /\$stopped = \$job.Stop\(\)[\s\S]*?Prepare-ScratchEvidence \$scratch[\s\S]*?Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/;
+  const prepareBeforeCopy = /\$stopped = \$job.Stop\(\)[\s\S]*?Prepare-ScratchEvidence \$scratch[\s\S]*?Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/;
   assert.match(control, prepareBeforeCopy);
   assert.doesNotMatch(control.replace('Prepare-ScratchEvidence $scratch', ''), prepareBeforeCopy);
   assert.doesNotMatch(control, /robocopy/);
@@ -588,4 +588,54 @@ test('IGSH-556: Favorites groups journey uses real keys and requires independent
   }
   assert.match(read(skill + 'features/README.md'), /\[Favorites groups\]\(favorites-groups.md\)/);
   assert.match(read(skill + 'features/workspaces.md'), /\[Favorites groups\]\(favorites-groups.md\)/);
+});
+
+function assertsScratchRaceHandling(source) {
+  const cleanup = source.slice(source.indexOf('function Test-VanishedScratchItem('), source.indexOf('function Wait-Until('));
+  assert.match(cleanup, /if \(Test-Path -LiteralPath \$Path\) \{ return \$false \}/);
+  for (const type of ['System.Management.Automation.ItemNotFoundException', 'IO.FileNotFoundException', 'IO.DirectoryNotFoundException']) {
+    assert.ok(cleanup.includes(`-is [${type}]`));
+  }
+  assert.match(cleanup, /\$exception = \$exception.InnerException/);
+  assert.match(cleanup, /catch \{\s*if \(-not \(Test-VanishedScratchItem \$_ \$entry.FullName\)\) \{ throw \}/);
+  assert.match(cleanup, /AddSeconds\(20\)/);
+  assert.match(cleanup, /Scratch cleanup left paths:[^\n]*\$leftovers -join/);
+  assert.match(source, /Remove-ScratchPath \$scratch/);
+}
+
+test('ISSUE-559 cleanup tolerates only typed missing paths and reports remaining paths within a bound', () => {
+  assertsScratchRaceHandling(control);
+  for (const [before, after] of [
+    ['if (Test-Path -LiteralPath $Path) { return $false }', ''],
+    ['if (-not (Test-VanishedScratchItem $_ $entry.FullName)) { throw }', 'throw'],
+    ['Scratch cleanup left paths:', 'Cleanup failed:'],
+  ]) {
+    const broken = control.replace(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => assertsScratchRaceHandling(broken));
+  }
+});
+
+test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and names locked leftovers', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'verify-scratch.test.ps1')], { encoding: 'utf8', timeout: 45000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ISSUE-559 old cleanup rejected:/);
+  assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
+});
+
+test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
+  const palette = control.slice(control.indexOf('function Focus-Palette('), control.indexOf('function Wait-WorkspaceSurface('));
+  assert.equal((palette.match(/Press @\(0x11, 0x4B\)/g) || []).length, 1);
+  assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
+  assert.match(palette, /'command palette initialized and owned frame focused' 20/);
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout'))"), control.indexOf("    Record 'Launch complete;"));
+  assert.match(setup, /ZigShell\/EdgeUserData/);
+  assert.match(setup, /\$warmupJob.Start\(\$edge/);
+  assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
+  assert.match(setup, /'isolated browser rendered setup page before the pane adoption deadline starts' 60/);
+  assert.doesNotMatch(setup, /Assert-BrowserPane|PaneLayoutProof|Start-Sleep/);
+  assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
+  assert.match(workflow, /run: node --test tools\/verify-multiprompt.test.js/);
+  assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
 });

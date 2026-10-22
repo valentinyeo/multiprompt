@@ -18,6 +18,7 @@ on:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
       - tools/verify-multiprompt.test.js
+      - tools/verify-scratch.test.ps1
       - tools/favorites-groups.test.js
       - src/**
       - tools/check-browser-pane-stuck.mjs

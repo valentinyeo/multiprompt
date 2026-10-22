@@ -438,6 +438,8 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $scratch = Join-Path $env:RUNNER_TEMP ('multiprompt-verify-' + [guid]::NewGuid().ToString('N'))
 $process = $null
 $job = $null
+$warmupJob = $null
+$warmup = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -455,26 +457,66 @@ function Record([string]$Action) {
     Save-Json @($script:actions.ToArray()) 'actions.json'
 }
 
+function Test-VanishedScratchItem($Failure, [string]$Path) {
+    if (Test-Path -LiteralPath $Path) { return $false }
+    $exception = $Failure.Exception
+    while ($null -ne $exception) {
+        if ($exception -is [System.Management.Automation.ItemNotFoundException] -or
+            $exception -is [IO.FileNotFoundException] -or $exception -is [IO.DirectoryNotFoundException]) { return $true }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
+
 function Prepare-ScratchEvidence([string]$Path) {
     $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
-    foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
-        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
-            Save-Json @($script:scratchLinks) 'scratch-links.json'
-            $entry.Delete()
-            Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
-        } elseif ($entry -is [IO.FileInfo] -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
-            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-            $deadline = [DateTime]::UtcNow.AddSeconds(20)
-            while ($true) {
-                try { $entry.Delete(); break } catch {
-                    if ([DateTime]::UtcNow -ge $deadline) { throw }
-                    Start-Sleep -Milliseconds 200
+    try {
+        foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
+            try {
+                if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
+                    Save-Json @($script:scratchLinks) 'scratch-links.json'
+                    $entry.Delete()
+                    Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+                } elseif ($entry -is [IO.FileInfo] -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
+                    [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while ($true) {
+                        try { $entry.Delete(); break } catch {
+                            if ([DateTime]::UtcNow -ge $deadline) { throw }
+                            Start-Sleep -Milliseconds 200
+                        }
+                    }
+                } else {
+                    $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+                    if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
                 }
+            } catch {
+                if (-not (Test-VanishedScratchItem $_ $entry.FullName)) { throw }
             }
-        } else {
-            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
-            if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+        }
+    } catch {
+        if (-not (Test-VanishedScratchItem $_ $Path)) { throw }
+    }
+}
+
+function Remove-ScratchPath([string]$Path) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $lastError = ''
+    while (Test-Path -LiteralPath $Path) {
+        try { Remove-Item $Path -Recurse -Force } catch {
+            $failedPath = if ($_.TargetObject -is [string]) { $_.TargetObject } else { $Path }
+            if (-not (Test-VanishedScratchItem $_ $failedPath)) {
+                if (-not (Test-Path -LiteralPath $Path)) { throw }
+                $lastError = $_.Exception.Message
+            }
+        }
+        if (Test-Path -LiteralPath $Path) {
+            if ([DateTime]::UtcNow -ge $deadline) {
+                $leftovers = @($Path) + @(Get-ChildItem -LiteralPath $Path -Force -Recurse | Select-Object -ExpandProperty FullName)
+                throw ("Scratch cleanup left paths: " + ($leftovers -join ', ') + ". " + $lastError)
+            }
+            Start-Sleep -Milliseconds 200
         }
     }
 }
@@ -704,8 +746,12 @@ function Focus-Palette([string]$Query, [int]$Target) {
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Wait-Until {
         $trace = (Get-Content $log -Raw).Substring($start)
+        if ($trace -notmatch '\[palette\] ready chars=0 count=\d+ target=\d+') { return $false }
+        Doctor
+        Assert-Foreground
+        [void][VerifyNative]::SetForegroundWindow($script:window)
         $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-    } 'command palette initialized and owned frame focused'
+    } 'command palette initialized and owned frame focused' 20
     Type-Text $Query
     Wait-Until {
         (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
@@ -1035,6 +1081,21 @@ try {
         $state = Read-Inbox
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
+    if ($Feature -in @('browser-pane-stuck', 'pane-layout')) {
+        $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
+        if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires installed Edge' }
+        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
+        $warmupJob = New-Object VerifyJob
+        $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
+        $warmup = $warmupJob.Start($edge, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
+        Wait-Until {
+            $warmup.Refresh()
+            if ($warmup.HasExited) { throw 'Browser setup process exited before readiness' }
+            $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt verification browser ready'
+        } 'isolated browser rendered setup page before the pane adoption deadline starts' 60
+        [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
+        Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
+    }
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
     [void][VerifyNative]::SetForegroundWindow($script:window)
@@ -1753,6 +1814,10 @@ try {
                     Save-Json @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } 'process-tree.json'
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
+                if ($null -ne $warmupJob) {
+                    $warmupStopped = $warmupJob.Stop()
+                    Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
+                }
             } finally {
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
@@ -1770,15 +1835,7 @@ try {
                 }
             }
         }
-        if (Test-Path $scratch) {
-            $deadline = [DateTime]::UtcNow.AddSeconds(20)
-            while (Test-Path $scratch) {
-                try { Remove-Item $scratch -Recurse -Force } catch {
-                    if ([DateTime]::UtcNow -ge $deadline) { throw }
-                    Start-Sleep -Milliseconds 200
-                }
-            }
-        }
+        Remove-ScratchPath $scratch
         $result.cleanup = 'owned process tree stopped; scratch copied to evidence/data then removed'
         $result.scratchRemoved = -not (Test-Path $scratch)
         if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }
@@ -1792,6 +1849,8 @@ try {
         $result.status = 'failed'
         $result.cleanup = $_.Exception.Message
     }
+    if ($null -ne $warmup) { $warmup.Dispose() }
+    if ($null -ne $warmupJob) { $warmupJob.Dispose() }
     if (Get-Variable nativeRegistry -Scope Script -ErrorAction SilentlyContinue) {
         if (Test-Path $script:nativeRegistry) { Remove-Item $script:nativeRegistry -Force }
     }

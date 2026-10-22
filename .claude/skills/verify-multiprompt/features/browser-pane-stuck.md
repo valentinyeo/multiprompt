@@ -22,6 +22,7 @@ Verify browser-pane close/reopen behavior and that a docked pane works without t
 Preconditions:
 
 - Baseline Doctor passes on a fresh GitHub Windows desktop with isolated empty app/browser data and an installed browser.
+- Setup gives the isolated Edge profile up to 60 seconds to render an owned blank setup page before any pane assertions. The setup browser stays job-owned until cleanup; no pane assertion is retried. Docking then retains its separate 25-second bound and main-window activation its 5-second bound.
 - No extension is installed in the isolated profile. Window ID 0 is expected and must not prevent docking or visibility.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=browser-pane-stuck`; pull requests run both appearance and browser-pane-stuck.
