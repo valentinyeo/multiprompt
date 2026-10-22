@@ -24,6 +24,7 @@ const EXTERNAL_WINDOW_BOUNDS = { left: 90, top: 90, width: 1400, height: 900 };
 let port;
 const debuggedTabs = new Set();
 const cdpOperationChains = new Map();
+const cdpSessionCancels = new Map();
 const screenshotCdpDetachTimers = new Map();
 const screenshotCdpDetachInFlight = new Map();
 const screenshotCdpPageEnabledTabs = new Set();
@@ -68,9 +69,10 @@ let extensionReloadTimer;
 function connect() {
   if (port) return port;
 
-  port = chrome.runtime.connectNative(HOST);
+  const connectedPort = chrome.runtime.connectNative(HOST);
+  port = connectedPort;
 
-  port.onMessage.addListener((message) => {
+  connectedPort.onMessage.addListener((message) => {
     console.log("multiprompt browser bridge:", message);
     bridgeVersionCheckChain = bridgeVersionCheckChain.then(async () => {
       await checkBridgeVersion(message);
@@ -84,7 +86,8 @@ function connect() {
     });
   });
 
-  port.onDisconnect.addListener(() => {
+  connectedPort.onDisconnect.addListener(() => {
+    if (port !== connectedPort) return;
     console.warn("multiprompt browser bridge disconnected:", chrome.runtime.lastError?.message);
     port = undefined;
     rejectPendingHostReplies(chrome.runtime.lastError?.message || "native host disconnected");
@@ -288,17 +291,20 @@ async function handleHostMessage(message) {
   try {
     if (extensionOutdated && message.method !== "extensionReload") console.warn(EXTENSION_OUTDATED_ERROR);
     const actionTimeoutMs = message.method === "screenshot" || message.method === "shoturl" ? 35000 : 15000;
-    const result = await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
+    const result = message.method === "cdp" && message.script !== undefined
+      ? await dispatch(message)
+      : await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
     if (result?.error === "page_error") {
       sendResponse(message, { ok: false, error: "page_error", result });
       return;
     }
     sendResponse(message, { ok: true, result });
-    if (message.method === "extensionReload") scheduleExtensionReload();
+    if (message.method === "extensionReload" || (message.method === "reset" && result.reloadScheduled)) scheduleExtensionReload();
   } catch (error) {
     sendResponse(message, {
       ok: false,
       error: error?.message || String(error),
+      ...(error?.failedStep ? { failedStep: error.failedStep, results: error.results || [] } : {}),
     });
     if (reloadPending) scheduleExtensionReload();
   }
@@ -327,6 +333,8 @@ async function dispatch(message) {
       return reloadAction(message);
     case "extensionReload":
       return { reloadScheduled: true };
+    case "reset":
+      return resetBridge(message);
     case "setTheme":
       return applyBrowserTheme(message);
     case "tabs":
@@ -1946,6 +1954,7 @@ async function typeAction(message) {
   const tab = await getTargetTab(message);
   const selector = stringOr(message.selector, "");
   const text = stringOr(message.text, "");
+  const rawEnter = message.rawEnter === true;
   let target = null;
   if (selector) {
     await runInTab(tab.id, installCursorApi, [cursorOptionsFrom(message)]).catch(() => {});
@@ -1962,12 +1971,12 @@ async function typeAction(message) {
       await dispatchSelectAll(debuggee);
     }
     if (message.keys === true) {
-      await dispatchTrustedKeys(debuggee, text);
+      await dispatchTrustedKeys(debuggee, text, rawEnter);
     } else {
-      await dispatchTrustedText(debuggee, text);
+      await dispatchTrustedText(debuggee, text, rawEnter);
     }
   });
-  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", selector: selector || undefined, frameId: target?.frameId, length: text.length };
+  return { typed: true, trusted: true, mode: message.keys === true ? "keys" : "text", rawEnter, selector: selector || undefined, frameId: target?.frameId, length: text.length };
 }
 
 async function locateSelectorAcrossFrames(tabId, selector, requireEditable) {
@@ -2019,8 +2028,13 @@ async function insertAction(message) {
   return { inserted: text.length, trusted: true };
 }
 
-async function dispatchTrustedText(debuggee, text) {
-  const lines = text.split("\n");
+async function dispatchTrustedText(debuggee, text, rawEnter = false) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  if (!rawEnter) {
+    if (normalized.length > 0) await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: normalized });
+    return;
+  }
+  const lines = normalized.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].length > 0) {
       await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: lines[i] });
@@ -2029,10 +2043,11 @@ async function dispatchTrustedText(debuggee, text) {
   }
 }
 
-async function dispatchTrustedKeys(debuggee, text) {
+async function dispatchTrustedKeys(debuggee, text, rawEnter = false) {
   for (const character of text.replace(/\r\n?/g, "\n")) {
     if (character === "\n") {
-      await dispatchEnter(debuggee);
+      if (rawEnter) await dispatchEnter(debuggee);
+      else await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: "\n" });
       continue;
     }
     const common = printableKeyDescriptor(character);
@@ -2579,34 +2594,76 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation) {
-  const previous = cdpOperationChains.get(tabId) || Promise.resolve();
-  const current = previous.catch(() => {}).then(async () => {
+function withCdpSession(tabId, operation, timeoutMs = 10000) {
+  if (cdpOperationChains.get(tabId)) {
+    return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
+  }
+  let cancel;
+  const cancelled = new Promise((_, reject) => { cancel = reject; });
+  const current = Promise.resolve().then(async () => {
     clearScreenshotCdpDetachTimer(tabId);
-    const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
-    if (pendingDetach) await pendingDetach.catch(() => {});
-
     const debuggee = { tabId };
-    if (debuggedTabs.has(tabId)) {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
-    }
-    await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
-    debuggedTabs.add(tabId);
+    const checkSession = () => {
+      if (cdpOperationChains.get(tabId) !== current) throw new Error("CDP session reset; retry command");
+    };
     try {
-      await chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true });
-      return await withTimeout(operation(debuggee), 15000, "CDP operation timed out");
+      const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
+      if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
+      checkSession();
+      if (debuggedTabs.has(tabId)) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
+      checkSession();
+      debuggedTabs.add(tabId);
+      await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+      checkSession();
+      await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
+      checkSession();
+      return await (timeoutMs === null ? operation(debuggee, checkSession) : withTimeout(operation(debuggee, checkSession), timeoutMs, "CDP operation timed out; run zsb reset"));
     } finally {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
+      if (cdpOperationChains.get(tabId) === current) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
     }
   });
   cdpOperationChains.set(tabId, current);
-  return current.finally(() => {
-    if (cdpOperationChains.get(tabId) === current) cdpOperationChains.delete(tabId);
+  cdpSessionCancels.set(tabId, cancel);
+  return Promise.race([current, cancelled]).finally(() => {
+    if (cdpOperationChains.get(tabId) === current) {
+      cdpOperationChains.delete(tabId);
+      cdpSessionCancels.delete(tabId);
+    }
   });
+}
+
+async function resetBridge(message) {
+  const windowId = messageWindowId(message);
+  const tabs = await chrome.tabs.query(windowId == null ? {} : { windowId });
+  let reloadScheduled = false;
+  await Promise.all(tabs.map(async ({ id: tabId }) => {
+    cdpSessionCancels.get(tabId)?.(new Error("CDP session reset; retry command"));
+    cdpSessionCancels.delete(tabId);
+    cdpOperationChains.delete(tabId);
+    clearScreenshotCdpDetachTimer(tabId);
+    screenshotCdpDetachInFlight.delete(tabId);
+    await withTimeout(chrome.debugger.detach({ tabId }), 1000, "CDP reset detach timed out").catch((error) => {
+      if (error?.message === "CDP reset detach timed out") reloadScheduled = true;
+    });
+    debuggedTabs.delete(tabId);
+    screenshotCdpPageEnabledTabs.delete(tabId);
+    focusEmulatedTabs.delete(tabId);
+    consoleCaptureTabs.delete(tabId);
+  }));
+  const oldPort = port;
+  port = undefined;
+  oldPort?.disconnect();
+  bridgeVersionCheckChain = Promise.resolve();
+  connect();
+  return { reset: true, windowId, tabs: tabs.length, reloadScheduled };
 }
 
 async function tryAcceptPendingDialog(debuggee) {
@@ -2658,11 +2715,91 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
 
 async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
+  if (message.script !== undefined) {
+    validateCdpScript(message.script);
+    return withCdpSession(tabId, async (debuggee, checkSession) => {
+      const results = [];
+      for (const [index, step] of message.script.entries()) {
+        try {
+          checkSession();
+          results.push(await runCdpScriptStep(debuggee, step, checkSession));
+        } catch (cause) {
+          const error = new Error(`CDP script step ${index + 1} (${step.method || step.waitEvent || "waitMs"}) failed: ${errorText(cause)}`);
+          error.failedStep = index + 1;
+          error.results = results;
+          throw error;
+        }
+      }
+      return results;
+    }, null);
+  }
   const cdpMethod = stringOr(message.cdpMethod, "");
   if (!cdpMethod) throw new Error("missing cdpMethod");
 
   return withCdpSession(tabId, (debuggee) =>
     chrome.debugger.sendCommand(debuggee, cdpMethod, message.params || {}));
+}
+
+function validateCdpScript(script) {
+  if (!Array.isArray(script) || script.length === 0 || script.length > 1000) {
+    throw new Error("CDP script must be an array of 1-1000 steps");
+  }
+  let budget = 0;
+  for (const [index, step] of script.entries()) {
+    const invalid = (reason) => {
+      const error = new Error(`CDP script step ${index + 1}: ${reason}`);
+      error.failedStep = index + 1;
+      throw error;
+    };
+    if (!step || typeof step !== "object" || Array.isArray(step)) invalid("expected an object");
+    if (Object.keys(step).some((key) => !["method", "params", "waitEvent", "timeoutMs", "waitMs"].includes(key))) invalid("unknown field");
+    if (step.method !== undefined && (typeof step.method !== "string" || !step.method.trim())) invalid("invalid method");
+    if (step.waitEvent !== undefined && (typeof step.waitEvent !== "string" || !step.waitEvent.trim())) invalid("invalid waitEvent");
+    if (step.params !== undefined && (!step.method || !step.params || typeof step.params !== "object" || Array.isArray(step.params))) invalid("params must be an object with a method");
+    if (step.waitMs !== undefined) {
+      if (!Number.isInteger(step.waitMs) || step.waitMs < 0 || step.waitMs > 300000 || Object.keys(step).length !== 1) invalid("waitMs must be a standalone delay (0-300000)");
+      budget += step.waitMs;
+    } else {
+      if (!step.method && !step.waitEvent) invalid("missing method, waitEvent or waitMs");
+      const timeout = step.timeoutMs ?? 15000;
+      if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 300000) invalid("timeoutMs must be 1-300000");
+      budget += timeout;
+    }
+    if (budget > 300000) invalid("total script timeout budget exceeds 300000 ms");
+  }
+}
+
+async function runCdpScriptStep(debuggee, step, checkSession) {
+  if (step.waitMs !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+    return { waitMs: step.waitMs };
+  }
+  let listener;
+  let active = true;
+  try {
+    return await withTimeout((async () => {
+      if (step.waitEvent?.startsWith("Page.")) await chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+      if (!active) return;
+      checkSession();
+      let event;
+      if (step.waitEvent) {
+        event = new Promise((resolve) => {
+          listener = (source, method, params) => {
+            if (source.tabId === debuggee.tabId && !source.sessionId && method === step.waitEvent) resolve(params || {});
+          };
+          chrome.debugger.onEvent.addListener(listener);
+        });
+      }
+      const result = step.method ? await chrome.debugger.sendCommand(debuggee, step.method, step.params || {}) : undefined;
+      return {
+        ...(step.method ? { method: step.method, result: result ?? {} } : { waitEvent: step.waitEvent }),
+        ...(event ? { event: await event } : {}),
+      };
+    })(), step.timeoutMs ?? 15000, "CDP step timed out");
+  } finally {
+    active = false;
+    if (listener) chrome.debugger.onEvent.removeListener(listener);
+  }
 }
 
 async function consoleAction(message) {

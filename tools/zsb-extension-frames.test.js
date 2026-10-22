@@ -44,6 +44,7 @@ function harness(frames, {
       return { via: "native-window", dataUrl: `data:image/png;base64,${png}`, bytesApprox: 8 };
     },
     cdpOperationChains: new Map(),
+    cdpSessionCancels: new Map(),
     debuggedTabs: new Set(),
     screenshotCdpDetachTimers: new Map(),
     screenshotCdpDetachInFlight: new Map(),
@@ -195,7 +196,7 @@ for (const failure of [
     assert.deepEqual(h.cdpTargets, [1, 1]);
     assert.equal(h.cdpCommands.some((call) => call.method === "Runtime.evaluate"), failure.name === "evaluation");
     assert.deepEqual(h.scriptCalls.map((call) => Array.from(call.frameIds)).sort(), [[0], [0], [2], [2], [3], [3]]);
-    assert.equal(h.detached.length, failure.attachError ? 0 : 2);
+    assert.deepEqual(h.detached, [1, 1]);
   });
 }
 
@@ -231,7 +232,7 @@ for (const failure of [
     assert.equal(h.captures[0].windowId, 10);
     assert.equal(h.captures[0].tabId, 1);
     assert.equal(h.captures[0].options.format, "png");
-    assert.equal(h.detached.length, failure.attachError ? 0 : 1);
+    assert.deepEqual(h.detached, [1]);
   });
 }
 
