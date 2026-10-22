@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const net = require('node:net');
+const { availableParallelism } = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawn, execFileSync } = require('node:child_process');
-const test = require('node:test');
+const { describe, test } = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 const read = file => process.env.ZSB_DEADLINE_BASE
@@ -207,9 +208,11 @@ async function remoteDeadline(t, drip) {
   assert.ok(Date.now() - started < 2500);
 }
 
-for (const drip of [false, true]) {
-  test(`ISSUE-154 remote client deadline errors on ${drip ? 'incomplete' : 'missing'} replies`, { skip: process.platform === 'win32' }, t => remoteDeadline(t, drip));
-}
+describe('ZSB remote deadlines', { concurrency: availableParallelism() }, () => {
+  for (const drip of [false, true]) {
+    test(`ISSUE-154 remote client deadline errors on ${drip ? 'incomplete' : 'missing'} replies`, { skip: process.platform === 'win32' }, t => remoteDeadline(t, drip));
+  }
+});
 
 test('ISSUE-154 real Windows CLI times out a missing CDP reply while another request succeeds', { skip: process.platform !== 'win32', timeout: 35000 }, async t => {
   const profile = `deadline-${process.pid}`;
@@ -370,86 +373,88 @@ function timedOut(result, deadline) {
   assert.doesNotMatch(result.stdout + result.stderr, /Traceback/);
 }
 
-test('silent server hits the total deadline', { skip: process.platform === 'win32' }, async () => {
-  timedOut(await run(['open', 'https://example.com'], '0.2'), 0.2);
-});
-
-test('trickling server cannot reset the total deadline with a byte every second', { skip: process.platform === 'win32' }, async () => {
-  let bytes = 0;
-  const result = await run(['text'], '2.5', socket => {
-    const timer = setInterval(() => { bytes++; socket.write(' '); }, 1000);
-    return () => clearInterval(timer);
+describe('ZSB total deadlines', { concurrency: availableParallelism() }, () => {
+  test('silent server hits the total deadline', { skip: process.platform === 'win32' }, async () => {
+    timedOut(await run(['open', 'https://example.com'], '0.2'), 0.2);
   });
-  timedOut(result, 2.5);
-  assert.ok(bytes >= 2, `fixture sent ${bytes} bytes`);
-});
 
-for (const command of ['status', 'version']) {
-  test(`${command} defaults to five seconds against a silent server`, { skip: process.platform === 'win32' }, async () => {
-    timedOut(await run([command], undefined, undefined, 5), 5);
+  test('trickling server cannot reset the total deadline with a byte every second', { skip: process.platform === 'win32' }, async () => {
+    let bytes = 0;
+    const result = await run(['text'], '2.5', socket => {
+      const timer = setInterval(() => { bytes++; socket.write(' '); }, 1000);
+      return () => clearInterval(timer);
+    });
+    timedOut(result, 2.5);
+    assert.ok(bytes >= 2, `fixture sent ${bytes} bytes`);
   });
-  test(`${command} accepts a shorter explicit deadline`, { skip: process.platform === 'win32' }, async () => {
-    timedOut(await run([command], '0.1'), 0.1);
+
+  for (const command of ['status', 'version']) {
+    test(`${command} defaults to five seconds against a silent server`, { skip: process.platform === 'win32' }, async () => {
+      timedOut(await run([command], undefined, undefined, 5), 5);
+    });
+    test(`${command} accepts a shorter explicit deadline`, { skip: process.platform === 'win32' }, async () => {
+      timedOut(await run([command], '0.1'), 0.1);
+    });
+  }
+
+  test('ZSB_TIMEOUT can extend the short status default', { skip: process.platform === 'win32' }, async () => {
+    const reply = '{"ok":true,"result":{}}\n';
+    const result = await run(['status'], '7', socket => {
+      const timer = setTimeout(() => socket.end(reply), 5200);
+      return () => clearTimeout(timer);
+    });
+    assert.equal(result.killed, false);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.stdout, reply);
+    assert.ok(result.elapsed > 5000);
   });
-}
 
-test('ZSB_TIMEOUT can extend the short status default', { skip: process.platform === 'win32' }, async () => {
-  const reply = '{"ok":true,"result":{}}\n';
-  const result = await run(['status'], '7', socket => {
-    const timer = setTimeout(() => socket.end(reply), 5200);
-    return () => clearTimeout(timer);
+  test('ordinary commands default to fifteen seconds', { skip: process.platform === 'win32' }, async () => {
+    timedOut(await run(['open'], undefined, undefined, 15), 15);
   });
-  assert.equal(result.killed, false);
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  assert.equal(result.stdout, reply);
-  assert.ok(result.elapsed > 5000);
-});
 
-test('ordinary commands default to fifteen seconds', { skip: process.platform === 'win32' }, async () => {
-  timedOut(await run(['open'], undefined, undefined, 15), 15);
-});
+  for (const timeout of ['', '0', '-1', 'NaN', 'Infinity', '-Infinity', '1e309', '86401', 'oops']) {
+    test(`invalid ZSB_TIMEOUT ${JSON.stringify(timeout)} fails with bad_args before sending`, { skip: process.platform === 'win32' }, async () => {
+      const result = await run(['open'], timeout, undefined, 1);
+      assert.equal(result.code, 1, result.stdout + result.stderr);
+      assert.equal(JSON.parse(result.stdout).error, 'bad_args');
+      assert.deepEqual(result.requests, []);
+      assert.equal(result.killed, false);
+    });
+  }
 
-for (const timeout of ['', '0', '-1', 'NaN', 'Infinity', '-Infinity', '1e309', '86401', 'oops']) {
-  test(`invalid ZSB_TIMEOUT ${JSON.stringify(timeout)} fails with bad_args before sending`, { skip: process.platform === 'win32' }, async () => {
-    const result = await run(['open'], timeout, undefined, 1);
-    assert.equal(result.code, 1, result.stdout + result.stderr);
+  test('valid decimal deadline allows fragmented success and preserves command parameters', { skip: process.platform === 'win32' }, async () => {
+    const args = ['cdp', 'Runtime.evaluate', '{"expression":"1","timeout":20000,"awaitPromise":true}'];
+    const reply = '{"ok":true,"result":{"value":1}}\n';
+    const result = await run(args, '1.5', socket => {
+      socket.write(reply.slice(0, 10));
+      const timer = setTimeout(() => socket.end(reply.slice(10)), 200);
+      return () => clearTimeout(timer);
+    });
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.stdout, reply);
+    assert.deepEqual(result.requests, [args]);
+  });
+
+  test('selftest has one deadline shared across requests', { skip: process.platform === 'win32' }, async () => {
+    let requests = 0;
+    const result = await run(['selftest'], '0.5', socket => {
+      if (++requests !== 1) return;
+      const timer = setTimeout(() => socket.end('ok\n'), 100);
+      return () => clearTimeout(timer);
+    });
+    timedOut(result, 0.5);
+    assert.equal(result.requests.length, 2);
+    assert.equal(result.requests[0][0], 'open');
+    assert.deepEqual(result.requests[1], ['tabs']);
+  });
+
+  test('selftest rejects invalid ZSB_TIMEOUT before sending', { skip: process.platform === 'win32' }, async () => {
+    const result = await run(['selftest'], 'NaN', undefined, 1);
+    assert.equal(result.code, 1);
     assert.equal(JSON.parse(result.stdout).error, 'bad_args');
     assert.deepEqual(result.requests, []);
-    assert.equal(result.killed, false);
   });
-}
-
-test('valid decimal deadline allows fragmented success and preserves command parameters', { skip: process.platform === 'win32' }, async () => {
-  const args = ['cdp', 'Runtime.evaluate', '{"expression":"1","timeout":20000,"awaitPromise":true}'];
-  const reply = '{"ok":true,"result":{"value":1}}\n';
-  const result = await run(args, '1.5', socket => {
-    socket.write(reply.slice(0, 10));
-    const timer = setTimeout(() => socket.end(reply.slice(10)), 200);
-    return () => clearTimeout(timer);
-  });
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  assert.equal(result.stdout, reply);
-  assert.deepEqual(result.requests, [args]);
-});
-
-test('selftest has one deadline shared across requests', { skip: process.platform === 'win32' }, async () => {
-  let requests = 0;
-  const result = await run(['selftest'], '0.5', socket => {
-    if (++requests !== 1) return;
-    const timer = setTimeout(() => socket.end('ok\n'), 100);
-    return () => clearTimeout(timer);
-  });
-  timedOut(result, 0.5);
-  assert.equal(result.requests.length, 2);
-  assert.equal(result.requests[0][0], 'open');
-  assert.deepEqual(result.requests[1], ['tabs']);
-});
-
-test('selftest rejects invalid ZSB_TIMEOUT before sending', { skip: process.platform === 'win32' }, async () => {
-  const result = await run(['selftest'], 'NaN', undefined, 1);
-  assert.equal(result.code, 1);
-  assert.equal(JSON.parse(result.stdout).error, 'bad_args');
-  assert.deepEqual(result.requests, []);
 });
 
 test('long-running command defaults and CI wiring are explicit', () => {
