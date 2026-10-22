@@ -53,6 +53,17 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.799", .items = &.{
+        .{ .text = "Browser commands now stop waiting with a clear timeout error instead of hanging, with configurable deadlines and faster status checks.", .ticket = "IGSH-278" },
+        .{ .text = "Browser text, snapshots and screenshots keep working on pages where another extension injected its own frame.", .ticket = "IGSH-459" },
+        .{ .text = "Idle chat windows no longer repeatedly check foreground ownership when no session visit can be recorded.", .ticket = "IGSH-513" },
+        .{ .text = "Browser panes that cannot connect can now be closed and reopened, or retried after a short timeout, without losing their URL.", .ticket = "IGSH-523" },
+        .{ .text = "Your saved session accepts typing and clicks while connections and other tabs load in the background.", .ticket = "IGSH-543" },
+        .{ .text = "Browser panes no longer appear as separate taskbar windows during launch.", .ticket = "IGSH-543" },
+        .{ .text = "Loading tabs stay intact when selected or closed, and reconnects no longer interrupt startup.", .ticket = "IGSH-543" },
+        .{ .text = "Sign-in pauses loading cleanly, and terminal launch failures now show an error.", .ticket = "IGSH-543" },
+        .{ .text = "Reduced duplicate pull-request CI builds and secret scans, and cancelled superseded lightweight checks while preserving arm64 release coverage and existing check names.", .ticket = "IGSH-544" },
+    } },
     .{ .ver = "0.28.798", .items = &.{
         .{ .text = "Browser commands now click reliably inside embedded pages and can run JavaScript in a chosen frame.", .ticket = "IGSH-305" },
         .{ .text = "Chat View now hides internal reminder blocks without losing the surrounding conversation text.", .ticket = "IGSH-437" },
