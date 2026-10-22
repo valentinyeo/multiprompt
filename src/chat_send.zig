@@ -1510,6 +1510,14 @@ fn chatSendViaConsole(shell_index: u32, send_text: []const u16, echo_id: u64) Sh
     return .ok;
 }
 
+fn chatOutboxReadyToType(channel: bool, direct: bool, busy: bool, screen_working_here: bool, input_row_idle: bool, is_active_shell: bool) bool {
+    if (!channel and busy) return false;
+    if (!channel and screen_working_here) return false;
+    if ((channel or direct) and !input_row_idle) return false;
+    if (!channel and !direct and !is_active_shell) return false;
+    return true;
+}
+
 fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
@@ -1527,11 +1535,11 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
         return true;
     }
     const channel = chatTmuxSendEligible(shell_index);
-    if (app_state.shells[shell_index].activity == .active) return false;
-    if (shell_index == app_state.active_shell and app_state.g_chat_screen_working) return false;
+    const busy = app_state.shells[shell_index].activity == .active;
+    const screen_working_here = shell_index == app_state.active_shell and app_state.g_chat_screen_working;
     const direct = chatShouldUseDirectInput(shell_index);
-    if ((channel or direct) and !chatOutboxInputRowIdle(shell_index)) return false;
-    if (!channel and !direct and shell_index != app_state.active_shell) return false;
+    const input_row_idle = if (channel or (direct and !busy and !screen_working_here)) chatOutboxInputRowIdle(shell_index) else false;
+    if (!chatOutboxReadyToType(channel, direct, busy, screen_working_here, input_row_idle, shell_index == app_state.active_shell)) return false;
     const echo_id = app_state.g_chat_outbox.items[e].id;
     switch (sendTextToShellVerifiedAt(shell_index, app_state.g_chat_outbox.items[e].text, echo_id)) {
         .ok => {},
@@ -2566,4 +2574,24 @@ test "ISSUE-460 session queued evidence cannot release the next outbox entry" {
     chatOutboxRemoveAtIn(&list, allocator, 0);
     try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, key));
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second request"), list.items[0].text);
+}
+
+test "IGSH-564 busy tmux session still gets the queued message typed" {
+    try std.testing.expect(chatOutboxReadyToType(true, false, true, true, true, true));
+    try std.testing.expect(!chatOutboxReadyToType(true, false, true, true, false, true));
+    try std.testing.expect(!chatOutboxReadyToType(false, true, true, false, true, true));
+    try std.testing.expect(!chatOutboxReadyToType(false, false, true, false, true, true));
+    try std.testing.expect(!chatOutboxReadyToType(false, true, false, false, false, true));
+    try std.testing.expect(chatOutboxReadyToType(false, true, false, false, true, true));
+
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    const key = "tmux:0:test";
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered));
+    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("second request")));
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key));
 }
