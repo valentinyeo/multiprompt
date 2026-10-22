@@ -157,7 +157,7 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       }
     }
     if (file === 'test.yml') {
-      assert.equal(caches.length, 12);
+      assert.equal(caches.length, 14);
       for (let i = 0; i < caches.length; i += 2) {
         assert.ok(caches[i].includes('uses: actions/cache/restore@'));
         assert.ok(caches[i + 1].includes('uses: actions/cache@'));
@@ -167,10 +167,11 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
   }
 });
 
-test('test-worker skips account Worker build and tests on STAMP PRs', () => {
+test('test-worker skips Zig installation, account Worker build and tests on STAMP PRs', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const worker = workflow.split('\n  test-worker:\n')[1].split(/\n  [\w-]+:\n/)[0];
-  const steps = worker.split(/(?=^      - )/m).filter(step => /worker\.test\.js|wrangler deploy --dry-run/.test(step));
+  const steps = worker.split(/(?=^      - )/m).filter(step => /Install Zig|worker\.test\.js|wrangler deploy --dry-run/.test(step));
+  assert.ok(steps.some(step => step.includes('Install Zig 0.16.0')));
   assert.ok(steps.some(step => step.includes('worker.test.js')));
   assert.ok(steps.some(step => step.includes('wrangler deploy --dry-run')));
   for (const step of steps) {
@@ -188,18 +189,19 @@ test('build, CI, installer and documentation use the stamp contract', () => {
     const job = jobs[name];
     assert.match(job, /id: rule\n        shell: bash/);
     assert.ok(job.indexOf('actions/setup-node@') < job.indexOf('id: rule'));
-    if (name === 'test' || name === 'test-vps') {
+    if (name !== 'test-windows-update') {
       assert.ok(job.indexOf('id: rule') < job.indexOf('name: Install Zig'));
     } else {
       assert.doesNotMatch(job, /Install Zig|zig build/);
-      assert.ok(job.indexOf('id: rule') < job.indexOf(name === 'test-worker' ? 'name: Build the account Worker' : 'actions/download-artifact@'));
+      assert.ok(job.indexOf('id: rule') < job.indexOf('actions/download-artifact@'));
     }
+    if (name === 'test-worker') assert.ok(job.indexOf('id: rule') < job.indexOf('name: Build the account Worker'));
     assert.ok(job.includes('git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}'));
     assert.ok(job.includes('node tools/version-stamp.mjs check HEAD^ HEAD'));
     const step = name === 'test-windows-update' ? 'Test safe release updates' : name === 'test-worker' ? 'Build the account Worker' : 'Run (?:tests|server tool tests)';
     assert.match(job, new RegExp(`- name: ${step}\\n        if: steps\\.rule\\.outputs\\.kind != 'STAMP'`));
   }
-  assert.equal((workflow.match(/- name: Install Zig 0\.16\.0\n        if: steps\.rule\.outputs\.kind != 'STAMP'/g) || []).length, 2);
+  assert.equal((workflow.match(/- name: Install Zig 0\.16\.0\n        if: steps\.rule\.outputs\.kind != 'STAMP'/g) || []).length, 3);
   assert.doesNotMatch(workflow, /Compile stamp/);
   const install = fs.readFileSync(path.join(root, 'tools/install-laptop1.sh'), 'utf8');
   assert.doesNotMatch(install, /Measure-Object|unstamped changelog/);

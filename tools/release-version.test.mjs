@@ -155,7 +155,13 @@ test('four Windows and two VPS jobs retain the upstream test graph with independ
   assert.match(worker, /actions\/setup-node@[a-f0-9]{40}\n        with:\n          node-version: 22\n          cache: npm\n          cache-dependency-path: service\/package-lock.json/);
   assert.match(worker, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        working-directory: service\n        timeout-minutes: 2\n        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build/);
   assert.match(worker, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        run: node --test service\/test\/infra.test.js service\/test\/worker.test.js/);
-  assert.doesNotMatch(worker, /zig build|Install Zig|ZIG_GLOBAL_CACHE_DIR|matrix:/);
+  for (const name of ['Restore Zig toolchain (PR)', 'Cache Zig toolchain', 'Install Zig 0.16.0']) {
+    const step = vps.split(/(?=^      - )/m).find(step => step.startsWith(`      - name: ${name}\n`));
+    assert.ok(step);
+    assert.ok(worker.includes(step));
+  }
+  assert.ok(worker.indexOf('name: Install Zig') < worker.indexOf('name: Run account Worker tests'));
+  assert.doesNotMatch(worker, /zig build|ZIG_GLOBAL_CACHE_DIR|\.zig-cache|matrix:/);
   assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
   assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
