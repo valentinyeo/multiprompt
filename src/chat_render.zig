@@ -576,8 +576,8 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
 fn chatRichSize(hdc: HANDLE, text: []const u16, bold: bool, level: u3) chat_markdown.TableSize {
     const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, level));
     defer _ = SelectObject(hdc, old);
-    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-    var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    var backend = TableMeasureBackend{ .hdc = hdc };
+    var height = backend.lineHeight();
     var buf: [512]chat_markdown.Span = undefined;
     const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
     defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
@@ -604,7 +604,7 @@ fn chatRichSize(hdc: HANDLE, text: []const u16, bold: bool, level: u3) chat_mark
             width += chatTextWidth(hdc, text[pos..end]);
             pos = end;
         }
-        height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+        height = @max(height, backend.lineHeight());
     }
     return .{ .width = width, .height = height };
 }
@@ -936,8 +936,8 @@ test "IGSH-376 top-level table cell sizes match master bytes" {
         fn cell(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.TableSize {
             const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, 0));
             defer _ = SelectObject(hdc, old);
-            var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-            var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+            var backend = TableMeasureBackend{ .hdc = hdc };
+            var height = backend.lineHeight();
             var buf: [512]chat_markdown.Span = undefined;
             const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
             defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
@@ -948,7 +948,7 @@ test "IGSH-376 top-level table cell sizes match master bytes" {
                 style.bold = style.bold or bold;
                 _ = SelectObject(hdc, chatRichFont(style, 0));
                 width += chatTextWidth(hdc, text[span.text.start..span.text.end]);
-                height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+                height = @max(height, backend.lineHeight());
             }
             return .{ .width = width, .height = height };
         }

@@ -319,7 +319,7 @@ function execute(control) {
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
     let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
-    functions = render.slice(render.indexOf('const TableMeasureBackend ='), render.indexOf('fn chatTableLayout(')) + functions;
+    functions = render.slice(render.indexOf('const TableMeasureBackend ='), render.indexOf('fn chatBlockNaturalWidth(')) + functions;
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + lineHeightPolicy + '\n' + functions + checks);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-'], { encoding: 'utf8', timeout: 120000 });
@@ -353,5 +353,6 @@ test('ISSUE-458 captured scrollbar gestures precede text selection and release o
   assert.match(proc, /WM_MOUSEMOVE => \{\s*if \(chatTableMouseMove\(hwnd, GET_X\(lp\)\)\) return 0/);
   assert.match(proc, /WM_LBUTTONUP => \{\s*if \(chat_table_drag != null\) \{[^]*?chat_table_drag = null;[^]*?ReleaseCapture\(\);\s*return 0;/);
   assert.match(proc, /0x0215, 0x001F => \{[^]*?chat_table_drag = null;/);
-  assert.match(body('refreshChatBlockCache'), /g_chat_tables\.refresh/);
+  assert.match(body('refreshChatBlockCache'), /chatTableRefresh\(/);
+  assert.match(body('chatTableRefresh'), /g_chat_tables\.refreshReceived\(/);
 });
