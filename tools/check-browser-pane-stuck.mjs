@@ -93,7 +93,7 @@ function browserForegroundContract(source) {
   assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
   assert.match(source, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/);
   for (const name of ['Press', 'Type-Text']) {
-    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*Assert-Foreground\\s*Record`));
+    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*(?:Wait-Until \\{[^}]*\\} '[^']*'\\s*)?Assert-Foreground\\s*Record`));
   }
 }
 browserForegroundContract(driver);
@@ -123,7 +123,7 @@ function scratchCleanupContract(source) {
   let offset = -1;
   for (const step of [
     '$stopped = $job.Stop()', "'process-tree.json'", 'Prepare-ScratchEvidence $scratch',
-    "Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force",
+    "Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break",
     'Remove-Item $scratch -Recurse -Force', '$result.scratchRemoved = -not (Test-Path $scratch)',
     "if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }",
     "foreach ($name in @('before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json'))",

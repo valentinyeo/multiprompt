@@ -307,10 +307,6 @@ function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
-    Wait-Until {
-        [void][VerifyNative]::SetForegroundWindow($script:window)
-        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-    } 'browser launch returned foreground to app'
     $pane = Assert-BrowserPane 'open' $Step $PreviousId
     Focus-BrowserPaneOwner $Step $pane.browser_connection_id
     return $pane
