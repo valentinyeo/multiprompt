@@ -31,3 +31,13 @@ test('Windows behavioral update tests are required by CI', () => {
   const suite = read('tools/update-release.test.ps1');
   for (const name of ['checksum mismatch refused', 'rollback after failed start', 'no automatic restart while running', 'version comparison']) assert.ok(suite.includes(name), name);
 });
+
+test('the update command cannot be interpreted as a snippet', () => {
+  const state = read('src/app_state.zig');
+  const value = name => Number(new RegExp(`pub const ${name}: usize = (\\d+);`).exec(state)[1]);
+  const update = value('SEARCH_UPDATE_OFFSET');
+  const snippets = value('SEARCH_SNIPPET_OFFSET');
+  assert.ok(update < snippets || update >= snippets + value('MAX_SNIPPETS'), 'Update command overlaps snippet IDs');
+  const duplicates = [...state.matchAll(/pub const (SEARCH_\w+): usize = (\d+);/g)].filter(([, name, number]) => name !== 'SEARCH_UPDATE_OFFSET' && Number(number) === update);
+  assert.deepEqual(duplicates, []);
+});
