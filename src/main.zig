@@ -3589,17 +3589,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
-            if (wp == 1 and foregroundIsOurs()) {
-                cancelShellRefocus(hwnd);
-                const fg = GetForegroundWindow();
-                const our_thread = GetCurrentThreadId();
-                const fg_thread = GetWindowThreadProcessId(fg, null);
-                const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-                _ = SetForegroundWindow(hwnd);
-                _ = SetFocus(hwnd);
-                if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
-                if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
-            }
             if (app_state.g_all_sessions_active) {
                 closeAllSessions(hwnd);
             }
@@ -3683,7 +3672,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 hideShellsForOverlay();
                 updateBrowserVisibility();
             }
+            if (wp == 1 and foregroundIsOurs()) {
+                cancelShellRefocus(hwnd);
+                const fg = GetForegroundWindow();
+                const our_thread = GetCurrentThreadId();
+                const fg_thread = GetWindowThreadProcessId(fg, null);
+                const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
+                _ = SetForegroundWindow(hwnd);
+                _ = SetFocus(hwnd);
+                if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
+                if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
+            }
             _ = SetFocus(app_state.g_main_hwnd);
+            altqLog("palette_focus wp={} foreground={X} frame={X} focus={X}", .{ wp, altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()) });
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },

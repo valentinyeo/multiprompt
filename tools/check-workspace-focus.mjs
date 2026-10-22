@@ -47,6 +47,12 @@ function appPaletteFocusContract(shortcuts, main) {
   assert.match(open, /const fg_thread = GetWindowThreadProcessId\(fg, null\);/);
   assert.match(open, /AttachThreadInput\(our_thread, fg_thread, 1\) != 0;\s*_ = SetForegroundWindow\(hwnd\);\s*_ = SetFocus\(hwnd\);\s*if \(attached\) _ = AttachThreadInput\(our_thread, fg_thread, 0\);/);
   assert.match(open, /cancelShellRefocus\(hwnd\);\s*app_state\.g_search_active = true;/);
+  const activation = open.indexOf('if (wp == 1 and foregroundIsOurs())');
+  for (const setup of ['app_state.g_search_active = true;', 'updateSearchResults();', 'captureSearchBackdrop();', 'hideShellsForOverlay();', 'updateBrowserVisibility();']) {
+    const position = open.indexOf(setup);
+    assert.ok(position >= 0 && position < activation, `${setup} must finish before the native foreground handoff`);
+  }
+  assert.match(open, /altqLog\("palette_focus wp=\{\} foreground=\{X\} frame=\{X\} focus=\{X\}", \.\{ wp, altqPtr\(GetForegroundWindow\(\)\), altqPtr\(hwnd\), altqPtr\(GetFocus\(\)\) \}\);/);
   assert.match(main, /const SetForegroundWindow = @import\("focus.zig"\)\.SetForegroundWindow;/);
   assert.match(main, /const SetFocus = @import\("focus.zig"\)\.SetFocus;/);
   assert.match(main, /const AttachThreadInput = @import\("focus.zig"\)\.AttachThreadInput;/);
@@ -67,6 +73,16 @@ for (const [file, before, after] of [
   const broken = source.replace(before, after);
   assert.notEqual(broken, source, `mutation applies: ${before}`);
   assert.throws(() => appPaletteFocusContract(file === 'shortcuts' ? broken : shortcuts, file === 'main' ? broken : main), assert.AssertionError, `reject palette activation regression: ${before}`);
+}
+
+const paletteActivation = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'))
+  .match(/            if \(wp == 1 and foregroundIsOurs\(\)\) \{[\s\S]*?\n            \}/)?.[0];
+assert.ok(paletteActivation);
+for (const newline of ['\n', '\r\n']) {
+  appPaletteFocusContract(shortcuts.replaceAll('\n', newline), main.replaceAll('\n', newline));
+  const earlyActivation = main.replace(paletteActivation, '').replace('        WM_APP_SEARCH_OPEN => {', `        WM_APP_SEARCH_OPEN => {\n${paletteActivation}`);
+  assert.notEqual(earlyActivation, main);
+  assert.throws(() => appPaletteFocusContract(shortcuts, earlyActivation.replaceAll('\n', newline)), assert.AssertionError, 'reject the pre-repair activation-before-overlay order');
 }
 
 function hookFocusAuthorityContract(source, focus) {
