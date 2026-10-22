@@ -32,6 +32,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
+- [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, with failed SSH explicitly outside remote verification.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.

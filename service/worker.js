@@ -11,6 +11,7 @@ const layoutFeature = (request, token) => (request.headers.get('X-Layout-Feature
 function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
+    if (!layoutFeature(request, 'groups')) for (const key of ['group_id', 'starred_group_id', 'group', 'starred_group']) delete visible[key];
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
     if (!layoutFeature(request, 'used')) delete visible.used;
     if (!layoutFeature(request, 'visits')) delete visible.visits;
@@ -20,7 +21,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts');
+  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts,groups');
   return response;
 }
 export function validateLayout(x) {
@@ -49,8 +50,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'used', 'visits', 'input'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'used', 'visits', 'input', 'group_id', 'starred_group_id', 'group', 'starred_group'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group_id' || key === 'starred_group_id' ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= 2 ** 32 : key === 'group' || key === 'starred_group' ? !keys(t[key], ['name', 'collapsed', 'color', 'color_set']) || !text(t[key].name, 64) || typeof t[key].collapsed !== 'boolean' || typeof t[key].color_set !== 'boolean' || !Number.isInteger(t[key].color) || t[key].color < 0 || t[key].color > 7 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -298,9 +299,19 @@ export default {
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
+          if (!layoutFeature(request, 'groups')) {
+            for (const key of ['group_id', 'starred_group_id', 'group', 'starred_group']) {
+              if (previous?.[key] !== undefined) tab[key] = previous[key];
+              else delete tab[key];
+            }
+          }
           if (!layoutFeature(request, 'favorite')) {
             if (typeof previous?.favorite === 'boolean') tab.favorite = previous.favorite;
             else delete tab.favorite;
+          }
+          if (tab.favorite === false && (Object.hasOwn(tab, 'starred_group_id') || Object.hasOwn(tab, 'starred_group'))) {
+            tab.starred_group_id = 0;
+            delete tab.starred_group;
           }
           if (!layoutFeature(request, 'used')) {
             if (previous?.used !== undefined) tab.used = previous.used;

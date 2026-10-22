@@ -44,6 +44,6 @@ This journey covers local CMD and Chat View typing focus, not account sync, agen
 ## Gotchas
 
 - Without single-window mode Ctrl+N opens another app window instead; that is a different journey and is not covered here.
-- Starred occupies Alt+1, so Alt+2 is the first stored workspace.
+- Starred occupies Alt+1, so Alt+2 is the first stored workspace. It has independent session groups through the existing group actions; [Favorites groups](favorites-groups.md) verifies that grouping there leaves the home group intact.
 - A focused docked browser uses Alt+Right for browser navigation. The baseline deliberately has no browser; do not pretend that a browser back/forward action switched workspaces.
 - Snoozing, waking, remote-session bring-back and workspace sorting need separate real prerequisites and are not verified by create/switch/return.

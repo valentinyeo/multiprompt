@@ -171,6 +171,17 @@ const VaultFetch = @import("app_state.zig").VaultFetch;
 const VaultPut = @import("app_state.zig").VaultPut;
 const RegisterClipboardFormatW = @import("win32.zig").RegisterClipboardFormatW;
 
+fn captureLayoutGroup(a: std.mem.Allocator, gid: u32) !?session_layout.Group {
+    const gi = @import("sidebar.zig").findGroupIdx(gid) orelse return null;
+    const group = app_state.groups[gi];
+    return .{
+        .name = try std.unicode.utf16LeToUtf8Alloc(a, group.name[0..group.name_len]),
+        .collapsed = group.collapsed,
+        .color = group.color,
+        .color_set = group.color_set,
+    };
+}
+
 pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_layout.Layout {
     var workspaces: std.ArrayList(session_layout.Workspace) = .empty;
     var tabs: std.ArrayList(session_layout.Tab) = .empty;
@@ -195,6 +206,10 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .name = name,
             .manual = shell.name_source == .manual,
             .favorite = shell.favorite,
+            .group_id = shell.group_id,
+            .starred_group_id = shell.starred_group_id,
+            .group = try captureLayoutGroup(a, shell.group_id),
+            .starred_group = try captureLayoutGroup(a, shell.starred_group_id),
             .used = if (shell.last_used != 0) shell.last_used else null,
             .input = if (shell.input != 0) shell.input else null,
             .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
@@ -1009,6 +1024,11 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_ws_focus[slot] = old_focus[oi];
         app_state.g_lws_count += 1;
     }
+    for (server.value.tabs) |tab| {
+        const max_id = @max(tab.group_id, tab.starred_group_id);
+        if (max_id < std.math.maxInt(u32)) app_state.next_group_id = @max(app_state.next_group_id, max_id + 1);
+    }
+    var restored_groups: std.AutoHashMap(u32, u32) = .init(a);
     for (desired.tabs, 0..) |tab, dest| {
         var existing: ?usize = null;
         if (tab.tmux_session.len == 0) {
@@ -1045,6 +1065,39 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             if (tab.favorite) |favorite| shell.favorite = favorite;
+            inline for (.{ "group_id", "starred_group_id" }, .{ "group", "starred_group" }) |id_key, group_key| {
+                const source_id = @field(tab, id_key);
+                var gid: u32 = 0;
+                if (source_id != 0) {
+                    if (restored_groups.get(source_id)) |mapped| {
+                        gid = mapped;
+                    } else if (@field(tab, group_key)) |saved| {
+                        const wide = try std.unicode.utf8ToUtf16LeAlloc(a, saved.name);
+                        var gi = @import("sidebar.zig").findGroupIdx(source_id);
+                        if (gi != null) {
+                            for (app_state.shells[0..app_state.shell_count]) |other| {
+                                if (other.sync_owned) continue;
+                                if (other.group_id == source_id or other.starred_group_id == source_id) gi = null;
+                            }
+                        }
+                        if (gi == null) {
+                            const created = @import("sidebar.zig").createGroup(wide);
+                            if (created == 0) return error.LayoutCapacity;
+                            gi = @import("sidebar.zig").findGroupIdx(created);
+                        }
+                        const group = &app_state.groups[gi.?];
+                        @memcpy(group.name[0..wide.len], wide);
+                        group.name_len = @intCast(wide.len);
+                        group.collapsed = saved.collapsed;
+                        group.color = saved.color;
+                        group.color_set = saved.color_set;
+                        gid = group.id;
+                        try restored_groups.put(source_id, gid);
+                    }
+                }
+                @field(shell, id_key) = gid;
+            }
+            if (!shell.favorite) shell.starred_group_id = 0;
             if (tab.used) |used| shell.last_used = @max(shell.last_used, used);
             if (tab.input) |input| shell.input = @max(shell.input, input);
             shell.visits = @import("frequent.zig").Visits.merge(shell.visits.optional(), tab.visits);
@@ -1054,6 +1107,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             break;
         };
     }
+    @import("sidebar.zig").pruneEmptyGroups();
     var kept_active = false;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, si| if (s.shell_id == active_id) {
         app_state.active_shell = @intCast(si);

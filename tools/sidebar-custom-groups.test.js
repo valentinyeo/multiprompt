@@ -16,8 +16,8 @@ test("custom groups are top-level workspace blocks with pinned-first members", (
   const layout = bodyOf("fn layoutRows(out: *[MAX_ROWS]Row) u32 {");
   assert.match(layout, /for \(0\.\.group_count\) \|gidx\|/);
   assert.match(layout, /member_tier_pass: i32 = @intFromEnum\(SidebarTier\.pinned\)/);
-  assert.match(layout, /shells\[i\]\.group_id != gid/);
-  assert.match(layout, /shells\[i\]\.workspace != g_active_workspace/,
+  assert.match(layout, /tabGroupId\(i\) != gid/);
+  assert.match(layout, /tabInCurrentWorkspace\(i\)/,
     "group rows must be scoped to the active workspace");
 });
 
@@ -43,7 +43,7 @@ test("palette and context-menu group moves share selection semantics", () => {
   const remove = bodyOf("fn removeTabOrSelectionFromGroup(captured_sid: u32) bool {");
   assert.match(assign, /selectedTabCount\(\) > 0[\s\S]*?applyGroupToSelectedTabs\(gid\)/);
   assert.match(assign, /findShellById\(captured_sid\)/);
-  assert.match(remove, /selectedTabCount\(\) > 0[\s\S]*?shells\[si\]\.group_id = 0/);
+  assert.match(remove, /selectedTabCount\(\) > 0[\s\S]*?setTabGroupId\(si, 0\)/);
   assert.match(source, /target == SEARCH_TABCTX_GROUP_NEW[\s\S]*?assignTabOrSelectionToGroup\(tc_sid, new_gid\)/);
   assert.match(source, /target == SEARCH_TABCTX_GROUP_REMOVE[\s\S]*?removeTabOrSelectionFromGroup\(tc_sid\)/);
 });
@@ -51,7 +51,7 @@ test("palette and context-menu group moves share selection semantics", () => {
 test("dragging onto a group changes membership without changing pin or lock", () => {
   const tierDrop = bodyOf("fn sidebarTierForDrop(hit: HitTarget) ?SidebarTier {");
   assert.match(tierDrop, /\.header => null/);
-  assert.match(tierDrop, /shells\[idx\]\.group_id == 0/);
+  assert.match(tierDrop, /tabGroupId\(idx\) == 0/);
 
   assert.match(source, /if \(target_gid != 0\)[\s\S]*?moveShellToIndexWithGroup/);
   assert.match(source, /\.header => \|tgidx\|[\s\S]*?moveShellToGroupStart/);
