@@ -1287,8 +1287,7 @@ try {
             Palette 'IGSH224 Journey'
             Press @(0x0D) 'Enter: reopen the named workspace'
             Wait-Until { $state = Read-Session; $state.workspaces[$state.active_workspace].wid -ceq $targetId } 'same workspace identity reopened' 60
-            Palette 'open browser'
-            Press @(0x0D) 'Enter: restore reopened workspace browser pane'
+            $reopenedPane = Open-BrowserPane 'workspace-reopened'
             Assert-WorkspaceProfile 'reopened' $targetId $targetRoot $bookmark
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $script:zsbPort = 0
@@ -1309,6 +1308,7 @@ try {
             if ($routed.result.url -cne $bookmark) { throw 'zsb reached the wrong workspace browser host' }
             Press @(0x12, 0x32) 'Alt+2: select another workspace before requesting the parked target'
             Wait-Until { (Read-Session).active_workspace -eq 0 } 'foreign workspace selected'
+            Focus-BrowserPaneOwner 'workspace-parked-zsb' (Read-BrowserPane).browser_connection_id
             $parked = Invoke-Zsb @('url') $script:zsbPort 'zsb-parked-target-url' $targetKey
             $foreign = Invoke-Zsb @('url') $script:zsbPort 'zsb-foreign-url' $foreignKey
             if ($parked.result.url -cne $bookmark -or $foreign.result.url -ceq $bookmark) { throw 'zsb borrowed the foreground or wrong workspace host' }
