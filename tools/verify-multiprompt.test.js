@@ -189,7 +189,17 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /Palette 'open url in browser'\s+Snapshot 'url-action'/);
   assert.match(control, /function Focus-WorkspaceFrame[\s\S]*?Doctor[\s\S]*?FocusOwnedWindow\(\$script:window, \$process.Id, \$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(control, /function Palette[^\n]*\{\s+if \(\$Feature -eq 'browser-workspaces'\) \{ Focus-WorkspaceFrame \}/);
-  assert.match(control, /Open-BrowserPane 'workspace-reopened'\s+Assert-WorkspaceProfile 'reopened'/);
+  const workspaces = control.slice(control.indexOf("        'browser-workspaces' {"), control.indexOf("        'inbox' {"));
+  const assertReopenedPane = text => {
+    assert.match(text, /\$state = Read-Session\s+\$script:browserShellId = \$state.tabs\[\$state.active_tab\].shell_id\s+Palette 'open browser'/);
+    assert.match(text, /\$pane = Read-BrowserPane\s+\$null -ne \$pane -and \$pane.browser_state -eq 'connected' -and\s+\$pane.browser_connection_id -gt 0 -and \$pane.browser_window_id -gt 0 -and\s+\[VerifyNative\]::PaneVisible\(\$script:window\)/);
+    assert.match(text, /Focus-BrowserPaneOwner 'workspace-reopened' \(Read-BrowserPane\).browser_connection_id\s+Assert-WorkspaceProfile 'reopened'/);
+    assert.doesNotMatch(text, /Open-BrowserPane|Assert-BrowserPane/);
+  };
+  assertReopenedPane(workspaces);
+  for (const required of ['$script:browserShellId = $state.tabs[$state.active_tab].shell_id', "$pane.browser_state -eq 'connected'", '$pane.browser_connection_id -gt 0', '$pane.browser_window_id -gt 0', '[VerifyNative]::PaneVisible($script:window)']) {
+    assert.throws(() => assertReopenedPane(workspaces.replace(required, '$true')));
+  }
   assert.match(control, /Focus-BrowserPaneOwner 'workspace-parked-zsb' \(Read-BrowserPane\).browser_connection_id\s+\$parked = Invoke-Zsb/);
   assert.match(control, /Press-WorkspaceBrowser @\(0x11, 0x39\)[\s\S]*?ValuePattern[\s\S]*?\$value.Current.Value -in @\(\$bookmark, \$bookmark.Substring\(8\)\)[\s\S]*?'bookmark-page.json'[\s\S]*?Press-WorkspaceBrowser @\(0x11, 0x44\)/);
   for (const label of ['Ctrl+D: bookmark this page in Edge', 'Enter: save favorite', 'Esc: close favorite dialog']) {

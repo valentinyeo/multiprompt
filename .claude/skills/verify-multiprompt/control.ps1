@@ -1297,7 +1297,18 @@ try {
             Palette 'IGSH224 Journey'
             Press @(0x0D) 'Enter: reopen the named workspace'
             Wait-Until { $state = Read-Session; $state.workspaces[$state.active_workspace].wid -ceq $targetId } 'same workspace identity reopened' 60
-            $reopenedPane = Open-BrowserPane 'workspace-reopened'
+            $state = Read-Session
+            $script:browserShellId = $state.tabs[$state.active_tab].shell_id
+            Palette 'open browser'
+            Press @(0x0D) 'Enter: reopen the workspace browser pane'
+            Wait-Until {
+                $pane = Read-BrowserPane
+                $null -ne $pane -and $pane.browser_state -eq 'connected' -and
+                    $pane.browser_connection_id -gt 0 -and $pane.browser_window_id -gt 0 -and
+                    [VerifyNative]::PaneVisible($script:window)
+            } 'workspace-reopened: exact shell has a connected extension browser pane' 60
+            Save-Json (Read-BrowserPane) 'workspace-reopened-pane.json'
+            Focus-BrowserPaneOwner 'workspace-reopened' (Read-BrowserPane).browser_connection_id
             Assert-WorkspaceProfile 'reopened' $targetId $targetRoot $bookmark
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $script:zsbPort = 0
