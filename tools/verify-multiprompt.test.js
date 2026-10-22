@@ -653,8 +653,8 @@ test('ISSUE-569 snapshots identify foreign foreground windows and preserve pre-c
   function contract(driver) {
     const identity = driver.slice(driver.indexOf('    public static Dictionary<string, object> WindowIdentity('), driver.indexOf('    public static bool PaneVisible('));
     for (const required of [
-      'uint thread = GetWindowThreadProcessId(hwnd, out pid);',
-      '{ "handle", hwnd.ToInt64() }', '{ "pid", pid }', '{ "thread", thread }',
+      'uint ownerThread = GetWindowThreadProcessId(hwnd, out ownerPid);',
+      '{ "handle", hwnd.ToInt64() }', '{ "pid", ownerPid }', '{ "thread", ownerThread }',
       '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
       '{ "root", GetAncestor(hwnd, 2).ToInt64() }',
       '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
@@ -686,7 +686,7 @@ test('ISSUE-569 snapshots identify foreign foreground windows and preserve pre-c
   }
   contract(control);
   for (const required of [
-    '{ "pid", pid }', '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
+    '{ "pid", ownerPid }', '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
     '{ "root", GetAncestor(hwnd, 2).ToInt64() }', '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
     'windows.Add(WindowIdentity(hwnd));', '$focus.foregroundWindow =', '$focus.foregroundRoot =',
     '$focus.foregroundRootOwner =', '$focus.desktopWindows =', '$focus.processes =',

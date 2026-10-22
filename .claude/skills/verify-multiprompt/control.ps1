@@ -121,10 +121,10 @@ public static class VerifyNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     public static Dictionary<string, object> WindowIdentity(IntPtr hwnd) {
-        uint pid;
-        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        uint ownerPid;
+        uint ownerThread = GetWindowThreadProcessId(hwnd, out ownerPid);
         return new Dictionary<string, object> {
-            { "handle", hwnd.ToInt64() }, { "pid", pid }, { "thread", thread },
+            { "handle", hwnd.ToInt64() }, { "pid", ownerPid }, { "thread", ownerThread },
             { "class", Class(hwnd) }, { "title", Title(hwnd) },
             { "root", GetAncestor(hwnd, 2).ToInt64() },
             { "rootOwner", GetAncestor(hwnd, 3).ToInt64() },
