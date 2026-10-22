@@ -15,7 +15,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -189,8 +188,10 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_send_routing.step);
     outbox_test_step.dependOn(&chat_send_routing.step);
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
+    chat_view_gaps_tests.setName("test chat view gaps");
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
+    pane_spacing_tests.setName("test pane spacing");
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&pane_spacing_tests.step);
     vps_test_step.dependOn(&pane_spacing_tests.step);
@@ -199,17 +200,23 @@ pub fn build(b: *std.Build) void {
     const chat_settle_tests = b.addSystemCommand(&.{ "python3", "tools/chat-settle-test.py" });
     vps_test_step.dependOn(&chat_settle_tests.step);
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
-    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
+    const portable_paths_tests = b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" });
+    portable_paths_tests.setName("test portable paths");
+    test_step.dependOn(&portable_paths_tests.step);
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
+    version_stamp_tests.setName("test version stamp");
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
     const changelog_entry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/changelog-entry.test.js", "tools/changelog-fragment-reads.test.js" });
+    changelog_entry_tests.setName("test changelog entry");
     test_step.dependOn(&changelog_entry_tests.step);
     vps_test_step.dependOn(&changelog_entry_tests.step);
     const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
+    smooth_shapes_tests.setName("test smooth shapes");
     test_step.dependOn(&smooth_shapes_tests.step);
     vps_test_step.dependOn(&smooth_shapes_tests.step);
     const root_images_tests = b.addSystemCommand(&.{ "node", "--test", "tools/root-images.test.js" });
+    root_images_tests.setName("test root images");
     test_step.dependOn(&root_images_tests.step);
     vps_test_step.dependOn(&root_images_tests.step);
     const chat_perf_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -222,11 +229,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_chat_perf_tests.step);
     vps_test_step.dependOn(&run_chat_perf_tests.step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
+    chat_cpu_regression.setName("test chat cpu regression");
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
+    chat_bench_tests.setName("test chat bench");
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);
     const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
+    chat_bench_ab_summary_tests.setName("test chat bench ab summary");
     test_step.dependOn(&chat_bench_ab_summary_tests.step);
     vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
     const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js", "tools/chat-bench/receipt.test.mjs" });
@@ -237,9 +247,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_usage_telemetry_tests.step);
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
+    launch_regression.setName("test launch regression");
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
     const usage_mode_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_single_exe.test.js" });
+    usage_mode_regression.setName("test usage mode regression");
     test_step.dependOn(&usage_mode_regression.step);
     const usage_mode_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/usage_telemetry_mode.zig"),
@@ -274,6 +286,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_browser_corner_tests.step);
     vps_test_step.dependOn(&run_browser_corner_tests.step);
     const browser_corner_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-corners.test.js" });
+    browser_corner_source.setName("test browser corner source");
     browser_corner_source.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&browser_corner_source.step);
     vps_test_step.dependOn(&browser_corner_source.step);
@@ -286,6 +299,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_browser_onscreen_tests.step);
     vps_test_step.dependOn(&run_browser_onscreen_tests.step);
     const browser_onscreen_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-onscreen.test.js" });
+    browser_onscreen_source.setName("test browser onscreen source");
     test_step.dependOn(&browser_onscreen_source.step);
     vps_test_step.dependOn(&browser_onscreen_source.step);
     const account_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -301,6 +315,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(account_state_tests).step);
     const account_desktop_tests = b.addSystemCommand(&.{ "python3", "tests/test_account_desktop.py" });
+    account_desktop_tests.setName("test account desktop");
     test_step.dependOn(&account_desktop_tests.step);
     account_test_step.dependOn(&account_desktop_tests.step);
     const session_layout_sync_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -409,29 +424,36 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
     const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
+    frequent_integration_tests.setName("test frequent integration");
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
     const reply_quote_tests = b.addSystemCommand(&.{ "node", "--test", "tools/reply-quote-fixture.test.js" });
+    reply_quote_tests.setName("test reply quote");
     reply_quote_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&reply_quote_tests.step);
     vps_test_step.dependOn(&reply_quote_tests.step);
     const chat_skill_tab_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-tab.test.js" });
+    chat_skill_tab_tests.setName("test chat skill tab");
     chat_skill_tab_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_skill_tab_tests.step);
     vps_test_step.dependOn(&chat_skill_tab_tests.step);
     const chat_drafts_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drafts.test.js" });
+    chat_drafts_tests.setName("test chat drafts");
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);
     vps_test_step.dependOn(&chat_drafts_tests.step);
     const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js" });
+    chat_switch_tests.setName("test chat switch");
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
     const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js" });
+    one_font_tests.setName("test one font");
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);
     const terminal_glyph_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-glyphs.test.js" });
+    terminal_glyph_tests.setName("test terminal glyph");
     test_step.dependOn(&terminal_glyph_tests.step);
     vps_test_step.dependOn(&terminal_glyph_tests.step);
     const shell_font_migration_tests = b.addTest(.{
@@ -446,37 +468,47 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_shell_font_migration_tests.step);
     vps_test_step.dependOn(&run_shell_font_migration_tests.step);
     const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
+    console_font_tests.setName("test console font");
     test_step.dependOn(&console_font_tests.step);
     vps_test_step.dependOn(&console_font_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
+    palette_rows_tests.setName("test palette rows");
     test_step.dependOn(&palette_rows_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
+    close_all_browser_panes_tests.setName("test close all browser panes");
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
+    shortcuts_doc_tests.setName("test shortcuts doc");
     test_step.dependOn(&shortcuts_doc_tests.step);
     const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
+    chat_table_tests.setName("test chat table");
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
+    chat_rich_tests.setName("test chat rich");
     test_step.dependOn(&chat_rich_tests.step);
     test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js" });
+    chat_autocomplete_tests.setName("test chat autocomplete");
     test_step.dependOn(&chat_autocomplete_tests.step);
     const bridge_tests = b.addTest(.{ .root_module = bridge_exe.root_module });
     const run_bridge_tests = b.addRunArtifact(bridge_tests);
     test_step.dependOn(&run_bridge_tests.step);
     b.step("test-bridge", "Run browser bridge unit tests").dependOn(&run_bridge_tests.step);
     const bridge_bad_args_tests = b.addSystemCommand(&.{ "node", "--test", "tools/bridge-bad-args.test.js" });
+    bridge_bad_args_tests.setName("test bridge bad args");
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
     if (b.graph.host.result.os.tag == .windows) {
         const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
+        zsb_help_tests.setName("test zsb help");
         zsb_help_tests.step.dependOn(&bridge_install.step);
         zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
         test_step.dependOn(&zsb_help_tests.step);
     }
     const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
+    zsb_help_dispatch_tests.setName("test zsb help dispatch");
     test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/tmux_identity.zig"),
@@ -485,130 +517,177 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(tmux_identity_tests).step);
     const zsb_who_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-who.test.js" });
+    zsb_who_tests.setName("test zsb who");
     test_step.dependOn(&zsb_who_tests.step);
     const zsb_selftest_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-selftest.test.js", "tools/zsb-selftest-docs.test.js" });
     vps_test_step.dependOn(&zsb_selftest_tests.step);
     const internal_page_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-internal-pages.test.js" });
+    internal_page_tests.setName("test internal page");
     test_step.dependOn(&internal_page_tests.step);
     vps_test_step.dependOn(&internal_page_tests.step);
     const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js", "extension/bridge-emulation.test.js" });
+    bridge_routing_tests.setName("test bridge routing");
     test_step.dependOn(&bridge_routing_tests.step);
     const zsb_extension_frames_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-extension-frames.test.js" });
+    zsb_extension_frames_tests.setName("test zsb extension frames");
     test_step.dependOn(&zsb_extension_frames_tests.step);
     vps_test_step.dependOn(&zsb_extension_frames_tests.step);
     const bridge_profile_tests = b.addSystemCommand(&.{ "node", "--test", "tools/bridge-profile-pipes.test.js" });
+    bridge_profile_tests.setName("test bridge profile");
     bridge_profile_tests.step.dependOn(&bridge_install.step);
     bridge_profile_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_profile_tests.step);
     const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js" });
+    browser_profile_isolation_tests.setName("test browser profile isolation");
     test_step.dependOn(&browser_profile_isolation_tests.step);
     const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js" });
+    browser_engine_selection_tests.setName("test browser engine selection");
     test_step.dependOn(&browser_engine_selection_tests.step);
     const zsb_session_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-isolation.test.js" });
+    zsb_session_isolation_tests.setName("test zsb session isolation");
     test_step.dependOn(&zsb_session_isolation_tests.step);
     const browser_theme_sync_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-theme-sync.test.js" });
+    browser_theme_sync_tests.setName("test browser theme sync");
     test_step.dependOn(&browser_theme_sync_tests.step);
     const skills_and_sync_login_tests = b.addSystemCommand(&.{ "node", "--test", "tools/skills-and-sync-login.test.js" });
+    skills_and_sync_login_tests.setName("test skills and sync login");
     test_step.dependOn(&skills_and_sync_login_tests.step);
     const system_theme_follow_tests = b.addSystemCommand(&.{ "node", "--test", "tools/system-theme-follow.test.js" });
+    system_theme_follow_tests.setName("test system theme follow");
     test_step.dependOn(&system_theme_follow_tests.step);
     const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js" });
+    search_selection_tests.setName("test search selection");
     test_step.dependOn(&search_selection_tests.step);
     const ctrl_t_palette_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ctrl-t-palette-usage.test.js" });
+    ctrl_t_palette_tests.setName("test ctrl t palette");
     test_step.dependOn(&ctrl_t_palette_tests.step);
     const sidebar_drag_pin_tests = b.addSystemCommand(&.{ "node", "--test", "tools/sidebar-drag-pin.test.js" });
+    sidebar_drag_pin_tests.setName("test sidebar drag pin");
     test_step.dependOn(&sidebar_drag_pin_tests.step);
     const session_lock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-lock.test.js" });
+    session_lock_tests.setName("test session lock");
     test_step.dependOn(&session_lock_tests.step);
     const agent_recognition_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-recognition.test.js" });
+    agent_recognition_tests.setName("test agent recognition");
     test_step.dependOn(&agent_recognition_tests.step);
     const capacity_guardian_tests = b.addSystemCommand(&.{ "node", "--test", "tools/capacity-guardian.test.js" });
+    capacity_guardian_tests.setName("test capacity guardian");
     test_step.dependOn(&capacity_guardian_tests.step);
     const ai_pace_sidebar_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ai-pace-sidebar.test.js" });
+    ai_pace_sidebar_tests.setName("test ai pace sidebar");
     test_step.dependOn(&ai_pace_sidebar_tests.step);
     const kimi_usage_tests = b.addSystemCommand(&.{ "python", "-m", "unittest", "tools/usage-telemetry/test_kimi_usage.py" });
+    kimi_usage_tests.setName("test kimi usage");
     test_step.dependOn(&kimi_usage_tests.step);
     const notification_adapter_tests = b.addSystemCommand(&.{ "python3", "-m", "unittest", "discover", "-s", "tools/agent-notifications", "-p", "test_*.py" });
     vps_test_step.dependOn(&notification_adapter_tests.step);
     const multi_monitor_movement_tests = b.addSystemCommand(&.{ "node", "--test", "tools/multi-monitor-movement.test.js" });
+    multi_monitor_movement_tests.setName("test multi monitor movement");
     test_step.dependOn(&multi_monitor_movement_tests.step);
     const blue_dot_persistence_tests = b.addSystemCommand(&.{ "node", "--test", "tools/blue-dot-persistence.test.js" });
+    blue_dot_persistence_tests.setName("test blue dot persistence");
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
+    hibernate_hook_recovery_tests.setName("test hibernate hook recovery");
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
     const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
+    ssh_reconnect_tests.setName("test ssh reconnect");
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
     vps_test_step.dependOn(&ssh_reconnect_tests.step);
     const screenshot_pipeline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/screenshot-pipeline.test.js", "tools/screenshot-caret.test.js", "extension/screenshot-shortcut.test.js", "tools/issue-509-screenshot-system-menu.test.js", "tools/issue-493-tab-url-shortcut.test.js" });
+    screenshot_pipeline_tests.setName("test screenshot pipeline");
     test_step.dependOn(&screenshot_pipeline_tests.step);
     const paste_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/paste-focus.test.js" });
+    paste_focus_tests.setName("test paste focus");
     test_step.dependOn(&paste_focus_tests.step);
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
+    shell_focus_tests.setName("test shell focus");
     test_step.dependOn(&shell_focus_tests.step);
     const console_font_lifecycle_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font-lifecycle.test.js" });
+    console_font_lifecycle_tests.setName("test console font lifecycle");
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);
     vps_test_step.dependOn(&console_font_lifecycle_tests.step);
     const window_flicker_tests = b.addSystemCommand(&.{ "node", "--test", "tools/window-flicker.test.js" });
+    window_flicker_tests.setName("test window flicker");
     window_flicker_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&window_flicker_tests.step);
     vps_test_step.dependOn(&window_flicker_tests.step);
     const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/chat-view-console-return.test.js", "tools/full-width-chat.test.js" });
+    chat_view_console_visibility_tests.setName("test chat view console visibility");
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
+    zsb_interaction_tests.setName("test zsb interaction");
     test_step.dependOn(&zsb_interaction_tests.step);
     const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    zsb_deadline_tests.setName("test zsb deadline");
     if (b.graph.host.result.os.tag == .windows) {
         zsb_deadline_tests.step.dependOn(&bridge_install.step);
         zsb_deadline_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     }
     test_step.dependOn(&zsb_deadline_tests.step);
     const zsb_type_newlines_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-type-newlines.test.js" });
+    zsb_type_newlines_tests.setName("test zsb type newlines");
     test_step.dependOn(&zsb_type_newlines_tests.step);
     vps_test_step.dependOn(&zsb_type_newlines_tests.step);
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
+    zsb_session_open_tests.setName("test zsb session open");
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
+    snippet_form_input_tests.setName("test snippet form input");
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
+    console_url_copy_tests.setName("test console url copy");
     test_step.dependOn(&console_url_copy_tests.step);
     const inbox_undo_shortcut_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-undo-shortcut.test.js" });
+    inbox_undo_shortcut_tests.setName("test inbox undo shortcut");
     test_step.dependOn(&inbox_undo_shortcut_tests.step);
     const windows_shortcut_passthrough_tests = b.addSystemCommand(&.{ "node", "--test", "tools/windows-shortcut-passthrough.test.js" });
+    windows_shortcut_passthrough_tests.setName("test windows shortcut passthrough");
     test_step.dependOn(&windows_shortcut_passthrough_tests.step);
     const inbox_reduction_search_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-reduction-search.test.js" });
+    inbox_reduction_search_tests.setName("test inbox reduction search");
     test_step.dependOn(&inbox_reduction_search_tests.step);
     const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js" });
+    dictation_paste_tests.setName("test dictation paste");
     test_step.dependOn(&dictation_paste_tests.step);
     const deepgram_key_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/deepgram-key-source.test.js" });
+    deepgram_key_source_tests.setName("test deepgram key source");
     test_step.dependOn(&deepgram_key_source_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
+    session_state_bucket_tests.setName("test session state bucket");
     test_step.dependOn(&session_state_bucket_tests.step);
     const other_workspace_invariant_tests = b.addSystemCommand(&.{ "node", "--test", "tools/other-workspace-invariant.test.js" });
+    other_workspace_invariant_tests.setName("test other workspace invariant");
     test_step.dependOn(&other_workspace_invariant_tests.step);
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });
+    zig_copy_tests.setName("test zig copy");
     test_step.dependOn(&zig_copy_tests.step);
     vps_test_step.dependOn(&zig_copy_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
+    test_wiring_tests.setName("test test wiring");
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
     const bridge_version_heal_tests = b.addSystemCommand(&.{ "node", "--test", "tools/bridge-version-heal.test.js", "tools/zsb-extension-reload.test.js" });
+    bridge_version_heal_tests.setName("test bridge version heal");
     bridge_version_heal_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     test_step.dependOn(&bridge_version_heal_tests.step);
     vps_test_step.dependOn(&bridge_version_heal_tests.step);
     const chat_drop_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drop.test.js", "tools/chat-double-click.test.js", "tools/ssh-upload-reliability.test.js" });
+    chat_drop_tests.setName("test chat drop");
     chat_drop_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drop_tests.step);
     vps_test_step.dependOn(&chat_drop_tests.step);
     const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
     vps_test_step.dependOn(&crash_reports_tests.step);
     const idle_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-513-idle-front.test.js" });
+    idle_front_tests.setName("test idle front");
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
@@ -632,33 +711,65 @@ pub fn build(b: *std.Build) void {
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 
+    const serial_tests = [_]*std.Build.Step{
+        &chat_cpu_regression.step,
+        &launch_regression.step,
+        &chat_bench_tests.step,
+        &chat_bench_ab_summary_tests.step,
+        &run_chat_perf_tests.step,
+        &chat_table_tests.step,
+        &bridge_profile_tests.step,
+        &window_flicker_tests.step,
+        &idle_front_tests.step,
+        &zsb_deadline_tests.step,
+    };
+    for (test_step.dependencies.items) |test_dependency| {
+        if (test_dependency.cast(std.Build.Step.Run)) |command| {
+            if (command.producer == null and std.mem.indexOfScalar(*std.Build.Step, &serial_tests, test_dependency) == null) {
+                command.stdio = .{ .check = .empty };
+                command.has_side_effects = true;
+                command.step.makeFn = runCapturedTest;
+            }
+        }
+    }
+
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry, chat CPU and version contract tests"),
-        b.step("test-group-2", "Run Chat View regression, pane spacing and upload fixtures"),
-        b.step("test-group-3", "Run portable modules, source regressions and compiler-backed fixtures"),
-        b.step("test-group-4", "Run sync protocol, console lifecycle and desktop interaction fixtures"),
-        b.step("test-group-5", "Run SSH reconnect and browser profile fixtures"),
+        b.step("test-group-1", "Run desktop, telemetry, pane spacing and launch fixtures"),
+        b.step("test-group-2", "Run chat CPU and idle regressions"),
+        b.step("test-group-3", "Run portable modules, source checks, bridge profiles and deadlines"),
+        b.step("test-group-4", "Run Chat View, sync protocol, screenshot and compiler-backed fixtures"),
+        b.step("test-group-5", "Run SSH reconnect fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
-            dependency == &frequent_integration_tests.step or dependency == &chat_cpu_regression.step or
-            dependency == &version_stamp_tests.step)
+            dependency == &launch_regression.step or dependency == &pane_spacing_tests.step or
+            dependency == &chat_view_console_visibility_tests.step or dependency == &run_bridge_tests.step)
             0
-        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
-            dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
+        else if (dependency == &chat_cpu_regression.step or dependency == &idle_front_tests.step)
             1
-        else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step)
-            4
-        else if (dependency == &run_sync_protocol_tests.step or
-            dependency == &console_font_lifecycle_tests.step or dependency == &launch_regression.step or
-            dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
-            dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step or
-            dependency == &chat_drafts_tests.step or dependency == &window_flicker_tests.step or
-            dependency == &idle_front_tests.step)
+        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_sync_protocol_tests.step or
+            dependency == &frequent_integration_tests.step or dependency == &chat_drafts_tests.step or
+            dependency == &chat_table_tests.step or dependency == &run_chat_perf_tests.step or
+            dependency == &screenshot_pipeline_tests.step)
             3
+        else if (dependency == &ssh_reconnect_tests.step)
+            4
         else
             2;
         test_groups[group].dependOn(dependency);
+    }
+    if (b.graph.host.result.os.tag == .windows) {
+        for (test_groups) |group| {
+            var previous: ?*std.Build.Step = null;
+            for (serial_tests) |serial_test| {
+                if (std.mem.indexOfScalar(*std.Build.Step, group.dependencies.items, serial_test) == null) continue;
+                for (group.dependencies.items) |dependency| {
+                    if (std.mem.indexOfScalar(*std.Build.Step, &serial_tests, dependency) == null) serial_test.dependOn(dependency);
+                }
+                if (previous) |step| serial_test.dependOn(step);
+                previous = serial_test;
+            }
+        }
     }
     test_step.dependencies.clearRetainingCapacity();
     const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-5)");
@@ -696,4 +807,37 @@ pub fn build(b: *std.Build) void {
     } else {
         for (vps_groups) |group| vps_test_step.dependOn(group);
     }
+}
+
+fn runCapturedTest(step: *std.Build.Step, options: std.Build.Step.MakeOptions) !void {
+    const run = step.cast(std.Build.Step.Run).?;
+    const b = step.owner;
+    const io = b.graph.io;
+    const argv = try options.gpa.alloc([]const u8, run.argv.items.len);
+    defer options.gpa.free(argv);
+    for (run.argv.items, argv) |arg, *value| value.* = switch (arg) {
+        .bytes => |bytes| bytes,
+        else => return step.fail("captured test commands require literal arguments", .{}),
+    };
+    const cwd: std.process.Child.Cwd = if (run.cwd) |path| .{ .path = path.getPath2(b, step) } else .inherit;
+    const environ_map = run.environ_map orelse &b.graph.environ_map;
+    step.result_failed_command = try std.Build.Step.allocPrintCmd(options.gpa, cwd, .{
+        .child = environ_map,
+        .parent = &b.graph.environ_map,
+    }, argv);
+    const started = std.Io.Clock.Timestamp.now(io, .awake);
+    defer step.result_duration_ns = @intCast(started.untilNow(io).raw.nanoseconds);
+    const result = std.process.run(options.gpa, io, .{
+        .argv = argv,
+        .cwd = cwd,
+        .environ_map = environ_map,
+        .progress_node = options.progress_node,
+        .timeout = .{ .deadline = started.addDuration(.{ .raw = std.Io.Duration.fromSeconds(300), .clock = .awake }) },
+    }) catch |err| return step.fail("test command failed: {t}", .{err});
+    defer options.gpa.free(result.stdout);
+    defer options.gpa.free(result.stderr);
+    step.handleChildProcessTerm(result.term) catch |err| {
+        step.result_stderr = try std.fmt.allocPrint(b.allocator, "stdout:\n{s}\nstderr:\n{s}", .{ result.stdout, result.stderr });
+        return err;
+    };
 }

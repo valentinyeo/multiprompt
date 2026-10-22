@@ -62,9 +62,16 @@ def main():
     root = Path(__file__).resolve().parent.parent
     before = subprocess.check_output(['git', 'show', f'{args.base}:build.zig'], cwd=root, text=True)
     after = (root / 'build.zig').read_text()
-    assert before.split('    const test_groups =', 1)[0] == after.split('    const test_groups =', 1)[0], 'test definitions or upstream dependencies changed'
-    for step, array, count in [('test_step', 'test_groups', 4), ('vps_test_step', 'vps_groups', 3)]:
-        old = groups(before, step, array)
+    commands = r'b.addSystemCommand\((&\.\{.*?\})\)'
+    assert re.findall(commands, before, re.S) == re.findall(commands, after, re.S), 'system commands or arguments changed'
+    for pattern in (r'b.addTest\((.*?)\);', r'\w+\.setEnvironmentVariable\((.*?)\);'):
+        assert re.findall(pattern, before, re.S) == re.findall(pattern, after, re.S), 'test definitions or environment changed'
+    aliases = {
+        f'&b.addSystemCommand({arguments}).step': f'&{name}.step'
+        for name, arguments in re.findall(r'const (\w+) = b.addSystemCommand\((&\.\{.*?\})\);', after, re.S)
+    }
+    for step, array, count in [('test_step', 'test_groups', 5), ('vps_test_step', 'vps_groups', 3)]:
+        old = [[aliases.get(dependency, dependency) for dependency in group] for group in groups(before, step, array)]
         new = groups(after, step, array)
         assert len(new) == count, array
         verify(old, new)
