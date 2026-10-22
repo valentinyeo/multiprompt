@@ -69,6 +69,73 @@ for (const [file, before, after] of [
   assert.throws(() => appPaletteFocusContract(file === 'shortcuts' ? broken : shortcuts, file === 'main' ? broken : main), assert.AssertionError, `reject palette activation regression: ${before}`);
 }
 
+function workspaceLayoutContract(source) {
+  const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
+  const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  const conditions = [pills, focus].map(text => {
+    const expression = text.split('\n').find(line => line.includes("$state.PSObject.Properties['hide_pills'] -and"));
+    assert.ok(expression, 'saved pill visibility must remain required');
+    for (const field of ['hide_sidebar', 'sidebar_collapsed']) {
+      assert.ok(expression.includes(`-not ($state.PSObject.Properties['${field}'] -and $state.${field})`), `${field} must default to false without an absent-property read`);
+    }
+    return expression;
+  });
+  assert.ok(conditions[0].includes("Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0"));
+  assert.ok(conditions[0].includes("-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100"));
+  const evaluate = conditions.map(expression => new Function('state', 'workspace', `return ${expression
+    .replace(/@\(\$state.workspaces \| Where-Object \{ (.*?) \}\).Count/g, 'state.workspaces.filter(item => $1).length')
+    .replace(/(\$state|\$_)\.PSObject.Properties\['(\w+)'\]/g, (_, object, field) => `Object.hasOwn(${object === '$state' ? 'state' : 'item'}, '${field}')`)
+    .replace(/\$state\b/g, 'state').replace(/\$_\b/g, 'item').replace(/\$Workspace\b/g, 'workspace').replace(/\$null\b/g, 'null')
+    .replace(/-not /g, '!').replace(/ -and /g, ' && ').replace(/ -or /g, ' || ')
+    .replace(/ -eq /g, ' === ').replace(/ -ne /g, ' !== ').replace(/ -ge /g, ' >= ').replace(/ -lt /g, ' < ')};`));
+  const strict = object => new Proxy(object, {
+    get(target, key) {
+      assert.ok(Object.hasOwn(target, key), `StrictMode read of missing ${key}`);
+      return target[key];
+    },
+  });
+  const check = (saved, workspace, expected) => {
+    const state = saved === null ? null : strict({ ...saved, workspaces: saved.workspaces.map(strict) });
+    assert.deepEqual(evaluate.map(test => Boolean(test(state, workspace))), expected);
+  };
+  const visible = { hide_pills: false, single_window: true, workspace_count: 1, workspaces: [{}] };
+  check(null, 0, [false, false]);
+  check(visible, 0, [true, true]);
+  for (const field of ['hide_sidebar', 'sidebar_collapsed', 'hide_pills']) {
+    check({ ...visible, [field]: false }, 0, [true, true]);
+    check({ ...visible, [field]: true }, 0, [false, false]);
+  }
+  const { hide_pills, ...unsaved } = visible;
+  check(unsaved, 0, [false, false]);
+  check({ ...visible, single_window: false }, 0, [false, true]);
+  for (const workspace of [-1, 1]) check(visible, workspace, [false, true]);
+  for (const scale of [0, 80, 100, 110, 150]) check({ ...visible, ui_scale: scale }, 0, [scale === 100, true]);
+  for (const snoozed of [false, true]) check({ ...visible, workspaces: [{ snoozed }] }, 0, [!snoozed, true]);
+}
+
+workspaceLayoutContract(driver);
+for (const [before, after] of [
+  ["$state.PSObject.Properties['hide_sidebar'] -and ", ''],
+  ["$state.PSObject.Properties['sidebar_collapsed'] -and ", ''],
+  ["$_.PSObject.Properties['snoozed'] -and ", ''],
+  ["-not $state.PSObject.Properties['ui_scale']", '-not $state.ui_scale'],
+  ["-not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar)", '$true'],
+  ["-not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)", '$true'],
+  [' -and $_.snoozed', ''],
+  ['$state.ui_scale -eq 100', '$state.ui_scale -ge 0'],
+  ['.Count -eq 0', '.Count -ge 0'],
+]) {
+  const broken = driver.replaceAll(before, after);
+  assert.notEqual(broken, driver, `mutation applies: ${before}`);
+  assert.throws(() => workspaceLayoutContract(broken), assert.AssertionError, `reject optional layout regression: ${before}`);
+}
+const session = read('src/session.zig');
+for (const [field, variable] of [['hide_sidebar', 'g_hide_sidebar'], ['sidebar_collapsed', 'g_sidebar_collapsed'], ['snoozed', 'g_ws_snoozed[wi]']]) {
+  assert.ok(session.includes(`if (app_state.${variable}) {\n`));
+  assert.ok(session.includes(`\\"${field}\\":true`));
+}
+assert.ok(session.includes('if (app_state.g_ui_scale != 100 and pos + 24 < json_buf.len)'));
+
 nativePaletteFocusContract(driver);
 for (const [before, after] of [
   ['GetFocusedWindow($script:window) -eq $script:window', 'GetForegroundWindow() -eq $script:window'],
@@ -89,4 +156,4 @@ for (const [before, after] of [
 const workflow = read('.github/workflows/verify.yml');
 assert.ok(workflow.includes('      - tools/check-workspace-focus.mjs'));
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
-console.log('workspace-focus static checks passed (guarded palette activation, exact native focus, read-only waits, negative controls; Windows CI still required)');
+console.log('workspace-focus static checks passed (guarded palette activation, strict optional layout reads, exact native focus, read-only waits, negative controls; Windows CI still required)');

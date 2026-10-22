@@ -475,7 +475,7 @@ function Type-Text([string]$Text) {
 function Click-WorkspacePill([int]$Workspace) {
     Wait-Until {
         $state = Read-Session
-        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not $state.hide_sidebar -and -not $state.sidebar_collapsed -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.snoozed }).Count -eq 0 -and (-not $state.ui_scale -or $state.ui_scale -eq 100)
+        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
     } "visible unsnoozed workspace pill $Workspace at default layout"
     Doctor
     Assert-Foreground
@@ -844,7 +844,7 @@ try {
             }
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not $state.hide_sidebar -and -not $state.sidebar_collapsed
+                $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'

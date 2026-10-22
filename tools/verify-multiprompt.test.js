@@ -417,11 +417,13 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(focus, /Focus-Palette 'per tab' 6345/);
   for (const text of [pills, focus]) {
     assert.match(text, /PSObject.Properties\['hide_pills'\] -and -not \$state.hide_pills/);
-    assert.match(text, /-not \$state.hide_sidebar -and -not \$state.sidebar_collapsed/);
+    for (const field of ['hide_sidebar', 'sidebar_collapsed']) {
+      assert.ok(text.includes(`-not ($state.PSObject.Properties['${field}'] -and $state.${field})`));
+    }
   }
   assert.match(pills, /\$state.single_window/);
-  assert.match(pills, /Where-Object \{ \$_.snoozed \}\).Count -eq 0/);
-  assert.match(pills, /-not \$state.ui_scale -or \$state.ui_scale -eq 100/);
+  assert.ok(pills.includes("Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0"));
+  assert.ok(pills.includes("-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100"));
   assert.ok(pills.indexOf('Wait-Until {') < pills.indexOf('[VerifyNative]::ClickClient'));
   assert.match(pills, /8 \+ \(\$Workspace \+ 1\) \* 29 \+ 12\), 17/);
   assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length/);
