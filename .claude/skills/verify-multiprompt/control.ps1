@@ -818,7 +818,9 @@ function Assert-SeededWorkspaceUpgrade {
         Wait-Until {
             $upgradeProcess.Refresh()
             $script:window = $upgradeProcess.MainWindowHandle
-            $script:window -ne [IntPtr]::Zero -and (Test-Path ($seedRoot + '.workspace-owner'))
+            $state = Read-Inbox
+            $script:window -ne [IntPtr]::Zero -and (Test-Path ($seedRoot + '.workspace-owner')) -and
+                $null -ne $state -and @($state.shells).Count -gt 0
         } 'upgraded app adopts the existing shared profile without launching Chromium' 60
         $sha = [Security.Cryptography.SHA256]::Create()
         try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('igsh224-upgrade-original')))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
