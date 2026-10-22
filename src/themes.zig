@@ -687,7 +687,7 @@ pub fn applyTitleBarTheme() void {
 }
 
 test "IGSH-443 shell face and saved font names migrate idempotently" {
-    try std.testing.expectEqualStrings("Hack", app_state.DEFAULT_CONSOLE_FONT);
+    try std.testing.expectEqualStrings("Nordwand Mono MP SemiBold", app_state.DEFAULT_CONSOLE_FONT);
     try std.testing.expect(app_state.DEFAULT_CONSOLE_FONT.len < 32);
     try std.testing.expectEqualStrings(app_state.DEFAULT_CONSOLE_FONT, app_state.DEV_CONSOLE_FONTS[app_state.DEFAULT_CONSOLE_FONT_IDX]);
     for ([_][]const u8{
@@ -703,7 +703,7 @@ test "IGSH-443 shell face and saved font names migrate idempotently" {
         defer parsed.deinit();
         var face: [64]u16 = @splat(0);
         parseThemeFontField(parsed.value, "console_font", &face);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hack"), std.mem.sliceTo(&face, 0));
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Nordwand Mono MP SemiBold"), std.mem.sliceTo(&face, 0));
         var height: i32 = 18;
         parseThemeIntField(parsed.value, "console_font_height", &height);
         try std.testing.expectEqual(@as(i32, 22), height);
@@ -720,7 +720,7 @@ test "IGSH-456 nested and missing saved faces preserve unrelated settings" {
         defer parsed.deinit();
         var face: [64]u16 = @splat(0);
         parseThemeFontField(parsed.value, "console_font", &face);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hack"), std.mem.sliceTo(&face, 0));
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Nordwand Mono MP SemiBold"), std.mem.sliceTo(&face, 0));
         parseThemeFontField(parsed.value, "title_font", &face);
         try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("IBM Plex Sans"), std.mem.sliceTo(&face, 0));
         var height: i32 = 18;
@@ -730,4 +730,57 @@ test "IGSH-456 nested and missing saved faces preserve unrelated settings" {
         parseThemeColorField(parsed.value, "shell_bg", &color);
         try std.testing.expectEqual(RGB(0x12, 0x34, 0x56), color);
     }
+}
+
+fn issue456Table(file: []const u8, tag: *const [4]u8) []const u8 {
+    for (0..std.mem.readInt(u16, file[4..6], .big)) |i| {
+        const record = file[12 + i * 16 ..][0..16];
+        if (std.mem.eql(u8, record[0..4], tag)) return file[std.mem.readInt(u32, record[8..12], .big)..][0..std.mem.readInt(u32, record[12..16], .big)];
+    }
+    return &.{};
+}
+
+fn issue456WindowsName(file: []const u8, id: u16, out: []u16) []const u16 {
+    const name = issue456Table(file, "name");
+    const strings = name[std.mem.readInt(u16, name[4..6], .big)..];
+    for (0..std.mem.readInt(u16, name[2..4], .big)) |i| {
+        const record = name[6 + i * 12 ..][0..12];
+        if (std.mem.readInt(u16, record[0..2], .big) != 3 or std.mem.readInt(u16, record[6..8], .big) != id) continue;
+        const text = strings[std.mem.readInt(u16, record[10..12], .big)..][0..std.mem.readInt(u16, record[8..10], .big)];
+        for (0..text.len / 2) |j| out[j] = std.mem.readInt(u16, text[j * 2 ..][0..2], .big);
+        return out[0 .. text.len / 2];
+    }
+    return out[0..0];
+}
+
+test "ISSUE-456 shell face is the bundled Nordwand Mono MP SemiBold and declares the code pages conhost requests" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expectEqualStrings("Nordwand Mono MP SemiBold", fonts.SHELL_FACE);
+    try std.testing.expectEqual(600, fonts.SHELL_WEIGHT);
+    var face: [64]u16 = undefined;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral(fonts.SHELL_FACE), issue456WindowsName(fonts.MONO_SEMIBOLD, 1, &face));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral(fonts.SHELL_FACE), issue456WindowsName(fonts.MONO_SEMIBOLD, 4, &face));
+    const os2 = issue456Table(fonts.MONO_SEMIBOLD, "OS/2");
+    try std.testing.expectEqual(@as(u16, fonts.SHELL_WEIGHT), std.mem.readInt(u16, os2[4..6], .big));
+    try std.testing.expectEqual(@as(u8, 9), os2[35]);
+    try std.testing.expect(std.mem.readInt(u16, os2[0..2], .big) >= 1);
+    try std.testing.expect(std.mem.readInt(u32, os2[78..82], .big) & 1 != 0);
+    try std.testing.expect(std.mem.readInt(u32, os2[82..86], .big) & (1 << 31) != 0);
+    try std.testing.expect(std.mem.readInt(u32, os2[82..86], .big) & (1 << 30) != 0);
+    try std.testing.expect(std.mem.readInt(u32, issue456Table(fonts.MONO_SEMIBOLD, "post")[12..16], .big) != 0);
+}
+
+test "ISSUE-456 conhost reads the shell font from a content-named session font file" {
+    const source = @embedFile("console.zig");
+    const start = std.mem.indexOf(u8, source, "pub fn bundledShellFontFileName(").?;
+    const end = std.mem.indexOf(u8, source[start..], "\npub fn unregisterBundledConsoleFonts(").? + start;
+    const register = source[start..end];
+    try std.testing.expect(std.mem.indexOf(u8, register, "Wyhash.hash(0, @import(\"fonts.zig\").MONO_SEMIBOLD)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "@import(\"fonts.zig\").MONO_SEMIBOLD },") != null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "AddFontResourceExW(@ptrCast(path), 0, null)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "AddFontMemResourceEx") == null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "Hack") == null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "NordwandMono-Regular") == null);
+    try std.testing.expect(std.mem.indexOf(u8, register, "NordwandMono-Bold") == null);
+    try std.testing.expect(std.mem.indexOf(u8, app_state.DEFAULT_DEV_THEME_JSON, "\"console_font_weight\": 600") != null);
 }

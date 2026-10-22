@@ -9,6 +9,8 @@ Multiprompt is a native Windows desktop app hosting real console windows, with c
 
 Read [features/README.md](features/README.md), then the selected feature file before running anything. Never build, launch or drive locally, through Wine, on a VPS, or on a user's laptop. All execution below happens on GitHub's free `windows-latest` machines in the public repository.
 
+Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
+
 ## Launch
 
 From an authenticated checkout, submit the default branch's workflow and select a feature-map file stem:
