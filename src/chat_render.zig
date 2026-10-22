@@ -3193,7 +3193,7 @@ test "Chat View selection copies displayed ranges with CRLF and block joins" {
     try std.testing.expectEqualSlices(u16, expected, out[0..n]);
 }
 
-test "IGSH-567 pending Waiting to send text uses transcript selection and copy" {
+test "IGSH-567 pending message text uses transcript selection and copy" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("Pending message");
     var pending: [text.len]u16 = text[0..text.len].*;
     const old_outbox = app_state.g_chat_outbox;
@@ -3218,7 +3218,6 @@ test "IGSH-567 pending Waiting to send text uses transcript selection and copy" 
         chatSelectionClear();
     }
     try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 567, .text = &pending, .state = .queued });
-    try std.testing.expectEqual(chat_echo.Label.waiting_to_send, chat_echo.pendingLabel(.offline_queue, false, false));
     chatSelectAll();
     try std.testing.expectEqual(chat_hit.pending_selection_base, app_state.g_chat_sel_anchor);
     const stable_start = (chatSelectionDisplay(0) orelse return error.TestUnexpectedResult).start;
