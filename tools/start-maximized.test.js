@@ -91,7 +91,7 @@ test('IGSH-587 signed update, rollback and account restart request maximized', (
 function assertJourney(control, workflow, map) {
   assert.match(control, /\[DllImport\("user32.dll"\)\] public static extern bool IsZoomed\(IntPtr hwnd\);/);
   const start = control.indexOf("    if ($Feature -eq 'appearance') {");
-  const normalize = control.indexOf('    [void][VerifyNative]::ShowWindow($script:window, 9)');
+  const normalize = control.indexOf('    [void][VerifyNative]::ShowWindow($script:window, 9)', start);
   assert.ok(start >= 0 && normalize > start);
   const check = control.slice(start, normalize);
   assert.match(check, /Doctor\s*\$maximized = \[VerifyNative\]::IsZoomed\(\$script:window\)/);
