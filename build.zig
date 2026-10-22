@@ -633,27 +633,27 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry, chat CPU and version contract tests"),
+        b.step("test-group-1", "Run desktop, telemetry and chat CPU tests"),
         b.step("test-group-2", "Run Chat View regression, pane spacing and upload fixtures"),
-        b.step("test-group-3", "Run portable modules, source regressions and compiler-backed fixtures"),
+        b.step("test-group-3", "Run portable modules, window flicker, source regressions and compiler-backed fixtures"),
         b.step("test-group-4", "Run sync protocol, console lifecycle and desktop interaction fixtures"),
-        b.step("test-group-5", "Run SSH reconnect and browser profile fixtures"),
+        b.step("test-group-5", "Run SSH reconnect, account integration, version contracts and browser profile fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
-            dependency == &frequent_integration_tests.step or dependency == &chat_cpu_regression.step or
-            dependency == &version_stamp_tests.step)
+            dependency == &chat_cpu_regression.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
             dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
             1
-        else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step)
+        else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step or
+            dependency == &frequent_integration_tests.step or dependency == &version_stamp_tests.step)
             4
         else if (dependency == &run_sync_protocol_tests.step or
             dependency == &console_font_lifecycle_tests.step or dependency == &launch_regression.step or
             dependency == &chat_table_tests.step or dependency == &screenshot_pipeline_tests.step or
             dependency == &chat_view_console_visibility_tests.step or dependency == &zsb_interaction_tests.step or
-            dependency == &chat_drafts_tests.step or dependency == &window_flicker_tests.step or
+            dependency == &chat_drafts_tests.step or
             dependency == &idle_front_tests.step)
             3
         else
