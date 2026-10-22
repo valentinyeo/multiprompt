@@ -226,6 +226,11 @@ fn stopOldHelpers(dir: []const u16) void {
     }
 }
 
+pub fn stopForUpdate(path: []const u16) void {
+    stopOldHelpers(path[0..wideDirLen(path)]);
+    usage_telemetry_mode.stopForRelaunch();
+}
+
 fn wideContains(hay: []const u16, needle: []const u8) ?usize {
     if (hay.len < needle.len) return null;
     var i: usize = 0;

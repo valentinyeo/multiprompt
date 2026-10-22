@@ -1326,6 +1326,10 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == update_release.WM_RESPONSIVE) {
+        update_release.ready();
+        return 0;
+    }
     defer if (msg != WM_DESTROY and msg != 0x0082) sessionFrontChanged();
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -7716,6 +7720,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 pub fn main(init: std.process.Init) void {
     launch_cache.begin();
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return;
+    if (update_release.runHelperIfRequested(args)) return;
     if (usage_telemetry_mode.isRequested(args)) {
         usage_telemetry.main(init) catch {};
         return;
@@ -7746,7 +7751,7 @@ pub fn main(init: std.process.Init) void {
         return;
     }
 
-    if (update_release.startup()) return;
+    if (update_release.startup(args)) return;
 
     var console_fonts = @import("console.zig").registerBundledConsoleFonts();
     defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
@@ -7916,6 +7921,8 @@ pub fn main(init: std.process.Init) void {
     _ = @import("win32.zig").UpdateWindow(hwnd);
     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
 
+    _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
+    update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
         _ = TranslateMessage(&msg);

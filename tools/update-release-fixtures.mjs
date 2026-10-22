@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { generateKeyPairSync, createHash, sign } from 'node:crypto';
+if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('Throwaway signing runs only inside GitHub');
+const root = process.argv[2];
+const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+const wrong = generateKeyPairSync('ed25519');
+const rawPublic = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
+fs.writeFileSync('src/release_signing_public_key.txt', rawPublic.toString('base64') + '\n');
+for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true]]) {
+  const dir = path.join(root, `v${version}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const app = Buffer.concat([fs.readFileSync(path.join(root, broken ? 'broken.exe' : 'fixture.exe')), Buffer.from(`MPVERSION=${version};`)]);
+  const bridge = Buffer.concat([fs.readFileSync(path.join(root, 'fixture.exe')), Buffer.from(`BRIDGEVERSION=${version};`)]);
+  const names = ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip'];
+  for (const [i, bytes] of [app, bridge, fs.readFileSync(path.join(root, 'extension.zip'))].entries()) fs.writeFileSync(path.join(dir, names[i]), bytes);
+  const sums = Buffer.from(names.map(name => `${createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}  ${name}\n`).join(''));
+  fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt'), sums);
+  fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt.sig'), sign(null, sums, privateKey));
+  fs.writeFileSync(path.join(dir, 'wrong.sig'), sign(null, sums, wrong.privateKey));
+}
+console.log('Signed throwaway local-release fixtures prepared');

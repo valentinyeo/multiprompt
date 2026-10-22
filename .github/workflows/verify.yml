@@ -51,7 +51,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'safe-updates')) { throw 'Unknown feature map' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
@@ -66,6 +66,12 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Prepare job-only signed local release
+        if: env.FEATURE == 'safe-updates'
+        shell: powershell
+        run: |
+          if ($env:RELEASE_TAG) { throw 'safe-updates requires the branch verifier built with the job-only public key' }
+          & tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
         run: zig build
@@ -97,7 +103,13 @@ jobs:
           @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Full signed local-release swap journey
+        if: env.FEATURE == 'safe-updates'
+        shell: powershell
+        run: |
+          & tools/update-release-journey.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -Evidence "$pwd/evidence"
       - name: Launch Doctor Drive Evidence Cleanup
+        if: env.FEATURE != 'safe-updates'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
@@ -106,6 +118,10 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force evidence | Out-Null
+          if ($env:FEATURE -eq 'safe-updates' -and (Test-Path evidence/safe-updates.json)) {
+            $proof = Get-Content evidence/safe-updates.json -Raw | ConvertFrom-Json
+            @{ feature = 'safe-updates'; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
+          }
           if (-not (Test-Path evidence/result.json)) {
             @{ feature = $env:FEATURE; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' } | ConvertTo-Json | Set-Content -Encoding UTF8 evidence/result.json
           }

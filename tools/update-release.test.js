@@ -7,10 +7,10 @@ const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 
 test('release updater is default on and checks before session restoration', () => {
   const main = read('src/main.zig');
-  assert.match(main, /if \(update_release\.startup\(\)\) return;/);
+  assert.match(main, /if \(update_release\.startup\(args\)\) return;/);
   const updater = read('src/update_release.zig');
   assert.match(updater, /pub const IGSH_246 = true;/);
-  assert.ok(main.indexOf('update_release.startup()') < main.indexOf('const restored = restoreSession()'));
+  assert.ok(main.indexOf('update_release.startup(args)') < main.indexOf('const restored = restoreSession()'));
   assert.match(main, /update_release\.ready\(\)/);
   assert.match(read('src/update_card.zig'), /update_release\.poll\(\)/);
   assert.match(main, /_ = startUpdateCardWatch\(\);\s*_ = SetTimer\(hwnd, TIMER_UPDATE_CHECK/);

@@ -6,6 +6,8 @@ const APP_VERSION = @import("main.zig").APP_VERSION;
 
 pub const IGSH_246 = true;
 const interval_ms = 3 * 60 * 60 * 1000;
+pub const WM_RESPONSIVE = 0x85F4;
+var launch_args: []const []const u8 = &.{};
 var last_check: u64 = 0;
 var checker: win.HANDLE = null;
 var exe: [520:0]u16 = @splat(0);
@@ -71,7 +73,37 @@ fn spawn(mode: []const u8, pids: []const u32, accepted: []const u8) win.HANDLE {
     defer a.free(script8);
     const exe8 = std.unicode.utf16LeToUtf8Alloc(a, exe[0..exe_len]) catch return null;
     defer a.free(exe8);
-    const text = std.fmt.allocPrint(a, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{s}\" -Mode {s} -Exe \"{s}\" -Current {s} -Arch {s} -WaitPids \"{s}\" -AcceptedEvent \"{s}\"", .{ script8, mode, exe8, APP_VERSION, architecture(), pid_buf[0..used], accepted }) catch return null;
+    var arguments: std.Io.Writer.Allocating = .init(a);
+    defer arguments.deinit();
+    var skip = false;
+    for (launch_args) |arg| {
+        if (skip) {
+            skip = false;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--update-ready")) {
+            skip = true;
+            continue;
+        }
+        arguments.writer.writeAll(" \"") catch return null;
+        var slashes: usize = 0;
+        for (arg) |c| {
+            if (c == '\\') {
+                slashes += 1;
+                continue;
+            }
+            arguments.writer.splatByteAll('\\', if (c == '"') slashes * 2 + 1 else slashes) catch return null;
+            arguments.writer.writeByte(c) catch return null;
+            slashes = 0;
+        }
+        arguments.writer.splatByteAll('\\', slashes * 2) catch return null;
+        arguments.writer.writeByte('"') catch return null;
+    }
+    const raw = arguments.written();
+    const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(raw.len)) catch return null;
+    defer a.free(encoded);
+    _ = std.base64.standard.Encoder.encode(encoded, raw);
+    const text = std.fmt.allocPrint(a, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{s}\" -Mode {s} -Exe \"{s}\" -Current {s} -Arch {s} -WaitPids \"{s}\" -AcceptedEvent \"{s}\" -LaunchArguments \"{s}\"", .{ script8, mode, exe8, APP_VERSION, architecture(), pid_buf[0..used], accepted, encoded }) catch return null;
     defer a.free(text);
     const cmd = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return null;
     defer a.free(cmd);
@@ -83,19 +115,19 @@ fn spawn(mode: []const u8, pids: []const u32, accepted: []const u8) win.HANDLE {
     return pi.hProcess;
 }
 
-pub fn startup() bool {
+pub fn startup(args: []const []const u8) bool {
+    launch_args = if (args.len > 1) args[1..] else &.{};
     if (!enabled() or win.FindWindowW(w("ZigShell"), null) != null) return false;
-    if (std.mem.indexOf(u16, std.mem.span(GetCommandLineW()), std.mem.span(w("--update-ready"))) != null) return false;
-    last_check = win.GetTickCount64();
-    const process = spawn("Check", &.{}, "") orelse return false;
-    defer _ = win.CloseHandle(process);
-    if (win.WaitForSingleObject(process, 65_000) != 0) {
-        _ = win.TerminateProcess(process, 1);
-        return false;
+    for (launch_args) |arg| {
+        if (std.mem.eql(u8, arg, "--update-ready")) return false;
     }
-    var code: u32 = 0;
-    if (win.GetExitCodeProcess(process, &code) == 0 or code != 42) return false;
-    return restart(&.{win.GetCurrentProcessId()});
+    return hasStaged() and restart(&.{win.GetCurrentProcessId()});
+}
+
+pub fn beginCheck() void {
+    if (!enabled() or checker != null) return;
+    last_check = win.GetTickCount64();
+    checker = spawn("Check", &.{}, "");
 }
 
 pub fn poll() ?[]const u8 {
@@ -135,6 +167,26 @@ pub fn restart(pids: []const u32) bool {
     if (win.WaitForMultipleObjects(2, &handles, 0, 15_000) == 0) return true;
     _ = win.TerminateProcess(process, 1);
     return false;
+}
+
+pub fn runHelperIfRequested(args: []const []const u8) bool {
+    if (args.len < 2) return false;
+    if (std.mem.eql(u8, args[1], "--stop-update-helpers")) {
+        var path: [520:0]u16 = @splat(0);
+        const n = win.GetModuleFileNameW(null, &path, path.len);
+        if (n == 0 or n >= path.len) std.process.exit(1);
+        update_check.stopForUpdate(path[0..n]);
+        return true;
+    }
+    if (!std.mem.eql(u8, args[1], "--verify-release-manifest")) return false;
+    if (args.len != 4) std.process.exit(1);
+    const manifest = @import("file_io.zig").readFileAllocWin32(args[2], 1024 * 1024 + 1) orelse std.process.exit(1);
+    defer std.heap.page_allocator.free(manifest);
+    if (manifest.len > 1024 * 1024) std.process.exit(1);
+    const signature = @import("file_io.zig").readFileAllocWin32(args[3], 65) orelse std.process.exit(1);
+    defer std.heap.page_allocator.free(signature);
+    @import("release_signature.zig").verify(manifest, signature) catch std.process.exit(1);
+    std.process.exit(0);
 }
 
 pub fn ready() void {

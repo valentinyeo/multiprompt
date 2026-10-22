@@ -7,7 +7,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const body = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start) + start.length));
 
 test('R1 cold launch only applies staged bits, background check never waits before window', () => {
-  const startup = body(read('src/update_release.zig'), 'pub fn startup()', 'pub fn poll()');
+  const startup = body(read('src/update_release.zig'), 'pub fn startup(', 'pub fn beginCheck()');
   assert.doesNotMatch(startup, /spawn\("Check"|65_000|GetExitCodeProcess/);
   assert.match(startup, /hasStaged\(\)/);
   assert.match(read('src/main.zig'), /ShowWindow\(hwnd, SW_SHOW\)[\s\S]*update_release\.beginCheck\(\)/);
@@ -46,7 +46,7 @@ test('R5 detached manifest signatures required before trusting checksums', () =>
 test('R6 accepted event occurs before waiting on background download lock', () => {
   const ps = read('src/update_release.ps1');
   assert.ok(ps.indexOf('$accepted.Set()') < ps.indexOf('$mutex.WaitOne('));
-  assert.match(ps, /WaitOne\(-1\)/);
+  assert.match(ps, /\$mutex\.WaitOne\(\$\(if \(\$Mode -eq 'Apply'\) \{ -1 \}/);
 });
 test('R7 old-process exit timeout has a runnable recovery path', () => {
   const ps = read('src/update_release.ps1');

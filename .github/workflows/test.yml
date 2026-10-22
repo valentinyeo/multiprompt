@@ -153,8 +153,15 @@ jobs:
         if: matrix.group == 1
         run: |
           node --test tools/update-release-review.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tools/update-release.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          zig build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -File tools/update-release.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
