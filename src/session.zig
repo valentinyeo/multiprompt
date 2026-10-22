@@ -1878,7 +1878,7 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
     const saved_active = app_state.active_shell;
     const saved_workspace = app_state.g_active_workspace;
     const saved_single = app_state.g_single_window;
-    const saved_starred = app_state.g_starred_workspace;
+    const prior_starred = app_state.g_starred_workspace;
     const saved_last = app_state.g_starred_last_shell;
     const saved_restoring = app_state.g_restoring;
     const saved_pending = @import("launch_cache.zig").pending;
@@ -1894,7 +1894,7 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
         app_state.active_shell = saved_active;
         app_state.g_active_workspace = saved_workspace;
         app_state.g_single_window = saved_single;
-        app_state.g_starred_workspace = saved_starred;
+        app_state.g_starred_workspace = prior_starred;
         app_state.g_starred_last_shell = saved_last;
         app_state.g_restoring = saved_restoring;
         @import("launch_cache.zig").pending = saved_pending;
