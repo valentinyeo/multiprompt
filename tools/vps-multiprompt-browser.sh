@@ -680,6 +680,9 @@ report = {"ok": True, "path": out_path, "bytes": len(png)}
 via = result.get("via") or ("Page.captureScreenshot" if result.get("data") else "")
 if via:
     report["via"] = via
+for field in ("warning", "emulationLost"):
+    if field in result:
+        report[field] = result[field]
 print(json.dumps(report, separators=(",", ":")))
 PY
     rc=$?

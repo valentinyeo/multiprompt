@@ -192,8 +192,14 @@ test('subframe navigation does not reapply, and ordinary CDP errors retain emula
 
 test('extension release version is unused and matches self-test documentation', () => {
   const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST_SOURCE || path.join(__dirname, 'manifest.json'), 'utf8'));
+  const { execFileSync } = require('node:child_process');
+  let floor = '1.0.71';
+  try {
+    floor = JSON.parse(execFileSync('git', ['show', 'origin/master:extension/manifest.json'], { cwd: path.join(__dirname, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).version;
+  } catch {}
   const parts = manifest.version.split('.').map(Number);
-  assert.ok(parts[0] > 1 || (parts[0] === 1 && (parts[1] > 0 || parts[2] > 71)), '1.0.71 is already allocated to other open PRs');
+  const base = floor.split('.').map(Number);
+  assert.ok(parts[0] > base[0] || (parts[0] === base[0] && (parts[1] > base[1] || (parts[1] === base[1] && parts[2] > base[2]))), `${manifest.version} must be above master/fallback ${floor}`);
   const docs = fs.readFileSync(path.join(__dirname, '../openwiki/browser/zsb-selftest.md'), 'utf8');
   assert.ok(docs.includes(`version **${manifest.version}**`));
 });
@@ -525,4 +531,95 @@ test('non-emulated busy CDP fails promptly and reset cancels queued emulated wor
   assert.equal(h.overrides.get(1).metrics.width, 412);
   assert.equal(h.attached.has(1), true);
   await h.run({ method: 'emulate', device: 'off' });
+});
+
+for (const method of ['tabs', 'activeTab', 'url', 'frames', 'text', 'links', 'snapshot', 'find', 'navigate', 'closeTab', 'reset', 'resolveWindow']) {
+  test(`lost emulation permits warned lifecycle or read-only ${method}`, async () => {
+    const h = harness();
+    await h.run({ method: 'emulate', device: 'iphone' });
+    h.fail('Emulation.setDeviceMetricsOverride');
+    await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+    h.fail(undefined);
+    h.context.actionCalls = 0;
+    vm.runInContext(`dispatchAction = async message => {
+      actionCalls++;
+      if (message.method === 'reset' || message.method === 'closeTab') lostEmulationTabs.delete(1);
+      return { method: message.method, acted: true };
+    };`, h.context);
+    const result = await h.run({ method });
+    assert.equal(result.method, method);
+    assert.equal(result.acted, true);
+    assert.match(result.warning, /emulation lost/i);
+    assert.equal(result.emulationLost, !['reset', 'closeTab'].includes(method));
+    assert.equal(h.context.actionCalls, 1);
+  });
+}
+
+for (const method of ['screenshot', 'eval', 'click', 'key', 'type']) {
+  test(`lost emulation blocks viewport-sensitive ${method} before dispatch`, async () => {
+    const h = harness();
+    await h.run({ method: 'emulate', device: 'iphone' });
+    h.fail('Emulation.setDeviceMetricsOverride');
+    await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+    h.context.actionCalls = 0;
+    vm.runInContext('dispatchAction = async () => { actionCalls++; return {}; };', h.context);
+    await assert.rejects(h.run({ method }), /emulation lost.*zsb emulate/i);
+    assert.equal(h.context.actionCalls, 0);
+  });
+}
+
+test('reset clears lost emulation and permits viewport-sensitive commands again', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  h.fail('Emulation.setDeviceMetricsOverride');
+  await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  h.fail(undefined);
+  const result = await h.run({ method: 'reset' });
+  assert.equal(result.reset, true);
+  assert.match(result.warning, /emulation lost/i);
+  assert.equal(result.emulationLost, false);
+  await h.run({ method: 'key', combo: 'Enter' });
+});
+
+test('native screenshot output preserves lost-emulation metadata', () => {
+  const source = fs.readFileSync(process.env.NATIVE_SOURCE || path.join(__dirname, '../src/bridge.zig'), 'utf8');
+  const body = source.slice(source.indexOf('fn saveScreenshotResponse('), source.indexOf('\nfn getScreenshotBase64('));
+  assert.match(body, /getString\(result\.object\.get\("warning"\)\)/);
+  assert.match(body, /appendJsonString\(&out, warning\)/);
+  assert.match(body, /result\.object\.get\("emulationLost"\)/);
+  assert.match(body, /getBool\(emulation_lost\)/);
+});
+
+test('shell screenshot output preserves warning and emulationLost for both PNG response shapes', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const source = fs.readFileSync(process.env.BROWSER_SOURCE || path.join(__dirname, '../tools/vps-multiprompt-browser.sh'), 'utf8');
+  const start = source.indexOf("<<'PY'\n", source.indexOf('if [ -n "$output_path" ]')) + "<<'PY'\n".length;
+  assert.ok(start > "<<'PY'\n".length);
+  const script = source.slice(start, source.indexOf('\nPY\n', start));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-screenshot-'));
+  try {
+    for (const data of [{ data: 'iVBORw0KGgo=' }, { dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }]) {
+      for (const lost of [true, false, undefined]) {
+        const result = { ...data, via: 'synthetic', ...(lost === undefined ? {} : { warning: 'emulation lost: "restore" failed', emulationLost: lost }) };
+        const input = path.join(dir, 'reply.json');
+        const output = path.join(dir, 'shot.png');
+        fs.writeFileSync(input, JSON.stringify({ ok: true, result }));
+        const run = spawnSync('python3', ['-c', script, output, input], { encoding: 'utf8' });
+        assert.equal(run.status, 0, run.stderr);
+        assert.deepEqual(JSON.parse(run.stdout), { ok: true, path: output, bytes: 8, via: 'synthetic', ...(lost === undefined ? {} : { warning: result.warning, emulationLost: lost }) });
+        assert.deepEqual(fs.readFileSync(output), Buffer.from('iVBORw0KGgo=', 'base64'));
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('release version guard compares against the current git master with a fixed fallback', () => {
+  const source = fs.readFileSync(__filename, 'utf8');
+  const guard = source.slice(source.indexOf("test('extension release version"), source.indexOf("test('ordinary CDP command state"));
+  assert.match(guard, /execFileSync\('git', \['show', 'origin\/master:extension\/manifest\.json'\]/);
+  assert.match(guard, /catch/);
+  assert.match(guard, /1\.0\.71/);
 });

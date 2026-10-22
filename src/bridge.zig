@@ -2044,6 +2044,14 @@ fn saveScreenshotResponse(allocator: std.mem.Allocator, response: []const u8, ou
         try out.appendSlice(",\"via\":\"Page.captureScreenshot\"");
     }
 
+    if (getString(result.object.get("warning"))) |warning| {
+        try out.appendSlice(",\"warning\":");
+        try appendJsonString(&out, warning);
+    }
+    if (result.object.get("emulationLost")) |emulation_lost| {
+        try out.print(",\"emulationLost\":{}", .{getBool(emulation_lost)});
+    }
+
     try out.appendSlice("}\n");
     try writeStdout(out.items);
 }
