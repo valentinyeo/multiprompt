@@ -534,14 +534,24 @@ function Wait-ConsoleText([string]$Command) {
 
 function Focus-WorkspaceShell {
     [void][VerifyNative]::SetForegroundWindow($script:window)
-    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    if ($null -ne $focused -and (Get-Process -Id $focused.Current.ProcessId).ProcessName -eq 'msedge') {
+    $script:focusedBrowser = $false
+    Wait-Until {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -eq $focused) { return $false }
+        $owner = [int]$focused.Current.ProcessId
+        if ($owner -le 0) { return $false }
+        $script:focusedBrowser = [Diagnostics.Process]::GetProcessById($owner).ProcessName -eq 'msedge'
+        return $true
+    } 'focused control has a live owning process'
+    if ($script:focusedBrowser) {
         Press @(0x1B) 'Esc: dismiss any Edge startup bubble without disabling the extension'
         Press @(0x12, 0x4D) 'Alt+M: return keyboard focus from browser to workspace shell'
     }
     Wait-Until {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        $null -ne $focused -and (Get-Process -Id $focused.Current.ProcessId).ProcessName -ne 'msedge'
+        if ($null -eq $focused) { return $false }
+        $owner = [int]$focused.Current.ProcessId
+        $owner -gt 0 -and [Diagnostics.Process]::GetProcessById($owner).ProcessName -ne 'msedge'
     } 'workspace shell owns keyboard input'
 }
 
