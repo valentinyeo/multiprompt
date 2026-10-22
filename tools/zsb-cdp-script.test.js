@@ -262,5 +262,11 @@ test('IGSH-221 native and remote transports preserve safety, budgets and full JS
   assert.match(functionSource('handleHostMessage'), /message\.method === "cdp" && message\.script !== undefined\s*\? await dispatch\(message\)/);
   assert.match(functionSource('handleHostMessage'), /failedStep: error\.failedStep, results: error\.results/);
   assert.match(functionSource('sendCdp'), /getTargetTab\(message\)/);
-  assert.match(fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8'), /node --test tools\/zsb-cdp-script\.test\.js/);
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  assert.match(workflow, /node --test tools\/zsb-cdp-script\.test\.js/);
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  assert.match(build, /const zsb_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\)/);
+  assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath\(\.bin, "zigshell-bridge\.exe"\)\)/);
+  assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\)/);
 });
