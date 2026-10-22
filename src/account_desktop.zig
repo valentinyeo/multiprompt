@@ -876,10 +876,10 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const merged = try account_records.merge(alloc, state.records, documents.value.records);
     const desired = try account_records.materialize(alloc, merged);
     if (desired.workspaces.len > MAX_LWS or desired.tabs.len > MAX_SHELLS) return error.LayoutCapacity;
-    try accountApplyHosts(alloc, local.hosts orelse &.{}, desired.hosts orelse &.{}, config);
     state.records = merged;
     const acknowledged = try std.json.Stringify.valueAlloc(alloc, state, .{ .emit_null_optional_fields = false });
     if (!writeFileAtomicW(path, acknowledged)) return error.Storage;
+    try accountApplyHosts(alloc, local.hosts orelse &.{}, desired.hosts orelse &.{}, config);
     reply.bytes = try session_layout.encode(a, desired);
 }
 
