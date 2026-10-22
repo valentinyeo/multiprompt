@@ -6290,8 +6290,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
                             switchToWorkspace(findMyWorkspaceSlot(id).?);
                         } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
-                            if (absorbWorkspaceIntoSlots(id, name)) {
-                                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
+                            if (absorbWorkspaceIntoSlots(id, name)) |slot| {
+                                switchToWorkspace(slot);
                             } else {
                                 newWorkspace();
                             }

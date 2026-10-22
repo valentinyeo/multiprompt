@@ -1547,8 +1547,7 @@ fn closedWorkspaceMoveTargetSlot(workspace_idx: u32) ?u8 {
 
     scanLiveWorkspaceWindows(false);
     if (!workspaceCanMoveIntoClosedStandalone(workspace_idx)) return null;
-    if (!absorbWorkspaceIntoSlots(id, name_copy[0..name_len])) return null;
-    return findMyWorkspaceSlot(id);
+    return absorbWorkspaceIntoSlots(id, name_copy[0..name_len]);
 }
 
 pub fn moveTabToClosedWorkspace(tab_idx: u32, workspace_idx: u32) void {
@@ -1639,7 +1638,7 @@ pub fn restoreRegisteredWorkspaceWindows() void {
         const name = cand_names[ci][0..cand_name_len[ci]];
         if (findAndFocusWorkspaceWindow(id, name)) continue;
         if (app_state.g_single_window) {
-            if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("startup absorb failed: ", id);
+            if (absorbWorkspaceIntoSlots(id, name) == null) debugLog2("startup absorb failed: ", id);
             continue;
         }
         spawnWorkspaceWindow(id);
@@ -4053,31 +4052,31 @@ test "workspace absorption remaps colliding group ids without losing metadata" {
     try std.testing.expectEqual(@as(u32, 3), app_state.group_count);
 }
 
-pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool {
-    if (!app_state.g_single_window) return false;
-    if (id.len == 0 or std.mem.eql(u8, id, getInstanceName())) return false;
+pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) ?u8 {
+    if (!app_state.g_single_window) return null;
+    if (id.len == 0 or std.mem.eql(u8, id, getInstanceName())) return null;
 
     var path_buf: [512]u8 = undefined;
-    const path = getSessionPathForWorkspace(&path_buf, id) orelse return false;
+    const path = getSessionPathForWorkspace(&path_buf, id) orelse return null;
     var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
     var n: usize = 0;
     {
-        const h = win32OpenRead(path) orelse return false;
+        const h = win32OpenRead(path) orelse return null;
         defer _ = CloseHandle(h);
         n = win32ReadAll(h, &json_buf);
     }
-    if (n == 0) return false;
+    if (n == 0) return null;
     const json = json_buf[0..n];
-    if (!sessionFileIsValid(json)) return false;
+    if (!sessionFileIsValid(json)) return null;
 
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const tab_count = parseSessionTabs(json, &tabs);
-    var parsed = json_reader.parse(std.heap.page_allocator, json) catch return false;
+    var parsed = json_reader.parse(std.heap.page_allocator, json) catch return null;
     defer parsed.deinit();
     const entries = json_reader.field(parsed.value, "tabs");
     const empty_workspace = tab_count == 0 and entries == .array and entries.array.items.len == 0;
-    if (tab_count == 0 and !empty_workspace) return false;
-    if (!importWorkspaceGroups(json, tabs[0..tab_count])) return false;
+    if (tab_count == 0 and !empty_workspace) return null;
+    if (!importWorkspaceGroups(json, tabs[0..tab_count])) return null;
     logSavedTabsAudit("absorbWorkspace:parsed", tabs[0..tab_count]);
 
     var src_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
@@ -4135,13 +4134,15 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     app_state.g_restoring = true;
 
     var spawned: u32 = 0;
+    var restored_slot: ?u8 = null;
     if (empty_workspace) {
         if (app_state.g_lws_count >= MAX_LWS) {
             app_state.g_restoring = was_restoring;
-            return false;
+            return null;
         }
         const slot = app_state.g_lws_count;
         app_state.g_lws_count += 1;
+        restored_slot = slot;
         const saved_name = src_names[0][0..@min(src_name_len[0], 31)];
         const name = if (saved_name.len > 0) saved_name else fallback_name;
         const name_len = @min(name.len, @as(usize, 31));
@@ -4287,6 +4288,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 app_state.shells[idx].claude_cwd_len = tabs[t].claude_cwd_len;
             }
             restoreBrowserStateFromSavedTab(@intCast(idx), &tabs[t]);
+            if (restored_slot == null) restored_slot = slot;
             spawned += 1;
         } else {
             debugLog("absorbWorkspace: spawn FAILED");
@@ -4304,8 +4306,13 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.g_ws_focus[s] = .none;
         }
         app_state.g_lws_count = entry_lws;
-        return false;
+        return null;
     }
+
+    const target_slot = restored_slot orelse return null;
+    const restored_id = app_state.g_ws_ids[target_slot];
+    const restored_id_len = app_state.g_ws_id_len[target_slot];
+    const restored_other = isOtherWorkspaceSlot(target_slot);
 
     var stamp_buf: [32]u8 = undefined;
     const stamp = workspaceDeleteStamp(&stamp_buf);
@@ -4328,7 +4335,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     app_state.g_sidebar_scroll = 0;
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-    return true;
+    return findMyWorkspaceSlot(restored_id[0..restored_id_len]) orelse if (restored_other) otherPillSlot() else null;
 }
 
 fn collapseOtherWindowsIntoThis() void {
@@ -4371,7 +4378,7 @@ fn collapseOtherWindowsIntoThis() void {
             continue;
         }
         Sleep(150);
-        if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("collapse: absorb failed for ", id);
+        if (absorbWorkspaceIntoSlots(id, name) == null) debugLog2("collapse: absorb failed for ", id);
     }
     _ = reconcileWorkspaceRegistry(true);
 }

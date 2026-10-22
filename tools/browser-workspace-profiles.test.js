@@ -255,3 +255,99 @@ test('IGSH-224 synthetic upgrade proof exercises production roots markers native
   assert.match(upgrade, /New-Object Text.UTF8Encoding\(\$false\)/);
   assert.ok(control.indexOf('Assert-SeededWorkspaceUpgrade }') < control.indexOf('$process = $job.Start($Exe, $scratch'));
 });
+
+function workspaceConsumer(body, bindings) {
+  const javascript = body
+    .replace(/name_copy\[0\.\.name_len\]/g, 'name')
+    .replace(/if \((findMyWorkspaceSlot\(id\)|absorbWorkspaceIntoSlots\(id, name\))\) \|slot\|/g, 'if ((slot = $1) !== null)');
+  return new Function(...Object.keys(bindings), `let slot; { ${javascript} }`)(...Object.values(bindings));
+}
+
+test('IGSH-224 palette reopen selects the imported durable workspace when the export alias is absent', () => {
+  const main = read('src/main.zig');
+  const start = main.indexOf('if (absorbWorkspaceIntoSlots(id, name))');
+  const body = main.slice(start, main.indexOf('\n                        } else {', start));
+  assert.ok(start >= 0 && body.length > 0);
+  for (const restoredSlot of [2, 0]) {
+    for (const imported of [false, true]) {
+      const slots = new Map();
+      let selected = null;
+      let created = 0;
+      workspaceConsumer(body, {
+        id: 'split-123-0', name: 'A',
+        absorbWorkspaceIntoSlots: id => {
+          assert.equal(id, 'split-123-0');
+          if (!imported) return null;
+          slots.set('durable-A', restoredSlot);
+          return restoredSlot;
+        },
+        findMyWorkspaceSlot: id => slots.get(id) ?? null,
+        switchToWorkspace: slot => { selected = slot; },
+        newWorkspace: () => { created++; },
+      });
+      assert.equal(selected, imported ? restoredSlot : null);
+      assert.equal(created, imported ? 0 : 1);
+      assert.equal(slots.has('split-123-0'), false);
+    }
+  }
+});
+
+test('IGSH-224 move to closed workspace moves the tab into the imported durable slot rather than its alias', () => {
+  const source = read('src/workspaces.zig');
+  const target = source.slice(source.indexOf('fn closedWorkspaceMoveTargetSlot('), source.indexOf('pub fn moveTabToClosedWorkspace('));
+  const body = target.slice(target.indexOf('if (findMyWorkspaceSlot(id))'), target.lastIndexOf('}'));
+  const move = source.slice(source.indexOf('pub fn moveTabToClosedWorkspace('), source.indexOf('pub fn moveSelectedTabsToClosedWorkspace('));
+  const caller = move.slice(move.indexOf('    if (tab_idx'), move.lastIndexOf('}'))
+    .replace('app_state.shell_count', 'shellCount')
+    .replace('const slot = closedWorkspaceMoveTargetSlot(workspace_idx) orelse return;', 'const slot = closedWorkspaceMoveTargetSlot(workspace_idx); if (slot === null) return;');
+  for (const restoredSlot of [2, 0]) {
+    for (const imported of [false, true]) {
+      const slots = new Map();
+      const tab = { workspace: 1 };
+      let imports = 0;
+      const bindings = {
+        id: 'split-123-0', name: 'A', workspace_idx: 4,
+        findMyWorkspaceSlot: id => slots.get(id) ?? null,
+        scanLiveWorkspaceWindows: () => {},
+        workspaceCanMoveIntoClosedStandalone: () => true,
+        absorbWorkspaceIntoSlots: id => {
+          assert.equal(id, 'split-123-0');
+          imports++;
+          if (!imported) return null;
+          slots.set('durable-A', restoredSlot);
+          return restoredSlot;
+        },
+      };
+      workspaceConsumer(caller, {
+        tab_idx: 0, workspace_idx: 4, shellCount: 1,
+        closedWorkspaceMoveTargetSlot: () => workspaceConsumer(body, bindings),
+        moveTabToPill: (index, slot) => { assert.equal(index, 0); tab.workspace = slot; },
+      });
+      assert.equal(imports, 1);
+      assert.equal(tab.workspace, imported ? restoredSlot : 1);
+      assert.equal(slots.has('split-123-0'), false);
+      slots.set('split-123-0', restoredSlot);
+      assert.equal(workspaceConsumer(body, bindings), restoredSlot);
+      assert.equal(imports, 1);
+    }
+  }
+});
+
+test('IGSH-224 import returns a successful restored slot after duplicate workspace normalization', () => {
+  const source = read('src/workspaces.zig');
+  const absorb = source.slice(source.indexOf('pub fn absorbWorkspaceIntoSlots('), source.indexOf('fn collapseOtherWindowsIntoThis('));
+  assert.match(absorb, /pub fn absorbWorkspaceIntoSlots\([^\n]+\) \?u8/);
+  assert.doesNotMatch(absorb, /return false;|return true;/);
+  assert.match(absorb, /if \(empty_workspace\) \{[\s\S]*?restored_slot = slot;/);
+  assert.match(absorb, /if \(restored_slot == null\) restored_slot = slot;\s+spawned \+= 1;/);
+  assert.match(absorb, /const restored_id = app_state\.g_ws_ids\[target_slot\];/);
+  assert.ok(absorb.indexOf('const restored_id =') < absorb.indexOf('mergeDuplicateOtherWorkspaces();'));
+  assert.match(absorb, /return findMyWorkspaceSlot\(restored_id\[0\.\.restored_id_len\]\) orelse if \(restored_other\) otherPillSlot\(\) else null;/);
+  for (const caller of ['moveTabToClosedWorkspace', 'moveSelectedTabsToClosedWorkspace', 'moveGroupToClosedWorkspace']) {
+    const start = source.indexOf(`pub fn ${caller}(`);
+    const body = source.slice(start, source.indexOf('\n}', start));
+    assert.match(body, /const slot = closedWorkspaceMoveTargetSlot\(workspace_idx\) orelse return;/);
+    assert.match(body, /move(?:Tab|SelectedTabs|Group)ToPill\([^;]*slot\);/);
+  }
+  assert.equal([...source.matchAll(/if \(absorbWorkspaceIntoSlots\(id, name\) == null\)/g)].length, 2);
+});
