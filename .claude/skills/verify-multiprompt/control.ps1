@@ -28,13 +28,14 @@ using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr GetFocus();
     [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
@@ -56,6 +57,18 @@ public static class VerifyNative {
                 targetAttached = AttachThreadInput(current, target, true);
             }
             SetForegroundWindow(hwnd);
+            if (GetForegroundWindow() != hwnd) {
+                Rect bounds;
+                if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
+                Point point = new Point { X = bounds.Left + 100, Y = bounds.Top + 22 };
+                if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
+                if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                Input[] click = new Input[2];
+                click[0].data.mouse = new Mouse { flags = 2 };
+                click[1].data.mouse = new Mouse { flags = 4 };
+                if (SendInput(2, click, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Owned browser click failed");
+                Thread.Sleep(100);
+            }
             if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
             SetFocus(hwnd);
             if (GetAncestor(GetFocus(), 3) != frame) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
