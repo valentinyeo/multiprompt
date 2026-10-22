@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const changed = new Set([
-  ...execFileSync('git', ['diff', '--name-only', 'daf2435'], { encoding: 'utf8' }).trim().split('\n'),
+  ...execFileSync('git', ['diff', '--name-only', 'origin/master'], { encoding: 'utf8' }).trim().split('\n'),
   ...execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { encoding: 'utf8' }).trim().split('\n'),
 ]);
 let checked = 0;
@@ -21,5 +21,5 @@ for (const file of changed) {
   }
 }
 assert.ok(checked > 0);
-execFileSync('git', ['diff', '--check', 'daf2435'], { stdio: 'pipe' });
+execFileSync('git', ['diff', '--check', 'origin/master'], { stdio: 'pipe' });
 console.log(`ISSUE-252 syntax verified (${checked} files)`);

@@ -1220,26 +1220,31 @@ const syncGet = async token => {
 test('ISSUE-252 authenticated devices round trip add edit delete and deterministic host conflicts', async () => {
   await db.prepare('DELETE FROM sync_records').run();
   const { token: first } = await enroll(), { token: second } = await enroll();
-  const host = syncHost('device-a', 100);
-  const workspace = { kind: 'workspace', id: 'Work', updated_at: 100, device_id: 'device-a', deleted: false, workspace: { name: 'Work' } };
-  const session = { kind: 'session', id: '0:one', updated_at: 100, device_id: 'device-a', deleted: false, session: { kind: 'tmux', name: 'One', tmux_session: 'One', tmux_host: 0, workspace: 'Work' } };
+  const start = Date.now() - 10000;
+  const host = syncHost(first.device_id, start);
+  const workspace = { kind: 'workspace', id: 'Work', updated_at: start, device_id: first.device_id, deleted: false, workspace: { name: 'Work' } };
+  const session = { kind: 'session', id: '0:one', updated_at: start, device_id: first.device_id, deleted: false, session: { kind: 'tmux', name: 'One', tmux_session: 'One', tmux_host: 0, workspace: 'Work' } };
   assert.equal((await syncPut(first, [host, workspace, session])).status, 200);
   assert.deepEqual(await syncGet(second), [host, workspace, session]);
-  const left = syncHost('device-a', 200, 'left.example.com'), right = syncHost('device-b', 200, 'right.example.com');
-  const changed = { ...session, updated_at: 200, device_id: 'device-a', session: { ...session.session, name: 'Renamed' } };
+  const left = syncHost(first.device_id, start + 100, 'left.example.com'), right = syncHost(second.device_id, start + 100, 'right.example.com');
+  const changed = { ...session, updated_at: start + 100, session: { ...session.session, name: 'Renamed' } };
   const responses = await Promise.all([syncPut(first, [left, changed]), syncPut(second, [right])]);
-  assert.deepEqual(responses.map(r => r.status), [200, 200]);
-  assert.deepEqual(await syncGet(first), [right, workspace, changed]);
-  assert.equal((await syncPut(first, [left])).status, 200);
-  assert.deepEqual(await syncGet(second), [right, workspace, changed]);
-  const dead = [right, workspace, changed].map(({ kind, id }) => ({ kind, id, updated_at: 300, device_id: 'device-a', deleted: true }));
+  assert.ok(responses.every(r => [200, 409].includes(r.status)));
+  assert.equal((await syncPut(first, [left, changed])).status, 200);
+  assert.equal((await syncPut(second, [right])).status, 200);
+  const winner = first.device_id > second.device_id ? left : right;
+  const received = await syncGet(first);
+  assert.deepEqual(received[0], winner);
+  assert.deepEqual(received[1], workspace);
+  assert.equal(received[2].session.name, 'Renamed');
+  const dead = [winner, workspace, changed].map(({ kind, id }) => ({ kind, id, updated_at: start + 200, device_id: first.device_id, deleted: true }));
   assert.equal((await syncPut(first, dead)).status, 200);
-  assert.equal((await syncPut(second, [host, workspace, session])).status, 200);
+  assert.equal((await syncPut(first, [host, workspace, session])).status, 200);
   assert.deepEqual(await syncGet(second), dead);
   await db.prepare('DELETE FROM sync_records').run();
-  await syncPut(first, [right]);
-  await syncPut(second, [left]);
-  assert.deepEqual(await syncGet(first), [right]);
+  assert.equal((await syncPut(second, [right])).status, 200);
+  assert.equal((await syncPut(first, [left])).status, 200);
+  assert.deepEqual(await syncGet(first), [winner]);
 });
 
 test('ISSUE-252 record service rejects credentials keys local paths geometry malformed ids and future clocks', async () => {
@@ -1261,11 +1266,73 @@ test('ISSUE-252 records are account scoped and unauthorized or revoked devices c
   const otherToken = 'record-foreign-access'.padEnd(43, 'x');
   await db.prepare('INSERT INTO devices VALUES (?,?,?,?,?,?,?)').bind('record-foreign', 'foreign-account', 'Foreign device', 'record-foreign-refresh', 0, 0, 0).run();
   await db.prepare('INSERT INTO access_tokens VALUES (?,?,?)').bind(await hash(otherToken), 'record-foreign', Math.floor(Date.now() / 1000) + 600).run();
-  const foreign = { access_token: otherToken };
+  const foreign = { access_token: otherToken, device_id: 'record-foreign' };
   assert.deepEqual(await syncGet(foreign), []);
-  assert.equal((await syncPut(foreign, [syncHost('foreign-device', 150)])).status, 200);
+  assert.equal((await syncPut(foreign, [syncHost(foreign.device_id, Date.now())])).status, 200);
   assert.notDeepEqual(await syncGet(foreign), await syncGet(token));
   await request('/v1/devices/' + token.device_id, { method: 'DELETE', headers: auth(token) });
   assert.equal((await request('/v1/sync-records', { headers: auth(token) })).status, 401);
   assert.equal((await syncPut(token, [syncHost('device', 400)])).status, 401);
+});
+
+
+test('ISSUE-252 N records bind device identity and provide server time for skew correction', async () => {
+  const { token } = await enroll();
+  const forged = await syncPut(token, [syncHost('forged-device', Date.now())]);
+  assert.equal(forged.status, 403);
+  assert.equal((await forged.json()).error, 'record_device_mismatch');
+  const fast = await syncPut(token, [syncHost(token.device_id, Date.now() + 600000)]);
+  assert.equal(fast.status, 400);
+  const error = await fast.json();
+  assert.equal(error.error, 'clock_skew');
+  assert.ok(Math.abs(error.server_time - Date.now()) < 5000);
+  assert.equal((await syncPut(token, [syncHost(token.device_id, error.server_time)])).status, 200);
+});
+
+test('ISSUE-252 D expired tombstones are collected stale replay rejected and batches bounded', async () => {
+  await db.prepare('DELETE FROM sync_records').run();
+  const { token } = await enroll();
+  const cutoff = Date.now() - 31 * 24 * 60 * 60 * 1000;
+  const dead = { kind: 'host', id: '0', updated_at: cutoff, device_id: token.device_id, deleted: true };
+  await db.prepare('INSERT INTO sync_records VALUES (?,?,?,?,?,?)').bind('owner@example.com', dead.kind, dead.id, dead.updated_at, dead.device_id, JSON.stringify(dead)).run();
+  assert.deepEqual(await syncGet(token), []);
+  const stale = await syncPut(token, [syncHost(token.device_id, cutoff)]);
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).error, 'record_expired');
+  const oversized = Array.from({ length: 17 }, (_, i) => ({ kind: 'workspace', id: 'Work' + i, updated_at: Date.now(), device_id: token.device_id, deleted: false, workspace: { name: 'Work' + i } }));
+  const result = await syncPut(token, oversized);
+  assert.equal(result.status, 413);
+  assert.equal((await result.json()).error, 'record_batch_limit');
+  assert.deepEqual(await syncGet(token), []);
+});
+
+test('ISSUE-252 D full account returns capacity error instead of dropping records', async () => {
+  await db.prepare('DELETE FROM sync_records').run();
+  const { token } = await enroll();
+  await db.prepare("WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x<4095) INSERT INTO sync_records (account,kind,id,updated_at,device_id,document) SELECT ?, 'workspace', 'Full'||x, ?, ?, json_object('kind','workspace','id','Full'||x,'updated_at',?,'device_id',?,'deleted',json('false'),'workspace',json_object('name','Full'||x)) FROM n").bind('owner@example.com', Date.now(), token.device_id, Date.now(), token.device_id).run();
+  const result = await syncPut(token, [syncHost(token.device_id, Date.now())]);
+  assert.equal(result.status, 409);
+  assert.equal((await result.json()).error, 'record_capacity');
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM sync_records WHERE account=?').bind('owner@example.com').first()).n, 4096);
+  await db.prepare('DELETE FROM sync_records').run();
+});
+
+test('ISSUE-252 E activity preserves concurrent session metadata through the real endpoint', async () => {
+  await db.prepare('DELETE FROM sync_records').run();
+  const { token: first } = await enroll(), { token: second } = await enroll();
+  const now = Date.now() - 1000;
+  const stamp = (updated_at, device_id) => ({ updated_at, device_id });
+  const base = { kind: 'session', id: '0:one', updated_at: now, device_id: first.device_id, deleted: false, session: { kind: 'tmux', name: 'Old', favorite: false, tmux_session: 'one', tmux_host: 0, workspace: 'Work', used: 10, input: 10, visits: [1] } };
+  const renamed = { ...base, updated_at: now + 100, fields: { name: stamp(now + 100, first.device_id), manual: stamp(now, first.device_id), favorite: stamp(now + 100, first.device_id), workspace: stamp(now, first.device_id) }, session: { ...base.session, name: 'Renamed', favorite: true } };
+  const active = { ...base, updated_at: now + 200, device_id: second.device_id, fields: Object.fromEntries(['name', 'manual', 'favorite', 'workspace'].map(key => [key, stamp(now, first.device_id)])), session: { ...base.session, used: 300, input: 400, visits: [2] } };
+  for (const order of [[renamed, active], [active, renamed]]) {
+    await db.prepare('DELETE FROM sync_records').run();
+    for (const record of order) assert.equal((await syncPut(record.device_id === first.device_id ? first : second, [record])).status, 200);
+    const [record] = await syncGet(first);
+    assert.equal(record.session.name, 'Renamed');
+    assert.equal(record.session.favorite, true);
+    assert.equal(record.session.used, 300);
+    assert.equal(record.session.input, 400);
+    assert.deepEqual(record.session.visits, [1, 2]);
+  }
 });

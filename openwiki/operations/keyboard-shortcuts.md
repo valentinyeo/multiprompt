@@ -189,7 +189,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Open command palette; it opens with your last 5 sessions |
-| Ctrl+K -&gt; Sync between laptops | Opt in to hosts, workspaces and remote sessions sync; off by default |
+| Ctrl+K -&gt; Sync between laptops | Opt in to deletion history; existing account sync stays on |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock multiprompt |
 | Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |

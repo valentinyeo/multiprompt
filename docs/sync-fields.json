@@ -13,7 +13,7 @@
       "HostName": "sync",
       "Port": "sync",
       "User": "sync",
-      "host_keys": "never-sync",
+      "host_keys": "sync",
       "IdentityFile": "never-sync",
       "CertificateFile": "never-sync",
       "IdentityAgent": "never-sync",
@@ -196,7 +196,43 @@
       "host": "sync",
       "workspace": "sync",
       "session": "sync",
-      "settings": "sync"
+      "settings": "sync",
+      "initialized": "never-sync",
+      "fields": "sync",
+      "server_time": "never-sync",
+      "deletion_history": "sync",
+      "observed_at": "never-sync"
     }
+  },
+  "ownership": {
+    "layout": "/v1/layout",
+    "layout_fields": [
+      "hosts.slot",
+      "hosts.name",
+      "hosts.hostname",
+      "hosts.port",
+      "hosts.user",
+      "hosts.host_keys",
+      "workspaces.name",
+      "tabs.kind",
+      "tabs.name",
+      "tabs.manual",
+      "tabs.favorite",
+      "tabs.used",
+      "tabs.input",
+      "tabs.visits",
+      "tabs.tmux_session",
+      "tabs.tmux_host",
+      "tabs.workspace",
+      "settings.frequent",
+      "settings.favorites",
+      "settings.all",
+      "settings.frequent_first"
+    ],
+    "records": [
+      "deletion_history"
+    ],
+    "records_endpoint": "/v1/sync-records",
+    "rule": "Layout remains the sole authority for all existing values with sync on or off. Opt-in records store bounded deletion history only, never materialize or rewrite layout/SSH values. Legacy record payloads are protocol-tested but never applied by the desktop. Device public-key publication, approvals, revocation and missing-host import remain automatic and independent."
   }
 }

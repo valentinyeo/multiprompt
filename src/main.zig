@@ -4309,6 +4309,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     var dbg_cf: [96]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&dbg_cf, "[confirm] sel={d} count={d} target={d} (tabsort_auto={d} manual={d})", .{ app_state.g_search_sel, app_state.g_search_result_count, target, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET }) catch "[confirm fmt-err]");
                 }
+                if (target == app_state.SEARCH_LAPTOP_SYNC_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("account_desktop.zig").accountToggleSync();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_LAYOUT_PULL_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;

@@ -1,1 +1,1 @@
-Opt in to sync your hosts, workspaces and remote sessions between laptops while keeping SSH keys, passwords and window positions on each device.
+Keep automatic account sync working as before, with optional deletion history and safer SSH configuration backups.

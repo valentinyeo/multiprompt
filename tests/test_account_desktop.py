@@ -41,7 +41,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn("len == 1 and env[0] == '1'", claim)
         reply = function(MAIN, 'handleLayoutReply')
         invalid = reply.split('if (reply.unauthorized) {', 1)[1].split('const bytes =', 1)[0]
-        self.assertIn('if (reply.job.kind == .startup)', invalid)
+        self.assertNotIn('if (reply.job.kind == .startup)', invalid)
         self.assertIn('accountLock();', invalid)
 
     def test_all_spawn_and_restore_paths_fail_closed_with_negative_control(self):
@@ -188,16 +188,15 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('accountResumeJob(.startup)', function(MAIN, 'pullSessionLayout'))
         self.assertNotIn('g_account_base == null', function(MAIN, 'publishSessionLayout'))
 
-    def test_access_cache_precedes_refresh_and_reauth_never_locks_running_terminals(self):
+    def test_issue_252_access_cache_precedes_refresh_and_revocation_locks_running_session(self):
         worker = function(MAIN, 'accountRequest')
         self.assertLess(worker.index('g_account_access.usable('), worker.index('account_client.refresh(old)'))
         self.assertIn('if (renewed) try g_account_access.remember', worker)
         reply = function(MAIN, 'handleLayoutReply')
         invalid = reply.split('if (reply.unauthorized) {', 1)[1].split('const bytes =', 1)[0]
-        background = invalid.split('} else {', 1)[1]
-        self.assertNotIn('accountLock()', background)
+        self.assertIn('accountLock();', invalid)
+        self.assertNotIn('} else {', invalid)
         self.assertIn('g_account_reauth = true;', invalid)
-        self.assertIn('Sign in again:', invalid)
         self.assertIn('g_account_locked or g_account_reauth', MAIN)
         self.assertIn('g_account_reauth or g_cap_msg_until > now', MAIN)
 

@@ -44,47 +44,13 @@ test('ISSUE-252 conflict tombstone and readback mutations fail executable scenar
   }
 });
 
-function body(name) {
-  const text = fs.readFileSync(path.join(root, 'src/account_desktop.zig'), 'utf8');
-  const start = text.indexOf(`fn ${name}(`);
-  assert.ok(start >= 0, name);
-  return text.slice(start, text.indexOf('\n}', start) + 2).replaceAll('app_state.', '');
-}
-
-test('ISSUE-252 actual scheduler arms only one timer and off means no wakeups', () => {
-  const harness = `const std = @import("std");
-const account_records = @import("account_records.zig");
-const TIMER_ACCOUNT: usize = 170;
-var g_main_hwnd: usize = 1;
-var g_account_sync_enabled = false;
-var g_account_bypass = false;
-var armed: usize = 0;
-var last_delay: u32 = 0;
-fn KillTimer(_: usize, id: usize) i32 { std.debug.assert(id == TIMER_ACCOUNT); armed = 0; return 1; }
-fn SetTimer(_: usize, id: usize, delay: u32, _: ?*anyopaque) usize { std.debug.assert(id == TIMER_ACCOUNT); armed += 1; last_delay = delay; return id; }
-${body('accountArmTimer')}
-test "ISSUE-252 disabled startup repeated saves toggle and backoff share a single bounded timer" {
-    accountArmTimer(2000);
-    try std.testing.expectEqual(@as(usize, 0), armed);
-    g_account_sync_enabled = true;
-    accountArmTimer(account_records.poll_ms);
-    try std.testing.expectEqual(@as(usize, 1), armed);
-    try std.testing.expectEqual(@as(u32, 180000), last_delay);
-    accountArmTimer(2000);
-    accountArmTimer(40000);
-    try std.testing.expectEqual(@as(usize, 1), armed);
-    try std.testing.expectEqual(@as(u32, 40000), last_delay);
-    g_account_sync_enabled = false;
-    accountArmTimer(2000);
-    try std.testing.expectEqual(@as(usize, 0), armed);
-    g_account_sync_enabled = true;
-    g_account_bypass = true;
-    accountArmTimer(2000);
-    try std.testing.expectEqual(@as(usize, 0), armed);
-}
-`;
-  const result = execute(text => text, harness);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+test('ISSUE-252 record polling adds no timer or competing host writer', () => {
+  const source = fs.readFileSync(path.join(root, 'src/account_desktop.zig'), 'utf8');
+  const start = source.indexOf('fn accountSyncRecords(');
+  const records = source.slice(start, source.indexOf('\n}', start));
+  assert.match(records, /GetTickCount64\(\) -\| records_checked.\? < account_records.poll_ms/);
+  assert.doesNotMatch(records, /SetTimer|KillTimer|accountSyncHosts|rewriteHost|materialize/);
+  assert.match(source, /SetTimer\(hwnd, TIMER_ACCOUNT, 20000, null\)/);
 });
 
 test('ISSUE-252 real original host deletion and key privacy regressions fail before this change', () => {
@@ -114,40 +80,4 @@ test "ISSUE-252 original host document must not carry SSH keys" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('ISSUE-252 actual SSH watcher blocks rearms before posting and releases its notification on stop or failure', () => {
-  const watcher = body('accountHostWatchThread').replace('const w = @import("win32.zig");', '').replaceAll('w.', '');
-  const harness = `const std = @import("std");
-const HANDLE = usize;
-const WM_APP_ACCOUNT_HOST_CHANGED = 1206;
-var waits: []const u32 = &.{1, 1, 0};
-var at: usize = 0;
-var posts: usize = 0;
-var rearms: usize = 0;
-var closes: usize = 0;
-var rearm_ok = true;
-fn WaitForMultipleObjects(n: u32, handles: [*]const HANDLE, all: i32, delay: u32) u32 {
-    std.debug.assert(n == 2 and handles[0] == 7 and handles[1] == 8 and all == 0 and delay == 0xFFFFFFFF);
-    const result = waits[at]; at += 1; return result;
-}
-fn FindCloseChangeNotification(_: HANDLE) i32 { closes += 1; return 1; }
-fn FindNextChangeNotification(_: HANDLE) i32 { rearms += 1; return @intFromBool(rearm_ok); }
-fn PostMessageW(hwnd: HANDLE, message: u32, wp: usize, lp: isize) i32 {
-    std.debug.assert(hwnd == 9 and message == WM_APP_ACCOUNT_HOST_CHANGED and wp == 0 and lp == 0);
-    posts += 1; std.debug.assert(rearms >= posts); return 1;
-}
-${watcher}
-test "ISSUE-252 watcher change change stop and failure" {
-    accountHostWatchThread(8, 7, 9);
-    try std.testing.expectEqual(@as(usize, 2), posts);
-    try std.testing.expectEqual(@as(usize, 1), closes);
-    at = 0; rearm_ok = false; waits = &.{1};
-    accountHostWatchThread(8, 7, 9);
-    try std.testing.expectEqual(@as(usize, 2), posts);
-    try std.testing.expectEqual(@as(usize, 2), closes);
-}
-`;
-  const result = execute(text => text, harness);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
 });

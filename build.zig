@@ -279,7 +279,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
     test_step.dependOn(&b.addRunArtifact(account_record_tests).step);
-    const laptop_sync_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-252-inventory.test.js", "tools/issue-252-integration.test.js", "tools/issue-252-records.test.js" });
+    const laptop_sync_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-252-inventory.test.js", "tools/issue-252-integration.test.js", "tools/issue-252-records.test.js", "tools/issue-252-review.test.js" });
     vps_test_step.dependOn(&laptop_sync_tests.step);
     const account_desktop_tests = b.addSystemCommand(&.{ "python3", "tests/test_account_desktop.py" });
     test_step.dependOn(&account_desktop_tests.step);

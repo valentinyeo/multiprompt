@@ -33,7 +33,9 @@ test('ISSUE-252 host and registry inventory separates portable identity from loc
   const registry = section('src/workspaces.zig', 'fn writeWorkspaceRegistryFile(', '\n}');
   audit(registry, inventory.workspace_registry.fields);
   assert.throws(() => audit(registry + '\n"\\"password\\":false"', inventory.workspace_registry.fields), /password/);
-  for (const field of ['host_keys', 'IdentityFile', 'CertificateFile', 'IdentityAgent', 'password', 'private_key', 'public_key', '*']) assert.equal(inventory.hosts.fields[field], 'never-sync');
+  for (const field of ['IdentityFile', 'CertificateFile', 'IdentityAgent', 'password', 'private_key', 'public_key', '*']) assert.equal(inventory.hosts.fields[field], 'never-sync');
+  assert.equal(inventory.hosts.fields.host_keys, 'sync');
+  assert.equal(inventory.ownership.layout, '/v1/layout');
   for (const policy of Object.values(inventory.window_geometry.fields)) assert.equal(policy, 'never-sync');
   const doc = read('docs/laptop-sync.md');
   for (const term of ['PR #12', 'IGSH-423', '/v1/layout', '/v1/sync-records', 'Not deployed', 'plaintext', 'Local CMD']) assert.ok(doc.includes(term), term);

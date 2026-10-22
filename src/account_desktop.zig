@@ -3,6 +3,7 @@ const std = @import("std");
 const tmux_identity = @import("tmux_identity.zig");
 const sync_auth = @import("sync_auth.zig");
 const session_layout = @import("session_layout.zig");
+const account_records = @import("account_records.zig");
 const account_hosts = @import("account_hosts.zig");
 const account_keys = @import("account_keys.zig");
 const account_layout = @import("account_layout.zig");
@@ -560,12 +561,125 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
                 try accountAppendSshFile(known, "\r\n");
                 try accountAppendSshFile(known, additions.items);
             }
+            const original = try accountReadHostConfig(config);
+            defer if (original) |bytes| std.heap.page_allocator.free(bytes);
+            if (original) |bytes| try accountBackupHostConfig(a, config, bytes);
             accountAppendSshFile(config, block) catch continue;
         } else host.host_keys = keys[0..@min(keys.len, 4)];
         host.name = name;
         try hosts.append(a, host);
     }
     return hosts.toOwnedSlice(a);
+}
+
+fn accountReadHostConfig(path: []const u8) !?[]u8 {
+    const w = @import("win32.zig");
+    var wide: [600]u16 = undefined;
+    const wpath = win32WidePath(&wide, path) orelse return error.Storage;
+    const file = w.CreateFileW(wpath.ptr, w.GENERIC_READ, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) {
+        const code = w.GetLastError();
+        if (code != 2 and code != 3) return error.Storage;
+        return null;
+    }
+    defer _ = CloseHandle(file);
+    var size: i64 = 0;
+    if (w.GetFileSizeEx(file, &size) == 0 or size < 0 or size >= session_layout.max_bytes) return error.Storage;
+    const bytes = try std.heap.page_allocator.alloc(u8, @intCast(size));
+    errdefer std.heap.page_allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var n: DWORD = 0;
+        if (w.ReadFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &n, null) == 0 or n == 0) return error.Storage;
+        total += n;
+    }
+    return bytes;
+}
+
+fn accountBackupHostConfig(a: std.mem.Allocator, config: []const u8, bytes: []const u8) !void {
+    const w = @import("win32.zig");
+    const path = try std.fmt.allocPrint(a, "{s}.{d}.{d}.bak", .{ config, syncNow(), GetTickCount64() });
+    var wide: [700]u16 = undefined;
+    const name = win32WidePath(&wide, path) orelse return error.Storage;
+    const file = w.CreateFileW(name.ptr, w.GENERIC_WRITE, 0, null, w.CREATE_NEW, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    defer _ = CloseHandle(file);
+    var written: DWORD = 0;
+    if (w.WriteFile(file, bytes.ptr, @intCast(bytes.len), &written, null) == 0 or written != bytes.len or w.FlushFileBuffers(file) == 0) return error.Storage;
+}
+
+fn syncNow() u64 {
+    return @import("inbox.zig").nowFileTime() / 10000 -| 11644473600000;
+}
+
+var records_checked: ?u64 = null;
+var records_scope: ?[64]u8 = null;
+
+fn accountSyncRecords(a: std.mem.Allocator, access: []const u8, token: []const u8, captured: std.json.Parsed(session_layout.Layout), reply: *LayoutReply) !void {
+    const account = try account_client.field(token, "account_id");
+    defer std.heap.page_allocator.free(account);
+    const device = try account_client.field(token, "device_id");
+    defer std.heap.page_allocator.free(device);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(account, &digest, .{});
+    const scope = std.fmt.bytesToHex(digest, .lower);
+    if (records_scope != null and std.mem.eql(u8, &records_scope.?, &scope) and records_checked != null and GetTickCount64() -| records_checked.? < account_records.poll_ms and reply.job.kind != .push) return;
+    var state: account_records.State = .{ .account = &scope };
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, "account-records.json") orelse return error.Storage;
+    if (readFileAllocWin32(path, session_layout.max_bytes)) |bytes| {
+        defer std.heap.page_allocator.free(bytes);
+        const parsed = try std.json.parseFromSlice(account_records.State, a, bytes, .{ .allocate = .alloc_always });
+        if (std.mem.eql(u8, parsed.value.account, &scope)) state = parsed.value;
+    }
+    const first = try account_client.request("GET", "/v1/sync-records", access, "");
+    defer first.deinit();
+    if (first.status == 401) reply.unauthorized = true;
+    if (first.status != 200) return error.Network;
+    const initial = try std.json.parseFromSlice(account_records.Documents, a, first.bytes, .{ .allocate = .alloc_always });
+    if (initial.value.server_time == 0) return error.ServerTime;
+    const offset = account_records.clockOffset(syncNow(), initial.value.server_time);
+    reply.clock_skew = offset > 300000 or offset < -300000;
+    const now = initial.value.server_time;
+    if (state.observed_at < now -| account_records.retention_ms) state.initialized = false;
+    try account_records.bootstrap(a, &state, initial.value.records, captured.value);
+    state.records = try account_records.prune(a, state.records, now);
+    state.records = try account_records.deletionHistory(a, state.records, state.local, captured.value, device, now);
+    const outgoing = try account_records.delta(a, state.records, initial.value.records);
+    var at: usize = 0;
+    while (at < outgoing.len) {
+        const end = @min(at + 16, outgoing.len);
+        const body = try std.json.Stringify.valueAlloc(a, .{ .records = outgoing[at..end] }, .{ .emit_null_optional_fields = false });
+        const put = try account_client.request("PUT", "/v1/sync-records", access, body);
+        defer put.deinit();
+        if (put.status == 401) reply.unauthorized = true;
+        if (put.status != 200) return error.Network;
+        const received = try std.json.parseFromSlice(account_records.Documents, a, put.bytes, .{ .allocate = .alloc_always });
+        try account_records.roundTrip(a, outgoing[at..end], received.value.records);
+        at = end;
+    }
+    state.records = try account_records.prune(a, try account_records.merge(a, state.records, initial.value.records), now);
+    state.local = captured.value;
+    state.observed_at = now;
+    const acknowledged = try std.json.Stringify.valueAlloc(a, state, .{ .emit_null_optional_fields = false });
+    if (!writeFileAtomicW(path, acknowledged)) return error.Storage;
+    records_checked = GetTickCount64();
+    records_scope = scope;
+}
+
+pub fn accountToggleSync() void {
+    if (app_state.g_account_busy) {
+        showHeaderNoticeAscii("Account request in progress; try again", 3000, true);
+        return;
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, "account-sync.json") orelse return;
+    const enabled = !app_state.g_account_sync_enabled;
+    if (!writeFileAtomicW(path, if (enabled) "{\"enabled\":true}" else "{\"enabled\":false}")) return;
+    app_state.g_account_sync_enabled = enabled;
+    records_checked = null;
+    showHeaderNoticeAscii(if (enabled) "Sync history ON; existing account sync is unchanged" else "Sync history OFF; existing account sync stays on", 5000, false);
+    if (enabled) pullSessionLayout();
 }
 
 fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
@@ -602,6 +716,7 @@ fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []cons
     const body = try std.json.Stringify.valueAlloc(a, .{ .public_key = key }, .{});
     const result = try account_client.request("PUT", "/v1/device-key", access, body);
     defer result.deinit();
+    if (result.status == 401) return error.Revoked;
     if (result.status != 200) return error.PublishKey;
     if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
     g_account_keys_cache.published_key = published;
@@ -609,6 +724,11 @@ fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []cons
 
 fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutReply) ![]const []const u8 {
     var aliases: std.ArrayList([]const u8) = .empty;
+    if (g_account_hosts_cache.arena != null) {
+        const names = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+        for (g_account_hosts_cache.hosts) |host| try aliases.append(a, names[host.slot]);
+        return aliases.toOwnedSlice(a);
+    }
     for ([_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE }) |alias| {
         const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
         const output = accountSshOutput(a, command, 5000) catch |err| {
@@ -645,12 +765,14 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.Process;
     const ssh = ssh_buf[0..ssh_len];
     accountPublishDeviceKey(a, ssh, access, job.kind) catch |err| {
+        if (err == error.Revoked) reply.unauthorized = true;
         if (err == error.MissingPublicKey) accountDeviceKeyError(reply, "The public key file id_ed25519.pub is missing next to your private key.");
         return err;
     };
     if (!policy.check) return;
     const result = try account_client.request("GET", "/v1/device-keys", access, "");
     defer result.deinit();
+    if (result.status == 401) reply.unauthorized = true;
     if (result.status != 200) return error.DeviceKeys;
     const listing = try account_keys.parseListing(a, result.bytes);
     defer listing.deinit();
@@ -675,6 +797,7 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
             const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/{s}", .{ decision.device_id, if (decision.approve) "approve" else "deny" });
             const decided = try account_client.request("POST", path, access, "");
             defer decided.deinit();
+            if (decided.status == 401) reply.unauthorized = true;
             if (decided.status != 200) return error.DecideKey;
         }
         return;
@@ -800,6 +923,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (remote.status != 200) return error.Conflict;
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
+    if (app_state.g_account_sync_enabled) {
+        accountSyncRecords(alloc, access, response.bytes, try session_layout.parse(alloc, reply.bytes.?), reply) catch {
+            reply.records_failed = true;
+        };
+    }
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
@@ -1105,6 +1233,8 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer if (reply.device_keys) |bytes| a.free(bytes);
     defer if (reply.key_error) |bytes| a.free(bytes);
     defer {
+        if (reply.clock_skew) showHeaderNoticeAscii("Your clock differs by over 5 minutes; sync is using server time. Check your system clock.", 15000, true);
+        if (reply.records_failed and !reply.unauthorized) showHeaderNoticeAscii("Sync history could not update; account layout sync is still working. Will retry.", 5000, true);
         if (reply.key_error) |text| {
             app_state.g_account_busy = true;
             showSyncMessage(text, true);
@@ -1128,12 +1258,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         app_state.g_account_has_token = false;
         app_state.g_account_reauth = true;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
-        if (reply.job.kind == .startup) {
-            accountLock();
-        } else {
-            showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to multiprompt", 86400000, true);
-            _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
-        }
+        accountLock();
         return;
     }
     if (reply.has_token) {
@@ -1373,6 +1498,16 @@ pub fn accountClaim(hwnd: HANDLE) bool {
 }
 
 pub fn accountBootstrap(hwnd: HANDLE) bool {
+    var settings_buf: [512]u8 = undefined;
+    if (syncAuthPath(&settings_buf, "account-sync.json")) |path| {
+        if (readFileAllocWin32(path, 256)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            if (std.json.parseFromSlice(struct { enabled: bool = false }, std.heap.page_allocator, bytes, .{})) |parsed| {
+                defer parsed.deinit();
+                app_state.g_account_sync_enabled = parsed.value.enabled;
+            } else |_| {}
+        }
+    }
     if (app_state.g_account_bypass) return true;
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;

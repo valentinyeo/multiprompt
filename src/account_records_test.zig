@@ -186,11 +186,12 @@ test "ISSUE-252 host edits and deletes keep local identities passwords and unrel
     const config = "Host remote-1\n HostName old.example.com\n User old\n Port 22\n IdentityFile device-key\n ProxyCommand device-proxy\nHost other\n HostName other.example.com\n";
     const next = try records.rewriteHost(a, config, "remote-1", .{ .slot = 0, .name = "Host 1", .hostname = "new.example.com", .port = 2222, .user = "owner" });
     try std.testing.expect(std.mem.indexOf(u8, next, "HostName new.example.com") != null);
-    try std.testing.expect(std.mem.indexOf(u8, next, "HostName old.example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, next, "HostName old.example.com") != null);
     for ([_][]const u8{ "IdentityFile device-key", "ProxyCommand device-proxy", "HostName other.example.com" }) |kept| try std.testing.expect(std.mem.indexOf(u8, next, kept) != null);
     const deleted = try records.rewriteHost(a, next, "remote-1", null);
-    try std.testing.expect(std.mem.indexOf(u8, deleted, "HostName new.example.com") == null);
+    try std.testing.expect(std.mem.indexOf(u8, deleted, "HostName new.example.com") != null);
     try std.testing.expect(std.mem.indexOf(u8, deleted, "IdentityFile device-key") != null);
+    try std.testing.expectEqualStrings(next, deleted);
 }
 
 test "ISSUE-252 readback crash replay and idle polls do not restamp acknowledged remote changes" {
@@ -224,4 +225,61 @@ test "ISSUE-252 SSH rewrite overrides earlier wildcards without copying local op
     const second = try records.rewriteHost(a, first, "remote-1", remote);
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(std.mem.indexOf(u8, first, "ProxyCommand device-proxy") != null);
+}
+
+test "ISSUE-252 B fresh bootstrap adopts established records without restamping" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const remote = try records.project(a, initial, "established", 100);
+    var fresh = records.State{ .account = "account" };
+    try records.bootstrap(a, &fresh, remote, empty);
+    try std.testing.expect(fresh.initialized);
+    try std.testing.expectEqual(@as(usize, 3), fresh.records.len);
+    const changed = try records.deletionHistory(a, fresh.records, fresh.local, empty, "fresh", 200);
+    try std.testing.expectEqual(@as(usize, 0), changed.len);
+    try std.testing.expectEqual(@as(u64, 100), remote[0].updated_at);
+    try std.testing.expectEqualStrings("established", remote[0].device_id);
+}
+
+test "ISSUE-252 D tombstones expire and unchanged records have an empty delta" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const live = try records.project(a, initial, "a", 100);
+    const deleted = try records.edit(a, live, initial, empty, "a", 200);
+    try std.testing.expectEqual(@as(usize, 3), (try records.prune(a, deleted, 200 + records.retention_ms)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try records.prune(a, deleted, 201 + records.retention_ms)).len);
+    try std.testing.expectEqual(@as(usize, 3), (try records.prune(a, live, 201 + records.retention_ms)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try records.delta(a, live, live)).len);
+    try std.testing.expectEqual(@as(usize, 3), (try records.delta(a, deleted, live)).len);
+}
+
+test "ISSUE-252 E activity merges independently of rename and favorite in either order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = try records.project(a, initial, "base", 100);
+    var renamed = tab;
+    renamed.name = "Renamed";
+    renamed.favorite = true;
+    var active = tab;
+    active.used = 300;
+    active.input = 400;
+    active.visits = &.{ 1, 2 };
+    const name_edit = try records.edit(a, base, initial, .{ .hosts = initial.hosts, .workspaces = initial.workspaces, .tabs = &.{renamed} }, "name", 200);
+    const activity = try records.edit(a, base, initial, .{ .hosts = initial.hosts, .workspaces = initial.workspaces, .tabs = &.{active} }, "activity", 300);
+    for ([_][]const records.Record{ try records.merge(a, name_edit, activity), try records.merge(a, activity, name_edit) }) |merged| {
+        const result = try records.materialize(a, merged);
+        try std.testing.expectEqualStrings("Renamed", result.tabs[0].name);
+        try std.testing.expect(result.tabs[0].favorite.?);
+        try std.testing.expectEqual(@as(u64, 300), result.tabs[0].used.?);
+        try std.testing.expectEqual(@as(u64, 400), result.tabs[0].input.?);
+        try std.testing.expectEqualSlices(u64, &.{ 1, 2 }, result.tabs[0].visits.?);
+    }
+}
+
+test "ISSUE-252 N server clock offset corrects both fast and slow clocks" {
+    try std.testing.expectEqual(@as(i64, -600000), records.clockOffset(700000, 100000));
+    try std.testing.expectEqual(@as(i64, 600000), records.clockOffset(100000, 700000));
 }

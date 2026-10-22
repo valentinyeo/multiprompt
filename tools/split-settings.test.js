@@ -138,7 +138,7 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
     assert.ok(client.includes('X-Layout-Features: favorite,used,visits,input,settings,hosts\\r\\n'));
     assert.match(desktop, /return \.\{ \.settings = app_state.g_layout_settings,/);
     assert.match(desktop, /app_state.g_layout_settings = desired.settings;/);
-    assert.match(desktop, /TIMER_ACCOUNT, 2000/);
+    assert.match(desktop, /TIMER_ACCOUNT_SAVE, 2000/);
     assert.match(session, /if \(saveSessionTo\(path, null\)\) publishSessionLayout\(\)/);
     assert.match(session, /parseFromValue\(@import\("frequent.zig"\).Settings/);
   };

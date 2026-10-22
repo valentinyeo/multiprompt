@@ -5,6 +5,9 @@ const eq = std.mem.eql;
 
 pub const poll_ms = 180000;
 pub const max_records = 4096;
+pub const retention_ms = 30 * 24 * 60 * 60 * 1000;
+pub const Stamp = struct { updated_at: u64, device_id: []const u8 };
+pub const Fields = struct { name: Stamp, manual: Stamp, favorite: Stamp, workspace: Stamp };
 pub const Host = struct { slot: u8, name: []const u8, hostname: []const u8, port: u16, user: []const u8 };
 pub const Kind = enum { host, workspace, session, settings };
 pub const Record = struct {
@@ -17,13 +20,16 @@ pub const Record = struct {
     workspace: ?layout.Workspace = null,
     session: ?layout.Tab = null,
     settings: ?layout.Settings = null,
+    fields: ?Fields = null,
 };
 pub const State = struct {
     account: []const u8,
+    initialized: bool = false,
+    observed_at: u64 = 0,
     records: []const Record = &.{},
     local: layout.Layout = .{ .workspaces = &.{}, .tabs = &.{} },
 };
-pub const Documents = struct { records: []const Record };
+pub const Documents = struct { records: []const Record, server_time: u64 = 0 };
 
 fn identity(a: Allocator, record: Record) ![]const u8 {
     return switch (record.kind) {
@@ -59,6 +65,14 @@ pub fn validate(a: Allocator, records: []const Record) !void {
         for (record.device_id) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return error.InvalidRecord;
         for (records[0..i]) |old| if (same(old, record)) return error.InvalidRecord;
         const count = @as(u8, @intFromBool(record.host != null)) + @intFromBool(record.workspace != null) + @intFromBool(record.session != null) + @intFromBool(record.settings != null);
+        if (record.fields) |fields| {
+            if (record.kind != .session or record.deleted) return error.InvalidRecord;
+            inline for (std.meta.fields(Fields)) |field| {
+                const stamp = @field(fields, field.name);
+                if (stamp.updated_at == 0 or stamp.updated_at > record.updated_at or stamp.device_id.len == 0 or stamp.device_id.len > 64) return error.InvalidRecord;
+                for (stamp.device_id) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return error.InvalidRecord;
+            }
+        }
         if (record.deleted) {
             if (count != 0) return error.InvalidRecord;
             switch (record.kind) {
@@ -98,7 +112,9 @@ pub fn merge(a: Allocator, left: []const Record, right: []const Record) ![]const
     try result.appendSlice(a, left);
     for (right) |incoming| {
         if (find(result.items, incoming)) |i| {
-            if (newer(incoming, result.items[i])) result.items[i] = incoming;
+            if (incoming.kind == .session and !incoming.deleted and !result.items[i].deleted) {
+                result.items[i] = try mergeSession(a, result.items[i], incoming);
+            } else if (newer(incoming, result.items[i])) result.items[i] = incoming;
         } else try result.append(a, incoming);
     }
     if (result.items.len > max_records) return error.RecordCapacity;
@@ -129,6 +145,8 @@ fn payloadEqual(a: Allocator, x: Record, y: Record) !bool {
     right.updated_at = 1;
     left.device_id = "device";
     right.device_id = "device";
+    left.fields = null;
+    right.fields = null;
     const l = try std.json.Stringify.valueAlloc(a, left, .{ .emit_null_optional_fields = false });
     defer a.free(l);
     const r = try std.json.Stringify.valueAlloc(a, right, .{ .emit_null_optional_fields = false });
@@ -142,12 +160,33 @@ pub fn edit(a: Allocator, records: []const Record, base: layout.Layout, current:
     const before = try project(a, base, device, stamp);
     const after = try project(a, current, device, stamp);
     var changed: std.ArrayList(Record) = .empty;
-    for (after) |record| {
+    for (after) |projected| {
+        var record = projected;
         if (find(before, record)) |i| {
             if (try payloadEqual(a, before[i], record)) continue;
         }
         if (find(records, record)) |i| {
             if (try payloadEqual(a, records[i], record)) continue;
+        }
+        if (record.session) |current_tab| {
+            const stamp_value = Stamp{ .updated_at = stamp, .device_id = device };
+            var fields = Fields{ .name = stamp_value, .manual = stamp_value, .favorite = stamp_value, .workspace = stamp_value };
+            if (find(records, record)) |i| {
+                const old = records[i];
+                if (old.session) |old_tab| {
+                    const previous = if (find(before, record)) |j| before[j].session.? else old_tab;
+                    const old_fields = fieldStamps(old);
+                    inline for (std.meta.fields(Fields)) |field| {
+                        const key = field.name;
+                        const equal = if (@TypeOf(@field(current_tab, key)) == []const u8)
+                            eq(u8, @field(current_tab, key), @field(previous, key))
+                        else
+                            @field(current_tab, key) == @field(previous, key);
+                        if (equal) @field(fields, key) = @field(old_fields, key);
+                    }
+                }
+            }
+            record.fields = fields;
         }
         try changed.append(a, record);
     }
@@ -210,45 +249,79 @@ pub fn roundTrip(a: Allocator, sent: []const Record, received: []const Record) !
 
 pub fn rewriteHost(a: Allocator, config: []const u8, alias: []const u8, host: ?Host) ![]const u8 {
     if (!@import("account_hosts.zig").validHostname(alias)) return error.InvalidRecord;
-    var output: std.ArrayList(u8) = .empty;
-    var block: std.ArrayList(u8) = .empty;
-    var header: []const u8 = "";
-    var target = false;
-    var lines = std.mem.splitScalar(u8, config, '\n');
-    while (lines.next()) |line| {
-        if (line.len == 0 and lines.peek() == null) break;
-        var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t=");
-        const key = fields.next() orelse "";
-        if (std.ascii.eqlIgnoreCase(key, "Host") or std.ascii.eqlIgnoreCase(key, "Match")) {
-            if (header.len > 0 and ((!target and !std.ascii.eqlIgnoreCase(std.mem.trim(u8, header, " \t\r"), "Host *")) or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
-                try output.appendSlice(a, header);
-                try output.append(a, '\n');
-            }
-            try output.appendSlice(a, block.items);
-            block.clearRetainingCapacity();
-            header = line;
-            target = false;
-            if (std.ascii.eqlIgnoreCase(key, "Host")) {
-                if (fields.next()) |value| target = std.ascii.eqlIgnoreCase(value, alias) and fields.next() == null;
-            }
-            continue;
+    if (host == null) return a.dupe(u8, config);
+    const h = host.?;
+    try @import("account_hosts.zig").validate(&.{.{ .slot = h.slot, .name = h.name, .hostname = h.hostname, .port = h.port, .user = h.user }});
+    const prefix = try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port {d}\n  User {s}\nHost *\n", .{ alias, h.hostname, h.port, h.user });
+    if (std.mem.startsWith(u8, config, prefix)) return a.dupe(u8, config);
+    return std.fmt.allocPrint(a, "{s}{s}", .{ prefix, config });
+}
+
+fn fieldStamps(record: Record) Fields {
+    const stamp = Stamp{ .updated_at = record.updated_at, .device_id = record.device_id };
+    return record.fields orelse .{ .name = stamp, .manual = stamp, .favorite = stamp, .workspace = stamp };
+}
+
+pub fn mergeSession(a: Allocator, left: Record, right: Record) !Record {
+    var result = if (newer(right, left)) right else left;
+    var tab = result.session.?;
+    var fields = fieldStamps(result);
+    const l = fieldStamps(left);
+    const r = fieldStamps(right);
+    inline for (std.meta.fields(Fields)) |field| {
+        const ls = @field(l, field.name);
+        const rs = @field(r, field.name);
+        const use_right = rs.updated_at > ls.updated_at or (rs.updated_at == ls.updated_at and std.mem.order(u8, rs.device_id, ls.device_id) == .gt);
+        @field(tab, field.name) = @field((if (use_right) right else left).session.?, field.name);
+        @field(fields, field.name) = if (use_right) rs else ls;
+    }
+    tab.used = layout.maxUsed(left.session.?.used, right.session.?.used);
+    tab.input = layout.maxUsed(left.session.?.input, right.session.?.input);
+    tab.visits = try layout.mergeVisits(a, left.session.?.visits, right.session.?.visits);
+    result.session = tab;
+    result.fields = fields;
+    return result;
+}
+
+pub fn prune(a: Allocator, records: []const Record, now: u64) ![]const Record {
+    var kept: std.ArrayList(Record) = .empty;
+    for (records) |record| {
+        if (record.deleted and record.updated_at < now -| retention_ms) continue;
+        try kept.append(a, record);
+    }
+    return kept.toOwnedSlice(a);
+}
+
+pub fn delta(a: Allocator, local: []const Record, remote: []const Record) ![]const Record {
+    var changed: std.ArrayList(Record) = .empty;
+    for (local) |record| {
+        if (find(remote, record)) |i| {
+            if (!newer(record, remote[i]) and try payloadEqual(a, record, remote[i])) continue;
+            if (newer(remote[i], record)) continue;
         }
-        if (target and (std.ascii.eqlIgnoreCase(key, "HostName") or std.ascii.eqlIgnoreCase(key, "Port") or std.ascii.eqlIgnoreCase(key, "User"))) continue;
-        try block.appendSlice(a, line);
-        try block.append(a, '\n');
+        try changed.append(a, record);
     }
-    if (header.len > 0 and ((!target and !std.ascii.eqlIgnoreCase(std.mem.trim(u8, header, " \t\r"), "Host *")) or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
-        try output.appendSlice(a, header);
-        try output.append(a, '\n');
+    return changed.toOwnedSlice(a);
+}
+
+pub fn bootstrap(a: Allocator, state: *State, remote: []const Record, local: layout.Layout) !void {
+    if (!state.initialized) {
+        state.records = try a.dupe(Record, remote);
+        state.local = local;
+        state.initialized = true;
     }
-    try output.appendSlice(a, block.items);
-    const reset = if (std.mem.startsWith(u8, output.items, "Host *\n")) "" else "Host *\n";
-    const prefix = if (host) |h|
-        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port {d}\n  User {s}\n{s}", .{ alias, h.hostname, h.port, h.user, reset })
-    else
-        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port 22\n{s}", .{ alias, alias, reset });
-    try output.insertSlice(a, 0, prefix);
-    return output.toOwnedSlice(a);
+}
+
+pub fn deletionHistory(a: Allocator, records: []const Record, base: layout.Layout, current: layout.Layout, device: []const u8, now: u64) ![]const Record {
+    const edited = try edit(a, records, base, current, device, now);
+    var history: std.ArrayList(Record) = .empty;
+    for (edited) |record| if (record.deleted) try history.append(a, record);
+    return prune(a, history.items, now);
+}
+
+pub fn clockOffset(local: u64, server: u64) i64 {
+    if (server == 0) return 0;
+    return @as(i64, @intCast(server)) - @as(i64, @intCast(local));
 }
 
 test "ISSUE-252 record protocol scenarios" {

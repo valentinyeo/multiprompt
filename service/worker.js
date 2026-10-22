@@ -57,14 +57,22 @@ export function validateLayout(x) {
   return x;
 }
 
-export function validateRecords(records) {
+export function validateRecords(records, deviceId) {
   if (!Array.isArray(records) || records.length > 4096) fail(400, 'invalid_records');
   const ids = new Set();
   for (const r of records) {
     if (!r || typeof r !== 'object' || Array.isArray(r) || !['host', 'workspace', 'session', 'settings'].includes(r.kind) ||
         typeof r.id !== 'string' || !r.id.length || r.id.length > 96 || typeof r.device_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(r.device_id) ||
-        !Number.isSafeInteger(r.updated_at) || r.updated_at <= 0 || r.updated_at > Date.now() + 300000 || typeof r.deleted !== 'boolean' ||
-        Object.keys(r).some(k => !['kind', 'id', 'device_id', 'updated_at', 'deleted', r.kind].includes(k))) fail(400, 'invalid_record');
+        !Number.isSafeInteger(r.updated_at) || r.updated_at <= 0 || typeof r.deleted !== 'boolean' ||
+        Object.keys(r).some(k => !['kind', 'id', 'device_id', 'updated_at', 'deleted', 'fields', r.kind].includes(k))) fail(400, 'invalid_record');
+    if (r.updated_at > Date.now() + 300000) fail(400, 'clock_skew');
+    if (deviceId !== undefined && r.device_id !== deviceId) fail(403, 'record_device_mismatch');
+    if (r.fields !== undefined) {
+      if (r.kind !== 'session' || r.deleted || !r.fields || Object.keys(r.fields).sort().join(',') !== 'favorite,manual,name,workspace') fail(400, 'invalid_record_fields');
+      for (const stamp of Object.values(r.fields)) {
+        if (!stamp || Object.keys(stamp).sort().join(',') !== 'device_id,updated_at' || !Number.isSafeInteger(stamp.updated_at) || stamp.updated_at <= 0 || stamp.updated_at > r.updated_at || !/^[A-Za-z0-9_-]{1,64}$/.test(stamp.device_id)) fail(400, 'invalid_record_fields');
+      }
+    }
     const identity = `${r.kind}:${r.id}`;
     if (ids.has(identity)) fail(400, 'duplicate_record');
     ids.add(identity);
@@ -93,6 +101,27 @@ export function validateRecords(records) {
     validateLayout(value);
   }
   return records;
+}
+
+const newerRecord = (a, b) => a.updated_at > b.updated_at || a.updated_at === b.updated_at && a.device_id > b.device_id;
+export function mergeRecord(left, right) {
+  if (!left) return right;
+  const result = structuredClone(newerRecord(right, left) ? right : left);
+  if (left.kind !== 'session' || left.deleted || right.deleted) return result;
+  const fields = record => record.fields || Object.fromEntries(['name', 'manual', 'favorite', 'workspace'].map(key => [key, { updated_at: record.updated_at, device_id: record.device_id }]));
+  const l = fields(left), r = fields(right);
+  result.fields = {};
+  for (const key of ['name', 'manual', 'favorite', 'workspace']) {
+    const useRight = newerRecord(r[key], l[key]);
+    result.fields[key] = useRight ? r[key] : l[key];
+    if ((useRight ? right : left).session[key] === undefined) delete result.session[key];
+    else result.session[key] = (useRight ? right : left).session[key];
+  }
+  for (const key of ['used', 'input']) {
+    if (left.session[key] !== undefined || right.session[key] !== undefined) result.session[key] = Math.max(left.session[key] || 0, right.session[key] || 0);
+  }
+  if (left.session.visits !== undefined || right.session.visits !== undefined) result.session.visits = [...new Set([...(left.session.visits || []), ...(right.session.visits || [])])].sort((a, b) => a - b).slice(-8);
+  return result;
 }
 
 function validateCrashReport(x) {
@@ -315,14 +344,28 @@ export default {
       }
       if (url.pathname === '/v1/sync-records' && ['GET', 'PUT'].includes(request.method)) {
         if (!device.id) fail(401, 'device_required');
+        const serverTime = Date.now(), cutoff = serverTime - 30 * 24 * 60 * 60 * 1000;
+        await db.prepare("DELETE FROM sync_records WHERE account=? AND updated_at<? AND json_extract(document,'$.deleted')=1").bind(device.account, cutoff).run();
         if (request.method === 'PUT') {
           const b = await body(request);
           if (!b || Object.keys(b).length !== 1) fail(400, 'invalid_records');
-          const records = validateRecords(b.records);
-          if (records.length) await db.batch(records.map(r => db.prepare('INSERT INTO sync_records (account,kind,id,updated_at,device_id,document) SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sync_records WHERE account=?)<4096 OR EXISTS (SELECT 1 FROM sync_records WHERE account=? AND kind=? AND id=?) ON CONFLICT(account,kind,id) DO UPDATE SET updated_at=excluded.updated_at,device_id=excluded.device_id,document=excluded.document WHERE excluded.updated_at>sync_records.updated_at OR (excluded.updated_at=sync_records.updated_at AND excluded.device_id>sync_records.device_id)').bind(device.account, r.kind, r.id, r.updated_at, r.device_id, JSON.stringify(r), device.account, device.account, r.kind, r.id)));
+          const records = validateRecords(b.records, device.id);
+          if (records.length > 16) fail(413, 'record_batch_limit');
+          for (const record of records) {
+            if (record.updated_at < cutoff) fail(409, 'record_expired');
+            const previous = await db.prepare('SELECT document FROM sync_records WHERE account=? AND kind=? AND id=?').bind(device.account, record.kind, record.id).first();
+            const merged = mergeRecord(previous ? JSON.parse(previous.document) : null, record);
+            const document = JSON.stringify(merged);
+            const result = await db.prepare('INSERT INTO sync_records (account,kind,id,updated_at,device_id,document) SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sync_records WHERE account=?)<4096 OR EXISTS (SELECT 1 FROM sync_records WHERE account=? AND kind=? AND id=?) ON CONFLICT(account,kind,id) DO UPDATE SET updated_at=excluded.updated_at,device_id=excluded.device_id,document=excluded.document WHERE sync_records.document=?').bind(device.account, merged.kind, merged.id, merged.updated_at, merged.device_id, document, device.account, device.account, merged.kind, merged.id, previous?.document ?? '').run();
+            if (!result.meta.changes) {
+              const count = await db.prepare('SELECT count(*) AS n FROM sync_records WHERE account=?').bind(device.account).first();
+              if (count.n >= 4096 && !previous) fail(409, 'record_capacity');
+              fail(409, 'record_conflict');
+            }
+          }
         }
         const rows = await db.prepare("SELECT document FROM sync_records WHERE account=? ORDER BY CASE kind WHEN 'host' THEN 0 WHEN 'workspace' THEN 1 WHEN 'session' THEN 2 ELSE 3 END,id").bind(device.account).all();
-        return json({ records: rows.results.map(row => JSON.parse(row.document)) });
+        return json({ records: rows.results.map(row => JSON.parse(row.document)), server_time: Date.now() });
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
@@ -376,7 +419,7 @@ export default {
       }
       return reply({ error: 'not_found' }, 404);
     } catch (e) {
-      return reply({ error: e.status ? e.message : 'service_unavailable' }, e.status || 503);
+      return reply({ error: e.status ? e.message : 'service_unavailable', server_time: Date.now() }, e.status || 503);
     }
   }
 };
