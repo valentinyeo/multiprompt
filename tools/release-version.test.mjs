@@ -85,7 +85,9 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
-  assert.doesNotMatch(workflow, /secrets\.|--draft/);
+  assert.doesNotMatch(workflow, /--draft/);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
   assert.match(workflow, /if: github.event_name != 'pull_request'/);

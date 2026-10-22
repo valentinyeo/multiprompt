@@ -782,7 +782,7 @@ pub const AgentSessionBreakdown = struct {
     }
 };
 
-pub const UPDATE_CARD_H: i32 = 54;
+pub const UPDATE_CARD_H: i32 = 76;
 pub const UPDATE_CHECK_MS: u32 = 30000;
 pub var g_update_watch_stop: HANDLE = null;
 pub var g_update_watch_thread: ?std.Thread = null;
@@ -1241,7 +1241,7 @@ pub const SEARCH_CHANGELOG_OFFSET: usize = 6241;
 pub const SEARCH_BROWSER_BACK_OFFSET: usize = 6242;
 pub const SEARCH_BROWSER_FORWARD_OFFSET: usize = 6243;
 pub const SEARCH_BROWSER_MODE_OFFSET: usize = 6244;
-pub const SEARCH_UPDATE_OFFSET: usize = 6275;
+pub const SEARCH_UPDATE_OFFSET: usize = 6385;
 pub const SEARCH_RESTART_OFFSET: usize = 6245;
 pub const SEARCH_ZSB_REBIND_OFFSET: usize = 6246;
 pub const SEARCH_SHELL_DIAG_OFFSET: usize = 6247;

@@ -147,6 +147,37 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Test safe release updates
+        if: matrix.group == 1
+        run: |
+          $before = "$env:RUNNER_TEMP/update-review-before"
+          New-Item -ItemType Directory -Force $before | Out-Null
+          git fetch origin 1e557042ad06b6371baec41ab803dc759c989378
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git archive --format=tar --output="$env:RUNNER_TEMP/update-review-before.tar" 1e557042ad06b6371baec41ab803dc759c989378 -- src/main.zig src/update_release.zig src/update_release.ps1 src/update_card.zig tools/update-release.test.ps1 .github/workflows/verify.yml .github/workflows/release.yml build.zig
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -xf "$env:RUNNER_TEMP/update-review-before.tar" -C $before
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:UPDATE_SOURCE_ROOT = $before
+          node --test tools/update-release-review.test.js > "$env:RUNNER_TEMP/update-review-before.log"
+          $beforeExit = $LASTEXITCODE
+          Remove-Item Env:UPDATE_SOURCE_ROOT
+          $beforeLog = Get-Content "$env:RUNNER_TEMP/update-review-before.log" -Raw
+          if ($beforeExit -ne 1) { throw 'Review regression controls did not fail on the review baseline' }
+          foreach ($finding in 1..9) {
+            if ($beforeLog -notmatch "not ok $finding - R$finding ") { throw "Finding R$finding did not fail first" }
+            Write-Host "FAILING FIRST R$finding CONFIRMED against review baseline"
+          }
+          node --test tools/update-release-review.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tools/update-release.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          zig build -Drelease=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
