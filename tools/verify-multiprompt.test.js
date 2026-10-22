@@ -426,7 +426,7 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(pills, /8 \+ \(\$Workspace \+ 1\) \* 29 \+ 12\), 17/);
   assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length/);
   assert.match(palette, /Substring\(\$start\)/);
-  assert.match(palette, /FocusedElement.Current.NativeWindowHandle -eq \$script:window.ToInt64\(\)/);
+  assert.match(palette, /GetFocusedWindow\(\$script:window\) -eq \$script:window/);
   assert.match(palette, /\$Query.Length/);
   assert.match(palette, /\$Target/);
   assert.equal((palette.match(/Wait-Until \{/g) || []).length, 2);

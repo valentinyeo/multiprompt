@@ -20,6 +20,7 @@ on:
       - tools/verify-multiprompt.test.js
       - src/**
       - tools/check-browser-pane-stuck.mjs
+      - tools/check-workspace-focus.mjs
 
 permissions:
   contents: read
@@ -80,6 +81,8 @@ jobs:
           persist-credentials: false
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js
+      - name: Check workspace focus journey contract
+        run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
       - name: Validate journey and syntax

@@ -23,7 +23,7 @@ Every input requires Doctor's executable/window ownership check and the owned ap
 | --- | --- | --- |
 | 1 | Launch isolated single-window CMD | Check executable hash/version before launch; owned main HWND and initialized shell publication within 60 s; foreground frame within 20 s; Doctor passes. |
 | 2 | Read baseline | Initial saved CMD within 60 s; first workspace selected; saved tab identity, Chat View off and owned console foreground within 20 s. |
-| 3 | Show switcher if hidden | Ctrl+K: new debug-log suffix reports initialized empty palette and UIA focus is the owned frame within 20 s. Type `workspace switcher`: processed query length and selected target 6213 within 20 s before Enter. Saved explicit `hide_pills:false`, visible expanded sidebar within 20 s. Capture `pills-ready.png`. |
+| 3 | Show switcher if hidden | Ctrl+K: new debug-log suffix reports initialized empty palette and native GUI-thread focus is exactly the owned frame within 20 s. Type `workspace switcher`: processed query length and selected target 6213 within 20 s before Enter. Saved explicit `hide_pills:false`, visible expanded sidebar within 20 s. Capture `pills-ready.png`. |
 | 4 | Select per-session Chat View | Ctrl+K and query readiness as above, target 6345 for `per tab`; Enter; saved per-session mode and restored CMD console within 20 s. |
 | 5 | Enable Chat View if off | Saved session `cv:true` within 20 s; visible owned native Edit child within 30 s. |
 | 6 | Foreground initial Chat View frame | Setup only: restore/foreground frame; exact frame foreground and original owned Edit HWND focused within 20 s each. No subsequent foreground or focus setters. |
@@ -54,5 +54,6 @@ The source contracts check switcher setup, pill visibility/layout guards, readin
 - Workspace pills are hidden by default. Never infer their presence from the workspace count or title. A click at the absent pill's coordinates can collapse RECENTS instead of switching workspaces.
 - The first stored workspace follows Starred: its pill center is client `(49,17)`, and the second is `(78,17)` at the guarded default layout. Snoozed pills invalidate that index-to-coordinate mapping.
 - Per-session Chat View omits `chat_view_mode` from saved state; an off session can omit `cv`. A saved active index alone does not prove the console or typing box is input-ready.
+- The custom-drawn palette has no native Edit or custom UIA focus provider. Its readiness requires both foreground HWND and GetGUIThreadInfo hwndFocus to equal the owned frame, not the UIA proxy's NativeWindowHandle. Snapshots retain both native and UIA observations in `*.focus.json`; the check never moves focus.
 - Console staging uses its native Document TextPattern, not the unsupported Edit ValuePattern. Chat View continues to use the original Edit HWND's bounded WM_GETTEXT.
 - This is local CMD/Chat View coverage, not an account, agent, browser, SSH, sync or relaunch journey. Readiness waits observe restoration; they never repair it. CI must still confirm the changed journey on Windows.

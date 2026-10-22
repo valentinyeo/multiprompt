@@ -28,6 +28,7 @@ using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
@@ -35,6 +36,7 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
@@ -123,6 +125,15 @@ public static class VerifyNative {
             if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
             Thread.Sleep(35);
         }
+    }
+    public static IntPtr GetFocusedWindow(IntPtr hwnd) {
+        uint pid;
+        uint thread = GetWindowThreadProcessId(hwnd, out pid);
+        if (thread == 0) throw new InvalidOperationException("Cannot find the owned window thread");
+        GuiThreadInfo info = new GuiThreadInfo();
+        info.Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+        if (!GetGUIThreadInfo(thread, ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return info.Focus;
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
@@ -415,6 +426,13 @@ function Doctor {
 }
 
 function Snapshot([string]$Name) {
+    $focus = @{ foreground = [VerifyNative]::GetForegroundWindow().ToInt64() }
+    try { $focus.native = [VerifyNative]::GetFocusedWindow($script:window).ToInt64() } catch { $focus.nativeError = $_.Exception.Message }
+    try {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $focus.uia = @{ handle = $focused.Current.NativeWindowHandle; pid = $focused.Current.ProcessId; class = $focused.Current.ClassName }
+    } catch { $focus.uiaError = $_.Exception.Message }
+    Save-Json $focus ($Name + '.focus.json')
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
     $tree = foreach ($node in $nodes) {
@@ -472,7 +490,7 @@ function Focus-Palette([string]$Query, [int]$Target) {
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Wait-Until {
         $trace = (Get-Content $log -Raw).Substring($start)
-        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $script:window.ToInt64()
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
     } 'command palette initialized and owned frame focused'
     Type-Text $Query
     Wait-Until {
