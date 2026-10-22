@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.807", .items = &.{
+        .{ .text = "Each workspace now keeps its own browser logins and bookmarks. On upgrade, your restored workspace keeps the existing browser profile in place; new workspaces start with separate empty profiles.", .ticket = "IGSH-224" },
+    } },
     .{ .ver = "0.28.806", .items = &.{
         .{ .text = "Switching workspaces remembers where you were typing so you can keep typing without clicking again.", .ticket = "IGSH-522" },
     } },
