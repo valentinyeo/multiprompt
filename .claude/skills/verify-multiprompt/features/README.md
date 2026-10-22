@@ -24,7 +24,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Diagnostic verification
 
-- [Chat sync audit](chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
+- [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
 ## Features
 

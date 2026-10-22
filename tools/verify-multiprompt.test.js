@@ -174,8 +174,10 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   for (const ending of ['\n', '\r\n']) {
     assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
-  assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(chat-sync-audit.md\)/);
-  assert.match(read(skill + 'features/chat-sync-audit.md'), /not a Windows desktop journey/);
+  assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
+  assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
+  assert.equal(fs.existsSync(path.join(root, skill, 'features/chat-sync-audit.md')), false);
+  assert.match(read(skill + 'SKILL.md'), /\[Chat sync audit\]\(diagnostics\/chat-sync-audit.md\)/);
 });
 
 test('maintained verification code contains no removable code comments', async () => {
