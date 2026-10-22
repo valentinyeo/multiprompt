@@ -188,3 +188,63 @@ test('IGSH-224 an open palette retains input over owned browser popups but never
     assert.throws(() => check(broken));
   }
 });
+
+test('IGSH-224 close exports transport collisions through the same alias as split and reopens the durable ID', () => {
+  const source = read('src/workspaces.zig');
+  const close = source.slice(source.indexOf('pub fn closeMyWorkspaceSlot('), source.indexOf('fn deleteMyWorkspaceSlot('));
+  assert.match(close, /workspaceExportTransport\(&transport_buf, id, slot\)/);
+  assert.match(close, /exportSlotSessionFile\(slot, transport_id\)/);
+  assert.match(close, /addOrUpdateWorkspaceHosted\(transport_id, name, false, ""\)/);
+  const split = source.slice(source.indexOf('fn leaveSingleWindowMode('), source.indexOf('pub fn newWorkspace('));
+  assert.match(split, /workspaceExportTransport\(&entry.id,/);
+  assert.match(source, /\"split-\{d\}-\{d\}\"/);
+});
+
+test('IGSH-224 inactive single selected and grouped shell moves reconcile before publication', () => {
+  const source = read('src/workspaces.zig');
+  for (const [start, end, index] of [['pub fn moveTabToPill(', 'pub fn moveSelectedTabsToPill(', 'tab_idx'], ['pub fn moveSelectedTabsToPill(', 'pub fn moveGroupToPill(', '@intCast(i)'], ['pub fn moveGroupToPill(', 'fn workspaceSessionFileExists(', '@intCast(i)']]) {
+    const move = source.slice(source.indexOf(start), source.indexOf(end));
+    const reconcile = `reconcileBrowserWorkspace(${index});`;
+    assert.ok(move.indexOf(reconcile) > move.indexOf('.workspace = slot;'));
+    assert.ok(move.indexOf(reconcile) < move.indexOf('commitPillMove('));
+  }
+  const pane = read('src/browser_pane.zig');
+  const reconcile = pane.slice(pane.indexOf('pub fn reconcileBrowserWorkspace('), pane.indexOf('threadlocal var browser_command_profile'));
+  assert.doesNotMatch(reconcile, /browser_hwnd == null\) return/);
+  assert.match(reconcile, /deleteBrowserWindowIdFile\(app_state.shells\[idx\].shell_id\)/);
+});
+
+test('IGSH-224 explicit window still loads the shell profile binding and fail-closed guard', () => {
+  const source = read('src/bridge.zig');
+  assert.match(source, /const bound_window = resolveWindowFromEnv\(allocator\);\s+if \(g_window_id == null\) g_window_id = bound_window;/);
+  assert.doesNotMatch(source, /if \(g_window_id == null\) g_window_id = resolveWindowFromEnv/);
+});
+
+test('IGSH-224 upgrade retains the original shared root with a durable owner before browser launch', () => {
+  const source = read('src/browser_workspace_profile.zig');
+  assert.match(source, /pub fn adoptLegacyProfile\(/);
+  assert.match(source, /\.workspace-owner/);
+  assert.match(source, /legacyOwner\(/);
+  const pane = read('src/browser_pane.zig');
+  assert.match(pane, /pub fn adoptLegacyBrowserProfiles\(/);
+  const main = read('src/main.zig');
+  const browser = main.slice(main.indexOf('        .browser => {'), main.indexOf('        .browser => {') + 550);
+  assert.match(browser, /adoptLegacyBrowserProfiles\(\);[\s\S]*relaunchActiveRestoredBrowserPane\(\)/);
+  assert.match(source, /if \(std.ascii.eqlIgnoreCase\(seed, destination\)\) return;/);
+  assert.match(source, /ensureWorkspaceProfile\(allocator, "", destination\)/);
+});
+
+test('IGSH-224 host evidence includes intermediary parents rather than filtering them away', () => {
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  assert.match(control, /Save-Json @\(Get-CimInstance Win32_Process \| Select-Object ProcessId, ParentProcessId, Name, CommandLine\) 'workspace-host-processes.json'/);
+});
+
+test('IGSH-224 synthetic upgrade proof exercises production roots markers native identity and a new live browser', () => {
+  const bridge = read('src/bridge.zig');
+  const migration = bridge.slice(bridge.indexOf('test "IGSH-224 upgrade retains the original shared profile root'));
+  for (const required of ['adoptLegacyProfile', 'workspace_profile.path', 'tokenFromPath', 'Default/Bookmarks', 'Default/Network/Cookies', 'synthetic encryption key marker', 'fixture.absent(relative)']) assert.ok(migration.includes(required), required);
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const upgrade = control.slice(control.indexOf('function Assert-SeededWorkspaceUpgrade'), control.indexOf('function Select-Theme('));
+  for (const required of ['Get-FileHash $bookmarks', 'Get-FileHash $cookies', 'originalBrowserLaunched = $false', 'workspace-upgrade.json', 'upgrade-process-tree.json', 'New workspace stole', 'newRoot', 'Get-CimInstance Win32_Process']) assert.ok(upgrade.includes(required), required);
+  assert.ok(control.indexOf('Assert-SeededWorkspaceUpgrade }') < control.indexOf('$process = $job.Start($Exe, $scratch'));
+});

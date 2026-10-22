@@ -21,8 +21,9 @@ By default each stable workspace ID selects its own engine-specific profile in
 Names and slots never select storage. The first 30 SHA-256 hex characters form
 the directory; `e-` or `c-` prefixes its pipe token. The launch notice identifies
 the active profile before manual bookmark editing. Workspace deletion retains
-the profile for recovery. Shared EdgeUserData/ChromeUserData remain unchanged
-as migration seeds and rollback profiles.
+the profile for recovery. Existing EdgeUserData/ChromeUserData stay in place for the restored active
+workspace, bound by an adjacent create-only `.workspace-owner` sidecar. New
+workspaces get empty separate roots, not copies of existing logins/bookmarks.
 
 A native host derives its registration token from its live Chromium ancestor's
 user-data argument, not from connection order. A mismatched environment override
@@ -32,9 +33,10 @@ carry that snapshot, including unfreeze, retries and background URL reads.
 Unknown/stale profile pipes never fall back to another workspace or the shared
 pipe. The extension's existing exact-window/tab ownership checks remain in force.
 
-First-use migration completes off the UI thread before launch/adoption starts.
+Upgrade records the existing root owner before any browser launch; new-profile
+initialization completes off the UI thread before launch/adoption starts.
 See [the lifecycle contract](../../docs/browser-pane-lifecycle.md#workspace-browser-profiles)
-for source-closed checks, exclusions, incomplete-copy handling and the default-on
+for in-place upgrade, explicit clone checks, incomplete-profile handling and the default-on
 one-line `IGSH_224` rollback switch.
 
 Local CLI callers inherit `BROWSER_CLI_WINDOW_FILE`; its atomically replaced

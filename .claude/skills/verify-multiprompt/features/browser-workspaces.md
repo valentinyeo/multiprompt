@@ -9,7 +9,10 @@
   command line, unchanged profile root and Edge-written bookmark file.
 - Real zsb requests reach the target workspace's native host, including while a
   different workspace is foreground; the other profile lacks the target bookmark.
-- Fresh launches do not create shared migration seeds; cleanup owns every process.
+- A separate synthetic pre-upgrade install retains its original profile root,
+  bookmark/cookie/Local State marker bytes and owner while a new workspace launches
+  a separate empty profile. Neither the fixture nor any account contains real data.
+- The original fresh six-profile journey remains unchanged; cleanup owns every process.
 
 ## How to get to it (user POV)
 
@@ -29,7 +32,15 @@ host executable in the disposable runner's HKCU, removing it during cleanup.
 In each profile, open edge://extensions/, turn on Developer mode through its
 visible UI Automation toggle, and require the real native pipe. No browser
 flags, policies or preference files bypass this user consent step.
-No app state, browser preferences or bookmark files are seeded or edited.
+Only the separate upgrade preflight seeds an old-format session and synthetic
+Bookmarks, Network/Cookies and Local State marker files before starting the app.
+It never launches Chromium on these deliberately synthetic marker files. The
+new workspace launches a real separate root; marker hashes and ownership must
+remain unchanged. `workspace-upgrade.json` and `upgrade-process-tree.json` retain
+the proof. The Zig migration regression additionally resolves the original root
+and native token through the production mapping, reopens it and verifies every
+marker remains byte-for-byte intact. The main six-profile journey still seeds
+no app state, preferences or bookmark files.
 Common app keystrokes use the strict Doctor-verified main-window foreground guard.
 Browser-only keystrokes validate the exact profile PID/HWND and root owner;
 A real hit-tested title-bar click can activate the window without selecting a tab.
@@ -56,9 +67,10 @@ workspace-lifecycle.json, bookmark-action.png and all lifecycle screenshots.
 ## Gotchas
 
 Offline account bypass is not real sign-in. Real signed-in browser credentials,
-Valentin's existing bookmarks and their migration are checked by the runner on
-laptop1 after release/install, never on this server. This journey uses only
-synthetic public URLs and newly created favorites, not private profile data.
+Valentin's actual existing bookmarks are checked by the runner on laptop1 after
+release/install, never on this server. Synthetic upgrade continuity is checked
+on GitHub; real sign-in/decryption is not claimed by marker preservation. This
+journey uses synthetic fixtures, public URLs and new favorites, not private data.
 It does not prove remote SSH/tmux, sync, Chrome engine switching or every menu
 entry. Missing extension, native host, bookmark, identity or lifecycle state
 fails rather than skipping an action. Six browsers can each need a minute.

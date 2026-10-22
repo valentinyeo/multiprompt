@@ -792,6 +792,68 @@ function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [st
     Snapshot $Stage
 }
 
+function Assert-SeededWorkspaceUpgrade {
+    $freshScratch = $script:scratch
+    $freshWindow = $script:window
+    $freshProcess = $script:process
+    $upgradeJob = $null
+    $upgradeProcess = $null
+    try {
+        $script:scratch = Join-Path $freshScratch 'upgrade'
+        foreach ($directory in @('roaming/ZigShell', 'local/ZigShell/EdgeUserData/Default/Network', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
+        $env:APPDATA = Join-Path $scratch 'roaming'
+        $env:LOCALAPPDATA = Join-Path $scratch 'local'
+        $seedRoot = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
+        $bookmarks = Join-Path $seedRoot 'Default/Bookmarks'
+        $cookies = Join-Path $seedRoot 'Default/Network/Cookies'
+        [IO.File]::WriteAllText($bookmarks, 'synthetic pre-upgrade bookmark marker')
+        [IO.File]::WriteAllText($cookies, 'synthetic pre-upgrade cookie marker')
+        [IO.File]::WriteAllText((Join-Path $seedRoot 'Local State'), 'synthetic pre-upgrade encryption key marker')
+        $before = @((Get-FileHash $bookmarks).Hash, (Get-FileHash $cookies).Hash, (Get-FileHash (Join-Path $seedRoot 'Local State')).Hash)
+        @{ single_window = $true; workspace_count = 1; active_workspace = 0; active_tab = 0; workspaces = @(@{ wid = 'igsh224-upgrade-original'; name = 'Upgrade original' }); tabs = @(@{ kind = 'cmd'; workspace = 0 }) } | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $env:APPDATA 'ZigShell/session.json')
+        $upgradeJob = New-Object VerifyJob
+        $upgradeProcess = $upgradeJob.Start($Exe, $scratch, (Join-Path $Evidence 'upgrade-stdout.log'), (Join-Path $Evidence 'upgrade-stderr.log'))
+        $script:process = $upgradeProcess
+        Wait-Until {
+            $upgradeProcess.Refresh()
+            $script:window = $upgradeProcess.MainWindowHandle
+            $script:window -ne [IntPtr]::Zero -and (Test-Path ($seedRoot + '.workspace-owner'))
+        } 'upgraded app adopts the existing shared profile without launching Chromium' 60
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('igsh224-upgrade-original')))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
+        if ((Get-Content ($seedRoot + '.workspace-owner') -Raw) -cne ('e-' + $hash)) { throw 'Upgrade assigned the existing profile to the wrong workspace' }
+        [void][VerifyNative]::ShowWindow($script:window, 9)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        Doctor
+        Press @(0x11, 0x4E) 'Ctrl+N: create a new workspace after upgrading the synthetic existing install'
+        Wait-Until { (Read-Session).workspace_count -eq 2 -and (Read-Session).active_workspace -eq 1 } 'new upgrade workspace saved'
+        $newId = (Read-Session).workspaces[1].wid
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $newHash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($newId)))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
+        $newRoot = Join-Path $env:LOCALAPPDATA ('ZigShell/BrowserWorkspaces/edge/' + $newHash)
+        Press @(0x12, 0x41) 'Alt+A: launch only the new workspace browser after upgrade'
+        Wait-Until { @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($newRoot) -and $_.CommandLine -notlike '*--type=*' }).Count -eq 1 } 'new workspace uses a separate live profile root' 60
+        $after = @((Get-FileHash $bookmarks).Hash, (Get-FileHash $cookies).Hash, (Get-FileHash (Join-Path $seedRoot 'Local State')).Hash)
+        if (($before -join ',') -cne ($after -join ',')) { throw 'Upgrade changed existing bookmark cookie or encryption key marker bytes' }
+        if ((Test-Path (Join-Path $newRoot 'Default/Bookmarks')) -and (Get-Content (Join-Path $newRoot 'Default/Bookmarks') -Raw).Contains('synthetic pre-upgrade')) { throw 'New workspace copied the existing profile' }
+        if ((Get-Content ($seedRoot + '.workspace-owner') -Raw) -cne ('e-' + $hash)) { throw 'New workspace stole the existing profile owner' }
+        Save-Json @{ originalWorkspace = 'igsh224-upgrade-original'; originalRoot = $seedRoot; owner = 'e-' + $hash; newWorkspace = $newId; newRoot = $newRoot; before = $before; after = $after; markerFiles = @($bookmarks, $cookies, (Join-Path $seedRoot 'Local State')); originalBrowserLaunched = $false } 'workspace-upgrade.json'
+        $result.checks += @{ name = 'synthetic-pre-upgrade-profile-preserved'; originalRoot = $seedRoot; newRoot = $newRoot; markerHashesUnchanged = $true }
+    } finally {
+        if ($null -ne $upgradeJob) {
+            $stopped = $upgradeJob.Stop()
+            Save-Json @{ totalProcesses = $stopped.TotalProcesses; activeAfterStop = $stopped.ActiveProcesses } 'upgrade-process-tree.json'
+            $upgradeJob.Dispose()
+        }
+        if ($null -ne $upgradeProcess) { $upgradeProcess.Dispose() }
+        $script:scratch = $freshScratch
+        $script:window = $freshWindow
+        $script:process = $freshProcess
+        $env:APPDATA = Join-Path $scratch 'roaming'
+        $env:LOCALAPPDATA = Join-Path $scratch 'local'
+    }
+}
+
 function Select-Theme([string]$Theme, [string]$ActionShot) {
     Palette 'themes'
     Press @(0x0D) 'Enter: Themes...'
@@ -840,6 +902,7 @@ try {
         New-Item -ItemType Directory -Force (Split-Path $script:extensionPath) | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../extension') $script:extensionPath -Recurse
     }
+    if ($Feature -eq 'browser-workspaces') { Assert-SeededWorkspaceUpgrade }
     $job = New-Object VerifyJob
     $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     Wait-Until {
@@ -1346,7 +1409,7 @@ try {
             if ((Read-Session).active_workspace -ne 0) { throw 'Background zsb routing changed the active workspace' }
             $foreignBookmarks = Join-Path $roots[0] 'Default/Bookmarks'
             if ((Test-Path $foreignBookmarks) -and (Get-Content $foreignBookmarks -Raw).Contains($bookmark)) { throw 'Target bookmark leaked into the other workspace profile' }
-            Save-Json @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('msedge.exe', 'zigshell-bridge.exe') } | Select-Object ProcessId, ParentProcessId, Name, CommandLine) 'workspace-host-processes.json'
+            Save-Json @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine) 'workspace-host-processes.json'
             Palette 'IGSH224 Journey'
             Press @(0x0D) 'Enter: return to the verified workspace'
             Assert-WorkspaceProfile 'after' $targetId $targetRoot $bookmark

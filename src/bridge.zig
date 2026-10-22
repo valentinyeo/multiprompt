@@ -183,7 +183,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         return usage();
     }
 
-    if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
+    const bound_window = resolveWindowFromEnv(allocator);
+    if (g_window_id == null) g_window_id = bound_window;
 
     const is_script = std.mem.eql(u8, command, "cdp") and blk: {
         var script_args = args;
@@ -3210,4 +3211,41 @@ test "IGSH-224 source without a process lock is locked only for the clone transa
     try fixture.absent("seed/lockfile");
     try fixture.absent("clone/lockfile");
     try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+}
+
+test "IGSH-224 upgrade retains the original shared profile root and all synthetic durable markers" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("ZigShell/EdgeUserData", "Default/Bookmarks", "synthetic upgrade bookmarks");
+    try fixture.write("ZigShell/EdgeUserData", "Default/Network/Cookies", "synthetic upgrade cookies");
+    try fixture.write("ZigShell/EdgeUserData", "Local State", "synthetic encryption key marker");
+    try workspace_profile.adoptLegacyProfile(fixture.base, "edge", "original-workspace");
+    var original: [32]u8 = undefined;
+    _ = try workspace_profile.token(&original, "edge", "original-workspace");
+    var root_buf: [1024]u8 = undefined;
+    const root = try workspace_profile.path(&root_buf, fixture.base, "edge", &original);
+    const shared = try std.fmt.allocPrint(std.testing.allocator, "{s}\\ZigShell\\EdgeUserData", .{fixture.base});
+    defer std.testing.allocator.free(shared);
+    try std.testing.expectEqualStrings(shared, root);
+    try workspace_profile.ensureWorkspaceProfile(std.testing.allocator, shared, root);
+    try workspace_profile.adoptLegacyProfile(fixture.base, "edge", "new-workspace");
+    var discovered: [32]u8 = undefined;
+    try std.testing.expectEqualStrings(&original, (try workspace_profile.tokenFromPath(&discovered, fixture.base, shared)).?);
+    for ([_][]const u8{ "new-workspace", "another-workspace" }) |id| {
+        var value: [32]u8 = undefined;
+        _ = try workspace_profile.token(&value, "edge", id);
+        var next_buf: [1024]u8 = undefined;
+        const next = try workspace_profile.path(&next_buf, fixture.base, "edge", &value);
+        try std.testing.expect(!std.mem.eql(u8, shared, next));
+        try workspace_profile.ensureWorkspaceProfile(std.testing.allocator, shared, next);
+        try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, next));
+        const relative = try std.fmt.allocPrint(std.testing.allocator, "ZigShell/BrowserWorkspaces/edge/{s}/Default/Bookmarks", .{value[2..]});
+        defer std.testing.allocator.free(relative);
+        try fixture.absent(relative);
+    }
+    try std.testing.expectEqualStrings(shared, try workspace_profile.path(&root_buf, fixture.base, "edge", &original));
+    try fixture.same("ZigShell/EdgeUserData", "Default/Bookmarks", "synthetic upgrade bookmarks");
+    try fixture.same("ZigShell/EdgeUserData", "Default/Network/Cookies", "synthetic upgrade cookies");
+    try fixture.same("ZigShell/EdgeUserData", "Local State", "synthetic encryption key marker");
+    try fixture.absent("ZigShell/EdgeUserData/.multiprompt-clone-complete");
 }

@@ -191,6 +191,7 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const browserUrlSlice = @import("browser_pane.zig").browserUrlSlice;
+const reconcileBrowserWorkspace = @import("browser_pane.zig").reconcileBrowserWorkspace;
 const hideBrowserFloatingChrome = @import("browser_pane.zig").hideBrowserFloatingChrome;
 const parkStrayBrowserPanes = @import("browser_pane.zig").parkStrayBrowserPanes;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
@@ -1465,6 +1466,7 @@ pub fn moveTabToPill(tab_idx: u32, slot: u8) void {
     if (!app_state.g_single_window or slot >= app_state.g_lws_count or app_state.g_ws_snoozed[slot] or tab_idx >= app_state.shell_count) return;
     const was_active = tab_idx == app_state.active_shell;
     app_state.shells[tab_idx].workspace = slot;
+    reconcileBrowserWorkspace(tab_idx);
     app_state.shells[tab_idx].group_id = 0;
     commitPillMove(slot, was_active);
 }
@@ -1475,6 +1477,7 @@ pub fn moveSelectedTabsToPill(slot: u8) void {
     for (0..app_state.shell_count) |i| {
         if (!app_state.shells[i].selected) continue;
         app_state.shells[i].workspace = slot;
+        reconcileBrowserWorkspace(@intCast(i));
         app_state.shells[i].group_id = 0;
         app_state.shells[i].selected = false;
         if (i == app_state.active_shell) follow = true;
@@ -1489,6 +1492,7 @@ pub fn moveGroupToPill(gidx: u32, slot: u8) void {
     for (0..app_state.shell_count) |i| {
         if (app_state.shells[i].group_id != gid) continue;
         app_state.shells[i].workspace = slot;
+        reconcileBrowserWorkspace(@intCast(i));
         if (i == app_state.active_shell) follow = true;
     }
     commitPillMove(slot, follow);
@@ -3156,10 +3160,8 @@ fn leaveSingleWindowMode() bool {
         const entry = &split_entries[split_count];
         entry.id_len = @min(app_state.g_ws_id_len[ws], @as(u32, @intCast(entry.id.len)));
         if (entry.id_len > 0) @memcpy(entry.id[0..entry.id_len], app_state.g_ws_ids[ws][0..entry.id_len]);
-        if (std.mem.eql(u8, entry.id[0..entry.id_len], getInstanceName())) {
-            const alias = std.fmt.bufPrint(&entry.id, "split-{d}-{d}", .{ GetTickCount64(), ws }) catch return false;
-            entry.id_len = @intCast(alias.len);
-        }
+        const transport = workspaceExportTransport(&entry.id, entry.id[0..entry.id_len], ws) orelse return false;
+        entry.id_len = @intCast(transport.len);
         var name_buf: [32]u8 = undefined;
         const name = workspaceDisplayName(ws, &name_buf);
         entry.name_len = @intCast(@min(name.len, entry.name.len));
@@ -3535,6 +3537,11 @@ pub fn persistWorkspaceOrder() void {
     updateMainWindowTitle();
 }
 
+fn workspaceExportTransport(buf: *[32]u8, id: []const u8, slot: u8) ?[]const u8 {
+    if (!std.mem.eql(u8, id, getInstanceName())) return id;
+    return std.fmt.bufPrint(buf, "split-{d}-{d}", .{ GetTickCount64(), slot }) catch null;
+}
+
 fn exportSlotSessionFile(slot: u8, transport_id: []const u8) bool {
     if (slot >= app_state.g_lws_count) return false;
     ensureWorkspaceSlotId(slot);
@@ -3894,7 +3901,9 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     @memcpy(name_copy[0..nm.len], nm);
     const name = name_copy[0..nm.len];
 
-    const exported = exportSlotSessionFile(slot, id);
+    var transport_buf: [32]u8 = undefined;
+    const transport_id = workspaceExportTransport(&transport_buf, id, slot) orelse return;
+    const exported = exportSlotSessionFile(slot, transport_id);
     if (!exported) {
         showHeaderNoticeAscii("Could not hibernate workspace - tabs left open", 4500, true);
         return;
@@ -3918,9 +3927,9 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         var stamp_buf: [32]u8 = undefined;
         const stamp = workspaceDeleteStamp(&stamp_buf);
         var path_buf: [512]u8 = undefined;
-        if (getSessionPathForWorkspace(&path_buf, id)) |path| archiveWorkspaceFile(path, stamp);
+        if (getSessionPathForWorkspace(&path_buf, transport_id)) |path| archiveWorkspaceFile(path, stamp);
     } else {
-        addOrUpdateWorkspaceHosted(id, name, false, "");
+        addOrUpdateWorkspaceHosted(transport_id, name, false, "");
     }
     syncCurrentWorkspaceToRegistry();
     writeWorkspaceRegistryFile();

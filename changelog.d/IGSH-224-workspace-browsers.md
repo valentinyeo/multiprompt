@@ -1,1 +1,1 @@
-Each workspace now keeps its own browser logins and bookmarks, starting with a cache-free copy of your existing isolated browser profile.
+Each workspace now keeps its own browser logins and bookmarks. On upgrade, your restored workspace keeps the existing browser profile in place; new workspaces start with separate empty profiles.

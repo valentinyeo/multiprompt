@@ -298,8 +298,12 @@ Success prints one JSON line with destination, copied file count, and bytes.
 `src/browser_workspace_profile.zig` has the one-line `IGSH_224 = true` switch.
 Set it to false and rebuild to restore the shared isolated-profile behavior.
 The switch defaults on; it does not move or overwrite `EdgeUserData` or
-`ChromeUserData`. Those directories remain the read-only first-use seeds and
-rollback profiles.
+`ChromeUserData`. On upgrade, the restored active workspace retains the exact existing root.
+A create-only `EdgeUserData.workspace-owner` / `ChromeUserData.workspace-owner`
+sidecar binds each existing root to that workspace token before any browser
+launch. Subsequent launches and native hosts resolve the same sidecar; other
+workspaces cannot claim or clone that profile. No existing profile file is moved,
+copied over or deleted. The sidecar survives rename, reorder, conversion and reopen.
 
 A stable workspace ID is SHA-256 hashed (the first 30 hexadecimal characters),
 never a display name or slot. Profiles live under
@@ -316,21 +320,15 @@ Closing or deleting a workspace leaves its hash-addressed browser data intact;
 there is no automatic profile deletion. Retained directories can be backed up
 or recovered separately, without following a workspace display-name path.
 
-Before launching, a background worker prepares a missing profile. The shared
-source must have no running browser process. Its process lock is held for the
-whole copy. When absent, a temporary delete-on-close lock is created atomically
-and removed on exit; no durable seed data changes. Process checks also run
-before and after copying. Migration preflights the retained
-bytes plus 1 GiB, copies into `.partial`, validates Local State and at least one
-profile Preferences file, writes a completion marker, and atomically renames.
-Incomplete destinations never launch. A fresh install with no seed initializes
-a minimal complete profile without creating a shared seed. Interrupted partial
-copies are retried, not adopted. Service Worker registrations are retained;
-CacheStorage, ScriptCache, HTTP/code/GPU caches, component/model downloads,
-crash reports, and process locks are not copied. Durable source files are never edited. Only the bridge extension's own local
-routing registry is excluded from seeding, so copied window IDs and process
-ownership cannot survive into a new profile; other extensions' local settings
-are retained.
+Before launching a new workspace, a background worker initializes a minimal
+complete profile without copying the existing workspace's logins or bookmarks.
+It requires 1 GiB free, builds in `.partial`, validates Local State and Preferences,
+writes a completion marker and atomically renames. Incomplete destinations never
+launch. The existing shared profile launches in place without a clone marker;
+its original Local State and cookie encryption context stay together. Ownership
+read/write failures refuse browser launch rather than choosing a fresh root.
+The explicit `profile-clone` utility retains its source-closed, cache-excluding
+transaction checks; automatic upgrade does not invoke that copy path.
 
 The native host reads its Chromium ancestor's actual `--user-data-dir`, validates
 it against the local workspace profile root, and registers only the matching

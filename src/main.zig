@@ -8280,6 +8280,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         .browser => {
             app_state.g_startup_progress = false;
             launch_cache.step(.browser);
+            @import("browser_pane.zig").adoptLegacyBrowserProfiles();
             relaunchActiveRestoredBrowserPane();
             updateBrowserVisibility();
             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {

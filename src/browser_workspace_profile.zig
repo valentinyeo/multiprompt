@@ -39,9 +39,85 @@ pub fn isWorkspaceToken(value: []const u8) bool {
     return true;
 }
 
+extern "kernel32" fn CreateFileW([*:0]const u16, u32, u32, ?*anyopaque, u32, u32, ?windows.HANDLE) callconv(.winapi) windows.HANDLE;
+extern "kernel32" fn ReadFile(windows.HANDLE, [*]u8, u32, *u32, ?*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn WriteFile(windows.HANDLE, [*]const u8, u32, *u32, ?*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn FlushFileBuffers(windows.HANDLE) callconv(.winapi) i32;
+extern "kernel32" fn GetFileAttributesW([*:0]const u16) callconv(.winapi) u32;
+extern "kernel32" fn GetLastError() callconv(.winapi) u32;
+extern "kernel32" fn CreateMutexW(?*anyopaque, i32, [*:0]const u16) callconv(.winapi) ?windows.HANDLE;
+extern "kernel32" fn WaitForSingleObject(windows.HANDLE, u32) callconv(.winapi) u32;
+extern "kernel32" fn ReleaseMutex(windows.HANDLE) callconv(.winapi) i32;
+
+fn legacyPath(buf: []u8, local: []const u8, engine: []const u8) ![]const u8 {
+    if (!std.mem.eql(u8, engine, "edge") and !std.mem.eql(u8, engine, "chrome")) return error.InvalidEngine;
+    return std.fmt.bufPrint(buf, "{s}\\ZigShell\\{s}UserData", .{ local, if (std.mem.eql(u8, engine, "edge")) @as([]const u8, "Edge") else "Chrome" });
+}
+
+fn legacyOwner(buf: *[32]u8, local: []const u8, engine: []const u8) !?[]const u8 {
+    var root_buf: [1024]u8 = undefined;
+    const root = try legacyPath(&root_buf, local, engine);
+    var sidecar_buf: [1100]u8 = undefined;
+    const sidecar = try std.fmt.bufPrint(&sidecar_buf, "{s}.workspace-owner", .{root});
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, sidecar);
+    defer std.heap.page_allocator.free(wide);
+    const file = CreateFileW(wide, 0x80000000, 3, null, 3, 0x80, null);
+    if (file == @as(windows.HANDLE, @ptrFromInt(std.math.maxInt(usize)))) {
+        if (GetLastError() == 2 or GetLastError() == 3) return null;
+        return error.LegacyOwnerUnavailable;
+    }
+    defer _ = CloseHandle(file);
+    var bytes: [33]u8 = undefined;
+    var n: u32 = 0;
+    if (ReadFile(file, &bytes, bytes.len, &n, null) == 0 or n != 32 or !isWorkspaceToken(bytes[0..32]) or bytes[0] != engine[0]) return error.InvalidLegacyOwner;
+    @memcpy(buf, bytes[0..32]);
+    return buf;
+}
+
+pub fn adoptLegacyProfile(local: []const u8, engine: []const u8, workspace_id: []const u8) !void {
+    var root_buf: [1024]u8 = undefined;
+    const root = try legacyPath(&root_buf, local, engine);
+    const wide_root = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, root);
+    defer std.heap.page_allocator.free(wide_root);
+    const attributes = GetFileAttributesW(wide_root);
+    if (attributes == 0xffffffff) {
+        if (GetLastError() == 2 or GetLastError() == 3) return;
+        return error.LegacyProfileUnavailable;
+    }
+    if (attributes & 0x10 == 0 or attributes & 0x400 != 0) return error.InvalidLegacyProfile;
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(root, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    var mutex_buf: [128]u8 = undefined;
+    const mutex_text = try std.fmt.bufPrint(&mutex_buf, "Local\\multiprompt-profile-owner-{s}", .{hex});
+    const mutex_wide = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, mutex_text);
+    defer std.heap.page_allocator.free(mutex_wide);
+    const mutex = CreateMutexW(null, 0, mutex_wide) orelse return error.ProfileMutexUnavailable;
+    defer _ = CloseHandle(mutex);
+    const waited = WaitForSingleObject(mutex, 0);
+    if (waited != 0 and waited != 0x80) return error.ProfilePreparationInProgress;
+    defer _ = ReleaseMutex(mutex);
+    var owner: [32]u8 = undefined;
+    if (try legacyOwner(&owner, local, engine) != null) return;
+    const value = try token(&owner, engine, workspace_id);
+    var sidecar_buf: [1100]u8 = undefined;
+    const sidecar = try std.fmt.bufPrint(&sidecar_buf, "{s}.workspace-owner", .{root});
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, sidecar);
+    defer std.heap.page_allocator.free(wide);
+    const file = CreateFileW(wide, 0x40000000, 0, null, 1, 0x80, null);
+    if (file == @as(windows.HANDLE, @ptrFromInt(std.math.maxInt(usize)))) return error.LegacyOwnerWriteFailed;
+    defer _ = CloseHandle(file);
+    var written: u32 = 0;
+    if (WriteFile(file, value.ptr, @intCast(value.len), &written, null) == 0 or written != value.len or FlushFileBuffers(file) == 0) return error.LegacyOwnerWriteFailed;
+}
+
 pub fn path(buf: []u8, local: []const u8, engine: []const u8, value: []const u8) ![]const u8 {
     if (!std.mem.eql(u8, engine, "edge") and !std.mem.eql(u8, engine, "chrome")) return error.InvalidEngine;
     if (!isWorkspaceToken(value) or value[0] != engine[0]) return error.InvalidProfileToken;
+    var owner: [32]u8 = undefined;
+    if (try legacyOwner(&owner, local, engine)) |existing| {
+        if (std.mem.eql(u8, existing, value)) return legacyPath(buf, local, engine);
+    }
     return std.fmt.bufPrint(buf, "{s}\\ZigShell\\BrowserWorkspaces\\{s}\\{s}", .{ local, engine, value[2..] });
 }
 
@@ -81,7 +157,14 @@ pub fn userDataArgument(allocator: std.mem.Allocator, line: []const u8) !?[]u8 {
 pub fn tokenFromPath(buf: *[32]u8, local: []const u8, candidate: []const u8) !?[]const u8 {
     var expected_buf: [1024]u8 = undefined;
     const base = try std.fmt.bufPrint(&expected_buf, "{s}\\ZigShell\\BrowserWorkspaces\\", .{local});
-    if (candidate.len < base.len or !std.ascii.eqlIgnoreCase(candidate[0..base.len], base)) return null;
+    if (candidate.len < base.len or !std.ascii.eqlIgnoreCase(candidate[0..base.len], base)) {
+        for ([_][]const u8{ "edge", "chrome" }) |engine| {
+            var legacy_buf: [1024]u8 = undefined;
+            const legacy = try legacyPath(&legacy_buf, local, engine);
+            if (std.ascii.eqlIgnoreCase(candidate, legacy)) return legacyOwner(buf, local, engine);
+        }
+        return null;
+    }
     const rest = candidate[base.len..];
     const split = std.mem.indexOfScalar(u8, rest, '\\') orelse return error.InvalidWorkspaceProfile;
     const engine = rest[0..split];
@@ -171,7 +254,8 @@ pub fn requireSourceClosed(allocator: std.mem.Allocator, seed: []const u8) !void
 }
 
 pub fn ensureWorkspaceProfile(allocator: std.mem.Allocator, seed: []const u8, destination: []const u8) !void {
-    try clone_profile.ensureWorkspaceProfile(allocator, seed, destination);
+    if (std.ascii.eqlIgnoreCase(seed, destination)) return;
+    try clone_profile.ensureWorkspaceProfile(allocator, "", destination);
 }
 
 test "IGSH-224 stable workspace profile identities survive names and slots and separate engines" {
