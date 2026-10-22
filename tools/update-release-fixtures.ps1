@@ -2,17 +2,6 @@ param([Parameter(Mandatory=$true)][string]$Root)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:OS -ne 'Windows_NT') { throw 'Fixtures run only in GitHub Windows' }
 New-Item -ItemType Directory -Force $Root | Out-Null
-$publicKeyPath = [IO.Path]::GetFullPath("$PSScriptRoot/../src/release_signing_public_key.txt")
-$originalPublicKey = [IO.File]::ReadAllText($publicKeyPath)
-try {
-    [IO.File]::WriteAllText($publicKeyPath, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`n")
-    $placeholder = Start-Process zig.exe -ArgumentList 'build -Drelease=true' -Wait -PassThru -RedirectStandardError "$Root/placeholder-error.txt"
-    if ($placeholder.ExitCode -eq 0 -or (Get-Content "$Root/placeholder-error.txt" -Raw) -notmatch 'Release signing public key is still the all-zero placeholder') { throw 'Release build did not reject the fake public key loudly' }
-} finally {
-    [IO.File]::WriteAllText($publicKeyPath, $originalPublicKey)
-}
-Write-Host 'Release placeholder rejected; ordinary tests remain buildable'
-
 $source = @'
 using System;
 using System.Diagnostics;

@@ -1,13 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { generateKeyPairSync, createHash, sign } from 'node:crypto';
+import { generateKeyPairSync, createPrivateKey, createPublicKey, createHash, sign } from 'node:crypto';
 if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('Throwaway signing runs only inside GitHub');
 const root = process.argv[2];
-const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-const wrong = generateKeyPairSync('ed25519');
+const privateKey = process.env.MULTIPROMPT_TEST_SIGNING_KEY
+  ? createPrivateKey({ key: fs.readFileSync(process.env.MULTIPROMPT_TEST_SIGNING_KEY), type: 'pkcs8', format: 'der' })
+  : generateKeyPairSync('ed25519').privateKey;
+const publicKey = createPublicKey(privateKey);
 const rawPublic = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
 fs.writeFileSync('src/release_signing_public_key.txt', rawPublic.toString('base64') + '\n');
+if (root === '--prepare-key') {
+  const keyPath = process.argv[3];
+  fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+  fs.writeFileSync(keyPath, privateKey.export({ type: 'pkcs8', format: 'der' }));
+  console.log('Prepared throwaway update-test signing key');
+  process.exit(0);
+}
+const wrong = generateKeyPairSync('ed25519');
 for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true]]) {
   const dir = path.join(root, `v${version}`);
   fs.mkdirSync(dir, { recursive: true });
