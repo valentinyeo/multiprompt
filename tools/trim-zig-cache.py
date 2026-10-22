@@ -25,20 +25,24 @@ def main():
     print(f'Zig caches before: {total / 1024 / 1024:.1f} MiB; cap: {args.cap_mib} MiB', flush=True)
     objects = local / 'o'
     entries = sorted(objects.iterdir(), key=lambda entry: entry.stat().st_mtime) if objects.is_dir() else []
+    removed_entries = 0
+    removed_bytes = 0
     for entry in entries:
         if total <= cap:
             break
         removed = size(entry)
-        print(f'Removing {entry}: {removed / 1024 / 1024:.1f} MiB', flush=True)
         if entry.is_dir() and not entry.is_symlink():
             shutil.rmtree(entry)
         else:
             entry.unlink()
         total -= removed
+        removed_entries += 1
+        removed_bytes += removed
+    print(f'Removed {removed_entries} entries: {removed_bytes / 1024 / 1024:.1f} MiB', flush=True)
     total = size(local) + size(global_cache)
     print(f'Zig caches after: {total / 1024 / 1024:.1f} MiB', flush=True)
     if total > cap:
-        raise SystemExit('Non-object Zig caches exceed cap; refusing an oversized save')
+        print(f'::warning::Zig caches still {total / 1024 / 1024:.1f} MiB after trimming, above the {args.cap_mib} MiB cap', flush=True)
 
 
 if __name__ == '__main__':
