@@ -695,6 +695,27 @@ test "ISSUE-460 failed initial persistence never accepts or displays an undurabl
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
 }
+test "IGSH-564 idle channel with a suggested reply in the input box still types the message" {
+    defer clear();
+    channel_enabled = true;
+    shells[0].activity = .idle;
+    input_idle = false;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("send despite the suggestion"), .queued);
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
+}
+test "IGSH-564 queued message older than ten minutes is still typed, never marked not sent" {
+    defer clear();
+    channel_enabled = true;
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("send the aged queued message"), .queued);
+    fake_now_ms += 900_000;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(ChatEchoState.sending, g_chat_outbox.items[0].state);
+    try std.testing.expect(g_chat_outbox.items[0].write_started);
+}
 test "ISSUE-460 channel never appends over a message already held in the shell input" {
     defer clear();
     channel_enabled = true;
