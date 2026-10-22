@@ -229,12 +229,7 @@ pub fn materialize(a: Allocator, records: []const Record) !layout.Layout {
 
 pub fn needsPush(a: Allocator, local: []const Record, remote: []const Record) !bool {
     try validate(a, remote);
-    for (local) |record| {
-        const i = find(remote, record) orelse return true;
-        if (newer(record, remote[i])) return true;
-        if (!newer(remote[i], record) and !try payloadEqual(a, record, remote[i])) return true;
-    }
-    return false;
+    return (try delta(a, local, remote)).len != 0;
 }
 
 pub fn roundTrip(a: Allocator, sent: []const Record, received: []const Record) !void {
@@ -242,6 +237,18 @@ pub fn roundTrip(a: Allocator, sent: []const Record, received: []const Record) !
     for (sent) |record| {
         const i = find(received, record) orelse return error.UnprovenRoundTrip;
         const remote = received[i];
+        if (record.session != null and remote.session != null and !record.deleted and !remote.deleted) {
+            const combined = try mergeSession(a, remote, record);
+            if (!try payloadEqual(a, combined, remote)) return error.UnprovenRoundTrip;
+            const sent_fields = fieldStamps(record);
+            const received_fields = fieldStamps(remote);
+            inline for (std.meta.fields(Fields)) |field| {
+                const sent_stamp = @field(sent_fields, field.name);
+                const received_stamp = @field(received_fields, field.name);
+                if (sent_stamp.updated_at > received_stamp.updated_at or (sent_stamp.updated_at == received_stamp.updated_at and std.mem.order(u8, sent_stamp.device_id, received_stamp.device_id) == .gt)) return error.UnprovenRoundTrip;
+            }
+            continue;
+        }
         if (newer(record, remote)) return error.UnprovenRoundTrip;
         if (!newer(remote, record) and !try payloadEqual(a, record, remote)) return error.UnprovenRoundTrip;
     }
@@ -296,8 +303,15 @@ pub fn delta(a: Allocator, local: []const Record, remote: []const Record) ![]con
     var changed: std.ArrayList(Record) = .empty;
     for (local) |record| {
         if (find(remote, record)) |i| {
-            if (!newer(record, remote[i]) and try payloadEqual(a, record, remote[i])) continue;
-            if (newer(remote[i], record)) continue;
+            if (record.session != null and remote[i].session != null and !record.deleted and !remote[i].deleted) {
+                const combined = try mergeSession(a, remote[i], record);
+                const left = try std.json.Stringify.valueAlloc(a, combined, .{ .emit_null_optional_fields = false });
+                const right = try std.json.Stringify.valueAlloc(a, remote[i], .{ .emit_null_optional_fields = false });
+                if (eq(u8, left, right)) continue;
+            } else {
+                if (!newer(record, remote[i]) and try payloadEqual(a, record, remote[i])) continue;
+                if (newer(remote[i], record)) continue;
+            }
         }
         try changed.append(a, record);
     }

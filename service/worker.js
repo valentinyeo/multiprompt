@@ -70,7 +70,7 @@ export function validateRecords(records, deviceId) {
     if (r.fields !== undefined) {
       if (r.kind !== 'session' || r.deleted || !r.fields || Object.keys(r.fields).sort().join(',') !== 'favorite,manual,name,workspace') fail(400, 'invalid_record_fields');
       for (const stamp of Object.values(r.fields)) {
-        if (!stamp || Object.keys(stamp).sort().join(',') !== 'device_id,updated_at' || !Number.isSafeInteger(stamp.updated_at) || stamp.updated_at <= 0 || stamp.updated_at > r.updated_at || !/^[A-Za-z0-9_-]{1,64}$/.test(stamp.device_id)) fail(400, 'invalid_record_fields');
+        if (!stamp || Object.keys(stamp).sort().join(',') !== 'device_id,updated_at' || !Number.isSafeInteger(stamp.updated_at) || stamp.updated_at <= 0 || stamp.updated_at > r.updated_at || typeof stamp.device_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(stamp.device_id)) fail(400, 'invalid_record_fields');
       }
     }
     const identity = `${r.kind}:${r.id}`;

@@ -269,7 +269,12 @@ test "ISSUE-252 E activity merges independently of rename and favorite in either
     active.visits = &.{ 1, 2 };
     const name_edit = try records.edit(a, base, initial, .{ .hosts = initial.hosts, .workspaces = initial.workspaces, .tabs = &.{renamed} }, "name", 200);
     const activity = try records.edit(a, base, initial, .{ .hosts = initial.hosts, .workspaces = initial.workspaces, .tabs = &.{active} }, "activity", 300);
+    try std.testing.expect(try records.needsPush(a, name_edit, activity));
+    try std.testing.expectError(error.UnprovenRoundTrip, records.roundTrip(a, name_edit, activity));
     for ([_][]const records.Record{ try records.merge(a, name_edit, activity), try records.merge(a, activity, name_edit) }) |merged| {
+        try records.roundTrip(a, name_edit, merged);
+        try records.roundTrip(a, activity, merged);
+        try std.testing.expect(!try records.needsPush(a, merged, merged));
         const result = try records.materialize(a, merged);
         try std.testing.expectEqualStrings("Renamed", result.tabs[0].name);
         try std.testing.expect(result.tabs[0].favorite.?);
