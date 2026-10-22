@@ -36,6 +36,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr GetFocus();
     [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
@@ -58,6 +59,7 @@ public static class VerifyNative {
             }
             SetForegroundWindow(hwnd);
             if (GetForegroundWindow() != hwnd) {
+                BringWindowToTop(hwnd);
                 Rect bounds;
                 if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
                 Point point = new Point { X = bounds.Left + 100, Y = bounds.Top + 22 };
@@ -627,7 +629,17 @@ function Press-WorkspaceBrowser([int[]]$Keys, [string]$Label) {
     [VerifyNative]::Chord($Keys)
 }
 
+function Focus-WorkspaceFrame {
+    Doctor
+    Record 'Activate the exact owned app frame before workspace keyboard input'
+    Wait-Until {
+        [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'exact owned workspace frame receives keyboard focus'
+}
+
 function Palette([string]$Query) {
+    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
 }
@@ -1208,8 +1220,7 @@ try {
                 $identities += $id
                 Snapshot ('workspace-' + $index)
                 if ($index -eq 0) { Snapshot 'action' }
-                [void][VerifyNative]::SetForegroundWindow($script:window)
-                Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -eq $script:window } 'owned app foreground for workspace input'
+                Focus-WorkspaceFrame
             }
             if (@($roots | Select-Object -Unique).Count -ne 6) { throw 'Workspaces reused a browser profile root' }
             $live = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*--user-data-dir=*' -and $_.CommandLine -notlike '*--type=*' })
@@ -1275,7 +1286,6 @@ try {
             Wait-Until { $state = Read-Session; $state.PSObject.Properties['workspace_id'] -and $state.workspace_id -ceq $targetId -and -not $state.PSObject.Properties['single_window'] } 'standalone identity persisted' 60
             Assert-WorkspaceProfile 'multi-window' $targetId $targetRoot $bookmark
             Wait-Until { @(Get-ChildItem (Join-Path $scratch 'roaming/ZigShell') -Filter 'inbox-*.json').Count -eq 6 } 'six standalone workspace windows published' 60
-            [void][VerifyNative]::SetForegroundWindow($script:window)
             Palette 'window mode'
             Press @(0x0D) 'Enter: convert back to single-window mode'
             Wait-Until { $state = Read-Session; $state.PSObject.Properties['single_window'] -and $state.single_window -and $state.workspace_count -eq 6 -and $state.workspaces[4].wid -ceq $targetId } 'all workspace identities and order restored' 90
