@@ -87,7 +87,7 @@ def metadata():
         assert text in (ROOT / 'service/README.md').read_text()
     assert 'env.ACCOUNT_EMAIL' in (ROOT / 'service/worker.js').read_text()
     assert (ROOT / 'src/fonts/OFL.txt').is_file()
-    expected_workflows = {'release.yml', 'test.yml', 'gitleaks.yml', 'no-comments.yml', 'extension-version.yml', 'docs-site.yml'}
+    expected_workflows = {'release.yml', 'test.yml', 'gitleaks.yml', 'no-comments.yml', 'docs-site.yml'}
     assert {p.name for p in (ROOT / '.github/workflows').glob('*.yml')} == expected_workflows
     for p in (ROOT / '.github').rglob('*.yml'):
         text = p.read_text()

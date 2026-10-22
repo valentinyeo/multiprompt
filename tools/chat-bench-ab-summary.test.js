@@ -30,7 +30,7 @@ test('odd medians, extrema, failed checks and signed differences use real result
 });
 
 test('runner tooling and production reader require LF checkout on every OS', t => {
-  const files = ['tools/chat-bench/run.mjs', 'tools/chat-bench/lib.mjs', 'tools/chat-bench/reader-service.py', 'tools/chat-bench/browser-fixture.c', 'tools/chat-bench/ssh-fixture.c', 'tools/chat-bench/config.json', 'src/chat_history_reader.py'];
+  const files = ['tools/chat-bench/run.mjs', 'tools/chat-bench/lib.mjs', 'tools/chat-bench/reader-service.py', 'tools/chat-bench/browser-fixture.c', 'tools/chat-bench/config.json', 'src/chat_history_reader.py'];
   const cwd = path.join(__dirname, '..');
   const result = spawnSync('git', ['check-attr', 'text', 'eol', '--', ...files], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
