@@ -595,6 +595,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const surface = if (fg == app_state.g_main_hwnd and GetFocus() != null) GetFocus() else fg;
             if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) focusGuardNoteInput(surface, GetTickCount64(), true);
             if (foregroundHwndIsOurs(fg)) app_state.g_focus_user_action_tick = app_state.g_focus_input_tick;
+        } else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and
+            kb.vkCode != VK_MENU and kb.vkCode != 0xA4 and kb.vkCode != 0xA5 and kb.vkCode != 0xFF and
+            foregroundIsOurs())
+        {
+            app_state.g_focus_user_action_tick = GetTickCount64();
         }
 
         const find_key_up = kb.vkCode < app_state.g_chat_find_consumed.len and app_state.g_chat_find_consumed[kb.vkCode] and (wp == WM_KEYUP or wp == WM_SYSKEYUP);

@@ -69,6 +69,84 @@ for (const [file, before, after] of [
   assert.throws(() => appPaletteFocusContract(file === 'shortcuts' ? broken : shortcuts, file === 'main' ? broken : main), assert.AssertionError, `reject palette activation regression: ${before}`);
 }
 
+function hookFocusAuthorityContract(source, focus) {
+  const attribution = source.slice(source.indexOf('        const prior_focus_action ='), source.indexOf('        const find_key_up ='));
+  assert.match(attribution, /defer app_state\.g_focus_user_action_tick = prior_focus_action;/);
+  assert.match(attribution, /app_state\.g_focus_user_action_tick = 0;/);
+  assert.match(attribution, /if \(\(kb\.flags & 0x10\) == 0\) \{[^}]*focusGuardNoteInput\(surface, GetTickCount64\(\), true\);[^}]*foregroundHwndIsOurs\(fg\)/);
+  const injected = attribution.match(/\} else if \(([\s\S]*?)\)\s*\{\s*app_state\.g_focus_user_action_tick = GetTickCount64\(\);\s*\}/);
+  assert.ok(injected, 'owned injected shortcut commands need dispatch authority, not physical typing history');
+  assert.doesNotMatch(injected[0], /focusGuardNoteInput|g_focus_input_tick =|g_focus_return_hwnd =/);
+  const allows = new Function('wp', 'key', 'owned', `return ${injected[1]
+    .replaceAll('WM_SYSKEYDOWN', '260').replaceAll('WM_KEYDOWN', '256').replaceAll('kb.vkCode', 'key')
+    .replaceAll('VK_MENU', '18').replaceAll('foregroundIsOurs()', 'owned').replaceAll(' and', ' &&').replaceAll(' or', ' ||')};`);
+  for (const key of [0x0D, 0x4B, 0x43, 0x4E, 0x32, 0x25, 0x27, 0x57]) {
+    for (const wp of [256, 257, 260, 261]) {
+      for (const owned of [false, true]) assert.equal(allows(wp, key, owned), owned && [256, 260].includes(wp));
+    }
+  }
+  for (const key of [0x12, 0xA4, 0xA5, 0xFF]) {
+    for (const wp of [256, 260]) assert.equal(allows(wp, key, true), false, 'internal Alt tricks must not manufacture authority');
+  }
+  assert.match(source, /const PostMessageW = @import\("focus.zig"\)\.PostMessageW;/);
+  for (const message of ['SEARCH_OPEN', 'SEARCH_CHAR', 'SEARCH_CONFIRM', 'CHAT_TOGGLE', 'NEW_WINDOW', 'SWITCH_WORKSPACE', 'CYCLE_WORKSPACE']) {
+    assert.match(source, new RegExp(`PostMessageW\\(app_state\\.g_main_hwnd, WM_APP_${message},`));
+  }
+  const post = focus.slice(focus.indexOf('pub fn PostMessageW('), focus.indexOf('fn focusGuardPasteAllows('));
+  assert.match(post, /GetCurrentThreadId\(\) == GetWindowThreadProcessId\(app_state\.g_main_hwnd, null\) and app_state\.g_focus_user_action_tick != 0/);
+  assert.match(post, /\.msg = msg, \.wp = wp, \.lp = lp, \.tick = app_state\.g_focus_user_action_tick/);
+  assert.match(post, /entry\.msg == msg and entry\.wp == wp and entry\.lp == lp/);
+  assert.match(post, /entry\.tick = 0;\s*return if \(now -\| tick <= 1500\) tick else 0;/);
+}
+
+const focusSource = read('src/focus.zig');
+hookFocusAuthorityContract(shortcuts, focusSource);
+for (const [before, after] of [
+  ['} else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and', '} else if ((wp == WM_KEYDOWN) and'],
+  ['foregroundIsOurs())\n        {\n            app_state.g_focus_user_action_tick = GetTickCount64();', 'true)\n        {\n            app_state.g_focus_user_action_tick = GetTickCount64();'],
+  ['kb.vkCode != VK_MENU and ', ''],
+  ['kb.vkCode != 0xA4 and ', ''],
+  ['kb.vkCode != 0xA5 and ', ''],
+  [' and kb.vkCode != 0xFF', ''],
+  ['app_state.g_focus_user_action_tick = GetTickCount64();', 'app_state.g_focus_user_action_tick = 0;'],
+]) {
+  const broken = shortcuts.replace(before, after);
+  assert.notEqual(broken, shortcuts, `mutation applies: ${before}`);
+  assert.throws(() => hookFocusAuthorityContract(broken, focusSource), assert.AssertionError);
+}
+
+function journeyOptionalChatContract(source) {
+  const journey = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
+  assert.match(journey, /\$tab\.PSObject\.Properties\.Name -contains 'cv' -and \$tab\.cv/);
+  assert.doesNotMatch(journey, /\(Read-Session\)\.tabs\[[^\]]+\]\.cv/);
+  const wait = journey.match(/Wait-Until \{\s*\$state = Read-Session\s*([^\n]+)\s*\} 'test session Chat View enabled'/);
+  assert.ok(wait, 'cv readiness must handle absent saved state and omitted false preferences');
+  assert.equal(wait[1], "$null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv");
+  const evaluate = new Function('state', `return Boolean(${wait[1]
+    .replaceAll('$null', 'null').replaceAll('$state', 'state').replaceAll('[$initialTab]', '[0]')
+    .replace("state.tabs[0].PSObject.Properties['cv']", "Object.hasOwn(state.tabs[0], 'cv')")
+    .replaceAll(' -ne ', ' !== ').replaceAll(' -and ', ' && ')});`);
+  assert.equal(evaluate(null), false);
+  for (const saved of [{}, { cv: false }, { cv: true }]) {
+    const tab = new Proxy(saved, { get(target, key) {
+      assert.ok(Object.hasOwn(target, key), `StrictMode read of missing ${key}`);
+      return target[key];
+    } });
+    assert.equal(evaluate({ tabs: [tab] }), saved.cv === true);
+  }
+}
+
+journeyOptionalChatContract(driver);
+for (const [before, after] of [
+  ["$state.tabs[$initialTab].PSObject.Properties['cv'] -and ", ''],
+  [' -and $state.tabs[$initialTab].cv', ''],
+  ['$null -ne $state -and $state.tabs[$initialTab]', '$state.tabs[$initialTab]'],
+]) {
+  const broken = driver.replace(before, after);
+  assert.notEqual(broken, driver, `mutation applies: ${before}`);
+  assert.throws(() => journeyOptionalChatContract(broken), assert.AssertionError);
+}
+
 function workspaceLayoutContract(source) {
   const pills = source.slice(source.indexOf('function Click-WorkspacePill('), source.indexOf('function Focus-Palette('));
   const focus = source.slice(source.indexOf("        'workspace-focus' {"), source.indexOf("        'inbox' {"));
@@ -156,4 +234,4 @@ for (const [before, after] of [
 const workflow = read('.github/workflows/verify.yml');
 assert.ok(workflow.includes('      - tools/check-workspace-focus.mjs'));
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
-console.log('workspace-focus static checks passed (guarded palette activation, strict optional layout reads, exact native focus, read-only waits, negative controls; Windows CI still required)');
+console.log('workspace-focus static checks passed (owned injected shortcut authority, strict optional journey reads, exact native focus, read-only waits, negative controls; Windows CI still required)');

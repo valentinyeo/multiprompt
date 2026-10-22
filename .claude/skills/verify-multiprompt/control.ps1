@@ -859,7 +859,10 @@ try {
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
                 Press @(0x12, 0x43) 'Alt+C: enable Chat View for the test session'
             }
-            Wait-Until { (Read-Session).tabs[$initialTab].cv } 'test session Chat View enabled'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv
+            } 'test session Chat View enabled'
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
             $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
             Wait-Until {
