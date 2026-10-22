@@ -193,6 +193,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
 
   const extensionSetup = control.slice(control.indexOf('function Enable-WorkspaceExtension('), control.indexOf('function Read-BookmarkUrls('));
   assert.match(extensionSetup, /Press-WorkspaceBrowser @\(0x12, 0x44\)[\s\S]*?Doctor[\s\S]*?GetAncestor\(\$foreground, 2\) -ne \$script:bookmarkWindow[\s\S]*?\[VerifyNative\]::Text\('edge:\/\/extensions\/'\)/);
+  assert.match(extensionSetup, /Name -ne 'Extensions menu'[\s\S]*?InvokePattern[\s\S]*?\$menu.Invoke\(\)/);
   assert.match(extensionSetup, /Name -ne 'Developer mode'[\s\S]*?TogglePattern[\s\S]*?\$toggle.Toggle\(\)/);
   assert.match(extensionSetup, /GetFiles[\s\S]*?-contains \$pipe/);
   assert.doesNotMatch(extensionSetup, /Set-Content|WriteAllText|WriteAllBytes|Set-Item|PostMessage/);

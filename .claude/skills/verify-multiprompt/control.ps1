@@ -693,13 +693,26 @@ function Enable-WorkspaceExtension([string]$Root, [int]$Index) {
         $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
         $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($node in $nodes) {
+            if ($node.Current.Name -ne 'Extensions menu' -or $node.Current.ProcessId -ne $script:bookmarkPid) { continue }
+            Doctor
+            if ($Index -eq 0) { Snapshot 'extensions-action' }
+            Record ('Open the actual Edge Extensions sidebar for profile ' + $Index)
+            $menu = $node.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $menu.Invoke()
+            return $true
+        }
+        return $false
+    } 'open the narrow Edge Extensions navigation menu' 60
+    Wait-Until {
+        $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
+        $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($node in $nodes) {
             if ($node.Current.Name -ne 'Developer mode' -or $node.Current.ProcessId -ne $script:bookmarkPid) { continue }
             $toggle = $null
             if (-not $node.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) { continue }
             if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
                 Doctor
                 Record ('Enable Developer mode through the visible Edge Extensions toggle for profile ' + $Index)
-                if ($Index -eq 0) { Snapshot 'extensions-action' }
                 $toggle.Toggle()
             }
             return $toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
