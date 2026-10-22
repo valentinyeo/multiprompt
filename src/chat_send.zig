@@ -1733,10 +1733,6 @@ pub fn sshAutoReconnectTick() void {
     sshProbeFinish();
     const now = GetTickCount64();
     var attempted = [_]bool{false} ** 256;
-    var reconnecting = [_]u16{0} ** 256;
-    for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if ((shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) and shell.ssh_reconnect.phase == .reconnecting) reconnecting[shell.tmux_host] += 1;
-    }
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
@@ -1753,10 +1749,9 @@ pub fn sshAutoReconnectTick() void {
         if (shell.disconnected and shell.ssh_reconnect.phase == .connected) sshReconnectArm(@intCast(i), "link-disconnected");
         shell.ssh_reconnect.expireProbeWait(now, shell.spawn_tick);
         const host = shell.tmux_host;
-        if (!attempted[host] and reconnecting[host] < 3 and shell.ssh_reconnect.due(now)) {
+        if (!attempted[host] and shell.ssh_reconnect.due(now)) {
             if (sshNetworkVeto(@intCast(i), now)) continue;
             attempted[host] = true;
-            reconnecting[host] += 1;
             sshReconnectAttempt(@intCast(i));
         }
     }
