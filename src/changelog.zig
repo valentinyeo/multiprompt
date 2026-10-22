@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.819", .items = &.{
+        .{ .text = "The browser pane stays in place: it can no longer be dragged away or maximized to full screen.", .ticket = "IGSH-566" },
+    } },
     .{ .ver = "0.28.818", .items = &.{
         .{ .text = "Links open in your default desktop browser when the session browser pane is off, with a toggle in Ctrl+K.", .ticket = "IGSH-573" },
     } },
