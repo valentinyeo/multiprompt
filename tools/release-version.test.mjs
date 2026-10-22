@@ -107,9 +107,10 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
+  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
   assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
+  assert.match(tests, /ARM64: \$\{\{ needs\.build-arm64\.result \}\}/);
 });
 
 test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {

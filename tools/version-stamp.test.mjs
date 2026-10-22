@@ -145,17 +145,19 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
+    const arm64 = workflow.split('\n  build-arm64:\n')[1]?.split('\n  test-result:\n')[0];
     for (const cache of caches) {
+      const guard = arm64?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == '/);
+      assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'pull_request'\n/);
+        assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == 'pull_request'\n`));
       } else {
-        assert.match(cache, /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+        assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
     }
     if (file === 'test.yml') {
-      assert.equal(caches.length, 8);
+      assert.equal(caches.length, 12);
       for (let i = 0; i < caches.length; i += 2) {
         assert.ok(caches[i].includes('uses: actions/cache/restore@'));
         assert.ok(caches[i + 1].includes('uses: actions/cache@'));
