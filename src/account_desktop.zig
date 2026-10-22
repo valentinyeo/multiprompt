@@ -288,6 +288,7 @@ pub fn publishSessionLayout() void {
 pub fn pullSessionLayout() void {
     if (!app_state.g_account_sync_enabled or app_state.g_account_bypass) return;
     accountArmTimer(account_records.poll_ms);
+    accountStartHostWatch();
     if (app_state.g_account_locked or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
     accountPush();
 }
@@ -303,6 +304,7 @@ pub fn accountPush() void {
         job.saved_at = syncNow();
     }
     job.sync = true;
+    app_state.g_account_host_dirty = false;
     startAccountJob(job);
 }
 fn syncNow() u64 {
@@ -311,6 +313,55 @@ fn syncNow() u64 {
 fn accountArmTimer(delay: u64) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
     if (app_state.g_account_sync_enabled and !app_state.g_account_bypass) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT, @intCast(@max(1, @min(delay, 300000))), null);
+}
+fn accountHostWatchThread(change: HANDLE, stop: HANDLE, hwnd: HANDLE) void {
+    const w = @import("win32.zig");
+    defer _ = w.FindCloseChangeNotification(change);
+    const handles = [_]HANDLE{ stop, change };
+    while (true) {
+        const result = w.WaitForMultipleObjects(handles.len, &handles, 0, 0xFFFFFFFF);
+        if (result == 0) return;
+        if (result != 1 or w.FindNextChangeNotification(change) == 0) return;
+        _ = PostMessageW(hwnd, w.WM_APP_ACCOUNT_HOST_CHANGED, 0, 0);
+    }
+}
+fn accountStartHostWatch() void {
+    if (!app_state.g_account_sync_enabled or app_state.g_account_bypass or app_state.g_account_host_watch_thread != null) return;
+    const w = @import("win32.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const path = accountHostConfigPath(arena.allocator()) catch return;
+    const slash = std.mem.lastIndexOfScalar(u8, path, '\\') orelse return;
+    var wide: [600]u16 = undefined;
+    const directory = win32WidePath(&wide, path[0..slash]) orelse return;
+    const change = w.FindFirstChangeNotificationW(directory.ptr, 0, 0x1 | 0x8 | 0x10);
+    if (change == null or change == w.INVALID_HANDLE_VALUE_PTR) return;
+    const stop = w.CreateEventW(null, 1, 0, null);
+    if (stop == null) {
+        _ = w.FindCloseChangeNotification(change);
+        return;
+    }
+    const thread = std.Thread.spawn(.{}, accountHostWatchThread, .{ change, stop, app_state.g_main_hwnd }) catch {
+        _ = CloseHandle(stop);
+        _ = w.FindCloseChangeNotification(change);
+        return;
+    };
+    app_state.g_account_host_watch_stop = stop;
+    app_state.g_account_host_watch_thread = thread;
+}
+pub fn accountStopHostWatch() void {
+    if (app_state.g_account_host_watch_thread) |thread| {
+        _ = @import("win32.zig").SetEvent(app_state.g_account_host_watch_stop);
+        thread.join();
+        _ = CloseHandle(app_state.g_account_host_watch_stop);
+        app_state.g_account_host_watch_stop = null;
+        app_state.g_account_host_watch_thread = null;
+    }
+}
+pub fn accountHostChanged() void {
+    if (!app_state.g_account_sync_enabled or app_state.g_account_bypass) return;
+    app_state.g_account_host_dirty = true;
+    if (!app_state.g_account_retry.notified) accountArmTimer(2000);
 }
 pub fn accountToggleSync() void {
     if (app_state.g_account_busy) {
@@ -324,10 +375,11 @@ pub fn accountToggleSync() void {
     app_state.g_account_sync_enabled = enabled;
     accountArmTimer(account_records.poll_ms);
     if (enabled) {
+        accountStartHostWatch();
         app_state.g_account_retry.succeeded();
         publishSessionLayout();
         pullSessionLayout();
-    }
+    } else accountStopHostWatch();
     showHeaderNoticeAscii(if (enabled) "Laptop sync ON; keys and local paths stay here" else "Laptop sync OFF; local files kept", 5000, false);
 }
 fn accountDeletePending() void {
@@ -386,6 +438,11 @@ pub fn accountSignOut() void {
         return;
     }
     saveSession();
+    var setting_buf: [512]u8 = undefined;
+    const setting = syncAuthPath(&setting_buf, "account-sync.json") orelse return;
+    if (!writeFileAtomicW(setting, "{\"enabled\":false}")) return;
+    app_state.g_account_sync_enabled = false;
+    accountStopHostWatch();
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -747,8 +804,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const config_bytes = readFileAllocWin32(config_path, session_layout.max_bytes);
     defer if (config_bytes) |bytes| a.free(bytes);
     const config = config_bytes orelse "";
-    local.hosts = try accountSyncHosts(alloc, state.local.hosts orelse &.{});
+    local.hosts = state.local.hosts;
     state.records = try account_records.edit(alloc, state.records, state.local, local, device, if (job.saved_at == 0) syncNow() else job.saved_at);
+    const before_hosts = local;
+    local.hosts = try accountSyncHosts(alloc, state.local.hosts orelse &.{});
+    state.records = try account_records.edit(alloc, state.records, before_hosts, local, device, syncNow());
     state.local = local;
     const pending = try std.json.Stringify.valueAlloc(alloc, state, .{ .emit_null_optional_fields = false });
     if (!writeFileAtomicW(path, pending)) return error.Storage;
@@ -759,10 +819,12 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const initial = try std.json.parseFromSlice(account_records.Documents, alloc, first.bytes, .{ .allocate = .alloc_always });
     const outgoing = try account_records.merge(alloc, state.records, initial.value.records);
     const body = try std.json.Stringify.valueAlloc(alloc, account_records.Documents{ .records = outgoing }, .{ .emit_null_optional_fields = false });
-    const put = try account_client.request("PUT", "/v1/sync-records", access, body);
-    defer put.deinit();
-    if (put.status == 401) reply.unauthorized = true;
-    if (put.status != 200) return error.Network;
+    if (try account_records.needsPush(alloc, state.records, initial.value.records)) {
+        const put = try account_client.request("PUT", "/v1/sync-records", access, body);
+        defer put.deinit();
+        if (put.status == 401) reply.unauthorized = true;
+        if (put.status != 200) return error.Network;
+    }
     const remote = try account_client.request("GET", "/v1/sync-records", access, "");
     defer remote.deinit();
     if (remote.status == 401) reply.unauthorized = true;
@@ -1048,7 +1110,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     defer if (app_state.g_account_sync_enabled) {
-        accountArmTimer(if (app_state.g_account_retry.notified) app_state.g_account_retry.after -| GetTickCount64() else if (app_state.g_account_dirty_at != 0) 2000 else account_records.poll_ms);
+        accountArmTimer(if (app_state.g_account_retry.notified) app_state.g_account_retry.after -| GetTickCount64() else if (app_state.g_account_dirty_at != 0 or app_state.g_account_host_dirty) 2000 else account_records.poll_ms);
     };
     if (lp == 0) {
         g_account_key_prompt_active = false;
@@ -1360,6 +1422,7 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     app_state.g_account_bootstrapping = false;
     startAccountJob(.{ .kind = .startup });
     accountArmTimer(account_records.poll_ms);
+    accountStartHostWatch();
     return true;
 }
 

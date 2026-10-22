@@ -61,6 +61,18 @@ pub fn validate(a: Allocator, records: []const Record) !void {
         const count = @as(u8, @intFromBool(record.host != null)) + @intFromBool(record.workspace != null) + @intFromBool(record.session != null) + @intFromBool(record.settings != null);
         if (record.deleted) {
             if (count != 0) return error.InvalidRecord;
+            switch (record.kind) {
+                .host => if (record.id.len != 1 or record.id[0] < '0' or record.id[0] > '2') return error.InvalidRecord,
+                .workspace => {
+                    if (record.id.len > 31) return error.InvalidRecord;
+                    try layout.validate(.{ .workspaces = &.{.{ .name = record.id }}, .tabs = &.{} });
+                },
+                .session => {
+                    if (record.id.len < 3 or record.id.len > 65 or record.id[0] < '0' or record.id[0] > '2' or record.id[1] != ':') return error.InvalidRecord;
+                    for (record.id[2..]) |c| if ((!std.ascii.isLower(c) and !std.ascii.isDigit(c)) and c != '_' and c != '-') return error.InvalidRecord;
+                },
+                .settings => if (!eq(u8, record.id, "settings")) return error.InvalidRecord,
+            }
             continue;
         }
         if (count != 1 or !eq(u8, record.id, try identity(a, record))) return error.InvalidRecord;
@@ -176,6 +188,16 @@ pub fn materialize(a: Allocator, records: []const Record) !layout.Layout {
     return result;
 }
 
+pub fn needsPush(a: Allocator, local: []const Record, remote: []const Record) !bool {
+    try validate(a, remote);
+    for (local) |record| {
+        const i = find(remote, record) orelse return true;
+        if (newer(record, remote[i])) return true;
+        if (!newer(remote[i], record) and !try payloadEqual(a, record, remote[i])) return true;
+    }
+    return false;
+}
+
 pub fn roundTrip(a: Allocator, sent: []const Record, received: []const Record) !void {
     try validate(a, received);
     for (sent) |record| {
@@ -198,7 +220,7 @@ pub fn rewriteHost(a: Allocator, config: []const u8, alias: []const u8, host: ?H
         var fields = std.mem.tokenizeAny(u8, std.mem.trim(u8, line, " \t\r"), " \t=");
         const key = fields.next() orelse "";
         if (std.ascii.eqlIgnoreCase(key, "Host") or std.ascii.eqlIgnoreCase(key, "Match")) {
-            if (header.len > 0 and (!target or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
+            if (header.len > 0 and ((!target and !std.ascii.eqlIgnoreCase(std.mem.trim(u8, header, " \t\r"), "Host *")) or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
                 try output.appendSlice(a, header);
                 try output.append(a, '\n');
             }
@@ -215,7 +237,7 @@ pub fn rewriteHost(a: Allocator, config: []const u8, alias: []const u8, host: ?H
         try block.appendSlice(a, line);
         try block.append(a, '\n');
     }
-    if (header.len > 0 and (!target or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
+    if (header.len > 0 and ((!target and !std.ascii.eqlIgnoreCase(std.mem.trim(u8, header, " \t\r"), "Host *")) or std.mem.trim(u8, block.items, " \t\r\n").len > 0)) {
         try output.appendSlice(a, header);
         try output.append(a, '\n');
     }

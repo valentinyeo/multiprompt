@@ -1387,6 +1387,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         accountCancelSignIn();
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_ACCOUNT_HOST_CHANGED) {
+        @import("account_desktop.zig").accountHostChanged();
+        return 0;
+    }
     if (msg == WM_TIMER and wp == TIMER_ACCOUNT) {
         _ = KillTimer(hwnd, TIMER_ACCOUNT);
         pullSessionLayout();
@@ -7566,6 +7570,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_app_closing) return 0;
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
+            @import("account_desktop.zig").accountStopHostWatch();
             _ = KillTimer(hwnd, TIMER_BROWSER_HEALTH);
             _ = KillTimer(hwnd, TIMER_BROWSER_ENGINE_SWITCH);
             _ = KillTimer(hwnd, TIMER_TUNNEL_KEEPER);

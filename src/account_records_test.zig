@@ -192,3 +192,36 @@ test "ISSUE-252 host edits and deletes keep local identities passwords and unrel
     try std.testing.expect(std.mem.indexOf(u8, deleted, "HostName new.example.com") == null);
     try std.testing.expect(std.mem.indexOf(u8, deleted, "IdentityFile device-key") != null);
 }
+
+test "ISSUE-252 readback crash replay and idle polls do not restamp acknowledged remote changes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const local = try records.project(a, initial, "a", 100);
+    var changed = host;
+    changed.hostname = "remote.example.com";
+    const remote_layout = layout.Layout{ .hosts = &.{changed}, .workspaces = initial.workspaces, .tabs = initial.tabs };
+    const remote = try records.edit(a, local, initial, remote_layout, "b", 200);
+    const journal = records.State{ .account = "account", .local = initial, .records = remote };
+    const replay = try records.edit(a, journal.records, journal.local, initial, "a", 300);
+    try std.testing.expect(!try records.needsPush(a, replay, remote));
+    const applied = try records.materialize(a, remote);
+    const acknowledged = try records.edit(a, journal.records, journal.local, applied, "a", 400);
+    try std.testing.expect(!try records.needsPush(a, acknowledged, remote));
+    const materialized = try records.materialize(a, replay);
+    try std.testing.expectEqualStrings("remote.example.com", materialized.hosts.?[0].hostname);
+    try std.testing.expect(try records.needsPush(a, remote, local));
+}
+
+test "ISSUE-252 SSH rewrite overrides earlier wildcards without copying local options or growing empty blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const config = "IdentityFile device-key\nHost *\n Port 22\nHost remote-1\n HostName old.example.com\n User old\n ProxyCommand device-proxy\n";
+    const remote = records.Host{ .slot = 0, .name = "Host 1", .hostname = "new.example.com", .port = 2222, .user = "owner" };
+    const first = try records.rewriteHost(a, config, "remote-1", remote);
+    try std.testing.expect(std.mem.startsWith(u8, first, "Host remote-1\n  HostName new.example.com\n  Port 2222\n  User owner\nHost *\nIdentityFile device-key"));
+    const second = try records.rewriteHost(a, first, "remote-1", remote);
+    try std.testing.expectEqualStrings(first, second);
+    try std.testing.expect(std.mem.indexOf(u8, first, "ProxyCommand device-proxy") != null);
+}
