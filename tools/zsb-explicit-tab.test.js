@@ -35,6 +35,8 @@ function browserHarness(ownsWindow) {
       } },
     },
     document: { title: tab.title },
+    loadProtectedWindows: async () => {},
+    protectedWindowMeta: new Map(),
     markZigShellWindow: async () => {},
     ensureBackgroundTabFocusEmulation: async value => value,
     getRememberedZsbTargetTab: async () => null,
@@ -136,6 +138,15 @@ fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
   };
 }
 
+test('explicit-tab browser dispatch has the pane-protection dependencies', async () => {
+  const owner = browserHarness(true), wrong = browserHarness(false);
+  const message = { method: 'text', windowId, tab: String(tabId) };
+  assert.equal((await owner.api.dispatch(message)).tab.id, tabId);
+  assert.deepEqual(owner.reads, [tabId]);
+  await assert.rejects(wrong.api.dispatch(message), /not found \(no active tab\)/);
+  assert.deepEqual(wrong.reads, []);
+});
+
 test('explicit --tab survives transport and retries a non-owning instance, not a foreign tab', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-explicit-tab-'));
   let server;
@@ -232,13 +243,23 @@ test('IGSH-228: type preserves text and targets --tab through the real CLI parse
       [[text], { text }],
       [[selector, text], { selector, text }],
       [['--keys', text], { text, keys: true }],
+      [['--raw-enter', selector, text], { selector, text, rawEnter: true }],
+      [['--keys', '--raw-enter', '--tab', target, text], { text, tab: target, keys: true, rawEnter: true }],
+      [['--keys', '--tab', target, '--raw-enter', selector, text], { selector, text, tab: target, keys: true, rawEnter: true }],
+      [['--raw-enter', '--keys', '--tab', target, text], { text, tab: target, keys: true, rawEnter: true }],
+      [['--raw-enter', '--tab', target, '--keys', selector, text], { selector, text, tab: target, keys: true, rawEnter: true }],
+      [['--tab', target, '--keys', '--raw-enter', text], { text, tab: target, keys: true, rawEnter: true }],
+      [['--tab', target, '--raw-enter', '--keys', selector, text], { selector, text, tab: target, keys: true, rawEnter: true }],
+      [[selector, '--raw-enter', text, '--tab', target, '--keys'], { selector, text, tab: target, keys: true, rawEnter: true }],
+      [[text, '--keys', '--raw-enter', '--tab', target], { text, tab: target, keys: true, rawEnter: true }],
+      [[selector, 'hello', '--raw-enter', 'world', '--keys', '--tab', target], { selector, text: 'hello world', tab: target, keys: true, rawEnter: true }],
       [[selector, ''], { selector, text: '' }],
     ]) {
       const lines = native('app-command', 'type', ...args).split('\n');
       const request = JSON.parse(lines[1]);
       assert.equal(request.method, 'type');
       assert.equal(request.windowId, windowId);
-      const actual = Object.fromEntries(['selector', 'text', 'tab', 'keys'].filter(key => key in request).map(key => [key, request[key]]));
+      const actual = Object.fromEntries(['selector', 'text', 'tab', 'keys', 'rawEnter'].filter(key => key in request).map(key => [key, request[key]]));
       assert.deepEqual(actual, expected, JSON.stringify(args));
     }
   } finally {
