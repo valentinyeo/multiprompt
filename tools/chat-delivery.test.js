@@ -1352,7 +1352,7 @@ test('IGSH-564 steer oracles reject missing post-delivery keys and the old deliv
   for (const control of ['steer-before', 'steer-empty-before']) {
     const result = runHarness(control);
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stderr, /IGSH-564 steer .*FAIL/);
+    assert.match(result.stderr, /IGSH-564 steer [\s\S]*FAIL/);
     assert.match(result.stderr, /expected 1, found 0/);
   }
 });
