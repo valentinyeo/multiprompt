@@ -2250,6 +2250,7 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
     };
     if (app_state.g_app_closing or app_state.shells[idx].browser_hwnd != job.hwnd) return;
     app_state.shells[idx].browser_docking = false;
+    publishInboxState();
     if (app_state.g_account_locked) {
         parkBrowserWindow(job.hwnd);
         return;

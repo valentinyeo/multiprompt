@@ -1099,7 +1099,7 @@ test "ISSUE-511 tick waits for confirming gone" {
 });
 
 
-test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown listing failures', () => {
+test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown listing failures', { skip: process.platform === 'win32' ? 'The POSIX tmux probe is exercised on GitHub Linux test-vps; Windows runs pure-state and desktop coverage' : false }, () => {
   const line = body('sshProbeThread').split('\n').find(line => line.includes('tmux list-clients'));
   const literal = line.match(/, ("(?:\\.|[^"\\])*")\)\) continue;/);
   assert.ok(literal, 'remote probe command literal');

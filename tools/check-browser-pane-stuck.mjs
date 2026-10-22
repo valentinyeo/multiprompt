@@ -129,6 +129,7 @@ assert.throws(() => placeholderContract(pane.replace('return .not_open;', 'retur
 function openingClockContract(source) {
   assert.ok(body(source, 'beginBrowserOpening').includes('if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;'));
   assert.ok(body(source, 'resetBrowserConnection').includes('sh.browser_first_launch_tick = 0;'));
+  assert.match(body(source, 'finishBrowserDock'), /browser_docking = false;\s*publishInboxState\(\)/);
   const expires = body(source, 'browserOpeningExpired');
   assert.ok(expires.includes('sh.browser_hwnd == null and sh.browser_first_launch_tick != 0'));
   assert.ok(expires.includes('now -| sh.browser_first_launch_tick >= BROWSER_PLACEHOLDER_NOT_OPEN_MS'));
@@ -141,6 +142,7 @@ function openingClockContract(source) {
   }
 }
 openingClockContract(pane);
+assert.throws(() => openingClockContract(pane.replace('    app_state.shells[idx].browser_docking = false;\n    publishInboxState();', '    app_state.shells[idx].browser_docking = false;')));
 assert.throws(() => openingClockContract(pane.replace('if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;', 'sh.browser_first_launch_tick = now;')));
 assert.throws(() => openingClockContract(pane.replace('        app_state.shells[target].browser_launch_tick = 0;', '')));
 function benchContract(source) {
