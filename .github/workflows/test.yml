@@ -176,7 +176,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          zig build
+          zig build -Drelease=true
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoProfile -File tools/update-release.test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

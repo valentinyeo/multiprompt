@@ -74,7 +74,7 @@ jobs:
           & tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
-        run: zig build
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }}
       - name: Resolve real executable
         shell: pwsh
         env:
