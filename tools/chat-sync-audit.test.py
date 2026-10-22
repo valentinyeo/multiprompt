@@ -78,6 +78,21 @@ class ChatSyncAuditTest(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         self.assertEqual([item['pane_line'] for item in candidates], [1, 3, 5])
 
+    def test_pane_candidates_skips_running_tool_rows(self):
+        capture = ['● The neutral summary is ready',
+                   '● Inspecting the neutral inventory',
+                   '  ⎿  $ list inventory',
+                   '● This neutral paragraph follows a blank line', '',
+                   '  ⎿  a separate neutral detail',
+                   '● This neutral paragraph has continuation text',
+                   '  another neutral sentence',
+                   '  ⎿  a later neutral detail'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['pane_line'] for item in candidates], [1, 4, 7])
+        self.assertEqual([item['text'] for item in candidates],
+                         ['The neutral summary is ready', 'This neutral paragraph follows a blank line',
+                          'This neutral paragraph has continuation text'])
+
     def test_igsh380_build_progress_banner_is_not_a_chat_turn(self):
         capture = ['● Build in progress (~7 min); preparing preview images',
                    '● Build in progress: the compiler found a real error',
@@ -170,6 +185,27 @@ class ChatSyncAuditTest(unittest.TestCase):
             wire = self.wire([])
             evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=content))
             self.assertEqual(evidence[0]['record'], 'thinking')
+
+    def test_transcript_evidence_system_notice(self):
+        reader = audit.load_reader()
+        notice = 'A neutral worker is now idle'
+        reply = 'The neutral summary is ready'
+        events = [dict(type='system', subtype='informational', content=notice,
+                       timestamp='2026-01-01T00:00:00Z'),
+                  dict(type='assistant', message=dict(role='assistant', content=reply),
+                       timestamp='2026-01-01T00:00:01Z')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=notice))
+            self.assertEqual(evidence, [dict(line=1, timestamp=events[0]['timestamp'],
+                                            location='in_window', record='system_notice')])
+            evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=reply))
+            self.assertEqual(evidence, [dict(line=2, timestamp=events[1]['timestamp'],
+                                            location='in_window', record='conversation')])
+            self.assertEqual(audit.transcript_evidence(reader, path, wire,
+                             dict(kind='pane_missing', text='An unrelated neutral notice')), [])
 
     def test_igsh402_evidence_matches_each_ordered_text_segment(self):
         reader = audit.load_reader()

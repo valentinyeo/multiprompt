@@ -29,9 +29,12 @@ def normalize(text):
 
 def pane_candidates(capture):
     candidates = []
-    for line_no, line in enumerate(capture.splitlines()[:-8], 1):
+    lines = capture.splitlines()
+    for line_no, line in enumerate(lines[:-8], 1):
         line = ANSI.sub('', line).strip()
         if line.startswith('● ') and not re.match(r'^● [A-Za-z_]+\(', line):
+            if ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
+                continue
             text = line[2:].strip()
         elif re.match(r'^[❯›>] ', line):
             text = line[2:].strip()
@@ -87,6 +90,9 @@ def transcript_evidence(reader, path, wire, finding):
                 if matches:
                     break
             if not messages:
+                if finding['kind'] == 'pane_missing' and event.get('type') == 'system' and isinstance(event.get('content'), str):
+                    matches = normalize(finding['text'])[:60] in normalize(event['content'].replace('**', '').replace('`', ''))
+                    record = 'system_notice'
                 content = (event.get('message') or {}).get('content', [])
                 if finding['kind'] == 'pane_missing' and isinstance(content, list):
                     for part in content:
