@@ -34,6 +34,8 @@ All steps run in order in **one attached debugger session**, detached on success
 
 A script must be an array of 1–1000 steps. Unknown fields and invalid steps are rejected before attachment. The sum of command/event timeout budgets and delays cannot exceed 300000 ms. Split larger investigations into separate scripts, remembering that debugger state does not persist across scripts.
 
+The remote wrapper gives scripts a 360-second total reply deadline (single CDP commands default to 30 seconds). `ZSB_TIMEOUT` overrides that deadline using finite seconds greater than zero, at most 86400. Incoming reply bytes do not reset the deadline.
+
 On success stdout is a JSON array with one entry per step, or `--out FILE` writes that array without printing it. For the example above, the profile is at `[5].result.profile`; extract it if a profiling viewer expects the profile object itself. On failure execution stops, the command exits nonzero, and stdout contains `{"ok":false,"failedStep":2,"error":"...","results":[...]}` with a **1-based** failed step and completed results. Existing output files are not overwritten on a step failure. Scripts are not automatically replayed after a lost reply or a step failure.
 
 Input and output paths belong to the machine running the CLI. The remote wrapper reads the file/stdin locally and sends its JSON contents through the existing tunnel; it writes `--out` locally too. Native script files are limited to 1 MiB; remote scripts also fit the existing 64 KiB encoded request and Windows command-line limits. Responses retain the existing 16 MiB bridge limit; `--out` avoids terminal output, not transport limits. Run `zsb cdp --help` for a short reference. No keyboard shortcut or palette action is added for this CLI-only option.

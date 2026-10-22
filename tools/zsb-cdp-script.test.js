@@ -180,9 +180,9 @@ test('IGSH-221 malformed steps and excessive budgets fail before debugger attach
   assert.ok(!h.calls.some(c => c[0] === 'attach'));
 });
 
-function runWrapper(args, port, input = '') {
+function runWrapper(args, port, input = '', env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('bash', [wrapper, ...args], { env: { ...process.env, TMUX: '', ZSB_SESSION: 'test-session', ZSB_PORT: String(port) } });
+    const child = spawn('bash', [wrapper, ...args], { env: { ...process.env, TMUX: '', ZSB_SESSION: 'test-session', ZSB_PORT: String(port), ...env } });
     let stdout = '', stderr = '';
     child.stdout.on('data', data => { stdout += data; });
     child.stderr.on('data', data => { stderr += data; });
@@ -248,7 +248,41 @@ test('IGSH-221 script errors remain structured and never overwrite an output fil
   }
 });
 
+test('IGSH-221 script reply deadlines honor ZSB_TIMEOUT even while replies trickle', async () => {
+  let bytes = 0, requests = 0;
+  const sockets = new Set(), timers = [];
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    socket.on('error', () => {});
+    socket.on('close', () => sockets.delete(socket));
+    socket.once('data', () => {
+      requests++;
+      const trickle = setInterval(() => { bytes++; socket.write(' '); }, 25);
+      const finish = setTimeout(() => { clearInterval(trickle); socket.end('[]'); }, 1500);
+      socket.once('close', () => { clearInterval(trickle); clearTimeout(finish); });
+      timers.push(trickle, finish);
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await runWrapper(['cdp', '--script', '-'], server.address().port, '[{"waitMs":0}]', { ZSB_TIMEOUT: '0.2' });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const reply = JSON.parse(result.stdout);
+    assert.equal(reply.error, 'reply_timeout');
+    assert.match(reply.message, /deadline 0\.2s/);
+    assert.match(reply.hint, /[Rr]econnect/);
+    assert.ok(bytes >= 2, `fixture sent ${bytes} bytes`);
+    assert.equal(requests, 1);
+  } finally {
+    for (const timer of timers) clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('IGSH-221 native and remote transports preserve safety, budgets and full JSON output', () => {
+  const remote = fs.readFileSync(wrapper, 'utf8');
+  assert.match(remote, /if script_mode:\n    default_timeout = 360\ntry:\n    timeout = float\(os\.environ\.get\("ZSB_TIMEOUT", default_timeout\)\)/);
   assert.match(native, /readCdpScript\(allocator, source\)/);
   assert.match(native, /std\.Io\.File\.stdin\(\)\.handle/);
   const scriptBranch = native.slice(native.indexOf('if (std.mem.eql(u8, cdp_method, "--script")'), native.indexOf('const params_json = args.next();', native.indexOf('const cdp_method =')));
