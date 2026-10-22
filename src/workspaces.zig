@@ -2140,7 +2140,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
                 transfer.group_name[gi] = if (wc >= 32 and wc < 127) @intCast(wc) else '?';
             }
             transfer.group_name_len = glen;
-            transfer.group_color = app_state.groups[sgidx].color;
+            transfer.group_color = app_state.groups[sgidx].color | (if (app_state.groups[sgidx].color_set) @as(u8, 128) else 0);
             transfer.group_collapsed = if (app_state.groups[sgidx].collapsed) 1 else 0;
         }
     }
@@ -2204,6 +2204,28 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     return true;
 }
 
+fn restoreClosedShellGroup(new_idx: u32, saved: @TypeOf(app_state.groups[0])) void {
+    var gi = findGroupIdx(saved.id);
+    if (gi) |_| {
+        for (app_state.shells[0..new_idx]) |shell| {
+            if (shell.group_id == saved.id and shell.workspace != app_state.shells[new_idx].workspace) {
+                gi = null;
+                break;
+            }
+        }
+    }
+    if (gi == null and app_state.group_count < MAX_GROUPS) {
+        const gid = createGroup(saved.name[0..saved.name_len]);
+        gi = findGroupIdx(gid);
+        if (gi) |idx| {
+            app_state.groups[idx].color = saved.color;
+            app_state.groups[idx].color_set = saved.color_set;
+            app_state.groups[idx].collapsed = saved.collapsed;
+        }
+    }
+    if (gi) |idx| app_state.shells[new_idx].group_id = app_state.groups[idx].id;
+}
+
 pub fn reopenLastClosedShell() void {
     if (app_state.g_closed_count == 0) return;
     const entry = app_state.g_closed_history[app_state.g_closed_count - 1];
@@ -2216,6 +2238,7 @@ pub fn reopenLastClosedShell() void {
     app_state.g_pending_chat_id = entry.chat_id;
     defer app_state.g_pending_chat_id = 0;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
+        if (entry.group) |saved| restoreClosedShellGroup(app_state.shell_count - 1, saved);
         app_state.g_closed_count -= 1;
         if ((entry.was_manual or entry.was_sem) and entry.name_len > 0) {
             const new_idx = app_state.shell_count - 1;
@@ -2223,6 +2246,7 @@ pub fn reopenLastClosedShell() void {
             app_state.shells[new_idx].name_len = entry.name_len;
             app_state.shells[new_idx].name_source = if (entry.was_manual) .manual else .semantic;
         }
+        if (entry.group != null) saveSession();
     }
 }
 
@@ -3679,11 +3703,14 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + cf.len], cf);
             pos += cf.len;
         }
-        if (app_state.groups[gi].color != 0) {
+        if (app_state.groups[gi].color_set) {
             const cpfx = ",\"color\":";
             @memcpy(json_buf[pos .. pos + cpfx.len], cpfx);
             pos += cpfx.len;
             pos += writeUintTo(json_buf[pos..], app_state.groups[gi].color);
+            const explicit = ",\"color_set\":true";
+            @memcpy(json_buf[pos .. pos + explicit.len], explicit);
+            pos += explicit.len;
         }
         json_buf[pos] = '}';
         pos += 1;
@@ -3839,8 +3866,13 @@ fn importWorkspaceGroups(json: []const u8, tabs: []SavedTab) bool {
         if (value.object.get("collapsed")) |v| {
             if (v == .bool) group.collapsed = v.bool;
         }
-        if (value.object.get("color")) |v| {
-            if (v == .integer and v.integer >= 0) group.color = @intCast(@mod(v.integer, GROUP_COLORS.len));
+        if (json_reader.boolTrue(value, "color_set")) {
+            if (value.object.get("color")) |v| {
+                if (v == .integer and v.integer >= 0) {
+                    group.color = @intCast(@mod(v.integer, GROUP_COLORS.len));
+                    group.color_set = true;
+                }
+            }
         }
         count += 1;
     }
@@ -3867,7 +3899,7 @@ test "workspace absorption remaps colliding group ids without losing metadata" {
     var tabs = [_]SavedTab{ std.mem.zeroes(SavedTab), std.mem.zeroes(SavedTab) };
     tabs[0].group_id = 1;
     tabs[1].group_id = 2;
-    try std.testing.expect(importWorkspaceGroups("{\"groups\":[{\"id\":1,\"name\":\"Beta\",\"color\":4,\"collapsed\":true},{\"id\":2,\"name\":\"Gamma\",\"color\":2}]}", &tabs));
+    try std.testing.expect(importWorkspaceGroups("{\"groups\":[{\"id\":1,\"name\":\"Beta\",\"color\":4,\"color_set\":true,\"collapsed\":true},{\"id\":2,\"name\":\"Gamma\",\"color\":2}]}", &tabs));
     try std.testing.expectEqual(@as(u32, 2), tabs[0].group_id);
     try std.testing.expectEqual(@as(u32, 3), tabs[1].group_id);
     try std.testing.expect(app_state.groups[1].collapsed);

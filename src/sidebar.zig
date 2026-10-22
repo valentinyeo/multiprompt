@@ -354,6 +354,7 @@ const uiFontStatusCard = @import("drawing.zig").uiFontStatusCard;
 const uiFontClose = @import("drawing.zig").uiFontClose;
 const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
 const paintThreadTitle = @import("drawing.zig").paintThreadTitle;
+const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const paintWorkspaceStrip = @import("drawing.zig").paintWorkspaceStrip;
 const paintSidebarStickyStatusCard = @import("telemetry_panel.zig").paintSidebarStickyStatusCard;
 const stopSpinnerTimerIfIdle = @import("clipboard.zig").stopSpinnerTimerIfIdle;
@@ -416,13 +417,9 @@ pub fn findGroupIdx(gid: u32) ?u32 {
     return null;
 }
 
-fn groupColor(gidx: u32) DWORD {
-    if (gidx >= app_state.group_count) return GROUP_COLORS[0];
-    return GROUP_COLORS[app_state.groups[gidx].color % GROUP_COLORS.len];
-}
-
 fn displayedGroupColor(gidx: u32) DWORD {
-    return customColorOr("accent", groupColor(gidx));
+    if (gidx < app_state.group_count and app_state.groups[gidx].color_set) return GROUP_COLORS[app_state.groups[gidx].color % GROUP_COLORS.len];
+    return customColorOr("muted", if (app_state.g_light_theme) RGB(130, 134, 140) else RGB(145, 149, 157));
 }
 
 pub fn tintColor(base: DWORD, color: DWORD, num: u32, den: u32) DWORD {
@@ -1004,7 +1001,8 @@ pub fn createGroup(name: []const u16) u32 {
     @memcpy(g.name[0..n], name[0..n]);
     g.name_len = n;
     g.collapsed = false;
-    g.color = @intCast(app_state.group_count % GROUP_COLORS.len);
+    g.color = 7;
+    g.color_set = false;
     app_state.group_count += 1;
     return g.id;
 }
@@ -1363,7 +1361,7 @@ pub fn materializeDisplayOrder() void {
 
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
-    var y: i32 = (if (LOOK_UNIFIED) DEV_TOP_PAD else 0) + wsStripHeight();
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight();
     if (app_state.g_starred_workspace) {
         for (0..app_state.shell_count) |i| {
             if (!@import("workspaces.zig").starredShellVisible(i)) continue;
@@ -1662,10 +1660,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             if (blit_w > region_w) blit_w = region_w;
                         }
                     } else if (LOOK_UNIFIED) {
-                        const avail = right_rc.right - SIDEBAR_W();
-                        bx = SIDEBAR_W() + @divTrunc(avail - draw_w, 2);
-                        if (bx < SIDEBAR_W()) bx = SIDEBAR_W();
-                        by = DEV_TOP_PAD;
+                        const pane = @import("window_layout.zig").activePaneRects(client_rc).primary;
+                        blit_w = @min(blit_w, pane.right - pane.left);
+                        bx = pane.left + @divTrunc(pane.right - pane.left - blit_w, 2);
+                        by = pane.top + threadTitleHeight();
                     }
                     _ = BitBlt(hdc, bx, by, blit_w, draw_h, src_dc, 0, 0, GDI_SRCCOPY);
                 }
@@ -1678,6 +1676,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         var rows_arr: [MAX_ROWS]Row = undefined;
         const row_count = if (app_state.g_hide_sidebar) 0 else layoutRows(&rows_arr);
+        const column = @import("window_layout.zig").activePaneRects(client_rc).sidebar;
 
         for (0..row_count) |ri| {
             const row = rows_arr[ri];
@@ -1707,16 +1706,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const base_header_bg: DWORD = customColorOr("header_bg", if (app_state.g_light_theme) RGB(232, 232, 232) else if (app_state.g_edge_gray_theme) RGB(60, 60, 60) else if (app_state.g_mid_theme) RGB(80, 80, 80) else RGB(28, 28, 28));
                 const header_bg: DWORD = tintColor(base_header_bg, displayedGroupColor(gidx), 3, 10);
                 const hdr_brush = CreateSolidBrush(header_bg);
-                var hdr_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + GROUP_HEADER_H };
+                var hdr_rc = RECT{ .left = column.left, .top = y, .right = column.right, .bottom = y + GROUP_HEADER_H };
                 _ = FillRect(hdc, &hdr_rc, hdr_brush);
                 _ = DeleteObject(hdr_brush);
-
-                if (!app_state.g_sidebar_collapsed) {
-                    const gstripe_br = CreateSolidBrush(displayedGroupColor(gidx));
-                    var gstripe_rc = RECT{ .left = 0, .top = y + 2, .right = 3, .bottom = y + GROUP_HEADER_H - 2 };
-                    _ = FillRect(hdc, &gstripe_rc, gstripe_br);
-                    _ = DeleteObject(gstripe_br);
-                }
 
                 _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220)));
 
@@ -1755,23 +1747,13 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
             const i: usize = row.shell_idx;
 
-            if (!app_state.g_sidebar_collapsed and app_state.shells[i].group_id != 0) {
-                if (findGroupIdx(app_state.shells[i].group_id)) |sgidx| {
-                    const stripe_br = CreateSolidBrush(displayedGroupColor(sgidx));
-                    var stripe_rc = RECT{ .left = 0, .top = y + 2, .right = 3, .bottom = y + tabRowH() - 2 };
-                    _ = FillRect(hdc, &stripe_rc, stripe_br);
-                    _ = DeleteObject(stripe_br);
-                }
-            }
-
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 62, 104) else tintColor(sidebar_bg, RGB(120, 160, 255), 1, 6);
-                const sw = SIDEBAR_W();
                 const hl_brush = CreateSolidBrush(hl);
                 const hl_pen = CreatePen(0, 1, customColorOr("overlay_border", hl));
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
-                _ = @import("smooth.zig").drawRoundRect(hdc, 4, y + 3, sw - 4, y + tabRowH() - 3, 8, 8);
+                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, 8, 8);
                 _ = SelectObject(hdc, ob);
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
@@ -1803,7 +1785,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 if (sel_pen != null) {
                     const old_pen = SelectObject(hdc, sel_pen);
                     const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                    _ = @import("smooth.zig").drawRoundRect(hdc, 5, y + 4, SIDEBAR_W() - 5, y + tabRowH() - 4, 9, 9);
+                    _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 4, column.right, y + tabRowH() - 4, 9, 9);
                     _ = SelectObject(hdc, old_brush);
                     _ = SelectObject(hdc, old_pen);
                     _ = DeleteObject(sel_pen);
@@ -2092,6 +2074,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
         }
 
         const content_end_logical: i32 = if (row_count == 0) 0 else (rows_arr[row_count - 1].y + rowTotalHeight(rows_arr[row_count - 1]));
+        if (!app_state.g_sidebar_collapsed) {
+            for (rows_arr[0..row_count], 0..) |row, ri| {
+                if (row.kind != .header) continue;
+                var bottom = row.y + GROUP_HEADER_H;
+                for (rows_arr[ri + 1 .. row_count]) |member| {
+                    if (member.kind != .tab or app_state.shells[member.shell_idx].group_id != app_state.groups[row.gidx].id) break;
+                    bottom = member.y + tabRowH();
+                }
+                const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
+                var rail = RECT{ .left = column.left, .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(3), .bottom = bottom - app_state.g_sidebar_scroll };
+                _ = FillRect(hdc, &rail, brush);
+                _ = DeleteObject(brush);
+            }
+        }
+
         const btns_y: i32 = content_end_logical + 4 - app_state.g_sidebar_scroll;
         if (!app_state.g_hide_sidebar) {
             _ = SelectObject(hdc, font_subtitle);
@@ -2442,7 +2439,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = DeleteObject(sel_br);
                     }
 
-                    if (is_session_overview_menu) {
+                    if (result_idx >= app_state.SEARCH_GROUPCTX_BASE and result_idx < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) {
+                        _ = SelectObject(hdc, font_title);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
+                        var label: [192]u16 = undefined;
+                        const len = @import("rename.zig").groupPaletteLabel(result_idx - app_state.SEARCH_GROUPCTX_BASE, &label);
+                        var text_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, &label, @intCast(len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (is_session_overview_menu) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var som_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };

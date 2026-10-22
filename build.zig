@@ -190,6 +190,10 @@ pub fn build(b: *std.Build) void {
     outbox_test_step.dependOn(&chat_send_routing.step);
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
+    const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
+    pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&pane_spacing_tests.step);
+    vps_test_step.dependOn(&pane_spacing_tests.step);
     const chat_reader_tests = b.addSystemCommand(&.{ "python3", "tools/chat-history-reader-test.py" });
     vps_test_step.dependOn(&chat_reader_tests.step);
     const chat_settle_tests = b.addSystemCommand(&.{ "python3", "tools/chat-settle-test.py" });
@@ -261,6 +265,18 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(session_layout_tests).step);
+    const browser_corner_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/browser_corners.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    }) });
+    const run_browser_corner_tests = b.addRunArtifact(browser_corner_tests);
+    test_step.dependOn(&run_browser_corner_tests.step);
+    vps_test_step.dependOn(&run_browser_corner_tests.step);
+    const browser_corner_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-corners.test.js" });
+    browser_corner_source.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&browser_corner_source.step);
+    vps_test_step.dependOn(&browser_corner_source.step);
     const browser_onscreen_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/browser_onscreen.zig"),
         .target = target,

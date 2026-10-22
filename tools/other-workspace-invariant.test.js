@@ -132,7 +132,7 @@ test("the catch-all cannot be removed or renamed", () => {
   assert.match(close, /if \(isOtherWorkspaceSlot\(slot\)\)[\s\S]*?return/);
   assert.match(remove, /if \(isOtherWorkspaceSlot\(slot\)\)[\s\S]*?return/);
 
-  const rename = functionBody("commitRename", "appendWorkspaceMoveMenuItems");
+  const rename = functionBody("commitRename", "openTabContextPalette");
   assert.match(rename, /if \(isOtherWorkspaceSlot\(ws\)[\s\S]*?Other is the permanent catch-all/,
     "F2 must not rename away the reserved catch-all");
 });
@@ -144,7 +144,7 @@ test("duplicate reserved workspaces merge sessions before removing their slots",
   assert.match(merge, /const keep = otherPillSlot\(\)/);
   assert.ok(merge.indexOf("shells[si].workspace = keep") < merge.indexOf("removeWorkspaceSlot(ws)"));
   assert.doesNotMatch(merge, /closeShell\(|hibernateWorkspaceShell\(/);
-  const rename = functionBody("commitRename", "appendWorkspaceMoveMenuItems");
+  const rename = functionBody("commitRename", "openTabContextPalette");
   assert.match(rename, /paletteWideTextMatchRank\(buf\[0\.\.ulen\], L\("Other"\)\[0\.\.5\]\) == 4/);
 });
 

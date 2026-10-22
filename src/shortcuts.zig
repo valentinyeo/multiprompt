@@ -327,6 +327,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag tab onto a group", .b = "Move it there without changing pin or lock state", .header = false },
     .{ .a = "Drag tab: PINNED / RECENTS", .b = "Change its order inside the group or ungrouped list", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped PINNED or RECENTS", .header = false },
+    .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (lock / pin / reconnect / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },

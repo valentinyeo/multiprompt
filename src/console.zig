@@ -2422,6 +2422,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.was_manual = (app_state.shells[idx].name_source == .manual);
         entry.was_sem = (app_state.shells[idx].name_source == .semantic);
         entry.closed_at = GetTickCount64();
+        entry.group = if (findGroupIdx(app_state.shells[idx].group_id)) |gi| app_state.groups[gi] else null;
         app_state.g_closed_history[app_state.g_closed_count] = entry;
         app_state.g_closed_count += 1;
     }

@@ -45,7 +45,9 @@ function audit(text) {
   assert.ok(geometryGuard >= 0 && geometryGuard < layout.indexOf('SetWindowPos('));
   const hide = layout.indexOf('SW_HIDE');
   assert.ok(hide >= 0 && hide < layout.indexOf('IsIconic('), 'even minimized frames must hide a re-shown console');
-  assert.equal((text.match(/verifyShellWindowSize\(/g) || []).length, 4, 'all size repair callers stay within guarded layout');
+  const repairs = (layout.match(/verifyShellWindowSize\(/g) || []).length;
+  assert.ok(repairs > 0);
+  assert.equal((text.match(/verifyShellWindowSize\(/g) || []).length, repairs + 1, 'all size repair callers stay within guarded layout');
   const send = fn(text, 'sendLocalChatPromptEx');
   assert.doesNotMatch(send, /g_chat_active\s*=/, 'sending must not disable containment');
   assert.match(send, /!shellConsoleShouldBeVisible\(shell_index\)[^]*pasteTextToShellDirect\(shell_index, text\)/);
@@ -66,6 +68,7 @@ function audit(text) {
 
 test('every console reveal is guarded; a new HWND alias bypass are rejected', () => {
   audit(source);
+  assert.throws(() => audit(source + '\nfn leakedRepair() void { verifyShellWindowSize(hwnd, 0, 0, 1, 1); }'));
   assert.throws(() => audit(source + '\nfn leakedConsole() void { _ = ShowWindow(console_alias, SW_SHOW); }'));
   assert.throws(() => audit(source + '\nfn leakedConsole(hwnd: HANDLE) void { _ = ShowWindow(hwnd, SW_SHOW); }'));
   assert.throws(() => audit(source.replace('const hwnd = CreateWindowExW(\n        0,\n        L("ZigShell")', 'const hwnd = CreateWindowExW(\n        0,\n        L("ConsoleWindowClass")')));

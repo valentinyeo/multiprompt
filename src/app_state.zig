@@ -662,6 +662,7 @@ const TabGroup = struct {
     name_len: u32,
     collapsed: bool,
     color: u8,
+    color_set: bool = false,
 };
 pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
@@ -700,6 +701,7 @@ pub const ClosedShell = struct {
     was_manual: bool,
     was_sem: bool,
     closed_at: u64,
+    group: ?TabGroup = null,
     tmux_host: u8 = 0,
 };
 pub const MAX_CLOSED_HISTORY = 10;
@@ -936,6 +938,10 @@ pub var g_search_group_move_mode: bool = false;
 pub var g_groupmove_tab_sid: u32 = 0;
 pub var g_search_skills_mode: bool = false;
 pub var g_search_tabctx_mode: bool = false;
+pub var g_search_groupctx_mode: bool = false;
+pub var g_groupctx_gid: u32 = 0;
+pub const SEARCH_GROUPCTX_BASE: usize = 10000;
+pub const SEARCH_GROUPCTX_COUNT: usize = 16 + MAX_LWS + MAX_WORKSPACES;
 pub var g_tabctx_sid: u32 = 0;
 pub var g_search_remind_input_mode: bool = false;
 pub var g_search_rename_input_mode: bool = false;
@@ -975,8 +981,8 @@ pub var g_browser_url_poll_result_len: u32 = 0;
 
 pub var g_urlbar_hwnd: HANDLE = null;
 pub var g_urlbar_class_registered: bool = false;
-pub const BROWSER_EDGE_MASK_COUNT: usize = 6;
-pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bottom = 3, controls = 4, control_hit = 5 };
+pub const BROWSER_EDGE_MASK_COUNT: usize = 10;
+pub const BrowserEdgeMaskSide = enum(usize) { left = 0, top = 1, right = 2, bottom = 3, controls = 4, control_hit = 5, top_left = 6, top_right = 7, bottom_left = 8, bottom_right = 9 };
 pub var g_browser_edge_mask_hwnds: [BROWSER_EDGE_MASK_COUNT]HANDLE = [_]HANDLE{null} ** BROWSER_EDGE_MASK_COUNT;
 pub var g_browser_edge_mask_class_registered: bool = false;
 pub var g_browser_edge_mask_raise_ticks: i32 = 0;
@@ -2138,7 +2144,8 @@ pub const ReminderEntry = struct {
     group_id: u32 = 0,
     group_name: [64]u16 = std.mem.zeroes([64]u16),
     group_name_len: u32 = 0,
-    group_color: u8 = 0,
+    group_color: u8 = 7,
+    group_color_set: bool = false,
     group_collapsed: bool = false,
     pinned_top: bool = false,
     favorite: bool = false,

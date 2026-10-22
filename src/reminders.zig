@@ -177,7 +177,8 @@ pub fn loadRemindersIfNeeded() void {
         e.wide_name_len = json_reader.copyWide(obj, "wide_name", &e.wide_name);
         e.group_id = @intCast(json_reader.uint(obj, "group_id"));
         e.group_name_len = json_reader.copyWide(obj, "group_name", &e.group_name);
-        e.group_color = @intCast(@min(json_reader.uint(obj, "group_color"), GROUP_COLORS.len - 1));
+        e.group_color_set = json_reader.boolTrue(obj, "group_color_set");
+        e.group_color = if (e.group_color_set) @intCast(@min(json_reader.uint(obj, "group_color"), GROUP_COLORS.len - 1)) else 7;
         e.group_collapsed = json_reader.boolTrue(obj, "group_collapsed");
         e.pinned_top = json_reader.boolTrue(obj, "pinned_top");
         e.locked = json_reader.boolTrue(obj, "locked");
@@ -318,6 +319,11 @@ fn saveReminders() bool {
             @memcpy(json_buf[pos .. pos + color.len], color);
             pos += color.len;
             pos += writeUintTo(json_buf[pos..], e.group_color);
+            if (e.group_color_set) {
+                const explicit = ",\"group_color_set\":true";
+                @memcpy(json_buf[pos .. pos + explicit.len], explicit);
+                pos += explicit.len;
+            }
             if (e.group_collapsed) {
                 const collapsed = ",\"group_collapsed\":true";
                 @memcpy(json_buf[pos .. pos + collapsed.len], collapsed);
@@ -392,6 +398,15 @@ fn reminderFromShell(idx: usize, due_at: u64) ?ReminderEntry {
     e.last_used = app_state.shells[idx].last_used;
     e.input = app_state.shells[idx].input;
     e.visits = app_state.shells[idx].visits;
+    if (findGroupIdx(app_state.shells[idx].group_id)) |gi| {
+        const group = app_state.groups[gi];
+        e.group_id = group.id;
+        e.group_name = group.name;
+        e.group_name_len = group.name_len;
+        e.group_color = group.color;
+        e.group_color_set = group.color_set;
+        e.group_collapsed = group.collapsed;
+    }
 
     e.name_len = @intCast(@min(app_state.shells[idx].name_len, @as(u32, 63)));
     for (0..e.name_len) |j| {
@@ -547,7 +562,7 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
                 }
                 if (gi == null and app_state.group_count < MAX_GROUPS) {
                     const gid = @max(e.group_id, app_state.next_group_id);
-                    app_state.groups[app_state.group_count] = .{ .id = gid, .name = std.mem.zeroes([64]u16), .name_len = e.group_name_len, .collapsed = e.group_collapsed, .color = e.group_color };
+                    app_state.groups[app_state.group_count] = .{ .id = gid, .name = std.mem.zeroes([64]u16), .name_len = e.group_name_len, .collapsed = e.group_collapsed, .color = e.group_color, .color_set = e.group_color_set };
                     for (0..e.group_name_len) |ni| app_state.groups[app_state.group_count].name[ni] = e.group_name[ni];
                     gi = app_state.group_count;
                     app_state.group_count += 1;
@@ -1008,9 +1023,12 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
                     if (value.object.get("collapsed")) |v| if (v == .bool) {
                         group.collapsed = v.bool;
                     };
-                    if (value.object.get("color")) |v| if (v == .integer and v.integer >= 0) {
-                        group.color = @intCast(@mod(v.integer, GROUP_COLORS.len));
-                    };
+                    if (json_reader.boolTrue(value, "color_set")) {
+                        if (value.object.get("color")) |v| if (v == .integer and v.integer >= 0) {
+                            group.color = @intCast(@mod(v.integer, GROUP_COLORS.len));
+                            group.color_set = true;
+                        };
+                    }
                 } else resolved = 0;
             }
             for (tabs[0..count], 0..) |*tab, ti| if (original_groups[ti] == gid) {

@@ -151,7 +151,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.last_done_content = archiveContent(obj, "done_rows");
         tab.last_done_content_valid = string(field(obj, "done_rows")) != null;
         const split = unsigned(field(obj, "bsplit"), 350);
-        tab.bsplit_permille = @intCast(@max(50, @min(split, 950)));
+        tab.bsplit_permille = @intCast(@min(split, 1000));
         count += 1;
     }
     return count;

@@ -1445,6 +1445,18 @@ test "workspace destination query selects exact Wazig before partial matches and
     for (0..6) |i| try std.testing.expectEqual(SEARCH_WSMOVE_OFFSET + i, app_state.g_search_results[i + 1]);
 }
 
+fn appendGroupPaletteResults() void {
+    for (0..app_state.SEARCH_GROUPCTX_COUNT) |action| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (!@import("rename.zig").groupPaletteActionAvailable(action)) continue;
+        var label: [192]u16 = undefined;
+        const len = @import("rename.zig").groupPaletteLabel(action, &label);
+        if (app_state.g_search_len > 0 and !u16ContainsInsensitive(label[0..len], app_state.g_search_buf[0..app_state.g_search_len])) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_GROUPCTX_BASE + action;
+        app_state.g_search_result_count += 1;
+    }
+}
+
 pub fn updateSearchResults() void {
     app_state.g_search_result_count = 0;
     if (app_state.g_search_len == 0) app_state.g_multiprompt_logged_in = hasMultipromptLogin();
@@ -1493,6 +1505,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_len > 0) {
+            appendGroupPaletteResults();
             sortSearchResultsByRank();
             app_state.g_search_sel = 0;
             app_state.g_search_scroll = 0;
@@ -1753,6 +1766,12 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_groupctx_mode) {
+        appendGroupPaletteResults();
         if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
         return;
     }
@@ -4039,6 +4058,7 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (app_state.g_search_len > 0) appendGroupPaletteResults();
     sortSearchResultsByRank();
 
     if (app_state.g_search_len == 0) {

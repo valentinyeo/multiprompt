@@ -75,6 +75,55 @@ const shellConsoleShouldBeVisible = @import("chat_composer.zig").shellConsoleSho
 const CHAT_WORKING_GENERIC = @import("app_state.zig").CHAT_WORKING_GENERIC;
 const uiScaled = @import("drawing.zig").uiScaled;
 
+pub fn paneOuterMargin() i32 {
+    return uiScaled(8);
+}
+
+pub fn paneGap() i32 {
+    return uiScaled(8);
+}
+
+pub const PaneRects = struct {
+    sidebar: RECT,
+    burn: RECT,
+    primary: RECT,
+    browser: RECT,
+    splitter: RECT,
+};
+
+pub fn clampPaneSplitWidth(available: i32, width: i32) i32 {
+    const min_side = @min(uiScaled(200), @divTrunc(available, 2));
+    return std.math.clamp(width, min_side, available - min_side);
+}
+
+pub fn paneRects(client: RECT, sidebar_w: i32, browser: bool, split_permille: u32, burn_h: i32) PaneRects {
+    const margin = paneOuterMargin();
+    const gap = paneGap();
+    const sidebar = RECT{ .left = margin, .top = margin, .right = @max(margin, sidebar_w - @divTrunc(gap, 2)), .bottom = client.bottom - margin };
+    var primary = RECT{ .left = if (sidebar_w > 0) sidebar.right + gap else margin, .top = margin, .right = client.right - margin, .bottom = client.bottom - margin };
+    var browser_rect = RECT{ .left = primary.right, .top = margin, .right = primary.right, .bottom = primary.bottom };
+    var splitter = browser_rect;
+    if (browser) {
+        const available = @max(0, primary.right - primary.left - gap);
+        const width = clampPaneSplitWidth(available, @divTrunc(available * @as(i32, @intCast(split_permille)), 1000));
+        primary.right = primary.left + width;
+        browser_rect.left = primary.right + gap;
+        splitter.left = primary.right;
+        splitter.right = browser_rect.left;
+    }
+    return .{
+        .sidebar = sidebar,
+        .burn = .{ .left = sidebar.left, .top = sidebar.bottom - burn_h, .right = sidebar.right, .bottom = sidebar.bottom },
+        .primary = primary,
+        .browser = browser_rect,
+        .splitter = splitter,
+    };
+}
+
+pub fn activePaneRects(client: RECT) PaneRects {
+    return paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
+}
+
 pub fn repositionActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.shells[app_state.active_shell].hwnd == null or app_state.g_main_hwnd == null) return;
@@ -114,52 +163,24 @@ pub fn repositionActive() void {
     }
     if (LOOK_UNIFIED) {
         ensureDevThemeInitialized();
-        if (browserSlotReserved()) {
-            const layout = calcBrowserLayout() orelse return;
-            const shb = app_state.shells[app_state.active_shell].hwnd;
-            var stb = GetWindowLongPtrW(shb, GWL_STYLE);
-            stb &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
-            _ = SetWindowLongPtrW(shb, GWL_STYLE, stb);
-            _ = SetWindowRgn(shb, null, 1);
-            const inset: i32 = if (app_state.shells[app_state.active_shell].browser_native) paneFocusInset() else 0;
-            const cx = layout.console_x + inset;
-            const cy = layout.console_y + inset;
-            const cw = layout.console_w - 2 * inset;
-            const ch = layout.console_h - 2 * inset;
-            if (nudge) _ = SetWindowPos(shb, null, cx, cy, cw, ch - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
-            _ = SetWindowPos(shb, null, cx, cy, cw, ch, SWP_FRAMECHANGED | SWP_NOZORDER);
-            verifyShellWindowSize(shb, cx, cy, cw, ch);
-            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
-            return;
-        }
-        if (app_state.shells[app_state.active_shell].full_width) {
-            const sh0 = app_state.shells[app_state.active_shell].hwnd;
-            var st0 = GetWindowLongPtrW(sh0, GWL_STYLE);
-            st0 &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
-            _ = SetWindowLongPtrW(sh0, GWL_STYLE, st0);
-            _ = SetWindowRgn(sh0, null, 1);
-            const fw_w = rc.right - SIDEBAR_W();
-            const fw_top = DEV_TOP_PAD + threadTitleHeight();
-            const fw_h = rc.bottom - DEV_TOP_PAD - fw_top;
-            if (nudge) _ = SetWindowPos(sh0, null, SIDEBAR_W(), fw_top, fw_w, fw_h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
-            _ = SetWindowPos(sh0, null, SIDEBAR_W(), fw_top, fw_w, fw_h, SWP_FRAMECHANGED | SWP_NOZORDER);
-            verifyShellWindowSize(sh0, SIDEBAR_W(), fw_top, fw_w, fw_h);
-            return;
-        }
-        const con_top = DEV_TOP_PAD + threadTitleHeight();
-        const h = rc.bottom - DEV_TOP_PAD - con_top;
+        const pane = activePaneRects(rc).primary;
+        const con_top = pane.top + threadTitleHeight();
+        const h = pane.bottom - con_top;
         const sh = app_state.shells[app_state.active_shell].hwnd;
         var st = GetWindowLongPtrW(sh, GWL_STYLE);
         st &= ~@as(isize, @intCast(WS_VSCROLL | WS_HSCROLL));
         _ = SetWindowLongPtrW(sh, GWL_STYLE, st);
-        const edge_pad: i32 = if (SIDEBAR_W() == 0) consoleEdgePad() else 0;
-        const col = centeredConsoleColumn(rc.right, SIDEBAR_W(), edge_pad, consoleCellW());
-        const w = col.width;
-        const left = col.left;
+        const col = centeredConsoleColumn(pane.right, pane.left, 0, consoleCellW());
+        const full_width = app_state.shells[app_state.active_shell].full_width;
+        const w = if (full_width) pane.right - pane.left else col.width;
+        const left = if (full_width) pane.left else col.left;
         _ = SetWindowRgn(sh, null, 1);
         if (nudge) _ = SetWindowPos(sh, null, left, con_top, w, h - 1, SWP_FRAMECHANGED | SWP_NOZORDER);
         _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
         verifyShellWindowSize(sh, left, con_top, w, h);
+        if (browserSlotReserved()) {
+            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+        }
         return;
     }
     const pad: i32 = SHELL_PAD;
@@ -206,8 +227,20 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
     _ = DeleteObject(glyph_font);
 }
 
+pub fn chatSurfaceRadius() i32 {
+    return uiScaled(CHAT_BUBBLE_RADIUS);
+}
+
+pub fn chatSurfaceBorderW() i32 {
+    return @max(1, uiScaled(1));
+}
+
+pub fn chatSurfaceBorderColor() DWORD {
+    return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
+}
+
 fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
-    const edge = @max(1, uiScaled(1));
+    const edge = chatSurfaceBorderW();
     fillRoundRectAA(hdc, rc, radius, border_color);
     fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
 }
@@ -331,8 +364,8 @@ pub fn paintChatView(hdc: HANDLE) void {
     const layout = chatViewLayout();
     refreshChatBrushes();
     _ = SetBkMode(hdc, TRANSPARENT);
-    const card_border = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
-    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, uiScaled(CHAT_BUBBLE_RADIUS));
+    const card_border = chatSurfaceBorderColor();
+    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, chatSurfaceRadius());
     if (app_state.g_chat_reply_len > 0) {
         const old_font = SelectObject(hdc, ensureChatFont());
         defer _ = SelectObject(hdc, old_font);

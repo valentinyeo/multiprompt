@@ -23,16 +23,13 @@ function toggle(text) {
 
 function content(text) {
   const layout = body(text, 'chatViewLayout');
-  const start = layout.indexOf('    const full_width =');
-  const end = layout.indexOf('\n    const left = content.left;');
-  assert.ok(end >= 0);
-  if (start >= 0) return layout.slice(start, end);
-  return layout.slice(layout.indexOf('    const content ='), end);
+  return layout.slice(layout.indexOf('    const full_width ='), layout.indexOf('    const content_top ='));
 }
 
-function harness(handler, geometry) {
+function harness(handler, geometry = content(source)) {
   return `const std = @import("std");
 const chat_style = @import("chat_style.zig");
+const app_state = @This();
 const HANDLE = ?usize;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const ISSUE_373_SHELL_OVERRIDE = true;
@@ -51,16 +48,35 @@ fn saveSession() void { saves += 1; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
 fn browserSlotReserved() bool { return browser; }
 fn browserSplitPermilleForActiveShell() u16 { return 350; }
-fn uiScaled(value: i32) i32 { return value; }
+var scale: i32 = 100;
+fn uiScaled(value: i32) i32 { return @divTrunc(value * scale, 100); }
 ${body(source, 'fullWidthShouldResizeConsole')}
 ${body(source, 'chatViewShouldShowForTab')}
 ${handler}
 fn chatColumn(width: i32) struct { left: i32, width: i32 } {
-    const slot = .{ .left = @as(i32, 220) };
-    const col = .{ .width = width };
-    const inset = 10;
+    const slot = .{ .left = @as(i32, 220), .right = 220 + width };
 ${geometry}
-    return .{ .left = content.left, .width = content.width };
+    return .{ .left = left, .width = right - left };
+}
+test "production reading column and full width stay inside the shared pane" {
+    for ([_]i32{100, 150}) |dpi| {
+        scale = dpi;
+        for ([_]bool{false, true}) |docked| {
+            browser = docked;
+            for ([_]i32{0, 40, 600, 1700}) |width| {
+                shells[0].full_width = true;
+                const full = chatColumn(width);
+                try std.testing.expectEqual(@as(i32, 220), full.left);
+                try std.testing.expectEqual(width, full.width);
+                shells[0].full_width = false;
+                const normal = chatColumn(width);
+                const want = @min(width, @max(@divTrunc(width * 350, 1000), uiScaled(760)));
+                try std.testing.expectEqual(want, normal.width);
+                try std.testing.expectEqual(220 + @divTrunc(width - want, 2), normal.left);
+                try std.testing.expect(normal.left >= full.left and normal.left + normal.width <= full.left + full.width);
+            }
+        }
+    }
 }
 test "ISSUE-440 production toggle changes only width and saves twice" {
     for ([_]ChatViewMode{ .everywhere, .per_session, .nowhere }) |mode| {
@@ -97,27 +113,11 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
     _ = toggleFullWidth(null);
     try std.testing.expectEqual(@as(usize, 0), resizes);
 }
-test "ISSUE-440 production layout expands chat but never crosses the browser split" {
-    for ([_]i32{ 0, 40, 600, 1700 }) |width| {
-        browser = false;
-        shells[0].full_width = true;
-        const full = chatColumn(width);
-        try std.testing.expectEqual(@as(i32, 220), full.left);
-        try std.testing.expectEqual(width, full.width);
-        shells[0].full_width = false;
-        const normal = chatColumn(width);
-        try std.testing.expectEqual(chat_style.contentColumn(220, width, false, 350, 760, 10).width, normal.width);
-        browser = true;
-        const split = chatColumn(width);
-        shells[0].full_width = true;
-        try std.testing.expectEqual(split, chatColumn(width));
-        try std.testing.expect(split.left >= 220 and split.left + split.width <= 220 + width);
-    }
-}
+
 `;
 }
 
-test('ISSUE-440 executes the production toggle and chat layout; old console work and old layout both fail', () => {
+test('ISSUE-440 executes the production toggle without resetting the Chat View console', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh440-'));
   try {
     copyZig(['chat_style.zig'], dir);
@@ -127,22 +127,19 @@ test('ISSUE-440 executes the production toggle and chat layout; old console work
       fs.writeFileSync(file, harness(handler, geometry));
       return spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     }
-    const result = run(toggle(source), content(source));
+    const result = run(toggle(source));
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     const oldHandler = toggle(source).replace('fullWidthShouldResizeConsole(g_chat_active)', 'true');
-    const oldGeometry = content(source).replace(/^    const full_width =[^\n]+\n/m, '').replace('if (full_width) col.width else uiScaled(760)', 'uiScaled(760)');
     assert.notEqual(oldHandler, toggle(source));
-    assert.notEqual(oldGeometry, content(source));
-    for (const [handler, geometry, failingTest] of [
-      [oldHandler, content(source), 'production toggle'],
-      [toggle(source), oldGeometry, 'production layout'],
-    ]) {
-      const old = run(handler, geometry);
-      assert.notEqual(old.status, 0);
-      assert.match(old.stderr, new RegExp(`${failingTest}[^]*FAIL`));
-      console.log(`ISSUE-440 old ${failingTest} rejected`);
-    }
+    const old = run(oldHandler);
+    assert.notEqual(old.status, 0);
+    assert.match(old.stderr, /production toggle[^]*FAIL/);
+    const deadToggle = content(source).replace('if (full_width) slot.right - slot.left else uiScaled(760)', 'uiScaled(760)');
+    const dead = run(toggle(source), deadToggle.replace(/    const full_width =[^\n]+\n/, ''));
+    assert.notEqual(dead.status, 0);
+    assert.match(dead.stderr, /production reading column[^]*FAIL/);
+    console.log('ISSUE-440 old console reset and dead width toggle rejected');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -159,5 +156,6 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);
   assert.ok(close.indexOf('applyBlackConsoleBackground') < close.indexOf('showShellConsole'));
   assert.match(body(source, 'respawnShellInPlace'), /\.full_width = saved_full_width/);
-  assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('].full_width)'));
+  assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('activePaneRects(rc).primary'));
+  assert.match(body(source, 'chatViewLayout'), /activePaneRects\(rc\)\.primary/);
 });
