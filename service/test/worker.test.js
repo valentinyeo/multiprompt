@@ -5,7 +5,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import worker, { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
 
-let mf, db;
+let mf, db, hostClient;
 const mail = [], usageToken = 'u'.repeat(43);
 const base = 'http://localhost';
 const encode = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -27,6 +27,8 @@ async function enroll() {
 }
 const auth = token => ({ Authorization: 'Bearer ' + token.access_token });
 before(async () => {
+  const { default: fixture } = await import('../../tools/account-hosts-fixture.js');
+  hostClient = fixture.build(readFileSync(new URL('../../src/account_desktop.zig', import.meta.url), 'utf8'));
   mf = new Miniflare(convertV4MiniflareOptions({ outboundService: async req => {
     if (req.url === 'https://api.resend.com/emails') { mail.push(await req.json()); return new Response('{"id":"test"}'); }
     assert.fail('Unexpected outbound request: ' + req.url);
@@ -1209,13 +1211,8 @@ test('device key regression: real Ed25519 and live-probe wire keys remain accept
   }
 });
 
-let hostClient;
 after(() => hostClient?.cleanup());
 async function hostPair() {
-  if (!hostClient) {
-    const { default: fixture } = await import('../../tools/account-hosts-fixture.js');
-    hostClient = fixture.build(readFileSync(new URL('../../src/account_desktop.zig', import.meta.url), 'utf8'));
-  }
   const first = (await enroll()).token, second = (await enroll()).token;
   const host = { slot: 0, name: 'Host 1', hostname: 'old.example', port: 22, user: 'owner' };
   const headers = token => ({ ...auth(token), 'X-Layout-Features': 'hosts' });
