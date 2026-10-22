@@ -666,12 +666,12 @@ pub const TableCache = struct {
 
     pub fn refreshReceived(self: *TableCache, a: std.mem.Allocator, before: []const Block, after: []const Block, before_text: []const u16, after_text: []const u16, received: *BlockCache, tracked: ?*usize) void {
         var expanded: [2]std.ArrayList(Block) = .{ .empty, .empty };
-        defer for (&expanded) |*list| list.deinit(a);
+        defer for (&expanded) |*snapshot_blocks| snapshot_blocks.deinit(a);
         const snapshots = [2][]const Block{ before, after };
         const texts = [2][]const u16{ before_text, after_text };
-        for (snapshots, texts, &expanded) |snapshot, capture, *list| {
+        for (snapshots, texts, &expanded) |snapshot, capture, *snapshot_blocks| {
             for (snapshot) |block| {
-                list.append(a, block) catch {
+                snapshot_blocks.append(a, block) catch {
                     self.clear(a);
                     return;
                 };
@@ -687,7 +687,7 @@ pub const TableCache = struct {
                     table.source_offset = block.source_offset;
                     table.source_end = block.source_end;
                     table.segment = block.segment;
-                    list.append(a, table) catch {
+                    snapshot_blocks.append(a, table) catch {
                         self.clear(a);
                         return;
                     };
