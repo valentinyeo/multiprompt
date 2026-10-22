@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, spawnSync, execFileSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
@@ -152,7 +152,7 @@ test "ISSUE-543 loading remote tabs" {
     await zig(runtime(loadingChecks), 'ISSUE-543 loading');
   });
   test('ISSUE-543 negative control: original reconnect tick disconnects a loading tab', async () => {
-    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })).join('\n').replaceAll('app_state.', '');
+    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => fs.readFileSync(path.join(__dirname, 'fixtures/igsh-543/review-before', path.basename(file)), 'utf8')).join('\n').replaceAll('app_state.', '');
     await zig(runtime(loadingChecks, original), 'ISSUE-543 loading', true, 1, /TestUnexpectedResult/);
   });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {

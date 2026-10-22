@@ -766,7 +766,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_MODE_OFFSET => "browser pane mode",
         SEARCH_BROWSER_ENGINE_OFFSET => "browser engine",
         SEARCH_RESTART_OFFSET => "restart multiprompt",
-        SEARCH_UPDATE_OFFSET => "update relaunch new version",
+        SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
         SEARCH_ZSB_REBIND_OFFSET => "rebind browser pane",
         SEARCH_SHELL_DIAG_OFFSET => "copy shell diagnostics",
         SEARCH_SYNC_NAME_OFFSET => "use agent or tmux name",
@@ -2375,7 +2375,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_update = app_state.g_update_ver_len > 0 and app_state.g_search_len == 0;
         if (!show_update and app_state.g_search_len > 0) {
-            const update_labels = [_][]const u8{ "update", "relaunch", "new version", "upgrade" };
+            const update_labels = [_][]const u8{ "update", "restart to update", "relaunch", "new version", "upgrade" };
             for (update_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_update = true;

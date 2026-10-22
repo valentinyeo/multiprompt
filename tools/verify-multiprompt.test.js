@@ -92,6 +92,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(read('src/account_desktop.zig'), /pub fn accountBootstrap\(hwnd: HANDLE\) bool \{\s*if \(app_state\.g_account_bypass\) return true;/);
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
   assert.match(read('src/session.zig'), /fn startupRestoreWorker\([^\n]*\) void \{\s*_ = @import\("console\.zig"\)\.resolveSshPath\(false\);/);
+  assert.match(read('src/main.zig'), /listener_status\.load\(\.acquire\)[\s\S]*?\.pending => return false/);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
@@ -118,6 +119,22 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.match(transport, /\$response\.ok -ne \$true/);
   assert.match(transport, /finally \{ \$reply.Dispose\(\); \$client.Dispose\(\) \}/);
   assert.doesNotMatch(transport, /Start-Process|Invoke-Expression|PostMessage/);
+});
+
+test('docked native browser handoff retains identity, visibility and strict foreign-input guards', () => {
+  const guard = control.slice(control.indexOf('function Assert-Foreground {'), control.indexOf('function Press('));
+  const handoff = control.slice(control.indexOf('function Focus-BrowserPaneOwner('), control.indexOf('function Assert-ConnectedPaneStaysVisible('));
+  const refusesForeign = /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/;
+  const dockedOwner = /\$pane.browser_state -eq 'connected' -and\s*\$pane.browser_connection_id -eq \$ConnectionId -and \[VerifyNative\]::PaneVisible\(\$script:window\)/;
+  const waitsBeforeActivation = /Wait-Until \{[\s\S]*\} "browser-pane-stuck \$\{Step\}: docked pane ready for main-window activation" 25\s*Doctor\s*Record[^\n]*\n\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/;
+  const verifiesForeground = /Wait-Until \{ \[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window \} "browser-pane-stuck \$\{Step\}: main window is foreground" 5/;
+  for (const pattern of [dockedOwner, waitsBeforeActivation, verifiesForeground]) {
+    assert.match(handoff, pattern);
+    assert.throws(() => assert.match(handoff.replace(pattern, ''), pattern));
+  }
+  assert.match(handoff, /Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id/);
+  assert.match(guard, refusesForeign);
+  assert.throws(() => assert.match(guard.replace(refusesForeign, ''), refusesForeign));
 });
 
 test('G2: discovery, creation and repeat use saved names and identical arguments', () => {

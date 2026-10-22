@@ -6,6 +6,7 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 
 - `palette-search`: filter commands using an actual supported query.
 - `palette-execute`: execute UI Size: Increase and save 110% app scale.
+- `update-command-idle`: search Restart to update and execute with no staged update, retaining the owned app and session.
 - `palette-reset`: navigate to UI Size: Reset and restore 100%.
 
 ## How to get to it (user POV)
@@ -27,6 +28,7 @@ Preconditions:
 - **Search.** Press Ctrl+K and type `interface`. `action.png` shows the filtered UI Size rows with Increase selected.
 - **Execute.** Press Enter for `UI Size: Increase`. The palette closes and the app's saved `ui_scale` must be 110. Capture `after.png` showing larger chrome.
 - **Reset.** Reopen Ctrl+K and type `interface`; Down twice reaches `UI Size: Reset`, then Enter. Capture `reset.png`. The saved scale must be default 100 (the default may be omitted from the file).
+- **Update entry.** Search `restart to update`, capture `update-command.png`, reject a blank selected row by checking its screenshot text pixels, then Enter with no staged update. Doctor must still identify the original live PID, executable hash, HWND and initial shell; capture `update-idle.png`. The updater switch is OFF in this isolated harness to prevent a release from replacing the branch being verified. This proves the palette entry and no-ready behavior, not the ready notice or an actual release install; Windows update regression tests separately exercise download validation and rollback.
 - **Proof.** Compare `before.png`, `action.png`, `after.png` and `reset.png`. `actions.json` records both selections; `result.json` records the checked 110 and 100 values. The final `data/roaming/ZigShell/session.json` confirms the reset state.
 
 ## Gotchas

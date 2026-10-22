@@ -24,6 +24,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
