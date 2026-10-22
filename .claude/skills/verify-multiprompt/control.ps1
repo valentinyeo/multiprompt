@@ -346,13 +346,12 @@ function Prepare-ScratchEvidence([string]$Path) {
             Save-Json @($script:scratchLinks) 'scratch-links.json'
             $entry.Delete()
             Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } elseif ($entry -is [IO.FileInfo] -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
+            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
+            $entry.Delete()
         } else {
             $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
             if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
-            elseif ($entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
-                [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-                $entry.Delete()
-            }
         }
     }
 }
@@ -610,7 +609,6 @@ function Press-WorkspaceBrowser([int[]]$Keys, [string]$Label) {
 }
 
 function Palette([string]$Query) {
-    if ($Feature -in @('browser-workspaces', 'browser-pane-stuck')) { Focus-WorkspaceShell }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
 }
@@ -1121,7 +1119,6 @@ try {
                     Press @(0x12, 0x33) 'Alt+3: select the already created second workspace'
                     Wait-Until { (Read-Session).active_workspace -eq 1 } 'second workspace active'
                 } elseif ($index -gt 1) {
-                    Focus-WorkspaceShell
                     Press @(0x11, 0x4E) 'Ctrl+N: create an independent workspace'
                     Wait-Until { (Read-Session).workspace_count -eq $index + 1 } 'new workspace saved'
                 }
@@ -1183,7 +1180,6 @@ try {
             Snapshot 'bookmark-action'
             Press-WorkspaceBrowser @(0x0D) 'Enter: save favorite'
             Press-WorkspaceBrowser @(0x1B) 'Esc: close favorite dialog'
-            Focus-WorkspaceShell
             Assert-WorkspaceProfile 'renamed' $targetId $targetRoot $bookmark
             Palette 'sort workspaces'
             Press @(0x0D) 'Enter: Sort Workspaces'
