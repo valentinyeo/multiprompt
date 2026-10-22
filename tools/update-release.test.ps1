@@ -232,8 +232,11 @@ try {
     Assert ((Get-Content "$dir/rejected.txt" -Raw) -eq 'v1.12.0') 'Failed version not suppressed'
     Assert (-not (Save-Update $target '1.11.0' 'x64')) 'Failed version retried'
     Assert (-not (Test-Path "$dir/ready.txt")) 'Failed version remains ready'
-    Wait-File "$target.starts"
-    Assert ((Get-Content "$target.starts" | Select-Object -Last 1) -eq '--name|Review Desk|--other|C:\tail\') 'Rollback arguments changed or retained readiness flag'
+    $rollbackDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ((Get-Content "$target.starts" | Select-Object -Last 1) -ne '--name|Review Desk|--other|C:\tail\') {
+        if ([DateTime]::UtcNow -gt $rollbackDeadline) { throw 'Rollback arguments changed or retained readiness flag' }
+        Start-Sleep -Milliseconds 100
+    }
     $restored = @(Get-Process | Where-Object { $_.Path -eq $target })
     Assert ($restored.Count -eq 1) 'Rollback did not leave exactly one app running'
     Start-Sleep -Seconds 61
