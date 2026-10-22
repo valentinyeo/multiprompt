@@ -70,6 +70,7 @@ export function validateRecords(records) {
     ids.add(identity);
     if (r.kind === 'host' && !/^[0-2]$/.test(r.id) || r.kind === 'session' && !/^[0-2]:[a-z0-9_-]{1,63}$/.test(r.id) ||
         r.kind === 'settings' && r.id !== 'settings' || r.kind === 'workspace' && (!r.id.length || new TextEncoder().encode(r.id).length > 31 || /[\x00-\x1f\x7f]/u.test(r.id))) fail(400, 'invalid_record_id');
+    if (r.kind === 'workspace') validateLayout({ schema: 1, revision: 0, workspaces: [{ name: r.id }], tabs: [] });
     if (r.deleted) {
       if (Object.hasOwn(r, r.kind)) fail(400, 'tombstone_payload');
       continue;

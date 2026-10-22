@@ -39,6 +39,11 @@ function audit(state, desktop, main) {
   assert.match(body(desktop, 'accountApplyHosts'), /if \(!std\.mem\.eql\(u8, current orelse "", original\)\) return error.HostConfigChanged/);
   assert.match(body(desktop, 'accountSyncHosts'), /const output = try accountSshOutput/);
   assert.doesNotMatch(body(desktop, 'accountSyncHosts'), /host_keys|known_hosts|keygen|readKeys/);
+  assert.match(body(desktop, 'accountHostWatchThread'), /WaitForMultipleObjects\(handles.len, &handles, 0, 0xFFFFFFFF\)/);
+  assert.match(body(desktop, 'accountStartHostWatch'), /if \(!app_state\.g_account_sync_enabled or/);
+  assert.match(body(desktop, 'accountStopHostWatch'), /SetEvent[\s\S]*thread.join\(\)/);
+  assert.match(body(desktop, 'accountToggleSync'), /else accountStopHostWatch\(\)/);
+  assert.match(main, /accountStopHostWatch\(\)/);
   assert.doesNotMatch(state + desktop + main, /TIMER_ACCOUNT_SAVE/);
   assert.match(main, /wp == TIMER_ACCOUNT\) \{\s*_ = KillTimer\(hwnd, TIMER_ACCOUNT\);\s*pullSessionLayout\(\)/);
   assert.match(body(desktop, 'handleLayoutReply'), /accountArmTimer\(if \(app_state\.g_account_retry\.notified\)/);
