@@ -1109,7 +1109,12 @@ try {
             Press @(0x12, 0x37) 'Alt+7: select the sixth workspace'
             Wait-Until { (Read-Session).active_workspace -eq 5 } 'sixth workspace active'
             Palette 'rename workspace'
+            Snapshot 'rename-action'
             Press @(0x0D) 'Enter: Rename workspace'
+            Wait-Until {
+                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+                $null -ne $focused -and $focused.Current.ProcessId -eq $process.Id -and $focused.Current.ClassName -eq 'EDIT'
+            } 'native workspace rename editor owns focus'
             Press @(0x11, 0x41) 'Ctrl+A: replace workspace name'
             Type-Text 'IGSH224 Journey'
             Press @(0x0D) 'Enter: save workspace name'
