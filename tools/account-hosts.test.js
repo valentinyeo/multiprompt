@@ -9,9 +9,9 @@ function audit(desktop, client) {
   assert.equal((request.match(/accountSyncHosts\(/g) || []).length, 1);
   assert.ok(request.indexOf('accountSyncHosts(') < request.indexOf('while (attempts < 3)'));
   assert.match(request, /if \(remote\.hosts_supported and account_hosts\.shouldRefresh\(GetTickCount64\(\), g_account_hosts_cache\.refreshed_at, job\.kind == \.login or job\.kind == \.startup, g_account_hosts_cache\.hosts, initial\.value\.hosts orelse &\.\{\}\)\) \{/);
-  assert.match(request, /const discovered = try accountSyncHosts\(host_arena\.allocator\(\), initial\.value\.hosts orelse &\.\{\}\);/);
+  assert.match(request, /const discovered: \?\[\]const account_hosts\.Host = accountSyncHosts\(host_arena\.allocator\(\), initial\.value\.hosts orelse &\.\{\}\) catch null;/);
   assert.match(request, /if \(g_account_hosts_cache\.arena\) \|\*old\| old\.deinit\(\);/);
-  assert.match(request, /g_account_hosts_cache = \.\{ \.arena = host_arena, \.hosts = discovered, \.refreshed_at = GetTickCount64\(\) \};/);
+  assert.match(request, /g_account_hosts_cache = \.\{ \.arena = host_arena, \.hosts = found, \.refreshed_at = GetTickCount64\(\) \};/);
   assert.match(request, /const hosts = g_account_hosts_cache\.hosts;/);
   assert.match(desktop, /if \(app_state\.g_account_busy or app_state\.g_account_bypass\)/);
   assert.match(desktop, /app_state\.g_account_busy = true;/);
@@ -19,8 +19,8 @@ function audit(desktop, client) {
   assert.match(discovery, /host\.user = try a\.dupe\(u8, host\.user\);/);
   assert.match(discovery, /for \(incoming_keys, owned_keys\) \|key, \*owned\| owned\.\* = try a\.dupe\(u8, key\);/);
   assert.match(discovery, /host\.host_keys = owned_keys;/);
-  assert.match(request, /rebased\.hosts = if \(remote\.hosts_supported\) hosts else null;/);
-  assert.match(request, /remote\.hosts_supported and account_hosts\.needsPublish\(hosts, server.value.hosts orelse &\.\{\}\)/);
+  assert.match(request, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) hosts else server\.value\.hosts\) else null;/);
+  assert.match(request, /remote\.hosts_supported and hosts_ready and account_hosts\.needsPublish\(hosts, server.value.hosts orelse &\.\{\}\)/);
   assert.match(discovery, /app_state\.SSH_TARGET_DE, app_state\.SSH_TARGET_UK, app_state\.SSH_TARGET_INNE/);
   assert.match(discovery, /appendSshExe\(/);
   assert.match(discovery, /-G \{s\}/);
@@ -46,9 +46,9 @@ test('hosts sync discovery is worker-serialized, cached with owned data, bounded
   const desktop = read('src/account_desktop.zig'), client = read('src/account_client.zig');
   audit(desktop, client);
   for (const [before, after] of [
-    ['rebased.hosts = if (remote.hosts_supported) hosts else null;', 'rebased.hosts = hosts;'],
+    ['rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) hosts else server.value.hosts) else null;', 'rebased.hosts = hosts;'],
     ['remote.hosts_supported and account_hosts.shouldRefresh', 'account_hosts.shouldRefresh'],
-    ['remote.hosts_supported and account_hosts.needsPublish', 'account_hosts.needsPublish'],
+    ['remote.hosts_supported and hosts_ready and account_hosts.needsPublish', 'account_hosts.needsPublish'],
     ['const hosts = g_account_hosts_cache.hosts;', ''],
     ['account_hosts.shouldRefresh(GetTickCount64()', 'true or account_hosts.shouldRefresh(GetTickCount64()'],
     ['job.kind == .login or job.kind == .startup', 'false'],
@@ -72,7 +72,7 @@ test('hosts support is fail-closed and rechecked from the latest reply after con
   audit(desktop, client);
   const request = desktop.slice(desktop.indexOf('fn accountRequest('), desktop.indexOf('fn layoutSyncWorker('));
   const loop = request.slice(request.indexOf('while (attempts < 3)'));
-  assert.match(loop, /rebased\.hosts = if \(remote\.hosts_supported\) hosts else null;/);
+  assert.match(loop, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) hosts else server\.value\.hosts\) else null;/);
   assert.match(loop, /\.emit_null_optional_fields = false/);
   assert.match(loop, /remote = put;/);
   assert.ok(loop.indexOf('rebased.hosts =') < loop.indexOf('account_client.request("PUT"'));
