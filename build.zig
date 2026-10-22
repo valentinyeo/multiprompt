@@ -561,6 +561,10 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_drop_tests.step);
     const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
     vps_test_step.dependOn(&crash_reports_tests.step);
+    const idle_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-513-idle-front.test.js" });
+    idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&idle_front_tests.step);
+    vps_test_step.dependOn(&idle_front_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
         "node",                                   "--test",                              "--test-concurrency=4",
         "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",
