@@ -1351,6 +1351,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (app_state.g_app_closing or initializeDeferred(hwnd)) {
             _ = KillTimer(hwnd, launch_cache.TIMER_STARTUP);
             launch_cache.pending = false;
+            saveSession();
             launch_cache.changed();
             @import("account_desktop.zig").resumeStartupReply();
         }

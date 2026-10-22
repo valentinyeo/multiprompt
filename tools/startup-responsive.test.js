@@ -78,6 +78,28 @@ test('ISSUE-543 startup returns to input-priority timers before waiting on any c
   responsiveOrdering(read('src/main.zig'), read('src/console.zig'), read('src/session.zig'));
 });
 
+test('IGSH-522 phased startup persists the initial session after consoles finish and saving is unblocked', () => {
+  const verify = main => {
+    const dispatch = body(main, 'wndProc');
+    const timer = dispatch.slice(dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'), dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_SAVE)'));
+    assert.match(timer, /if \(app_state\.g_app_closing or initializeDeferred\(hwnd\)\) \{\s*_ = KillTimer\(hwnd, launch_cache\.TIMER_STARTUP\);\s*launch_cache\.pending = false;\s*saveSession\(\);\s*launch_cache\.changed\(\);/);
+    const initialize = body(main, 'initializeDeferred');
+    assert.ok(initialize.indexOf('startup_inflight.load(.acquire) != 0) return false') < initialize.indexOf('.done => return true'));
+    assert.match(initialize, /startup_inflight\.load\(\.acquire\) != 0\) return false/);
+  };
+  const main = read('src/main.zig');
+  verify(main);
+  for (const replacement of [
+    'launch_cache.pending = false;',
+    'saveSession();\n            launch_cache.pending = false;',
+  ]) {
+    const original = 'launch_cache.pending = false;\n            saveSession();';
+    assert.ok(main.includes(original));
+    assert.throws(() => verify(main.replace(original, replacement)), assert.AssertionError);
+  }
+  assert.throws(() => verify(execFileSync('git', ['show', 'cc26027:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
+});
+
 test('ISSUE-543 hidden browser beacons get tool-window ownership before docking', () => {
   taskbarOrdering(read('src/browser_pane.zig'));
 });
