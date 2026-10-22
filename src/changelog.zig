@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.806", .items = &.{
+        .{ .text = "Switching workspaces remembers where you were typing so you can keep typing without clicking again.", .ticket = "IGSH-522" },
+    } },
     .{ .ver = "0.28.805", .items = &.{
         .{ .text = "The docked browser now has smooth rounded corners and a border matching Chat View.", .ticket = "IGSH-496" },
         .{ .text = "Panes and sidebar cards now have matching margins and gaps at every display scale.", .ticket = "IGSH-496" },
