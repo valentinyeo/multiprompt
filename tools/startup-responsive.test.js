@@ -169,7 +169,7 @@ if (process.env.STARTUP_BEFORE_REF) {
   });
 }
 
-const reviewBefore = file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+const reviewBefore = file => execFileSync('git', ['show', `85775e8:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
 const reviewCases = [
   ['loading shells bypass reconnect until worker completion', read => {
     const consoleSource = read('src/console.zig');

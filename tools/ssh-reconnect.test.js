@@ -144,7 +144,7 @@ test "ISSUE-543 loading remote tabs" {
     await zig(runtime(loadingChecks), 'ISSUE-543 loading');
   });
   test('ISSUE-543 negative control: original reconnect tick disconnects a loading tab', async () => {
-    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })).join('\n').replaceAll('app_state.', '');
+    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => execFileSync('git', ['show', `85775e8:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })).join('\n').replaceAll('app_state.', '');
     await zig(runtime(loadingChecks, original), 'ISSUE-543 loading', true, 1, /TestUnexpectedResult/);
   });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
