@@ -269,9 +269,10 @@ var active_shell: usize = 0;
 var shell_count: usize = 1;
 var sent: [8192]u8 = undefined;
 var sent_len: usize = 0;
-fn navigateBrowserPaneWithActivation(_: usize, url: []const u8, _: bool) void {
+fn openSessionLink(_: usize, url: []const u8) bool {
     @memcpy(sent[0..url.len], url);
     sent_len = url.len;
+    return true;
 }
 fn webView2OwnsActiveShell() bool { return false; }
 fn requestWebView2Focus() void {}

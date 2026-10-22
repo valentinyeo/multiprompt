@@ -379,6 +379,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+P", .b = "Keep this tab's browser pane awake (exempt from freeze/hibernate)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
+    .{ .a = "Ctrl+K -> External Browser Links When Pane Off", .b = "Toggle desktop browser for HTTP(S) links when the session pane is off (default on)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace and keep their saved URLs", .header = false },
     .{ .a = "Ctrl+K \u{2192} Insert browser-control instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
@@ -1825,7 +1826,7 @@ fn pointOverActiveShell(pt: POINT) bool {
 
 fn ctrlClickOverActiveShell(pt: POINT) bool {
     if (app_state.active_shell >= app_state.shell_count or
-        (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell())) return false;
+        (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell() and !app_state.g_external_browser_links)) return false;
     if (IsIconic(app_state.g_main_hwnd) != 0) return false;
     return pointOverActiveShell(pt);
 }
@@ -2155,7 +2156,7 @@ pub fn mouseHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESUL
         }
     }
     if (app_state.active_shell >= app_state.shell_count or
-        (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell()))
+        (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell() and !app_state.g_external_browser_links))
     {
         return CallNextHookEx(app_state.g_mouse_hook, nCode, wp, lp);
     }

@@ -173,7 +173,7 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const cancelPendingNativeBrowserFocus = @import("focus.zig").cancelPendingNativeBrowserFocus;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
-const navigateBrowserPaneWithActivation = @import("browser_pane.zig").navigateBrowserPaneWithActivation;
+const openSessionLink = @import("browser_pane.zig").openSessionLink;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
 const requestWebView2Focus = @import("browser_pane.zig").requestWebView2Focus;
 const pointInRect = @import("chat_composer.zig").pointInRect;
@@ -1760,7 +1760,7 @@ fn chatImageAt(x: i32, y: i32, out: []u8) ?[]const u8 {
 
 fn chatOpenUrlBytes(url: []const u8) void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    navigateBrowserPaneWithActivation(app_state.active_shell, url, true);
+    if (!openSessionLink(app_state.active_shell, url)) return;
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
 
@@ -3415,7 +3415,7 @@ pub fn openClickedLink(url: []const u16) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     var bytes: [8192]u8 = undefined;
     const n = clickedLinkUrl(url, &bytes) orelse return;
-    navigateBrowserPaneWithActivation(app_state.active_shell, bytes[0..n], true);
+    if (!openSessionLink(app_state.active_shell, bytes[0..n])) return;
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
 
