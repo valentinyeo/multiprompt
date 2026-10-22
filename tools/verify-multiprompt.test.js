@@ -346,7 +346,7 @@ test('IGSH-522: workspace return grants a bounded owned-input handoff, never bac
   const switching = read('src/workspaces.zig');
   assertsWorkspaceFocusHandoff(switching);
   for (const [before, after] of [
-    ['!app_state.g_restoring and ', ''],
+    ['if (!app_state.g_restoring and !app_state.g_account_applying and', 'if (!app_state.g_account_applying and'],
     ['!app_state.g_account_applying and ', ''],
     ['@import("focus.zig").foregroundIsOurs()', 'true'],
     ['app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd', 'app_state.shells[idx].browser_hwnd'],
@@ -578,7 +578,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
       "name = 'normal-close-selection'", "Focus-Palette 'Restore first' $firstIndex",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
-      "if ($result.checks.Count -ne 2) { throw", "Snapshot 'after'",
+      "if ($result.checks.Count -ne 4) { throw", "Snapshot 'after'",
     ]) {
       const next = recipe.indexOf(step, offset + 1);
       assert.ok(next > offset, `missing or misordered ${step}`);
@@ -656,6 +656,8 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
       '$state = Read-Inbox', '$saved = Read-Session', '$_.sid -eq $state.active_shell_id',
       '$selected.Count -eq 1', '$selected[0].name -ceq $Name', '$selected[0].ws -eq $Workspace',
       '$state.active_workspace -eq $Workspace', '$saved.active_workspace -eq $Workspace',
+      "$state.PSObject.Properties['starred_view']", "$saved.PSObject.Properties['starred_view']",
+      '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
       '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId',
       '$saved.tabs[$saved.active_tab].name -ceq $Name', ").Count -eq 3",
     ]) assert.ok(source.includes(required), required);
@@ -707,5 +709,117 @@ test('ISSUE-569 selection persistence is independent of deferred browser startup
     broken[file] = broken[file].replace(before, after);
     assert.notEqual(broken[file], sources[file]);
     assert.throws(() => contract(...broken));
+  }
+});
+
+
+test('ISSUE-569 Starred restore persists the view and reuses the real workspace entry path', () => {
+  function contract(session, inbox, workspaces) {
+    const save = session.slice(session.indexOf('pub fn saveSessionTo('), session.indexOf('fn mergeStartupSelection('));
+    assert.match(save, /!app_state.g_single_window or app_state.g_starred_workspace or app_state.shells\[i\].workspace == app_state.g_active_workspace/);
+    assert.ok(save.includes('\\"starred_view\\":{}'));
+    assert.match(save, /app_state.shells\[app_state.active_shell\].shell_id, app_state.g_starred_workspace/);
+    const merge = session.slice(session.indexOf('fn mergeStartupSelection('), session.indexOf('fn selectedSavedTab('));
+    assert.match(merge, /"starred_view", \.\{ \.bool = json_reader.boolTrue\(live.value, "starred_view"\) \}/);
+    const view = session.slice(session.indexOf('fn restoreStarredView('), session.indexOf('pub fn saveSession()'));
+    assert.match(view, /app_state.g_starred_workspace = false;/);
+    assert.match(view, /if \(!starred or !app_state.g_single_window or app_state.active_shell >= app_state.shell_count\) return;/);
+    assert.match(view, /if \(!@import\("workspaces.zig"\).starredShellVisible\(app_state.active_shell\)\) return;/);
+    assert.match(view, /app_state.g_starred_last_shell = app_state.shells\[app_state.active_shell\].shell_id;/);
+    assert.match(view, /@import\("workspaces.zig"\).switchToWorkspace\(@import\("workspace_view.zig"\).starred\);/);
+    assert.doesNotMatch(view, /g_starred_workspace = true|SetTimer|focusActiveShell|loadInboxModel/);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
+    assert.match(restore, /const restore_starred = if \(@import\("launch_cache.zig"\).pending and @import\("launch_cache.zig"\).selected_shell_id != 0\)\s+app_state.g_starred_workspace\s+else\s+json_reader.boolTrue\(json, "starred_view"\);/);
+    assert.ok(restore.indexOf('restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));') > restore.indexOf('seedActiveWorkspaceLastShell('));
+    assert.match(inbox, /active_workspace\\":\{d\},\\"starred_view\\":\{\}/);
+    assert.match(inbox, /app_state.g_active_workspace,\s+app_state.g_starred_workspace,/);
+    const entry = workspaces.slice(workspaces.indexOf('if (ws_in == @import("workspace_view.zig").starred)'), workspaces.indexOf('if (ws_in >= app_state.g_lws_count'));
+    assert.match(entry, /if \(!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0\) saveSession\(\);/);
+    for (const name of [
+      'ISSUE-569 saved Starred view restores the same favorite session',
+      'ISSUE-569 same favorite saved at home restores home instead of Starred',
+      'ISSUE-569 saved Starred view falls back home when session is unfavorited',
+    ]) assert.ok(session.includes(`test "${name}"`), name);
+    const fixture = session.slice(session.indexOf('fn testStarredSelectionRoundTrip('), session.indexOf('test "ISSUE-569 filtered save'));
+    for (const required of [
+      'saveSessionTo(path, null)', 'selectedSavedTab(parsed.value, tabs[0..count], 0)',
+      'json_reader.boolean(json_reader.field(parsed.value, "starred_view"), !saved_starred)',
+      'restoreStarredView(json_reader.boolTrue(parsed.value, "starred_view"))',
+      'saved_starred and favorite_on_restore, app_state.g_starred_workspace',
+      '@as(u32, 42), app_state.shells[app_state.active_shell].shell_id',
+      '@as(u8, 1), app_state.g_active_workspace',
+      'testStarredSelectionRoundTrip(true, true)', 'testStarredSelectionRoundTrip(false, true)',
+      'testStarredSelectionRoundTrip(true, false)',
+    ]) assert.ok(fixture.includes(required), required);
+    assert.match(session, /expect\(json_reader.boolTrue\(parsed.value, "starred_view"\)\)/);
+    assert.match(session, /expect\(!json_reader.boolTrue\(new_parsed.value, "starred_view"\)\)/);
+  }
+  const sources = [read('src/session.zig'), read('src/inbox.zig'), read('src/workspaces.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, 'or app_state.g_starred_workspace or', 'or'],
+    [0, ',\\"starred_view\\":{}', ''],
+    [0, '.bool = json_reader.boolTrue(live.value, "starred_view")', '.bool = false'],
+    [0, 'if (!@import("workspaces.zig").starredShellVisible(app_state.active_shell)) return;', ''],
+    [0, 'app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;', ''],
+    [0, 'restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));', ''],
+    [1, ',\\"starred_view\\":{}', ''],
+    [2, '        if (!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0) saveSession();', ''],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken));
+  }
+});
+
+test('ISSUE-569 journey restores the same favorite in Starred and at home with real keys', () => {
+  function contract(driver) {
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    let offset = -1;
+    for (const step of [
+      "Press @(0x12, 0x53) 'Alt+S:", "'middle favorite persisted'",
+      "Press @(0x12, 0x31) 'Alt+1:", "Focus-Palette 'Restore middle' $middleIndex",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "Restart-SessionRestore 'normal-close' $false",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "name = 'starred-view-selection'",
+      "Press @([byte]0x12, [byte](0x32 + $workspace))",
+      "Focus-Palette 'Restore middle' $middleIndex",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
+      "Restart-SessionRestore 'favorite-home-kill' $true",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
+      "'same session remains a favorite at home after kill'",
+      "'favorite-home-kill-after.inbox.json'", "'favorite-home-kill-after.session.json'",
+      "name = 'favorite-home-selection'", "Restart-SessionRestore 'process-kill' $true",
+      'if ($result.checks.Count -ne 4) { throw',
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    const assertion = driver.slice(driver.indexOf('function Assert-SessionRestoreSelection('), driver.indexOf('function Select-Theme('));
+    for (const required of [
+      '[bool]$Starred = $false', "$state.PSObject.Properties['starred_view']",
+      "$saved.PSObject.Properties['starred_view']", '$state.starred_view -eq $Starred',
+      '$saved.starred_view -eq $Starred',
+    ]) assert.ok(assertion.includes(required), required);
+  }
+  contract(control);
+  for (const required of [
+    "Press @(0x12, 0x53) 'Alt+S: favorite the middle restore session'",
+    "Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'",
+    "Press @([byte]0x12, [byte](0x32 + $workspace))",
+    "Restart-SessionRestore 'favorite-home-kill' $true",
+    '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
+    "name = 'starred-view-selection'", "name = 'favorite-home-selection'",
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken));
+  }
+  const map = read(skill + 'features/session-restore.md');
+  for (const required of ['starred-view-selection', 'favorite-home-selection', 'Alt+S', 'Alt+1', 'starred_view', 'favorite-home-kill-after']) {
+    assert.ok(map.includes(required), required);
   }
 });

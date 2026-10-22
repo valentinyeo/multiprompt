@@ -113,7 +113,7 @@ test('IGSH-457 Starred uses shared live membership and digit mapping on every na
   assert.match(inbox, /const favoriteSplitMatches = @import\("workspace_view.zig"\).splitMatches/);
   assert.match(workspaces, /@import\("workspace_view.zig"\).contains\(true, 0, shell.workspace, shell.favorite\)/);
   const starredSwitch = workspaces.slice(workspaces.indexOf('if (ws_in == @import("workspace_view.zig").starred)'), workspaces.indexOf('if (ws_in >= app_state.g_lws_count'));
-  assert.match(starredSwitch, /updateMainWindowTitle\(\);\s*_ = InvalidateRect\(app_state.g_main_hwnd, null, 0\);\s*return;/);
+  assert.match(starredSwitch, /updateMainWindowTitle\(\);\s*_ = InvalidateRect\(app_state.g_main_hwnd, null, 0\);\s*if \(!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0\) saveSession\(\);\s*return;/);
   assert.equal((hook.match(/WM_APP_SWITCH_WORKSPACE, @import\("workspace_view.zig"\).fromDigit\(kb.vkCode - 0x30\).\?/g) || []).length, 2);
   assert.doesNotMatch(hook, /WM_APP_SWITCH_WORKSPACE, kb.vkCode - 0x31/);
   assert.match(sidebar, /if \(app_state.g_starred_workspace\) \{[\s\S]*?starredShellVisible\(i\)[\s\S]*?return count;/);

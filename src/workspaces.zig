@@ -2724,6 +2724,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
         }
         updateMainWindowTitle();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        if (!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0) saveSession();
         return;
     }
     if (ws_in >= app_state.g_lws_count or app_state.g_ws_snoozed[ws_in]) return;

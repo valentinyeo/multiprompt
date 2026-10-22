@@ -900,18 +900,20 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
     Doctor
 }
 
-function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]$WorkspaceId) {
+function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]$WorkspaceId, [bool]$Starred = $false) {
     Wait-Until {
         $state = Read-Inbox
         $saved = Read-Session
         if ($null -eq $state -or $null -eq $saved) { return $false }
         $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
-        $selected.Count -eq 1 -and $selected[0].name -ceq $Name -and
+        $state.PSObject.Properties['starred_view'] -and $saved.PSObject.Properties['starred_view'] -and
+            $state.starred_view -eq $Starred -and $saved.starred_view -eq $Starred -and
+            $selected.Count -eq 1 -and $selected[0].name -ceq $Name -and
             $selected[0].ws -eq $Workspace -and $state.active_workspace -eq $Workspace -and
             $saved.active_workspace -eq $Workspace -and $saved.workspaces[$Workspace].wid -ceq $WorkspaceId -and
             $saved.tabs[$saved.active_tab].name -ceq $Name -and
             @($state.shells | Where-Object { $_.name -in @('Restore first', 'Restore middle', 'Restore last') }).Count -eq 3
-    } "published and persisted selection is $Name in the original workspace"
+    } "published and persisted selection is $Name in the original workspace, Starred=$Starred"
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot) {
@@ -1078,13 +1080,37 @@ try {
             Focus-Palette 'Restore middle' $middleIndex
             Press @(0x0D) 'Enter: select the middle session by name'
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId
+            Press @(0x12, 0x53) 'Alt+S: favorite the middle restore session'
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.favorite -eq $true }).Count -eq 1 } 'middle favorite persisted'
+            Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'
+            Focus-Palette 'Restore middle' $middleIndex
+            Press @(0x0D) 'Enter: select the favorite in Starred'
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
             Snapshot 'action'
             Restart-SessionRestore 'normal-close' $false
-            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.favorite -eq $true }).Count -eq 1 } 'favorite retained after Starred restore'
             Save-Json (Read-Inbox) 'normal-close-after.inbox.json'
             Save-Json (Read-Session) 'normal-close-after.session.json'
             Snapshot 'normal-close-after'
             $result.checks += @{ name = 'normal-close-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
+            $result.checks += @{ name = 'starred-view-selection'; session = 'Restore middle'; starred_view = (Read-Inbox).starred_view }
+            Press @([byte]0x12, [byte](0x32 + $workspace)) 'Alt+workspace digit: return to the favorite home workspace'
+            $tabs = @((Read-Session).tabs)
+            $middleIndex = -1
+            for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
+            if ($middleIndex -lt 0) { throw 'Favorite session missing after normal close' }
+            Focus-Palette 'Restore middle' $middleIndex
+            Press @(0x0D) 'Enter: select the same favorite in its home workspace'
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false
+            Snapshot 'favorite-home-action'
+            Restart-SessionRestore 'favorite-home-kill' $true
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.favorite -eq $true }).Count -eq 1 } 'same session remains a favorite at home after kill'
+            Save-Json (Read-Inbox) 'favorite-home-kill-after.inbox.json'
+            Save-Json (Read-Session) 'favorite-home-kill-after.session.json'
+            Snapshot 'favorite-home-kill-after'
+            $result.checks += @{ name = 'favorite-home-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; starred_view = (Read-Inbox).starred_view }
             $tabs = @((Read-Session).tabs)
             $firstIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore first') { $firstIndex = $i } }
@@ -1098,7 +1124,7 @@ try {
             Save-Json (Read-Inbox) 'process-kill-after.inbox.json'
             Save-Json (Read-Session) 'process-kill-after.session.json'
             $result.checks += @{ name = 'process-kill-selection'; session = 'Restore first'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
-            if ($result.checks.Count -ne 2) { throw 'Both restore checks are required' }
+            if ($result.checks.Count -ne 4) { throw 'All selection and workspace-view restore checks are required' }
             Snapshot 'after'
         }
         'workspaces' {
