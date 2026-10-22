@@ -111,41 +111,43 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker\]/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
 test('aggregate routing requires the update and Worker jobs and rejects every unsuccessful heavy dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker\]/);
+  assert.match(aggregate, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
   assert.match(aggregate, /UPDATE: \$\{\{ needs\.test-windows-update\.result \}\}/);
   assert.match(aggregate, /WORKER: \$\{\{ needs\.test-worker\.result \}\}/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /if require_jobs success true success success success "\$result" success; then exit 1; fi/);
-  assert.match(aggregate, /if require_jobs success true success success success success "\$result"; then exit 1; fi/);
-  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER"/);
+  assert.match(aggregate, /if require_jobs success true success success success "\$result" success success; then exit 1; fi/);
+  assert.match(aggregate, /if require_jobs success true success success success success "\$result" success; then exit 1; fi/);
+  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE"/);
+  assert.match(aggregate, /UPDATE_SOURCE: \$\{\{ needs\.test-update-source\.result \}\}/);
+  assert.match(aggregate, /if require_jobs success true success success success success success "\$result"; then exit 1; fi/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success' };
+  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Aggregate routing controls passed/);
-  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', BUILD: 'skipped', UPDATE: 'skipped', WORKER: 'skipped' }).status, 0);
-  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'BUILD', 'UPDATE', 'WORKER']) {
+  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', BUILD: 'skipped', UPDATE: 'skipped', WORKER: 'skipped', UPDATE_SOURCE: 'skipped' }).status, 0);
+  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'BUILD', 'UPDATE', 'WORKER', 'UPDATE_SOURCE']) {
     for (const status of ['failure', 'cancelled', 'skipped']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
   }
   assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
-test('four Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
+test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
-  assert.deepEqual(matrices, [[1, 2, 3, 4], [1, 2, 3]]);
+  assert.deepEqual(matrices, [[1, 2, 3, 4, 5], [1, 2, 3]]);
   assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
   assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
-  for (const [option, count, array] of [['test-group', 4, 'test_groups'], ['test-vps-group', 3, 'vps_groups']]) {
+  for (const [option, count, array] of [['test-group', 5, 'test_groups'], ['test-vps-group', 3, 'vps_groups']]) {
     assert.ok(build.includes(`"Run one ${array === 'test_groups' ? 'desktop' : 'server'} test group (1-${count})"`));
     assert.ok(build.includes(`if (group < 1 or group > ${array}.len) @panic("${option} must be between 1 and ${count}")`));
     assert.ok(build.includes(`for (${array}) |group| ${array === 'test_groups' ? 'test_step' : 'vps_test_step'}.dependOn(group)`));

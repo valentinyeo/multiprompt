@@ -146,8 +146,9 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
+    const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
     for (const cache of caches) {
-      const guard = windows?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
+      const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
       assert.match(cache, new RegExp(`if: ${guard}github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
@@ -157,15 +158,15 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       }
     }
     if (file === 'test.yml') {
-      assert.equal(caches.length, 14);
+      assert.equal(caches.length, 16);
       for (let i = 0; i < caches.length; i += 2) {
         assert.ok(caches[i].includes('uses: actions/cache/restore@'));
         assert.ok(caches[i + 1].includes('uses: actions/cache@'));
         assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
       }
       for (const [name, cap, prefix, run] of [
-        ['test', 1600, 'shards-v5-group-', 'Run tests'],
-        ['test-vps', 1600, 'shards-v5-vps-', 'Run server tool tests'],
+        ['test', 1600, 'shards-v6-group-', 'Run tests'],
+        ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests'],
       ]) {
         const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
         const steps = job.split(/(?=^      - )/m);

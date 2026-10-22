@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: [1, 2, 3, 4, 5]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -121,9 +121,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -131,9 +131,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v5-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -162,25 +162,18 @@ jobs:
           du -sh "$ZIG_GLOBAL_CACHE_DIR"
           if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
-  test-windows-update:
-    needs: [changes, build-windows]
+  test-update-source:
+    needs: changes
     if: needs.changes.outputs.heavy == 'true'
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      MULTIPROMPT_TEST_SIGNING_KEY: ${{ github.workspace }}/update-verifier/update-test-key.der
     steps:
-      - name: Keep LF line endings
-        run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
       - name: Check version rule
         id: rule
         shell: bash
@@ -190,13 +183,9 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Test release update source regressions
         if: steps.rule.outputs.kind != 'STAMP'
-        with:
-          name: update-verifier-x64-${{ github.run_id }}
-          path: update-verifier
-      - name: Test safe release updates
-        if: steps.rule.outputs.kind != 'STAMP'
+        shell: pwsh
         run: |
           $before = "$env:RUNNER_TEMP/update-review-before"
           New-Item -ItemType Directory -Force $before | Out-Null
@@ -220,9 +209,79 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tools/update-release.test.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Restore Zig toolchain (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Cache Zig toolchain
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Install Zig 0.16.0
+        run: |
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Reject placeholder release signing key
+        run: |
+          key=src/release_signing_public_key.txt
+          cp "$key" "$RUNNER_TEMP/release-signing-public-key.txt"
+          trap 'cp "$RUNNER_TEMP/release-signing-public-key.txt" "$key"' EXIT
+          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$key"
+          if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "$RUNNER_TEMP/placeholder-error.txt" 2>&1; then
+            echo 'Release build did not reject the fake public key loudly'
+            exit 1
+          fi
+          grep -F 'Release signing public key is still the all-zero placeholder' "$RUNNER_TEMP/placeholder-error.txt"
+          echo 'Release placeholder rejected; ordinary tests remain buildable'
+
+  test-windows-update:
+    needs: [changes, build-windows]
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [Lifecycle, Rollback]
+    env:
+      MULTIPROMPT_TEST_SIGNING_KEY: ${{ github.workspace }}/update-verifier/update-test-key.der
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Check version rule
+        id: rule
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          else
+            node tools/version-stamp.mjs check HEAD^ HEAD
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.rule.outputs.kind != 'STAMP'
+        with:
+          name: update-verifier-x64-${{ github.run_id }}
+          path: update-verifier
+      - name: Test safe release updates
+        if: steps.rule.outputs.kind != 'STAMP'
+        run: |
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe"
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   test-vps:
@@ -281,9 +340,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v5-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v5-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -291,9 +350,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v5-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v5-vps-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         run: |
@@ -313,7 +372,7 @@ jobs:
         if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node --test tools/zsb-iframe.test.js
       - name: Run session restore fixtures
-        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node tools/json-reader/benchmark.mjs --fixtures-only
       - name: Bound Zig cache before save
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -435,19 +494,6 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Reject placeholder release signing key
-        if: matrix.arch == 'x64'
-        run: |
-          key=src/release_signing_public_key.txt
-          cp "$key" "$RUNNER_TEMP/release-signing-public-key.txt"
-          trap 'cp "$RUNNER_TEMP/release-signing-public-key.txt" "$key"' EXIT
-          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$key"
-          if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "$RUNNER_TEMP/placeholder-error.txt" 2>&1; then
-            echo 'Release build did not reject the fake public key loudly'
-            exit 1
-          fi
-          grep -F 'Release signing public key is still the all-zero placeholder' "$RUNNER_TEMP/placeholder-error.txt"
-          echo 'Release placeholder rejected; ordinary tests remain buildable'
       - name: Build release executables for arm64
         if: matrix.arch == 'arm64'
         run: zig build -Dtarget=aarch64-windows-gnu --summary all
@@ -470,7 +516,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [changes, test, test-vps, build-windows, test-windows-update, test-worker]
+    needs: [changes, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -484,25 +530,27 @@ jobs:
           BUILD: ${{ needs.build-windows.result }}
           UPDATE: ${{ needs.test-windows-update.result }}
           WORKER: ${{ needs.test-worker.result }}
+          UPDATE_SOURCE: ${{ needs.test-update-source.result }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1
             case "$2" in
               false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] && [ "$6" = success ] && [ "$7" = success ] ;;
+              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] && [ "$6" = success ] && [ "$7" = success ] && [ "$8" = success ] ;;
               *) return 1 ;;
             esac
           }
-          require_jobs success true success success success success success
-          require_jobs success false skipped skipped skipped skipped skipped
+          require_jobs success true success success success success success success
+          require_jobs success false skipped skipped skipped skipped skipped skipped
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped skipped skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success success success success; then exit 1; fi
-            if require_jobs success true success "$result" success success success; then exit 1; fi
-            if require_jobs success true success success "$result" success success; then exit 1; fi
-            if require_jobs success true success success success "$result" success; then exit 1; fi
-            if require_jobs success true success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" false skipped skipped skipped skipped skipped skipped; then exit 1; fi
+            if require_jobs success true "$result" success success success success success; then exit 1; fi
+            if require_jobs success true success "$result" success success success success; then exit 1; fi
+            if require_jobs success true success success "$result" success success success; then exit 1; fi
+            if require_jobs success true success success success "$result" success success; then exit 1; fi
+            if require_jobs success true success success success success "$result" success; then exit 1; fi
+            if require_jobs success true success success success success success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success success success success; then exit 1; fi
+          if require_jobs success invalid success success success success success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER"
+          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE"

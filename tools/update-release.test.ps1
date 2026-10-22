@@ -1,4 +1,4 @@
-param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '')
+param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script:manifestFault = ''
@@ -62,215 +62,227 @@ try {
     $env:MULTIPROMPT_NO_LOGIN = ''
     Copy-Item -LiteralPath $Verifier -Destination "$Root/verifier.exe" -Force
     $env:MULTIPROMPT_TEST_VERIFIER = "$Root/verifier.exe"
-    $eventName = 'Local\MultipromptSignIn-' + [guid]::NewGuid().ToString('N')
-    $event = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
-    $timer = [Diagnostics.Stopwatch]::StartNew()
-    $signedOut = Start-Process -FilePath "$Root/verifier.exe" -ArgumentList "--name `"Review sign in`" --update-ready $eventName" -PassThru
-    try {
-        Assert ($event.WaitOne(15000)) 'Sign-in screen did not report responsive readiness'
-        $signedOut.Refresh()
-        Assert (-not $signedOut.HasExited -and $signedOut.MainWindowHandle -ne [IntPtr]::Zero) 'Sign-in readiness had no live main window'
-        Start-Sleep -Seconds 2
-        Assert ($signedOut.Responding) 'Sign-in process is unresponsive during background network check'
-        if ($Evidence) {
-            New-Item -ItemType Directory -Force $Evidence | Out-Null
-            Add-Type -AssemblyName System.Drawing
-            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
-            $rectangle = New-Object UpdateProof+Rect
-            Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
-            $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
-            $graphics = [Drawing.Graphics]::FromImage($bitmap)
-            $dc = $graphics.GetHdc()
-            try { Assert ([UpdateProof]::PrintWindow($signedOut.MainWindowHandle, $dc, 2)) 'Sign-in screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-            try { $bitmap.Save((Join-Path $Evidence 'sign-in-ready.png')) } finally { $bitmap.Dispose() }
+    if ($TestGroup -ne 'Rollback') {
+        $eventName = 'Local\MultipromptSignIn-' + [guid]::NewGuid().ToString('N')
+        $event = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $signedOut = Start-Process -FilePath "$Root/verifier.exe" -ArgumentList "--name `"Review sign in`" --update-ready $eventName" -PassThru
+        try {
+            Assert ($event.WaitOne(15000)) 'Sign-in screen did not report responsive readiness'
+            $signedOut.Refresh()
+            Assert (-not $signedOut.HasExited -and $signedOut.MainWindowHandle -ne [IntPtr]::Zero) 'Sign-in readiness had no live main window'
+            Start-Sleep -Seconds 2
+            Assert ($signedOut.Responding) 'Sign-in process is unresponsive during background network check'
+            if ($Evidence) {
+                New-Item -ItemType Directory -Force $Evidence | Out-Null
+                Add-Type -AssemblyName System.Drawing
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
+                $rectangle = New-Object UpdateProof+Rect
+                Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($signedOut.MainWindowHandle, $dc, 2)) 'Sign-in screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'sign-in-ready.png')) } finally { $bitmap.Dispose() }
+            }
+            Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Signed-out startup restored sessions'
+            Passed 'sign-in screen responsive ready before deferred tabs'
+        } finally {
+            Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $signedOut.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            if (-not $signedOut.HasExited) { $signedOut.Kill(); $signedOut.WaitForExit() }
+            $event.Dispose()
         }
-        Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Signed-out startup restored sessions'
-        Passed 'sign-in screen responsive ready before deferred tabs'
-    } finally {
-        Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $signedOut.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        if (-not $signedOut.HasExited) { $signedOut.Kill(); $signedOut.WaitForExit() }
-        $event.Dispose()
-    }
-    Assert ($timer.Elapsed.TotalSeconds -lt 20) 'Sign-in launch was blocked'
-    $env:IGSH_246 = '0'
-    Select-Release 'v1.10.0'
-    $cold = Join-Path $Root 'cold.exe'
-    Copy-Item -LiteralPath $Verifier -Destination $cold
-    Assert (Save-Update $cold '0.0.0' 'x64') 'Cold-launch fixture was not staged'
-    $env:IGSH_246 = '1'
-    $coldStart = Start-Process $cold -ArgumentList ' "--name" "Review Desk" "--other" "C:\tail\\"' -PassThru
-    Assert ($coldStart.WaitForExit(20000)) 'Cold launch did not hand off its staged update before restoring tabs'
-    Wait-File "$cold.starts"
-    $coldDeadline = [DateTime]::UtcNow.AddSeconds(20)
-    while (Test-Path "$cold.update/ready.txt") {
-        if ([DateTime]::UtcNow -gt $coldDeadline) { throw 'Cold staged update did not finish' }
-        Start-Sleep -Milliseconds 100
-    }
-    Assert ((Get-FileHash $cold).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'Cold staged swap did not install verified update'
-    Assert ((Get-Content "$cold.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Real app update did not forward launch arguments'
-    Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Cold update restored tabs before swapping'
-    Passed 'real cold-launch staged apply preserves launch arguments before tabs'
-    Stop-FixtureApps
-    Remove-Item "$Root/zigshell-bridge.exe" -Force
-    $env:IGSH_246 = '0'
-
-
-    Copy-Item "$Root/fixture.exe" $target -Force
-    Copy-Item "$Root/fixture.exe" "$Root/zigshell-bridge.exe" -Force
-    $oldHash = (Get-FileHash $target).Hash
-    $launch = ' "--name" "Review Desk" "--other" "C:\tail\\"'
-    $encodedArguments = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($launch))
-    Select-Release 'v1.10.0'
-    New-Item -ItemType Directory -Force $dir | Out-Null
-    Copy-Item "$script:releaseFolder/SHA256SUMS.txt*" $dir -Force
-    Assert-Manifest $target $dir
-    Assert (Save-Update $target '1.9.0' 'x64') 'Valid manifest signature did not stage an update'
-    Passed 'valid signature accepted'
-    Copy-Item "$script:releaseFolder/wrong.sig" "$dir/SHA256SUMS.txt.sig" -Force
-    Refuses { Assert-Manifest $target $dir } 'Wrong signing key accepted'
-    $script:manifestFault = 'wrong'
-    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
-    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
-    Passed 'wrong key rejected'
-    Copy-Item "$script:releaseFolder/SHA256SUMS.txt.sig" "$dir/SHA256SUMS.txt.sig" -Force
-    [IO.File]::AppendAllText("$dir/SHA256SUMS.txt", 'tampered')
-    Refuses { Assert-Manifest $target $dir } 'Tampered manifest accepted'
-    $script:manifestFault = 'tampered'
-    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
-    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
-    Passed 'tampered SHA256SUMS rejected'
-    Copy-Item "$script:releaseFolder/SHA256SUMS.txt" "$dir/SHA256SUMS.txt" -Force
-    Remove-Item "$dir/SHA256SUMS.txt.sig"
-    Refuses { Assert-Manifest $target $dir } 'Missing signature accepted'
-    $script:manifestFault = 'missing'
-    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
-    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
-    Passed 'missing signature rejected'
-
-    Assert ((Get-ReleaseVersion 'v1.10.0') -gt (Get-ReleaseVersion '1.9.999')) 'Numeric version comparison'
-    Assert ((Get-ReleaseVersion '1.2.3') -eq (Get-ReleaseVersion 'v1.2.3')) 'Equal versions'
-    Assert ((Get-ReleaseVersion '2.0.0') -gt (Get-ReleaseVersion '1.999.999')) 'Major comparison'
-    foreach ($invalid in @('1.2', '1.2.3-beta', '1.2.3.4', '01.2.3', 'v1.2.3;bad')) { Refuses { Get-ReleaseVersion $invalid } 'Invalid version accepted' }
-    Passed 'version comparison'
-    $signatureBytes = [IO.File]::ReadAllBytes("$script:releaseFolder/SHA256SUMS.txt.sig")
-    $signatureBytes[0] = $signatureBytes[0] -bxor 1
-    [IO.File]::WriteAllBytes("$dir/SHA256SUMS.txt.sig", $signatureBytes)
-    Refuses { Assert-Manifest $target $dir } 'Invalid signature accepted'
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Invalid signature marked ready'
-    $script:release.author.login = 'untrusted-user'
-    Refuses { Save-Update $target '1.9.0' 'x64' } 'Untrusted author accepted'
-    $script:release.author.login = 'github-actions[bot]'
-    $script:release.assets[0].browser_download_url = 'https://example.com/untrusted.exe'
-    Refuses { Save-Update $target '1.9.0' 'x64' } 'External asset URL accepted'
-    Select-Release 'v1.10.0'
-    Assert (-not (Save-Update $target '2.0.0' 'x64')) 'Downgrade staged'
-    Assert (-not (Save-Update $target '1.10.0' 'x64')) 'Equal release staged'
-    Assert (Save-Update $target '1.9.0' 'x64') 'Verified update was not staged'
-    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Background check replaced installation'
-    Assert (-not (Test-Path "$target.starts")) 'Background check launched the app'
-    Assert (-not (Test-Path "$target.previous.exe")) 'Background check installed without consent'
-    Passed 'no automatic restart while running'
-    [IO.File]::AppendAllText("$dir/next.exe", 'tampered')
-    Refuses { Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" 'multiprompt-x64.exe' $target } 'Checksum mismatch accepted'
-    Passed 'checksum mismatch refused'
-    Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage good checksum'
-    [IO.File]::AppendAllText("$dir/next-bridge.exe", 'tampered')
-    Refuses { Assert-Update "$dir/next-bridge.exe" "$dir/SHA256SUMS.txt" 'zigshell-bridge-x64.exe' $target } 'Bridge checksum mismatch accepted'
-    Passed 'matching bridge checksum enforced'
-    Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage good bridge'
-    Refuses { Install-Update $target 'x64' '' '2.0.0' } 'Staged downgrade accepted'
-    Stop-FixtureApps
-    Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage after stale refusal'
-
-    $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::Unicode.GetBytes($target.ToLowerInvariant())))).Replace('-', '')
-    $mutex = New-Object Threading.Mutex($false, $mutexName)
-    $null = $mutex.WaitOne()
-    $acceptedName = 'Local\MultipromptApplyTest-' + [guid]::NewGuid().ToString('N')
-    $accepted = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $acceptedName)
-    try {
-        $updater = [IO.Path]::GetFullPath("$PSScriptRoot/../src/update_release.ps1")
-        $apply = Start-Process powershell.exe -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$updater`" -Mode Apply -Exe `"$target`" -Current 1.9.0 -Arch x64 -AcceptedEvent $acceptedName -LaunchArguments $encodedArguments" -PassThru
-        Assert ($accepted.WaitOne(5000)) 'Restart did not acknowledge while download lock was held'
-        Start-Sleep -Seconds 16
-        Assert (-not $apply.HasExited) 'Apply silently abandoned download lock'
-    } finally { $mutex.ReleaseMutex(); $mutex.Dispose(); $accepted.Dispose() }
-    Assert ($apply.WaitForExit(30000)) 'Apply did not finish after download completed'
-    Assert ($apply.ExitCode -eq 0) 'First signed swap failed'
-    Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'First app swap mismatch'
-    Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.10.0/zigshell-bridge-x64.exe").Hash) 'First bridge swap mismatch'
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Successful card did not clear'
-    Assert ((Get-Content "$target.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Launch arguments not preserved'
-    Passed 'restart during download lock finishes after download'
-    Passed 'first signed local release swap'
-    Stop-FixtureApps
-
-    $collector = Start-Process "$target.previous.exe" -ArgumentList '--usage-telemetry' -PassThru
-    Wait-File "$target.previous.exe.telemetry-ready"
-    $bridgeHelper = Start-Process "$Root/zigshell-bridge.exe" -PassThru
-    Wait-File "$Root/zigshell-bridge.exe.starts"
-    Assert (-not $collector.HasExited -and -not $bridgeHelper.HasExited) 'Old helpers did not hold executable locks'
-    Select-Release 'v1.11.0'
-    Assert (Save-Update $target '1.10.0' 'x64') 'Second release not staged'
-    Install-Update $target 'x64' '' '1.10.0'
-    Assert ($collector.WaitForExit(5000) -and $bridgeHelper.WaitForExit(5000)) 'Old helper processes survived swap'
-    Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.11.0/multiprompt-x64.exe").Hash) 'Second app update failed'
-    Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.11.0/zigshell-bridge-x64.exe").Hash) 'Second bridge update failed'
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Second card did not clear'
-    Passed 'locked backup update succeeds'
-    Passed 'second consecutive update'
-    Stop-FixtureApps
-
-    $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
-    Assert ((Get-Content "$extension/manifest.json" -Raw) -match '2.0.0') 'Matching extension files were not updated'
-    Assert (-not (Test-Path "$extension/themes/current/manifest.json")) 'User-selected current theme overwritten'
-    Passed 'extension install preserves current theme'
-    $goodHash = (Get-FileHash $target).Hash
-    $bridgeHash = (Get-FileHash "$Root/zigshell-bridge.exe").Hash
-    Select-Release 'v1.12.0'
-    Assert (Save-Update $target '1.11.0' 'x64') 'Broken release not staged'
-    Refuses { Install-Update $target 'x64' '' '1.11.0' } 'Broken new executable reported success'
-    Assert ((Get-FileHash $target).Hash -eq $goodHash) 'Rollback did not restore app'
-    Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq $bridgeHash) 'Rollback did not restore bridge'
-    Assert ((Get-FileHash "$target.previous.exe").Hash -eq $goodHash) 'Previous executable not retained'
-    Assert ((Get-FileHash "$dir/failed.exe").Hash -eq (Get-FileHash "$Root/v1.12.0/multiprompt-x64.exe").Hash) 'Failed executable not quarantined'
-    Assert ((Get-Content "$dir/rejected.txt" -Raw) -eq 'v1.12.0') 'Failed version not suppressed'
-    Assert (-not (Save-Update $target '1.11.0' 'x64')) 'Failed version retried'
-    Assert (-not (Test-Path "$dir/ready.txt")) 'Failed version remains ready'
-    $rollbackDeadline = [DateTime]::UtcNow.AddSeconds(15)
-    while ((Get-Content "$target.starts" | Select-Object -Last 1) -ne '--name|Review Desk|--other|C:\tail\') {
-        if ([DateTime]::UtcNow -gt $rollbackDeadline) { throw 'Rollback arguments changed or retained readiness flag' }
-        Start-Sleep -Milliseconds 100
-    }
-    $restored = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
-    Assert ($restored.Count -eq 1) 'Rollback did not leave exactly one app running'
-    Start-Sleep -Seconds 61
-    Assert (-not $restored[0].HasExited) 'Old rollback app killed on ready deadline'
-    Passed 'rollback after failed start'
-    Passed 'immediate-exit rollback'
-    Passed 'restored app has no ready deadline'
-    Stop-FixtureApps
-
-    Select-Release 'v1.11.0'
-    Assert (Save-Update $target '1.10.0' 'x64') 'Exit-timeout fixture not staged'
-    $script:timeoutObserved = $false
-    $script:unboundedObserved = $false
-    function Get-WaitingProcesses([string]$Pids) {
-        $fake = New-Object PSObject
-        $fake | Add-Member ScriptMethod WaitForExit {
-            if ($args.Count -gt 0) { Assert ($args[0] -eq 60000) 'Wrong exit timeout'; $script:timeoutObserved = $true; return $false }
-            $script:unboundedObserved = $true
+        Assert ($timer.Elapsed.TotalSeconds -lt 20) 'Sign-in launch was blocked'
+        $env:IGSH_246 = '0'
+        Select-Release 'v1.10.0'
+        $cold = Join-Path $Root 'cold.exe'
+        Copy-Item -LiteralPath $Verifier -Destination $cold
+        Assert (Save-Update $cold '0.0.0' 'x64') 'Cold-launch fixture was not staged'
+        $env:IGSH_246 = '1'
+        $coldStart = Start-Process $cold -ArgumentList ' "--name" "Review Desk" "--other" "C:\tail\\"' -PassThru
+        Assert ($coldStart.WaitForExit(20000)) 'Cold launch did not hand off its staged update before restoring tabs'
+        Wait-File "$cold.starts"
+        $coldDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        while (Test-Path "$cold.update/ready.txt") {
+            if ([DateTime]::UtcNow -gt $coldDeadline) { throw 'Cold staged update did not finish' }
+            Start-Sleep -Milliseconds 100
         }
-        return $fake
+        Assert ((Get-FileHash $cold).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'Cold staged swap did not install verified update'
+        Assert ((Get-Content "$cold.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Real app update did not forward launch arguments'
+        Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Cold update restored tabs before swapping'
+        Passed 'real cold-launch staged apply preserves launch arguments before tabs'
+        Stop-FixtureApps
+        Remove-Item "$Root/zigshell-bridge.exe" -Force
+        $env:IGSH_246 = '0'
+
+
+        Copy-Item "$Root/fixture.exe" $target -Force
+        Copy-Item "$Root/fixture.exe" "$Root/zigshell-bridge.exe" -Force
+        $oldHash = (Get-FileHash $target).Hash
+        $launch = ' "--name" "Review Desk" "--other" "C:\tail\\"'
+        $encodedArguments = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($launch))
+        Select-Release 'v1.10.0'
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        Copy-Item "$script:releaseFolder/SHA256SUMS.txt*" $dir -Force
+        Assert-Manifest $target $dir
+        Assert (Save-Update $target '1.9.0' 'x64') 'Valid manifest signature did not stage an update'
+        Passed 'valid signature accepted'
+        Copy-Item "$script:releaseFolder/wrong.sig" "$dir/SHA256SUMS.txt.sig" -Force
+        Refuses { Assert-Manifest $target $dir } 'Wrong signing key accepted'
+        $script:manifestFault = 'wrong'
+        try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+        Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
+        Passed 'wrong key rejected'
+        Copy-Item "$script:releaseFolder/SHA256SUMS.txt.sig" "$dir/SHA256SUMS.txt.sig" -Force
+        [IO.File]::AppendAllText("$dir/SHA256SUMS.txt", 'tampered')
+        Refuses { Assert-Manifest $target $dir } 'Tampered manifest accepted'
+        $script:manifestFault = 'tampered'
+        try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+        Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
+        Passed 'tampered SHA256SUMS rejected'
+        Copy-Item "$script:releaseFolder/SHA256SUMS.txt" "$dir/SHA256SUMS.txt" -Force
+        Remove-Item "$dir/SHA256SUMS.txt.sig"
+        Refuses { Assert-Manifest $target $dir } 'Missing signature accepted'
+        $script:manifestFault = 'missing'
+        try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+        Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
+        Passed 'missing signature rejected'
+
+        Assert ((Get-ReleaseVersion 'v1.10.0') -gt (Get-ReleaseVersion '1.9.999')) 'Numeric version comparison'
+        Assert ((Get-ReleaseVersion '1.2.3') -eq (Get-ReleaseVersion 'v1.2.3')) 'Equal versions'
+        Assert ((Get-ReleaseVersion '2.0.0') -gt (Get-ReleaseVersion '1.999.999')) 'Major comparison'
+        foreach ($invalid in @('1.2', '1.2.3-beta', '1.2.3.4', '01.2.3', 'v1.2.3;bad')) { Refuses { Get-ReleaseVersion $invalid } 'Invalid version accepted' }
+        Passed 'version comparison'
+        $signatureBytes = [IO.File]::ReadAllBytes("$script:releaseFolder/SHA256SUMS.txt.sig")
+        $signatureBytes[0] = $signatureBytes[0] -bxor 1
+        [IO.File]::WriteAllBytes("$dir/SHA256SUMS.txt.sig", $signatureBytes)
+        Refuses { Assert-Manifest $target $dir } 'Invalid signature accepted'
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Invalid signature marked ready'
+        $script:release.author.login = 'untrusted-user'
+        Refuses { Save-Update $target '1.9.0' 'x64' } 'Untrusted author accepted'
+        $script:release.author.login = 'github-actions[bot]'
+        $script:release.assets[0].browser_download_url = 'https://example.com/untrusted.exe'
+        Refuses { Save-Update $target '1.9.0' 'x64' } 'External asset URL accepted'
+        Select-Release 'v1.10.0'
+        Assert (-not (Save-Update $target '2.0.0' 'x64')) 'Downgrade staged'
+        Assert (-not (Save-Update $target '1.10.0' 'x64')) 'Equal release staged'
+        Assert (Save-Update $target '1.9.0' 'x64') 'Verified update was not staged'
+        Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Background check replaced installation'
+        Assert (-not (Test-Path "$target.starts")) 'Background check launched the app'
+        Assert (-not (Test-Path "$target.previous.exe")) 'Background check installed without consent'
+        Passed 'no automatic restart while running'
+        [IO.File]::AppendAllText("$dir/next.exe", 'tampered')
+        Refuses { Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" 'multiprompt-x64.exe' $target } 'Checksum mismatch accepted'
+        Passed 'checksum mismatch refused'
+        Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage good checksum'
+        [IO.File]::AppendAllText("$dir/next-bridge.exe", 'tampered')
+        Refuses { Assert-Update "$dir/next-bridge.exe" "$dir/SHA256SUMS.txt" 'zigshell-bridge-x64.exe' $target } 'Bridge checksum mismatch accepted'
+        Passed 'matching bridge checksum enforced'
+        Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage good bridge'
+        Refuses { Install-Update $target 'x64' '' '2.0.0' } 'Staged downgrade accepted'
+        Stop-FixtureApps
+        Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage after stale refusal'
+
+        $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::Unicode.GetBytes($target.ToLowerInvariant())))).Replace('-', '')
+        $mutex = New-Object Threading.Mutex($false, $mutexName)
+        $null = $mutex.WaitOne()
+        $acceptedName = 'Local\MultipromptApplyTest-' + [guid]::NewGuid().ToString('N')
+        $accepted = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $acceptedName)
+        try {
+            $updater = [IO.Path]::GetFullPath("$PSScriptRoot/../src/update_release.ps1")
+            $apply = Start-Process powershell.exe -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$updater`" -Mode Apply -Exe `"$target`" -Current 1.9.0 -Arch x64 -AcceptedEvent $acceptedName -LaunchArguments $encodedArguments" -PassThru
+            Assert ($accepted.WaitOne(5000)) 'Restart did not acknowledge while download lock was held'
+            Start-Sleep -Seconds 16
+            Assert (-not $apply.HasExited) 'Apply silently abandoned download lock'
+        } finally { $mutex.ReleaseMutex(); $mutex.Dispose(); $accepted.Dispose() }
+        Assert ($apply.WaitForExit(30000)) 'Apply did not finish after download completed'
+        Assert ($apply.ExitCode -eq 0) 'First signed swap failed'
+        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'First app swap mismatch'
+        Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.10.0/zigshell-bridge-x64.exe").Hash) 'First bridge swap mismatch'
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Successful card did not clear'
+        Assert ((Get-Content "$target.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Launch arguments not preserved'
+        Passed 'restart during download lock finishes after download'
+        Passed 'first signed local release swap'
+        Stop-FixtureApps
+
+        $collector = Start-Process "$target.previous.exe" -ArgumentList '--usage-telemetry' -PassThru
+        Wait-File "$target.previous.exe.telemetry-ready"
+        $bridgeHelper = Start-Process "$Root/zigshell-bridge.exe" -PassThru
+        Wait-File "$Root/zigshell-bridge.exe.starts"
+        Assert (-not $collector.HasExited -and -not $bridgeHelper.HasExited) 'Old helpers did not hold executable locks'
+        Select-Release 'v1.11.0'
+        Assert (Save-Update $target '1.10.0' 'x64') 'Second release not staged'
+        Install-Update $target 'x64' '' '1.10.0'
+        Assert ($collector.WaitForExit(5000) -and $bridgeHelper.WaitForExit(5000)) 'Old helper processes survived swap'
+        Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.11.0/multiprompt-x64.exe").Hash) 'Second app update failed'
+        Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.11.0/zigshell-bridge-x64.exe").Hash) 'Second bridge update failed'
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Second card did not clear'
+        Passed 'locked backup update succeeds'
+        Passed 'second consecutive update'
+        Stop-FixtureApps
+
+        $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
+        Assert ((Get-Content "$extension/manifest.json" -Raw) -match '2.0.0') 'Matching extension files were not updated'
+        Assert (-not (Test-Path "$extension/themes/current/manifest.json")) 'User-selected current theme overwritten'
+        Passed 'extension install preserves current theme'
     }
-    Install-Update $target 'x64' '999' '1.10.0'
-    Assert ($script:timeoutObserved -and $script:unboundedObserved) 'Long exit was not supervised until completion'
-    Wait-File "$target.starts"
-    $running = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
-    Assert ($running.Count -eq 1) 'Exit-timeout recovery left no runnable app'
-    Passed 'exit timeout relaunches runnable old app'
+    if ($TestGroup -eq 'Rollback') {
+        $env:IGSH_246 = '0'
+        Copy-Item "$Root/v1.11.0/multiprompt-x64.exe" $target -Force
+        Copy-Item "$Root/v1.11.0/zigshell-bridge-x64.exe" "$Root/zigshell-bridge.exe" -Force
+        $launch = ' "--name" "Review Desk" "--other" "C:\tail\\"'
+    }
+    if ($TestGroup -ne 'Lifecycle') {
+        $goodHash = (Get-FileHash $target).Hash
+        $bridgeHash = (Get-FileHash "$Root/zigshell-bridge.exe").Hash
+        Select-Release 'v1.12.0'
+        Assert (Save-Update $target '1.11.0' 'x64') 'Broken release not staged'
+        Refuses { Install-Update $target 'x64' '' '1.11.0' } 'Broken new executable reported success'
+        Assert ((Get-FileHash $target).Hash -eq $goodHash) 'Rollback did not restore app'
+        Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq $bridgeHash) 'Rollback did not restore bridge'
+        Assert ((Get-FileHash "$target.previous.exe").Hash -eq $goodHash) 'Previous executable not retained'
+        Assert ((Get-FileHash "$dir/failed.exe").Hash -eq (Get-FileHash "$Root/v1.12.0/multiprompt-x64.exe").Hash) 'Failed executable not quarantined'
+        Assert ((Get-Content "$dir/rejected.txt" -Raw) -eq 'v1.12.0') 'Failed version not suppressed'
+        Assert (-not (Save-Update $target '1.11.0' 'x64')) 'Failed version retried'
+        Assert (-not (Test-Path "$dir/ready.txt")) 'Failed version remains ready'
+        $rollbackDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ((Get-Content "$target.starts" | Select-Object -Last 1) -ne '--name|Review Desk|--other|C:\tail\') {
+            if ([DateTime]::UtcNow -gt $rollbackDeadline) { throw 'Rollback arguments changed or retained readiness flag' }
+            Start-Sleep -Milliseconds 100
+        }
+        $restored = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
+        Assert ($restored.Count -eq 1) 'Rollback did not leave exactly one app running'
+        Start-Sleep -Seconds 61
+        Assert (-not $restored[0].HasExited) 'Old rollback app killed on ready deadline'
+        Passed 'rollback after failed start'
+        Passed 'immediate-exit rollback'
+        Passed 'restored app has no ready deadline'
+        Stop-FixtureApps
+
+    }
+    if ($TestGroup -ne 'Rollback') {
+        Select-Release 'v1.11.0'
+        Assert (Save-Update $target '1.10.0' 'x64') 'Exit-timeout fixture not staged'
+        $script:timeoutObserved = $false
+        $script:unboundedObserved = $false
+        function Get-WaitingProcesses([string]$Pids) {
+            $fake = New-Object PSObject
+            $fake | Add-Member ScriptMethod WaitForExit {
+                if ($args.Count -gt 0) { Assert ($args[0] -eq 60000) 'Wrong exit timeout'; $script:timeoutObserved = $true; return $false }
+                $script:unboundedObserved = $true
+            }
+            return $fake
+        }
+        Install-Update $target 'x64' '999' '1.10.0'
+        Assert ($script:timeoutObserved -and $script:unboundedObserved) 'Long exit was not supervised until completion'
+        Wait-File "$target.starts"
+        $running = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
+        Assert ($running.Count -eq 1) 'Exit-timeout recovery left no runnable app'
+        Passed 'exit timeout relaunches runnable old app'
+    }
     $journeySucceeded = $true
     Write-Host 'UPDATE BEHAVIOR PASSED'
 } finally {
