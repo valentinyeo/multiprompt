@@ -90,6 +90,7 @@ fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, flags: UINT) i3
 }
 fn chatBlockDisplayRange(_: []const u16, block: ChatBlock) struct { start: usize, len: usize } { return .{ .start = block.start, .len = block.len }; }
 fn chatImgMeasure(_: []const u16, _: i32) ChatImgLayout { return .{}; }
+fn chatBlockNaturalWidth(_: HANDLE, text: []const u16, _: ChatBlock, _: usize, max_width: i32) i32 { return @min(max_width, @as(i32, @intCast(text.len)) * 8); }
 fn chatFlowBlock(_: HANDLE, text: []const u16, _: ChatBlock, area: RECT, paint: bool, _: ?usize, _: usize, height: ?*i32) ?usize {
     if (height) |h| h.* = 20 * @as(i32, @intCast(1 + text.len * 8 / @as(usize, @intCast(@max(1, area.right - area.left)))));
     if (paint) { drawn_len = text.len; @memcpy(drawn[0..drawn_len], text); }
