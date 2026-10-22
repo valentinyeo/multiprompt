@@ -246,26 +246,27 @@ public static class PaneLayoutProof {
             int railRight = railX + 1;
             while (railRight < sidebarLeft + S(40, dpi, scale) && Distance(pixel(railRight, (railTop + railBottom) / 2), railColor) <= 2) railRight++;
             int rowTop = railTop + S(28, dpi, scale), rowBottom = rowTop + S(38, dpi, scale);
-            int iconTop = (rowTop + rowBottom - S(16, dpi, scale)) / 2;
             var rowBackground = pixel(sidebarRight - S(45, dpi, scale), (rowTop + rowBottom) / 2);
             var cardBackground = pixel(sidebarLeft + S(2, dpi, scale), (rowTop + rowBottom) / 2);
+            var sidebarBackground = pixel(sidebarRight - S(45, dpi, scale), railBottom + S(2, dpi, scale));
+            string backgroundColors = " rowBackground=" + rowBackground + " cardBackground=" + cardBackground + " sidebarBackground=" + sidebarBackground;
             var railPixelColor = pixel(railX, (rowTop + rowBottom) / 2);
             var firstIconColor = System.Drawing.Color.Empty;
             int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1, iconPixels = 0;
             for (int x = railRight; x < sidebarLeft + S(34, dpi, scale); x++) {
-                for (int y = iconTop; y < iconTop + S(16, dpi, scale); y++) {
+                for (int y = rowTop + S(4, dpi, scale); y < rowBottom - S(4, dpi, scale); y++) {
                     var color = pixel(x, y);
-                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16) continue;
+                    if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16 || Distance(color, sidebarBackground) <= 16) continue;
                     if (x < minX) firstIconColor = color;
                     minX = Math.Min(minX, x); minY = Math.Min(minY, y);
                     maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); iconPixels++;
                 }
             }
-            Require(iconPixels >= S(16, dpi, scale) && maxY - minY >= S(8, dpi, scale), "row-icon-found", "No visible CMD icon pixels in the first grouped row");
+            Require(iconPixels >= S(16, dpi, scale) && maxY - minY >= S(8, dpi, scale), "row-icon-found", "No visible CMD icon pixels in the first grouped row" + backgroundColors);
             proof["railRect"] = new int[] { railX, railTop, railRight, railBottom };
             proof["iconPixelBounds"] = new int[] { minX, minY, maxX + 1, maxY + 1 };
             proof["iconPixels"] = iconPixels;
-            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor);
+            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor + backgroundColors);
         }
         return proof;
     }
