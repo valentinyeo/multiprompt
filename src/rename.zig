@@ -235,6 +235,7 @@ pub fn beginPaletteRenameInput(idx: u32) bool {
     if (idx >= app_state.shell_count or !app_state.g_search_active) return false;
     app_state.g_search_rename_input_mode = true;
     app_state.g_search_rename_sid = app_state.shells[idx].shell_id;
+    app_state.g_search_rename_workspace_len = 0;
     app_state.g_search_rename_select_all = true;
     app_state.g_search_len = @min(app_state.shells[idx].name_len, @as(u32, @intCast(app_state.g_search_buf.len - 1)));
     @memcpy(app_state.g_search_buf[0..app_state.g_search_len], app_state.shells[idx].name[0..app_state.g_search_len]);

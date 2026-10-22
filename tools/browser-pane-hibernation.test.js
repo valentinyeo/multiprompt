@@ -62,7 +62,7 @@ test("freeze/unfreeze are idempotent, mirror the wake marker, and never block th
   const freeze = functionBody("freezeBrowserPaneForShell");
   assert.match(freeze, /shells\[idx\]\.browser_frozen\) return;/, "no-op when already frozen");
   assert.match(freeze, /window_id == 0\) return;/, "no-op until the windowId has resolved");
-  assert.match(freeze, /spawnBrowserCliHidden\(cmd\);/, "fire-and-forget: never CreateProcess-and-wait on the UI thread");
+  assert.match(freeze, /spawnBrowserCliForShell\(idx, cmd\);/, "fire-and-forget: never CreateProcess-and-wait on the UI thread");
   assert.match(freeze, /shells\[idx\]\.browser_frozen = true;/);
   assert.match(freeze, /setBrowserFrozenMarkerForShell\(idx, true\);/);
 

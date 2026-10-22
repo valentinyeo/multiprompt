@@ -2082,7 +2082,7 @@ pub fn updateSearchResults() void {
                 if (app_state.g_ws_snoozed[slot]) continue;
             }
             if (app_state.g_search_workspace_delete_mode and !workspaceCanDelete(@intCast(wi))) continue;
-            if (app_state.g_search_len == 0 or workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
+            if (workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = if (app_state.g_search_workspace_delete_mode)
                     SEARCH_WORKSPACE_DELETE_OFFSET + wi
                 else
@@ -4174,6 +4174,8 @@ fn sessionOverviewCommandMatches(query: []const u16) bool {
 }
 
 fn workspaceMatchesSearch(e: *const WorkspaceEntry, query: []const u16) bool {
+    if (app_state.g_single_window and std.mem.eql(u8, e.id[0..e.id_len], @import("startup.zig").getInstanceName()) and
+        findMyWorkspaceSlot(e.id[0..e.id_len]) == null) return false;
     if (query.len == 0) return true;
     var name_w: [64]u16 = undefined;
     const nl = @min(e.name_len, name_w.len);

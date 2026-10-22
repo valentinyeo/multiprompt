@@ -1075,7 +1075,10 @@ test("issue: native recovery carries shell identity and retained nonce, never fo
   assert.match(main, /protect-window --shell-id \{d\} --owner-pid \{d\}/);
   assert.match(main, /resolve-window --shell-id \{d\} --owner-pid \{d\}/);
   assert.match(main, /match, GetCurrentProcessId\(\)/);
-  const resolve = native.slice(native.indexOf('command, "resolve-window"'), native.indexOf('command, "manifest"', native.indexOf('command, "resolve-window"')));
+  const resolveStart = native.indexOf('command, "resolve-window"');
+  const resolveEnd = native.indexOf('command, "manifest"', resolveStart);
+  assert.ok(resolveStart >= 0 && resolveEnd > resolveStart);
+  const resolve = native.slice(resolveStart, resolveEnd);
   assert.match(resolve, /arg, "--shell-id"/);
   assert.match(resolve, /shellId/);
 });
