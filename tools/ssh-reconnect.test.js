@@ -1034,6 +1034,7 @@ test "ISSUE-511 tick waits for confirming gone" {
     shells[0].ssh_reconnect.ok();
     alive = false;
     sshDisconnect(0, "process-exit-event");
+    sshProbeStart();
     fake_now = shells[0].ssh_reconnect.next_tick;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 1), spawns);
