@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.817", .items = &.{
+        .{ .text = "Right-click a link in Chat View and choose Copy link to copy just its address.", .ticket = "IGSH-574" },
+    } },
     .{ .ver = "0.28.816", .items = &.{
         .{ .text = "You can now select and copy messages that are waiting to send in Chat View.", .ticket = "IGSH-567" },
     } },
