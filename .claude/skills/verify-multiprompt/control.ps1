@@ -39,10 +39,10 @@ public static class VerifyNative {
     [DllImport("user32.dll")] static extern IntPtr GetFocus();
     [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
-    public static void FocusFrame(IntPtr hwnd, int expectedPid) {
+    public static void FocusOwnedWindow(IntPtr hwnd, int expectedPid, IntPtr frame) {
         uint owner;
         uint target = GetWindowThreadProcessId(hwnd, out owner);
-        if (owner != expectedPid || Class(hwnd) != "ZigShell" || GetAncestor(hwnd, 3) != hwnd) throw new InvalidOperationException("Focus frame ownership mismatch");
+        if (owner != expectedPid || Class(frame) != "ZigShell" || GetAncestor(hwnd, 3) != frame || (hwnd != frame && Class(hwnd) != "Chrome_WidgetWin_1")) throw new InvalidOperationException("Focus window ownership mismatch");
         uint current = GetCurrentThreadId();
         uint foregroundOwner;
         uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundOwner);
@@ -60,7 +60,7 @@ public static class VerifyNative {
             SetForegroundWindow(hwnd);
             if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
             SetFocus(hwnd);
-            if (GetAncestor(GetFocus(), 3) != hwnd) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
+            if (GetAncestor(GetFocus(), 3) != frame) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
         } finally {
             if (targetAttached) AttachThreadInput(current, target, false);
             if (foregroundAttached) AttachThreadInput(current, foreground, false);
@@ -566,7 +566,7 @@ function Wait-ConsoleText([string]$Command) {
 function Focus-WorkspaceShell {
     Doctor
     Record 'Focus the verified owned app frame for workspace keyboard commands'
-    [VerifyNative]::FocusFrame($script:window, $process.Id)
+    [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
     Wait-Until {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($null -eq $focused) { return $false }
@@ -587,12 +587,13 @@ function Focus-WorkspaceBrowser([string]$Root) {
             $candidate = [IntPtr]$node.Current.NativeWindowHandle
             if ([VerifyNative]::GetAncestor($candidate, 3) -ne $script:window) { continue }
             $script:bookmarkWindow = $candidate
+            $script:bookmarkPid = [int]$browsers[0].ProcessId
             return $true
         }
         return $false
     } 'exact profile browser HWND belongs to the owned app' 60
     Record 'Focus the actual owned Edge window for the keyboard favorite action'
-    [void][VerifyNative]::SetForegroundWindow($script:bookmarkWindow)
+    [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow } 'exact workspace browser owns keyboard input'
 }
 
