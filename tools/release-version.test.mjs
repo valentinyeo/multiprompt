@@ -124,7 +124,9 @@ test('four Windows and two VPS jobs retain the upstream test graph and folded se
   const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
   assert.match(vps, /name: Build the account Worker\n        if: matrix.group == 1/);
   assert.match(vps, /name: Run account Worker tests\n        if: matrix.group == 1/);
-  assert.match(tests, /name: Sweep real zsb.exe command help[\s\S]*run: node --test tools\/zsb-help.test.js/);
+  assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
+  assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
+  assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
 });
 
 test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {
