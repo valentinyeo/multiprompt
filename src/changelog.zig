@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.820", .items = &.{
+        .{ .text = "In Chat View, Ctrl+X then Ctrl+S sends your message into a busy Claude session right away, like Claude's own Ctrl+X Ctrl+S.", .ticket = "IGSH-564" },
+    } },
     .{ .ver = "0.28.819", .items = &.{
         .{ .text = "The browser pane stays in place: it can no longer be dragged away or maximized to full screen.", .ticket = "IGSH-566" },
     } },
