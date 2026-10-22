@@ -372,12 +372,23 @@ pub fn voicePasteTranscriptToShellNoEnter(transcript: []const u16) bool {
         sendLocalChatPromptEx(app_state.active_shell, transcript, false);
 }
 
+var chat_steer_prompt = false;
+
+pub fn chatSteerPrompt() void {
+    chat_steer_prompt = true;
+    defer chat_steer_prompt = false;
+    sendChatPrompt();
+}
+
 pub fn sendChatPrompt() void {
     chatAcClose();
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var text_buf: [16384]u16 = undefined;
     const text_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text_buf, @intCast(text_buf.len));
-    if (text_len_i <= 0) return;
+    if (text_len_i <= 0) {
+        if (chat_steer_prompt) chatEchoPushQueuedNow();
+        return;
+    }
     const text_len: usize = @intCast(text_len_i);
     var has_text = false;
     for (text_buf[0..text_len]) |c| {
@@ -386,7 +397,10 @@ pub fn sendChatPrompt() void {
             break;
         }
     }
-    if (!has_text) return;
+    if (!has_text) {
+        if (chat_steer_prompt) chatEchoPushQueuedNow();
+        return;
+    }
     var send_text: []const u16 = text_buf[0..text_len];
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
@@ -436,10 +450,11 @@ pub fn sendChatPrompt() void {
             slot.consumed = true;
         };
     }
-    if (chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued) == null) {
+    const ei = chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
-    }
+    };
+    app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;
     chatOutboxTick();
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
     app_state.g_chat_scroll_bottom_pending = true;
@@ -1269,15 +1284,15 @@ pub fn chatEchoCountDeliveredForShell(idx: u32) usize {
 }
 
 pub fn chatEchoPushQueuedNow() void {
-    if (app_state.active_shell >= app_state.shell_count) return;
-    if (chatEchoCountDeliveredForShell(app_state.active_shell) == 0) {
-        showHeaderNoticeAscii("No message is queued in Claude for this tab", 3000, false);
-        return;
-    }
-    const sent = if (chatTmuxSendEligible(app_state.active_shell))
-        chatAgentKey(app_state.active_shell, 0x18)
+    chatEchoPushQueuedForShell(app_state.active_shell);
+}
+
+fn chatEchoPushQueuedForShell(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    const sent = if (chatTmuxSendEligible(idx))
+        chatAgentKey(idx, 0x18)
     else
-        chatShouldUseDirectInput(app_state.active_shell) and sendClaudeSendQueuedNowToShell(app_state.active_shell);
+        chatShouldUseDirectInput(idx) and sendClaudeSendQueuedNowToShell(idx);
     if (!sent) {
         showHeaderNoticeAscii("Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal", 4000, true);
         return;
@@ -1285,6 +1300,13 @@ pub fn chatEchoPushQueuedNow() void {
     app_state.g_chat_scroll_bottom_pending = true;
     if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
     showHeaderNoticeAscii("Asked Claude to take the queued message now", 2500, false);
+}
+
+fn chatSteerAfterDelivery(idx: u32, ei: usize) void {
+    const entry = &app_state.g_chat_outbox.items[ei];
+    if (!entry.steer_pending) return;
+    entry.steer_pending = false;
+    chatEchoPushQueuedForShell(idx);
 }
 
 pub fn chatEchoSendAgain(id: u64) void {
@@ -1556,6 +1578,7 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     }
     app_state.g_chat_outbox.items[e].state = if (direct or app_state.g_chat_outbox.items[e].channel_pending) .sending else .delivered;
     app_state.g_chat_outbox.items[e].left_box_ms = 0;
+    if (!app_state.g_chat_outbox.items[e].channel_pending) chatSteerAfterDelivery(shell_index, e);
     _ = saveChatOutbox();
     if (app_state.g_chat_active) chatOutboxChanged();
     return true;
@@ -2256,7 +2279,10 @@ fn chatTmuxSendFinish() void {
         const result = chatSendViaConsole(idx, job.text, job.echo_id);
         if (ei) |i| {
             app_state.g_chat_outbox.items[i].state = if (result != .ok) .not_sent else if (chatShouldUseDirectInput(idx)) .sending else .delivered;
+            if (result == .ok) chatSteerAfterDelivery(idx, i);
         }
+    } else if (ei) |i| {
+        if (app_state.g_chat_outbox.items[i].state == .delivered) chatSteerAfterDelivery(idx, i);
     }
     _ = saveChatOutbox();
     chatOutboxChanged();

@@ -354,6 +354,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Retry Unsent Messages\"", .b = "Re-send this tab's Not-sent Chat View messages in order", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Discard Unsent Messages\"", .b = "Drop this tab's Not-sent Chat View messages", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble)", .header = false },
+    .{ .a = "Ctrl+X then Ctrl+S in Chat View", .b = "Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
     .{ .a = "Alt+V", .b = "Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View", .header = false },
@@ -410,6 +411,15 @@ fn claimBrowserTogglePress(key_down: bool, event_time: u32, held: *bool, last_ev
     if (held.*) return false;
     held.* = true;
     return claimBrowserToggleEvent(event_time, last_event_time);
+}
+
+var chat_steer_chord_pending = false;
+
+fn chatSteerChord(pending: *bool, vk: u32, ctrl: bool, shift: bool, alt: bool, chat: bool) bool {
+    if (vk == 0x10 or vk == 0x11 or vk == 0x12 or (vk >= 0xA0 and vk <= 0xA5) or vk == 0x5B or vk == 0x5C) return false;
+    const armed = pending.*;
+    pending.* = !armed and chat and ctrl and !shift and !alt and vk == 0x58;
+    return armed and chat and ctrl and !shift and !alt and vk == 0x53;
 }
 
 fn globalPaletteChord(vk: u32, ctrl: bool, shift: bool, alt: bool, ours: bool) bool {
@@ -604,6 +614,17 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
+        }
+
+        if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {
+            if (chatSteerChord(&chat_steer_chord_pending, kb.vkCode, isCtrlDown(),
+                (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0,
+                isAltDown(kb.flags) or app_state.g_win_held,
+                chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus()))
+            {
+                _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_SEND, 1, 0);
+                return 1;
+            }
         }
 
         const find_key_up = kb.vkCode < app_state.g_chat_find_consumed.len and app_state.g_chat_find_consumed[kb.vkCode] and (wp == WM_KEYUP or wp == WM_SYSKEYUP);
