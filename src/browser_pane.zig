@@ -823,6 +823,33 @@ pub fn browserUrlSlice(idx: u32) []const u8 {
     return "about:blank";
 }
 
+pub fn rememberActiveBrowserTabUrl() void {
+    const idx = app_state.active_shell;
+    if (idx >= app_state.shell_count or (!app_state.shells[idx].browser_enabled and !webView2OwnsActiveShell())) return;
+    const url = app_state.shells[idx].browser_url[0..app_state.shells[idx].browser_url_len];
+    if (url.len == 0 or std.mem.indexOf(u8, url, "ZSPANE") != null) return;
+    @memcpy(app_state.g_last_browser_tab_url[0..url.len], url);
+    app_state.g_last_browser_tab_url_len = url.len;
+}
+
+pub fn browserTabUrlForChat() ?[]const u8 {
+    const idx = app_state.active_shell;
+    if (idx < app_state.shell_count and (app_state.shells[idx].browser_enabled or webView2OwnsActiveShell())) {
+        const url = app_state.shells[idx].browser_url[0..app_state.shells[idx].browser_url_len];
+        if (url.len > 0 and std.mem.indexOf(u8, url, "ZSPANE") == null) return url;
+    }
+    if (app_state.g_last_browser_tab_url_len > 0)
+        return app_state.g_last_browser_tab_url[0..app_state.g_last_browser_tab_url_len];
+    var recent: ?usize = null;
+    for (0..app_state.shell_count) |i| {
+        const url = app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len];
+        if (url.len == 0 or std.mem.indexOf(u8, url, "ZSPANE") != null) continue;
+        if (recent == null or app_state.shells[i].last_active > app_state.shells[recent.?].last_active) recent = i;
+    }
+    if (recent) |i| return app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len];
+    return null;
+}
+
 fn browserUrlDisplaySlice(idx: u32) []const u8 {
     const s = browserUrlSlice(idx);
     if (std.mem.indexOf(u8, s, "ZSPANE") != null) return "";
@@ -2676,6 +2703,7 @@ pub fn updateBrowserVisibility() void {
         return;
     }
     if (!app_state.g_chat_active) sweepBrowserOrphans(GetTickCount64());
+    rememberActiveBrowserTabUrl();
 
     if (webView2OwnsActiveShell()) {
         cancelBrowserVisibilitySettle();
