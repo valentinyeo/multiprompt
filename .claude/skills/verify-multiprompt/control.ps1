@@ -1389,6 +1389,9 @@ try {
         'group-rail' {
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             Select-Theme 'dark' 'group-rail-dark'
+            Focus-Palette 'tab order' 6217
+            Press @(0x28) 'Down: Tab Order Manual'
+            Press @(0x0D) 'Enter: keep stable manual sidebar order'
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.active_workspace -eq 0 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD session'
             Press @(0x71) 'F2: rename first session'
             Press @(0x11, 0x41) 'Ctrl+A: replace first session name'
