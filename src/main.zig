@@ -1377,6 +1377,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         handleBrowserWindowResolved(@ptrFromInt(@as(usize, @bitCast(lp))));
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_BROWSER_DOCK_GUARD) {
+        @import("browser_pane.zig").handleBrowserDockGuard();
+        return 0;
+    }
     if (msg == WM_APP_BROWSER_DOCKED) {
         const job: *BrowserDockJob = @ptrFromInt(@as(usize, @bitCast(lp)));
         finishBrowserDock(job);
@@ -1426,6 +1430,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         return 0;
     }
     switch (msg) {
+        WM_SYSCOMMAND => {
+            if ((wp & 0xFFF0) == @import("win32.zig").SC_MAXIMIZE and activeBrowserHasForegroundFocus()) return 0;
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        },
         WM_APP_UPDATE_CHANGED => {
             if (wp != 0) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
@@ -4251,6 +4259,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_WIN_SNAP => {
+            if (wp == 2 and activeBrowserHasForegroundFocus()) return 0;
             var mi: MONITORINFO = std.mem.zeroes(MONITORINFO);
             mi.cbSize = @sizeOf(MONITORINFO);
             const mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -7772,6 +7781,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_chat_code_font = null;
             uninstallHook();
             uninstallForegroundHook();
+            @import("browser_pane.zig").uninstallBrowserDockHooks();
             closeWebView2();
             resetGdiCache();
             if (app_state.g_urlbar_hwnd != null) {
@@ -7997,6 +8007,8 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
+    @import("browser_pane.zig").installBrowserDockHooks();
+    defer @import("browser_pane.zig").uninstallBrowserDockHooks();
     defer if (app_state.g_account_instance_mutex != null) {
         _ = ReleaseMutex(app_state.g_account_instance_mutex);
         _ = CloseHandle(app_state.g_account_instance_mutex);

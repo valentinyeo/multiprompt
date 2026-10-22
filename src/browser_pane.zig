@@ -2159,6 +2159,139 @@ test "settle positioning is idempotent once Chromium reaches its dock" {
     try std.testing.expect(!browserRectMatchesTarget(target, 586, 119, 475, 589));
 }
 
+const BrowserDockGuardAction = enum { none, restore, reposition };
+
+fn lockedBrowserStyle(style: isize) isize {
+    const win = @import("win32.zig");
+    return (style & ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX))) | @as(isize, @intCast(WS_POPUP));
+}
+
+fn browserDockGuardAction(docked: bool, zoomed: bool, current: RECT, target: RECT) BrowserDockGuardAction {
+    if (!docked) return .none;
+    if (zoomed) return .restore;
+    if (!browserRectMatchesTarget(current, target.left, target.top, target.right - target.left, target.bottom - target.top)) return .reposition;
+    return .none;
+}
+
+test "locked browser style removes maximize and minimize boxes" {
+    const win = @import("win32.zig");
+    const style: isize = @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX | WS_VISIBLE);
+    const locked = lockedBrowserStyle(style);
+    try std.testing.expectEqual(@as(isize, @intCast(WS_POPUP | WS_VISIBLE)), locked);
+    try std.testing.expectEqual(locked, lockedBrowserStyle(locked));
+}
+
+test "docked browser moved rect triggers snap back" {
+    const target = RECT{ .left = 586, .top = 119, .right = 1060, .bottom = 708 };
+    var moved = target;
+    moved.left -= 300;
+    moved.right -= 300;
+    moved.top += 200;
+    moved.bottom += 200;
+    try std.testing.expectEqual(BrowserDockGuardAction.reposition, browserDockGuardAction(true, false, moved, target));
+}
+
+test "docked browser zoomed pane triggers restore even at matching rect" {
+    const target = RECT{ .left = 586, .top = 119, .right = 1060, .bottom = 708 };
+    try std.testing.expectEqual(BrowserDockGuardAction.restore, browserDockGuardAction(true, true, target, target));
+}
+
+test "docked browser matching rect is an idempotent no-op" {
+    const target = RECT{ .left = 586, .top = 119, .right = 1060, .bottom = 708 };
+    try std.testing.expectEqual(BrowserDockGuardAction.none, browserDockGuardAction(true, false, target, target));
+}
+
+test "non-docked browser window is ignored even when zoomed and moved" {
+    const target = RECT{ .left = 586, .top = 119, .right = 1060, .bottom = 708 };
+    const moved = RECT{ .left = 0, .top = 0, .right = 1920, .bottom = 1080 };
+    try std.testing.expectEqual(BrowserDockGuardAction.none, browserDockGuardAction(false, true, moved, target));
+    try std.testing.expectEqual(BrowserDockGuardAction.none, browserDockGuardAction(false, false, moved, target));
+}
+
+var browser_move_size_hook: HANDLE = null;
+var browser_location_hook: HANDLE = null;
+var browser_dock_guard_pending = false;
+
+fn dockedBrowserIndex(hwnd: HANDLE) ?u32 {
+    if (hwnd == null or app_state.g_main_hwnd == null or app_state.g_app_closing) return null;
+    if (GetPropW(hwnd, L("ZigShellPaneOwner")) != app_state.g_main_hwnd) return null;
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].browser_hwnd == hwnd and !app_state.shells[i].browser_docking) return @intCast(i);
+    }
+    return null;
+}
+
+fn browserDockTarget(layout: BrowserLayout, native: bool) ?RECT {
+    var pt = POINT{ .x = layout.browser_x, .y = layout.browser_y };
+    if (ClientToScreen(app_state.g_main_hwnd, &pt) == 0) return null;
+    const top = if (native) 0 else browserAppTitlebarH();
+    return .{ .left = pt.x, .top = pt.y - top, .right = pt.x + @max(@as(i32, 1), layout.browser_w), .bottom = pt.y + @max(@as(i32, 1), layout.browser_h) };
+}
+
+fn browserDockGuardTarget(idx: u32, current: RECT) ?RECT {
+    if (app_state.g_monitor_transition.active or app_state.g_chat_browser_swap.shell_id != 0) return null;
+    if (idx != app_state.active_shell or !app_state.shells[idx].browser_enabled or browserChromeHiddenForOverlay() or !foregroundIsOurs()) {
+        return .{ .left = BROWSER_PARK_X, .top = BROWSER_PARK_Y, .right = BROWSER_PARK_X + (current.right - current.left), .bottom = BROWSER_PARK_Y + (current.bottom - current.top) };
+    }
+    return browserDockTarget(calcBrowserLayout() orelse return null, app_state.shells[idx].browser_native);
+}
+
+fn browserDockWinEvent(hook: HANDLE, event: DWORD, hwnd: HANDLE, object: @import("win32.zig").LONG, child: @import("win32.zig").LONG, thread: DWORD, time: DWORD) callconv(WINAPI) void {
+    const win = @import("win32.zig");
+    _ = hook;
+    _ = thread;
+    _ = time;
+    if (event == win.EVENT_OBJECT_LOCATIONCHANGE and (object != win.OBJID_WINDOW or child != 0)) return;
+    const idx = dockedBrowserIndex(hwnd) orelse return;
+    if (event == win.EVENT_SYSTEM_MOVESIZESTART) {
+        _ = PostMessageW(hwnd, win.WM_CANCELMODE, 0, 0);
+        _ = PostMessageW(hwnd, win.WM_KEYDOWN, win.VK_ESCAPE, 1);
+        _ = PostMessageW(hwnd, win.WM_KEYUP, win.VK_ESCAPE, @bitCast(@as(usize, 0xC0000001)));
+    } else if (event != win.EVENT_SYSTEM_MOVESIZEEND and event != win.EVENT_OBJECT_LOCATIONCHANGE) return;
+    if (browser_dock_guard_pending) return;
+    var current: RECT = undefined;
+    if (GetWindowRect(hwnd, &current) == 0) return;
+    const target = browserDockGuardTarget(idx, current) orelse return;
+    if (browserDockGuardAction(true, win.IsZoomed(hwnd) != 0, current, target) == .none) return;
+    browser_dock_guard_pending = PostMessageW(app_state.g_main_hwnd, win.WM_APP_BROWSER_DOCK_GUARD, 0, 0) != 0;
+}
+
+pub fn handleBrowserDockGuard() void {
+    const win = @import("win32.zig");
+    browser_dock_guard_pending = false;
+    for (0..app_state.shell_count) |i| {
+        const hwnd = app_state.shells[i].browser_hwnd;
+        const idx = dockedBrowserIndex(hwnd) orelse continue;
+        var current: RECT = undefined;
+        if (GetWindowRect(hwnd, &current) == 0) continue;
+        const target = browserDockGuardTarget(idx, current) orelse continue;
+        const action = browserDockGuardAction(true, win.IsZoomed(hwnd) != 0, current, target);
+        if (action == .none) continue;
+        if (action == .restore) _ = ShowWindowAsync(hwnd, win.SW_RESTORE);
+        if (target.left == BROWSER_PARK_X) {
+            parkBrowserWindow(hwnd);
+        } else {
+            positionActiveBrowser();
+        }
+    }
+}
+
+pub fn installBrowserDockHooks() void {
+    const win = @import("win32.zig");
+    if (browser_move_size_hook == null) browser_move_size_hook = win.SetWinEventHook(win.EVENT_SYSTEM_MOVESIZESTART, win.EVENT_SYSTEM_MOVESIZEEND, null, browserDockWinEvent, 0, 0, win.WINEVENT_OUTOFCONTEXT);
+    if (browser_location_hook == null) browser_location_hook = win.SetWinEventHook(win.EVENT_OBJECT_LOCATIONCHANGE, win.EVENT_OBJECT_LOCATIONCHANGE, null, browserDockWinEvent, 0, 0, win.WINEVENT_OUTOFCONTEXT);
+    if (browser_move_size_hook == null or browser_location_hook == null) debugLog("[browser] dock guard WinEvent hook failed");
+}
+
+pub fn uninstallBrowserDockHooks() void {
+    const win = @import("win32.zig");
+    if (browser_move_size_hook != null) _ = win.UnhookWinEvent(browser_move_size_hook);
+    if (browser_location_hook != null) _ = win.UnhookWinEvent(browser_location_hook);
+    browser_move_size_hook = null;
+    browser_location_hook = null;
+    browser_dock_guard_pending = false;
+}
+
 fn suppressBrowserPaneAltTabEntry(hwnd: HANDLE) void {
     if (hwnd == null) return;
     const ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -2209,9 +2342,7 @@ fn dockBrowserWindow(idx: u32, hwnd: HANDLE, foreground_launch: bool) void {
 fn browserDockWorker(job: *BrowserDockJob) void {
     const hwnd = job.hwnd;
     _ = ShowWindow(hwnd, SW_HIDE);
-    var style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-    style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
-    style |= @as(isize, @intCast(WS_POPUP));
+    const style = lockedBrowserStyle(GetWindowLongPtrW(hwnd, GWL_STYLE));
     _ = SetWindowLongPtrW(hwnd, GWL_STYLE, style);
     suppressBrowserPaneAltTabEntry(hwnd);
     _ = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, @as(LONG_PTR, @bitCast(@intFromPtr(job.owner))));
@@ -2546,14 +2677,14 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     };
-    var pt = POINT{ .x = layout.browser_x, .y = layout.browser_y };
-    if (ClientToScreen(app_state.g_main_hwnd, &pt) == 0) return;
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) {
-        const target_w = @max(@as(i32, 1), layout.browser_w);
-        const target_h = @max(@as(i32, 1), layout.browser_h);
-        browserTraceN("posBrowser SWP native x=", pt.x);
-        const target_x = pt.x;
-        const target_y = pt.y;
+    const native = app_state.shells[app_state.active_shell].browser_native;
+    const target = browserDockTarget(layout, native) orelse return;
+    const target_x = target.left;
+    const target_y = target.top;
+    const target_w = target.right - target.left;
+    const target_h = target.bottom - target.top;
+    if (native) {
+        browserTraceN("posBrowser SWP native x=", target_x);
         if (browserWindowNeedsPosition(bh, target_x, target_y, target_w, target_h)) {
             setBrowserWindowPosAsync(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             browserTrace("posBrowser moved");
@@ -2565,7 +2696,9 @@ pub fn positionActiveBrowser() void {
     } else {
         hideBrowserEdgeMasks();
         const tbh = browserAppTitlebarH();
-        setBrowserWindowPosAsync(bh, null, pt.x, pt.y - tbh, layout.browser_w, layout.browser_h + tbh, SWP_NOZORDER | SWP_NOACTIVATE);
+        if (browserWindowNeedsPosition(bh, target_x, target_y, target_w, target_h)) {
+            setBrowserWindowPosAsync(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         if (windowOwnerProcessStillActive(bh) and IsHungAppWindow(bh) == 0) {
             const thread = std.Thread.spawn(.{}, browserClipWorker, .{ bh, tbh, layout.browser_w, layout.browser_h + tbh }) catch return;
             thread.detach();
@@ -2584,7 +2717,7 @@ pub fn positionActiveBrowser() void {
         var rb: RECT = std.mem.zeroes(RECT);
         _ = GetWindowRect(bh, &rb);
         var lbuf: [160]u8 = undefined;
-        const ls = std.fmt.bufPrint(&lbuf, "[browser] pos target=({d},{d} {d}x{d}) readback=({d},{d},{d},{d})", .{ pt.x, pt.y, layout.browser_w, layout.browser_h, rb.left, rb.top, rb.right, rb.bottom }) catch "";
+        const ls = std.fmt.bufPrint(&lbuf, "[browser] pos target=({d},{d} {d}x{d}) readback=({d},{d},{d},{d})", .{ target_x, target_y, target_w, target_h, rb.left, rb.top, rb.right, rb.bottom }) catch "";
         debugLog(ls);
     }
 }
