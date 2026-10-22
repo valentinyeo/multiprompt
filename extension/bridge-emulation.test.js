@@ -190,18 +190,43 @@ test('subframe navigation does not reapply, and ordinary CDP errors retain emula
 });
 
 
+function assertReleaseVersion(version, floor, extensionChanged) {
+  if (!extensionChanged) {
+    assert.equal(version, floor, `${version} must equal master ${floor} when the extension is unchanged`);
+    return;
+  }
+  const parts = version.split('.').map(Number);
+  const base = floor.split('.').map(Number);
+  assert.ok(parts[0] > base[0] || (parts[0] === base[0] && (parts[1] > base[1] || (parts[1] === base[1] && parts[2] > base[2]))), `${version} must be above master/fallback ${floor}`);
+}
+
 test('extension release version is unused and matches self-test documentation', () => {
   const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST_SOURCE || path.join(__dirname, 'manifest.json'), 'utf8'));
-  const { execFileSync } = require('node:child_process');
+  const { execFileSync, spawnSync } = require('node:child_process');
   let floor = '1.0.71';
+  let masterAvailable = false;
   try {
     floor = JSON.parse(execFileSync('git', ['show', 'origin/master:extension/manifest.json'], { cwd: path.join(__dirname, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).version;
+    masterAvailable = true;
   } catch {}
-  const parts = manifest.version.split('.').map(Number);
-  const base = floor.split('.').map(Number);
-  assert.ok(parts[0] > base[0] || (parts[0] === base[0] && (parts[1] > base[1] || (parts[1] === base[1] && parts[2] > base[2]))), `${manifest.version} must be above master/fallback ${floor}`);
+  let extensionChanged = true;
+  if (masterAvailable) {
+    const diff = spawnSync('git', ['diff', '--quiet', 'origin/master', '--', 'extension', ':(exclude)extension/**/*.test.js', ':(exclude)extension/*.test.js'], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+    assert.ifError(diff.error);
+    assert.ok(diff.status === 0 || diff.status === 1, diff.stderr);
+    extensionChanged = diff.status === 1;
+  }
+  assertReleaseVersion(manifest.version, floor, extensionChanged);
   const docs = fs.readFileSync(path.join(__dirname, '../openwiki/browser/zsb-selftest.md'), 'utf8');
   assert.ok(docs.includes(`version **${manifest.version}**`));
+});
+
+test('extension release version requires a bump only for shipped extension changes', () => {
+  assert.throws(() => assertReleaseVersion('1.0.82', '1.0.82', true), /must be above/);
+  assert.doesNotThrow(() => assertReleaseVersion('1.0.83', '1.0.82', true));
+  assert.doesNotThrow(() => assertReleaseVersion('1.0.82', '1.0.82', false));
+  assert.throws(() => assertReleaseVersion('1.0.83', '1.0.82', false), /must equal master/);
+  assert.throws(() => assertReleaseVersion('1.0.81', '1.0.82', false), /must equal master/);
 });
 
 test('ordinary CDP command state is reset explicitly while emulation is preserved', async () => {
