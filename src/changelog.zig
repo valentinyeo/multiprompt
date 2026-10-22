@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.808", .items = &.{
+        .{ .text = "The Chat View message box, conversation, and title stay inside the pane focus border again.", .ticket = "IGSH-549" },
+    } },
     .{ .ver = "0.28.807", .items = &.{
         .{ .text = "Each workspace now keeps its own browser logins and bookmarks. On upgrade, your restored workspace keeps the existing browser profile in place; new workspaces start with separate empty profiles.", .ticket = "IGSH-224" },
     } },
