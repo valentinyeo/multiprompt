@@ -245,8 +245,9 @@ test('failed emulation apply times out without a retained session, including lat
       h.hold(method);
       const pending = h.run({ method: 'emulate', device: 'iphone' });
       await new Promise(resolve => setImmediate(resolve));
-      if (!existing) assert.equal(h.emulated(1), false, 'setup is not recorded before apply succeeds');
+      const recordedBeforeSuccess = h.emulated(1);
       await assert.rejects(pending, /CDP operation timed out/);
+      if (!existing) assert.equal(recordedBeforeSuccess, false, 'setup is not recorded before apply succeeds');
       assert.equal(h.emulated(1), false, `${method}: no half-applied record`);
       assert.equal(h.attached.has(1), false, `${method}: no debugging bar`);
       h.release();
