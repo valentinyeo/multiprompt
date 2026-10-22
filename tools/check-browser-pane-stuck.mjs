@@ -64,6 +64,21 @@ for (const step of ['initial-open', 'shortcut-close', 'reopen-after-shortcut', '
 for (const observation of ['GetProp(hwnd, "ZigShellPaneOwner")', 'IsWindowVisible(hwnd)', 'GetWindowRect(hwnd, out pane)', 'AddSeconds(21)', 'Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id']) {
   assert.ok(driver.includes(observation), `connected journey observes ${observation}`);
 }
+for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'", 'Press @(0x12, 0x10, 0x41)', 'Press @(0x12, 0x10, 0x42)']) {
+  assert.ok(driver.includes(input), `real input: ${input}`);
+}
+function shiftedShortcutTimingContract(source) {
+  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));
+  assert.ok(Number.isFinite(debounce) && debounce > 0, 'production browser shortcut debounce exists');
+  const sequence = source.match(/Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$shiftToggleCooldown = \[Diagnostics.Stopwatch\]::StartNew\(\)\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Wait-Until \{ \$shiftToggleCooldown.ElapsedMilliseconds -ge (\d+) \} 'browser shortcut debounce elapsed' (\d+)\n\s+Press @\(0x12, 0x10, 0x42\)[^\n]*\n\s+\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id/);
+  assert.ok(sequence, 'shifted shortcuts retain close/new-identity assertions with a bounded monotonic cooldown after the first chord');
+  const cooldown = Number(sequence[1]);
+  const timeout = Number(sequence[2]) * 1000;
+  assert.ok(cooldown > debounce && timeout > cooldown && timeout <= 10000, 'journey waits past production debounce within a bounded timeout');
+}
+shiftedShortcutTimingContract(driver);
+assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5\n", '')));
+assert.throws(() => shiftedShortcutTimingContract(driver.replace('ElapsedMilliseconds -ge 1600', 'ElapsedMilliseconds -ge 1000')));
 function browserForegroundContract(source) {
   const helper = source.match(/function Focus-BrowserPaneOwner\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
   assert.ok(helper, 'browser launches explicitly activate the main window after docking');
