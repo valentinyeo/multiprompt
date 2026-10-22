@@ -3628,16 +3628,25 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const was_search_active = app_state.g_search_active;
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
-            if (wp == 1 and foregroundIsOurs() and focusGuard(hwnd)) {
-                cancelShellRefocus(hwnd);
-                const fg = GetForegroundWindow();
-                const our_thread = GetCurrentThreadId();
-                const fg_thread = GetWindowThreadProcessId(fg, null);
-                const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-                _ = SetForegroundWindow(hwnd);
-                _ = SetFocus(hwnd);
-                if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
-                if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
+            if (wp == 1 and foregroundIsOurs()) {
+                app_state.g_focus_authorized_hwnd = hwnd;
+                app_state.g_focus_authorized_until = GetTickCount64() + 1500;
+                const allowed = focusGuard(hwnd);
+                altqLog("palette_guard allowed={} foreground={X} frame={X} action={} input={}", .{ allowed, altqPtr(GetForegroundWindow()), altqPtr(hwnd), app_state.g_focus_user_action_tick, app_state.g_focus_input_tick });
+                if (allowed) {
+                    cancelShellRefocus(hwnd);
+                    const fg = GetForegroundWindow();
+                    const our_thread = GetCurrentThreadId();
+                    const fg_thread = GetWindowThreadProcessId(fg, null);
+                    const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
+                    _ = SetForegroundWindow(hwnd);
+                    _ = SetFocus(hwnd);
+                    if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
+                    if (GetForegroundWindow() == hwnd) app_state.g_browser_focus_mode = false;
+                    altqLog("palette_activate foreground={X} frame={X} focus={X}", .{ altqPtr(GetForegroundWindow()), altqPtr(hwnd), altqPtr(GetFocus()) });
+                }
+                app_state.g_focus_authorized_hwnd = null;
+                app_state.g_focus_authorized_until = 0;
             }
             app_state.g_search_workspace_mode = false;
             app_state.g_search_workspace_delete_mode = false;

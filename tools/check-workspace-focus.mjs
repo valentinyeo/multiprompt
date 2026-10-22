@@ -43,11 +43,11 @@ function appPaletteFocusContract(shortcuts, main) {
   assert.match(chord, /if \(activeBrowserHasForegroundFocus\(\)\) \{\s*return CallNextHookEx/);
   assert.match(chord, /PostMessageW\(app_state\.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0\)/, 'Ctrl+K must activate the frame, not leave the embedded console foreground');
   const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
-  assert.match(open, /if \(wp == 1 and foregroundIsOurs\(\) and focusGuard\(hwnd\)\) \{\s*cancelShellRefocus\(hwnd\);/);
+  assert.match(open, /if \(wp == 1 and foregroundIsOurs\(\)\) \{\s*app_state\.g_focus_authorized_hwnd = hwnd;\s*app_state\.g_focus_authorized_until = GetTickCount64\(\) \+ 1500;\s*const allowed = focusGuard\(hwnd\);[^]*?if \(allowed\) \{\s*cancelShellRefocus\(hwnd\);/);
   assert.match(open, /const fg_thread = GetWindowThreadProcessId\(fg, null\);/);
   assert.match(open, /AttachThreadInput\(our_thread, fg_thread, 1\) != 0;\s*_ = SetForegroundWindow\(hwnd\);\s*_ = SetFocus\(hwnd\);\s*if \(attached\) _ = AttachThreadInput\(our_thread, fg_thread, 0\);/);
   assert.match(open, /cancelShellRefocus\(hwnd\);\s*app_state\.g_search_active = true;/);
-  const activation = open.indexOf('if (wp == 1 and foregroundIsOurs() and focusGuard(hwnd))');
+  const activation = open.indexOf('if (wp == 1 and foregroundIsOurs())');
   const searchActive = open.indexOf('app_state.g_search_active = true;');
   assert.ok(searchActive >= 0 && searchActive < activation, 'palette state must precede reentrant native activation');
   assert.ok(activation < open.indexOf('hideShellsForOverlay();'), 'park foreground before hiding the input surfaces');
@@ -63,8 +63,10 @@ appPaletteFocusContract(shortcuts, main);
 for (const [file, before, after] of [
   ['shortcuts', 'debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);', 'debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 0, 0);'],
   ['shortcuts', 'if (activeBrowserHasForegroundFocus()) {\n                        return CallNextHookEx', 'if (false) {\n                        return CallNextHookEx'],
-  ['main', 'wp == 1 and foregroundIsOurs() and focusGuard(hwnd)', 'wp == 1'],
-  ['main', '_ = SetForegroundWindow(hwnd);\n                _ = SetFocus(hwnd);', '_ = SetFocus(hwnd);'],
+  ['main', 'wp == 1 and foregroundIsOurs()', 'wp == 1'],
+  ['main', 'const allowed = focusGuard(hwnd);', 'const allowed = true;'],
+  ['main', 'app_state.g_focus_authorized_hwnd = hwnd;', ''],
+  ['main', '_ = SetForegroundWindow(hwnd);\n                    _ = SetFocus(hwnd);', '_ = SetFocus(hwnd);'],
   ['main', 'if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);', ''],
   ['main', 'const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;', 'const SetForegroundWindow = @import("win32.zig").SetForegroundWindow;'],
 ]) {
@@ -75,7 +77,7 @@ for (const [file, before, after] of [
 }
 
 const paletteActivation = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'))
-  .match(/            if \(wp == 1 and foregroundIsOurs\(\) and focusGuard\(hwnd\)\) \{[\s\S]*?\n            \}/)?.[0];
+  .match(/            if \(wp == 1 and foregroundIsOurs\(\)\) \{[\s\S]*?\n            \}/)?.[0];
 assert.ok(paletteActivation);
 for (const newline of ['\n', '\r\n']) {
   appPaletteFocusContract(shortcuts.replaceAll('\n', newline), main.replaceAll('\n', newline));

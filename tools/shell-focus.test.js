@@ -80,8 +80,11 @@ test('workspace focus journey reads cross-process Edit text with a bounded read-
 
 function paletteHandoff(main) {
   const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
-  const handoff = open.match(/            if \(wp == 1 and foregroundIsOurs\(\) and focusGuard\(hwnd\)\) \{[^]*?\n            \}/)?.[0];
+  const handoff = open.match(/            if \(wp == 1 and foregroundIsOurs\(\)\) \{[^]*?\n            \}/)?.[0];
   assert.ok(handoff, 'authorize the frame before AttachThreadInput can reuse console authorization');
+  assert.match(handoff, /g_focus_authorized_hwnd = hwnd;\s*app_state\.g_focus_authorized_until = GetTickCount64\(\) \+ 1500;\s*const allowed = focusGuard\(hwnd\);/);
+  assert.match(handoff, /palette_guard allowed=\{\}[^]*?if \(allowed\) \{/);
+  assert.match(handoff, /palette_activate foreground=\{X\}[^]*?g_focus_authorized_hwnd = null;\s*app_state\.g_focus_authorized_until = 0;/);
   const active = open.indexOf('app_state.g_search_active = true;');
   assert.ok(active >= 0 && active < open.indexOf(handoff), 'activation callbacks must see the palette as active');
   assert.ok(open.indexOf(handoff) < open.indexOf('hideShellsForOverlay();'), 'park the frame before hiding a foreground console or browser');
@@ -93,39 +96,67 @@ test('palette handoff authorizes the frame and blocks reentrant shell repair bef
   const main = fs.readFileSync(path.resolve(__dirname, '..', 'src/main.zig'), 'utf8').replaceAll('\r\n', '\n');
   const handoff = paletteHandoff(main);
   for (const broken of [
-    main.replace(' and focusGuard(hwnd)', ''),
+    main.replace('app_state.g_focus_authorized_hwnd = hwnd;', ''),
+    main.replace(handoff, handoff.replace('GetTickCount64() + 1500;', 'GetTickCount64() + 15000;')),
+    main.replace('if (wp == 1 and foregroundIsOurs())', 'if (wp == 1)'),
+    main.replace('const allowed = focusGuard(hwnd);', 'const allowed = true;'),
+    main.replace('palette_guard allowed={}', 'missing_guard allowed={}'),
+    main.replace('palette_activate foreground={X}', 'missing_activation foreground={X}'),
+    main.replace(handoff, handoff.replace('app_state.g_focus_authorized_until = 0;', '')),
     main.replace(handoff, '').replace('        WM_APP_SEARCH_OPEN => {', `        WM_APP_SEARCH_OPEN => {\n${handoff}`),
     main.replace(handoff, '').replace('            altqLog("palette_focus', `${handoff}\n            altqLog("palette_focus`),
   ]) assert.throws(() => paletteHandoff(broken));
-  const run = new Function('wp', 'hwnd', 'app_state', 'foregroundIsOurs', 'focusGuard', 'cancelShellRefocus', 'GetForegroundWindow', 'GetCurrentThreadId', 'GetWindowThreadProcessId', 'AttachThreadInput', 'SetForegroundWindow', 'SetFocus', handoff.replaceAll(' and ', ' && ').replaceAll('_ = ', ''));
+  const run = new Function('GetTickCount64', 'altqLog', 'altqPtr', 'GetFocus', 'wp', 'hwnd', 'app_state', 'foregroundIsOurs', 'focusGuard', 'cancelShellRefocus', 'GetForegroundWindow', 'GetCurrentThreadId', 'GetWindowThreadProcessId', 'AttachThreadInput', 'SetForegroundWindow', 'SetFocus', handoff.replaceAll(' and ', ' && ').replaceAll('_ = ', '').replace(/, \.\{ ([^\n]*?) \}\);/g, ', [$1]);'));
   for (const previous of ['console', 'browser', 'frame', 'foreign']) {
-    for (const allowed of [false, true]) {
-      const state = { g_search_active: true, g_browser_focus_mode: true };
-      const calls = [];
-      let authorized = 'console';
-      let foreground = previous;
-      let focused = previous;
-      run(1, 'frame', state, () => previous !== 'foreign', target => {
-        if (allowed) authorized = target;
-        return allowed;
-      }, () => calls.push('cancel'), () => foreground, () => 1, target => target === 'frame' ? 1 : 2,
-      (from, to, attach) => {
-        assert.equal(authorized, 'frame');
-        calls.push(attach ? 'attach' : 'detach');
-        return 1;
-      }, target => {
-        assert.equal(state.g_search_active, true);
-        foreground = target;
-        calls.push('foreground');
-      }, target => { focused = target; calls.push('focus'); });
-      if (allowed && previous !== 'foreign') {
-        assert.equal(foreground, 'frame');
-        assert.equal(focused, 'frame');
-        assert.equal(state.g_browser_focus_mode, false);
-        assert.deepEqual(calls, previous === 'frame' ? ['cancel', 'foreground', 'focus'] : ['cancel', 'attach', 'foreground', 'focus', 'detach']);
-      } else assert.deepEqual(calls, []);
+    for (const wp of [0, 1]) {
+      for (const allowed of [false, true]) {
+        const state = { g_search_active: true, g_browser_focus_mode: true, g_focus_authorized_hwnd: null, g_focus_authorized_until: 0, g_focus_user_action_tick: 0, g_focus_input_tick: 900 };
+        const calls = [];
+        let authorized = 'console';
+        let foreground = previous;
+        let focused = previous;
+        const logs = [];
+        run(() => 1000, (format, values) => logs.push([format, values]), hwnd => hwnd, () => focused, wp, 'frame', state, () => previous !== 'foreign', target => {
+          assert.equal(state.g_focus_authorized_hwnd, 'frame');
+          assert.equal(state.g_focus_authorized_until, 2500);
+          assert.equal(state.g_focus_user_action_tick, 0, 'posted shortcut must not need a live hook action');
+          if (allowed) authorized = target;
+          return allowed;
+        }, () => calls.push('cancel'), () => foreground, () => 1, target => target === 'frame' ? 1 : 2,
+        (from, to, attach) => {
+          assert.equal(authorized, 'frame');
+          calls.push(attach ? 'attach' : 'detach');
+          return 1;
+        }, target => {
+          assert.equal(state.g_search_active, true);
+          foreground = target;
+          calls.push('foreground');
+        }, target => { focused = target; calls.push('focus'); });
+        if (wp === 1 && allowed && previous !== 'foreign') {
+          assert.equal(foreground, 'frame');
+          assert.equal(focused, 'frame');
+          assert.equal(state.g_browser_focus_mode, false);
+          assert.deepEqual(calls, previous === 'frame' ? ['cancel', 'foreground', 'focus'] : ['cancel', 'attach', 'foreground', 'focus', 'detach']);
+        } else assert.deepEqual(calls, []);
+        assert.equal(state.g_focus_authorized_hwnd, null, 'frame authority cannot outlive this handoff');
+        assert.equal(state.g_focus_authorized_until, 0);
+        assert.equal(logs.length, wp === 1 && previous !== 'foreign' ? (allowed ? 2 : 1) : 0);
+        if (logs.length) assert.equal(logs[0][1][0], allowed);
+        if (logs.length === 2) assert.equal(logs[1][1][0], 'frame');
+      }
     }
   }
+});
+
+test('palette frame authority works without a dispatch tick but never overrides foreign foreground', () => {
+  const focus = fs.readFileSync(path.resolve(__dirname, '..', 'src/focus.zig'), 'utf8');
+  const policy = focus.match(/fn focusGuardPolicy\([^]*?\) bool \{([^]*?)\n\}/)?.[1];
+  assert.ok(policy);
+  const allows = new Function('now', 'action_tick', 'same_surface', 'authorized', 'foreground_owned', policy.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+  assert.equal(allows(1000, 0, false, false, true), false, 'clearing console authority alone does not authorize the frame');
+  assert.equal(allows(1000, 0, false, true, true), true, 'an explicit frame grant bridges the posted shortcut');
+  assert.equal(allows(1000, 0, false, true, false), false, 'a bounded grant never overrides foreign foreground');
+  assert.equal(allows(2501, 0, false, false, true), false, 'expired frame authority cannot activate the frame');
 });
 
 function auditOverlayHide(source) {
