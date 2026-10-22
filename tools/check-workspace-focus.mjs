@@ -44,14 +44,22 @@ function appPaletteFocusContract(shortcuts, main) {
   assert.match(chord, /PostMessageW\(app_state\.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0\)/, 'Ctrl+K must activate the frame, not leave the embedded console foreground');
   const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
   assert.match(open, /if \(wp == 1 and foregroundIsOurs\(\)\) \{\s*app_state\.g_focus_authorized_hwnd = hwnd;\s*app_state\.g_focus_authorized_until = GetTickCount64\(\) \+ 1500;\s*const allowed = focusGuard\(hwnd\);[^]*?if \(allowed\) \{\s*cancelShellRefocus\(hwnd\);/);
-  assert.match(open, /const fg_thread = GetWindowThreadProcessId\(fg, null\);/);
-  assert.match(open, /AttachThreadInput\(our_thread, fg_thread, 1\) != 0;\s*_ = SetForegroundWindow\(hwnd\);\s*_ = SetFocus\(hwnd\);\s*if \(attached\) _ = AttachThreadInput\(our_thread, fg_thread, 0\);/);
+  const handoff = open.match(/            if \(wp == 1 and foregroundIsOurs\(\)\) \{[\s\S]*?\n            \}/)?.[0];
+  assert.ok(handoff);
+  const native = handoff.match(/                if \(allowed\) \{[\s\S]*?\n                \}/)?.[0];
+  assert.ok(native, 'native activation must remain inside the focus guard');
+  assert.match(native, /cancelShellRefocus\(hwnd\);\s*const fg = GetForegroundWindow\(\);\s*const our_thread = GetCurrentThreadId\(\);\s*var fg_pid: DWORD = 0;\s*const fg_thread = GetWindowThreadProcessId\(fg, &fg_pid\);/);
+  assert.match(native, /const tap_alt = fg != hwnd and \(GetAsyncKeyState\(@as\(i32, VK_MENU\)\) & @as\(i16, @bitCast\(@as\(u16, 0x8000\)\)\)\) == 0;/);
+  assert.match(native, /if \(tap_alt\) keybd_event\(VK_MENU, 0, 0, 0\);\s*const attach_result = if \(fg_thread != 0 and fg_thread != our_thread\) AttachThreadInput\(our_thread, fg_thread, 1\) else 0;\s*const sfw_result = SetForegroundWindow\(hwnd\);\s*const sfw_foreground = GetForegroundWindow\(\);\s*var sfw_pid: DWORD = 0;\s*const sfw_thread = GetWindowThreadProcessId\(sfw_foreground, &sfw_pid\);\s*_ = SetFocus\(hwnd\);\s*const detach_result = if \(attach_result != 0\) AttachThreadInput\(our_thread, fg_thread, 0\) else 0;/);
+  assert.match(native, /if \(tap_alt\) \{\s*keybd_event\(0xFF, 0, 0, 0\);\s*keybd_event\(0xFF, 0, KEYEVENTF_KEYUP, 0\);\s*keybd_event\(VK_MENU, 0, KEYEVENTF_KEYUP, 0\);\s*\}/);
+  assert.match(handoff.slice(handoff.indexOf(native) + native.length), /app_state\.g_focus_authorized_hwnd = null;\s*app_state\.g_focus_authorized_until = 0;/);
   assert.match(open, /cancelShellRefocus\(hwnd\);\s*app_state\.g_search_active = true;/);
   const activation = open.indexOf('if (wp == 1 and foregroundIsOurs())');
   const searchActive = open.indexOf('app_state.g_search_active = true;');
   assert.ok(searchActive >= 0 && searchActive < activation, 'palette state must precede reentrant native activation');
-  assert.ok(activation < open.indexOf('hideShellsForOverlay();'), 'park foreground before hiding the input surfaces');
-  assert.match(open, /altqLog\("palette_focus wp=\{\} foreground=\{X\} frame=\{X\} focus=\{X\}", \.\{ wp, altqPtr\(GetForegroundWindow\(\)\), altqPtr\(hwnd\), altqPtr\(GetFocus\(\)\) \}\);/);
+  assert.doesNotMatch(open.slice(0, activation), /SetForegroundWindow\(|SetFocus\(|AttachThreadInput\(|keybd_event\(/);
+  assert.ok(open.indexOf(handoff) + handoff.length < open.indexOf('hideShellsForOverlay();'), 'park foreground before hiding the input surfaces');
+  assert.match(open, /altqLog\("palette_focus wp=\{\} foreground=\{X\} frame=\{X\} focus=\{X\} rem=\{\} wait_alt=\{\}", \.\{ wp, altqPtr\(GetForegroundWindow\(\)\), altqPtr\(hwnd\), altqPtr\(GetFocus\(\)\), app_state\.g_refocus_remaining, app_state\.g_refocus_waiting_for_alt_release \}\);/);
   assert.match(main, /const SetForegroundWindow = @import\("focus.zig"\)\.SetForegroundWindow;/);
   assert.match(main, /const SetFocus = @import\("focus.zig"\)\.SetFocus;/);
   assert.match(main, /const AttachThreadInput = @import\("focus.zig"\)\.AttachThreadInput;/);
@@ -66,8 +74,21 @@ for (const [file, before, after] of [
   ['main', 'wp == 1 and foregroundIsOurs()', 'wp == 1'],
   ['main', 'const allowed = focusGuard(hwnd);', 'const allowed = true;'],
   ['main', 'app_state.g_focus_authorized_hwnd = hwnd;', ''],
-  ['main', '_ = SetForegroundWindow(hwnd);\n                    _ = SetFocus(hwnd);', '_ = SetFocus(hwnd);'],
-  ['main', 'if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);', ''],
+  ['main', 'const sfw_result = SetForegroundWindow(hwnd);', 'const sfw_result = 0;'],
+  ['main', 'const detach_result = if (attach_result != 0) AttachThreadInput(our_thread, fg_thread, 0) else 0;', ''],
+  ['main', 'const fg_thread = GetWindowThreadProcessId(fg, &fg_pid);', 'const fg_thread = GetWindowThreadProcessId(fg, null);'],
+  ['main', 'GetTickCount64() + 1500;\n                const allowed = focusGuard(hwnd);', 'GetTickCount64() + 60000;\n                const allowed = focusGuard(hwnd);'],
+  ['main', 'if (allowed) {\n                    cancelShellRefocus(hwnd);', 'if (true) {\n                    cancelShellRefocus(hwnd);'],
+  ['main', 'fg_thread != 0 and fg_thread != our_thread', 'fg_thread != 0'],
+  ['main', 'if (attach_result != 0) AttachThreadInput', 'if (true) AttachThreadInput'],
+  ['main', 'const tap_alt = fg != hwnd and ', 'const tap_alt = '],
+  ['main', 'if (tap_alt) keybd_event(VK_MENU, 0, 0, 0);', ''],
+  ['main', 'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);', ''],
+  ['main', 'keybd_event(0xFF, 0, 0, 0);', ''],
+  ['main', 'keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);', ''],
+  ['main', '_ = SetFocus(hwnd);\n                    const detach_result', 'const detach_result'],
+  ['main', 'app_state.g_focus_authorized_hwnd = null;\n                app_state.g_focus_authorized_until = 0;', 'app_state.g_focus_authorized_until = 0;'],
+  ['main', 'app_state.g_focus_authorized_hwnd = null;\n                app_state.g_focus_authorized_until = 0;', 'app_state.g_focus_authorized_hwnd = null;'],
   ['main', 'const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;', 'const SetForegroundWindow = @import("win32.zig").SetForegroundWindow;'],
 ]) {
   const source = file === 'shortcuts' ? shortcuts : main;
@@ -84,6 +105,8 @@ for (const newline of ['\n', '\r\n']) {
   const earlyActivation = main.replace(paletteActivation, '').replace('        WM_APP_SEARCH_OPEN => {', `        WM_APP_SEARCH_OPEN => {\n${paletteActivation}`);
   assert.notEqual(earlyActivation, main);
   assert.throws(() => appPaletteFocusContract(shortcuts, earlyActivation.replaceAll('\n', newline)), assert.AssertionError, 'reject activation before palette state blocks reentrant repairs');
+  const earlyNative = main.replace('        WM_APP_SEARCH_OPEN => {', '        WM_APP_SEARCH_OPEN => {\n            _ = SetForegroundWindow(hwnd);');
+  assert.throws(() => appPaletteFocusContract(shortcuts, earlyNative.replaceAll('\n', newline)), assert.AssertionError, 'reject unguarded native activation before palette state');
 }
 
 function hookFocusAuthorityContract(source, focus) {
