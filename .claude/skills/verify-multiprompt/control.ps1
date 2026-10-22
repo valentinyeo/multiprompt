@@ -346,13 +346,13 @@ function Prepare-ScratchEvidence([string]$Path) {
             Save-Json @($script:scratchLinks) 'scratch-links.json'
             $entry.Delete()
             Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
-        } elseif (-not $entry.PSIsContainer -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
-            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
-            $entry.Delete()
         } else {
             $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
             if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+            elseif ($entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
+                [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
+                $entry.Delete()
+            }
         }
     }
 }
