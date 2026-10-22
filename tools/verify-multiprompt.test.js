@@ -185,6 +185,18 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\)/);
   assert.match(control, /GetAncestor\(WindowFromPoint\(point\), 2\) != hwnd \|\| GetAncestor\(WindowFromPoint\(point\), 3\) != frame[\s\S]*?SetCursorPos[\s\S]*?new Mouse \{ flags = 2 \}[\s\S]*?new Mouse \{ flags = 4 \}[\s\S]*?SendInput\(2, click,[\s\S]*?GetForegroundWindow\(\) != hwnd\) throw/);
+  const focus = control.slice(control.indexOf('    public static void FocusOwnedWindow('), control.indexOf('    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'));
+  const assertOwnedFocus = text => {
+    assert.match(text, /owner != expectedPid/);
+    assert.match(text, /GetForegroundWindow\(\) != hwnd\) throw/);
+    assert.match(text, /!GetGUIThreadInfo\(target, ref info\) \|\| info.active != hwnd \|\| GetAncestor\(info.focus, 3\) != frame \|\| \(hwnd != frame && GetAncestor\(info.focus, 2\) != hwnd\)/);
+    assert.doesNotMatch(text, /AttachThreadInput|SetFocus\(/);
+  };
+  assertOwnedFocus(focus);
+  for (const required of ['owner != expectedPid', 'info.active != hwnd', 'GetAncestor(info.focus, 3) != frame', 'GetAncestor(info.focus, 2) != hwnd']) {
+    assert.throws(() => assertOwnedFocus(focus.replace(required, 'false')));
+  }
+  assert.throws(() => assertOwnedFocus(focus + 'AttachThreadInput(current, target, true);'));
   assert.match(control, /function Press-WorkspaceBrowser[\s\S]*?Doctor\s+Wait-Until[\s\S]*?FocusOwnedWindow\(\$script:bookmarkWindow, \$script:bookmarkPid, \$script:window\)[\s\S]*?GetAncestor\(\$foreground, 2\) -eq \$script:bookmarkWindow -and\s+\[VerifyNative\]::GetAncestor\(\$foreground, 3\) -eq \$script:window[\s\S]*?Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /Palette 'open url in browser'\s+Snapshot 'url-action'/);
   assert.match(control, /function Focus-WorkspaceFrame[\s\S]*?Doctor[\s\S]*?FocusOwnedWindow\(\$script:window, \$process.Id, \$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);

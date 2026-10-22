@@ -37,47 +37,29 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern IntPtr GetFocus();
-    [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
-    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint size, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public Rect caretRect; }
+    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     public static void FocusOwnedWindow(IntPtr hwnd, int expectedPid, IntPtr frame) {
         uint owner;
         uint target = GetWindowThreadProcessId(hwnd, out owner);
         if (owner != expectedPid || Class(frame) != "ZigShell" || GetAncestor(hwnd, 3) != frame || (hwnd != frame && Class(hwnd) != "Chrome_WidgetWin_1")) throw new InvalidOperationException("Focus window ownership mismatch");
-        uint current = GetCurrentThreadId();
-        uint foregroundOwner;
-        uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundOwner);
-        bool foregroundAttached = false;
-        bool targetAttached = false;
-        try {
-            if (foreground != 0 && foreground != current) {
-                foregroundAttached = AttachThreadInput(current, foreground, true);
-            }
-            if (target != current && target != foreground) {
-                targetAttached = AttachThreadInput(current, target, true);
-            }
-            SetForegroundWindow(hwnd);
-            if (GetForegroundWindow() != hwnd) {
-                BringWindowToTop(hwnd);
-                Rect bounds;
-                if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
-                Point point = new Point { X = bounds.Left + 100, Y = bounds.Top + 22 };
-                if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
-                if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                Input[] click = new Input[2];
-                click[0].data.mouse = new Mouse { flags = 2 };
-                click[1].data.mouse = new Mouse { flags = 4 };
-                if (SendInput(2, click, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Owned browser click failed");
-                Thread.Sleep(100);
-            }
-            if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
-            SetFocus(hwnd);
-            if (GetAncestor(GetFocus(), 3) != frame) throw new InvalidOperationException("Owned frame did not receive keyboard focus");
-        } finally {
-            if (targetAttached) AttachThreadInput(current, target, false);
-            if (foregroundAttached) AttachThreadInput(current, foreground, false);
+        SetForegroundWindow(hwnd);
+        if (GetForegroundWindow() != hwnd) {
+            BringWindowToTop(hwnd);
+            Rect bounds;
+            if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
+            Point point = new Point { X = bounds.Left + 100, Y = bounds.Top + 22 };
+            if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
+            if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            Input[] click = new Input[2];
+            click[0].data.mouse = new Mouse { flags = 2 };
+            click[1].data.mouse = new Mouse { flags = 4 };
+            if (SendInput(2, click, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Owned browser click failed");
+            Thread.Sleep(100);
         }
+        if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
+        GuiThreadInfo info = new GuiThreadInfo { size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
+        if (!GetGUIThreadInfo(target, ref info) || info.active != hwnd || GetAncestor(info.focus, 3) != frame || (hwnd != frame && GetAncestor(info.focus, 2) != hwnd)) throw new InvalidOperationException("Owned window did not receive keyboard focus");
     }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
@@ -349,6 +331,7 @@ function Save-Json($Value, [string]$Name) {
 }
 
 function Record([string]$Action) {
+    if ($Feature -eq 'browser-workspaces') { Write-Host ('workspace action: ' + $Action) }
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
 }
