@@ -49,6 +49,17 @@ jobs:
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Build the real audit renderer
         run: zig build chat-audit
+      - name: Record renderer file evidence
+        run: |
+          mkdir -p evidence
+          file zig-out/bin/chat-audit | tee evidence/renderer-file.txt
+      - name: Upload Linux audit renderer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-audit-linux
+          path: zig-out/bin/chat-audit
+          retention-days: 30
+          if-no-files-found: error
       - name: Verify synthetic audit fixtures
         run: |
           mkdir -p evidence

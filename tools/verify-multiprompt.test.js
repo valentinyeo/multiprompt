@@ -263,6 +263,8 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /git rev-parse HEAD > evidence\/revision\.txt/);
   assert.match(auditJob, /if: always\(\)/);
   assert.match(auditJob, /name: verify-chat-sync-audit/);
+  assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
+  assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
     assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }

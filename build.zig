@@ -171,7 +171,7 @@ pub fn build(b: *std.Build) void {
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
     const chat_audit = b.addExecutable(.{ .name = "chat-audit", .root_module = b.createModule(.{
         .root_source_file = b.path("src/chat_audit.zig"),
-        .target = b.graph.host,
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
         .optimize = .ReleaseSafe,
     }) });
     const install_chat_audit = b.addInstallArtifact(chat_audit, .{});
