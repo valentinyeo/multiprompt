@@ -188,6 +188,9 @@ pub fn build(b: *std.Build) void {
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
+    const changelog_entry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/changelog-entry.test.js", "tools/changelog-fragment-reads.test.js" });
+    test_step.dependOn(&changelog_entry_tests.step);
+    vps_test_step.dependOn(&changelog_entry_tests.step);
     const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
     test_step.dependOn(&smooth_shapes_tests.step);
     vps_test_step.dependOn(&smooth_shapes_tests.step);
@@ -440,6 +443,10 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
+    const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
+    zsb_help_tests.step.dependOn(&bridge_install.step);
+    zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+    test_step.dependOn(&zsb_help_tests.step);
     const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
     test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
