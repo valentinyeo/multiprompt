@@ -716,9 +716,9 @@ try {
                 $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
                 $newGroups.Count -eq 1 -and $newGroups[0].id -gt 0 -and $state.tabs[$tabIndex].group_id -eq $newGroups[0].id
             } 'new home group H persisted on original tab'
-            $home = Read-Session
-            $homeGroupId = $home.tabs[$tabIndex].group_id
-            $homeGroupIds = @($home.groups | ForEach-Object { $_.id })
+            $homeState = Read-Session
+            $homeGroupId = $homeState.tabs[$tabIndex].group_id
+            $homeGroupIds = @($homeState.groups | ForEach-Object { $_.id })
             Press @(0x1B) 'Escape: finish home group inline rename without changing its name'
             Press @(0x12, 0x31) 'Alt+1: Starred workspace'
             Palette 'move to group'
