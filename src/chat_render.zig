@@ -3341,9 +3341,8 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
 }
 
 fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
-    _ = buf;
-    _ = link;
-    return null;
+    const range = link orelse return null;
+    return buf[range.start..range.end];
 }
 
 test "IGSH-574 Copy link uses only the clicked URL without trailing punctuation" {
@@ -3891,6 +3890,15 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const menu = CreatePopupMenu();
             if (menu == null) return 0;
             defer _ = DestroyMenu(menu);
+            const link_text: ?[]u16 = if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
+                std.heap.page_allocator.dupe(u16, text) catch {
+                    showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+                    return 0;
+                }
+            else
+                null;
+            defer if (link_text) |text| std.heap.page_allocator.free(text);
+            if (link_text != null) _ = AppendMenuW(menu, MF_STRING, 7, L("Copy link"));
             const echo_id = chatEchoAt(GET_X(lp), GET_Y(lp));
             if (echo_id) |id| {
                 if (chatOutboxIndexById(id)) |ei| {
@@ -3931,6 +3939,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
             switch (cmd) {
+                7 => if (link_text) |text| chatCopyTextToClipboard(text),
                 1 => chatCopyTextToClipboard(if (copy_target == .selection) selection_text else message_text),
                 2 => chatSelectAll(),
                 3 => chatCopyTextToClipboard(message_text),
