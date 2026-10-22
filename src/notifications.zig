@@ -484,15 +484,6 @@ pub fn findZsbPaneTarget(session: []const u8) ?u32 {
     var best: ?u32 = null;
     for (0..app_state.shell_count) |i| {
         if (!shellMatchesZsbPaneTarget(i, token)) continue;
-        if (@import("browser_workspace_profile.zig").IGSH_224) {
-            if (best) |previous| {
-                var a: [32]u8 = undefined;
-                var b: [32]u8 = undefined;
-                const prior = @import("browser_pane.zig").workspaceProfileForShell(previous, &a) catch return null;
-                const current = @import("browser_pane.zig").workspaceProfileForShell(@intCast(i), &b) catch return null;
-                if (!std.mem.eql(u8, prior, current)) return null;
-            }
-        }
         if (best == null or tmux_identity.prefer(shellPaneRank(i), shellPaneRank(best.?))) best = @intCast(i);
     }
     if (best) |ti| {

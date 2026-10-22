@@ -70,12 +70,10 @@ for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'",
 }
 function foregroundInputContract(source) {
   const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
-  assert.match(press, /function Press[^\n]*\n\s+if \(\$Feature -eq 'browser-workspaces'\) \{ Focus-WorkspaceFrame \}\s+Doctor/);
   assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(press, /\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
 }
 foregroundInputContract(driver);
-assert.throws(() => foregroundInputContract(driver.replace("    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }\n", '')));
 assert.throws(() => foregroundInputContract(driver.replaceAll('[void][VerifyNative]::SetForegroundWindow($script:window)', '')));
 assert.throws(() => foregroundInputContract(driver.replace('    Assert-Foreground\n    Record $Label', '    Record $Label')));
 function shiftedShortcutTimingContract(source) {
@@ -112,8 +110,7 @@ function browserForegroundContract(source) {
   assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
   assert.match(source, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/);
   for (const name of ['Press', 'Type-Text']) {
-    const input = name === 'Press' ? source.replace("    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }\n", '') : source;
-    assert.match(input, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*(?:Wait-Until \\{[^}]*\\} '[^']*'\\s*)?Assert-Foreground\\s*Record`));
+    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*(?:Wait-Until \\{[^}]*\\} '[^']*'\\s*)?Assert-Foreground\\s*Record`));
   }
 }
 browserForegroundContract(driver);
