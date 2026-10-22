@@ -20,7 +20,7 @@ async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
     if (files.length) copyZig(files, dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
+      const child = spawn(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
       let stdout = '';
       let stderr = '';
       child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });

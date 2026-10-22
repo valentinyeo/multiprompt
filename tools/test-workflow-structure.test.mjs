@@ -50,6 +50,11 @@ test('each test job classifies after full-history checkout and gates all heavy s
   assert.match(build, /run\.has_side_effects = true;\s*run\.expectExitCode\(0\);/);
   assert.match(build, /b\.dupe\("--test-reporter=tap"\)/);
   assert.match(build, /b\.dupe\("--test-reporter-destination=stderr"\)/);
+  const parallel = build.slice(build.indexOf('for ([_]*std.Build.Step.Run{'), build.indexOf('const test_groups'));
+  assert.doesNotMatch(parallel, /chat_view_gaps_tests/);
+  for (const file of ['chat-cpu', 'ssh-reconnect', 'ssh-clock-standby']) {
+    assert.match(fs.readFileSync(new URL(`./${file}.test.js`, import.meta.url), 'utf8'), /\['test', '-j1',/);
+  }
   assert.match(build, /dependency == &run_sync_protocol_tests\.step or dependency == &frequent_integration_tests\.step/);
 });
 

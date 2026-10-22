@@ -634,7 +634,7 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     for ([_]*std.Build.Step.Run{
-        chat_cpu_regression, chat_view_gaps_tests, frequent_integration_tests, ssh_reconnect_tests,
+        chat_cpu_regression, frequent_integration_tests, ssh_reconnect_tests,
         window_flicker_tests, chat_switch_tests, bridge_version_heal_tests, reply_quote_tests, chat_skill_tab_tests,
     }) |run| {
         run.argv.insertSlice(b.allocator, 1, &.{

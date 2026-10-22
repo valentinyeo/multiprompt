@@ -195,7 +195,7 @@ test "table surface: complete captured box grid is exactly one table block" {
 }
 `);
     const file = path.join(dir, 'test.zig');
-    return spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'table surface:'], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', file, '--test-filter', 'table surface:'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('production table filtering and capture grouping keep the complete terminal grid', () => {

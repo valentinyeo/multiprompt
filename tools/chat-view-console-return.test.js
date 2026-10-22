@@ -186,7 +186,7 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness(source));
-    const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);

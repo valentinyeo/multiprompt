@@ -647,7 +647,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
     copyZig(['workspace_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness());
-    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', '-j1', file], {
       encoding: 'utf8', timeout: 120000,
     });
     assert.equal(result.error, undefined);

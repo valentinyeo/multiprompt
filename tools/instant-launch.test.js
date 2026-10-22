@@ -26,7 +26,7 @@ function verifyStartup(main, cache, account, transcript) {
 
 test('ISSUE-502 production ordered queue, snapshot codec and optimistic account decisions execute without Win32', () => {
   for (const file of ['launch_plan.zig', 'launch_snapshot.zig', 'account_state.zig']) {
-    const result = spawnSync(zig, ['test', `src/${file}`, '--test-filter', 'ISSUE-502'], { cwd: root, encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(zig, ['test', '-j1', `src/${file}`, '--test-filter', 'ISSUE-502'], { cwd: root, encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, `${file}\n${result.stdout}${result.stderr}`);
     assert.match(result.stderr, /All \d+ tests passed\./);
   }

@@ -147,13 +147,13 @@ test('ISSUE-451 executed production replies keep background approvals non-modal 
 }`;
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver).replaceAll('app_state.', ''));
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
     const backgroundModal = dispatch.replace('reply.job.kind == .device_keys', 'true');
     assert.notEqual(backgroundModal, dispatch);
     fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver.replace(dispatch, backgroundModal)).replaceAll('app_state.', ''));
-    const negative = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    const negative = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0);
     assert.match(negative.stderr, /background pending device replies[^]*FAIL/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

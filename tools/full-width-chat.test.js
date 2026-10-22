@@ -125,7 +125,7 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
     function run(handler, geometry) {
       fs.writeFileSync(file, harness(handler, geometry));
-      return spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+      return spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
     }
     const result = run(toggle(source));
     assert.equal(result.status, 0, result.stdout + result.stderr);

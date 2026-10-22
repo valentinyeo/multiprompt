@@ -91,6 +91,6 @@ fn jsonOk(raw: []const u8) bool {
   const file = path.join(dir, 'heal.zig');
   fs.writeFileSync(file, source);
   const zig = process.env.ZIG_EXE || process.env.ZIG || path.join(os.homedir(), '.local/zig-0.16.0/zig');
-  const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+  const result = spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });

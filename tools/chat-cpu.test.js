@@ -20,7 +20,7 @@ function run(code) {
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code);
-    return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 const scheduling = `

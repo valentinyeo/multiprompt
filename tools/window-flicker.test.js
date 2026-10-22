@@ -24,7 +24,7 @@ function zig(code, filter) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue521-'));
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), code);
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
   } finally {

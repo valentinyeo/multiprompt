@@ -238,20 +238,20 @@ test('executed production Zig decision, show, picker-close and input paths pass;
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness(source));
-    const run = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const run = spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stderr, /All \d+ tests passed/);
     console.log(run.stderr.trim());
     const broken = source.replace('if (!shellConsoleShouldBeVisible(idx)) {', 'if (false) {');
     assert.notEqual(broken, source);
     fs.writeFileSync(file, harness(broken));
-    const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const negative = spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0, 'an unconditional show must fail real execution');
     assert.match(negative.stderr, /URL picker close[^]*FAIL/);
     const oldPicker = source.replace(fn(source, 'closeUrlPickerInternal'), fn(source, 'closeUrlPickerInternal').replace('showShellConsole(active_shell, SW_SHOW, "closeUrlPickerInternal")', 'ShowWindow(shells[active_shell].hwnd, SW_SHOW)'));
     assert.notEqual(oldPicker, source);
     fs.writeFileSync(file, harness(oldPicker));
-    const baseline = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const baseline = spawnSync(zig, ['test', '-j1', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(baseline.status, 0, 'a raw-show picker mutation must fail real execution');
     assert.match(baseline.stderr, /URL picker close[^]*FAIL/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

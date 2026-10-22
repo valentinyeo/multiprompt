@@ -106,7 +106,7 @@ test "ISSUE-513 user selection still records a focused ten-second visit and canc
     try std.testing.expectEqual(@as(u32, 0), timer);
 }
 `);
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-513'], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-513'], { encoding: 'utf8', timeout: 60000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
