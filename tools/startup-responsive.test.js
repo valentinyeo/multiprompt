@@ -241,7 +241,7 @@ const reviewCases = [
     assert.ok(request.indexOf('const discovered: ?[]const account_hosts.Host = accountSyncHosts') < request.indexOf('rebased.hosts ='));
     assert.match(request, /hosts_ready = discovered != null/);
     assert.match(request, /if \(discovered\) \|found\| \{/);
-    assert.match(request, /if \(hosts_ready\) hosts else server\.value\.hosts/);
+    assert.match(request, /if \(hosts_ready\) synced_hosts else server\.value\.hosts/);
     const resolve = body(read('src/console.zig'), 'resolveSshPath');
     assert.match(resolve, /defer app_state\.g_ssh_resolved = true/);
   }],
