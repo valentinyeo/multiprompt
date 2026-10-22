@@ -48,7 +48,7 @@ test('regression guard accepts equal paired samples', () => {
 
 test('regression guard accepts slightly slower paired samples within noise', () => {
   assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(105))).ratio, 1.05);
-  assert.equal(summarize(samples(Array(7).fill(100), Array(7).fill(110))).ratio, 1.1);
+  assert.ok(Math.abs(summarize(samples(Array(7).fill(100), Array(7).fill(110))).ratio - 1.1) <= Number.EPSILON);
 });
 
 test('regression guard rejects clearly slower median or inconsistent paired samples', () => {
