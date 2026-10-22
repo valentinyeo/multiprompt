@@ -2227,6 +2227,27 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
         return makeResultResponse(allocator, id, "{\"unlocked\":false}");
     }
 
+    if (std.mem.eql(u8, method, "nativeScreenshot")) {
+        const window_id = getI64(object.get("windowId")) orelse return makeErrorResponse(allocator, id, "native screenshot requires windowId");
+        const owner_pid = getI64(object.get("ownerPid")) orelse return makeErrorResponse(allocator, id, "native screenshot requires a registered hosted pane owner");
+        const png = @import("bridge_capture.zig").capture(allocator, window_id, owner_pid) catch |err| {
+            const message = try std.fmt.allocPrint(allocator, "native pane screenshot failed: {s}", .{@errorName(err)});
+            defer allocator.free(message);
+            return makeErrorResponse(allocator, id, message);
+        };
+        defer allocator.free(png);
+        const encoder = std.base64.standard.Encoder;
+        const data = try allocator.alloc(u8, encoder.calcSize(png.len));
+        defer allocator.free(data);
+        _ = encoder.encode(data, png);
+        var result = std.array_list.Managed(u8).init(allocator);
+        defer result.deinit();
+        try result.appendSlice("{\"via\":\"native-window\",\"dataUrl\":\"data:image/png;base64,");
+        try result.appendSlice(data);
+        try result.print("\",\"bytesApprox\":{d}}}", .{png.len});
+        return makeResultResponse(allocator, id, result.items);
+    }
+
     if (std.mem.eql(u8, method, "getUploadConfig")) {
         return makeUploadConfigResponse(allocator, id);
     }
@@ -2236,6 +2257,15 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     }
 
     return makeErrorResponse(allocator, id, "unknown method");
+}
+
+test "native screenshot requires exact pane identity instead of returning unknown method" {
+    const missing_window = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\"}");
+    defer std.testing.allocator.free(missing_window);
+    try std.testing.expect(std.mem.indexOf(u8, missing_window, "native screenshot requires windowId") != null);
+    const missing_owner = try handleJsonMessage(std.testing.allocator, "{\"id\":\"fixture\",\"method\":\"nativeScreenshot\",\"windowId\":42}");
+    defer std.testing.allocator.free(missing_owner);
+    try std.testing.expect(std.mem.indexOf(u8, missing_owner, "registered hosted pane owner") != null);
 }
 
 fn commandLookup(command: []const u8) []const u8 {

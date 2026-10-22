@@ -388,7 +388,9 @@ async function rememberTargetWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) return;
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
+  await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
   await markZigShellWindow(wid);
 }
 
@@ -400,9 +402,10 @@ async function protectWindow(message) {
   const wid = messageWindowId(message);
   if (wid == null) throw new Error("protectWindow requires --window <id>");
   const record = await chrome.windows.get(wid).catch(() => null);
-  if (!record || (record.type && record.type !== "normal")) throw new Error(paneWindowNotFoundMessage(wid));
-  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   await loadProtectedWindows();
+  if (!record || (record.type && record.type !== "normal" &&
+      (record.type !== "popup" || protectedWindowMeta.get(wid)?.shellId == null))) throw new Error(paneWindowNotFoundMessage(wid));
+  const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const owner = protectedWindowMeta.get(wid);
   if (shellId != null && owner?.shellId != null &&
@@ -1575,6 +1578,10 @@ function isExtensionTab(tab) {
   return [tab?.url, tab?.pendingUrl].some((url) => /^[a-z][a-z0-9+.-]*-extension:\/\//i.test(url || ""));
 }
 
+function isBrowserInternalTab(tab) {
+  return /^(?:chrome|edge|chrome-search|chrome-untrusted|devtools):/i.test(tab?.pendingUrl || tab?.url || "");
+}
+
 function paneContentTab(tabs) {
   const active = tabs.find((tab) => tab.active && !isExtensionTab(tab));
   if (active && !isPaneBeaconTab(active)) return active;
@@ -1646,7 +1653,7 @@ async function resolveExplicitTargetTab(windowId, message, required) {
 }
 
 async function ensureBackgroundTabFocusEmulation(tab) {
-  if (!tab?.id || tab.active || focusEmulatedTabs.has(tab.id)) return tab;
+  if (!tab?.id || tab.active || isBrowserInternalTab(tab) || focusEmulatedTabs.has(tab.id)) return tab;
   try {
     await withCdpSession(tab.id, (debuggee) =>
       chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }));
@@ -1722,6 +1729,9 @@ async function runInActiveTab(func, args = [], message) {
 
 async function textAction(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    throw new Error(`text is unavailable on browser-internal pages (${tab.pendingUrl || tab.url}): the browser blocks extension access; use screenshot for a native pane capture`);
+  }
   try {
     const limit = numberOr(message.limit, 2000);
     const frameResults = await runInAllFrames(tab.id, getVisibleText, [limit]);
@@ -2343,6 +2353,15 @@ function keyDescriptor(raw, shift) {
 
 async function captureScreenshotResult(message) {
   const tab = await getTargetTab(message);
+  if (isBrowserInternalTab(tab)) {
+    const current = await chrome.tabs.get(tab.id);
+    if (!current.active || current.windowId !== message.windowId || !isBrowserInternalTab(current)) {
+      throw new Error("native screenshot requires the browser-internal tab to be selected in its hosted pane; refusing to capture another tab");
+    }
+    const owner = protectedWindowMeta.get(current.windowId);
+    const capture = await requestHostReply("nativeScreenshot", { windowId: current.windowId, ownerPid: owner?.ownerPid });
+    return { ...capture, tab: compactTab(current) };
+  }
   let dataUrl;
   let via = "Page.captureScreenshot";
   try {
@@ -2753,9 +2772,10 @@ function normalizeConsoleEvent(method, params) {
 
 async function resolveWindow(message) {
   await loadProtectedWindows();
-  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal", "popup"] });
   const normalIds = new Set(windows.filter((win) => !win.type || win.type === "normal").map((win) => win.id));
-  const tabs = (await chrome.tabs.query({})).filter((tab) => normalIds.has(tab.windowId) && !isExtensionTab(tab));
+  const paneIds = new Set(windows.filter((win) => normalIds.has(win.id) || win.type === "popup").map((win) => win.id));
+  const tabs = (await chrome.tabs.query({})).filter((tab) => paneIds.has(tab.windowId) && !isExtensionTab(tab));
   const shellId = Number.isInteger(message?.shellId) && message.shellId >= 0 ? message.shellId : null;
   const ownerPid = Number.isInteger(message?.ownerPid) && message.ownerPid > 0 ? message.ownerPid : null;
   const match = typeof message?.match === "string" ? message.match : "";
@@ -2766,10 +2786,16 @@ async function resolveWindow(message) {
         (owner?.shellId == null || (owner.shellId === shellId && (ownerPid == null || owner.ownerPid === ownerPid)));
     });
     if (new Set(beacons.map((tab) => tab.windowId)).size > 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
-    if (beacons.length > 0) return { windowId: beacons[0].windowId, tab: compactTab(beacons[0]) };
+    if (beacons.length > 0) {
+      const windowId = beacons[0].windowId;
+      if (!normalIds.has(windowId)) {
+        await markZigShellWindow(windowId, { shellId, ownerPid: ownerPid ?? protectedWindowMeta.get(windowId)?.ownerPid });
+      }
+      return { windowId, tab: compactTab(beacons[0]) };
+    }
   }
   if (shellId != null) {
-    const owned = windows.filter((win) => normalIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
+    const owned = windows.filter((win) => paneIds.has(win.id) && protectedWindowMeta.get(win.id)?.shellId === shellId &&
       (ownerPid == null || protectedWindowMeta.get(win.id)?.ownerPid === ownerPid));
     if (owned.length > 1) throw new Error(`ambiguous multiprompt pane windows for shell ${shellId}`);
     if (owned.length === 1) {
@@ -2778,7 +2804,7 @@ async function resolveWindow(message) {
     }
   }
   if (match) {
-    const hits = shellId != null ? [] : tabs.filter((tab) => typeof tab.url === "string" && tab.url.includes(match));
+    const hits = shellId != null ? [] : tabs.filter((tab) => normalIds.has(tab.windowId) && typeof tab.url === "string" && tab.url.includes(match));
     if (hits.length === 0) throw new Error(`no window with tab url matching: ${match}`);
     if (new Set(hits.map((tab) => tab.windowId)).size !== 1) throw new Error(`ambiguous window with tab url matching: ${match}`);
     return { windowId: hits[0].windowId, tab: compactTab(hits[0]) };

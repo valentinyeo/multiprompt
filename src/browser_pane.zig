@@ -2106,6 +2106,7 @@ fn bindBrowserWindowIdForShell(idx: u32, wid: i64) void {
     app_state.shells[idx].browser_window_id = wid;
     app_state.shells[idx].browser_launch_tick = 0;
     app_state.shells[idx].browser_open_failed = false;
+    _ = SetPropW(app_state.shells[idx].browser_hwnd, L("ZigShellBrowserWindowId"), @ptrFromInt(@as(usize, @intCast(wid))));
     writeBrowserWindowIdFile(app_state.shells[idx].shell_id, wid);
     writePaneSessionFileForShell(idx);
     var cmd_buf: [512]u8 = undefined;
