@@ -165,7 +165,7 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       }
       for (const [name, cap, prefix, run] of [
         ['test', 1600, 'shards-v5-group-', 'Run tests'],
-        ['test-vps', 1200, 'shards-v4-vps-', 'Run server tool tests'],
+        ['test-vps', 1600, 'shards-v5-vps-', 'Run server tool tests'],
       ]) {
         const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
         const steps = job.split(/(?=^      - )/m);
@@ -173,7 +173,9 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
         assert.equal(trim.length, 1);
         assert.match(trim[0], /if: steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
         assert.match(trim[0], /shell: bash\n/);
-        assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 2);
+        assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 1);
+        assert.ok(trim[0].includes('du -sh "$ZIG_GLOBAL_CACHE_DIR"\n'));
+        assert.ok(trim[0].includes('if [ -d .zig-cache ]; then du -sh .zig-cache; fi\n'));
         assert.ok(trim[0].includes(`python3 tools/trim-zig-cache.py --cap-mib ${cap}\n`));
         assert.ok(job.indexOf(`name: ${run}\n`) < job.indexOf('name: Bound Zig cache before save\n'));
         const buildCaches = steps.filter(step => /name: (?:Restore Zig \(PR\)|Cache Zig)\n/.test(step));

@@ -23,22 +23,10 @@ def main():
     cap = args.cap_mib * 1024 * 1024
     total = size(local) + size(global_cache)
     print(f'Zig caches before: {total / 1024 / 1024:.1f} MiB; cap: {args.cap_mib} MiB', flush=True)
-    objects = local / 'o'
-    entries = sorted(objects.iterdir(), key=lambda entry: entry.stat().st_mtime) if objects.is_dir() else []
-    removed_entries = 0
-    removed_bytes = 0
-    for entry in entries:
-        if total <= cap:
-            break
-        removed = size(entry)
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
-        total -= removed
-        removed_entries += 1
-        removed_bytes += removed
-    print(f'Removed {removed_entries} entries: {removed_bytes / 1024 / 1024:.1f} MiB', flush=True)
+    dropped = total > cap and local.is_dir()
+    if dropped:
+        shutil.rmtree(local)
+    print(f'Local Zig cache dropped: {"yes" if dropped else "no"}', flush=True)
     total = size(local) + size(global_cache)
     print(f'Zig caches after: {total / 1024 / 1024:.1f} MiB', flush=True)
     if total > cap:
