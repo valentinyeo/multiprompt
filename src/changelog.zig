@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.816", .items = &.{
+        .{ .text = "You can now select and copy messages that are waiting to send in Chat View.", .ticket = "IGSH-567" },
+    } },
     .{ .ver = "0.28.815", .items = &.{
         .{ .text = "Chat View now types every message into Claude at once like Claude's own buffer, drops the waiting labels, and force send presses Claude's Ctrl+X Ctrl+S.", .ticket = "IGSH-564" },
         .{ .text = "Every workspace uses your original signed-in browser again, so Chrome no longer asks you to sign in after the last update.", .ticket = "IGSH-565" },
