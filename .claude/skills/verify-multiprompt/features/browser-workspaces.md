@@ -30,7 +30,9 @@ No app state, browser preferences or bookmark files are seeded or edited.
 Before app commands, dismiss Edge startup bubbles with Escape and return to the
 shell with Alt+M when UI Automation reports browser focus.
 
-Create six workspaces and panes. Hash the persisted IDs independently and
+Create a second workspace with Ctrl+N to persist the fresh layout, then return
+to the first workspace and open both panes before creating the remaining four.
+Hash all six persisted IDs independently and
 require completion markers, Local State and six real profile processes.
 In the sixth workspace, rename it to IGSH224 Journey, navigate to a synthetic
 example.com URL and bookmark it through real keyboard input. Move the workspace

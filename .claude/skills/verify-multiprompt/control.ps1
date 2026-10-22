@@ -1043,11 +1043,18 @@ try {
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
         }
         'browser-workspaces' {
+            Press @(0x11, 0x4E) 'Ctrl+N: create a workspace and persist the fresh workspace layout'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['workspace_count'] -and $state.workspace_count -eq 2 } 'initial and new workspaces saved'
+            Press @(0x12, 0x32) 'Alt+2: return to the initial workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'initial workspace active'
             $roots = @()
             $identities = @()
             $browserRoot = Join-Path $scratch 'local/ZigShell/BrowserWorkspaces/edge'
             for ($index = 0; $index -lt 6; $index++) {
-                if ($index -gt 0) {
+                if ($index -eq 1) {
+                    Press @(0x12, 0x33) 'Alt+3: select the already created second workspace'
+                    Wait-Until { (Read-Session).active_workspace -eq 1 } 'second workspace active'
+                } elseif ($index -gt 1) {
                     Focus-WorkspaceShell
                     Press @(0x11, 0x4E) 'Ctrl+N: create an independent workspace'
                     Wait-Until { (Read-Session).workspace_count -eq $index + 1 } 'new workspace saved'
