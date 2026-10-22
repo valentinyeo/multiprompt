@@ -29,7 +29,11 @@ function Select-Release([string]$Version) {
 function Invoke-RestMethod { param($Uri, $Headers, $TimeoutSec) return $script:release }
 function Invoke-WebRequest {
     param($Uri, $Headers, [switch]$UseBasicParsing, $TimeoutSec, $OutFile)
-    Copy-Item -LiteralPath (Join-Path $script:releaseFolder ([IO.Path]::GetFileName($Uri))) -Destination $OutFile -Force
+    $name = [IO.Path]::GetFileName($Uri)
+    if ($script:manifestFault -eq 'missing' -and $name -eq 'SHA256SUMS.txt.sig') { throw 'Fixture signature asset missing' }
+    if ($script:manifestFault -eq 'wrong' -and $name -eq 'SHA256SUMS.txt.sig') { $name = 'wrong.sig' }
+    Copy-Item -LiteralPath (Join-Path $script:releaseFolder $name) -Destination $OutFile -Force
+    if ($script:manifestFault -eq 'tampered' -and $name -eq 'SHA256SUMS.txt') { [IO.File]::AppendAllText($OutFile, 'tampered') }
 }
 
 $Root = [IO.Path]::GetFullPath($Root)
@@ -39,6 +43,7 @@ foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROM
 $target = Join-Path $Root 'app.exe'
 $dir = "$target.update"
 $checks = New-Object System.Collections.ArrayList
+$journeySucceeded = $false
 function Passed([string]$Name) { [void]$checks.Add($Name); Write-Host "$Name passed" }
 try {
     foreach ($folder in @('roaming/ZigShell', 'local', 'profile/Documents/GitHub/zigshell/extension/themes/current')) { New-Item -ItemType Directory -Force (Join-Path $Root $folder) | Out-Null }
@@ -112,17 +117,30 @@ try {
     New-Item -ItemType Directory -Force $dir | Out-Null
     Copy-Item "$script:releaseFolder/SHA256SUMS.txt*" $dir -Force
     Assert-Manifest $target $dir
+    Assert (Save-Update $target '1.9.0' 'x64') 'Valid manifest signature did not stage an update'
     Passed 'valid signature accepted'
     Copy-Item "$script:releaseFolder/wrong.sig" "$dir/SHA256SUMS.txt.sig" -Force
     Refuses { Assert-Manifest $target $dir } 'Wrong signing key accepted'
+    $script:manifestFault = 'wrong'
+    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
     Passed 'wrong key rejected'
     Copy-Item "$script:releaseFolder/SHA256SUMS.txt.sig" "$dir/SHA256SUMS.txt.sig" -Force
     [IO.File]::AppendAllText("$dir/SHA256SUMS.txt", 'tampered')
     Refuses { Assert-Manifest $target $dir } 'Tampered manifest accepted'
+    $script:manifestFault = 'tampered'
+    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
     Passed 'tampered SHA256SUMS rejected'
     Copy-Item "$script:releaseFolder/SHA256SUMS.txt" "$dir/SHA256SUMS.txt" -Force
     Remove-Item "$dir/SHA256SUMS.txt.sig"
     Refuses { Assert-Manifest $target $dir } 'Missing signature accepted'
+    $script:manifestFault = 'missing'
+    try { Refuses { Save-Update $target '1.9.0' 'x64' } 'Unverified manifest staged an update' } finally { $script:manifestFault = '' }
+    Assert (-not (Test-Path "$dir/ready.txt")) 'Unverified signature left update ready'
+    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Unverified manifest modified installation'
     Passed 'missing signature rejected'
 
     Assert ((Get-ReleaseVersion 'v1.10.0') -gt (Get-ReleaseVersion '1.9.999')) 'Numeric version comparison'
@@ -243,12 +261,13 @@ try {
     $running = @(Get-Process | Where-Object { $_.Path -eq $target })
     Assert ($running.Count -eq 1) 'Exit-timeout recovery left no runnable app'
     Passed 'exit timeout relaunches runnable old app'
+    $journeySucceeded = $true
     Write-Host 'UPDATE BEHAVIOR PASSED'
 } finally {
     Stop-FixtureApps
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
     if ($Evidence) {
         New-Item -ItemType Directory -Force $Evidence | Out-Null
-        @{ checks = @($checks.ToArray()); success = ($checks.Count -ge 18); revision = $env:GITHUB_SHA; fixtureSource = 'signed local folder with ephemeral job-only signing key'; cleanup = 'all fixture processes stopped' } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'safe-updates.json')
+        @{ checks = @($checks.ToArray()); success = $journeySucceeded; revision = $env:GITHUB_SHA; fixtureSource = 'signed local folder with ephemeral job-only signing key'; cleanup = 'all fixture processes stopped' } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'safe-updates.json')
     }
 }
