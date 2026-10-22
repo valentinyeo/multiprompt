@@ -84,6 +84,7 @@ pub fn restore() void {
     }
     for (s.rows, 0..) |row, i| {
         var shell = state.empty_shell;
+        shell.console_inflight = true;
         shell.shell_id = row.id;
         state.next_shell_id = @max(state.next_shell_id, row.id +| 1);
         cached_ids[i] = row.id;

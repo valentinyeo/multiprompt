@@ -152,6 +152,7 @@ const reviewCases = [
   ['loading shells bypass reconnect until worker completion', read => {
     const consoleSource = read('src/console.zig');
     assert.match(body(consoleSource, 'spawnShellWithSession'), /\.console_inflight = asynchronous/);
+    assert.match(body(read('src/launch_cache.zig'), 'restore'), /shell\.console_inflight = true/);
     const complete = body(consoleSource, 'finishStartupShell');
     assert.ok(complete.indexOf('console_inflight = false') < complete.indexOf('registerShellExitWait(idx)'));
     for (const name of ['sshAutoReconnectTick', 'sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshProbeStart']) {
