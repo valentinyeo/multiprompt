@@ -291,6 +291,8 @@ test "picked colors survive closed tab reopen, reminders and layout export impor
     g_search_result_count = 0;
 }
 test "rails span header and all members exactly once, excluding ungrouped rows" {
+    const saved_active = active_shell;
+    defer active_shell = saved_active;
     group_count = 0;
     next_group_id = 1;
     _ = createGroup(&.{'A'});
