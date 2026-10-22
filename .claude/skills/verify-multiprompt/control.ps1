@@ -630,7 +630,7 @@ function Assert-Foreground {
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
     Wait-Until {
-        [VerifyNative]::BringToForeground($script:window)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
     } 'owned app foreground for keyboard input'
     Assert-Foreground
@@ -778,7 +778,10 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
     } "$Stage relaunch owns its published state after session restore" 60
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-    [VerifyNative]::BringToForeground($script:window)
+    Wait-Until {
+        [VerifyNative]::BringToForeground($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } "$Stage relaunched window foreground before input"
     Doctor
 }
 
@@ -868,7 +871,7 @@ try {
     }
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-    [VerifyNative]::BringToForeground($script:window)
+    [void][VerifyNative]::SetForegroundWindow($script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'foreground main window'
     Doctor
     Record 'Launch complete; read-only Doctor passed'

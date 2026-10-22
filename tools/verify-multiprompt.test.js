@@ -181,7 +181,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllBytes[\s\S]*?\.request.bin/);
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
-  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
@@ -623,11 +623,11 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.match(restart, /\$trace -match 'launch step=browser'/);
     assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
     assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
-    assert.match(restart, /\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Doctor/);
-    assert.doesNotMatch(restart, /GetForegroundWindow|Assert-Foreground/);
+    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Doctor/);
+    assert.doesNotMatch(restart, /Assert-Foreground/);
     const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
-    assert.match(press, /Doctor\s+Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
-    assert.match(driver, /BringToForeground\(\$script:window\)\s+Wait-Until[^\n]+ 'foreground main window'/);
+    assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+    assert.match(driver, /SetForegroundWindow\(\$script:window\)\s+Wait-Until[^\n]+ 'foreground main window'/);
     assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
     assert.match(driver, /Save-Json \$focus \(\$Name \+ '.focus.json'\)/);
     assert.match(driver, /\$bitmap.Save\(\(Join-Path \$Evidence \(\$Name \+ '.png'\)\)/);
@@ -637,8 +637,8 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
     ['if (attached) AttachThreadInput(currentThread, foregroundThread, false);', ''],
     ['try { SetForegroundWindow(hwnd); }', 'try { }'],
-    ['[VerifyNative]::BringToForeground($script:window)\n    Doctor', 'Assert-Foreground\n    Doctor'],
     ['[VerifyNative]::BringToForeground($script:window)\n        [VerifyNative]::GetAncestor', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        [VerifyNative]::GetAncestor'],
+    ['} "$Stage relaunched window foreground before input"\n    Doctor', '} "$Stage relaunched window foreground before input"\n    Assert-Foreground\n    Doctor'],
     ["Snapshot 'failure'", "Snapshot 'ignored'"],
     ["($Name + '.focus.json')", "($Name + '.ignored.json')"],
     ["$bitmap.Save((Join-Path $Evidence ($Name + '.png'))", "$bitmap.Save((Join-Path $Evidence ($Name + '.ignored'))"],
