@@ -53,8 +53,9 @@ print_help() {
       extension-reload) echo 'usage: zsb extension-reload (reload unpacked extension code; no app restart)'; return ;;
       tabs) echo 'usage: zsb tabs [--close ID]'; return ;;
       url) echo 'usage: zsb url [--tab ID]'; return ;;
+      frames) echo 'usage: zsb frames [--tab ID] (read-only frameId, parentFrameId and URL)'; return ;;
       find) echo 'usage: zsb find <text> [--tab ID]'; return ;;
-      click) echo 'usage: zsb click <selector> [--tab ID]'; return ;;
+      click) echo 'usage: zsb click <selector> [--tab ID] (reports via=cdp or frame-dom-fallback, and trusted)'; return ;;
       screenshot) echo 'usage: zsb screenshot [-o FILE | --output FILE] [--tab ID]'; return ;;
       console) echo 'usage: zsb console [-n N | --limit N] [--clear]'; return ;;
       routing-audit) echo 'usage: zsb routing-audit [--limit N | --full]'; return ;;
@@ -76,7 +77,7 @@ CDP_HELP
       close-tab) echo 'usage: zsb close-tab <id|match>'; return ;;
       tab) echo 'usage: zsb tab close <id|match>'; return ;;
       insert) echo 'usage: zsb insert <text>'; return ;;
-      eval|script) printf 'usage: zsb %s <js> [--tab ID]\n' "$1"; return ;;
+      eval|script) printf 'usage: zsb %s [--frame ID] <js> [--tab ID]\n' "$1"; return ;;
       key) echo 'usage: zsb key <combo>'; return ;;
       cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]'; return ;;
       profile-clone) echo 'usage: zsb profile-clone <src> <dst>'; return ;;
@@ -101,6 +102,8 @@ Commands and flags:
   extension-reload                  Reload unpacked extension code (no app restart)
   active-tab | activate <id> | close-tab <id> | tab close <id>
   url [--tab ID]                    Read a tab URL
+  frames [--tab ID]                 List frameId, parentFrameId and URL (read-only)
+  eval --frame ID <js> [--tab ID]    Evaluate JavaScript in a chosen frame's MAIN world
   text [--limit N | --full] [--tab ID]      Read visible text (default: 2000 chars)
   snapshot [--limit N | --full] [--tab ID]  Read page state (default: 2000 chars)
   links [--limit N | --full] [--tab ID]     Read links (default: 50 links)

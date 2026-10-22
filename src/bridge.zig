@@ -335,6 +335,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
     } else if (std.mem.eql(u8, command, "active-tab")) {
         if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "activeTab", "", null);
+    } else if (std.mem.eql(u8, command, "frames")) {
+        var fields = std.array_list.Managed(u8).init(allocator);
+        defer fields.deinit();
+        const tab = parseOnlyTabArg(&args) catch badArgs(command);
+        if (tab) |target| try appendTabTargetField(&fields, target);
+        try sendBrowserRequest(allocator, "frames", fields.items, null);
     } else if (std.mem.eql(u8, command, "url")) {
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
@@ -479,19 +485,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (args.next() != null) badArgs(command);
         try sendBrowserRequest(allocator, "cursor", fields.items, null);
     } else if (std.mem.eql(u8, command, "eval") or std.mem.eql(u8, command, "script")) {
-        const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const fields = buildEvalFields(allocator, &args) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
-        defer allocator.free(parsed.text);
-
-        var fields = std.array_list.Managed(u8).init(allocator);
-        defer fields.deinit();
-        try fields.appendSlice("\"code\":");
-        try appendJsonString(&fields, parsed.text);
-        if (parsed.tab) |target| try appendTabTargetField(&fields, target);
-        try sendBrowserRequest(allocator, "eval", fields.items, null);
+        defer allocator.free(fields);
+        try sendBrowserRequest(allocator, "eval", fields, null);
     } else if (std.mem.eql(u8, command, "key")) {
         const first = args.next() orelse badArgs(command);
         const combo = try joinRemainingArgs(allocator, &args, first);
@@ -655,13 +654,14 @@ const usage_text =
     \\  links [--limit n|--full] [--tab <id|match>] Return links across frames
     \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
     \\  find <text> [--tab <id|match>] Find text snippets across frames
-    \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
+    \\  click <selector> [--tab <id|match>]  Click across frames; reports via=cdp (trusted) or frame-dom-fallback (untrusted)
     \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable
     \\  type <selector> <text> [--tab <id|match>]  Click a selector and replace it with trusted text
     \\  type --keys [selector] <text> [--tab <id|match>]  Type individual keys for keyboard-driven typeaheads
     \\  insert <text>                  Insert trusted text at the page cursor
     \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
-    \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
+    \\  frames [--tab <id|match>]      List frameId, parentFrameId and URL (read-only)
+    \\  eval [--frame <frameId>] <js> [--tab <id|match>]  Execute JavaScript in that frame's MAIN world; default top frame; awaits promises
     \\  key <combo>                    Send a native key chord, e.g. "Alt+2" or "Ctrl+B"
     \\  screenshot [-o file.png] [--tab <id|match>] Return a PNG or save it
     \\  console [-n N|--clear]         Return recent console and page-log entries
@@ -2422,6 +2422,65 @@ fn parseOnlyTabArg(args: anytype) !?[]const u8 {
         tab = args.next() orelse return error.InvalidArguments;
     }
     return tab;
+}
+
+fn buildEvalFields(allocator: std.mem.Allocator, args: anytype) ![]u8 {
+    var code = std.array_list.Managed(u8).init(allocator);
+    defer code.deinit();
+    var tab: ?[]const u8 = null;
+    var frame_id: ?u32 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--frame")) {
+            if (frame_id != null) return error.InvalidArguments;
+            const value = args.next() orelse return error.InvalidArguments;
+            if (value.len == 0) return error.InvalidArguments;
+            for (value) |digit| {
+                if (digit < '0' or digit > '9') return error.InvalidArguments;
+            }
+            frame_id = std.fmt.parseInt(u32, value, 10) catch return error.InvalidArguments;
+        } else if (std.mem.eql(u8, arg, "--tab")) {
+            if (tab != null) return error.InvalidArguments;
+            tab = args.next() orelse return error.InvalidArguments;
+            if (tab.?.len == 0 or std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
+        } else {
+            if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
+            if (code.items.len > 0) try code.append(' ');
+            try code.appendSlice(arg);
+        }
+    }
+    if (code.items.len == 0) return error.InvalidArguments;
+    var fields = std.array_list.Managed(u8).init(allocator);
+    errdefer fields.deinit();
+    try fields.appendSlice("\"code\":");
+    try appendJsonString(&fields, code.items);
+    if (tab) |target| try appendTabTargetField(&fields, target);
+    if (frame_id) |id| try fields.print(",\"frameId\":{d}", .{id});
+    return fields.toOwnedSlice();
+}
+
+test "IGSH-305 eval frame and tab flags serialize without changing JavaScript" {
+    inline for (.{ "--frame 43 --tab 7 document.title", "--tab 7 document.title --frame 43", "document.title --frame 43 --tab 7" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        const fields = try buildEvalFields(std.testing.allocator, &args);
+        defer std.testing.allocator.free(fields);
+        try std.testing.expectEqualStrings("\"code\":\"document.title\",\"tab\":\"7\",\"frameId\":43", fields);
+    }
+    inline for (.{ "document.title", "--frame 0 document.title" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        const fields = try buildEvalFields(std.testing.allocator, &args);
+        defer std.testing.allocator.free(fields);
+        try std.testing.expect(std.mem.startsWith(u8, fields, "\"code\":\"document.title\""));
+    }
+}
+
+test "IGSH-305 eval rejects invalid or repeated frame flags and missing code" {
+    inline for (.{ "", "--frame", "--frame 43", "--frame -1 x", "--frame +1 x", "--frame 1.5 x", "--frame x x", "--frame 4294967296 x", "--frame 0 --frame 43 x", "--tab", "--tab --frame 43 x", "--tab 1 --tab 2 x", "--unknown x" }) |input| {
+        var args = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, input);
+        defer args.deinit();
+        try std.testing.expectError(error.InvalidArguments, buildEvalFields(std.testing.allocator, &args));
+    }
 }
 
 const TextTabArgs = struct {

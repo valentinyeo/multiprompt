@@ -946,14 +946,55 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     appendBrowserWideAscii(&exe_w, &epos, browserExePath());
     exe_w[@min(epos, exe_w.len - 1)] = 0;
     if (verboseLoggingEnabled()) debugLog2("[browser] exe=", browserExePath());
-    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params }) catch return;
+    var nonce: [40]u16 = @splat(0);
+    if (std.mem.indexOf(u8, launch_url, "<title>")) |at| {
+        const title = launch_url[at + 7 ..];
+        const len = @min(std.mem.indexOf(u8, title, "</title>") orelse 0, nonce.len - 1);
+        for (title[0..len], 0..) |c, i| nonce[i] = c;
+    }
+    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd }) catch return;
     thread.detach();
 }
 
-fn browserLaunchWorker(exe: [320]u16, params: [2048]u16) void {
+threadlocal var launch_guard_nonce: [40]u16 = @splat(0);
+threadlocal var launch_guard_owner: HANDLE = null;
+threadlocal var launch_guard_window: HANDLE = null;
+
+fn browserLaunchEvent(_: HANDLE, _: DWORD, hwnd: HANDLE, object: i32, child: i32, _: DWORD, _: DWORD) callconv(WINAPI) void {
+    if (object != 0 or child != 0 or hwnd == null or hwnd == launch_guard_window or launch_guard_nonce[0] == 0) return;
+    if (!edgeWindowClassMatches(hwnd) or GetPropW(hwnd, L("ZigShellPaneOwner")) != null) return;
+    var title: [256]u16 = undefined;
+    const len = InternalGetWindowText(hwnd, &title, title.len);
+    if (len <= 0 or std.mem.indexOf(u16, title[0..@intCast(len)], std.mem.sliceTo(&launch_guard_nonce, 0)) == null) return;
+    launch_guard_window = hwnd;
+    _ = ShowWindow(hwnd, SW_HIDE);
+    suppressBrowserPaneAltTabEntry(hwnd);
+    _ = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, @bitCast(@intFromPtr(launch_guard_owner)));
+    _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: HANDLE) void {
+    const win = @import("win32.zig");
     const co = CoInitializeEx(null, COINIT_APARTMENTTHREADED);
     defer if (co >= 0) CoUninitialize();
-    _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, SW_SHOWNOACTIVATE);
+    launch_guard_nonce = nonce;
+    launch_guard_owner = owner;
+    launch_guard_window = null;
+    const hook = if (nonce[0] != 0) win.SetWinEventHook(0x8000, 0x800C, null, browserLaunchEvent, 0, 0, 0) else null;
+    defer {
+        if (hook != null) _ = win.UnhookWinEvent(hook);
+    }
+    _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, if (nonce[0] != 0) SW_HIDE else SW_SHOWNOACTIVATE);
+    if (hook == null) return;
+    const until = GetTickCount64() + 6000;
+    while (GetTickCount64() < until and launch_guard_window == null) {
+        var msg = std.mem.zeroes(win.MSG);
+        while (win.PeekMessageW(&msg, null, 0, 0, 1) != 0) {
+            _ = win.TranslateMessage(&msg);
+            _ = win.DispatchMessageW(&msg);
+        }
+        _ = win.MsgWaitForMultipleObjects(0, null, 0, 50, 0x04FF);
+    }
 }
 
 pub fn spawnBrowserCliHidden(cmd: []const u8) void {
@@ -1398,7 +1439,6 @@ fn enumBrowserSnapshot(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
 fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!edgeWindowClassMatches(hwnd)) return 1;
     if (browserSnapshotContains(hwnd)) return 1;
-    if (IsWindowVisible(hwnd) == 0) return 1;
     var wr: RECT = std.mem.zeroes(RECT);
     if (GetWindowRect(hwnd, &wr) == 0) return 1;
     if (wr.right <= wr.left or wr.bottom <= wr.top) return 1;
@@ -2172,6 +2212,7 @@ fn dockBrowserWindow(idx: u32, hwnd: HANDLE, foreground_launch: bool) void {
 
 fn browserDockWorker(job: *BrowserDockJob) void {
     const hwnd = job.hwnd;
+    _ = ShowWindow(hwnd, SW_HIDE);
     var style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     style &= ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
     style |= @as(isize, @intCast(WS_POPUP));
