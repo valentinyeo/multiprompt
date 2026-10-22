@@ -215,6 +215,7 @@ $process = $null
 $job = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
+$script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -225,6 +226,21 @@ function Save-Json($Value, [string]$Name) {
 function Record([string]$Action) {
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
+}
+
+function Prepare-ScratchEvidence([string]$Path) {
+    $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
+            Save-Json @($script:scratchLinks) 'scratch-links.json'
+            $entry.Delete()
+            Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } else {
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+        }
+    }
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20) {
@@ -276,18 +292,24 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
     return $pane
 }
 
+function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and
+            $pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)
+    } "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25
+    Doctor
+    Record "Activate main window after browser-pane-stuck ${Step} docking"
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5
+}
+
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
-    Wait-Until {
-        $pane = Read-BrowserPane
-        $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::PaneVisible($script:window)
-    } 'browser docked before keyboard input' 25
-    Wait-Until {
-        [void][VerifyNative]::SetForegroundWindow($script:window)
-        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-    } 'browser launch returned foreground to app'
-    return Assert-BrowserPane 'open' $Step $PreviousId
+    $pane = Assert-BrowserPane 'open' $Step $PreviousId
+    Focus-BrowserPaneOwner $Step $pane.browser_connection_id
+    return $pane
 }
 
 function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
@@ -633,11 +655,7 @@ try {
             Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
-            Wait-Until {
-                $pane = Read-BrowserPane
-                $pane.browser_state -eq 'connected' -and [VerifyNative]::PaneVisible($script:window) -and
-                    [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-            } 'shifted browser docked before keyboard input' 25
+            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
             Palette 'close all browser panes'
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
@@ -682,12 +700,13 @@ try {
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
             } finally {
-                if (Test-Path (Join-Path $scratch 'roaming/ZigShell')) {
-                    $data = Join-Path $Evidence 'data/roaming'
+                if (Test-Path $scratch) {
+                    Prepare-ScratchEvidence $scratch
+                    $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
                     $deadline = [DateTime]::UtcNow.AddSeconds(20)
                     while ($true) {
-                        try { Copy-Item (Join-Path $scratch 'roaming/ZigShell') (Join-Path $data 'ZigShell') -Recurse -Force; break } catch {
+                        try { Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break } catch {
                             if ([DateTime]::UtcNow -ge $deadline) { throw }
                             Start-Sleep -Milliseconds 200
                         }
@@ -704,7 +723,7 @@ try {
                 }
             }
         }
-        $result.cleanup = 'owned process tree stopped; app data copied to evidence/data/roaming/ZigShell then scratch removed'
+        $result.cleanup = 'owned process tree stopped; scratch copied to evidence/data then removed'
         $result.scratchRemoved = -not (Test-Path $scratch)
         if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }
         Write-Output $result.cleanup

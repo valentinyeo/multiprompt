@@ -540,6 +540,9 @@ pub fn build(b: *std.Build) void {
         zsb_deadline_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     }
     test_step.dependOn(&zsb_deadline_tests.step);
+    const zsb_type_newlines_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-type-newlines.test.js" });
+    test_step.dependOn(&zsb_type_newlines_tests.step);
+    vps_test_step.dependOn(&zsb_type_newlines_tests.step);
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);

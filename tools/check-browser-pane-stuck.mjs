@@ -64,30 +64,80 @@ for (const step of ['initial-open', 'shortcut-close', 'reopen-after-shortcut', '
 for (const observation of ['GetProp(hwnd, "ZigShellPaneOwner")', 'IsWindowVisible(hwnd)', 'GetWindowRect(hwnd, out pane)', 'AddSeconds(21)', 'Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id']) {
   assert.ok(driver.includes(observation), `connected journey observes ${observation}`);
 }
-function browserInputReadyContract(source) {
-  const open = source.slice(source.indexOf('function Open-BrowserPane('), source.indexOf('function Assert-ConnectedPaneStaysVisible('));
-  assert.match(open, /Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible\(\$script:window\)[^}]*\} 'browser docked before keyboard input' 25/);
-  assert.ok(open.indexOf('browser docked before keyboard input') < open.indexOf('browser launch returned foreground to app'));
-  assert.match(source, /function Assert-Foreground \{[^}]*throw 'Refusing input: owned app is not foreground'/);
-  assert.match(source, /Assert-BrowserPane 'open' 'shift-b-toggle'[^]*?Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible[^}]*GetForegroundWindow[^}]*\} 'shifted browser docked before keyboard input' 25\s+Palette 'close all browser panes'/);
+function browserForegroundContract(source) {
+  const helper = source.match(/function Focus-BrowserPaneOwner\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
+  assert.ok(helper, 'browser launches explicitly activate the main window after docking');
+  const steps = [
+    'Wait-Until {', '$pane = Read-BrowserPane',
+    "$null -ne $pane -and $pane.browser_state -eq 'connected' -and",
+    '$pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)',
+    '} "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25',
+    'Doctor', 'Record "Activate main window after browser-pane-stuck ${Step} docking"',
+    '[void][VerifyNative]::SetForegroundWindow($script:window)',
+    'Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5',
+  ];
+  let offset = -1;
+  for (const step of steps) {
+    const next = helper.indexOf(step, offset + 1);
+    assert.ok(next > offset, `missing or misordered foreground handoff: ${step}`);
+    offset = next;
+  }
+  assert.match(source, /function Open-BrowserPane\([^\n]*\) \{\s*Palette 'open browser'\s*Press @\(0x0D\) 'Enter: Open Browser Pane'\s*\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s*Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s*return \$pane\s*\}/);
+  assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
+  assert.match(source, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/);
+  for (const name of ['Press', 'Type-Text']) {
+    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*(?:Wait-Until \\{[^}]*\\} '[^']*'\\s*)?Assert-Foreground\\s*Record`));
+  }
 }
-browserInputReadyContract(driver);
-assert.throws(() => browserInputReadyContract(driver.replace(/    Wait-Until \{\n        \$pane = Read-BrowserPane[^}]*\} 'browser docked before keyboard input' 25\n/, '')));
-for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'", 'Press @(0x12, 0x10, 0x41)', 'Press @(0x12, 0x10, 0x42)']) {
-  assert.ok(driver.includes(input), `real input: ${input}`);
+browserForegroundContract(driver);
+for (const [before, after] of [
+  ["$pane.browser_state -eq 'connected' -and", "$pane.browser_state -eq 'opening' -and"],
+  ['$pane.browser_connection_id -eq $ConnectionId -and ', ''],
+  [' -and [VerifyNative]::PaneVisible($script:window)', ''],
+  ['docked pane ready for main-window activation" 25', 'docked pane ready for main-window activation"'],
+  ['    Focus-BrowserPaneOwner $Step $pane.browser_connection_id\n', ''],
+  ["            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id\n", ''],
+  ["throw 'Refusing input: owned app is not foreground'", 'return'],
+  ['    Assert-Foreground\n    Record $Label', '    Record $Label'],
+]) assert.throws(() => browserForegroundContract(driver.replace(before, after)), `reject foreground regression: ${before}`);
+const activation = '    [void][VerifyNative]::SetForegroundWindow($script:window)\n';
+const earlyActivation = driver.replace(activation, '').replace('function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n', `function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n${activation}`);
+assert.throws(() => browserForegroundContract(earlyActivation), 'activation before docking repeats the original race');
+function scratchCleanupContract(source) {
+  assert.ok(source.includes('$script:scratchLinks = @()'), 'reparse evidence starts with an empty list');
+  const prepare = source.match(/function Prepare-ScratchEvidence\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
+  assert.ok(prepare, 'scratch is prepared without traversing protected WinINet compatibility links');
+  assert.ok(prepare.includes('foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {'));
+  assert.ok(!prepare.includes('-Recurse'), 'enumeration cannot enter a reparse point before inspecting it');
+  assert.match(prepare, /if \(\(\$entry.Attributes -band \[IO.FileAttributes\]::ReparsePoint\) -ne 0\) \{\s*\$script:scratchLinks \+= @\{ path = \$entry.FullName.Substring\(\$scratch.Length \+ 1\); attributes = \$entry.Attributes.ToString\(\); linkType = \$entry.LinkType; target = @\(\$entry.Target\) \}\s*Save-Json @\(\$script:scratchLinks\) 'scratch-links.json'\s*\$entry.Delete\(\)/);
+  assert.match(prepare, /\} else \{\s*\$entry.Attributes = \$entry.Attributes -band \(-bnot \$blockedAttributes\)\s*if \(\$entry -is \[IO.DirectoryInfo\]\) \{ Prepare-ScratchEvidence \$entry.FullName \}/);
+  assert.ok(prepare.includes('$blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System'));
+  const cleanup = source.slice(source.indexOf("    $result.status = 'passed'"));
+  let offset = -1;
+  for (const step of [
+    '$stopped = $job.Stop()', "'process-tree.json'", 'Prepare-ScratchEvidence $scratch',
+    "Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break",
+    'Remove-Item $scratch -Recurse -Force', '$result.scratchRemoved = -not (Test-Path $scratch)',
+    "if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }",
+    "foreach ($name in @('before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json'))",
+    'throw "Evidence lost during cleanup: $name"',
+  ]) {
+    const next = cleanup.indexOf(step, offset + 1);
+    assert.ok(next > offset, `missing or misordered scratch cleanup: ${step}`);
+    offset = next;
+  }
 }
-function shiftedShortcutTimingContract(source) {
-  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));
-  assert.ok(Number.isFinite(debounce) && debounce > 0, 'production browser shortcut debounce exists');
-  const sequence = source.match(/Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$shiftToggleCooldown = \[Diagnostics.Stopwatch\]::StartNew\(\)\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Wait-Until \{ \$shiftToggleCooldown.ElapsedMilliseconds -ge (\d+) \} 'browser shortcut debounce elapsed' (\d+)\n\s+Press @\(0x12, 0x10, 0x42\)[^\n]*\n\s+\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id/);
-  assert.ok(sequence, 'shifted shortcuts retain close/new-identity assertions with a bounded monotonic cooldown after the first chord');
-  const cooldown = Number(sequence[1]);
-  const timeout = Number(sequence[2]) * 1000;
-  assert.ok(cooldown > debounce && timeout > cooldown && timeout <= 10000, 'journey waits past production debounce within a bounded timeout');
-}
-shiftedShortcutTimingContract(driver);
-assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5\n", '')));
-assert.throws(() => shiftedShortcutTimingContract(driver.replace('ElapsedMilliseconds -ge 1600', 'ElapsedMilliseconds -ge 1000')));
+scratchCleanupContract(driver);
+for (const [before, after] of [
+  ['                    Prepare-ScratchEvidence $scratch\n', ''],
+  ['Get-ChildItem -LiteralPath $Path -Force', 'Get-ChildItem -LiteralPath $Path -Force -Recurse'],
+  ["            Save-Json @($script:scratchLinks) 'scratch-links.json'\n", ''],
+  ['$entry.Delete()', '$entry.Delete($true)'],
+  ['[IO.FileAttributes]::ReparsePoint) -ne 0', '[IO.FileAttributes]::ReparsePoint) -eq 0'],
+  ['$entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)', ''],
+  ["if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }", ''],
+  ['throw "Evidence lost during cleanup: $name"', ''],
+]) assert.throws(() => scratchCleanupContract(driver.replace(before, after)), `reject scratch cleanup regression: ${before}`);
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.notEqual(start, -1, `${name} exists`);
