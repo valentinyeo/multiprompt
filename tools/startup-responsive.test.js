@@ -97,7 +97,7 @@ test('IGSH-522 phased startup persists the initial session after consoles finish
     assert.ok(main.includes(original));
     assert.throws(() => verify(main.replace(original, replacement)), assert.AssertionError);
   }
-  assert.throws(() => verify(execFileSync('git', ['show', 'cc26027:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
+  assert.throws(() => verify(execFileSync('git', ['show', '2031a233bb99897988a93e498c2fe3b42bc40e9e:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
 });
 
 test('ISSUE-543 hidden browser beacons get tool-window ownership before docking', () => {
@@ -241,7 +241,7 @@ const reviewCases = [
     assert.ok(request.indexOf('const discovered: ?[]const account_hosts.Host = accountSyncHosts') < request.indexOf('rebased.hosts ='));
     assert.match(request, /hosts_ready = discovered != null/);
     assert.match(request, /if \(discovered\) \|found\| \{/);
-    assert.match(request, /if \(hosts_ready\) hosts else server\.value\.hosts/);
+    assert.match(request, /if \(hosts_ready\) synced_hosts else server\.value\.hosts/);
     const resolve = body(read('src/console.zig'), 'resolveSshPath');
     assert.match(resolve, /defer app_state\.g_ssh_resolved = true/);
   }],

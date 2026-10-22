@@ -312,9 +312,11 @@ test "ISSUE-458 production wheel targets the pointed table and leaves vertical w
 function execute(control) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-grid-'));
   try {
-    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
-    let functions = ['chatRichText', 'chatTableCellSize', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
+    let functions = ['chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
+    const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
+    functions = render.slice(render.indexOf('const TableMeasureBackend ='), render.indexOf('fn chatTableLayout(')) + functions;
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
     fs.writeFileSync(path.join(dir, 'test.zig'), prelude + lineHeightPolicy + '\n' + functions + checks);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-'], { encoding: 'utf8', timeout: 120000 });
