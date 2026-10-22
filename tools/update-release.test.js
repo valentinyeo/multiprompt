@@ -27,7 +27,24 @@ test('periodic update never invokes restart and explicit restart uses the verifi
 });
 
 test('Windows behavioral update tests are required by CI', () => {
-  assert.match(read('.github/workflows/test.yml'), /powershell -NoProfile -File tools\/update-release\.test\.ps1/);
+  const workflow = read('.github/workflows/test.yml');
+  const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
+  const update = jobs['test-windows-update'];
+  assert.match(update, /^    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: windows-latest\n/);
+  assert.doesNotMatch(update, /matrix:|matrix\.group/);
+  assert.doesNotMatch(jobs.test, /Test safe release updates|update-release/);
+  assert.equal((workflow.match(/- name: Test safe release updates/g) || []).length, 1);
+  assert.match(update, /- name: Test safe release updates\n        if: steps\.rule\.outputs\.kind != 'STAMP'/);
+  for (const command of [
+    'node --test tools/update-release-review.test.js',
+    'node --test tools/update-release.test.js',
+    'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
+    'zig build -Drelease=true',
+    'powershell -NoProfile -File tools/update-release.test.ps1',
+  ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
+  assert.match(update, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
+  assert.match(update, /foreach \(\$finding in 1\.\.9\)/);
+  assert.match(update, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-update-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
   const suite = read('tools/update-release.test.ps1');
   for (const name of ['checksum mismatch refused', 'rollback after failed start', 'no automatic restart while running', 'version comparison']) assert.ok(suite.includes(name), name);
 });
@@ -74,4 +91,12 @@ test('the update command cannot be interpreted as a snippet', () => {
   assert.ok(update < snippets || update >= snippets + value('MAX_SNIPPETS'), 'Update command overlaps snippet IDs');
   const duplicates = [...state.matchAll(/pub const (SEARCH_\w+): usize = (\d+);/g)].filter(([, name, number]) => name !== 'SEARCH_UPDATE_OFFSET' && Number(number) === update);
   assert.deepEqual(duplicates, []);
+});
+
+test('fixture cleanup snapshots each live process path once and tolerates inaccessible or exited processes', () => {
+  const cleanup = read('tools/update-release.test.ps1').split('function Stop-FixtureApps {')[1].split('function Wait-File')[0];
+  assert.equal((cleanup.match(/\$_\.Path/g) || []).length, 1);
+  assert.match(cleanup, /try \{\s*\$processPath = \$_\.Path\s*\$processPath -and \$processPath\.StartsWith\(\$Root, \[StringComparison\]::OrdinalIgnoreCase\)\s*\} catch \{ \$false \}/);
+  assert.match(cleanup, /Stop-Process -Id \$_\.Id -Force -ErrorAction SilentlyContinue/);
+  assert.match(cleanup, /WaitForExit\(5000\)/);
 });
