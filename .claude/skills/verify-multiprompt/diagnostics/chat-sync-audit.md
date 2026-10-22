@@ -20,7 +20,8 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 - Dispatch `gh workflow run verify.yml --ref <branch> -f feature=chat-sync-audit`.
 - The dedicated Linux job builds the real audit renderer on GitHub and runs `tools/chat-sync-audit.test.py -v` with synthetic fixtures.
 - Require both new regression tests and every existing audit test to pass.
-- Download `verify-chat-sync-audit`; inspect `fixtures.log` and match `revision.txt` to the branch commit.
+- Download `verify-chat-sync-audit`; inspect `fixtures.log`, `renderer-file.txt` (static Linux executable) and match `revision.txt` to the branch commit.
+- The server downloads the GitHub-built `chat-audit-linux` artifact into `zig-out/bin/` and makes it executable; it never builds the renderer locally. GitHub uses the baseline host CPU target.
 
 ## Gotchas
 

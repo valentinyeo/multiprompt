@@ -103,7 +103,7 @@ No live Windows GUI acceptance is claimed.
 
 ## Sync audit
 
-On the VPS, run `/home/owner/zig/zig build chat-audit` then `python3 tools/chat-sync-audit.py` to compare every live Claude/Codex pane with a cold Chat View load. Use `--json` for JSON lines or `--file-tickets` to file one ticket per new drift kind (`--state PATH` overrides the deduplication state). The audit ignores terminal status, thinking, and protocol-only notifications, checks visible Markdown text, and reports older pane turns outside the cold tail with their transcript lines and timestamps; scroll-up can still load those turns.
+On the server, download the GitHub-built `chat-audit-linux` artifact from the latest successful `verify chat-sync-audit master` run into `zig-out/bin/`, make `chat-audit` executable, then run `python3 tools/chat-sync-audit.py` (no local build) to compare every live Claude/Codex pane with a cold Chat View load. Use `--json` for JSON lines or `--file-tickets` to file one ticket per new drift kind (`--state PATH` overrides the deduplication state). The audit ignores terminal status, thinking, and protocol-only notifications, checks visible Markdown text, and reports older pane turns outside the cold tail with their transcript lines and timestamps; scroll-up can still load those turns.
 
 ## Whole-conversation find
 
