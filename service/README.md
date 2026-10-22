@@ -101,3 +101,7 @@ beta, alpha, gamma (bottom). `src/fixtures/issue-415-frequent.json` is identical
 
 Clients send the `hosts` feature token to share up to three server addresses, users, ports and public host keys, never private keys or identity files.
 Hosts are hidden from older clients, whose saves preserve them; host-aware saves replace only the server slots they send.
+
+## Opt-in laptop record sync
+
+ISSUE-252 adds `GET|PUT /v1/sync-records` and the additive `sync_records` table. The endpoint requires a non-revoked device Bearer token, scopes all rows to its account, rejects unknown/secret fields, and merges each document by `(updated_at, device_id)` with deletion tombstones retained. Payloads contain no SSH keys, passwords, machine-local paths or window geometry. No deployment is performed by the desktop PR. Apply the schema and deploy the Worker separately before enabling this feature. See [the protocol and full field inventory](../docs/laptop-sync.md). The existing `/v1/layout` API is unchanged for legacy clients.

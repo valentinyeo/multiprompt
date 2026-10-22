@@ -20,7 +20,7 @@ function verifyStartup(main, cache, account, transcript) {
   assert.doesNotMatch(main, /drawStartupProgress|Restoring sessions - /);
   const bootstrap = account.slice(account.indexOf('pub fn accountBootstrap('), account.indexOf('fn syncAuthPath('));
   assert.doesNotMatch(bootstrap, /while \(app_state\.g_account_locked\)/);
-  assert.ok(bootstrap.lastIndexOf('g_account_locked = false;') < bootstrap.indexOf('startAccountJob(accountResumeJob(.startup))'));
+  assert.ok(bootstrap.lastIndexOf('g_account_locked = false;') < bootstrap.indexOf('startAccountJob(.{ .kind = .startup })'));
 }
 
 test('ISSUE-502 production ordered queue, snapshot codec and optimistic account decisions execute without Win32', () => {

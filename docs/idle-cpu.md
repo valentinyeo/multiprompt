@@ -59,10 +59,10 @@ UI timers retain foreground responsiveness while background work uses notificati
 | TIMER_CHAT_DRAFT | One-shot composer debounce; retain durability latency. |
 | TIMER_SHOT_FOCUS | Bounded screenshot/paste focus handoff; retain. |
 | TIMER_CHAT_FOREGROUND_RETRY | Bounded user-action focus retry; retain. |
-| TIMER_ACCOUNT | 20 s authenticated remote sync; retain server freshness; file notifications cannot observe server-side changes. |
+| TIMER_ACCOUNT | Opt-in only: one-shot 3 min authenticated record freshness, 2 s save debounce, or 20–300 s exponential retry; no wakeups while laptop sync is off. Startup authentication is not a polling loop. |
 | TIMER_FONT_SYNC | On-demand incremental font sync, stops when complete; retain. |
 | TIMER_UPDATE_CHECK | Changed as above, failure fallback only. |
-| TIMER_ACCOUNT_SAVE | Dirty-layout retry/debounce only; retain authentication/conflict recovery. |
+| TIMER_ACCOUNT_SAVE | Removed; dirty-record debounce and retries share TIMER_ACCOUNT. |
 | TIMER_CHAT_BENCH | Fixture-only 1 s command/heartbeat; retain hang and switch measurement semantics. |
 | INPUT_HOOK_THREAD_TIMER_REQUEST_ID | 5 s low-level-hook stall watchdog, blocking GetMessage between ticks; retain missed-hook recovery. |
 

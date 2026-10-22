@@ -230,7 +230,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/account_records.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -270,6 +270,14 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(account_state_tests).step);
+    const account_record_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/account_records.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(account_record_tests).step);
+    const laptop_sync_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-252-inventory.test.js", "tools/issue-252-integration.test.js", "tools/issue-252-records.test.js" });
+    vps_test_step.dependOn(&laptop_sync_tests.step);
     const account_desktop_tests = b.addSystemCommand(&.{ "python3", "tests/test_account_desktop.py" });
     test_step.dependOn(&account_desktop_tests.step);
     account_test_step.dependOn(&account_desktop_tests.step);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import worker, { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
+import worker, { hash, validateLayout, validateRecords, safeNext, validateUsage } from '../worker.js';
 
 let mf, db;
 const mail = [], usageToken = 'u'.repeat(43);
@@ -1207,4 +1207,65 @@ test('device key regression: real Ed25519 and live-probe wire keys remain accept
     assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status: 'pending' });
     assert.equal((await db.prepare('SELECT public_key FROM device_keys WHERE device_id=?').bind(token.device_id).first()).public_key, public_key);
   }
+});
+
+const syncHost = (device, stamp, hostname = 'one.example.com') => ({ kind: 'host', id: '0', updated_at: stamp, device_id: device, deleted: false, host: { slot: 0, name: 'Host 1', hostname, port: 22, user: 'owner' } });
+const syncPut = (token, records) => request('/v1/sync-records', { method: 'PUT', headers: auth(token), body: JSON.stringify({ records }) });
+const syncGet = async token => {
+  const result = await request('/v1/sync-records', { headers: auth(token) });
+  assert.equal(result.status, 200);
+  return (await result.json()).records;
+};
+
+test('ISSUE-252 authenticated devices round trip add edit delete and deterministic host conflicts', async () => {
+  await db.prepare('DELETE FROM sync_records').run();
+  const { token: first } = await enroll(), { token: second } = await enroll();
+  const host = syncHost('device-a', 100);
+  const workspace = { kind: 'workspace', id: 'Work', updated_at: 100, device_id: 'device-a', deleted: false, workspace: { name: 'Work' } };
+  const session = { kind: 'session', id: '0:one', updated_at: 100, device_id: 'device-a', deleted: false, session: { kind: 'tmux', name: 'One', tmux_session: 'One', tmux_host: 0, workspace: 'Work' } };
+  assert.equal((await syncPut(first, [host, workspace, session])).status, 200);
+  assert.deepEqual(await syncGet(second), [host, workspace, session]);
+  const left = syncHost('device-a', 200, 'left.example.com'), right = syncHost('device-b', 200, 'right.example.com');
+  const changed = { ...session, updated_at: 200, device_id: 'device-a', session: { ...session.session, name: 'Renamed' } };
+  const responses = await Promise.all([syncPut(first, [left, changed]), syncPut(second, [right])]);
+  assert.deepEqual(responses.map(r => r.status), [200, 200]);
+  assert.deepEqual(await syncGet(first), [right, workspace, changed]);
+  assert.equal((await syncPut(first, [left])).status, 200);
+  assert.deepEqual(await syncGet(second), [right, workspace, changed]);
+  const dead = [right, workspace, changed].map(({ kind, id }) => ({ kind, id, updated_at: 300, device_id: 'device-a', deleted: true }));
+  assert.equal((await syncPut(first, dead)).status, 200);
+  assert.equal((await syncPut(second, [host, workspace, session])).status, 200);
+  assert.deepEqual(await syncGet(second), dead);
+  await db.prepare('DELETE FROM sync_records').run();
+  await syncPut(first, [right]);
+  await syncPut(second, [left]);
+  assert.deepEqual(await syncGet(first), [right]);
+});
+
+test('ISSUE-252 record service rejects credentials keys local paths geometry malformed ids and future clocks', async () => {
+  const valid = syncHost('device-a', 100);
+  assert.equal(validateRecords([valid])[0], valid);
+  for (const key of ['password', 'private_key', 'host_keys', 'IdentityFile', 'cwd', 'window_x', 'window_y', 'width', 'height']) {
+    assert.throws(() => validateRecords([{ ...valid, [key]: 'device-only' }]));
+    assert.throws(() => validateRecords([{ ...valid, host: { ...valid.host, [key]: 'device-only' } }]));
+  }
+  for (const bad of [{ ...valid, updated_at: Date.now() + 600000 }, { ...valid, id: '3' }, { ...valid, deleted: true }, { ...valid, device_id: 'unsafe/id' }, { ...valid, session: {} }]) assert.throws(() => validateRecords([bad]));
+  assert.throws(() => validateRecords([valid, valid]));
+  const { token } = await enroll();
+  assert.equal((await syncPut(token, [{ ...valid, host: { ...valid.host, password: 'device-only' } }])).status, 400);
+});
+
+test('ISSUE-252 records are account scoped and unauthorized or revoked devices cannot read or write', async () => {
+  assert.equal((await request('/v1/sync-records')).status, 401);
+  const { token } = await enroll();
+  const otherToken = 'record-foreign-access';
+  await db.prepare('INSERT INTO devices VALUES (?,?,?,?,?,?,?)').bind('record-foreign', 'foreign-account', 'Foreign device', 'record-foreign-refresh', 0, 0, 0).run();
+  await db.prepare('INSERT INTO access_tokens VALUES (?,?,?)').bind(await hash(otherToken), 'record-foreign', Math.floor(Date.now() / 1000) + 600).run();
+  const foreign = { access_token: otherToken };
+  assert.deepEqual(await syncGet(foreign), []);
+  assert.equal((await syncPut(foreign, [syncHost('foreign-device', 150)])).status, 200);
+  assert.notDeepEqual(await syncGet(foreign), await syncGet(token));
+  await request('/v1/devices/' + token.device_id, { method: 'DELETE', headers: auth(token) });
+  assert.equal((await request('/v1/sync-records', { headers: auth(token) })).status, 401);
+  assert.equal((await syncPut(token, [syncHost('device', 400)])).status, 401);
 });

@@ -626,6 +626,7 @@ const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
 const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
+const SEARCH_LAPTOP_SYNC_OFFSET = @import("app_state.zig").SEARCH_LAPTOP_SYNC_OFFSET;
 const SEARCH_SKILLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SKILLS_MENU_OFFSET;
 const SEARCH_SKILLS_BACK_OFFSET = @import("app_state.zig").SEARCH_SKILLS_BACK_OFFSET;
 const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET;
@@ -784,7 +785,6 @@ const captureSessionLayout = @import("account_desktop.zig").captureSessionLayout
 const TIMER_ACCOUNT = @import("app_state.zig").TIMER_ACCOUNT;
 const TIMER_FONT_SYNC = @import("app_state.zig").TIMER_FONT_SYNC;
 const TIMER_UPDATE_CHECK = @import("app_state.zig").TIMER_UPDATE_CHECK;
-const TIMER_ACCOUNT_SAVE = @import("app_state.zig").TIMER_ACCOUNT_SAVE;
 const startAccountJob = @import("account_desktop.zig").startAccountJob;
 const pullSessionLayout = @import("account_desktop.zig").pullSessionLayout;
 const accountPush = @import("account_desktop.zig").accountPush;
@@ -1388,11 +1388,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         return 0;
     }
     if (msg == WM_TIMER and wp == TIMER_ACCOUNT) {
+        _ = KillTimer(hwnd, TIMER_ACCOUNT);
         pullSessionLayout();
-        return 0;
-    }
-    if (msg == WM_TIMER and wp == TIMER_ACCOUNT_SAVE) {
-        if (app_state.g_account_dirty_at != 0 and GetTickCount64() - app_state.g_account_dirty_at >= 2000) accountPush();
         return 0;
     }
     switch (msg) {
@@ -4291,6 +4288,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (verboseLoggingEnabled()) {
                     var dbg_cf: [96]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&dbg_cf, "[confirm] sel={d} count={d} target={d} (tabsort_auto={d} manual={d})", .{ app_state.g_search_sel, app_state.g_search_result_count, target, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET }) catch "[confirm fmt-err]");
+                }
+                if (target == SEARCH_LAPTOP_SYNC_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("account_desktop.zig").accountToggleSync();
+                    return 0;
                 }
                 if (target == SEARCH_LAYOUT_PULL_OFFSET) {
                     app_state.g_search_active = false;
@@ -8126,6 +8131,8 @@ fn initializeDeferred(hwnd: HANDLE) void {
             app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, current) catch null;
         } else |_| {}
     }
+
+    pullSessionLayout();
 
     if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
 }

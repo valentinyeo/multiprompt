@@ -57,6 +57,43 @@ export function validateLayout(x) {
   return x;
 }
 
+export function validateRecords(records) {
+  if (!Array.isArray(records) || records.length > 4096) fail(400, 'invalid_records');
+  const ids = new Set();
+  for (const r of records) {
+    if (!r || typeof r !== 'object' || Array.isArray(r) || !['host', 'workspace', 'session', 'settings'].includes(r.kind) ||
+        typeof r.id !== 'string' || !r.id.length || r.id.length > 96 || typeof r.device_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(r.device_id) ||
+        !Number.isSafeInteger(r.updated_at) || r.updated_at <= 0 || r.updated_at > Date.now() + 300000 || typeof r.deleted !== 'boolean' ||
+        Object.keys(r).some(k => !['kind', 'id', 'device_id', 'updated_at', 'deleted', r.kind].includes(k))) fail(400, 'invalid_record');
+    const identity = `${r.kind}:${r.id}`;
+    if (ids.has(identity)) fail(400, 'duplicate_record');
+    ids.add(identity);
+    if (r.kind === 'host' && !/^[0-2]$/.test(r.id) || r.kind === 'session' && !/^[0-2]:[a-z0-9_-]{1,63}$/.test(r.id) ||
+        r.kind === 'settings' && r.id !== 'settings' || r.kind === 'workspace' && (!r.id.length || new TextEncoder().encode(r.id).length > 31 || /[\x00-\x1f\x7f]/u.test(r.id))) fail(400, 'invalid_record_id');
+    if (r.deleted) {
+      if (Object.hasOwn(r, r.kind)) fail(400, 'tombstone_payload');
+      continue;
+    }
+    const value = { schema: 1, revision: 0, workspaces: [], tabs: [] };
+    if (r.kind === 'host') {
+      if (Object.hasOwn(r.host || {}, 'host_keys') || r.id !== String(r.host?.slot)) fail(400, 'invalid_record_host');
+      value.hosts = [r.host];
+    } else if (r.kind === 'workspace') {
+      if (r.id !== r.workspace?.name) fail(400, 'invalid_record_workspace');
+      value.workspaces = [r.workspace];
+    } else if (r.kind === 'session') {
+      if (r.id !== `${r.session?.tmux_host}:${String(r.session?.tmux_session).toLowerCase()}`) fail(400, 'invalid_record_session');
+      value.workspaces = [{ name: r.session.workspace }];
+      value.tabs = [r.session];
+    } else {
+      if (!r.settings) fail(400, 'invalid_record_settings');
+      value.settings = r.settings;
+    }
+    validateLayout(value);
+  }
+  return records;
+}
+
 function validateCrashReport(x) {
   const fields = ['id', 'captured_at', 'app_version', 'android_version', 'thread', 'summary', 'stack_trace'];
   const limits = { app_version: 64, android_version: 64, thread: 200, summary: 2000, stack_trace: 16000 };
@@ -274,6 +311,17 @@ export default {
           db.prepare('DELETE FROM crash_reports WHERE device_id=? AND rowid IN (SELECT rowid FROM crash_reports WHERE device_id=? ORDER BY received_at DESC,rowid DESC LIMIT -1 OFFSET 50)').bind(device.id, device.id)
         ]);
         return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
+      }
+      if (url.pathname === '/v1/sync-records' && ['GET', 'PUT'].includes(request.method)) {
+        if (!device.id) fail(401, 'device_required');
+        if (request.method === 'PUT') {
+          const b = await body(request);
+          if (!b || Object.keys(b).length !== 1) fail(400, 'invalid_records');
+          const records = validateRecords(b.records);
+          if (records.length) await db.batch(records.map(r => db.prepare('INSERT INTO sync_records (account,kind,id,updated_at,device_id,document) SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sync_records WHERE account=?)<4096 OR EXISTS (SELECT 1 FROM sync_records WHERE account=? AND kind=? AND id=?) ON CONFLICT(account,kind,id) DO UPDATE SET updated_at=excluded.updated_at,device_id=excluded.device_id,document=excluded.document WHERE excluded.updated_at>sync_records.updated_at OR (excluded.updated_at=sync_records.updated_at AND excluded.device_id>sync_records.device_id)').bind(device.account, r.kind, r.id, r.updated_at, r.device_id, JSON.stringify(r), device.account, device.account, r.kind, r.id)));
+        }
+        const rows = await db.prepare("SELECT document FROM sync_records WHERE account=? ORDER BY CASE kind WHEN 'host' THEN 0 WHEN 'workspace' THEN 1 WHEN 'session' THEN 2 ELSE 3 END,id").bind(device.account).all();
+        return json({ records: rows.results.map(row => JSON.parse(row.document)) });
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();

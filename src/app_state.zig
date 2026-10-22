@@ -1263,6 +1263,7 @@ pub const SEARCH_SYNC_SIGNOUT_OFFSET: usize = 9100;
 pub const SEARCH_LAYOUT_PULL_OFFSET: usize = 9102;
 pub const SEARCH_SYNC_STATUS_OFFSET: usize = 9101;
 pub const SEARCH_APPROVE_DEVICES_OFFSET: usize = 9103;
+pub const SEARCH_LAPTOP_SYNC_OFFSET: usize = 9104;
 pub const SEARCH_SKILLS_MENU_OFFSET: usize = 6308;
 pub const SEARCH_SKILLS_BACK_OFFSET: usize = 6309;
 pub const SEARCH_KEEPAWAKE_OFFSET: usize = 6317;
@@ -1831,6 +1832,7 @@ pub var g_pollshell_count: u64 = 0;
 
 pub var g_account_locked = @import("account_state.zig").startupLocked();
 pub var g_account_bypass = false;
+pub var g_account_sync_enabled = false;
 pub var g_account_bootstrapping = true;
 pub var g_account_busy = false;
 pub var g_account_has_token = false;
@@ -1848,10 +1850,9 @@ pub var g_account_status: []const u8 = "Sign in to multiprompt to open your work
 pub const TIMER_ACCOUNT: usize = 170;
 pub const TIMER_FONT_SYNC: usize = 190;
 pub const TIMER_UPDATE_CHECK: usize = 172;
-pub const TIMER_ACCOUNT_SAVE: usize = 171;
 pub const AccountJobKind = enum { startup, login, pull, push, devices, revoke, signout, device_keys, decide_keys };
-pub const AccountJob = struct { kind: AccountJobKind, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null };
-pub const LayoutReply = struct { job: AccountJob, bytes: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const AccountJob = struct { kind: AccountJobKind, sync: bool = false, saved_at: u64 = 0, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null };
+pub const LayoutReply = struct { job: AccountJob, bytes: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, authenticated: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;

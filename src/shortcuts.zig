@@ -308,6 +308,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Win+Shift+Left/Right", .b = "Move window to the adjacent monitor", .header = false },
     .{ .a = "Palette / Actions", .b = "", .header = true },
     .{ .a = "Ctrl+K", .b = "Open command palette; it opens with your last 5 sessions", .header = false },
+    .{ .a = "Ctrl+K -> Sync between laptops", .b = "Opt in to hosts, workspaces and remote sessions sync; off by default", .header = false },
     .{ .a = "Ctrl+K -> Account: Sign Out", .b = "Forget this device login and lock multiprompt", .header = false },
     .{ .a = "Ctrl+K -> Account: Approve devices", .b = "Approve or deny a new device reaching your servers", .header = false },
     .{ .a = "Ctrl+K -> Account: Devices", .b = "List account devices and revoke a device", .header = false },

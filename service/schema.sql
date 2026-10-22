@@ -65,3 +65,9 @@ CREATE TABLE IF NOT EXISTS device_keys (
  status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','revoked')),
  requested INTEGER NOT NULL, decided INTEGER, decided_by TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sync_records (
+ account TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL,
+ updated_at INTEGER NOT NULL, device_id TEXT NOT NULL, document TEXT NOT NULL,
+ PRIMARY KEY (account,kind,id)
+);

@@ -4,6 +4,7 @@ const tmux_identity = @import("tmux_identity.zig");
 const sync_auth = @import("sync_auth.zig");
 const session_layout = @import("session_layout.zig");
 const account_hosts = @import("account_hosts.zig");
+const account_records = @import("account_records.zig");
 const account_keys = @import("account_keys.zig");
 const account_layout = @import("account_layout.zig");
 const account_state = @import("account_state.zig");
@@ -131,7 +132,6 @@ const debugLog2 = @import("diagnostics.zig").debugLog2;
 const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
 const saveSession = @import("session.zig").saveSession;
 const TIMER_ACCOUNT = @import("app_state.zig").TIMER_ACCOUNT;
-const TIMER_ACCOUNT_SAVE = @import("app_state.zig").TIMER_ACCOUNT_SAVE;
 const AccountJobKind = @import("app_state.zig").AccountJobKind;
 const AccountJob = @import("app_state.zig").AccountJob;
 const LayoutReply = @import("app_state.zig").LayoutReply;
@@ -206,12 +206,6 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
     return .{ .settings = app_state.g_layout_settings, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
-var g_account_hosts_cache: struct {
-    arena: ?std.heap.ArenaAllocator = null,
-    hosts: []const account_hosts.Host = &.{},
-    refreshed_at: ?u64 = null,
-} = .{};
-
 var g_account_keys_cache: struct {
     last_check_ms: ?u64 = null,
     published_key: ?[]const u8 = null,
@@ -266,21 +260,21 @@ fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !sessio
     return kept;
 }
 pub fn publishSessionLayout() void {
-    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
+    if (!app_state.g_account_sync_enabled or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
+    const base = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse "{\"workspaces\":[],\"tabs\":[]}") catch return;
     defer base.deinit();
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
-    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
+    const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse "{\"workspaces\":[],\"tabs\":[]}") catch return;
     defer synced.deinit();
-    if (!account_layout.publishNeeded(local, base.value, synced.value)) {
+    if (app_state.g_account_base != null and !account_layout.publishNeeded(local, base.value, synced.value)) {
         app_state.g_account_dirty_at = 0;
-        _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+        accountArmTimer(account_records.poll_ms);
         accountDeletePending();
         return;
     }
-    const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local }, .{ .emit_null_optional_fields = false }) catch return;
+    const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local, .saved_at = syncNow() }, .{ .emit_null_optional_fields = false }) catch return;
     var path_buf: [512]u8 = undefined;
     if (syncAuthPath(&path_buf, "account-layout-pending.json")) |path| {
         if (!writeFileAtomicW(path, pending)) {
@@ -289,41 +283,52 @@ pub fn publishSessionLayout() void {
         }
     }
     app_state.g_account_dirty_at = GetTickCount64();
-    if (!app_state.g_account_retry.notified and !app_state.g_account_reauth) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE, 2000, null);
+    if (!app_state.g_account_retry.notified and !app_state.g_account_reauth) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT, 2000, null);
 }
 pub fn pullSessionLayout() void {
-    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
-    if (app_state.g_account_base == null) {
-        startAccountJob(accountResumeJob(.startup));
-        return;
-    }
-    if (app_state.g_account_dirty_at != 0) {
-        accountPush();
-        return;
-    }
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const current = captureSessionLayout(arena.allocator(), false) catch return;
-    const edited = session_layout.encode(std.heap.page_allocator, current) catch return;
-    startAccountJob(.{ .kind = .pull, .edited = edited });
+    if (!app_state.g_account_sync_enabled or app_state.g_account_bypass) return;
+    accountArmTimer(account_records.poll_ms);
+    if (app_state.g_account_locked or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
+    accountPush();
 }
 pub fn accountPush() void {
-    if (app_state.g_account_busy or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_base == null or !app_state.g_account_retry.ready(GetTickCount64())) return;
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const held = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
-    defer held.deinit();
-    const local = accountCapturePush(arena.allocator(), held.value) catch return;
-    const encoded = session_layout.encode(std.heap.page_allocator, local) catch return;
-    const base = std.heap.page_allocator.dupe(u8, app_state.g_account_local_base orelse {
-        std.heap.page_allocator.free(encoded);
+    if (!app_state.g_account_sync_enabled or app_state.g_account_busy or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
+    accountArmTimer(account_records.poll_ms);
+    var job = accountResumeJob(.push);
+    if (job.edited == null) {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const current = captureSessionLayout(arena.allocator(), false) catch return;
+        job.edited = session_layout.encode(std.heap.page_allocator, current) catch return;
+        job.saved_at = syncNow();
+    }
+    job.sync = true;
+    startAccountJob(job);
+}
+fn syncNow() u64 {
+    return @import("inbox.zig").nowFileTime() / 10000 -| 11644473600000;
+}
+fn accountArmTimer(delay: u64) void {
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
+    if (app_state.g_account_sync_enabled and !app_state.g_account_bypass) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT, @intCast(@max(1, @min(delay, 300000))), null);
+}
+pub fn accountToggleSync() void {
+    if (app_state.g_account_busy) {
+        showHeaderNoticeAscii("Account request in progress; try again", 3000, true);
         return;
-    }) catch {
-        std.heap.page_allocator.free(encoded);
-        return;
-    };
-    startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
+    }
+    const enabled = !app_state.g_account_sync_enabled;
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, "account-sync.json") orelse return;
+    if (!writeFileAtomicW(path, if (enabled) "{\"enabled\":true}" else "{\"enabled\":false}")) return;
+    app_state.g_account_sync_enabled = enabled;
+    accountArmTimer(account_records.poll_ms);
+    if (enabled) {
+        app_state.g_account_retry.succeeded();
+        publishSessionLayout();
+        pullSessionLayout();
+    }
+    showHeaderNoticeAscii(if (enabled) "Laptop sync ON; keys and local paths stay here" else "Laptop sync OFF; local files kept", 5000, false);
 }
 fn accountDeletePending() void {
     var buf: [512]u8 = undefined;
@@ -339,7 +344,7 @@ fn accountResumeJob(kind: AccountJobKind) AccountJob {
     const path = syncAuthPath(&buf, "account-layout-pending.json") orelse return .{ .kind = kind };
     const bytes = readFileAllocWin32(path, session_layout.max_bytes) orelse return .{ .kind = kind };
     defer std.heap.page_allocator.free(bytes);
-    const Pending = struct { base: session_layout.Layout, edited: session_layout.Layout };
+    const Pending = struct { base: session_layout.Layout, edited: session_layout.Layout, saved_at: u64 = 0 };
     const parsed = std.json.parseFromSlice(Pending, arena.allocator(), bytes, .{}) catch return .{ .kind = kind };
     defer parsed.deinit();
     const base = session_layout.encode(std.heap.page_allocator, parsed.value.base) catch return .{ .kind = kind };
@@ -347,7 +352,7 @@ fn accountResumeJob(kind: AccountJobKind) AccountJob {
         std.heap.page_allocator.free(base);
         return .{ .kind = kind };
     };
-    return .{ .kind = kind, .base = base, .edited = edited };
+    return .{ .kind = kind, .base = base, .edited = edited, .saved_at = parsed.value.saved_at, .sync = app_state.g_account_sync_enabled };
 }
 fn accountDeleteToken() void {
     var buf: [512]u8 = undefined;
@@ -361,7 +366,7 @@ fn accountLock() void {
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
     app_state.g_account_dirty_at = 0;
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
     app_state.g_search_active = false;
     app_state.g_inbox_active = false;
     app_state.g_all_sessions_active = false;
@@ -405,7 +410,7 @@ pub fn accountCancelSignIn() void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
 fn accountSyncFailed(has_token: bool) void {
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
     const notify = app_state.g_account_retry.failed(GetTickCount64());
     switch (account_state.failure(app_state.g_account_bootstrapping, has_token, false)) {
         .unlock_local => {
@@ -416,19 +421,8 @@ fn accountSyncFailed(has_token: bool) void {
         .retry => app_state.g_account_status = "Cannot reach account service. Sync will retry.",
     }
     if (notify and !app_state.g_account_locked) showHeaderNoticeAscii("Sync failed; local changes kept for retry", 4000, true);
+    accountArmTimer(app_state.g_account_retry.after -| GetTickCount64());
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
-}
-fn accountReadLayout(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    const p = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
-    defer p.deinit();
-    if (p.value != .object) return error.InvalidLayout;
-    const value = p.value.object.get("layout") orelse return error.InvalidLayout;
-    const revision = p.value.object.get("revision") orelse return error.InvalidLayout;
-    const json = try std.json.Stringify.valueAlloc(a, value, .{ .emit_null_optional_fields = false });
-    const parsed = try session_layout.parse(a, json);
-    defer parsed.deinit();
-    if (revision != .integer or revision.integer < 0 or parsed.value.revision != revision.integer) return error.InvalidLayout;
-    return json;
 }
 fn accountSshOutput(a: std.mem.Allocator, command: []const u8, timeout_ms: u32) ![]const u8 {
     const w = @import("win32.zig");
@@ -490,82 +484,57 @@ fn accountSshOutput(a: std.mem.Allocator, command: []const u8, timeout_ms: u32) 
     return output.toOwnedSlice(a);
 }
 
-fn accountAppendSshFile(path: []const u8, bytes: []const u8) !void {
-    const file = @import("file_io.zig").win32OpenAppend(path) orelse return error.Storage;
-    defer _ = CloseHandle(file);
-    var total: usize = 0;
-    while (total < bytes.len) {
-        var written: DWORD = 0;
-        if (@import("win32.zig").WriteFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) return error.Storage;
-        total += written;
-    }
-}
-
-fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![]const account_hosts.Host {
+fn accountSyncHosts(a: std.mem.Allocator, previous: []const account_hosts.Host) ![]const account_hosts.Host {
     const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
     const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
     var ssh_buf: [1024]u8 = undefined;
     var ssh_len: usize = 0;
-    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return &.{};
-    const ssh = ssh_buf[0..ssh_len];
-    const path = std.mem.trim(u8, ssh, "\" ");
-    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return &.{};
-    const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
-    var profile_buf: [512]u8 = undefined;
-    const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
-    if (n == 0 or n >= profile_buf.len) return &.{};
-    const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
-    const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
-    const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.HostDiscovery;
     var hosts: std.ArrayList(account_hosts.Host) = .empty;
     for (aliases, names, 0..) |alias, name, slot| {
-        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
-        const output = accountSshOutput(a, command, 5000) catch continue;
-        const resolved = account_hosts.parseSshConfig(output) orelse continue;
-        const missing = account_hosts.shouldImport(alias, resolved);
-        var incoming: ?account_hosts.Host = null;
-        if (missing) {
-            for (remote) |host| if (host.slot == slot) {
-                incoming = host;
-                break;
-            };
-            if (incoming == null) continue;
-        }
-        var host = incoming orelse account_hosts.Host{ .slot = @intCast(slot), .name = name, .hostname = resolved.hostname, .port = resolved.port, .user = resolved.user };
-        const target = try account_hosts.knownHostName(a, host.hostname, host.port);
-        const lookup = try std.fmt.allocPrint(a, "{s} -F \"{s}\" -f \"{s}\"", .{ keygen, target, known });
-        const key_output = accountSshOutput(a, lookup, 5000) catch "";
-        const keys = try account_hosts.readKeys(a, key_output);
-        if (missing) {
-            host.hostname = try a.dupe(u8, host.hostname);
-            host.user = try a.dupe(u8, host.user);
-            if (host.host_keys) |incoming_keys| {
-                const owned_keys = try a.alloc([]const u8, incoming_keys.len);
-                for (incoming_keys, owned_keys) |key, *owned| owned.* = try a.dupe(u8, key);
-                host.host_keys = owned_keys;
-            }
-            const block = try account_hosts.configBlock(a, alias, host);
-            win32MakeDir(folder);
-            var additions: std.ArrayList(u8) = .empty;
-            for (host.host_keys orelse &.{}) |key| {
-                var present = false;
-                for (keys) |old| if (std.mem.eql(u8, old, key)) {
-                    present = true;
-                };
-                if (!present) try additions.appendSlice(a, try account_hosts.knownHostLine(a, host, key));
-            }
-            if (additions.items.len > 0) {
-                try accountAppendSshFile(known, "\r\n");
-                try accountAppendSshFile(known, additions.items);
-            }
-            accountAppendSshFile(config, block) catch continue;
-        } else host.host_keys = keys[0..@min(keys.len, 4)];
-        host.name = name;
-        try hosts.append(a, host);
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh_buf[0..ssh_len], alias });
+        const output = try accountSshOutput(a, command, 5000);
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.HostDiscovery;
+        if (account_hosts.shouldImport(alias, resolved)) continue;
+        var label = name;
+        for (previous) |host| if (host.slot == slot) {
+            label = host.name;
+        };
+        try hosts.append(a, .{ .slot = @intCast(slot), .name = label, .hostname = resolved.hostname, .port = resolved.port, .user = resolved.user });
     }
     return hosts.toOwnedSlice(a);
 }
-
+fn accountHostConfigPath(a: std.mem.Allocator) ![]const u8 {
+    var profile: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile, profile.len);
+    if (n == 0 or n >= profile.len) return error.Storage;
+    return std.fmt.allocPrint(a, "{s}\\.ssh\\config", .{profile[0..n]});
+}
+fn accountApplyHosts(a: std.mem.Allocator, before: []const account_hosts.Host, after: []const account_hosts.Host, original: []const u8) !void {
+    const path = try accountHostConfigPath(a);
+    const current = readFileAllocWin32(path, session_layout.max_bytes);
+    defer if (current) |bytes| std.heap.page_allocator.free(bytes);
+    if (!std.mem.eql(u8, current orelse "", original)) return error.HostConfigChanged;
+    var config = original;
+    const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+    for (aliases, 0..) |alias, slot| {
+        var old: ?account_hosts.Host = null;
+        var next: ?account_records.Host = null;
+        for (before) |h| if (h.slot == slot) {
+            old = h;
+        };
+        for (after) |h| if (h.slot == slot) {
+            next = .{ .slot = h.slot, .name = h.name, .hostname = h.hostname, .port = h.port, .user = h.user };
+        };
+        if (old == null and next == null) continue;
+        if (old != null and next != null and std.mem.eql(u8, old.?.hostname, next.?.hostname) and old.?.port == next.?.port and std.mem.eql(u8, old.?.user, next.?.user)) continue;
+        config = try account_records.rewriteHost(a, config, alias, next);
+    }
+    if (!std.mem.eql(u8, config, original)) {
+        if (std.mem.lastIndexOfScalar(u8, path, '\\')) |i| win32MakeDir(path[0..i]);
+        if (!writeFileAtomicW(path, config)) return error.Storage;
+    }
+}
 fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
     if (!account_keys.syncPolicy(reply.job.kind, 0, null, null, null).show_error or reply.key_error != null) return;
     reply.key_error = std.heap.page_allocator.dupe(u8, text) catch null;
@@ -720,6 +689,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (renewed) try app_state.g_account_access.remember(a, response.bytes, GetTickCount64());
     reply.has_token = true;
+    reply.authenticated = true;
     if (job.kind != .signout and !writeDpapiFile("account-device.dat", response.bytes)) return error.Storage;
     const access = try account_client.field(response.bytes, "access_token");
     defer freeSecret(access);
@@ -752,53 +722,63 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         };
         return;
     }
-    var remote = try account_client.request("GET", "/v1/layout", access, "");
-    defer remote.deinit();
-    if (remote.status == 401) reply.unauthorized = true;
-    if (remote.status != 200) return error.Network;
+    if (!job.sync or job.edited == null) return;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const alloc = arena.allocator();
-    const initial_json = try accountReadLayout(alloc, remote.bytes);
-    const initial = try session_layout.parse(alloc, initial_json);
-    defer initial.deinit();
-    if (remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
-        var host_arena = std.heap.ArenaAllocator.init(a);
-        errdefer host_arena.deinit();
-        const discovered = try accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{});
-        if (g_account_hosts_cache.arena) |*old| old.deinit();
-        g_account_hosts_cache = .{ .arena = host_arena, .hosts = discovered, .refreshed_at = GetTickCount64() };
+    const account = try account_client.field(response.bytes, "account_id");
+    defer a.free(account);
+    const device = try account_client.field(response.bytes, "device_id");
+    defer a.free(device);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(account, &digest, .{});
+    const scope = std.fmt.bytesToHex(digest, .lower);
+    var state: account_records.State = .{ .account = &scope };
+    var path_buf: [512]u8 = undefined;
+    const path = syncAuthPath(&path_buf, "account-records.json") orelse return error.Storage;
+    if (readFileAllocWin32(path, session_layout.max_bytes)) |bytes| {
+        defer a.free(bytes);
+        const parsed = try std.json.parseFromSlice(account_records.State, alloc, bytes, .{ .allocate = .alloc_always });
+        if (std.mem.eql(u8, parsed.value.account, &scope)) state = parsed.value;
     }
-    const hosts = g_account_hosts_cache.hosts;
-    var attempts: usize = 0;
-    while (attempts < 3) : (attempts += 1) {
-        const json = try accountReadLayout(alloc, remote.bytes);
-        const server = try session_layout.parse(alloc, json);
-        defer server.deinit();
-        var rebased = server.value;
-        if (job.base != null and job.edited != null) {
-            const base = try session_layout.parse(alloc, job.base.?);
-            defer base.deinit();
-            const edited = try session_layout.parse(alloc, job.edited.?);
-            defer edited.deinit();
-            rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
-        }
-        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) hosts else null;
-        const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
-        const put = try account_client.request("PUT", "/v1/layout", access, body);
-        remote.deinit();
-        remote = put;
-        if (remote.status == 200) break;
-        if (remote.status == 401) reply.unauthorized = true;
-        if (remote.status != 409) return error.Network;
-    }
-    if (remote.status != 200) return error.Conflict;
-    reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
-    accountSyncDeviceKeys(access, job, reply) catch {
-        accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
-    };
+    const captured = try session_layout.parse(alloc, job.edited.?);
+    var local = captured.value;
+    const config_path = try accountHostConfigPath(alloc);
+    const config_bytes = readFileAllocWin32(config_path, session_layout.max_bytes);
+    defer if (config_bytes) |bytes| a.free(bytes);
+    const config = config_bytes orelse "";
+    local.hosts = try accountSyncHosts(alloc, state.local.hosts orelse &.{});
+    state.records = try account_records.edit(alloc, state.records, state.local, local, device, if (job.saved_at == 0) syncNow() else job.saved_at);
+    state.local = local;
+    const pending = try std.json.Stringify.valueAlloc(alloc, state, .{ .emit_null_optional_fields = false });
+    if (!writeFileAtomicW(path, pending)) return error.Storage;
+    const first = try account_client.request("GET", "/v1/sync-records", access, "");
+    defer first.deinit();
+    if (first.status == 401) reply.unauthorized = true;
+    if (first.status != 200) return error.Network;
+    const initial = try std.json.parseFromSlice(account_records.Documents, alloc, first.bytes, .{ .allocate = .alloc_always });
+    const outgoing = try account_records.merge(alloc, state.records, initial.value.records);
+    const body = try std.json.Stringify.valueAlloc(alloc, account_records.Documents{ .records = outgoing }, .{ .emit_null_optional_fields = false });
+    const put = try account_client.request("PUT", "/v1/sync-records", access, body);
+    defer put.deinit();
+    if (put.status == 401) reply.unauthorized = true;
+    if (put.status != 200) return error.Network;
+    const remote = try account_client.request("GET", "/v1/sync-records", access, "");
+    defer remote.deinit();
+    if (remote.status == 401) reply.unauthorized = true;
+    if (remote.status != 200) return error.Network;
+    const documents = try std.json.parseFromSlice(account_records.Documents, alloc, remote.bytes, .{ .allocate = .alloc_always });
+    try account_records.roundTrip(alloc, state.records, documents.value.records);
+    const merged = try account_records.merge(alloc, state.records, documents.value.records);
+    const desired = try account_records.materialize(alloc, merged);
+    if (desired.workspaces.len > MAX_LWS or desired.tabs.len > MAX_SHELLS) return error.LayoutCapacity;
+    try accountApplyHosts(alloc, local.hosts orelse &.{}, desired.hosts orelse &.{}, config);
+    state.records = merged;
+    const acknowledged = try std.json.Stringify.valueAlloc(alloc, state, .{ .emit_null_optional_fields = false });
+    if (!writeFileAtomicW(path, acknowledged)) return error.Storage;
+    reply.bytes = try session_layout.encode(a, desired);
 }
+
 fn layoutSyncWorker(job: AccountJob) void {
     const a = std.heap.page_allocator;
     const reply = a.create(LayoutReply) catch {
@@ -1067,6 +1047,9 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
 pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
+    defer if (app_state.g_account_sync_enabled) {
+        accountArmTimer(if (app_state.g_account_retry.notified) app_state.g_account_retry.after -| GetTickCount64() else if (app_state.g_account_dirty_at != 0) 2000 else account_records.poll_ms);
+    };
     if (lp == 0) {
         g_account_key_prompt_active = false;
         accountSyncFailed(app_state.g_account_has_token);
@@ -1103,7 +1086,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         accountDeleteToken();
         app_state.g_account_has_token = false;
         app_state.g_account_reauth = true;
-        _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
         if (reply.job.kind == .startup) {
             accountLock();
         } else {
@@ -1120,6 +1103,15 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         }
     }
     if (reply.job.kind == .device_keys or reply.job.kind == .decide_keys) return;
+    if (!reply.job.sync and reply.authenticated and reply.bytes == null) {
+        app_state.g_account_locked = false;
+        app_state.g_account_reauth = false;
+        app_state.g_account_retry.succeeded();
+        if (app_state.g_account_sync_enabled and !app_state.g_startup_progress) pullSessionLayout();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+        return;
+    }
+
     const bytes = reply.bytes orelse {
         accountSyncFailed(reply.has_token or app_state.g_account_has_token);
         return;
@@ -1140,9 +1132,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const sent = session_layout.parse(alloc, edit) catch return;
         defer sent.deinit();
         var ownership: [MAX_SHELLS]bool = undefined;
-        const previous = session_layout.parse(alloc, app_state.g_account_base orelse bytes) catch return;
-        defer previous.deinit();
-        for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
+        for (sent.value.tabs, 0..) |_, i| ownership[i] = true;
         const ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
         local_ack = session_layout.encode(alloc, ack) catch return;
         const current = accountCapturePush(alloc, sent.value) catch return;
@@ -1174,7 +1164,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_has_token = true;
     app_state.g_account_reauth = false;
     app_state.g_account_retry.succeeded();
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
+    _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
@@ -1349,6 +1339,18 @@ pub fn accountClaim(hwnd: HANDLE) bool {
 }
 
 pub fn accountBootstrap(hwnd: HANDLE) bool {
+    _ = hwnd;
+    var settings_buf: [512]u8 = undefined;
+    if (syncAuthPath(&settings_buf, "account-sync.json")) |path| {
+        if (readFileAllocWin32(path, 256)) |bytes| {
+            defer std.heap.page_allocator.free(bytes);
+            const parsed = std.json.parseFromSlice(struct { enabled: bool = false }, std.heap.page_allocator, bytes, .{}) catch null;
+            if (parsed) |value| {
+                defer value.deinit();
+                app_state.g_account_sync_enabled = value.value.enabled;
+            }
+        }
+    }
     if (app_state.g_account_bypass) return true;
     if (readDpapiFile("account-device.dat", 16384)) |token| {
         app_state.g_account_has_token = true;
@@ -1356,8 +1358,8 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     }
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
-    startAccountJob(accountResumeJob(.startup));
-    _ = SetTimer(hwnd, TIMER_ACCOUNT, 20000, null);
+    startAccountJob(.{ .kind = .startup });
+    accountArmTimer(account_records.poll_ms);
     return true;
 }
 

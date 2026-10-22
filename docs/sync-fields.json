@@ -1,0 +1,202 @@
+{
+  "hosts": {
+    "files": [
+      "SSH config (USERPROFILE/.ssh/config)"
+    ],
+    "fields": {
+      "slot": "sync",
+      "name": "sync",
+      "hostname": "sync",
+      "port": "sync",
+      "user": "sync",
+      "Host": "sync",
+      "HostName": "sync",
+      "Port": "sync",
+      "User": "sync",
+      "host_keys": "never-sync",
+      "IdentityFile": "never-sync",
+      "CertificateFile": "never-sync",
+      "IdentityAgent": "never-sync",
+      "ProxyCommand": "never-sync",
+      "ProxyJump": "never-sync",
+      "password": "never-sync",
+      "private_key": "never-sync",
+      "public_key": "never-sync",
+      "known_hosts": "never-sync",
+      "*": "never-sync"
+    }
+  },
+  "session": {
+    "files": [
+      "APPDATA/ZigShell/session.json",
+      "APPDATA/ZigShell/session-<workspace-id>.json"
+    ],
+    "fields": {
+      "active_tab": "never-sync",
+      "active_workspace": "never-sync",
+      "all": "sync",
+      "amoled_theme": "never-sync",
+      "archive_done": "never-sync",
+      "archive_rows": "never-sync",
+      "archive_time": "never-sync",
+      "att": "never-sync",
+      "bnat": "never-sync",
+      "bon": "never-sync",
+      "browser_suspend_min": "never-sync",
+      "bsplit": "never-sync",
+      "burl": "never-sync",
+      "ccwd": "never-sync",
+      "chat_ac_claude_<index>": "never-sync",
+      "chat_ac_codex_<index>": "never-sync",
+      "chat_active": "never-sync",
+      "chat_font_pt": "never-sync",
+      "chat_id": "never-sync",
+      "chat_view_mode": "never-sync",
+      "claude_session": "never-sync",
+      "collapsed": "never-sync",
+      "color": "never-sync",
+      "console_font_h": "never-sync",
+      "csid": "never-sync",
+      "cso": "never-sync",
+      "cv": "never-sync",
+      "cwd": "never-sync",
+      "dev_amoled": "never-sync",
+      "dev_console_size": "never-sync",
+      "dev_font_idx": "never-sync",
+      "dev_theme_active": "never-sync",
+      "done_rows": "never-sync",
+      "edge_gray_theme": "never-sync",
+      "eta_numbers": "never-sync",
+      "eta_progress": "never-sync",
+      "favicon_path": "never-sync",
+      "favorite": "sync",
+      "favorites": "sync",
+      "frequent": "sync",
+      "frequent_first": "sync",
+      "fw": "never-sync",
+      "group_id": "never-sync",
+      "groups": "never-sync",
+      "hide_pills": "never-sync",
+      "hide_sidebar": "never-sync",
+      "iah": "never-sync",
+      "id": "never-sync",
+      "igsh354_paste_focus": "never-sync",
+      "inbox_excluded": "never-sync",
+      "inbox_tab": "never-sync",
+      "inbox_visits_order": "never-sync",
+      "input": "sync",
+      "kaw": "never-sync",
+      "keep_alive": "never-sync",
+      "kind": "sync",
+      "la": "never-sync",
+      "last_done_time": "never-sync",
+      "last_shell": "never-sync",
+      "light_theme": "never-sync",
+      "locked": "never-sync",
+      "locked_section_collapsed": "never-sync",
+      "lv": "never-sync",
+      "manual": "sync",
+      "mid_theme": "never-sync",
+      "mobile_mode": "never-sync",
+      "muted": "never-sync",
+      "name": "sync",
+      "pid": "never-sync",
+      "pinned_section_collapsed": "never-sync",
+      "pinned_top": "never-sync",
+      "recents_section_collapsed": "never-sync",
+      "sem": "never-sync",
+      "settings": "sync",
+      "shell_id": "never-sync",
+      "sidebar_collapsed": "never-sync",
+      "single_window": "never-sync",
+      "snoozed": "never-sync",
+      "sound_enabled": "never-sync",
+      "sync_owned": "never-sync",
+      "tabs": "sync",
+      "thread_title": "never-sync",
+      "tmux_host": "sync",
+      "tmux_session": "sync",
+      "ui_scale": "never-sync",
+      "used": "sync",
+      "used_unix": "never-sync",
+      "visits": "sync",
+      "voice_always_listen": "never-sync",
+      "voice_speed": "never-sync",
+      "wake_id": "never-sync",
+      "wid": "never-sync",
+      "workspace": "sync",
+      "workspace_count": "never-sync",
+      "workspaces": "sync"
+    }
+  },
+  "workspace_registry": {
+    "files": [
+      "APPDATA/ZigShell/windows.json",
+      "APPDATA/ZigShell/windows-dev.json"
+    ],
+    "fields": {
+      "version": "never-sync",
+      "windows": "never-sync",
+      "id": "never-sync",
+      "name": "sync",
+      "restore": "never-sync",
+      "host": "never-sync"
+    }
+  },
+  "workspace_order": {
+    "files": [
+      "APPDATA/ZigShell/workspace-order.json",
+      "APPDATA/ZigShell/workspace-order-dev.json"
+    ],
+    "fields": {
+      "workspace_ids": "never-sync"
+    }
+  },
+  "window_geometry": {
+    "files": [
+      "runtime Win32 window state",
+      "Chromium profile preferences"
+    ],
+    "fields": {
+      "x": "never-sync",
+      "y": "never-sync",
+      "width": "never-sync",
+      "height": "never-sync",
+      "left": "never-sync",
+      "top": "never-sync",
+      "right": "never-sync",
+      "bottom": "never-sync",
+      "monitor": "never-sync",
+      "dpi": "never-sync",
+      "maximized": "never-sync",
+      "window_position": "never-sync",
+      "window_size": "never-sync",
+      "browser_split_permille": "never-sync"
+    }
+  },
+  "sync_journal": {
+    "files": [
+      "APPDATA/ZigShell/account-sync.json",
+      "APPDATA/ZigShell/account-records.json",
+      "APPDATA/ZigShell/account-layout-pending.json"
+    ],
+    "fields": {
+      "enabled": "never-sync",
+      "account": "never-sync",
+      "local": "never-sync",
+      "base": "never-sync",
+      "edited": "never-sync",
+      "saved_at": "never-sync",
+      "records": "sync",
+      "kind": "sync",
+      "id": "sync",
+      "updated_at": "sync",
+      "device_id": "sync",
+      "deleted": "sync",
+      "host": "sync",
+      "workspace": "sync",
+      "session": "sync",
+      "settings": "sync"
+    }
+  }
+}
