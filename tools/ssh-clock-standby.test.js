@@ -54,6 +54,9 @@ var ssh_probe_job: ?*anyopaque = null;
 const UINT = u32;
 var g_tmux_fetch_tick: u64 = 0;
 var ssh_probe_next_tick: u64 = 0;
+var ssh_probe_pending_request = false;
+fn sshRequestSessionProbe() void { ssh_probe_pending_request = true; ssh_probe_next_tick = 0; armSshReconnectTimerIfNeeded(); }
+fn invalidateReconnectContent(_: u32) void {}
 const TIMER_SSH_RECONNECT = 1;
 const SSH_AUTO_RECONNECT_ENABLED = true;
 const DWORD = u32;
@@ -68,6 +71,7 @@ var timers: usize = 0;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 fn chatBenchEnabled() bool { return false; }
 fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
+fn reconnectTabVisible(_: u32) bool { return true; }
 fn threadTitleTop() i32 { return 10; }
 fn threadTitleHeight() i32 { return 44; }
 var veto_logs: usize = 0;
@@ -104,9 +108,9 @@ ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 =
 `;
 function runtime(tests) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
-  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
+  if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
+  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
 }
 
 function armRuntime(tests) {

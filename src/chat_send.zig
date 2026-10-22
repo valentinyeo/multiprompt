@@ -1639,10 +1639,11 @@ pub fn armSshReconnectTimerIfNeeded() void {
     var urgent = any;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended) continue;
         any = true;
         if (shell.disconnected or shell.ssh_reconnect.phase != .connected) urgent = true;
     }
+    if (any and ssh_probe_pending_request) urgent = true;
     const interval: UINT = if (urgent) 1000 else if (any) 15_000 else 0;
     if (interval == app_state.g_ssh_reconnect_timer_ms) return;
     app_state.g_ssh_reconnect_timer_ms = interval;
@@ -1654,40 +1655,48 @@ pub fn armSshReconnectTimerIfNeeded() void {
 }
 
 pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
+    if (chatBenchEnabled()) return;
     const now = GetTickCount64();
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
         if (affected != null and affected.? != i) continue;
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended) continue;
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
         } else if (shell.process == null or !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), reason);
         }
     }
-    if (affected == null) ssh_probe_next_tick = 0;
+    if (affected == null) sshRequestSessionProbe();
     armSshReconnectTimerIfNeeded();
 }
 
 pub fn sshDisconnect(idx: u32, reason: []const u8) void {
-    if (idx >= app_state.shell_count) return;
+    if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
-    if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) return;
+    if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended) return;
     var exit_code: DWORD = std.math.maxInt(DWORD);
     const got_code = shell.process != null and GetExitCodeProcess(shell.process, &exit_code) != 0;
+    if (shell.kind == .tmux and got_code and exit_code == 1 and GetTickCount64() -| shell.spawn_tick <= 3000) {
+        shell.ssh_reconnect.awaiting_probe = true;
+        sshRequestSessionProbe();
+    }
     var buf: [224]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect disconnect id={d} reason={s} exit_code={d} known={} phase={s}", .{ shell.shell_id, reason, exit_code, got_code, @tagName(shell.ssh_reconnect.phase) }) catch "ssh-reconnect disconnect log-overflow");
+    if (!shell.disconnected) sshRequestSessionProbe();
     shell.ssh_reconnect.confirmDisconnect(GetTickCount64(), reason, shell.process != null and shellProcessAliveForRead(idx));
     markSshTabDisconnected(idx);
 }
 
 pub fn sshReconnectNow(idx: u32) void {
-    if (idx >= app_state.shell_count) return;
+    if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
     if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
+    const was_ended = shell.ssh_reconnect.phase == .ended;
     shell.ssh_reconnect.manual(GetTickCount64());
     shell.disconnected = true;
+    if (was_ended) @import("drawing.zig").invalidateReconnectContent(idx);
     sshReconnectAttempt(idx);
 }
 
@@ -1716,13 +1725,14 @@ pub fn sshAutoReconnectTick() void {
     sshProbeFinish();
     const now = GetTickCount64();
     var attempted = [_]bool{false} ** 256;
+    var reconnecting = [_]u16{0} ** 256;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if (shell.ssh_reconnect.phase == .reconnecting) attempted[shell.tmux_host] = true;
+        if ((shell.kind == .tmux or shell.kind == .vps or shell.kind == .vps2) and shell.ssh_reconnect.phase == .reconnecting) reconnecting[shell.tmux_host] += 1;
     }
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
-        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended) continue;
         if (shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
         } else if (shell.process != null and !shellProcessAliveForRead(i)) {
@@ -1733,16 +1743,20 @@ pub fn sshAutoReconnectTick() void {
             sshReconnectOk(@intCast(i));
         }
         if (shell.disconnected and shell.ssh_reconnect.phase == .connected) sshReconnectArm(@intCast(i), "link-disconnected");
+        shell.ssh_reconnect.expireProbeWait(now, shell.spawn_tick);
         const host = shell.tmux_host;
-        if (!attempted[host] and shell.ssh_reconnect.due(now)) {
+        if (!attempted[host] and reconnecting[host] < 3 and shell.ssh_reconnect.due(now)) {
             if (sshNetworkVeto(@intCast(i), now)) continue;
             attempted[host] = true;
+            reconnecting[host] += 1;
             sshReconnectAttempt(@intCast(i));
         }
     }
     sshProbeStart();
     armSshReconnectTimerIfNeeded();
-    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected) {
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected and
+        @import("drawing.zig").reconnectTabVisible(app_state.active_shell))
+    {
         var header: RECT = undefined;
         if (GetClientRect(app_state.g_main_hwnd, &header) != 0) {
             header.top = threadTitleTop();
@@ -1754,22 +1768,56 @@ pub fn sshAutoReconnectTick() void {
 
 fn sshReconnectOk(idx: u32) void {
     const shell = &app_state.shells[idx];
+    if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed) return;
+    const state_changed = shell.disconnected;
     shell.ssh_reconnect.ok();
     shell.disconnected = false;
     var buf: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect ok id={d}", .{shell.shell_id}) catch return);
     armChatOutboxTimerIfNeeded();
-    chatOutboxTick();
-    repositionActive();
-    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    @import("console.zig").showReconnectedConsole(idx);
+    if (state_changed) @import("drawing.zig").invalidateReconnectContent(idx);
+    saveSession();
+}
+
+pub fn sshRequestSessionProbe() void {
+    ssh_probe_pending_request = true;
+    ssh_probe_next_tick = 0;
+    armSshReconnectTimerIfNeeded();
+}
+
+fn sshSessionEnded(idx: u32) void {
+    if (chatBenchEnabled()) return;
+    const shell = &app_state.shells[idx];
+    if (shell.ssh_reconnect.phase == .ended or shell.ssh_reconnect.phase == .closed or (shell.process != null and shellProcessAliveForRead(idx))) return;
+    @import("workspaces.zig").unregisterShellExitWait(idx);
+    if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
+    shell.hwnd = null;
+    if (shell.pid != 0) @import("console.zig").killProcessTree(shell.pid);
+    if (shell.process != null) _ = CloseHandle(shell.process);
+    shell.process = null;
+    shell.pid = 0;
+    shell.disconnected = true;
+    shell.activity = .idle;
+    shell.needs_attention = false;
+    shell.ssh_reconnect.end();
+    var buf: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect ended id={d} reason=session-gone", .{shell.shell_id}) catch "ssh-reconnect ended reason=session-gone");
+    @import("drawing.zig").invalidateReconnectContent(idx);
     saveSession();
 }
 
 const SshProbeJob = struct {
-    const Item = struct { id: u32, host: u8, session: [64]u8, len: u32, attached: bool = false };
+    const Item = struct { id: u32, host: u8, session: [64]u8, len: u32, spawn_tick: u64 = 0, attached: bool = false, session_gone: bool = false };
     items: [256]Item = undefined,
     count: usize = 0,
     healthy: [256]bool = @splat(false),
+    results: [256]struct {
+        exit_code: u32 = std.math.maxInt(u32),
+        ms: u64 = 0,
+        tail: [60]u8 = @splat(0),
+        len: usize = 0,
+    } = @splat(.{}),
     finished: std.atomic.Value(bool) = .init(false),
     abandoned: std.atomic.Value(bool) = .init(false),
     owners: std.atomic.Value(u32) = .init(2),
@@ -1778,17 +1826,21 @@ const SshProbeJob = struct {
 
 var ssh_probe_job: ?*SshProbeJob = null;
 var ssh_probe_next_tick: u64 = 0;
+var ssh_probe_pending_request: bool = false;
+var ssh_probe_misses: [256]u8 = @splat(0);
 
 fn sshProbeStart() void {
+    if (chatBenchEnabled()) return;
     if (ssh_probe_job != null or GetTickCount64() < ssh_probe_next_tick) return;
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
     for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.tmux_session_len == 0 or GetTickCount64() -| shell.spawn_tick < 3000) continue;
-        job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len };
+        if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.tmux_session_len == 0 or (!shell.ssh_reconnect.awaiting_probe and GetTickCount64() -| shell.spawn_tick < 3000)) continue;
+        job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len, .spawn_tick = shell.spawn_tick };
         job.count += 1;
     }
     if (job.count == 0) {
+        ssh_probe_pending_request = false;
         std.heap.page_allocator.destroy(job);
         return;
     }
@@ -1799,6 +1851,7 @@ fn sshProbeStart() void {
         return;
     };
     ssh_probe_job = job;
+    ssh_probe_pending_request = false;
     thread.detach();
 }
 
@@ -1817,20 +1870,31 @@ fn sshProbeThread(job: *SshProbeJob) void {
         if (!@import("console.zig").appendSshExe(&wide, &pos)) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ")) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, @import("console.zig").tmuxSshTarget(item.host))) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; printf '@@MP_LIVE@@\\n'\"")) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \\\"$listing\\\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \\\"$listing\\\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n'\"")) continue;
         const a = std.heap.page_allocator;
         const cmd = std.unicode.utf16LeToUtf8Alloc(a, wide[0..pos]) catch continue;
         defer a.free(cmd);
         var output: [32768]u8 = undefined;
+        const started = GetTickCount64();
         const result = @import("vps.zig").sshOneShotCaptureInput(cmd, &output, null, 10_000);
-        job.healthy[item.host] = result.success and std.mem.indexOf(u8, output[0..result.len], "@@MP_LIVE@@") != null;
+        const probe = &job.results[item.host];
+        probe.exit_code = result.exit_code;
+        probe.ms = GetTickCount64() -| started;
+        probe.len = @min(result.len, probe.tail.len);
+        for (output[result.len - probe.len .. result.len], 0..) |byte, i| {
+            probe.tail[i] = if (byte < 0x20 or byte == 0x7f) ' ' else byte;
+        }
+        job.healthy[item.host] = result.success and result.exit_code == 0 and @import("ssh_reconnect.zig").attached(output[0..result.len], "@@MP_LIVE@@") and @import("ssh_reconnect.zig").attached(output[0..result.len], "@@LS_OK@@");
         for (job.items[0..job.count]) |*candidate| {
-            if (candidate.host == item.host) candidate.attached = @import("ssh_reconnect.zig").attached(output[0..result.len], candidate.session[0..candidate.len]);
+            if (candidate.host != item.host) continue;
+            candidate.attached = @import("ssh_reconnect.zig").attached(output[0..result.len], candidate.session[0..candidate.len]);
+            candidate.session_gone = @import("ssh_reconnect.zig").sessionGone(output[0..result.len], candidate.session[0..candidate.len], result.success, result.exit_code);
         }
     }
 }
 
 fn sshProbeFinish() void {
+    if (chatBenchEnabled()) return;
     const job = ssh_probe_job orelse return;
     if (!job.finished.load(.acquire)) {
         if (GetTickCount64() -| job.started_tick < 45_000) return;
@@ -1844,19 +1908,48 @@ fn sshProbeFinish() void {
     defer {
         if (job.owners.fetchSub(1, .acq_rel) == 1) std.heap.page_allocator.destroy(job);
         ssh_probe_job = null;
-        ssh_probe_next_tick = GetTickCount64() + 15_000;
+        ssh_probe_next_tick = if (ssh_probe_pending_request) 0 else GetTickCount64() + 15_000;
+    }
+    var checked: [256]bool = @splat(false);
+    for (job.items[0..job.count]) |item| {
+        if (checked[item.host]) continue;
+        checked[item.host] = true;
+        ssh_probe_misses[item.host] = @import("ssh_reconnect.zig").probeMisses(ssh_probe_misses[item.host], job.healthy[item.host]);
+        const probe = job.results[item.host];
+        var buf: [224]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&buf, "ssh-probe result host={d} ok={d} exit={d} ms={d} misses={d} tail={s}", .{ item.host, @intFromBool(job.healthy[item.host]), probe.exit_code, probe.ms, ssh_probe_misses[item.host], probe.tail[0..probe.len] }) catch "ssh-probe result log-overflow");
     }
     for (job.items[0..job.count]) |item| {
         const idx = @import("inbox.zig").findShellById(item.id) orelse continue;
-        if (app_state.shells[idx].ssh_reconnect.phase == .closed) continue;
+        const shell = &app_state.shells[idx];
+        var tab_log: [224]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&tab_log, "ssh-probe tab id={d} phase={s} disconnected={} live={} attached={} gone={} incarnation={}", .{ shell.shell_id, @tagName(shell.ssh_reconnect.phase), shell.disconnected, shell.process != null and shellProcessAliveForRead(idx), item.attached, item.session_gone, shell.spawn_tick == item.spawn_tick }) catch "ssh-probe tab log-overflow");
+        if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
+            !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
+        const process_alive = shell.process != null and shellProcessAliveForRead(idx);
+        if (shell.ssh_reconnect.observeGone(item.session_gone, process_alive, GetTickCount64())) {
+            sshSessionEnded(idx);
+            continue;
+        }
+        if (shell.ssh_reconnect.gone_results > 0) {
+            sshRequestSessionProbe();
+            continue;
+        }
+        shell.ssh_reconnect.awaiting_probe = false;
+        if (item.session_gone and process_alive) continue;
         if (app_state.shells[idx].process == null) {
             sshDisconnect(idx, "probe-process-missing");
         } else if (!job.healthy[item.host]) {
-            sshDisconnect(idx, "probe-unreachable");
+            if (@import("ssh_reconnect.zig").probeUnreachable(ssh_probe_misses[item.host], shellProcessAliveForRead(idx))) {
+                sshDisconnect(idx, "probe-unreachable");
+            }
         } else if (!item.attached) {
-            sshDisconnect(idx, "tmux-detached");
-        } else if (app_state.shells[idx].disconnected) {
-            sshReconnectOk(idx);
+            if (shell.ssh_reconnect.phase != .reconnecting and !shell.ssh_reconnect.create_session and shell.ssh_reconnect.healthy_attach) sshDisconnect(idx, "tmux-detached");
+        } else if (process_alive) {
+            shell.ssh_reconnect.healthy_attach = true;
+            shell.ssh_reconnect.ever_healthy = true;
+            shell.ssh_reconnect.creating_session = false;
+            if (shell.disconnected) sshReconnectOk(idx);
         }
     }
 }

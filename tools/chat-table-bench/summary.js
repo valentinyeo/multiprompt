@@ -9,7 +9,7 @@ function summarize(samples) {
     assert.equal(values.length, 7, `${revision} sample count`);
     const ms = values.map((sample, index) => {
       assert.equal(sample.sample, index + 1, `${revision} sample sequence`);
-      assert.equal(sample.builds, 2000, `${revision} build count`);
+      assert.equal(sample.builds, 20000, `${revision} build count`);
       assert.ok(Number.isSafeInteger(sample.ticks) && sample.ticks > 0, 'positive counter ticks');
       assert.ok(Number.isSafeInteger(sample.frequency) && sample.frequency > 0, 'positive counter frequency');
       return sample.ticks / sample.frequency * 1000 / sample.builds;

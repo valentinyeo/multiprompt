@@ -39,11 +39,19 @@ assert.throws(() => prMatrixContract(workflow.replace('["appearance", "browser-p
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
+const desktopFeatures = featureFiles.filter(file => {
+  const text = read(`${directory}/features/${file}`);
+  const desktop = text.includes('## Driving it with control.ps1');
+  const reconnect = text.includes('## Driving it with the Windows reconnect harness');
+  assert.notEqual(desktop, reconnect, `${file} names exactly one desktop or reconnect driver`);
+  return desktop;
+});
 const allowed = driver.match(/ValidateSet\(([^)]*)\)/)?.[1].match(/'([^']+)'/g).map(value => value.slice(1, -1));
-assert.deepEqual([...allowed].sort(), featureFiles.map(file => file.slice(0, -3)).sort());
+assert.deepEqual([...allowed].sort(), desktopFeatures.map(file => file.slice(0, -3)).sort());
 for (const file of featureFiles) {
   const name = file.slice(0, -3);
   assert.ok(index.includes(`](${file})`), `index lists ${name}`);
+  if (!desktopFeatures.includes(file)) continue;
   assert.ok(workflow.includes(`'${name}'`), `workflow allows ${name}`);
   assert.ok(driver.includes(`        '${name}' {`), `driver implements ${name}`);
 }
@@ -184,6 +192,7 @@ assert.throws(() => placeholderContract(pane.replace('return .not_open;', 'retur
 function openingClockContract(source) {
   assert.ok(body(source, 'beginBrowserOpening').includes('if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;'));
   assert.ok(body(source, 'resetBrowserConnection').includes('sh.browser_first_launch_tick = 0;'));
+  assert.match(body(source, 'finishBrowserDock'), /browser_docking = false;\s*publishInboxState\(\)/);
   const expires = body(source, 'browserOpeningExpired');
   assert.ok(expires.includes('sh.browser_hwnd == null and sh.browser_first_launch_tick != 0'));
   assert.ok(expires.includes('now -| sh.browser_first_launch_tick >= BROWSER_PLACEHOLDER_NOT_OPEN_MS'));
@@ -196,6 +205,7 @@ function openingClockContract(source) {
   }
 }
 openingClockContract(pane);
+assert.throws(() => openingClockContract(pane.replace('    app_state.shells[idx].browser_docking = false;\n    publishInboxState();', '    app_state.shells[idx].browser_docking = false;')));
 assert.throws(() => openingClockContract(pane.replace('if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;', 'sh.browser_first_launch_tick = now;')));
 assert.throws(() => openingClockContract(pane.replace('        app_state.shells[target].browser_launch_tick = 0;', '')));
 function benchContract(source) {
