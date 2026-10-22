@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Test release version
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 3
         run: node --test tools/release-version.test.mjs
       - name: Check version rule
         if: steps.paths.outputs.heavy == 'true'
@@ -77,9 +77,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -87,9 +87,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
