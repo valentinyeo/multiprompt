@@ -1015,6 +1015,14 @@ try {
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
     }
+    if ($Feature -eq 'appearance') {
+        Doctor
+        $maximized = [VerifyNative]::IsZoomed($script:window)
+        Save-Json @{ hwnd = $script:window.ToInt64(); maximized = $maximized } 'startup-maximized.json'
+        if (-not $maximized) { throw 'IGSH-587: main window did not start maximized' }
+        $result.checks += @{ name = 'startup-maximized'; maximized = $maximized }
+        Snapshot 'startup-maximized'
+    }
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
     [void][VerifyNative]::SetForegroundWindow($script:window)

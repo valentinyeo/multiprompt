@@ -73,7 +73,7 @@ function Start-UpdatedApp([string]$Target) {
     $process = $null
     $ready = $false
     try {
-        $process = Start-Process -FilePath $Target -ArgumentList ($launch + ' --update-ready ' + $eventName) -PassThru
+        $process = Start-Process -FilePath $Target -ArgumentList ($launch + ' --update-ready ' + $eventName) -WindowStyle Maximized -PassThru
         $deadline = [DateTime]::UtcNow.AddSeconds(60)
         while ([DateTime]::UtcNow -lt $deadline) {
             if ($process.HasExited) { return $false }
@@ -94,7 +94,7 @@ function Start-UpdatedApp([string]$Target) {
 
 function Start-RestoredApp([string]$Target) {
     if (Get-Process | Where-Object { $_.Path -ieq $Target }) { return }
-    $null = Start-Process -FilePath $Target -ArgumentList ($launch + ' ')
+    $null = Start-Process -FilePath $Target -ArgumentList ($launch + ' ') -WindowStyle Maximized
 }
 
 function Get-WaitingProcesses([string]$Pids) {

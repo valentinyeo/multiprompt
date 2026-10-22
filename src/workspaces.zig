@@ -1196,6 +1196,8 @@ fn spawnWorkspaceWindowInternal(id: []const u8, wait_for_window: bool) ?HANDLE {
     cmd_buf[pos] = 0;
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = @import("win32.zig").STARTF_USESHOWWINDOW;
+    si.wShowWindow = @intCast(@import("win32.zig").SW_MAXIMIZE);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     if (CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 0, 0, null, null, &si, &pi) != 0) {
         defer {
@@ -1312,6 +1314,8 @@ fn spawnEmptyWorkspaceWindow(id: []const u8, display_name: []const u8) ?HANDLE {
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = @import("win32.zig").STARTF_USESHOWWINDOW;
+    si.wShowWindow = @intCast(@import("win32.zig").SW_MAXIMIZE);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     if (CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 0, 0, null, null, &si, &pi) == 0) return null;
     defer {
@@ -1845,6 +1849,8 @@ fn spawnNewWindowImpl(empty: bool) void {
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = @import("win32.zig").STARTF_USESHOWWINDOW;
+    si.wShowWindow = @intCast(@import("win32.zig").SW_MAXIMIZE);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
 
     _ = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 0, 0, null, null, &si, &pi);
@@ -2050,6 +2056,8 @@ pub fn detachTabToNewWindow(idx: u32) void {
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
+    si.dwFlags = @import("win32.zig").STARTF_USESHOWWINDOW;
+    si.wShowWindow = @intCast(@import("win32.zig").SW_MAXIMIZE);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     const create_ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 0, 0, null, null, &si, &pi);
     if (create_ok != 0) {
