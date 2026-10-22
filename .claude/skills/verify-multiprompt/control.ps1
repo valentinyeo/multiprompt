@@ -215,6 +215,7 @@ $process = $null
 $job = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
+$script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -225,6 +226,21 @@ function Save-Json($Value, [string]$Name) {
 function Record([string]$Action) {
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
+}
+
+function Prepare-ScratchEvidence([string]$Path) {
+    $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
+            Save-Json @($script:scratchLinks) 'scratch-links.json'
+            $entry.Delete()
+            Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } else {
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+        }
+    }
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20) {
@@ -689,6 +705,7 @@ try {
                 }
             } finally {
                 if (Test-Path $scratch) {
+                    Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
                     $deadline = [DateTime]::UtcNow.AddSeconds(20)
