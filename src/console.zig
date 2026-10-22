@@ -2000,6 +2000,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (app_state.g_account_locked) return false;
     if (idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return false;
+    if (idx == app_state.active_shell) {
+        app_state.g_front_period.selected = null;
+        @import("main.zig").sessionFrontChanged();
+    }
     const kind = app_state.shells[idx].kind;
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
     const title_id = app_state.allocateConsoleTitleId() orelse return false;

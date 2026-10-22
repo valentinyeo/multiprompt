@@ -83,7 +83,12 @@ test('G2: keyboard palette creates a group and waits for its real saved name and
 
 test('G2: offline startup uses the actual ephemeral app-owned loopback listener', () => {
   assert.match(read('src/account_desktop.zig'), /GetEnvironmentVariableA\("MULTIPROMPT_NO_LOGIN"[\s\S]*?g_account_bypass = true/);
-  assert.match(read('src/main.zig'), /startTunnelInboundListener\(\);\s*_ = resolveSshPath\(false\);/);
+  const main = read('src/main.zig');
+  const initialize = main.slice(main.indexOf('fn initializeDeferred('));
+  const links = initialize.slice(initialize.indexOf('        .links =>'), initialize.indexOf('        .tabs =>'));
+  assert.match(links, /startTunnelInboundListener\(\);/);
+  assert.match(links, /prepareStartupRestore\(\)/);
+  assert.doesNotMatch(initialize, /resolveSshPath\(false\)/);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
