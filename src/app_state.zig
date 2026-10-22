@@ -2386,6 +2386,7 @@ pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
     generation: u64 = 0,
     history: chat_history.History = .{},
+    tables: chat_markdown.TableCache = .{},
     pending: bool = false,
     retired: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
@@ -2406,6 +2407,7 @@ pub const ChatHistoryEntry = struct {
     result: ?chat_history.History = null,
 };
 pub var g_chat_tables: chat_markdown.TableCache = .{};
+pub var g_chat_tables_shell_id: u32 = 0;
 pub var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
 pub var g_chat_history_generation: u64 = 0;
 pub var g_chat_cache_generation: u64 = 0;

@@ -83,7 +83,11 @@ test('G2: keyboard palette creates a group and waits for its real saved name and
 
 test('G2: offline startup uses the actual ephemeral app-owned loopback listener', () => {
   assert.match(read('src/account_desktop.zig'), /GetEnvironmentVariableA\("MULTIPROMPT_NO_LOGIN"[\s\S]*?g_account_bypass = true/);
-  assert.match(read('src/main.zig'), /\.links => \{\s*launch_cache\.step\(\.links\);\s*if \(std\.Thread\.spawn\(\.\{\}, notifyListenerThread, \.\{\}\)\) \|notify_thread\| \{[^{}]*\} else \|_\| \{[^{}]*\}\s*startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/);
+  const main = read('src/main.zig');
+  const startupListener = /\.links => \{\s*launch_cache\.step\(\.links\);\s*if \(std\.Thread\.spawn\(\.\{\}, notifyListenerThread, \.\{\}\)\) \|notify_thread\| \{[^{}]*\} else \|_\| \{[^{}]*\}\s*startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/;
+  assert.match(main, startupListener);
+  assert.doesNotMatch(main.replace('startTunnelInboundListener();', ''), startupListener);
+  assert.match(main, /startup_phase = @enumFromInt\(@intFromEnum\(startup_phase\) \+ 1\);/);
   assert.match(read('src/launch_plan.zig'), /pub const Deferred = enum \{[^}]*\blinks,\s*tabs,/);
   assert.match(read('src/account_desktop.zig'), /pub fn accountBootstrap\(hwnd: HANDLE\) bool \{\s*if \(app_state\.g_account_bypass\) return true;/);
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
@@ -175,4 +179,17 @@ test('G3: four-section feature map is indexed and workspace entry points link it
   assert.match(workspaces, /zsb session-open --workspace/);
   assert.match(workspaces, /\[Session open\]\(session-open.md\)/);
   assert.match(map, /not a Windows journey result/);
+});
+
+
+test('chat table journey waits for the Chat View tab to be saved before recording its identity', () => {
+  const table = control.slice(control.indexOf("        'chat-tables' {"), control.indexOf("        'sessions' {"));
+  const ready = /Wait-Until \{ \$state = Read-Session; \$null -ne \$state -and @\(\$state\.tabs\)\.Count -gt 0 -and \$state\.active_tab -ge 0 -and \$state\.active_tab -lt @\(\$state\.tabs\)\.Count \} 'saved initial table tab'\s+\$tableTab = \(Read-Session\)\.active_tab/;
+  assert.match(table, ready);
+  const completion = /\$command \+= ' && echo table-ready>"' \+ \(Join-Path \$scratch 'table-ready\.txt'\) \+ '"'\s+Type-Text \$command\s+Press @\(0x0D\)/;
+  assert.match(table, completion);
+  assert.doesNotMatch(table.replace(' && echo table-ready', ' && echo wrong-marker'), completion);
+  assert.match(table, /Press @\(0x12, 0x43\) 'Alt\+C: open formatted Chat View'\s+Wait-Until/);
+  assert.doesNotMatch(table.replace('Wait-Until { $state = Read-Session;', 'Write-Output { $state = Read-Session;'), ready);
+  assert.doesNotMatch(table.replace('$state.active_tab -lt @($state.tabs).Count', '$true'), ready);
 });
