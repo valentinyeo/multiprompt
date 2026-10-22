@@ -67,10 +67,7 @@ test('foreign HWND mutations and bridge/OS launches never wait on the UI thread'
   assert.doesNotMatch(body('dockBrowserWindow'), /SetWindowLongPtrW|SetParent|DwmSetWindowAttribute/);
   assert.match(body('browserDockWorker'), /SetWindowLongPtrW[\s\S]*WM_APP_BROWSER_DOCKED/);
   assert.match(body('finishBrowserDock'), /findShellById\(job.shell_id\)/);
-  assert.match(body('spawnBrowserCliHidden'), /spawnBrowserCliForShell\(active_shell, cmd\)/);
-  assert.match(body('spawnBrowserCliForShell'), /browser_workspace_profile\.command/);
-  assert.match(body('spawnBrowserCliForShell'), /spawnBrowserCliQualified\(qualified\)/);
-  assert.match(body('spawnBrowserCliQualified'), /std\.Thread\.spawn\([^]*spawnBrowserCliWorker/);
+  assert.match(body('spawnBrowserCliHidden'), /std\.Thread\.spawn\([^]*spawnBrowserCliWorker/);
   assert.match(body('shellExecuteEdgeUrl'), /std\.Thread\.spawn\([^]*browserLaunchWorker/);
   assert.doesNotMatch(body('shellExecuteEdgeUrl'), /ShellExecuteW\(/);
   assert.doesNotMatch(body('chatSwitchBrowserTick'), /Sleep\(|WaitFor|SendMessage|SetFocus|SetForegroundWindow/);

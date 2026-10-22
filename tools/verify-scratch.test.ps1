@@ -31,7 +31,6 @@ function Prepare-ScratchEvidence([string]$Path) {
 $prepare = ${function:Prepare-ScratchEvidence}
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('verify-scratch-' + [guid]::NewGuid().ToString('N'))
 $script:vanish = $null
-$script:transientEvidence = New-Object System.Collections.ArrayList
 function Get-ChildItem {
     param([string]$LiteralPath, [switch]$Force, [switch]$Recurse)
     $entries = @(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -Force:$Force -Recurse:$Recurse)

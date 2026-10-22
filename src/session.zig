@@ -661,15 +661,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
     }
     const split_state = std.fmt.bufPrint(json_buf[pos..], ",\"inbox_tab\":{d},\"inbox_visits_order\":true", .{app_state.g_inbox_tab}) catch return false;
     pos += split_state.len;
-    if (!app_state.g_single_window) {
-        const id = if (app_state.g_ws_id_len[0] > 0) app_state.g_ws_ids[0][0..app_state.g_ws_id_len[0]] else @import("startup.zig").getInstanceName();
-        const prefix = ",\"workspace_id\":\"";
-        @memcpy(json_buf[pos .. pos + prefix.len], prefix);
-        pos += prefix.len;
-        appendJsonEscaped(&json_buf, &pos, id);
-        json_buf[pos] = '"';
-        pos += 1;
-    }
     if (app_state.g_single_window and pos + 256 < json_buf.len) {
         var swbuf: [96]u8 = undefined;
         const sw = std.fmt.bufPrint(&swbuf, ",\"single_window\":true,\"active_workspace\":{d},\"workspace_count\":{d},\"workspaces\":[", .{ app_state.g_active_workspace, app_state.g_lws_count }) catch swbuf[0..0];
@@ -1523,19 +1514,6 @@ pub fn restoreSession() u32 {
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
     var restored_active_ws: u8 = 0;
-    if (!json_reader.boolTrue(json, "single_window")) {
-        var id_buf: [64]u8 = undefined;
-        const saved_len = json_reader.copyString(json, "workspace_id", &id_buf);
-        const id_len = @min(saved_len, app_state.g_ws_ids[0].len);
-        @memcpy(app_state.g_ws_ids[0][0..id_len], id_buf[0..id_len]);
-        app_state.g_ws_id_len[0] = @intCast(id_len);
-        if (app_state.g_ws_id_len[0] == 0) {
-            const id = @import("startup.zig").getInstanceName();
-            const len = @min(id.len, app_state.g_ws_ids[0].len);
-            @memcpy(app_state.g_ws_ids[0][0..len], id[0..len]);
-            app_state.g_ws_id_len[0] = @intCast(len);
-        }
-    }
     if (json_reader.boolTrue(json, "single_window")) app_state.g_single_window = true;
     if (app_state.g_single_window) {
         const workspace = json_reader.uint(json, "active_workspace");
