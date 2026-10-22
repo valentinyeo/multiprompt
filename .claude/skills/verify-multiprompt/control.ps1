@@ -36,6 +36,11 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
@@ -166,6 +171,33 @@ public static class VerifyNative {
             input.data.mouse = new Mouse { flags = flags };
             if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
             Thread.Sleep(35);
+        }
+    }
+    public static void FocusOwnedWindow(IntPtr hwnd, uint pid, IntPtr owner) {
+        uint actualPid;
+        uint targetThread = GetWindowThreadProcessId(hwnd, out actualPid);
+        if (hwnd == IntPtr.Zero || owner == IntPtr.Zero || pid == 0 || targetThread == 0 || actualPid != pid ||
+            GetProp(hwnd, "ZigShellPaneOwner") != owner || GetAncestor(hwnd, 3) != owner) throw new InvalidOperationException("Browser focus ownership mismatch");
+        uint currentThread = GetCurrentThreadId();
+        uint foregroundPid;
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
+        bool attachedForeground = false, attachedTarget = false;
+        try {
+            if (foregroundThread != 0 && foregroundThread != currentThread) {
+                attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+                if (!attachedForeground) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if (targetThread != currentThread && targetThread != foregroundThread) {
+                attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+                if (!attachedTarget) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            AllowSetForegroundWindow(pid);
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+        } finally {
+            if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
         }
     }
     public static IntPtr GetFocusedWindow(IntPtr hwnd) {
