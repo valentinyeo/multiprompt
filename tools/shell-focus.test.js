@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const app = require('./app-source').readAppSource();
 
 function body(source, name, next) {
@@ -106,43 +107,79 @@ test('palette handoff authorizes the frame and blocks reentrant shell repair bef
     main.replace(handoff, '').replace('        WM_APP_SEARCH_OPEN => {', `        WM_APP_SEARCH_OPEN => {\n${handoff}`),
     main.replace(handoff, '').replace('            altqLog("palette_focus', `${handoff}\n            altqLog("palette_focus`),
   ]) assert.throws(() => paletteHandoff(broken));
-  const run = new Function('GetTickCount64', 'altqLog', 'altqPtr', 'GetFocus', 'wp', 'hwnd', 'app_state', 'foregroundIsOurs', 'focusGuard', 'cancelShellRefocus', 'GetForegroundWindow', 'GetCurrentThreadId', 'GetWindowThreadProcessId', 'AttachThreadInput', 'SetForegroundWindow', 'SetFocus', handoff.replaceAll(' and ', ' && ').replaceAll('_ = ', '').replace(/, \.\{ ([^\n]*?) \}\);/g, ', [$1]);'));
+  const translated = handoff.replaceAll(' and ', ' && ').replaceAll('_ = ', '')
+    .replace(/var (\w+): DWORD/g, 'let $1')
+    .replaceAll('@as(i32, VK_MENU)', 'VK_MENU')
+    .replaceAll('@as(i16, @bitCast(@as(u16, 0x8000)))', '0x8000')
+    .replace(/const (\w+) = if \(([^\n]*?)\) ([^\n]*?) else 0;/g, 'const $1 = ($2) ? $3 : 0;')
+    .replace(/&(fg_pid|sfw_pid)/g, 'value => { $1 = value; }')
+    .replace(/, \.\{ ([^\n]*?) \}\);/g, ', [$1]);');
+  const run = new Function('GetTickCount64', 'altqLog', 'altqPtr', 'GetFocus', 'wp', 'hwnd', 'app_state', 'foregroundIsOurs', 'focusGuard', 'cancelShellRefocus', 'GetForegroundWindow', 'GetCurrentThreadId', 'GetWindowThreadProcessId', 'AttachThreadInput', 'SetForegroundWindow', 'SetFocus', 'GetAsyncKeyState', 'VK_MENU', 'KEYEVENTF_KEYUP', 'keybd_event', translated);
   for (const previous of ['console', 'browser', 'frame', 'foreign']) {
     for (const wp of [0, 1]) {
       for (const allowed of [false, true]) {
-        const state = { g_search_active: true, g_browser_focus_mode: true, g_focus_authorized_hwnd: null, g_focus_authorized_until: 0, g_focus_user_action_tick: 0, g_focus_input_tick: 900 };
-        const calls = [];
-        let authorized = 'console';
-        let foreground = previous;
-        let focused = previous;
-        const logs = [];
-        run(() => 1000, (format, values) => logs.push([format, values]), hwnd => hwnd, () => focused, wp, 'frame', state, () => previous !== 'foreign', target => {
-          assert.equal(state.g_focus_authorized_hwnd, 'frame');
-          assert.equal(state.g_focus_authorized_until, 2500);
-          assert.equal(state.g_focus_user_action_tick, 0, 'posted shortcut must not need a live hook action');
-          if (allowed) authorized = target;
-          return allowed;
-        }, () => calls.push('cancel'), () => foreground, () => 1, target => target === 'frame' ? 1 : 2,
-        (from, to, attach) => {
-          assert.equal(authorized, 'frame');
-          calls.push(attach ? 'attach' : 'detach');
-          return 1;
-        }, target => {
-          assert.equal(state.g_search_active, true);
-          foreground = target;
-          calls.push('foreground');
-        }, target => { focused = target; calls.push('focus'); });
-        if (wp === 1 && allowed && previous !== 'foreign') {
-          assert.equal(foreground, 'frame');
-          assert.equal(focused, 'frame');
-          assert.equal(state.g_browser_focus_mode, false);
-          assert.deepEqual(calls, previous === 'frame' ? ['cancel', 'foreground', 'focus'] : ['cancel', 'attach', 'foreground', 'focus', 'detach']);
-        } else assert.deepEqual(calls, []);
-        assert.equal(state.g_focus_authorized_hwnd, null, 'frame authority cannot outlive this handoff');
-        assert.equal(state.g_focus_authorized_until, 0);
-        assert.equal(logs.length, wp === 1 && previous !== 'foreign' ? (allowed ? 2 : 1) : 0);
-        if (logs.length) assert.equal(logs[0][1][0], allowed);
-        if (logs.length === 2) assert.equal(logs[1][1][0], 'frame');
+        for (const physicalAlt of [false, true]) {
+          for (const attachResult of [0, 1]) {
+            for (const sfwResult of [0, 1]) {
+              const state = { g_search_active: true, g_browser_focus_mode: true, g_focus_authorized_hwnd: null, g_focus_authorized_until: 0, g_focus_user_action_tick: 0, g_focus_input_tick: 900 };
+              const calls = [];
+              let authorized = 'console';
+              let foreground = previous;
+              let focused = previous;
+              let alt = physicalAlt;
+              const logs = [];
+              run(() => 1000, (format, values) => logs.push([format, values]), hwnd => hwnd, () => focused, wp, 'frame', state, () => previous !== 'foreign', target => {
+                assert.equal(state.g_focus_authorized_hwnd, 'frame');
+                assert.equal(state.g_focus_authorized_until, 2500);
+                assert.equal(state.g_focus_user_action_tick, 0, 'posted shortcut must not need a live hook action');
+                if (allowed) authorized = target;
+                return allowed;
+              }, () => calls.push('cancel'), () => foreground, () => 1, (target, pid) => {
+                if (pid) pid(target === 'frame' ? 10 : 20);
+                return target === 'frame' ? 1 : 2;
+              }, (from, to, attach) => {
+                assert.equal(authorized, 'frame');
+                calls.push(attach ? 'attach' : 'detach');
+                return attach ? attachResult : 1;
+              }, target => {
+                assert.equal(state.g_search_active, true);
+                assert.ok(alt || foreground === 'frame', 'native foreground unlock must precede activation');
+                if (sfwResult) foreground = target;
+                calls.push('foreground');
+                return sfwResult;
+              }, target => { focused = target; calls.push('focus'); }, () => physicalAlt ? 0x8000 : 0, 0x12, 2, (vk, scan, flags) => {
+                if (vk === 0xFF) calls.push(flags === 0 ? 'mask-down' : 'mask-up');
+                else {
+                  assert.equal(vk, 0x12);
+                  alt = flags === 0;
+                  calls.push(alt ? 'alt-down' : 'alt-up');
+                }
+              });
+              if (wp === 1 && allowed && previous !== 'foreign') {
+                const landed = sfwResult || previous === 'frame';
+                assert.equal(foreground, landed ? 'frame' : previous);
+                assert.equal(focused, 'frame');
+                assert.equal(state.g_browser_focus_mode, !landed);
+                const expected = ['cancel'];
+                if (previous !== 'frame' && !physicalAlt) expected.push('alt-down');
+                if (previous !== 'frame') expected.push('attach');
+                expected.push('foreground', 'focus');
+                if (previous !== 'frame' && attachResult) expected.push('detach');
+                if (previous !== 'frame' && !physicalAlt) expected.push('mask-down', 'mask-up', 'alt-up');
+                assert.deepEqual(calls, expected);
+                const native = logs[1];
+                assert.match(native[0], /palette_native/);
+                assert.deepEqual(native[1], [previous, previous === 'frame' ? 1 : 2, previous === 'frame' ? 10 : 20, 1, previous === 'frame' ? 0 : attachResult, sfwResult, foreground, foreground === 'frame' ? 1 : 2, foreground === 'frame' ? 10 : 20, previous !== 'frame' && attachResult ? 1 : 0, previous !== 'frame' && !physicalAlt]);
+              } else assert.deepEqual(calls, []);
+              assert.equal(alt, physicalAlt, 'the handoff must restore injected Alt without releasing physical Alt');
+              assert.equal(state.g_focus_authorized_hwnd, null, 'frame authority cannot outlive this handoff');
+              assert.equal(state.g_focus_authorized_until, 0);
+              assert.equal(logs.length, wp === 1 && previous !== 'foreign' ? (allowed ? 3 : 1) : 0);
+              if (logs.length) assert.equal(logs[0][1][0], allowed);
+              if (logs.length === 3) assert.equal(logs[2][1][0], foreground);
+            }
+          }
+        }
       }
     }
   }
@@ -204,4 +241,57 @@ test('landed handoffs consume authority without losing the exact return surface'
     assert.equal(state.g_focus_authorized_until, 0);
     assert.equal(state.g_focus_browser_shell_id, 0);
   }
+});
+
+function auditPaletteUnlock(main, focus) {
+  const handoff = paletteHandoff(main);
+  const working = body(focus, 'focusActiveShellInner', 'activateConsoleForeground');
+  assert.match(working, /if \(need_alt\) \{\s*keybd_event\(VK_MENU, 0, 0, 0\);[^]*?AttachThreadInput[^]*?activateConsoleForeground\(target_hwnd\)[^]*?keybd_event\(VK_MENU, 0, KEYEVENTF_KEYUP, 0\);/);
+  assert.match(handoff, /const tap_alt = fg != hwnd and \(GetAsyncKeyState\(@as\(i32, VK_MENU\)\) & @as\(i16, @bitCast\(@as\(u16, 0x8000\)\)\)\) == 0;/);
+  const down = handoff.indexOf('if (tap_alt) keybd_event(VK_MENU, 0, 0, 0);');
+  const attach = handoff.indexOf('const attach_result =');
+  const activate = handoff.indexOf('const sfw_result = SetForegroundWindow(hwnd);');
+  const observed = handoff.indexOf('const sfw_foreground = GetForegroundWindow();');
+  const detach = handoff.indexOf('const detach_result =');
+  const up = handoff.indexOf('keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);');
+  assert.match(handoff, /if \(tap_alt\) \{\s*keybd_event\(0xFF, 0, 0, 0\);\s*keybd_event\(0xFF, 0, KEYEVENTF_KEYUP, 0\);\s*keybd_event\(VK_MENU, 0, KEYEVENTF_KEYUP, 0\);\s*\}/);
+  assert.ok(down >= 0 && attach > down && activate > attach && observed > activate && detach > observed && up > detach, 'use the established Alt unlock around the attached foreground handoff');
+  assert.match(handoff, /const attach_result = if \(fg_thread != 0 and fg_thread != our_thread\) AttachThreadInput\(our_thread, fg_thread, 1\) else 0;/);
+  assert.match(handoff, /const detach_result = if \(attach_result != 0\) AttachThreadInput\(our_thread, fg_thread, 0\) else 0;/);
+  assert.match(handoff, /GetWindowThreadProcessId\(fg, &fg_pid\)/);
+  assert.match(handoff, /GetWindowThreadProcessId\(sfw_foreground, &sfw_pid\)/);
+  assert.match(handoff, /palette_native before=\{X\} tid=\{\} pid=\{\} our_tid=\{\} attach=\{\} sfw=\{\} after=\{X\} tid=\{\} pid=\{\} detach=\{\} alt=\{\}[^]*?\.\{ altqPtr\(fg\), fg_thread, fg_pid, our_thread, attach_result, sfw_result, altqPtr\(sfw_foreground\), sfw_thread, sfw_pid, detach_result, tap_alt \}/);
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
+  assert.match(open, /palette_refocus rem=\{\} wait_alt=\{\}[^]*?cancelShellRefocus\(hwnd\);\s*app_state\.g_search_active = true;/);
+  assert.match(open, /palette_focus wp=\{\} foreground=\{X\} frame=\{X\} focus=\{X\} rem=\{\} wait_alt=\{\}/);
+  const timer = main.slice(main.indexOf('} else if (wp == TIMER_REFOCUS) {'), main.indexOf('} else if (wp == TIMER_HOOK_UNINSTALL) {'));
+  assert.match(timer, /if \(app_state\.g_search_active\) \{\s*altqLog\("palette_refocus suppressed[^]*?cancelShellRefocus\(hwnd\);\s*return 0;\s*\}\s*if \(!focusGuard\(/);
+}
+
+test('palette activation uses the established unlock and rejects missing native diagnostics or timer isolation', () => {
+  const root = path.resolve(__dirname, '..');
+  const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const focus = fs.readFileSync(path.join(root, 'src/focus.zig'), 'utf8');
+  auditPaletteUnlock(main, focus);
+  for (const missing of [
+    'if (tap_alt) keybd_event(VK_MENU, 0, 0, 0);',
+    'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);',
+    'keybd_event(0xFF, 0, 0, 0);',
+    'keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);',
+    'const sfw_foreground = GetForegroundWindow();',
+    'palette_native before={X}',
+    'palette_refocus suppressed',
+    'GetWindowThreadProcessId(fg, &fg_pid)',
+    'GetWindowThreadProcessId(sfw_foreground, &sfw_pid)',
+  ]) {
+    assert.ok(main.includes(missing), missing);
+    assert.throws(() => auditPaletteUnlock(main.replace(missing, ''), focus), missing);
+  }
+});
+
+test('palette activation unlock rejects baseline 77519a8', { skip: !process.env.PALETTE_BASELINE }, () => {
+  const root = path.resolve(__dirname, '..');
+  const focus = fs.readFileSync(path.join(root, 'src/focus.zig'), 'utf8');
+  const baseline = execFileSync('git', ['show', `${process.env.PALETTE_BASELINE}:src/main.zig`], { cwd: root, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+  assert.throws(() => auditPaletteUnlock(baseline, focus), /const tap_alt/, 'the native-unlock assertion must fail on the actual previous implementation');
 });
