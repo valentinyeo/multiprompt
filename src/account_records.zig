@@ -242,10 +242,11 @@ pub fn rewriteHost(a: Allocator, config: []const u8, alias: []const u8, host: ?H
         try output.append(a, '\n');
     }
     try output.appendSlice(a, block.items);
+    const reset = if (std.mem.startsWith(u8, output.items, "Host *\n")) "" else "Host *\n";
     const prefix = if (host) |h|
-        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port {d}\n  User {s}\nHost *\n", .{ alias, h.hostname, h.port, h.user })
+        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port {d}\n  User {s}\n{s}", .{ alias, h.hostname, h.port, h.user, reset })
     else
-        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port 22\nHost *\n", .{ alias, alias });
+        try std.fmt.allocPrint(a, "Host {s}\n  HostName {s}\n  Port 22\n{s}", .{ alias, alias, reset });
     try output.insertSlice(a, 0, prefix);
     return output.toOwnedSlice(a);
 }

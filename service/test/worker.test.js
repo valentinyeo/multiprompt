@@ -1258,7 +1258,7 @@ test('ISSUE-252 record service rejects credentials keys local paths geometry mal
 test('ISSUE-252 records are account scoped and unauthorized or revoked devices cannot read or write', async () => {
   assert.equal((await request('/v1/sync-records')).status, 401);
   const { token } = await enroll();
-  const otherToken = 'record-foreign-access';
+  const otherToken = 'record-foreign-access'.padEnd(43, 'x');
   await db.prepare('INSERT INTO devices VALUES (?,?,?,?,?,?,?)').bind('record-foreign', 'foreign-account', 'Foreign device', 'record-foreign-refresh', 0, 0, 0).run();
   await db.prepare('INSERT INTO access_tokens VALUES (?,?,?)').bind(await hash(otherToken), 'record-foreign', Math.floor(Date.now() / 1000) + 600).run();
   const foreign = { access_token: otherToken };
