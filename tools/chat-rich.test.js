@@ -165,3 +165,76 @@ test('IGSH-404 every Chat View copy path owns selection-sized storage and report
   assert.match(build, /"node", "--test", "tools\/chat-view-gaps\.test\.js"/);
   assert.match(build, /test_step\.dependOn\(&chat_view_gaps_tests\.step\)/);
 });
+
+test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlighting and copying', () => {
+  const display = body('chatSelectionDisplay');
+  assert.match(display, /chatBlockDisplayRange/);
+  assert.match(display, /g_chat_echo_layout_ids/);
+  assert.match(display, /chatOutboxIndexById/);
+  assert.match(display, /chat_hit\.pending_selection_base/);
+  for (const name of ['chatSelectAll', 'chatSelectionToClipboard', 'chatTranscriptSelectionBlockAt']) {
+    assert.match(body(name), /g_chat_block_count \+ g_chat_echo_layout_count/);
+    assert.match(body(name), /chatSelectionDisplay/);
+  }
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionDisplay/);
+  assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
+  assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
+  assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text, text_rc, false, true, null, offset,/);
+  assert.match(body('chatTranscriptWndProc'), /chatPaintEcho\([^;]*display\.start\)/);
+  assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
+  assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
+  assert.match(body('chatRelayout'), /old_echo_ids[^]*chatSelectionClear\(\)/);
+});
+
+test('IGSH-567 fixed pending regions retain selections across compatible capture refreshes', () => {
+  const hit = fs.readFileSync('src/chat_hit.zig', 'utf8');
+  assert.match(hit, /pub const pending_selection_base: usize = std\.math\.maxInt\(usize\) \/ 2 \+ 1;/);
+  assert.match(hit, /test "IGSH-567 pending and mixed selections survive streaming but not changed transcript prefixes or shells"/);
+  const refresh = body('refreshChatBlockCache');
+  assert.match(refresh, /keepDisplaySelection\([^]*g_chat_capture\[0\.\.g_chat_last_len\],[^]*source,\s*g_chat_sel_anchor,\s*g_chat_sel_caret,/);
+  const policy = hit.match(/pub fn keepDisplaySelection\([^]*?\) bool \{([^]*?)\n\}/);
+  assert.ok(policy);
+  const translated = policy[1]
+    .replace('if (end >= pending_selection_base) @min(end, before.len) else end', '(end >= pending_selection_base ? Math.min(end, before.length) : end)')
+    .replaceAll('@min(', 'Math.min(')
+    .replaceAll('@max(', 'Math.max(');
+  const keep = Function('same_shell', 'before', 'after', 'anchor', 'caret', 'pending_selection_base', 'keepSelection', translated);
+  const prefix = hit.match(/pub fn keepSelection\([^]*?\) bool \{\s*return ([^]*?);\s*\}/);
+  assert.ok(prefix);
+  const keepPrefix = Function('same_shell', 'before', 'after', 'end', `return ${prefix[1]
+    .replaceAll(' and ', ' && ')
+    .replaceAll('.len', '.length')
+    .replace('std.mem.eql(u16, before[0..end], after[0..end])', 'before.slice(0, end).every((value, i) => value === after[i])')};`);
+  const pending = 2 ** 31;
+  const before = [1, 2];
+  const appended = [1, 2, 3];
+  const replaced = [1, 3, 4];
+  const cases = [
+    [true, appended, pending, pending + 2, true],
+    [true, replaced, pending + 2, pending, true],
+    [true, appended, 1, pending + 2, true],
+    [true, appended, pending + 2, 1, true],
+    [true, replaced, 1, pending + 2, false],
+    [true, [1], pending + 2, 1, false],
+    [false, appended, pending, pending + 2, false],
+    [false, appended, 1, pending + 2, false],
+    [true, appended, 0, 2, true],
+    [true, replaced, 0, 2, false],
+    [true, appended, 0, 3, false],
+  ];
+  for (const [same, after, anchor, caret, expected] of cases) {
+    assert.equal(keep(same, before, after, anchor, caret, pending, keepPrefix), expected);
+  }
+  assert.equal(keepPrefix(true, before, appended, pending + 2), false);
+});
+
+test('IGSH-567 selection allocation counts display intersections instead of the reserved offset gap', () => {
+  const allocate = body('chatCopyTextAlloc');
+  assert.match(allocate, /chatSelectionDisplay\(i\)/);
+  assert.match(allocate, /const lo = @max\(sel.start, display.start\)/);
+  assert.match(allocate, /const hi = @min\(sel.end, display.start \+ display.text.len\)/);
+  assert.match(allocate, /std.math.add\(usize, selected_len, hi -\| lo\)/);
+  assert.doesNotMatch(allocate, /sel.end - sel.start/);
+  assert.match(body('chatRelayout'), />= chat_hit\.pending_selection_base/);
+});

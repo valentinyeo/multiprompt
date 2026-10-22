@@ -183,6 +183,10 @@ const pendingStart = source.indexOf('    g_chat_echo_layout_count = 0;\n    if (
 assert.ok(pendingStart >= 0, 'production pending layout');
 const pendingLayout = `
 const RECT = struct { left: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
+const chat_hit = struct { const pending_selection_base: usize = std.math.maxInt(usize) / 2 + 1; };
+var g_chat_sel_anchor: usize = 0;
+var g_chat_sel_caret: usize = 0;
+fn chatSelectionClear() void { g_chat_sel_anchor = 0; g_chat_sel_caret = 0; }
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_echo_layout: [20]RECT = undefined;
 var g_chat_echo_layout_ids: [20]u64 = undefined;
@@ -195,6 +199,8 @@ fn layoutPending() void {
     const hdc: u8 = 0;
     const width: i32 = 100;
     var y: i32 = 0;
+    const old_echo_count = g_chat_echo_layout_count;
+    const old_echo_ids = g_chat_echo_layout_ids;
 ${source.slice(pendingStart, source.indexOf('\n}', pendingStart))}
 }
 `;

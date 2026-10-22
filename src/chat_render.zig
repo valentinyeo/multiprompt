@@ -1446,6 +1446,8 @@ pub fn chatRelayout(client_width: i32) void {
         y = rc.bottom;
     }
     app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    const old_echo_ids = app_state.g_chat_echo_layout_ids;
     app_state.g_chat_echo_layout_count = 0;
     if (app_state.active_shell < app_state.shell_count) {
         var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -1466,6 +1468,9 @@ pub fn chatRelayout(client_width: i32) void {
             }
         }
     }
+    if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
+        (old_echo_count != app_state.g_chat_echo_layout_count or
+            !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
     app_state.g_chat_content_h = y;
 }
 
@@ -2599,7 +2604,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     }
 }
 
-fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT) void {
+fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const actions = chat_echo.pendingActions(e.state);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) - (if (actions.send_again) uiScaled(26) else @as(i32, 0)) };
@@ -2607,7 +2612,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT) void {
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-    _ = chatFlowText(hdc, e.text, text_rc, false, true, null, 0, null, null);
+    _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
@@ -2910,19 +2915,58 @@ fn chatWordRangeAt(buf: []const u16, pos: usize) struct { start: usize, end: usi
     return .{ .start = start, .end = end };
 }
 
+fn chatSelectionDisplay(index: usize) ?struct { block: ChatBlock, text: []const u16, start: usize } {
+    if (index < app_state.g_chat_block_count) {
+        const block = app_state.g_chat_blocks[index];
+        const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+        const disp = chatBlockDisplayRange(buf, block);
+        return .{ .block = block, .text = buf[disp.start..][0..disp.len], .start = disp.start };
+    }
+    const echo = index - app_state.g_chat_block_count;
+    if (echo >= app_state.g_chat_echo_layout_count) return null;
+    var start = chat_hit.pending_selection_base;
+    for (0..echo + 1) |i| {
+        const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse return null;
+        const text = app_state.g_chat_outbox.items[ei].text;
+        if (i == echo) return .{ .block = .{ .start = start, .len = text.len, .role = .user }, .text = text, .start = start };
+        start += text.len + 1;
+    }
+    return null;
+}
+
+fn chatSelectionRect(index: usize) RECT {
+    if (index >= app_state.g_chat_block_count) return app_state.g_chat_echo_layout[index - app_state.g_chat_block_count];
+    var rc = app_state.g_chat_layout_rects[index];
+    rc.left += app_state.g_chat_content_left;
+    rc.right += app_state.g_chat_content_left;
+    return rc;
+}
+
 fn chatTranscriptSelectionBlockAt(y: i32) ?usize {
-    return chat_hit.nearestBlock(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_blocks[0..app_state.g_chat_block_count], y + app_state.g_chat_scroll_y);
+    var best: ?usize = null;
+    var distance: i64 = std.math.maxInt(i64);
+    const content_y = y + app_state.g_chat_scroll_y;
+    for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+        const display = chatSelectionDisplay(i) orelse continue;
+        if (display.block.role == .tool) continue;
+        const rc = chatSelectionRect(i);
+        const dy = @max(@as(i64, rc.top) - content_y, @max(0, @as(i64, content_y) - rc.bottom));
+        if (dy < distance) {
+            best = i;
+            distance = dy;
+        }
+    }
+    return best;
 }
 
 fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
     const index = chatTranscriptSelectionBlockAt(y) orelse return null;
-    const block = app_state.g_chat_blocks[index];
+    const display = chatSelectionDisplay(index) orelse return null;
+    const block = display.block;
     if (block.role == .tool) return null;
-    const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
-    const text = app_state.g_chat_capture[disp.start .. disp.start + disp.len];
-    var area = app_state.g_chat_layout_rects[index];
-    area.left += app_state.g_chat_content_left;
-    area.right += app_state.g_chat_content_left;
+    const disp = .{ .start = display.start, .len = display.text.len };
+    const text = display.text;
+    var area = chatSelectionRect(index);
     area.top -= app_state.g_chat_scroll_y;
     area.bottom -= app_state.g_chat_scroll_y;
     area.top += chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H));
@@ -2943,7 +2987,7 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
-    const block_rect = app_state.g_chat_layout_rects[index];
+    const block_rect = chatSelectionRect(index);
     const content_y = y + app_state.g_chat_scroll_y;
     if (content_y < block_rect.top) return disp.start;
     if (content_y >= block_rect.bottom) return disp.start + disp.len;
@@ -2956,12 +3000,15 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
 }
 
 pub fn chatSelectAll() void {
-    if (app_state.g_chat_last_len == 0 or app_state.g_chat_block_count == 0) return;
-    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-    const first = chatBlockDisplayRange(buf, app_state.g_chat_blocks[0]);
-    const last = chatBlockDisplayRange(buf, app_state.g_chat_blocks[app_state.g_chat_block_count - 1]);
-    app_state.g_chat_sel_anchor = first.start;
-    app_state.g_chat_sel_caret = last.start + last.len;
+    var first: ?usize = null;
+    var end: usize = 0;
+    for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+        const display = chatSelectionDisplay(i) orelse continue;
+        if (first == null) first = display.start;
+        end = display.start + display.text.len;
+    }
+    app_state.g_chat_sel_anchor = first orelse return;
+    app_state.g_chat_sel_caret = end;
     app_state.g_chat_sel_active = app_state.g_chat_sel_anchor != app_state.g_chat_sel_caret;
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
@@ -3062,11 +3109,11 @@ fn chatCopyBlockText(out: []u16, block: ChatBlock, lo: usize, hi: usize) error{ 
 
 fn chatSelectionToClipboard(out: []u16) !usize {
     const sel = chatSelRange() orelse return 0;
-    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     var pos: usize = 0;
     var first = true;
-    for (0..app_state.g_chat_block_count) |i| {
-        const disp = chatBlockDisplayRange(buf, app_state.g_chat_blocks[i]);
+    for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+        const display = chatSelectionDisplay(i) orelse continue;
+        const disp = .{ .start = display.start, .len = display.text.len };
         const lo = @max(sel.start, disp.start);
         const hi = @min(sel.end, disp.start + disp.len);
         if (hi <= lo) continue;
@@ -3078,7 +3125,7 @@ fn chatSelectionToClipboard(out: []u16) !usize {
             out[pos + 3] = '\n';
             pos += 4;
         }
-        pos += try chatCopyBlockText(out[pos..], app_state.g_chat_blocks[i], lo, hi);
+        pos += if (i < app_state.g_chat_block_count) try chatCopyBlockText(out[pos..], display.block, lo, hi) else try chatCopyPlainText(out[pos..], display.text[lo - disp.start .. hi - disp.start]);
         first = false;
     }
     return pos;
@@ -3091,9 +3138,18 @@ fn chatCopyCapacity(selected_len: usize, block_count: usize) !usize {
 }
 
 fn chatCopyTextAlloc(allocator: std.mem.Allocator, block: ?ChatBlock) ![]u16 {
-    const selected_len = if (block) |b| b.len else if (chatSelRange()) |sel| sel.end - sel.start else 0;
+    var selected_len: usize = if (block) |b| b.len else 0;
+    if (block == null) {
+        const sel = chatSelRange() orelse return allocator.alloc(u16, 0);
+        for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
+            const display = chatSelectionDisplay(i) orelse continue;
+            const lo = @max(sel.start, display.start);
+            const hi = @min(sel.end, display.start + display.text.len);
+            selected_len = try std.math.add(usize, selected_len, hi -| lo);
+        }
+    }
     if (selected_len == 0) return allocator.alloc(u16, 0);
-    const capacity = try chatCopyCapacity(selected_len, if (block != null) 1 else app_state.g_chat_block_count);
+    const capacity = try chatCopyCapacity(selected_len, if (block != null) 1 else app_state.g_chat_block_count + app_state.g_chat_echo_layout_count);
     const out = try allocator.alloc(u16, capacity);
     errdefer allocator.free(out);
     const n = if (block) |b| try chatCopyBlockText(out, b, b.start, b.start + b.len) else try chatSelectionToClipboard(out);
@@ -3135,6 +3191,109 @@ test "Chat View selection copies displayed ranges with CRLF and block joins" {
     const n = try chatSelectionToClipboard(&out);
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("hello\r\n\r\nworld");
     try std.testing.expectEqualSlices(u16, expected, out[0..n]);
+}
+
+test "IGSH-567 pending message text uses transcript selection and copy" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Pending message");
+    var pending: [text.len]u16 = text[0..text.len].*;
+    const old_outbox = app_state.g_chat_outbox;
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    const old_echo_ids = app_state.g_chat_echo_layout_ids;
+    const old_scroll = app_state.g_chat_scroll_y;
+    app_state.g_chat_outbox = .empty;
+    app_state.g_chat_echo_layout_count = 1;
+    app_state.g_chat_echo_layout_ids[0] = 567;
+    app_state.g_chat_echo_layout[0] = .{ .left = 0, .top = 100, .right = 400, .bottom = 200 };
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_scroll_y = 0;
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_outbox = old_outbox;
+        app_state.g_chat_echo_layout_count = old_echo_count;
+        app_state.g_chat_echo_layout_ids = old_echo_ids;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 567, .text = &pending, .state = .queued });
+    chatSelectAll();
+    try std.testing.expectEqual(chat_hit.pending_selection_base, app_state.g_chat_sel_anchor);
+    const stable_start = (chatSelectionDisplay(0) orelse return error.TestUnexpectedResult).start;
+    app_state.g_chat_last_len = 1;
+    try std.testing.expectEqual(stable_start, (chatSelectionDisplay(0) orelse return error.TestUnexpectedResult).start);
+    app_state.g_chat_last_len = 0;
+    const copied = try chatCopyTextAlloc(std.testing.allocator, null);
+    defer std.testing.allocator.free(copied);
+    try std.testing.expectEqualSlices(u16, text, copied);
+    app_state.g_chat_sel_anchor = chatTranscriptCharAt(null, 20, 0) orelse return error.TestUnexpectedResult;
+    app_state.g_chat_sel_caret = chatTranscriptCharAt(null, 20, 300) orelse return error.TestUnexpectedResult;
+    app_state.g_chat_sel_active = true;
+    var out: [256]u16 = undefined;
+    const n = try chatSelectionToClipboard(&out);
+    try std.testing.expectEqualSlices(u16, text, out[0..n]);
+}
+
+test "IGSH-567 mixed sent and pending ranges copy across bubbles in both directions" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const sent = w("Sent");
+    const text = w("\u{276f} Pending\n\u{1f600}");
+    var pending: [text.len]u16 = text[0..text.len].*;
+    const old_outbox = app_state.g_chat_outbox;
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    const old_echo_ids = app_state.g_chat_echo_layout_ids;
+    const old_echo_rects = app_state.g_chat_echo_layout;
+    const old_left = app_state.g_chat_content_left;
+    const old_scroll = app_state.g_chat_scroll_y;
+    app_state.g_chat_outbox = .empty;
+    app_state.g_chat_echo_layout_count = 1;
+    app_state.g_chat_echo_layout_ids[0] = 567;
+    app_state.g_chat_echo_layout[0] = .{ .left = 80, .top = 200, .right = 480, .bottom = 400 };
+    @memcpy(app_state.g_chat_capture[0..sent.len], sent);
+    app_state.g_chat_last_len = sent.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = sent.len, .role = .user };
+    app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 0, .right = 400, .bottom = 100 };
+    app_state.g_chat_content_left = 80;
+    app_state.g_chat_scroll_y = 50;
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_outbox = old_outbox;
+        app_state.g_chat_echo_layout_count = old_echo_count;
+        app_state.g_chat_echo_layout_ids = old_echo_ids;
+        app_state.g_chat_echo_layout = old_echo_rects;
+        app_state.g_chat_content_left = old_left;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        chatSelectionClear();
+    }
+    try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 567, .text = &pending });
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    var out: [256]u16 = undefined;
+    for ([_]app_state.ChatEchoState{ .queued, .sending, .delivered, .not_sent }) |state| {
+        app_state.g_chat_outbox.items[0].state = state;
+        try std.testing.expectEqual(@as(?usize, 1), chatTranscriptSelectionBlockAt(160));
+        const caret = chatTranscriptCharAt(null, 81 + uiScaled(CHAT_BUBBLE_PAD), 151 + uiScaled(CHAT_BUBBLE_PAD)) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(chat_hit.pending_selection_base, caret);
+        chatSelectAll();
+        const copied = try chatCopyTextAlloc(std.testing.allocator, null);
+        defer std.testing.allocator.free(copied);
+        try std.testing.expectEqualSlices(u16, w("Sent\r\n\r\n\u{276f} Pending\r\n\u{1f600}"), copied);
+        var n = try chatSelectionToClipboard(&out);
+        try std.testing.expectEqualSlices(u16, copied, out[0..n]);
+        const end = chatTranscriptCharAt(null, 90, 500) orelse return error.TestUnexpectedResult;
+        app_state.g_chat_sel_anchor = end;
+        app_state.g_chat_sel_caret = 2;
+        n = try chatSelectionToClipboard(&out);
+        try std.testing.expectEqualSlices(u16, w("nt\r\n\r\n\u{276f} Pending\r\n\u{1f600}"), out[0..n]);
+        app_state.g_chat_sel_anchor = caret + 2;
+        app_state.g_chat_sel_caret = caret + 9;
+        n = try chatSelectionToClipboard(&out);
+        try std.testing.expectEqualSlices(u16, w("Pending"), out[0..n]);
+    }
 }
 
 test "Chat View word and block selection use display ranges" {
@@ -3266,18 +3425,20 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
     };
     if (app_state.g_chat_sel_click_count >= 3) {
         if (chatTranscriptSelectionBlockAt(y)) |idx| {
-            const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], app_state.g_chat_blocks[idx]);
-            app_state.g_chat_sel_anchor = disp.start;
-            app_state.g_chat_sel_caret = disp.start + disp.len;
+            const display = chatSelectionDisplay(idx) orelse return;
+            app_state.g_chat_sel_anchor = display.start;
+            app_state.g_chat_sel_caret = display.start + display.text.len;
             app_state.g_chat_sel_active = app_state.g_chat_sel_caret > app_state.g_chat_sel_anchor;
         }
         app_state.g_chat_sel_dragging = false;
         _ = ReleaseCapture();
         _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
     } else if (app_state.g_chat_sel_click_count == 2) {
-        const word = chatWordRangeAt(app_state.g_chat_capture[0..app_state.g_chat_last_len], char);
-        app_state.g_chat_sel_anchor = word.start;
-        app_state.g_chat_sel_caret = word.end;
+        const idx = chatTranscriptSelectionBlockAt(y) orelse return;
+        const display = chatSelectionDisplay(idx) orelse return;
+        const word = chatWordRangeAt(display.text, char - display.start);
+        app_state.g_chat_sel_anchor = display.start + word.start;
+        app_state.g_chat_sel_caret = display.start + word.end;
         app_state.g_chat_sel_active = word.end > word.start;
     } else {
         app_state.g_chat_sel_anchor = char;
@@ -3542,7 +3703,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     if (rc.bottom < 0 or rc.top > h) continue;
                     if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
                     const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
-                    chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc);
+                    const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
+                    chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
                 }
                 if (app_state.g_chat_block_count == 0) {
                     _ = SetBkMode(mem_dc, TRANSPARENT);

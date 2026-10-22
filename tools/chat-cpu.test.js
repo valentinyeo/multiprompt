@@ -151,6 +151,9 @@ var g_chat_font_pt: i32 = 13;
 var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_content_h: i32 = 0;
 var g_chat_echo_layout_count: usize = 0;
+var g_chat_sel_anchor: usize = 0;
+var g_chat_sel_caret: usize = 0;
+fn chatSelectionClear() void { g_chat_sel_anchor = 0; g_chat_sel_caret = 0; }
 var g_chat_content_left: i32 = 0;
 var g_chat_img_pass: u64 = 0;
 var g_chat_img_first_block: usize = 0;
@@ -164,7 +167,7 @@ var shell_count: u32 = 1;
 const CHAT_OUTBOX_KEY_CAP = 8;
 var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64, state: chat_echo.OutboxState } = &.{} }{};
 var g_chat_echo_layout: [20]RECT = undefined;
-var g_chat_echo_layout_ids: [20]u64 = undefined;
+var g_chat_echo_layout_ids: [20]u64 = @splat(0);
 var measured: usize = 0;
 fn uiScaled(n: i32) i32 { return @divTrunc(n * fake_ui_scale, 100); }
 fn GetDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
