@@ -19,8 +19,8 @@ function audit(desktop, client) {
   assert.match(discovery, /host\.user = try a\.dupe\(u8, host\.user\);/);
   assert.match(discovery, /for \(incoming_keys, owned_keys\) \|key, \*owned\| owned\.\* = try a\.dupe\(u8, key\);/);
   assert.match(discovery, /host\.host_keys = owned_keys;/);
-  assert.match(request, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) hosts else server\.value\.hosts\) else null;/);
-  assert.match(request, /remote\.hosts_supported and hosts_ready and account_hosts\.needsPublish\(hosts, server.value.hosts orelse &\.\{\}\)/);
+  assert.match(request, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) synced_hosts else server\.value\.hosts\) else null;/);
+  assert.match(request, /remote\.hosts_supported and hosts_ready and account_hosts\.needsPublish\(synced_hosts, server.value.hosts orelse &\.\{\}\)/);
   assert.match(discovery, /app_state\.SSH_TARGET_DE, app_state\.SSH_TARGET_UK, app_state\.SSH_TARGET_INNE/);
   assert.match(discovery, /appendSshExe\(/);
   assert.match(discovery, /-G \{s\}/);
@@ -46,7 +46,7 @@ test('hosts sync discovery is worker-serialized, cached with owned data, bounded
   const desktop = read('src/account_desktop.zig'), client = read('src/account_client.zig');
   audit(desktop, client);
   for (const [before, after] of [
-    ['rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) hosts else server.value.hosts) else null;', 'rebased.hosts = hosts;'],
+    ['rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) synced_hosts else server.value.hosts) else null;', 'rebased.hosts = hosts;'],
     ['remote.hosts_supported and account_hosts.shouldRefresh', 'account_hosts.shouldRefresh'],
     ['remote.hosts_supported and hosts_ready and account_hosts.needsPublish', 'account_hosts.needsPublish'],
     ['const hosts = g_account_hosts_cache.hosts;', ''],
@@ -72,7 +72,7 @@ test('hosts support is fail-closed and rechecked from the latest reply after con
   audit(desktop, client);
   const request = desktop.slice(desktop.indexOf('fn accountRequest('), desktop.indexOf('fn layoutSyncWorker('));
   const loop = request.slice(request.indexOf('while (attempts < 3)'));
-  assert.match(loop, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) hosts else server\.value\.hosts\) else null;/);
+  assert.match(loop, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) synced_hosts else server\.value\.hosts\) else null;/);
   assert.match(loop, /\.emit_null_optional_fields = false/);
   assert.match(loop, /remote = put;/);
   assert.ok(loop.indexOf('rebased.hosts =') < loop.indexOf('account_client.request("PUT"'));
@@ -85,4 +85,28 @@ test('hosts support is fail-closed and rechecked from the latest reply after con
     assert.throws(() => audit(desktop, client.replace(before, after)));
   }
   assert.throws(() => audit(desktop.replaceAll('remote.hosts_supported', 'initial_hosts_supported'), client));
+});
+
+
+test('ISSUE-252 production two-laptop host sync regressions and master negative control', () => {
+  const { spawnSync } = require('node:child_process');
+  const { prepare } = require('./account-hosts-fixture');
+  const desktop = read('src/account_desktop.zig');
+  const fixture = prepare(desktop);
+  try {
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', fixture.file, '--test-filter', 'ISSUE-252'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All \d+ tests passed/);
+  } finally { fixture.cleanup(); }
+  const master = spawnSync('git', ['show', '935601223eedc310039eb9d2508eb4141a7adb96:src/account_desktop.zig'], { encoding: 'utf8' });
+  assert.equal(master.status, 0, master.stderr);
+  const negative = prepare(master.stdout);
+  try {
+    const hosts = spawnSync('git', ['show', '935601223eedc310039eb9d2508eb4141a7adb96:src/account_hosts.zig'], { encoding: 'utf8' });
+    assert.equal(hosts.status, 0, hosts.stderr);
+    fs.writeFileSync(require('node:path').join(negative.dir, 'account_hosts.zig'), hosts.stdout);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', negative.file, '--test-filter', 'ISSUE-252 remote hostname'], { encoding: 'utf8', timeout: 120000 });
+    assert.notEqual(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /ISSUE-252 remote hostname port and user changes reach laptop B[^]*FAIL/);
+  } finally { negative.cleanup(); }
 });
