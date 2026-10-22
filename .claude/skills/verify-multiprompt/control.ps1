@@ -348,7 +348,13 @@ function Prepare-ScratchEvidence([string]$Path) {
             Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
         } elseif ($entry -is [IO.FileInfo] -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
             [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-            $entry.Delete()
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while ($true) {
+                try { $entry.Delete(); break } catch {
+                    if ([DateTime]::UtcNow -ge $deadline) { throw }
+                    Start-Sleep -Milliseconds 200
+                }
+            }
         } else {
             $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
             if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
@@ -675,12 +681,14 @@ function Register-WorkspaceBridge([string]$Root) {
 }
 
 function Enable-WorkspaceExtension([string]$Root, [int]$Index) {
-    Palette 'open url in browser'
-    Press @(0x0D) 'Enter: browser URL input for extension setup'
-    Type-Text 'edge://extensions/'
-    Press @(0x0D) 'Enter: open the actual Edge Extensions page'
     Focus-WorkspaceBrowser $Root
-    Press-WorkspaceBrowser @(0x11, 0x39) 'Ctrl+9: select the Edge Extensions page'
+    Press-WorkspaceBrowser @(0x12, 0x44) 'Alt+D: focus the actual Edge address bar'
+    Doctor
+    $foreground = [VerifyNative]::GetForegroundWindow()
+    if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:bookmarkWindow -or [VerifyNative]::GetAncestor($foreground, 3) -ne $script:window) { throw 'Refusing URL input: exact owned profile browser is not foreground' }
+    Record 'Type edge://extensions/ in the real Edge address bar'
+    [VerifyNative]::Text('edge://extensions/')
+    Press-WorkspaceBrowser @(0x0D) 'Enter: open the actual Edge Extensions page'
     Wait-Until {
         $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
         $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
