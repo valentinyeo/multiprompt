@@ -73,14 +73,14 @@ var g_amoled_theme = false;
 var g_edge_gray_theme = false;
 var g_mid_theme = false;
 var g_sidebar_scroll: i32 = 0;
-var browser_focused = false;
+var test_browser_focused = false;
 var ring_rect: RECT = .{};
 var splitter_paint: RECT = .{};
 fn reconnectTabVisible(_: u32) bool { return true; }
 fn foregroundIsOurs() bool { return true; }
 fn chatViewOwnsInput() bool { return g_chat_active; }
 fn browserPaneActive() bool { return reserved; }
-fn activeBrowserHasForegroundFocus() bool { return browser_focused; }
+fn activeBrowserHasForegroundFocus() bool { return test_browser_focused; }
 fn paletteAnchoredBesideBrowser() bool { return false; }
 fn RGB(r: u32, g: u32, b: u32) u32 { return r | (g << 8) | (b << 16); }
 fn customColorOr(_: []const u8, color: u32) u32 { return color; }
@@ -250,7 +250,7 @@ test "IGSH-549 console HWND and browser layout stay inside the primary ring" {
                 for ([_]bool{false, true}) |title| {
                     g_thread_title = title;
                     for ([_]bool{false, true}) |focused| {
-                        browser_focused = focused;
+                        test_browser_focused = focused;
                         const primary = activePaneRects(test_client).primary;
                         const edge = paneFocusRingPad() + paneFocusBorderW();
                         const inner = RECT{ .left = primary.left + edge, .top = primary.top + edge, .right = primary.right - edge, .bottom = primary.bottom - edge };
@@ -280,7 +280,7 @@ test "IGSH-549 console HWND and browser layout stay inside the primary ring" {
     }
     g_thread_title = true;
     shells[0].full_width = false;
-    browser_focused = false;
+    test_browser_focused = false;
     reserved = false;
 }
 test "IGSH-549 splitter paint is a bounded grip in the gap, never touching a ring" {
@@ -292,7 +292,7 @@ test "IGSH-549 splitter paint is a bounded grip in the gap, never touching a rin
         try expectInside(splitter_paint, panes.splitter);
         try std.testing.expect(splitter_paint.bottom - splitter_paint.top <= uiScaled(32));
         for ([_]bool{false, true}) |focused| {
-            browser_focused = focused;
+            test_browser_focused = focused;
             paintActivePaneBorder(null);
             const border = paneFocusBorderW();
             const outer = RECT{ .left = ring_rect.left - border, .top = ring_rect.top - border, .right = ring_rect.right + border, .bottom = ring_rect.bottom + border };
@@ -300,7 +300,7 @@ test "IGSH-549 splitter paint is a bounded grip in the gap, never touching a rin
         }
     }
     reserved = false;
-    browser_focused = false;
+    test_browser_focused = false;
 }
 test "IGSH-549 sidebar group rail has its own column before every row icon" {
     for ([_]u32{100, 125, 150}) |scale| {

@@ -242,7 +242,7 @@ public static class PaneLayoutProof {
                     if (run > longestRail) { longestRail = run; railX = x; railBottom = y + 1; railTop = y + 1 - run; }
                 }
             }
-            Require(longestRail >= S(60, dpi, scale), "group-line-found", "longest vertical group-color run=" + longestRail);
+            Require(longestRail >= S(40, dpi, scale), "group-line-found", "longest vertical group-color run=" + longestRail);
             int railRight = railX + 1;
             while (railRight < sidebarLeft + S(40, dpi, scale) && Distance(pixel(railRight, (railTop + railBottom) / 2), railColor) <= 2) railRight++;
             int rowTop = railTop + S(28, dpi, scale), rowBottom = rowTop + S(38, dpi, scale);

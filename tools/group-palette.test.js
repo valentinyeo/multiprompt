@@ -305,8 +305,8 @@ test "rails span header and all members exactly once, excluding ungrouped rows" 
     };
     paintRails(&rows);
     try std.testing.expectEqual(@as(usize, 2), rail_count);
-    try std.testing.expectEqual(RECT{ .left = 8, .right = 11, .top = 3, .bottom = 103 }, rail_rects[0]);
-    try std.testing.expectEqual(RECT{ .left = 8, .right = 11, .top = 141, .bottom = 165 }, rail_rects[1]);
+    try std.testing.expectEqual(RECT{ .left = 12, .right = 15, .top = 3, .bottom = 103 }, rail_rects[0]);
+    try std.testing.expectEqual(RECT{ .left = 12, .right = 15, .top = 141, .bottom = 165 }, rail_rects[1]);
     g_sidebar_collapsed = true;
     paintRails(&rows);
     try std.testing.expectEqual(@as(usize, 2), rail_count);

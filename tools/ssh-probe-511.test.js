@@ -266,8 +266,8 @@ test('ISSUE-511 active respawn sizes its console before show without touching an
   assert.match(reconnectComplete, /sshRequestSessionProbe\(\)/);
   const position = body('positionReconnectedConsole', console);
   assert.match(position, /if \(!@import\("drawing.zig"\)\.reconnectTabVisible\(idx\)\) return false/);
-  assert.match(position, /rc\.left = SIDEBAR_W\(\)/);
-  assert.match(position, /pane\.calcBrowserLayout\(\)/);
+  assert.match(position, /rc = @import\("window_layout\.zig"\)\.activePaneContentRect\(rc\)/);
+  assert.match(position, /rc\.top \+= pane\.threadTitleHeight\(\)/);
   assert.match(position, /pane\.centeredConsoleColumn\(/);
   assert.match(position, /SetWindowPos\(shell\.hwnd,[^\n]*SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW/);
   assert.equal((position.match(/SetWindowPos\(/g) || []).length, 1);
