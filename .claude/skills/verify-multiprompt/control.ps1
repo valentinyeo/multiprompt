@@ -1414,7 +1414,7 @@ try {
             Wait-Until { $state = Read-Session; $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[1].group_id -eq $state.groups[0].id } 'second session in new saved group'
             Press @(0x1B) 'Esc: finish default group name'
             $group = (Read-Session).groups[0]
-            Press @(0x11, 0x32) 'Ctrl+2: select the ungrouped original session'
+            Press @(0x11, 0x31) 'Ctrl+1: select the original session in manual order'
             Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
             Focus-Palette 'move to group' 6301
             Press @(0x0D) 'Enter: Move to Group submenu'
