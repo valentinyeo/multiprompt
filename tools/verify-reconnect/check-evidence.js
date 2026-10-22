@@ -22,6 +22,7 @@ function load(mode) {
   assert.ok([doctor.main, doctor.input_surface].includes(doctor.focus[0]));
   assert.ok(doctor.focus[1] === doctor.input_surface || doctor.focus[0] === doctor.input_surface);
   assert.equal(doctor.two_transports, true);
+  assert.deepEqual(doctor.transport_paths, [doctor.selected_ssh, doctor.selected_ssh]);
   assert.ok(json('layout-control.json').layout_positive_control > 0);
   const cleanup = json('cleanup.json');
   assert.equal(cleanup.remaining_owned_processes, 0);

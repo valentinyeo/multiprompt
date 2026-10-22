@@ -85,10 +85,9 @@ try {
     Copy-Item "$settings/session.json" "$Output/seed-session.json"
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void](Wait-For 'two live transports and connected debug lines' {
+    [void](Wait-For 'two owned transports and attach commands' {
         $text = Read-Log
         if ((Transport 'verify-one') -and (Transport 'verify-two') -and
-            $text.Contains("ssh: selected working executable: $Ssh") -and
             ($text -match "session='verify-one'") -and ($text -match "session='verify-two'")) { $true }
     })
     [void][ReconnectDesktop]::SetForegroundWindow($main)
@@ -111,7 +110,7 @@ try {
     $before = [ReconnectDesktop]::Focus($main)
     if ($before[0] -ne $main.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: app or embedded console must be foreground' }
     if ($before[1] -ne $inputSurface.ToInt64() -and $before[0] -ne $inputSurface.ToInt64()) { throw 'Doctor: native console must own typing focus' }
-    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
+    @{pid=$app.Id; exe=$Exe; main=$main.ToInt64(); input_surface=$inputSurface.ToInt64(); focus=$before; selected_ssh=$Ssh; transport_paths=@((Transport 'verify-one').Path, (Transport 'verify-two').Path); two_transports=$true} | ConvertTo-Json -Depth 5 | Set-Content "$Output/doctor.json"
     $positiveControl = @([regex]::Matches((Read-Log), '\[reposition\]')).Count
     if ($positiveControl -lt 1) { throw 'Doctor: console layout positive control missing' }
     if ([ReconnectDesktop]::Owner($inputSurface) -ne (Transport 'verify-one').Id) { throw 'Doctor: active console is not tab one' }
