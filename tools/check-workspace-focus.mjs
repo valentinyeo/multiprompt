@@ -23,11 +23,13 @@ function nativePaletteFocusContract(source) {
   assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length\s+Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'/);
   assert.match(palette, /\$trace = \(Get-Content \$log -Raw\).Substring\(\$start\)/);
   assert.ok(palette.includes("$trace -match '\\[palette\\] ready chars=0 count=\\d+ target=\\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window"), 'initialized palette, foreground frame and exact native focus are all required');
-  assert.match(palette, /\} 'command palette initialized and owned frame focused'\s+Type-Text \$Query\s+Wait-Until \{/);
+  assert.match(palette, /\} 'command palette initialized and owned frame focused' 20\s+Type-Text \$Query\s+Wait-Until \{/);
   assert.ok(palette.includes("' count=[1-9]\\d* target=' + $Target + '(?:\\r?\\n|$)'"), 'query must still select the exact command');
   assert.match(palette, /\$Query.Length/);
   assert.equal((palette.match(/Wait-Until \{/g) || []).length, 2);
-  assert.doesNotMatch(palette, /FocusedElement|SetFocus|SetForegroundWindow|ClickClient/);
+  const activation = '        [void][VerifyNative]::SetForegroundWindow($script:window)\n';
+  assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
+  assert.doesNotMatch(palette.replace(activation, ''), /FocusedElement|SetFocus|SetForegroundWindow|ClickClient/);
   const surface = source.slice(source.indexOf('function Wait-WorkspaceSurface('), source.indexOf('function Wait-ConsoleText('));
   assert.match(surface, /\$focused.Current.NativeWindowHandle -eq \$Composer/);
   assert.match(surface, /\$element.Current.ProcessId -eq \$process.Id -and -not \$element.Current.IsOffscreen/);

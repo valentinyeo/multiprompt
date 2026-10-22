@@ -141,7 +141,7 @@ function scratchCleanupContract(source) {
   for (const step of [
     '$stopped = $job.Stop()', "'process-tree.json'", 'Prepare-ScratchEvidence $scratch',
     "Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break",
-    'Remove-Item $scratch -Recurse -Force', '$result.scratchRemoved = -not (Test-Path $scratch)',
+    'Remove-ScratchPath $scratch', '$result.scratchRemoved = -not (Test-Path $scratch)',
     "if (-not $result.scratchRemoved) { throw 'Scratch directory still exists' }",
     "foreach ($name in @('before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json'))",
     'throw "Evidence lost during cleanup: $name"',
