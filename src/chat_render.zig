@@ -2645,12 +2645,10 @@ fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
         .not_sent => .not_sent,
     };
     const link_down = app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].disconnected or app_state.shells[app_state.active_shell].pid == 0;
-    const label: [*:0]const u16 = switch (chat_echo.pendingLabel(phase, link_down, e.transcript_queued)) {
+    const label: [*:0]const u16 = switch (chat_echo.pendingLabel(phase, link_down)) {
         .sending => L("\u{25F7} Sending\u{2026}"),
-        .queued_in_claude => L("\u{25F7} Queued, session is busy"),
-        .waiting_transcript => L("\u{25F7} Waiting for transcript"),
+        .queued_in_claude => L("\u{25F7} Queued in Claude"),
         .waiting_connection => L("\u{25F7} Waiting for connection"),
-        .waiting_to_send => L("\u{25F7} Waiting to send"),
         .not_sent => if (e.write_started) L("Delivery unconfirmed") else L("Not sent"),
     };
     var rc = area;

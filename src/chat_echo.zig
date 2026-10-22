@@ -427,13 +427,13 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
 }
 
 pub const Phase = enum { offline_queue, sending, delivered, not_sent };
-pub const Label = enum { sending, waiting_connection, waiting_to_send, queued_in_claude, waiting_transcript, not_sent };
+pub const Label = enum { sending, waiting_connection, queued_in_claude, not_sent };
 
-pub fn pendingLabel(phase: Phase, link_down: bool, transcript_queued: bool) Label {
+pub fn pendingLabel(phase: Phase, link_down: bool) Label {
     return switch (phase) {
         .sending => .sending,
-        .offline_queue => if (link_down) .waiting_connection else .waiting_to_send,
-        .delivered => if (transcript_queued) .queued_in_claude else .waiting_transcript,
+        .offline_queue => if (link_down) .waiting_connection else .sending,
+        .delivered => .queued_in_claude,
         .not_sent => .not_sent,
     };
 }
@@ -522,14 +522,19 @@ test "empty prefix and empty block never match" {
     try std.testing.expect(!blockMatches(&block, &empty));
 }
 
+test "IGSH-564 connected labels mirror Claude buffer without transcript evidence" {
+    try std.testing.expectEqual(Label.queued_in_claude, pendingLabel(.delivered, false));
+    try std.testing.expectEqual(Label.sending, pendingLabel(.offline_queue, false));
+    try std.testing.expectEqual(Label.waiting_connection, pendingLabel(.offline_queue, true));
+}
+
 test "pending label is truthful" {
-    try std.testing.expectEqual(Label.waiting_connection, pendingLabel(.offline_queue, true, false));
-    try std.testing.expectEqual(Label.waiting_to_send, pendingLabel(.offline_queue, false, false));
-    try std.testing.expectEqual(Label.queued_in_claude, pendingLabel(.delivered, false, true));
-    try std.testing.expectEqual(Label.waiting_transcript, pendingLabel(.delivered, true, false));
-    try std.testing.expectEqual(Label.queued_in_claude, pendingLabel(.delivered, true, true));
-    try std.testing.expectEqual(Label.sending, pendingLabel(.sending, false, false));
-    try std.testing.expectEqual(Label.not_sent, pendingLabel(.not_sent, false, false));
+    try std.testing.expectEqual(Label.waiting_connection, pendingLabel(.offline_queue, true));
+    try std.testing.expectEqual(Label.sending, pendingLabel(.offline_queue, false));
+    try std.testing.expectEqual(Label.queued_in_claude, pendingLabel(.delivered, false));
+    try std.testing.expectEqual(Label.queued_in_claude, pendingLabel(.delivered, true));
+    try std.testing.expectEqual(Label.sending, pendingLabel(.sending, false));
+    try std.testing.expectEqual(Label.not_sent, pendingLabel(.not_sent, false));
 }
 
 test "stampMs reads transcript times in any zone" {

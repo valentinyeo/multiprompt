@@ -562,10 +562,10 @@ fn chatOutboxAutoSendable(state: ChatEchoState) bool {
     return state == .queued;
 }
 
-fn chatOutboxFirstSendableIndexIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) ?usize {
+fn chatOutboxFirstSendableIndexIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8, claude_buffer: bool) ?usize {
     for (list.items, 0..) |e, i| {
         if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
-        if (e.state == .sending or e.state == .delivered) return null;
+        if (e.state == .sending or (e.state == .delivered and !claude_buffer)) return null;
         if (chat_echo.mayType(e.state, e.write_started, false, false)) return i;
     }
     return null;
@@ -742,9 +742,7 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         entry.expires_ms = if (saved_deadline > 0) @intCast(saved_deadline) else (if (saved_ms > 0) saved_ms else now_ms) +| 600_000;
                         const remaining_ms = std.math.clamp(entry.expires_ms -| now_ms, 0, 600_000);
                         entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - (600_000 - remaining_ms);
-                        if (chat_echo.pendingExpired(entry.state, entry.sent_tick_ms, @intCast(GetTickCount64())) or
-                            (entry.state == .delivered and entry.anchor.sent_ms == 0))
-                        {
+                        if (entry.state == .delivered and entry.anchor.sent_ms == 0) {
                             entry.state = .not_sent;
                             entry.retryable = true;
                         }
@@ -1276,7 +1274,11 @@ pub fn chatEchoPushQueuedNow() void {
         showHeaderNoticeAscii("No message is queued in Claude for this tab", 3000, false);
         return;
     }
-    if (!chatShouldUseDirectInput(app_state.active_shell) or !sendClaudeSendQueuedNowToShell(app_state.active_shell)) {
+    const sent = if (chatTmuxSendEligible(app_state.active_shell))
+        chatAgentKey(app_state.active_shell, 0x18)
+    else
+        chatShouldUseDirectInput(app_state.active_shell) and sendClaudeSendQueuedNowToShell(app_state.active_shell);
+    if (!sent) {
         showHeaderNoticeAscii("Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal", 4000, true);
         return;
     }
@@ -1511,9 +1513,10 @@ fn chatSendViaConsole(shell_index: u32, send_text: []const u16, echo_id: u64) Sh
 }
 
 fn chatOutboxReadyToType(channel: bool, direct: bool, busy: bool, screen_working_here: bool, input_row_idle: bool, is_active_shell: bool) bool {
-    if (!channel and busy) return false;
-    if (!channel and screen_working_here) return false;
-    if ((channel or direct) and !input_row_idle) return false;
+    if (channel) return true;
+    if (!direct and busy) return false;
+    if (!direct and screen_working_here) return false;
+    if (direct and !input_row_idle) return false;
     if (!channel and !direct and !is_active_shell) return false;
     return true;
 }
@@ -1521,9 +1524,12 @@ fn chatOutboxReadyToType(channel: bool, direct: bool, busy: bool, screen_working
 fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
-    if (chatOutboxFindSending(&app_state.g_chat_outbox) != null) return false;
+    if (chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_tmux_send_job != null) return false;
+    if (chatLinkLooksDown(shell_index)) return false;
+    const channel = chatTmuxSendEligible(shell_index);
+    const direct = chatShouldUseDirectInput(shell_index);
     const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
-    const first = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key) orelse return false;
+    const first = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key, channel or direct) orelse return false;
     if (first != e) return false;
     if (app_state.g_chat_outbox.items[e].retryable and chatEchoTryMatchEntry(e)) return true;
     if (app_state.g_chat_outbox.items[e].retryable and chatEchoDeliveryEvidence(app_state.g_chat_outbox.items[e]).enqueued) {
@@ -1534,11 +1540,9 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
         chatOutboxChanged();
         return true;
     }
-    const channel = chatTmuxSendEligible(shell_index);
     const busy = app_state.shells[shell_index].activity == .active;
     const screen_working_here = shell_index == app_state.active_shell and app_state.g_chat_screen_working;
-    const direct = chatShouldUseDirectInput(shell_index);
-    const input_row_idle = if (channel or (direct and !busy and !screen_working_here)) chatOutboxInputRowIdle(shell_index) else false;
+    const input_row_idle = if (!channel and direct) chatOutboxInputRowIdle(shell_index) else false;
     if (!chatOutboxReadyToType(channel, direct, busy, screen_working_here, input_row_idle, shell_index == app_state.active_shell)) return false;
     const echo_id = app_state.g_chat_outbox.items[e].id;
     switch (sendTextToShellVerifiedAt(shell_index, app_state.g_chat_outbox.items[e].text, echo_id)) {
@@ -1569,14 +1573,14 @@ pub fn chatOutboxTick() void {
             entry.left_box_ms = GetTickCount64();
             changed = true;
         }
-        if (chat_echo.pendingExpired(entry.state, entry.sent_tick_ms, now_ms)) {
+        if (entry.state != .delivered and entry.state != .sending) continue;
+        if (chat_echo.expiredSent(.delivered, entry.sent_tick_ms, now_ms) and !entry.channel_pending and !entry.transcript_queued) {
             entry.state = .not_sent;
             entry.retryable = true;
             entry.transcript_queued = false;
             changed = true;
             continue;
         }
-        if (entry.state != .delivered and entry.state != .sending) continue;
         const idx = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
         const busy = app_state.shells[idx].activity == .active or (idx == app_state.active_shell and app_state.g_chat_screen_working);
         entry.delivery_watch.observe(busy, now_ms);
@@ -1613,7 +1617,8 @@ pub fn chatOutboxFlushActiveNow() void {
     }
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
-    const e = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key) orelse {
+    const claude_buffer = !chatLinkLooksDown(app_state.active_shell) and (chatTmuxSendEligible(app_state.active_shell) or chatShouldUseDirectInput(app_state.active_shell));
+    const e = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key, claude_buffer) orelse {
         showHeaderNoticeAscii("No queued messages for this tab", 3000, false);
         return;
     };
@@ -2151,16 +2156,16 @@ test "Chat View outbox flush skips unconfirmed entries and keeps FIFO order" {
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", one, .delivered));
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", two, .not_sent));
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:zigshell-2", three, .queued));
-    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2"));
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2", false));
     list.items[0].transcript_queued = true;
-    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2"));
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2", false));
     list.items[0].state = .not_sent;
-    try std.testing.expectEqual(@as(?usize, 2), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2"));
+    try std.testing.expectEqual(@as(?usize, 2), chatOutboxFirstSendableIndexIn(&list, "tmux:1:zigshell-2", false));
     try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstIndexIn(&list, "tmux:1:zigshell-2"));
     const four = std.unicode.utf8ToUtf16LeStringLiteral("fourth");
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:3:delta", four, .delivered));
-    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:3:delta") == null);
-    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:9:absent") == null);
+    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:3:delta", false) == null);
+    try std.testing.expect(chatOutboxFirstSendableIndexIn(&list, "tmux:9:absent", false) == null);
 }
 
 test "Chat View echo confirmation survives CRLF, wrapping and a slash command" {
@@ -2507,20 +2512,22 @@ fn chatAgentKey(shell_index: u32, digit: u8) bool {
 
 fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) void {
     const a = std.heap.page_allocator;
-    const query = std.json.Stringify.valueAlloc(a, .{ .op = if (digit == 0x1B) @as([]const u8, "stop") else "permission", .digit = digit, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch {
-        if (digit != 0x1B) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
+    const op: []const u8 = if (digit == 0x1B) "stop" else if (digit == 0x18) "send_queued" else "permission";
+    const permission = digit != 0x1B and digit != 0x18;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = op, .digit = digit, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch {
+        if (permission) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         return;
     };
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, if (digit == 0x1B) "\tstop\tok\t" else "\tpermission\tok\t") == null) {
-        if (digit != 0x1B) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
-        debugLog(if (digit == 0x1B) "[chat] stop failed via=tmux" else "[chat] permission failed via=tmux");
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, if (digit == 0x1B) "\tstop\tok\t" else if (digit == 0x18) "\tsend_queued\tok\t" else "\tpermission\tok\t") == null) {
+        if (permission) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
+        debugLog(if (digit == 0x1B) "[chat] stop failed via=tmux" else if (digit == 0x18) "[chat] send queued failed via=tmux" else "[chat] permission failed via=tmux");
         return;
     }
     var log: [96]u8 = undefined;
-    debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ if (digit == 0x1B) @as([]const u8, "stop") else "permission", key.shell_id }) catch "");
+    debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ op, key.shell_id }) catch "");
 }
 
 test "IGSH-442 removed outbox entry is absent after JSON save and reload" {
@@ -2565,16 +2572,17 @@ test "ISSUE-460 session queued evidence cannot release the next outbox entry" {
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered));
     try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("second request")));
     list.items[0].transcript_queued = true;
-    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key));
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, false));
     chatOutboxRemoveAtIn(&list, allocator, 0);
-    try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, key));
+    try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, key, false));
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second request"), list.items[0].text);
 }
 
 test "IGSH-564 busy tmux session still gets the queued message typed" {
     try std.testing.expect(chatOutboxReadyToType(true, false, true, true, true, true));
-    try std.testing.expect(!chatOutboxReadyToType(true, false, true, true, false, true));
-    try std.testing.expect(!chatOutboxReadyToType(false, true, true, false, true, true));
+    try std.testing.expect(chatOutboxReadyToType(true, false, true, true, false, true));
+    try std.testing.expect(chatOutboxReadyToType(false, true, true, false, true, true));
+    try std.testing.expect(chatOutboxReadyToType(false, true, true, true, true, true));
     try std.testing.expect(!chatOutboxReadyToType(false, false, true, false, true, true));
     try std.testing.expect(!chatOutboxReadyToType(false, true, false, false, false, true));
     try std.testing.expect(chatOutboxReadyToType(false, true, false, false, true, true));
@@ -2588,5 +2596,10 @@ test "IGSH-564 busy tmux session still gets the queued message typed" {
     const key = "tmux:0:test";
     try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered));
     try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, key, std.unicode.utf8ToUtf16LeStringLiteral("second request")));
-    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key));
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, false));
+    try std.testing.expectEqual(@as(?usize, 1), chatOutboxFirstSendableIndexIn(&list, key, true));
+    list.items[0].state = .sending;
+    try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, true));
+    list.items[0].state = .not_sent;
+    try std.testing.expectEqual(@as(?usize, 1), chatOutboxFirstSendableIndexIn(&list, key, true));
 }

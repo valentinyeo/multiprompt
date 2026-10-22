@@ -50,6 +50,16 @@ class SendTest(unittest.TestCase):
         with patch.object(reader.subprocess, "run", side_effect=OSError):
             self.assertIn("stop\terror\ttmux_stop_failed", reader.stop_response(dict(id=8, tmux="term-1")))
 
+    def test_IGSH_564_force_send_presses_claude_keys_in_order_without_enter(self):
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("\tsend_queued\tok\t", reader.stop_response(dict(op="send_queued", id=8, tmux="term-1")))
+            run.assert_called_once_with(["tmux", "send-keys", "-t", "=term-1:", "C-x", "C-s"], check=True, capture_output=True, timeout=5)
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("invalid_tmux_name", reader.stop_response(dict(op="send_queued", id=8, tmux="bad;name")))
+            run.assert_not_called()
+        with patch.object(reader.subprocess, "run", side_effect=OSError):
+            self.assertIn("send_queued\terror\t", reader.stop_response(dict(op="send_queued", id=8, tmux="term-1")))
+
     def test_name_validation(self):
         for name in ("a;b", "$(x)", "", "a" * 65, "x\n", None, 4):
             with self.subTest(name=name), patch.object(reader.subprocess, "run") as run:
