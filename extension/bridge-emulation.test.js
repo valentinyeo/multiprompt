@@ -415,3 +415,16 @@ test('raw CDP implicit DOM enabling and known emulation overrides reset without 
   }
   await h.run({ method: 'emulate', device: 'off' });
 });
+
+test('raw device override cleanup uses the emulation active when its queued command runs', async () => {
+  const h = harness();
+  await h.run({ method: 'emulate', device: 'iphone' });
+  await Promise.all([
+    h.run({ method: 'emulate', device: 'pixel' }),
+    h.run({ method: 'cdp', cdpMethod: 'Emulation.setDeviceMetricsOverride', params: { width: 100, height: 100, mobile: false, deviceScaleFactor: 1 } }),
+  ]);
+  assert.equal(h.overrides.get(1).metrics.width, 412);
+  assert.equal(h.overrides.get(1).metrics.height, 915);
+  assert.match(h.overrides.get(1).userAgent, /Pixel/);
+  await h.run({ method: 'emulate', device: 'off' });
+});

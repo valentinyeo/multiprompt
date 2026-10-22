@@ -2887,20 +2887,21 @@ async function sendCdp(message) {
   };
   let cleanup = Object.hasOwn(resets, cdpMethod) ? resets[cdpMethod] : null;
   if (knownDomain && cdpMethod.endsWith(".enable")) cleanup = [[`${domain}.disable`, {}]];
-  const emulation = emulatedTabs.get(tabId);
-  if (emulation) {
-    const ownOverrides = {
-      "Emulation.setDeviceMetricsOverride": emulation.metrics,
-      "Emulation.setUserAgentOverride": { userAgent: emulation.userAgent, ...(emulation.userAgentMetadata ? { userAgentMetadata: emulation.userAgentMetadata } : {}) },
-      "Emulation.setTouchEmulationEnabled": { enabled: emulation.metrics.mobile, maxTouchPoints: emulation.metrics.mobile ? 5 : 1 },
-    };
-    if (Object.hasOwn(ownOverrides, cdpMethod)) cleanup = [[cdpMethod, ownOverrides[cdpMethod]]];
-    if (cdpMethod === "Emulation.clearDeviceMetricsOverride") cleanup = [["Emulation.setDeviceMetricsOverride", emulation.metrics]];
-  }
   const readOnly = knownDomain && /\.(get[A-Z]|capture[A-Z]|evaluate$|callFunctionOn$|querySelector|describeNode$|resolveNode$|requestNode$|disable$)/.test(cdpMethod) || cdpMethod === "Emulation.clearGeolocationOverride";
+  const ownOverride = ["Emulation.setDeviceMetricsOverride", "Emulation.clearDeviceMetricsOverride", "Emulation.setUserAgentOverride", "Emulation.setTouchEmulationEnabled"].includes(cdpMethod);
   return withCdpSession(tabId, (debuggee, isActive, sendCommand) => {
+    const emulation = emulatedTabs.get(tabId);
+    if (emulation) {
+      const ownOverrides = {
+        "Emulation.setDeviceMetricsOverride": emulation.metrics,
+        "Emulation.setUserAgentOverride": { userAgent: emulation.userAgent, ...(emulation.userAgentMetadata ? { userAgentMetadata: emulation.userAgentMetadata } : {}) },
+        "Emulation.setTouchEmulationEnabled": { enabled: emulation.metrics.mobile, maxTouchPoints: emulation.metrics.mobile ? 5 : 1 },
+      };
+      if (Object.hasOwn(ownOverrides, cdpMethod)) cleanup = [[cdpMethod, ownOverrides[cdpMethod]]];
+      if (cdpMethod === "Emulation.clearDeviceMetricsOverride") cleanup = [["Emulation.setDeviceMetricsOverride", emulation.metrics]];
+    }
     return sendCommand(cdpMethod, message.params || {}, cleanup || []);
-  }, false, !cleanup && !readOnly);
+  }, false, !cleanup && !readOnly && !ownOverride);
 }
 
 function validateCdpScript(script) {
