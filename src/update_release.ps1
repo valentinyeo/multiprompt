@@ -91,7 +91,12 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
     foreach ($process in $processes) { if (-not $process.WaitForExit(60000)) { throw 'App is still running; update cancelled' } }
     Assert-Update "$dir/next.exe" "$dir/SHA256SUMS.txt" $name $Target
     $backup = "$Target.previous.exe"
-    Move-Item -LiteralPath $Target -Destination $backup -Force
+    try {
+        Move-Item -LiteralPath $Target -Destination $backup -Force
+    } catch {
+        $null = Start-UpdatedApp $Target
+        throw
+    }
     try {
         Move-Item -LiteralPath "$dir/next.exe" -Destination $Target
         if (-not (Start-UpdatedApp $Target)) { throw 'Updated app failed readiness' }

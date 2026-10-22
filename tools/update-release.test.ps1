@@ -62,6 +62,15 @@ try {
 
     Refuses { Install-Update $target 'x64' '' '2.0.0' } 'Stale staged downgrade accepted'
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Stale update modified installation'
+    Copy-Item "$root/broken.exe" "$target.previous.exe"
+    $lockedBackup = [IO.File]::Open("$target.previous.exe", [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try { Refuses { Install-Update $target 'x64' '' '1.9.0' } 'Locked backup was overwritten' } finally { $lockedBackup.Dispose() }
+    Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Backup failure changed the installed executable'
+    Assert ((Get-Content "$target.starts" -Raw) -eq "start`n") 'Backup failure did not restart the untouched app'
+    Get-Process | Where-Object { $_.Path -eq $target } | ForEach-Object { $null = $_.WaitForExit(5000) }
+    Remove-Item "$target.starts", "$target.previous.exe" -Force
+    Write-Host 'backup failure resumes the previous app passed'
+
     Refuses { Install-Update $target 'x64' '' '1.9.0' } 'Broken update reported success'
     Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Previous executable not restored'
     Assert ((Get-Content "$target.starts" -Raw) -eq "start`n") 'Rollback did not start the previous executable exactly once'
