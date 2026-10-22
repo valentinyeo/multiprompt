@@ -1213,6 +1213,20 @@ fn normalizeBrowserUrl(s: []const u8, buf: []u8) []const u8 {
     return buf[0 .. prefix.len + s.len];
 }
 
+pub fn openSessionLink(idx: u32, url: []const u8) bool {
+    if (idx >= app_state.shell_count) return false;
+    if (app_state.g_external_browser_links and !app_state.shells[idx].browser_enabled and !webView2OwnsShell(idx) and
+        (std.ascii.startsWithIgnoreCase(url, "http://") or std.ascii.startsWithIgnoreCase(url, "https://")))
+    {
+        const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, url) catch return false;
+        defer std.heap.page_allocator.free(wide);
+        _ = ShellExecuteW(null, L("open"), wide.ptr, null, null, SW_SHOW);
+        return false;
+    }
+    navigateBrowserPaneWithActivation(idx, url, true);
+    return true;
+}
+
 pub fn navigateBrowserPane(idx: u32, raw_url: []const u8) void {
     navigateBrowserPaneWithActivation(idx, raw_url, false);
 }

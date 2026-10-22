@@ -528,7 +528,7 @@ pub fn uninstallMouseHook() void {
 fn wantMouseHookForUrlClicks() bool {
     if (app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) != 0) return false;
     return app_state.active_shell < app_state.shell_count and
-        (app_state.shells[app_state.active_shell].browser_enabled or webView2OwnsActiveShell()) and
+        (app_state.shells[app_state.active_shell].browser_enabled or webView2OwnsActiveShell() or app_state.g_external_browser_links) and
         isCtrlDown();
 }
 

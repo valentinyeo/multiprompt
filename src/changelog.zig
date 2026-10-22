@@ -53,6 +53,20 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.817", .items = &.{
+        .{ .text = "Right-click a link in Chat View and choose Copy link to copy just its address.", .ticket = "IGSH-574" },
+    } },
+    .{ .ver = "0.28.816", .items = &.{
+        .{ .text = "You can now select and copy messages that are waiting to send in Chat View.", .ticket = "IGSH-567" },
+    } },
+    .{ .ver = "0.28.815", .items = &.{
+        .{ .text = "Chat View now types every message into Claude at once like Claude's own buffer, drops the waiting labels, and force send presses Claude's Ctrl+X Ctrl+S.", .ticket = "IGSH-564" },
+        .{ .text = "Every workspace uses your original signed-in browser again, so Chrome no longer asks you to sign in after the last update.", .ticket = "IGSH-565" },
+        .{ .text = "Chat sync checks no longer mistake background-task status updates for missing messages.", .ticket = "IGSH-571" },
+    } },
+    .{ .ver = "0.28.814", .items = &.{
+        .{ .text = "Saved remote sessions start connecting right away when you reopen the app instead of waiting in line.", .ticket = "IGSH-568" },
+    } },
     .{ .ver = "0.28.813", .items = &.{
         .{ .text = "Chat View messages to a busy Claude session are sent right away again and show \"queued in Claude\".", .ticket = "IGSH-564" },
     } },
