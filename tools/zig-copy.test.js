@@ -91,6 +91,9 @@ test('ISSUE-270 replay copies the new chat_diff import that the old literal list
   assert.equal(old.length, 1);
   assert.match(old[0], /chat_history\.zig/);
   assert.doesNotMatch(old[0], /chat_diff\.zig/);
+});
+
+test('CI retains full history for regression fixtures', () => {
   assert.match(fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8'), /fetch-depth: 0/);
 });
 
