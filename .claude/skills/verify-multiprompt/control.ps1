@@ -1176,6 +1176,20 @@ try {
             Press @(0x0D) 'Enter: navigate to the synthetic bookmark URL'
             Wait-Until { (Read-Session).tabs | Where-Object { $_.PSObject.Properties['burl'] -and $_.burl -eq $bookmark } } 'app observed browser navigation' 60
             Focus-WorkspaceBrowser $targetRoot
+            Press-WorkspaceBrowser @(0x11, 0x39) 'Ctrl+9: select the URL tab opened by the palette'
+            Wait-Until {
+                $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
+                $edits = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
+                foreach ($edit in $edits) {
+                    if ($edit.Current.Name -ne 'Address and search bar') { continue }
+                    $value = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    if ($value.Current.Value -in @($bookmark, $bookmark.Substring(8))) {
+                        Save-Json @{ url = $value.Current.Value; hwnd = $script:bookmarkWindow.ToInt64(); pid = $script:bookmarkPid } 'bookmark-page.json'
+                        return $true
+                    }
+                }
+                return $false
+            } 'actual owned browser address bar shows the synthetic bookmark URL' 60
             Press-WorkspaceBrowser @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
             Snapshot 'bookmark-action'
             Press-WorkspaceBrowser @(0x0D) 'Enter: save favorite'

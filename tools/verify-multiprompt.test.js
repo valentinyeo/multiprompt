@@ -186,6 +186,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(control, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\)/);
   assert.match(control, /function Press-WorkspaceBrowser[\s\S]*?Doctor\s+Wait-Until[\s\S]*?FocusOwnedWindow\(\$script:bookmarkWindow, \$script:bookmarkPid, \$script:window\)[\s\S]*?GetAncestor\(\$foreground, 2\) -eq \$script:bookmarkWindow -and\s+\[VerifyNative\]::GetAncestor\(\$foreground, 3\) -eq \$script:window[\s\S]*?Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /Palette 'open url in browser'\s+Snapshot 'url-action'/);
+  assert.match(control, /Press-WorkspaceBrowser @\(0x11, 0x39\)[\s\S]*?ValuePattern[\s\S]*?\$value.Current.Value -in @\(\$bookmark, \$bookmark.Substring\(8\)\)[\s\S]*?'bookmark-page.json'[\s\S]*?Press-WorkspaceBrowser @\(0x11, 0x44\)/);
   for (const label of ['Ctrl+D: bookmark this page in Edge', 'Enter: save favorite', 'Esc: close favorite dialog']) {
     assert.ok(control.split('\n').some(line => line.includes('Press-WorkspaceBrowser @') && line.includes(label)));
   }
