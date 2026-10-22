@@ -52,6 +52,25 @@ test "table surface: chrome filtering keeps structural borders but hides real ch
         try std.testing.expectEqual(sample.hidden, ${chrome});
     }
 }
+test "table surface: IGSH-436 clipped table rows use display glyphs outside a classified table" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("│ ● │ ✻ │\r\n└───┴───┘");
+    var buf: [text.len]u16 = text[0..text.len].*;
+    var blocks: [8]ChatBlock = undefined;
+    const count = chatClassifyBlocks(&buf, &blocks);
+    for (blocks[0..count]) |block| try std.testing.expect(block.kind != .table);
+    chatApplyDisplayGlyphs(&buf);
+    try std.testing.expectEqualSlices(u16, w("| • | * |\r\n+---+---+"), &buf);
+}
+test "table surface: IGSH-436 symbol-only boxed chrome outside a table stays hidden" {
+    const line = std.unicode.utf8ToUtf16LeStringLiteral("│      │");
+    var blocks: [8]ChatBlock = undefined;
+    const count = chatClassifyBlocks(line, &blocks);
+    for (blocks[0..count]) |block| try std.testing.expect(block.kind != .table);
+    const table_line = chat_markdown.consoleTableLine(line);
+    const tool_header = false;
+    try std.testing.expect(${chrome});
+}
 test "table surface: narrative rows survive while genuine tool details stay hidden" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expect(!chatLineIsToolDetail(w("│ Event │ Status │")));
