@@ -62,10 +62,13 @@ loopback connection on port 19548.
 ## Recording
 
 Keyboard-driven typeahead: use `zsb type --keys 'input._58al' 'business_management'`
-then `zsb key Enter`. The `--keys` flag must precede the selector/text arguments.
+then `zsb key Enter`. The `--keys`, `--raw-enter`, and `--tab` flags may appear
+in any order, each at most once.
 With one text argument, typing uses the focused editable; with a selector it
 clicks and replaces the selected input as ordinary `type` does. The response
 reports `mode:keys`. Ordinary `type` retains the faster text-insertion path.
+Newlines in typed text are inserted as line breaks in both modes, so chat
+composers never submit; add `--raw-enter` to press Enter at each newline instead.
 The keyboard path emits Unicode characters individually through CDP keyDown
 and keyUp; Chromium generates keypress and input events. Do not synthesize DOM
 events or insert the same character again. Test suggestions and Enter selection

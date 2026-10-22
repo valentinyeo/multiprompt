@@ -208,13 +208,13 @@ test('CLI waits for a delayed profile pipe and handles immediate replies', { tim
   }
 });
 
-test('transport waits within its deadline and drains replies before closing the client', () => {
+test('ISSUE-154 transport uses a deadline without blocking the host on unread replies', () => {
   const request = source.slice(source.indexOf('fn requestBrowser('), source.indexOf('fn saveScreenshotResponse('));
-  assert.match(request, /const until = @min\(deadline orelse std\.math\.maxInt\(u64\), GetTickCount64\(\) \+ 1500\)/);
-  assert.match(request, /if \(remaining == 0\) return error\.PipeUnavailable/);
+  assert.match(request, /const connect_until = @min\(until, GetTickCount64\(\) \+ 1500\)/);
+  assert.match(request, /if \(remaining == 0\) return if \(GetTickCount64\(\) >= until\) error\.BrowserRequestTimeout else error\.PipeUnavailable/);
   assert.match(request, /WaitNamedPipeA\(command_pipe_name\.ptr, @intCast\(@min\(50, remaining\)\)\)/);
   const reply = source.slice(source.indexOf('fn routeReplyPipe('), source.indexOf('fn readPipeMessage('));
-  assert.match(reply, /defer _ = CloseHandle\(pipe\);[\s\S]*try writeAll\(pipe, payload\);\s*_ = FlushFileBuffers\(pipe\);/);
+  assert.match(reply, /defer _ = CloseHandle\(pipe\);[\s\S]*SetNamedPipeHandleState\(pipe, &mode, null, null\)[\s\S]*writeAll\(pipe, payload\) catch \{\};/);
 });
 
 test('issue: source preserves token-only lifetime mutex and shared pipe resolver', () => {
