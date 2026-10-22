@@ -1,5 +1,13 @@
 const std = @import("std");
 
+pub fn firstShowCommand() i32 {
+    return 5;
+}
+
+test "IGSH-587 first show preserves maximized creation state without activation" {
+    try std.testing.expectEqual(@as(i32, 8), firstShowCommand());
+}
+
 pub const Step = enum { snapshot, paint, account, links, telemetry, tabs, browser };
 pub const steps = [_]Step{ .snapshot, .paint, .account, .telemetry, .links, .tabs, .browser };
 
