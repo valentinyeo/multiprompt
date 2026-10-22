@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { readChangelogEntry } = require('./changelog-entry');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
@@ -98,6 +99,18 @@ test('dock guard is installed and removed with the app lifetime and dispatched o
   assert.equal(messages.filter(match => match[2] === guard[2]).length, 1);
 });
 
+test('browser-focused Aero Snap cannot maximize the owner frame while normal frame commands still work', () => {
+  function contract(source) {
+    assert.match(source, /WM_SYSCOMMAND => \{\s*if \(\(wp & 0xFFF0\) == @import\("win32.zig"\).SC_MAXIMIZE and activeBrowserHasForegroundFocus\(\)\) return 0;\s*return DefWindowProcW\(hwnd, msg, wp, lp\);\s*\}/);
+  }
+  contract(main);
+  assert.match(win, /pub const SC_MAXIMIZE: usize = 0xF030;/);
+  for (const before of ['(wp & 0xFFF0)', 'and activeBrowserHasForegroundFocus()', 'return DefWindowProcW(hwnd, msg, wp, lp);']) {
+    assert.ok(main.includes(before));
+    assert.throws(() => contract(main.replaceAll(before, '')));
+  }
+});
+
 test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op and non-docked windows', () => {
   assert.ok(main.includes('_ = @import("browser_pane.zig");'));
   for (const name of [
@@ -139,6 +152,7 @@ function journeyContract(source) {
   assert.match(mouse, /new uint\[\] \{ 2, 4, 2, 4 \}/);
   const exact = source.slice(source.indexOf('function Assert-LockedBrowserRect('), source.indexOf('function Get-LockedBrowserStrip('));
   assert.match(exact, /ElapsedMilliseconds -ge 1000/);
+  assert.equal((journey.match(/Assert-LockedBrowserRect \$browser \$dockRect '/g) || []).length, 3);
   assert.match(exact, /-not \[VerifyNative\]::IsZoomed\(\$Browser\)/);
   for (const edge of ['Left', 'Top', 'Right', 'Bottom']) assert.ok(exact.includes(`$current.${edge} -eq $DockRect.${edge}`));
   assert.match(exact, /exact dock rectangle and not zoomed" 5/);
@@ -172,6 +186,9 @@ test('pane-lock journey is mapped, indexed, allowed and included in the pull-req
   for (const feature of ['appearance', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout']) assert.ok(features.includes(feature));
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n]*'browser-pane-locked'/);
   assert.ok(workflow.includes('tools/check-browser-pane-locked.test.js'));
+  assert.match(workflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| '' \}\}/);
+  assert.match(workflow, /name: Build branch executable\s+if: env\.RELEASE_TAG == ''\s+run: zig build/);
+  assert.match(workflow, /} else \{\s*Copy-Item zig-out\/bin\/multiprompt\.exe verify-bin\/multiprompt\.exe/);
   assert.ok(read(`${directory}/features/README.md`).includes('](browser-pane-locked.md)'));
   assert.ok(read(`${directory}/SKILL.md`).includes('`browser-pane-locked`'));
   for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) assert.ok(map.includes(`## ${section}`));
@@ -190,7 +207,7 @@ test('changed code is comment-free and the user-facing fragment follows the chan
     [`${directory}/control.ps1`, 'powershell'], ['.github/workflows/verify.yml', 'yaml'],
     ['tools/check-browser-pane-locked.test.js', 'javascript'], ['tools/verify-multiprompt.test.js', 'javascript'],
   ]) assert.equal(strip(read(file), language).commentLines, 0, file);
-  const fragment = read('changelog.d/IGSH-566-browser-pane-locked.md').trim();
+  const fragment = readChangelogEntry('IGSH-566').trim();
   assert.equal(fragment.split('\n').length, 1);
   assert.equal(fragment, 'The browser pane stays in place: it can no longer be dragged away or maximized to full screen.');
   assert.match(read('openwiki/browser/routing-state-machine.md'), /cannot be dragged away or maximized to full screen/);

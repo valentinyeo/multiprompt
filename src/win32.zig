@@ -528,6 +528,7 @@ pub const ERROR_SUCCESS: LONG = 0;
 pub extern "advapi32" fn RegCreateKeyExA(HKEY, [*:0]const u8, DWORD, ?[*:0]u8, DWORD, DWORD, ?*anyopaque, *HKEY, ?*DWORD) callconv(WINAPI) LONG;
 pub extern "advapi32" fn RegSetValueExA(HKEY, ?[*:0]const u8, DWORD, DWORD, [*]const u8, DWORD) callconv(WINAPI) LONG;
 pub const WM_SYSCOMMAND: u32 = 0x0112;
+pub const SC_MAXIMIZE: usize = 0xF030;
 const SC_KEYMENU: usize = 0xF100;
 pub const SW_MAXIMIZE: i32 = 3;
 pub const SW_MINIMIZE: i32 = 6;
