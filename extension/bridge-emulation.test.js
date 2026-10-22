@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function harness({ timeoutMs } = {}) {
+function harness({ timeoutMs, realTarget = false } = {}) {
   const listeners = {};
   const calls = [];
   const attached = new Set();
@@ -60,6 +60,10 @@ function harness({ timeoutMs } = {}) {
     if (method === 'Synthetic.enableUnknown') return { acted: true, actionCount: 1 };
     return {};
   };
+  chrome.windows.get = async id => ({ id, type: 'normal' });
+  chrome.windows.create = async () => ({ id: 20 });
+  chrome.windows.getAll = async () => [{ id: 10, type: 'normal' }];
+  chrome.tabs.query = async () => [{ id: 1, windowId: 10, active: true, url: 'https://example.test' }];
   chrome.tabs.get = async tabId => ({ id: tabId, url: 'https://example.test' });
   chrome.scripting.executeScript = async ({ func }) => {
     if (func.name === 'evalInPage') throw new Error('Content Security Policy unsafe-eval');
@@ -67,9 +71,10 @@ function harness({ timeoutMs } = {}) {
   };
   const context = vm.createContext({ chrome, console, URL, navigator: { userAgent: 'Synthetic Desktop' }, setTimeout: (fn, ms) => setTimeout(fn, timeoutMs && ms === 15000 ? timeoutMs : ms), clearTimeout });
   vm.runInContext(fs.readFileSync(process.env.BRIDGE_SOURCE || path.join(__dirname, 'bridge.js'), 'utf8'), context);
-  vm.runInContext('rememberTargetWindow = async () => {}; getTargetTab = async message => ({ id: message.tabId || 1 });', context);
+  if (!realTarget) vm.runInContext('rememberTargetWindow = async () => {}; getTargetTab = async message => ({ id: message.tabId || 1 });', context);
   return {
-    calls, attached, overrides, commandState,
+    calls, attached, overrides, commandState, context,
+    windowless: message => context.dispatch(message),
     emulated: tabId => vm.runInContext(`emulatedTabs.has(${tabId})`, context),
     hold: method => { heldMethod = method; },
     release: () => { heldMethod = undefined; release(); },
@@ -188,7 +193,7 @@ test('subframe navigation does not reapply, and ordinary CDP errors retain emula
 test('extension release version is unused and matches self-test documentation', () => {
   const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST_SOURCE || path.join(__dirname, 'manifest.json'), 'utf8'));
   const parts = manifest.version.split('.').map(Number);
-  assert.ok(parts[0] > 1 || (parts[0] === 1 && (parts[1] > 0 || parts[2] > 70)), '1.0.68 is on master; 1.0.69 and 1.0.70 are already allocated');
+  assert.ok(parts[0] > 1 || (parts[0] === 1 && (parts[1] > 0 || parts[2] > 71)), '1.0.71 is already allocated to other open PRs');
   const docs = fs.readFileSync(path.join(__dirname, '../openwiki/browser/zsb-selftest.md'), 'utf8');
   assert.ok(docs.includes(`version **${manifest.version}**`));
 });
@@ -427,4 +432,71 @@ test('raw device override cleanup uses the emulation active when its queued comm
   assert.equal(h.overrides.get(1).metrics.height, 915);
   assert.match(h.overrides.get(1).userAgent, /Pixel/);
   await h.run({ method: 'emulate', device: 'off' });
+});
+
+for (const [method, fields, expected] of [
+  ['createPaneWindow', { url: 'data:text/html,<title>ZSPANE-test</title>' }, { windowId: 20, focused: false }],
+  ['setTheme', { theme: 'dark' }, { theme: 'dark', applied: true }],
+  ['protectWindow', { windowId: 10, shellId: 5 }, { windowId: 10, shellId: 5, protected: true }],
+  ['resolveWindow', {}, { windowId: 10 }],
+]) {
+  test(`lost emulation permits window-level ${method}`, async () => {
+    const h = harness({ realTarget: true });
+    await h.run({ method: 'emulate', device: 'iphone' });
+    h.fail('Emulation.setDeviceMetricsOverride');
+    await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+    assert.equal(h.emulated(1), false);
+    const result = await h.windowless({ method, ...fields });
+    for (const [key, value] of Object.entries(expected)) assert.equal(result[key], value);
+    assert.equal(result.warning, undefined);
+  });
+}
+
+test('lost emulation lookup errors never block window-level dispatch', async () => {
+  const h = harness({ realTarget: true });
+  vm.runInContext('lostEmulationTabs.set(1, "lost"); getTargetTab = async () => { throw new Error("no tab"); };', h.context);
+  const result = await h.run({ method: 'protectWindow', shellId: 5 });
+  assert.equal(result.protected, true);
+});
+
+for (const value of ['hello', 42, null, { acted: true }]) {
+  test(`lost emulation warning retains ${JSON.stringify(value)} result`, async () => {
+    const h = harness();
+    h.context.commandResult = value;
+    vm.runInContext('dispatchAction = async () => { lostEmulationTabs.set(1, "emulation lost: synthetic restore failure"); return commandResult; };', h.context);
+    const reply = await h.run({ method: 'eval', code: 'value' });
+    assert.deepEqual(JSON.parse(JSON.stringify(reply)), {
+      ...(value !== null && typeof value === 'object' ? value : { result: value }),
+      warning: 'emulation lost: synthetic restore failure', emulationLost: true,
+    });
+  });
+}
+
+test('zsb prints wrapped plain values and a separate warning without changing transport JSON', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-warning-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'multiprompt-browser'), `#!/usr/bin/env bash\nprintf '%s\\n' "$ZSB_TEST_REPLY"\nexit "\${ZSB_TEST_EXIT:-0}"\n`, { mode: 0o755 });
+    for (const value of ['hello', 42, null, { acted: true }]) {
+      const reply = { ok: true, result: { ...(value !== null && typeof value === 'object' ? value : { result: value }), warning: 'emulation lost', emulationLost: true } };
+      const run = spawnSync('bash', [path.join(__dirname, '../tools/vps-zsb.sh'), 'eval', 'value'], {
+        encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, ZSB_TEST_REPLY: JSON.stringify(reply) },
+      });
+      assert.equal(run.status, 0, run.stderr);
+      assert.equal(run.stderr, 'Warning: emulation lost\n');
+      if (value !== null && typeof value === 'object') assert.deepEqual(JSON.parse(run.stdout), reply);
+      else assert.equal(run.stdout, `${typeof value === 'string' ? value : JSON.stringify(value)}\n`);
+    }
+    for (const [raw, code] of [['usage: zsb eval', 0], ['{"ok":true,"result":"hello"}', 0], ['{"ok":false,"error":"failed"}', 2]]) {
+      const run = spawnSync('bash', [path.join(__dirname, '../tools/vps-zsb.sh'), 'eval', 'value'], {
+        encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, ZSB_TEST_REPLY: raw, ZSB_TEST_EXIT: String(code) },
+      });
+      assert.equal(run.status, code);
+      assert.equal(run.stdout, `${raw}\n`);
+      assert.equal(run.stderr, '');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

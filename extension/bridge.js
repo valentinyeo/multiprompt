@@ -323,12 +323,13 @@ async function handleHostMessage(message) {
 }
 
 async function dispatch(message) {
-  const tabId = lostEmulationTabs.size ? (await getTargetTab(message)).id : null;
+  const targetsTab = messageWindowId(message) != null && !["createPaneWindow", "setTheme", "protectWindow", "resolveWindow"].includes(message.method);
+  const tabId = targetsTab && lostEmulationTabs.size ? (await getTargetTab(message).catch(() => null))?.id : null;
   const warning = lostEmulationTabs.get(tabId);
   if (warning && message.method !== "emulate") throw new Error(warning);
   const result = await dispatchAction(message);
-  const lost = lostEmulationTabs.size ? lostEmulationTabs.get((await getTargetTab(message).catch(() => null))?.id) : null;
-  if (lost || warning) return { ...result, warning: lost || warning, emulationLost: Boolean(lost) };
+  const lost = targetsTab && lostEmulationTabs.size ? lostEmulationTabs.get((await getTargetTab(message).catch(() => null))?.id) : null;
+  if (lost || warning) return { ...(result !== null && typeof result === "object" ? result : { result }), warning: lost || warning, emulationLost: Boolean(lost) };
   return result;
 }
 
