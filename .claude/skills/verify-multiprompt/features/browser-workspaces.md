@@ -32,7 +32,8 @@ flags, policies or preference files bypass this user consent step.
 No app state, browser preferences or bookmark files are seeded or edited.
 Common app keystrokes use the strict Doctor-verified main-window foreground guard.
 Browser-only keystrokes validate the exact profile PID/HWND and root owner;
-Win32 thread-input attachment changes OS focus, never app state or focus policy.
+A real hit-tested title-bar click can activate the window without selecting a tab.
+GetGUIThreadInfo validates its actual keyboard focus without joining input queues.
 
 Create a second workspace with Ctrl+N to persist the fresh layout, then return
 to the first workspace and open both panes before creating the remaining four.
@@ -44,7 +45,7 @@ example.com URL. Select its newly opened tab with Ctrl+9 in the verified Edge wi
 independently read its address bar, then bookmark it with Ctrl+D. Move the workspace
 one position earlier, convert to six standalone windows and back, then close
 and reopen the named workspace. At each stage, assert the same ID, root and
-bookmark and capture a screenshot plus saved state in workspace-lifecycle.json.
+bookmark and saved active URL, and capture a screenshot plus saved state in workspace-lifecycle.json.
 
 Use the app-owned loopback zsb listener to request the target URL, switch to a
 different workspace, request the parked target and the foreign workspace URL,

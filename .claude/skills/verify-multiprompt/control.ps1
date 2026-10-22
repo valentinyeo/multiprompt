@@ -48,7 +48,7 @@ public static class VerifyNative {
             BringWindowToTop(hwnd);
             Rect bounds;
             if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
-            Point point = new Point { X = bounds.Left + 100, Y = bounds.Top + 22 };
+            Point point = new Point { X = hwnd == frame ? bounds.Left + 100 : bounds.Right - 160, Y = bounds.Top + 22 };
             if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
             if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             Input[] click = new Input[2];
@@ -749,6 +749,7 @@ function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [st
         if ($state.PSObject.Properties['single_window'] -and $state.single_window) {
             if ($state.workspaces[$state.active_workspace].wid -cne $Id) { return $false }
         } elseif (-not $state.PSObject.Properties['workspace_id'] -or $state.workspace_id -cne $Id) { return $false }
+        if ($state.tabs[$state.active_tab].burl -cne $Bookmark) { return $false }
         $file = Join-Path $Root 'Default/Bookmarks'
         if (-not (Test-Path $file)) { return $false }
         $bookmarks = Get-Content $file -Raw | ConvertFrom-Json

@@ -188,12 +188,13 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   const focus = control.slice(control.indexOf('    public static void FocusOwnedWindow('), control.indexOf('    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'));
   const assertOwnedFocus = text => {
     assert.match(text, /owner != expectedPid/);
+    assert.match(text, /X = hwnd == frame \? bounds.Left \+ 100 : bounds.Right - 160, Y = bounds.Top \+ 22/);
     assert.match(text, /GetForegroundWindow\(\) != hwnd\) throw/);
     assert.match(text, /!GetGUIThreadInfo\(target, ref info\) \|\| info.active != hwnd \|\| GetAncestor\(info.focus, 3\) != frame \|\| \(hwnd != frame && GetAncestor\(info.focus, 2\) != hwnd\)/);
     assert.doesNotMatch(text, /AttachThreadInput|SetFocus\(/);
   };
   assertOwnedFocus(focus);
-  for (const required of ['owner != expectedPid', 'info.active != hwnd', 'GetAncestor(info.focus, 3) != frame', 'GetAncestor(info.focus, 2) != hwnd']) {
+  for (const required of ['bounds.Right - 160', 'owner != expectedPid', 'info.active != hwnd', 'GetAncestor(info.focus, 3) != frame', 'GetAncestor(info.focus, 2) != hwnd']) {
     assert.throws(() => assertOwnedFocus(focus.replace(required, 'false')));
   }
   assert.throws(() => assertOwnedFocus(focus + 'AttachThreadInput(current, target, true);'));

@@ -104,6 +104,9 @@ test('IGSH-224 live browser journey proves every lifecycle stage and background 
   const observe = control.slice(control.indexOf('function Assert-WorkspaceProfile('), control.indexOf('function Select-Theme('));
   assert.match(observe, /workspace_id -cne \$Id/);
   assert.match(observe, /\$Bookmark -notin \$urls/);
+  const savedUrl = /\$state.tabs\[\$state.active_tab\].burl -cne \$Bookmark/;
+  assert.match(observe, savedUrl);
+  assert.doesNotMatch(observe.replace(savedUrl, '$false'), savedUrl);
   assert.match(observe, /\$live\.Count -ne 1/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|PostMessage/);
 });
