@@ -606,23 +606,24 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry and compiler-backed integration tests"),
+        b.step("test-group-1", "Run desktop, telemetry, SSH and compiler-backed integration tests"),
         b.step("test-group-2", "Run Chat View regression and CPU fixtures"),
-        b.step("test-group-3", "Run portable modules, source regressions and SSH fixtures"),
+        b.step("test-group-3", "Run portable modules, source regressions and compiler-backed fixtures"),
         b.step("test-group-4", "Run sync protocol and desktop interaction fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
             dependency == &chat_switch_tests.step or dependency == &frequent_integration_tests.step or
-            dependency == &chat_drop_tests.step or dependency == &reply_quote_tests.step or
-            dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
+            dependency == &reply_quote_tests.step or dependency == &chat_skill_tab_tests.step or
+            dependency == &ssh_reconnect_tests.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &chat_cpu_regression.step)
             1
         else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
             dependency == &launch_regression.step or dependency == &chat_table_tests.step or
             dependency == &screenshot_pipeline_tests.step or dependency == &chat_view_console_visibility_tests.step or
-            dependency == &zsb_interaction_tests.step)
+            dependency == &zsb_interaction_tests.step or dependency == &chat_drafts_tests.step or
+            dependency == &window_flicker_tests.step)
             3
         else
             2;
