@@ -1697,7 +1697,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
                     }
                     debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 0, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);
                     return 1;
                 }
                 if (kb.vkCode == 0x54 and shift) {

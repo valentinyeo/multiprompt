@@ -37,6 +37,38 @@ function nativePaletteFocusContract(source) {
   assert.match(source, /\$focus.uia = @\{ handle = \$focused.Current.NativeWindowHandle; pid = \$focused.Current.ProcessId; class = \$focused.Current.ClassName \}/);
 }
 
+function appPaletteFocusContract(shortcuts, main) {
+  const chord = shortcuts.match(/if \(!shift and kb\.vkCode == 0x4B and \(kb\.flags & 0x20\) == 0\) \{([\s\S]*?)\n                \}/)?.[1];
+  assert.ok(chord, 'Ctrl+K must retain its non-Alt, non-Shift chord');
+  assert.match(chord, /if \(activeBrowserHasForegroundFocus\(\)\) \{\s*return CallNextHookEx/);
+  assert.match(chord, /PostMessageW\(app_state\.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0\)/, 'Ctrl+K must activate the frame, not leave the embedded console foreground');
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
+  assert.match(open, /if \(wp == 1 and foregroundIsOurs\(\)\) \{\s*cancelShellRefocus\(hwnd\);/);
+  assert.match(open, /const fg_thread = GetWindowThreadProcessId\(fg, null\);/);
+  assert.match(open, /AttachThreadInput\(our_thread, fg_thread, 1\) != 0;\s*_ = SetForegroundWindow\(hwnd\);\s*_ = SetFocus\(hwnd\);\s*if \(attached\) _ = AttachThreadInput\(our_thread, fg_thread, 0\);/);
+  assert.match(open, /cancelShellRefocus\(hwnd\);\s*app_state\.g_search_active = true;/);
+  assert.match(main, /const SetForegroundWindow = @import\("focus.zig"\)\.SetForegroundWindow;/);
+  assert.match(main, /const SetFocus = @import\("focus.zig"\)\.SetFocus;/);
+  assert.match(main, /const AttachThreadInput = @import\("focus.zig"\)\.AttachThreadInput;/);
+}
+
+const shortcuts = read('src/shortcuts.zig');
+const main = read('src/main.zig');
+appPaletteFocusContract(shortcuts, main);
+for (const [file, before, after] of [
+  ['shortcuts', 'debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);', 'debugLog("hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 0, 0);'],
+  ['shortcuts', 'if (activeBrowserHasForegroundFocus()) {\n                        return CallNextHookEx', 'if (false) {\n                        return CallNextHookEx'],
+  ['main', 'wp == 1 and foregroundIsOurs()', 'wp == 1'],
+  ['main', '_ = SetForegroundWindow(hwnd);\n                _ = SetFocus(hwnd);', '_ = SetFocus(hwnd);'],
+  ['main', 'if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);', ''],
+  ['main', 'const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;', 'const SetForegroundWindow = @import("win32.zig").SetForegroundWindow;'],
+]) {
+  const source = file === 'shortcuts' ? shortcuts : main;
+  const broken = source.replace(before, after);
+  assert.notEqual(broken, source, `mutation applies: ${before}`);
+  assert.throws(() => appPaletteFocusContract(file === 'shortcuts' ? broken : shortcuts, file === 'main' ? broken : main), assert.AssertionError, `reject palette activation regression: ${before}`);
+}
+
 nativePaletteFocusContract(driver);
 for (const [before, after] of [
   ['GetFocusedWindow($script:window) -eq $script:window', 'GetForegroundWindow() -eq $script:window'],
@@ -57,4 +89,4 @@ for (const [before, after] of [
 const workflow = read('.github/workflows/verify.yml');
 assert.ok(workflow.includes('      - tools/check-workspace-focus.mjs'));
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
-console.log('workspace-focus static checks passed (exact native focus, read-only waits, negative controls; Windows CI still required)');
+console.log('workspace-focus static checks passed (guarded palette activation, exact native focus, read-only waits, negative controls; Windows CI still required)');
