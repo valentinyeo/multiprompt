@@ -32,14 +32,34 @@ function handler(name, next, signature) {
 }
 
 function creation(name, signature) {
+  if (name === 'respawnShellInPlace') {
+    const worker = fn(consoleSource, 'startupShellWorker');
+    const acquisition = between(worker, '    var pi = std.mem.zeroes(PROCESS_INFORMATION);', '\n    if (job.hwnd == null and job.process != null')
+      .replaceAll('@ptrCast(&job.command)', 'L("shell")')
+      .replaceAll('@ptrCast(job.environment)', 'null')
+      .replaceAll('if (job.has_cwd) @ptrCast(&job.cwd) else null', 'null')
+      .replaceAll('@import("win32.zig").SWP_NOACTIVATE', 'SWP_NOACTIVATE');
+    const theme = between(fn(consoleSource, 'finishStartupShell'), '    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);', '\n    if (idx == app_state.active_shell)');
+    return `fn ${signature} bool {
+      var job_value = struct { command: [1]u16 = .{0}, kind: ShellKind, job: HANDLE = null, process: HANDLE = null, pid: u32 = 0, hwnd: HANDLE = null, shell_id: usize = 1, owner: HANDLE }{ .kind = kind, .owner = g_main_hwnd };
+      const job = &job_value;
+      var si = std.mem.zeroes(STARTUPINFOW);
+      ${acquisition}
+      if (job.hwnd == null) return false;
+      installConsole(job.pid, kind, slot);
+      ${theme}
+      return true;
+    }`;
+  }
   const body = fn(consoleSource, name);
-  const block = between(body, '    if (CreateProcessW(', '    var style = GetWindowLongPtrW(').replace('    if (cmd_hwnd != null) {\n', '');
+  const start = name === 'spawnShellWithSession' ? '    if (!asynchronous and CreateProcessW(' : '    if (CreateProcessW(';
+  const block = between(body, start, '    var style = GetWindowLongPtrW(').replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
     var si = std.mem.zeroes(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     const cmd_ptr = L("shell");
-    ${name === 'spawnShellWithSession' ? 'const cwd_ptr = null;' : ''}
+    ${name === 'spawnShellWithSession' ? 'const cwd_ptr = null; const asynchronous = false;' : ''}
     ${block}
     installConsole(pi.dwProcessId, kind, slot);
     return true;
@@ -297,6 +317,7 @@ fn CreateProcessW(_: ?usize, _: [*:0]const u16, _: ?usize, _: ?usize, _: i32, _:
     pi.* = .{ .dwProcessId = latest_pid, .hThread = latest_pid, .hProcess = latest_pid }; return 1;
 }
 fn FindWindowW(_: ?usize, _: [*:0]const u16) HANDLE { return latest_pid; }
+fn WaitForSingleObject(_: HANDLE, _: u32) u32 { return 258; }
 fn Sleep(_: u32) void {}
 fn TerminateProcess(pid: HANDLE, _: u32) BOOL { consoles[pid.?].live = false; return 1; }
 fn isRemoteShellKind(kind: ShellKind) bool { return kind == .vps or kind == .vps2 or kind == .tmux; }

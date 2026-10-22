@@ -52,13 +52,13 @@ function audit(text) {
   const respawn = fn(text, 'respawnShellInPlace');
   assert.match(respawn, /const saved_chat_view_on = shells\[idx\]\.chat_view_on;/);
   assert.match(respawn, /\.chat_view_on = saved_chat_view_on,/);
-  for (const name of ['restoreSession', 'closeAllSessions', 'closeUrlPickerInternal', 'showActiveShellAfterOverlay', 'switchToShell', 'respawnShellInPlace']) {
+  for (const name of ['restoreSession', 'closeAllSessions', 'closeUrlPickerInternal', 'showActiveShellAfterOverlay', 'switchToShell', 'finishStartupShell']) {
     assert.match(fn(text, name), /showShellConsole\(/, `${name} uses the shared show policy`);
   }
   for (const site of ['wndProc.WM_APP_FOCUS', 'wndProc.WM_APP_FOCUS_SHELL', 'wndProc.WM_COPYDATA', 'main.adopt']) {
     assert.ok(text.includes(`"${site}"`), `${site} uses the shared show policy`);
   }
-  for (const name of ['reclaimShell', 'spawnShellWithSession', 'respawnShellInPlace']) {
+  for (const name of ['reclaimShell', 'spawnShellWithSession', 'startupShellWorker']) {
     const body = fn(text, name);
     assert.ok(body.indexOf('SW_HIDE') < body.indexOf('SetParent('), `${name} hides before reparenting`);
   }
