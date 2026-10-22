@@ -19,11 +19,17 @@ After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publi
 
 ## Automatic desktop updates
 
-The desktop checks the latest stable release before restoring tabs and every three hours while running. Only releases published by `github-actions[bot]` in `valentinyeo/multiprompt` are accepted, with the native ARM64 or x64 executable and its exact `SHA256SUMS.txt` entry. Current releases are unsigned; checksum verification and the GitHub release author are the trust boundary. A signed installation requires a valid update signature from the same publisher.
+The window appears without waiting for GitHub. Checks and downloads run in the background at launch and every three hours. Only an already staged, verified release can install at cold launch before tabs restore, and only when no other workspace window is running.
 
-While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** let you choose when to save sessions and restart. Installation retains `<app>.previous.exe`. A new process must signal readiness after session restoration and remain alive; otherwise the helper restores and starts the previous executable and suppresses that failed release. No update starts while another workspace window is already running at startup.
+Updates accept stable releases published by `github-actions[bot]` in `valentinyeo/multiprompt`. The embedded Ed25519 public key must verify the detached `SHA256SUMS.txt.sig` before any checksums are trusted. Native ARM64 or x64 app and bridge executables and the extension ZIP must match the signed manifest exactly. Authenticode policy remains additional: a signed installation requires a valid update signature from the same publisher.
 
-`pub const IGSH_246 = true;` in `src/update_release.zig` is the default-on switch. Set the process environment variable `IGSH_246=0` to disable release checks and installs without changing the executable. The install directory must be writable; network, permission and verification failures leave the current app running. The isolated desktop verifier disables release updates to keep the selected revision fixed.
+While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** save sessions and restart on request; an active download finishes before the swap. Installation stops the old telemetry and bridge helpers and retains `<app>.previous.exe`. The new app reports ready when its window responds, including the sign-in screen; failed startup restores app, bridge, and extension files and suppresses that release. Rollback starts the old app without a readiness kill deadline. An unusually slow exit remains supervised and reopens the old app after it finishes.
+
+Extension files are updated in the configured unpacked extension directory (or the standard existing installation), excluding `themes/current`, just as the manual installer does. Existing extension reload/self-heal remains responsible for loading those files in the browser.
+
+Publishable builds use `zig build -Drelease=true`, which refuses the fake all-zero public key in `src/release_signing_public_key.txt`; ordinary test builds do not need signing credentials. Release publication requires `MULTIPROMPT_RELEASE_SIGNING_KEY`, a base64 raw 32-byte Ed25519 seed held only in a GitHub secret, matching the embedded public key. The release job signs and self-verifies the checksum manifest before uploading it.
+
+`pub const IGSH_246 = true;` in `src/update_release.zig` is the default-on switch. Set the process environment variable `IGSH_246=0` to disable release checks and installs without changing the executable. The install directory must be writable; network, permission and verification failures leave the current app running. Baseline UI verification disables release updates to keep its revision fixed. The `safe-updates` journey instead uses signed local fake releases and an ephemeral job-only key to prove real staged apply, consecutive swaps and rollback.
 
 ## Install a release
 

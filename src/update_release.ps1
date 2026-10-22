@@ -164,20 +164,23 @@ function Install-Update([string]$Target, [string]$Architecture, [string]$Pids, [
         if (-not (Start-UpdatedApp $Target)) { throw 'Updated app failed readiness' }
         Remove-Item -LiteralPath "$dir/ready.txt" -Force
     } catch {
-        if ($moved) {
-            [IO.File]::WriteAllText("$dir/rejected.txt", $tag)
-            if (Test-Path -LiteralPath $Target) { Move-Item -LiteralPath $Target -Destination "$dir/failed.exe" -Force }
-            Copy-Item -LiteralPath $backup -Destination $Target
-            if ($bridgeInstalled) { Remove-Item -LiteralPath $bridge -Force }
-            if ($bridgeMoved) { Copy-Item -LiteralPath $bridgeBackup -Destination $bridge -Force }
-            if ($extensionSaved) {
-                Remove-Item -LiteralPath $extension -Recurse -Force
-                Copy-Item -LiteralPath "$dir/previous-extension" -Destination $extension -Recurse
+        try {
+            if ($moved) {
+                [IO.File]::WriteAllText("$dir/rejected.txt", $tag)
+                if (Test-Path -LiteralPath $Target) { Move-Item -LiteralPath $Target -Destination "$dir/failed.exe" -Force }
+                Copy-Item -LiteralPath $backup -Destination $Target
+                if ($bridgeInstalled) { Remove-Item -LiteralPath $bridge -Force }
+                if ($bridgeMoved) { Copy-Item -LiteralPath $bridgeBackup -Destination $bridge -Force }
+                if ($extensionSaved) {
+                    Remove-Item -LiteralPath $extension -Recurse -Force
+                    Copy-Item -LiteralPath "$dir/previous-extension" -Destination $extension -Recurse
+                }
+                Remove-Item -LiteralPath "$dir/ready.txt" -Force -ErrorAction SilentlyContinue
             }
+        } finally {
             Remove-Item -LiteralPath "$dir/ready.txt" -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $Target) { Start-RestoredApp $Target } elseif (Test-Path -LiteralPath $backup) { Start-RestoredApp $backup }
         }
-        Remove-Item -LiteralPath "$dir/ready.txt" -Force -ErrorAction SilentlyContinue
-        Start-RestoredApp $Target
         throw
     }
 }
