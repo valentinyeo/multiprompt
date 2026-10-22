@@ -18,7 +18,7 @@ function harness({ timeoutMs, realTarget = false } = {}) {
     return target[key] ??= String(key).startsWith('on') ? event(`${name}.${key}`) : async () => [];
   } });
   const chrome = new Proxy({}, { get(target, key) { return target[key] ??= namespace(key); } });
-  chrome.runtime.connectNative = () => ({ onMessage: event('port.message'), onDisconnect: event('port.disconnect'), postMessage() {} });
+  chrome.runtime.connectNative = () => ({ onMessage: event('port.message'), onDisconnect: event('port.disconnect'), postMessage() {}, disconnect() {} });
   chrome.storage.local = { get: async () => ({}), set: async () => {}, remove: async () => {} };
   chrome.debugger.attach = async ({ tabId }) => {
     assert.equal(attached.has(tabId), false, 'one debugger session per tab');
@@ -499,4 +499,30 @@ test('zsb prints wrapped plain values and a separate warning without changing tr
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('non-emulated busy CDP fails promptly and reset cancels queued emulated work without stale cleanup', async () => {
+  const h = harness();
+  h.hold('Runtime.evaluate');
+  const first = h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate' });
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(h.run({ method: 'cdp', cdpMethod: 'Page.enable' }), /CDP session busy.*zsb reset/);
+  h.release();
+  await first;
+  await h.run({ method: 'emulate', device: 'iphone' });
+  h.hold('Synthetic.enableUnknown');
+  const pending = assert.rejects(h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' }), /CDP session reset/);
+  await new Promise(resolve => setImmediate(resolve));
+  const queued = assert.rejects(h.run({ method: 'key', combo: 'Enter' }), /CDP session reset/);
+  const result = await h.run({ method: 'reset' });
+  assert.equal(result.reset, true);
+  await Promise.all([pending, queued]);
+  assert.equal(h.emulated(1), false);
+  await h.run({ method: 'emulate', device: 'pixel' });
+  h.release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.overrides.get(1).metrics.width, 412);
+  assert.equal(h.attached.has(1), true);
+  await h.run({ method: 'emulate', device: 'off' });
 });

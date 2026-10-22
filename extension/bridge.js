@@ -323,7 +323,7 @@ async function handleHostMessage(message) {
 }
 
 async function dispatch(message) {
-  const targetsTab = messageWindowId(message) != null && !["createPaneWindow", "setTheme", "protectWindow", "resolveWindow"].includes(message.method);
+  const targetsTab = messageWindowId(message) != null && !["createPaneWindow", "setTheme", "protectWindow", "resolveWindow", "reset"].includes(message.method);
   const tabId = targetsTab && lostEmulationTabs.size ? (await getTargetTab(message).catch(() => null))?.id : null;
   const warning = lostEmulationTabs.get(tabId);
   if (warning && message.method !== "emulate") throw new Error(warning);
@@ -2620,22 +2620,27 @@ function clearScreenshotCdpDetachTimer(tabId) {
 }
 
 function withCdpSession(tabId, operation, retainEmulation = false, resetState = false) {
+  if (cdpOperationChains.get(tabId) && !emulatedTabs.has(tabId)) {
+    return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
+  }
+  let reset = false;
+  let cancel;
+  const previousCancel = cdpSessionCancels.get(tabId);
+  const cancelled = new Promise((_, reject) => {
+    cancel = error => { reset = true; reject(error); previousCancel?.(error); };
+  });
+  const checkSession = () => {
+    if (reset) throw new Error("CDP session reset; retry command");
+  };
   const previous = cdpOperationChains.get(tabId) || Promise.resolve();
   const current = previous.catch(() => {}).then(async () => {
+    checkSession();
     clearScreenshotCdpDetachTimer(tabId);
     const pendingDetach = screenshotCdpDetachInFlight.get(tabId);
-    if (pendingDetach) await pendingDetach.catch(() => {});
+    if (pendingDetach) await withTimeout(pendingDetach, 1000, "CDP detach timed out; run zsb reset");
+    checkSession();
 
     const debuggee = { tabId };
-    if (debuggedTabs.has(tabId) && !emulatedTabs.has(tabId)) {
-      try { await chrome.debugger.detach(debuggee); } catch (_) {}
-      debuggedTabs.delete(tabId);
-      screenshotCdpPageEnabledTabs.delete(tabId);
-    }
-    if (!debuggedTabs.has(tabId)) {
-      await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
-      debuggedTabs.add(tabId);
-    }
     let active = true;
     let succeeded = false;
     const cleanup = [];
@@ -2644,7 +2649,7 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
       try {
         return await chrome.debugger.sendCommand(debuggee, method, params);
       } finally {
-        if (!active && emulatedTabs.has(tabId) && debuggedTabs.has(tabId)) {
+        if (!reset && !active && emulatedTabs.has(tabId) && debuggedTabs.has(tabId)) {
           for (const [reset, values] of [...resets].reverse()) {
             await chrome.debugger.sendCommand(debuggee, reset, values).catch(() => {});
           }
@@ -2652,12 +2657,26 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
       }
     };
     try {
-      await chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true });
-      const result = await withTimeout(operation(debuggee, () => active, sendCommand), 15000, "CDP operation timed out");
+      if (debuggedTabs.has(tabId) && !emulatedTabs.has(tabId)) {
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        if (reset) return;
+        debuggedTabs.delete(tabId);
+        screenshotCdpPageEnabledTabs.delete(tabId);
+      }
+      if (!debuggedTabs.has(tabId)) {
+        debuggedTabs.add(tabId);
+        await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out; run zsb reset");
+        checkSession();
+      }
+      checkSession();
+      await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
+      checkSession();
+      const result = await withTimeout(operation(debuggee, () => active && !reset, sendCommand), retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000, "CDP operation timed out; run zsb reset");
       succeeded = true;
       return result;
     } finally {
       active = false;
+      if (reset) return;
       const emulation = emulatedTabs.get(tabId);
       let cleanupError;
       if (emulation && !retainEmulation && !resetState) {
@@ -2669,9 +2688,11 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
           }
         }
       }
+      if (reset) return;
       if ((retainEmulation && !succeeded) || !emulatedTabs.has(tabId) || resetState || cleanupError) {
         emulatedTabs.delete(tabId);
-        try { await chrome.debugger.detach(debuggee); } catch (_) {}
+        await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
+        if (reset) return;
         debuggedTabs.delete(tabId);
         screenshotCdpPageEnabledTabs.delete(tabId);
         if (emulation && !retainEmulation) {
@@ -2680,10 +2701,12 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
             if (cleanupError) throw cleanupError;
             await withTimeout(chrome.debugger.attach(debuggee, "1.3"), 5000, "CDP attach timed out");
             debuggedTabs.add(tabId);
-            await withTimeout(applyDeviceEmulation(debuggee, emulation, () => restoring), 15000, "CDP emulation restore timed out");
+            await withTimeout(applyDeviceEmulation(debuggee, emulation, () => restoring && !reset), 15000, "CDP emulation restore timed out");
+            checkSession();
             emulatedTabs.set(tabId, emulation);
           } catch (error) {
-            try { await chrome.debugger.detach(debuggee); } catch (_) {}
+            if (reset) return;
+            try { await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset"); } catch (_) {}
             debuggedTabs.delete(tabId);
             const warning = `Emulation lost: ${errorText(error)}. Run zsb emulate to restore it.`;
             lostEmulationTabs.set(tabId, warning);
@@ -2696,8 +2719,12 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
     }
   });
   cdpOperationChains.set(tabId, current);
-  return current.finally(() => {
-    if (cdpOperationChains.get(tabId) === current) cdpOperationChains.delete(tabId);
+  cdpSessionCancels.set(tabId, cancel);
+  return Promise.race([current, cancelled]).finally(() => {
+    if (cdpOperationChains.get(tabId) === current) {
+      cdpOperationChains.delete(tabId);
+      cdpSessionCancels.delete(tabId);
+    }
   });
 }
 
@@ -2709,6 +2736,8 @@ async function resetBridge(message) {
     cdpSessionCancels.get(tabId)?.(new Error("CDP session reset; retry command"));
     cdpSessionCancels.delete(tabId);
     cdpOperationChains.delete(tabId);
+    emulatedTabs.delete(tabId);
+    lostEmulationTabs.delete(tabId);
     clearScreenshotCdpDetachTimer(tabId);
     screenshotCdpDetachInFlight.delete(tabId);
     await withTimeout(chrome.debugger.detach({ tabId }), 1000, "CDP reset detach timed out").catch((error) => {
