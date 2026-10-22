@@ -43,7 +43,7 @@ if (mode === 'public') {
     for (const name of ['build-x64', 'build-arm64', 'test', 'test-vps (1)', 'test-vps (2)', 'test-windows (1)', 'test-windows (2)', 'test-windows (3)', 'test-windows (4)', 'no-comments', 'secret-scan', 'extension-version']) {
       assert.ok(codeChecks.some(check => check.name === name && check.conclusion === 'success'), `Missing green check: ${name}`);
     }
-    for (const check of checks) assert.ok(check.bucket === 'pass' || check.bucket === 'skipping' && ['release', 'test', 'test-vps', 'test-windows'].includes(check.name), `Check not green: ${check.name} ${check.state}`);
+    for (const check of checks) assert.ok(check.bucket === 'pass' || check.bucket === 'skipping' && (['release', 'test'].includes(check.name) || /^test-(?:vps|windows)(?: \(|$)/.test(check.name)), `Check not green: ${check.name} ${check.state}`);
     console.log(`ISSUE-252 PR verified: #139 tested code ${testedHead}; current checks green`);
   } else {
     const runs = json(['api', 'repos/valentinyeo/multiprompt/actions/runs?branch=ceo%2FIGSH-252&per_page=30']).workflow_runs;

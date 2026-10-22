@@ -29,10 +29,10 @@ Scope: Inventory persisted fields, implement opt-in record sync through the acco
   EXPECT: ISSUE-252 regression controls proven
   EVIDENCE: pending
 
-- [ ] G6: Required changelog and shortcut documentation ship without version bumps, private data or code comments
+- [x] G6: Required changelog and shortcut documentation ship without version bumps, private data or code comments
   CHECK: node tools/issue-252-proof.mjs public
   EXPECT: ISSUE-252 public release rules verified
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=d44d831eb3c723f43b3320f62af89e8b92268dcde7f2461c27d3e2891e4e19b8; exit=0; EXPECT=matched; output-sha256=5808e16b70b1a8b9f9e0b01df47a059dee6c7e655996c4e3dad387b7c7586c1e; output-bytes=40; shell=/bin/sh; cwd=<repository>; path=b7c9797232e1/20 entries
 
 - [ ] G7: Ticket commit is pushed and titled PR has every GitHub check green without merge or deployment
   CHECK: node tools/issue-252-proof.mjs pr
