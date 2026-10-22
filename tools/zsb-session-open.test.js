@@ -231,7 +231,12 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
+  const fragmentPath = path.join(root, 'changelog.d/IGSH-535-session-open.md');
+  const fragment = fs.existsSync(fragmentPath)
+    ? fs.readFileSync(fragmentPath, 'utf8').trim()
+    : fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8').split('\n')
+      .find(line => line.includes('.ticket = "IGSH-535"'))?.match(/\.text = "([^"]*)"/)?.[1];
+  assert.ok(fragment, 'Session-open needs an unreleased fragment or its published changelog entry');
   assert.equal(fragment.split('\n').length, 1);
   assert.match(fragment, /workspace/);
 });
