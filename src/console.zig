@@ -2253,15 +2253,10 @@ fn positionReconnectedConsole(idx: u32) bool {
     const pane = @import("browser_pane.zig");
     var rc: RECT = std.mem.zeroes(RECT);
     if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
-    rc.left = SIDEBAR_W();
-    rc.top = app_state.DEV_TOP_PAD + pane.threadTitleHeight();
-    rc.bottom -= app_state.DEV_TOP_PAD;
-    if (pane.browserSlotReserved()) {
-        const layout = pane.calcBrowserLayout() orelse return false;
-        const inset: i32 = if (shell.browser_native) pane.paneFocusInset() else 0;
-        rc = .{ .left = layout.console_x + inset, .top = layout.console_y + inset, .right = layout.console_x + layout.console_w - inset, .bottom = layout.console_y + layout.console_h - inset };
-    } else if (!shell.full_width) {
-        const col = pane.centeredConsoleColumn(rc.right, SIDEBAR_W(), if (SIDEBAR_W() == 0) pane.consoleEdgePad() else 0, pane.consoleCellW());
+    rc = @import("window_layout.zig").activePaneContentRect(rc);
+    rc.top += pane.threadTitleHeight();
+    if (!shell.full_width) {
+        const col = pane.centeredConsoleColumn(rc.right, rc.left, 0, pane.consoleCellW());
         rc.left = col.left;
         rc.right = col.left + col.width;
     }
