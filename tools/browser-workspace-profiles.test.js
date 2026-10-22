@@ -84,3 +84,22 @@ test('IGSH-224 conversions retain durable workspace IDs independently of window 
   assert.doesNotMatch(leave, /app_state\.g_ws_id_len\[ws\] = 0/);
   assert.match(workspaces, /const workspace_id = if \(src_wid_len\[src_ws\] > 0\)/);
 });
+
+test('IGSH-224 live browser journey proves every lifecycle stage and background host isolation', () => {
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const journey = control.slice(control.indexOf("        'browser-workspaces' {"), control.indexOf("        'inbox' {"));
+  for (const stage of ['renamed', 'reordered', 'multi-window', 'single-window', 'reopened', 'after']) {
+    assert.ok(journey.includes(`Assert-WorkspaceProfile '${stage}' $targetId $targetRoot $bookmark`));
+  }
+  for (const action of ['rename workspace', 'sort workspaces', 'window mode', 'close workspace', 'IGSH224 Journey']) {
+    assert.ok(journey.includes(`Palette '${action}'`));
+  }
+  assert.match(journey, /Ctrl\+D: bookmark this page in Edge/);
+  assert.match(journey, /\$parked\.result\.url -cne \$bookmark -or \$foreign\.result\.url -ceq \$bookmark/);
+  assert.match(journey, /\(Read-Session\)\.active_workspace -ne 0/);
+  const observe = control.slice(control.indexOf('function Assert-WorkspaceProfile('), control.indexOf('function Select-Theme('));
+  assert.match(observe, /workspace_id -cne \$Id/);
+  assert.match(observe, /\$Bookmark -notin \$urls/);
+  assert.match(observe, /\$live\.Count -ne 1/);
+  assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|PostMessage/);
+});

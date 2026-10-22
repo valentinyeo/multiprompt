@@ -537,12 +537,13 @@ function Palette([string]$Query) {
     Type-Text $Query
 }
 
-function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace') {
     Doctor
     Assert-Foreground
     Record ('zsb ' + ($Arguments -join ' '))
     $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))
     $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")
+    if ($Session -ne 'workspace') { $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:${Session}:${payload}`n") }
     [IO.File]::WriteAllBytes((Join-Path $Evidence ($Name + '.request.bin')), $wire)
     $client = New-Object Net.Sockets.TcpClient
     $reply = New-Object IO.MemoryStream
@@ -569,6 +570,61 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
         if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
         return $response
     } finally { $reply.Dispose(); $client.Dispose() }
+}
+
+function Register-WorkspaceBridge([string]$Root) {
+    $script:extensionIds = @()
+    Wait-Until {
+        foreach ($name in @('Preferences', 'Secure Preferences')) {
+            $path = Join-Path $Root ('Default/' + $name)
+            if (-not (Test-Path $path)) { continue }
+            $saved = Get-Content $path -Raw | ConvertFrom-Json
+            if (-not $saved.PSObject.Properties['extensions'] -or -not $saved.extensions.PSObject.Properties['settings']) { continue }
+            $script:extensionIds = @($saved.extensions.settings.PSObject.Properties | Where-Object { $_.Value.PSObject.Properties['path'] -and $_.Value.path -eq $script:extensionPath } | ForEach-Object { $_.Name })
+            if ($script:extensionIds.Count -eq 1) { return $true }
+        }
+        return $false
+    } 'real unpacked extension identity saved by Edge' 60
+    $manifest = Join-Path $scratch 'native-host.json'
+    $hostExe = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+    if (-not (Test-Path $hostExe)) { throw 'Matching native host executable missing' }
+    $value = @{ name = 'com.zigshell.bridge'; description = 'GitHub isolated workspace verification'; path = $hostExe; type = 'stdio'; allowed_origins = @('chrome-extension://' + $script:extensionIds[0] + '/') }
+    [IO.File]::WriteAllText($manifest, ($value | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    $registry = 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.zigshell.bridge'
+    if (Test-Path $registry) { throw 'Fresh runner already has a native host registration' }
+    New-Item -Path $registry -Force | Out-Null
+    $script:nativeRegistry = $registry
+    Set-Item -Path $script:nativeRegistry -Value $manifest
+    Record ('Registered real Edge extension native host: ' + $script:extensionIds[0])
+}
+
+function Read-BookmarkUrls($Node) {
+    if ($null -eq $Node) { return }
+    if ($Node.PSObject.Properties['url']) { [string]$Node.url }
+    if ($Node.PSObject.Properties['children']) { foreach ($child in $Node.children) { Read-BookmarkUrls $child } }
+}
+
+function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [string]$Bookmark) {
+    Wait-Until {
+        $state = Read-Session
+        if ($null -eq $state) { return $false }
+        if ($state.PSObject.Properties['single_window'] -and $state.single_window) {
+            if ($state.workspaces[$state.active_workspace].wid -cne $Id) { return $false }
+        } elseif (-not $state.PSObject.Properties['workspace_id'] -or $state.workspace_id -cne $Id) { return $false }
+        $file = Join-Path $Root 'Default/Bookmarks'
+        if (-not (Test-Path $file)) { return $false }
+        $bookmarks = Get-Content $file -Raw | ConvertFrom-Json
+        $urls = @($bookmarks.roots.PSObject.Properties | ForEach-Object { Read-BookmarkUrls $_.Value })
+        if ($Bookmark -notin $urls) { return $false }
+        $live = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine -notlike '*--type=*' })
+        if ($live.Count -ne 1) { return $false }
+        $script:profileObservation = @{ stage = $Stage; workspaceId = $Id; root = $Root; bookmarkUrls = $urls; browserPid = $live[0].ProcessId; commandLine = $live[0].CommandLine; state = $state }
+        return $true
+    } ($Stage + ': same saved workspace ID, live profile root and user-created bookmark') 60
+    if (@(Get-ChildItem (Split-Path $Root) -Directory).Count -ne 6) { throw 'Lifecycle created an unexpected profile root' }
+    $script:profileObservations += $script:profileObservation
+    Save-Json $script:profileObservations 'workspace-lifecycle.json'
+    Snapshot $Stage
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot) {
@@ -614,6 +670,11 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'browser-workspaces') {
+        $script:extensionPath = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
+        New-Item -ItemType Directory -Force (Split-Path $script:extensionPath) | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot '../../../extension') $script:extensionPath -Recurse
+    }
     $job = New-Object VerifyJob
     $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     Wait-Until {
@@ -989,6 +1050,7 @@ try {
                     (Test-Path (Join-Path $root 'Local State')) -and
                     @((Read-Inbox).shells | Where-Object { $_.ws -eq $slot -and $_.br -eq 2 }).Count -gt 0
                 } 'completed workspace profile and live docked browser' 60
+                if ($index -eq 0) { Register-WorkspaceBridge $root }
                 $roots += $root
                 $identities += $id
                 Snapshot ('workspace-' + $index)
@@ -1007,8 +1069,88 @@ try {
             if ((Read-Session).workspaces[0].wid -ne $identities[0]) { throw 'Workspace ID changed on return' }
             if (@(Get-ChildItem $browserRoot -Directory).Count -ne 6) { throw 'Switching created another browser profile' }
             if ((Test-Path (Join-Path $scratch 'local/ZigShell/EdgeUserData')) -or (Test-Path (Join-Path $scratch 'local/ZigShell/ChromeUserData'))) { throw 'Fresh launches wrote a shared seed' }
-            Snapshot 'after'
-            $result.checks += @{ name = 'six-stable-live-workspace-profiles'; workspaceIds = $identities; roots = $roots; liveProfiles = 6; sharedSeedCreated = $false; nativeExtensionRouting = 'not exercised; no extension installed in this fresh desktop' }
+            $result.checks += @{ name = 'six-stable-live-workspace-profiles'; workspaceIds = $identities; roots = $roots; liveProfiles = 6; sharedSeedCreated = $false; nativeExtensionRouting = 'real unpacked extension and native host; zsb lifecycle below' }
+            $script:profileObservations = @()
+            $targetId = $identities[5]
+            $targetRoot = $roots[5]
+            $bookmark = 'https://example.com/?igsh224=workspace-five'
+            Press @(0x12, 0x37) 'Alt+7: select the sixth workspace'
+            Wait-Until { (Read-Session).active_workspace -eq 5 } 'sixth workspace active'
+            Palette 'rename workspace'
+            Press @(0x0D) 'Enter: Rename workspace'
+            Press @(0x11, 0x41) 'Ctrl+A: replace workspace name'
+            Type-Text 'IGSH224 Journey'
+            Press @(0x0D) 'Enter: save workspace name'
+            Wait-Until { (Read-Session).workspaces[5].name -ceq 'IGSH224 Journey' } 'workspace rename persisted'
+            Palette 'browser address'
+            Press @(0x0D) 'Enter: focus browser address bar'
+            Type-Text $bookmark
+            Press @(0x0D) 'Enter: navigate to the synthetic bookmark URL'
+            Wait-Until { (Read-Session).tabs | Where-Object { $_.PSObject.Properties['burl'] -and $_.burl -eq $bookmark } } 'app observed browser navigation' 60
+            Press @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
+            Snapshot 'bookmark-action'
+            Press @(0x0D) 'Enter: save favorite'
+            Press @(0x1B) 'Esc: close favorite dialog'
+            [void][VerifyNative]::SetForegroundWindow($script:window)
+            Assert-WorkspaceProfile 'renamed' $targetId $targetRoot $bookmark
+            Palette 'sort workspaces'
+            Press @(0x0D) 'Enter: Sort Workspaces'
+            for ($step = 0; $step -lt 5; $step++) { Press @(0x28) 'Down: select the sixth workspace in sort list' }
+            Press @(0x11, 0x26) 'Ctrl+Up: move the workspace one position earlier'
+            Wait-Until { (Read-Session).workspaces[4].wid -ceq $targetId } 'workspace reorder persisted'
+            Press @(0x1B) 'Esc: close workspace sort list'
+            Assert-WorkspaceProfile 'reordered' $targetId $targetRoot $bookmark
+            Palette 'window mode'
+            Press @(0x0D) 'Enter: convert to multi-window mode'
+            Wait-Until { $state = Read-Session; $state.PSObject.Properties['workspace_id'] -and $state.workspace_id -ceq $targetId -and -not $state.PSObject.Properties['single_window'] } 'standalone identity persisted' 60
+            Assert-WorkspaceProfile 'multi-window' $targetId $targetRoot $bookmark
+            Wait-Until { @(Get-ChildItem (Join-Path $scratch 'roaming/ZigShell') -Filter 'inbox-*.json').Count -eq 6 } 'six standalone workspace windows published' 60
+            [void][VerifyNative]::SetForegroundWindow($script:window)
+            Palette 'window mode'
+            Press @(0x0D) 'Enter: convert back to single-window mode'
+            Wait-Until { $state = Read-Session; $state.PSObject.Properties['single_window'] -and $state.single_window -and $state.workspace_count -eq 6 -and $state.workspaces[4].wid -ceq $targetId } 'all workspace identities and order restored' 90
+            Assert-WorkspaceProfile 'single-window' $targetId $targetRoot $bookmark
+            Palette 'close workspace'
+            Press @(0x0D) 'Enter: close this named workspace'
+            Wait-Until { @((Read-Session).workspaces | Where-Object { $_.wid -ceq $targetId }).Count -eq 0 } 'target workspace closed and saved'
+            Snapshot 'workspace-closed'
+            Palette 'IGSH224 Journey'
+            Press @(0x0D) 'Enter: reopen the named workspace'
+            Wait-Until { $state = Read-Session; $state.workspaces[$state.active_workspace].wid -ceq $targetId } 'same workspace identity reopened' 60
+            Palette 'open browser'
+            Press @(0x0D) 'Enter: restore reopened workspace browser pane'
+            Assert-WorkspaceProfile 'reopened' $targetId $targetRoot $bookmark
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $script:zsbPort = 0
+            Wait-Until {
+                $listener = [regex]::Match((Get-Content $log -Raw), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+                if (-not $listener.Success) { return $false }
+                $script:zsbPort = [int]$listener.Groups[1].Value
+                @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
+            } 'original app-owned zsb listener remains live'
+            $state = Read-Session
+            $targetTab = $state.tabs[$state.active_tab]
+            $targetKey = 'zss-' + $targetTab.shell_id
+            $foreignTab = @($state.tabs | Where-Object { (-not $_.PSObject.Properties['workspace']) -or $_.workspace -eq 0 })[0]
+            $foreignKey = 'zss-' + $foreignTab.shell_id
+            $token = 'e-' + (Split-Path $targetRoot -Leaf)
+            Wait-Until { [IO.Directory]::GetFiles('\\.\pipe\') -contains ('\\.\pipe\multiprompt-browser-isolated-' + $token) } 'reopened workspace native host registered its exact profile pipe' 60
+            $routed = Invoke-Zsb @('url') $script:zsbPort 'zsb-target-url' $targetKey
+            if ($routed.result.url -cne $bookmark) { throw 'zsb reached the wrong workspace browser host' }
+            Press @(0x12, 0x32) 'Alt+2: select another workspace before requesting the parked target'
+            Wait-Until { (Read-Session).active_workspace -eq 0 } 'foreign workspace selected'
+            $parked = Invoke-Zsb @('url') $script:zsbPort 'zsb-parked-target-url' $targetKey
+            $foreign = Invoke-Zsb @('url') $script:zsbPort 'zsb-foreign-url' $foreignKey
+            if ($parked.result.url -cne $bookmark -or $foreign.result.url -ceq $bookmark) { throw 'zsb borrowed the foreground or wrong workspace host' }
+            if ((Read-Session).active_workspace -ne 0) { throw 'Background zsb routing changed the active workspace' }
+            $foreignBookmarks = Join-Path $roots[0] 'Default/Bookmarks'
+            if ((Test-Path $foreignBookmarks) -and (Get-Content $foreignBookmarks -Raw).Contains($bookmark)) { throw 'Target bookmark leaked into the other workspace profile' }
+            Save-Json @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('msedge.exe', 'zigshell-bridge.exe') } | Select-Object ProcessId, ParentProcessId, Name, CommandLine) 'workspace-host-processes.json'
+            Palette 'IGSH224 Journey'
+            Press @(0x0D) 'Enter: return to the verified workspace'
+            Assert-WorkspaceProfile 'after' $targetId $targetRoot $bookmark
+            $result.checks += @{ name = 'workspace-lifecycle-and-zsb'; workspaceId = $targetId; root = $targetRoot; bookmark = $bookmark; stages = @($script:profileObservations | ForEach-Object { $_.stage }); targetSession = $targetKey; foreignSession = $foreignKey; targetReply = $routed; parkedReply = $parked; foreignReply = $foreign; extensionId = $script:extensionIds[0]; profileToken = $token; realLogin = 'post-install laptop1 only' }
+
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
@@ -1159,6 +1301,9 @@ try {
     } catch {
         $result.status = 'failed'
         $result.cleanup = $_.Exception.Message
+    }
+    if (Get-Variable nativeRegistry -Scope Script -ErrorAction SilentlyContinue) {
+        if (Test-Path $script:nativeRegistry) { Remove-Item $script:nativeRegistry -Force }
     }
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $process) { $process.Dispose() }
