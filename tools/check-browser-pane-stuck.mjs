@@ -61,11 +61,11 @@ for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'",
 }
 function foregroundInputContract(source) {
   const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
-  assert.match(press, /Doctor\s+if \(\$Feature -eq 'browser-pane-stuck'\) \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+Wait-Until \{ \[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window \}/);
-  assert.match(press, /\}\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
+  assert.match(press, /\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
 }
 foregroundInputContract(driver);
-assert.throws(() => foregroundInputContract(driver.replace('[void][VerifyNative]::SetForegroundWindow($script:window)', '')));
+assert.throws(() => foregroundInputContract(driver.replaceAll('[void][VerifyNative]::SetForegroundWindow($script:window)', '')));
 assert.throws(() => foregroundInputContract(driver.replace('    Assert-Foreground\n    Record $Label', '    Record $Label')));
 function shiftedShortcutTimingContract(source) {
   const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));

@@ -180,3 +180,13 @@ test('G3: four-section feature map is indexed and workspace entry points link it
   assert.match(workspaces, /\[Session open\]\(session-open.md\)/);
   assert.match(map, /not a Windows journey result/);
 });
+
+
+test('chat table journey waits for the Chat View tab to be saved before recording its identity', () => {
+  const table = control.slice(control.indexOf("        'chat-tables' {"), control.indexOf("        'sessions' {"));
+  const ready = /Wait-Until \{ \$state = Read-Session; \$null -ne \$state -and @\(\$state\.tabs\)\.Count -gt 0 -and \$state\.active_tab -ge 0 -and \$state\.active_tab -lt @\(\$state\.tabs\)\.Count \} 'saved initial table tab'\s+\$tableTab = \(Read-Session\)\.active_tab/;
+  assert.match(table, ready);
+  assert.match(table, /Press @\(0x12, 0x43\) 'Alt\+C: open formatted Chat View'\s+Wait-Until/);
+  assert.doesNotMatch(table.replace('Wait-Until { $state = Read-Session;', 'Write-Output { $state = Read-Session;'), ready);
+  assert.doesNotMatch(table.replace('$state.active_tab -lt @($state.tabs).Count', '$true'), ready);
+});
