@@ -28,8 +28,8 @@ function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
     fn(read('drawing'), 'uiScaled'),
-    ...['SIDEBAR_W', 'threadTitleHeight', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
-    fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'),
+    ...['SIDEBAR_W', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
+    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects'].map(n => fn(layout, n)));
   const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
@@ -62,6 +62,7 @@ var shells = [_]struct { hwnd: HANDLE = @ptrFromInt(2), browser_split_permille: 
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_active = false;
 var g_chat_composer_extra_h: i32 = 0;
+var g_chat_reply_len: usize = 0;
 var g_webview2_active = false;
 var g_webview2_set_visible: ?*const fn (i32) void = null;
 var g_all_sessions_active = false;
@@ -75,7 +76,6 @@ fn mainWindowDpi() u32 { return 96; }
 ${fn(browser, 'browserSplitPermilleForActiveShell')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
-fn chatReplyBarH() i32 { return 0; }
 fn chatWorkingIndicatorH() i32 { return uiScaled(18); }
 fn consoleCellW() i32 { return uiScaled(10); }
 fn GetClientRect(_: HANDLE, rc: *RECT) i32 { rc.* = test_client; return 1; }
@@ -187,6 +187,42 @@ fn equalGap(expected: i32, actual: i32) !void {
         std.debug.print("SPACING ASSERTION expected={d} measured={d}\\n", .{expected, actual});
         return error.UnequalPaneSpacing;
     }
+}
+test "IGSH-549 Chat View content stays inside the focus border" {
+    g_chat_active = true;
+    g_hide_sidebar = false;
+    g_thread_title = true;
+    shells[0].browser_split_permille = 500;
+    for ([_]u32{100, 125, 150}) |scale| {
+        g_ui_scale = scale;
+        for ([_]bool{false, true}) |docked| {
+            reserved = docked;
+            for ([_]bool{false, true}) |full_width| {
+                shells[0].full_width = full_width;
+                for ([_]usize{0, 1}) |reply_len| {
+                    g_chat_reply_len = reply_len;
+                    g_chat_composer_extra_h = if (reply_len > 0) uiScaled(80) else 0;
+                    const primary = activePaneRects(test_client).primary;
+                    const edge = paneFocusRingPad() + paneFocusBorderW();
+                    const inner = RECT{ .left = primary.left + edge, .top = primary.top + edge, .right = primary.right - edge, .bottom = primary.bottom - edge };
+                    const c = chatViewLayout();
+                    const title = RECT{ .left = c.transcript.left, .top = threadTitleTop(), .right = threadTitleBandRightFor(test_client.right), .bottom = threadTitleTop() + threadTitleHeight() };
+                    for ([_]RECT{c.composer_card, c.transcript, title, c.composer, c.send_btn, c.attach_btn, c.stop_btn}) |rect| {
+                        try std.testing.expect(rect.left >= inner.left);
+                        try std.testing.expect(rect.top >= inner.top);
+                        try std.testing.expect(rect.right <= inner.right);
+                        try std.testing.expect(rect.bottom <= inner.bottom);
+                        try std.testing.expect(rect.right >= rect.left and rect.bottom >= rect.top);
+                    }
+                }
+            }
+        }
+    }
+    g_chat_reply_len = 0;
+    g_chat_composer_extra_h = 0;
+    g_chat_active = false;
+    reserved = false;
+    shells[0].full_width = false;
 }
 test "all production pane consumers share outer margins and gaps" {
     var failures: usize = 0;
