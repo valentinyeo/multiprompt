@@ -63,7 +63,7 @@ test("leaving single-window mode preserves the active identity and remembered wo
     "a failed split must keep single-window mode active");
 
   const leave = functionBody("leaveSingleWindowMode", "newWorkspace");
-  const exportPos = leave.indexOf("if (!exportSlotSessionFile(ws)) return false;");
+  const exportPos = leave.indexOf("if (!exportSlotSessionFile(ws, entry.id[0..entry.id_len])) return false;");
   const detachPos = leave.indexOf("hibernateWorkspaceShell(si)");
   assert.ok(exportPos >= 0 && detachPos > exportPos,
     "every workspace export must finish before any live shell is detached");
@@ -71,8 +71,9 @@ test("leaving single-window mode preserves the active identity and remembered wo
     "the standalone frame must inherit the active workspace name");
   assert.match(leave, /addOrUpdateWorkspaceHosted\([\s\S]*?true, ""\)/,
     "split slots must become standalone remembered registry entries");
-  assert.match(leave, /g_ws_ids\[0\][\s\S]*?getInstanceName\(\)/,
-    "the remaining current workspace must use the window's stable identity");
+  assert.match(leave, /g_ws_ids\[0\] = original_ids\[active_slot\]/,
+    "the remaining current workspace must retain its stable identity independently of its window");
+  assert.match(leave, /g_ws_id_len\[0\] = original_id_lengths\[active_slot\]/);
 });
 
 test("standalone workspace exports keep groups without forcing single-window mode", () => {
@@ -93,10 +94,11 @@ test("mode switches reopen every validated export and preserve empty workspaces"
   const leave = functionBody("leaveSingleWindowMode", "newWorkspace");
   assert.ok(leave.indexOf("saveSession();") < leave.indexOf("spawnWorkspaceWindow(entry.id"));
   assert.ok(leave.indexOf("publishInboxState();") < leave.indexOf("spawnWorkspaceWindow(entry.id"));
-  assert.match(leave, /g_ws_ids\[ws\]\[0\.\.g_ws_id_len\[ws\]\], getInstanceName\(\)/);
-  assert.match(leave, /g_ws_id_len\[ws\] = 0/);
+  assert.match(leave, /entry.id\[0\.\.entry.id_len\], getInstanceName\(\)/);
+  assert.match(leave, /"split-\{d\}-\{d\}"/);
+  assert.doesNotMatch(leave, /g_ws_id_len\[ws\] = 0/);
   assert.match(leave, /for \(0\.\.split_count\) \|i\|/);
-  assert.ok(leave.indexOf('saveWorkspaceModeOrder(active_slot)') < leave.indexOf('hibernateWorkspaceShell(si)'));
+  assert.ok(leave.indexOf('saveWorkspaceModeOrder()') < leave.indexOf('hibernateWorkspaceShell(si)'));
   const toggle = functionBody('toggleSingleWindowMode','newWorkspace');
   assert.ok(toggle.indexOf('collapseOtherWindowsIntoThis();') < toggle.indexOf('restoreWorkspaceModeOrder();'));
   assert.match(source, /restored == 0 and !g_restored_valid_session/);

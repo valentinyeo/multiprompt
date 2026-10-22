@@ -1,5 +1,6 @@
 const std = @import("std");
 const windows = std.os.windows;
+const workspace_profile = @import("browser_workspace_profile.zig");
 const browser_profile_clone = @import("browser_profile_clone.zig");
 
 const app_name = "com.zigshell.bridge";
@@ -13,6 +14,8 @@ const browser_request_attempts = 4;
 
 var g_window_id: ?i64 = null;
 var g_profile_token: []const u8 = "";
+var g_window_binding_profile: [32]u8 = std.mem.zeroes([32]u8);
+var g_window_binding_required = false;
 
 const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
@@ -180,7 +183,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         return usage();
     }
 
-    if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
+    const bound_window = resolveWindowFromEnv(allocator);
+    if (g_window_id == null) g_window_id = bound_window;
 
     const is_script = std.mem.eql(u8, command, "cdp") and blk: {
         var script_args = args;
@@ -200,6 +204,29 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     defer if (profile_env) |token| allocator.free(token);
     g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
+    if (!is_native_host and profile_override == null and profile_env == null and g_window_binding_profile[0] != 0) {
+        g_profile_token = &g_window_binding_profile;
+    }
+    const needs_host = !std.mem.eql(u8, command, "open") and !std.mem.eql(u8, command, "sidebar") and
+        !std.mem.eql(u8, command, "status") and !std.mem.eql(u8, command, "doctor") and
+        !std.mem.eql(u8, command, "version") and !std.mem.eql(u8, command, "manifest") and
+        !std.mem.eql(u8, command, "help") and !std.mem.eql(u8, command, "--help") and !std.mem.eql(u8, command, "-h");
+    if (!is_native_host and needs_host and profile_override == null and profile_env == null and g_window_binding_required and g_window_binding_profile[0] == 0) {
+        const response = try makeBridgeCliErrorResponse(allocator, command, "workspace profile binding is missing or stale; reopen this exact tab's browser pane", null);
+        defer allocator.free(response);
+        try writeStdout(response);
+        try writeStdout("\n");
+        std.process.exit(2);
+    }
+    var parent_token: [32]u8 = undefined;
+    if (is_native_host and !is_legacy_host) {
+        const parent = try workspace_profile.nativeParentToken(allocator, &parent_token);
+        if (parent.chromium) {
+            const actual = parent.token orelse "";
+            if (g_profile_token.len > 0 and !std.mem.eql(u8, actual, g_profile_token)) return error.ProfileParentMismatch;
+            g_profile_token = actual;
+        }
+    }
     var pipe_name_buf: [128]u8 = undefined;
     const profile_pipe_name = isolatedPipeName(&pipe_name_buf, g_profile_token) catch {
         if (!is_native_host) {
@@ -1143,41 +1170,32 @@ fn sendSidebarNotify() !void {
 
 fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     _ = allocator;
-    var buf: [256]u8 = undefined;
-
+    var buf: [1024]u8 = undefined;
+    var override: ?i64 = null;
     if (getEnvVar(&buf, "BROWSER_CLI_WINDOW")) |val| {
-        const trimmed = std.mem.trim(u8, val, " \t\r\n");
-        if (std.fmt.parseInt(i64, trimmed, 10)) |id| {
-            return id;
-        } else |_| {}
+        override = std.fmt.parseInt(i64, std.mem.trim(u8, val, " \t\r\n"), 10) catch null;
     }
-
     if (getEnvVar(&buf, "BROWSER_CLI_WINDOW_FILE")) |path| {
-        var path_buf: [260]u8 = undefined;
-        if (path.len >= path_buf.len) return null;
+        g_window_binding_required = workspace_profile.IGSH_224;
+        var path_buf: [1024]u8 = undefined;
+        if (path.len >= path_buf.len) return override;
         @memcpy(path_buf[0..path.len], path);
         path_buf[path.len] = 0;
-        const file = CreateFileA(
-            @ptrCast(&path_buf),
-            0x80000000,
-            1,
-            null,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            null,
-        );
-        if (file == INVALID_HANDLE_VALUE) return null;
+        const file = CreateFileA(@ptrCast(&path_buf), GENERIC_READ, FILE_SHARE_READ | 4, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+        if (file == INVALID_HANDLE_VALUE) return override;
         defer _ = CloseHandle(file);
-        var file_buf: [64]u8 = undefined;
+        var file_buf: [80]u8 = undefined;
         var read: windows.DWORD = 0;
-        if (ReadFile(file, &file_buf, @intCast(file_buf.len), &read, null) == 0) return null;
-        const trimmed = std.mem.trim(u8, file_buf[0..read], " \t\r\n");
-        if (std.fmt.parseInt(i64, trimmed, 10)) |id| {
-            return id;
-        } else |_| {}
+        if (ReadFile(file, &file_buf, file_buf.len, &read, null) == 0 or read == file_buf.len) return override;
+        var lines = std.mem.splitScalar(u8, file_buf[0..read], '\n');
+        const id_text = std.mem.trim(u8, lines.next() orelse return override, " \t\r");
+        const id = std.fmt.parseInt(i64, id_text, 10) catch return override;
+        if (id <= 0) return override;
+        const profile = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+        if (workspace_profile.isWorkspaceToken(profile)) @memcpy(&g_window_binding_profile, profile);
+        return override orelse id;
     }
-
-    return null;
+    return override;
 }
 
 fn commandDeadline(is_script: bool) void {
@@ -1196,9 +1214,10 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
         var name_buf: [128]u8 = undefined;
         const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
         const mutex = CreateMutexA(null, 0, name.ptr) orelse return error.ProfileMutexUnavailable;
-        const wait = WaitForSingleObject(mutex, 0xFFFFFFFF);
+        const wait = WaitForSingleObject(mutex, if (workspace_profile.isWorkspaceToken(g_profile_token)) 0 else 0xFFFFFFFF);
         if (wait != 0 and wait != 0x80) {
             _ = CloseHandle(mutex);
+            if (workspace_profile.isWorkspaceToken(g_profile_token)) return error.ProfileAlreadyRegistered;
             return error.ProfileMutexUnavailable;
         }
         break :blk mutex;
@@ -1371,6 +1390,8 @@ fn sendLocalStatus(allocator: std.mem.Allocator) !void {
     } else {
         try response.appendSlice("null,\"pane\":\"unknown\"");
     }
+    try response.appendSlice(",\"profileToken\":");
+    try appendJsonString(&response, g_profile_token);
     try response.appendSlice(",\"hint\":\"For remote multiprompt-browser, reconnect the SSH/tmux session before opening or rebinding the browser pane after a network drop.\"}\n");
     try writeStdout(response.items);
 }
@@ -2923,11 +2944,14 @@ const CloneFixture = struct {
         "Local State",                       "Default/Preferences",        "Default/Bookmarks",     "Default/Network/Cookies",
         "Default/Service Worker/Database/y", "Default/Secure Preferences", "Default/Login Data",    "Default/Extensions/extension/data",
         "Default/Local Storage/data",        "Default/IndexedDB/data",     "Default/Sessions/data", "Default/History",
+        "Default/Local Extension Settings/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/CURRENT",
         "Default/Web Data",                  "Profile 1/Preferences",
     };
     const skipped = [_][]const u8{
         "lockfile",                          "Default/Cache/data_1", "Default/Service Worker/CacheStorage/x",
         "OptGuideOnDeviceModel/weights.bin", "Crashpad/z",           "root-metrics",
+        "Default/Local Extension Settings/fgclkhodglfogcckilgnihofmlpmiiao/CURRENT",
+        "Default/Local Extension Settings/eakdogphfehclpdnjecifppkcnfjnheh/CURRENT",
     };
 
     fn init() !CloneFixture {
@@ -3134,4 +3158,94 @@ test "ISSUE-410 extended paths normalize before overlapping path protection" {
     try fixture.same("clone", ".multiprompt-clone-complete", "");
     try fixture.unchanged();
     std.debug.print("ISSUE-410 extended paths passed\n", .{});
+}
+
+test "IGSH-224 workspace profile module" {
+    std.testing.refAllDecls(workspace_profile);
+}
+
+test "IGSH-224 workspace profiles seed independently and retain bookmark edits" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("seed", "Default\\Bookmarks", "shared bookmarks");
+    for (0..6) |index| {
+        const destination = try std.fmt.allocPrint(std.testing.allocator, "{s}\\workspace-{d}", .{ fixture.base, index });
+        defer std.testing.allocator.free(destination);
+        try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, destination);
+        try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, destination));
+    }
+    try fixture.write("workspace-0", "Default\\Bookmarks", "workspace zero only");
+    try fixture.same("workspace-1", "Default\\Bookmarks", "shared bookmarks");
+    try fixture.same("seed", "Default\\Bookmarks", "shared bookmarks");
+    const zero = try std.fmt.allocPrint(std.testing.allocator, "{s}\\workspace-0", .{fixture.base});
+    defer std.testing.allocator.free(zero);
+    try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, zero);
+    try fixture.same("workspace-0", "Default\\Bookmarks", "workspace zero only");
+}
+
+test "IGSH-224 incomplete workspace destination is never launchable" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("clone", "Local State", "{}");
+    try std.testing.expect(!try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+    try std.testing.expectError(error.IncompleteWorkspaceProfile, browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, fixture.source, fixture.dest));
+    try fixture.same("clone", "Local State", "{}");
+}
+
+test "IGSH-224 a new installation creates a complete profile without creating a seed" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    const absent_seed = try std.fmt.allocPrint(std.testing.allocator, "{s}\\absent-seed", .{fixture.base});
+    defer std.testing.allocator.free(absent_seed);
+    try browser_profile_clone.ensureWorkspaceProfile(std.testing.allocator, absent_seed, fixture.dest);
+    try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+    try fixture.absent("absent-seed");
+    try fixture.same("clone", "Default\\Preferences", "{}");
+}
+
+test "IGSH-224 source without a process lock is locked only for the clone transaction" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.tmp.dir.deleteFile(std.testing.io, "seed/lockfile");
+    _ = try browser_profile_clone.clone(std.testing.allocator, fixture.source, fixture.dest, .{});
+    try fixture.absent("seed/lockfile");
+    try fixture.absent("clone/lockfile");
+    try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, fixture.dest));
+}
+
+test "IGSH-224 upgrade retains the original shared profile root and all synthetic durable markers" {
+    var fixture = try CloneFixture.init();
+    defer fixture.deinit();
+    try fixture.write("ZigShell/EdgeUserData", "Default/Bookmarks", "synthetic upgrade bookmarks");
+    try fixture.write("ZigShell/EdgeUserData", "Default/Network/Cookies", "synthetic upgrade cookies");
+    try fixture.write("ZigShell/EdgeUserData", "Local State", "synthetic encryption key marker");
+    try workspace_profile.adoptLegacyProfile(fixture.base, "edge", "original-workspace");
+    var original: [32]u8 = undefined;
+    _ = try workspace_profile.token(&original, "edge", "original-workspace");
+    var root_buf: [1024]u8 = undefined;
+    const root = try workspace_profile.path(&root_buf, fixture.base, "edge", &original);
+    const shared = try std.fmt.allocPrint(std.testing.allocator, "{s}\\ZigShell\\EdgeUserData", .{fixture.base});
+    defer std.testing.allocator.free(shared);
+    try std.testing.expectEqualStrings(shared, root);
+    try workspace_profile.ensureWorkspaceProfile(std.testing.allocator, shared, root);
+    try workspace_profile.adoptLegacyProfile(fixture.base, "edge", "new-workspace");
+    var discovered: [32]u8 = undefined;
+    try std.testing.expectEqualStrings(&original, (try workspace_profile.tokenFromPath(&discovered, fixture.base, shared)).?);
+    for ([_][]const u8{ "new-workspace", "another-workspace" }) |id| {
+        var value: [32]u8 = undefined;
+        _ = try workspace_profile.token(&value, "edge", id);
+        var next_buf: [1024]u8 = undefined;
+        const next = try workspace_profile.path(&next_buf, fixture.base, "edge", &value);
+        try std.testing.expect(!std.mem.eql(u8, shared, next));
+        try workspace_profile.ensureWorkspaceProfile(std.testing.allocator, shared, next);
+        try std.testing.expect(try browser_profile_clone.workspaceReady(std.testing.allocator, next));
+        const relative = try std.fmt.allocPrint(std.testing.allocator, "ZigShell/BrowserWorkspaces/edge/{s}/Default/Bookmarks", .{value[2..]});
+        defer std.testing.allocator.free(relative);
+        try fixture.absent(relative);
+    }
+    try std.testing.expectEqualStrings(shared, try workspace_profile.path(&root_buf, fixture.base, "edge", &original));
+    try fixture.same("ZigShell/EdgeUserData", "Default/Bookmarks", "synthetic upgrade bookmarks");
+    try fixture.same("ZigShell/EdgeUserData", "Default/Network/Cookies", "synthetic upgrade cookies");
+    try fixture.same("ZigShell/EdgeUserData", "Local State", "synthetic encryption key marker");
+    try fixture.absent("ZigShell/EdgeUserData/.multiprompt-clone-complete");
 }
