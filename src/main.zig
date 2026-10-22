@@ -7717,11 +7717,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 pub fn main(init: std.process.Init) void {
     launch_cache.begin();
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return;
-    if (update_release.runHelperIfRequested(args)) return;
     if (usage_telemetry_mode.isRequested(args)) {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
     if (update_check.runRelaunchHelperIfRequested()) return;
