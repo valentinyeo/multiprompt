@@ -42,4 +42,42 @@ function build(source) {
   } };
 }
 
-module.exports = { prepare, build };
+function prepareNative(source) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'account-hosts-native-'));
+  require('./zig-copy').copyZig(['account_hosts.zig', 'file_io.zig'], dir);
+  const production = section(source, 'accountApplyHostAddresses')
+    .replaceAll('app_state.', '')
+    .replaceAll('@import("console.zig").appendSshExe', 'appendSshExe');
+  const fixture = `const std = @import("std");
+const account_hosts = @import("account_hosts.zig");
+const DWORD = @import("win32.zig").DWORD;
+const LPCWSTR = @import("win32.zig").LPCWSTR;
+const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
+const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
+const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
+const SSH_TARGET_DE = "remote-1";
+const SSH_TARGET_UK = "remote-2";
+const SSH_TARGET_INNE = "remote-3";
+fn appendSshExe(buf: []u8, len: *usize) bool {
+    @memcpy(buf[0..4], "ssh ");
+    len.* = 4;
+    return true;
+}
+fn accountSshOutput(_: std.mem.Allocator, _: []const u8, _: u64) ![]const u8 {
+    return "hostname old.example\\nport 22\\nuser owner\\n";
+}
+test "ISSUE-252 native Windows timestamped backup precedes address rewrite" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const old = account_hosts.Host{ .slot = 0, .name = "Host 1", .hostname = "old.example", .port = 22, .user = "owner" };
+    var changed = old;
+    changed.hostname = "native.example";
+    try accountApplyHostAddresses(arena.allocator(), &.{old}, &.{changed});
+}
+`;
+  const file = path.join(dir, 'test.zig');
+  fs.writeFileSync(file, fixture + production);
+  return { dir, file, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+module.exports = { prepare, build, prepareNative };

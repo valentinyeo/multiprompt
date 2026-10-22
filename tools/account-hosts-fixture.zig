@@ -145,8 +145,14 @@ const account_client = struct {
             } else {
                 const host = parsed.value.layout.hosts.?[0];
                 server_host = host;
+                server_host.name = try allocator.dupe(u8, host.name);
                 server_host.hostname = try allocator.dupe(u8, host.hostname);
                 server_host.user = try allocator.dupe(u8, host.user);
+                if (host.host_keys) |keys| {
+                    const owned_keys = try allocator.alloc([]const u8, keys.len);
+                    for (keys, owned_keys) |key, *owned| owned.* = try allocator.dupe(u8, key);
+                    server_host.host_keys = owned_keys;
+                }
                 revision += 1;
                 puts += 1;
             }

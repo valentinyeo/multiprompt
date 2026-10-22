@@ -110,3 +110,23 @@ test('ISSUE-252 production two-laptop host sync regressions and master negative 
     assert.match(result.stderr, /ISSUE-252 remote hostname port and user changes reach laptop B[^]*FAIL/);
   } finally { negative.cleanup(); }
 });
+
+test('ISSUE-252 native Windows rewrite writes a real timestamped backup and preserves credentials', { skip: process.platform !== 'win32' }, () => {
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const fixture = require('./account-hosts-fixture').prepareNative(read('src/account_desktop.zig'));
+  try {
+    const folder = path.join(fixture.dir, '.ssh');
+    fs.mkdirSync(folder);
+    const original = 'Host remote-1\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\n  IdentityFile ~/.ssh/local_key\r\n  ProxyCommand custom-proxy %h\r\nHost other\r\n  HostName untouched.example\r\n';
+    fs.writeFileSync(path.join(folder, 'config'), original);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', fixture.file, '--test-filter', 'ISSUE-252 native Windows', '-lkernel32'], { encoding: 'utf8', timeout: 120000, env: { ...process.env, USERPROFILE: fixture.dir } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const backups = fs.readdirSync(folder).filter(name => /^config\.\d+\.bak$/.test(name));
+    assert.equal(backups.length, 1);
+    assert.equal(fs.readFileSync(path.join(folder, backups[0]), 'utf8'), original);
+    const config = fs.readFileSync(path.join(folder, 'config'), 'utf8');
+    assert.match(config, /hostname native.example\r\n/);
+    for (const line of ['  Port 22\r\n', '  User owner\r\n', '  IdentityFile ~/.ssh/local_key\r\n', '  ProxyCommand custom-proxy %h\r\n', 'Host other\r\n  HostName untouched.example\r\n']) assert.ok(config.includes(line));
+  } finally { fixture.cleanup(); }
+});
