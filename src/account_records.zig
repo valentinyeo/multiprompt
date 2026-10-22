@@ -306,7 +306,9 @@ pub fn delta(a: Allocator, local: []const Record, remote: []const Record) ![]con
             if (record.session != null and remote[i].session != null and !record.deleted and !remote[i].deleted) {
                 const combined = try mergeSession(a, remote[i], record);
                 const left = try std.json.Stringify.valueAlloc(a, combined, .{ .emit_null_optional_fields = false });
-                const right = try std.json.Stringify.valueAlloc(a, remote[i], .{ .emit_null_optional_fields = false });
+                var normalized = remote[i];
+                normalized.fields = fieldStamps(normalized);
+                const right = try std.json.Stringify.valueAlloc(a, normalized, .{ .emit_null_optional_fields = false });
                 if (eq(u8, left, right)) continue;
             } else {
                 if (!newer(record, remote[i]) and try payloadEqual(a, record, remote[i])) continue;
