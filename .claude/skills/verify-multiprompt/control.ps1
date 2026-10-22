@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -733,6 +733,61 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
     } finally { $reply.Dispose(); $client.Dispose() }
 }
 
+function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
+    Doctor
+    if ($process.MainWindowHandle -ne $script:window) { throw 'Refusing to close a different window' }
+    Save-Json (Read-Inbox) ($Stage + '-before.inbox.json')
+    Save-Json (Read-Session) ($Stage + '-before.session.json')
+    if ($Crash) {
+        Record 'Kill only the verified owned app PID after selection persistence'
+        Stop-Process -Id $process.Id -Force
+    } else {
+        Record 'WM_CLOSE: close only the verified owned main window normally'
+        if (-not $process.CloseMainWindow()) { throw 'Owned window refused WM_CLOSE' }
+    }
+    if (-not $process.WaitForExit(20000)) { throw "$Stage app did not exit" }
+    $stopped = $job.Stop()
+    Save-Json @{ pid = $process.Id; activeAfterStop = $stopped.ActiveProcesses; crash = $Crash } ($Stage + '-exit.json')
+    $process.Dispose()
+    $job.Dispose()
+    $script:process = $null
+    $script:job = $null
+    $script:window = [IntPtr]::Zero
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $logStart = (Get-Content $log -Raw).Length
+    $script:job = New-Object VerifyJob
+    $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), '--single-window')
+    Wait-Until {
+        $process.Refresh()
+        $script:window = $process.MainWindowHandle
+        $state = Read-Inbox
+        $trace = (Get-Content $log -Raw).Substring($logStart)
+        $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
+            $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
+            $trace -match 'launch step=browser'
+    } "$Stage relaunch owns its published state after session restore" 60
+    [void][VerifyNative]::ShowWindow($script:window, 9)
+    [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "$Stage relaunched window foreground"
+    Doctor
+}
+
+function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]$WorkspaceId) {
+    Wait-Until {
+        $state = Read-Inbox
+        $saved = Read-Session
+        if ($null -eq $state -or $null -eq $saved) { return $false }
+        $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+        $selected.Count -eq 1 -and $selected[0].name -ceq $Name -and
+            $selected[0].ws -eq $Workspace -and $state.active_workspace -eq $Workspace -and
+            $saved.active_workspace -eq $Workspace -and $saved.workspaces[$Workspace].wid -ceq $WorkspaceId -and
+            $saved.active_shell_id -eq $state.active_shell_id -and
+            $saved.tabs[$saved.active_tab].name -ceq $Name -and
+            @($state.shells | Where-Object { $_.name -in @('Restore first', 'Restore middle', 'Restore last') }).Count -eq 3
+    } "published and persisted selection is $Name in the original workspace"
+}
+
 function Select-Theme([string]$Theme, [string]$ActionShot) {
     Palette 'themes'
     Press @(0x0D) 'Enter: Themes...'
@@ -777,7 +832,11 @@ try {
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
     $job = New-Object VerifyJob
-    $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
+    if ($Feature -eq 'session-restore') {
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
+    } else {
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
+    }
     Wait-Until {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
@@ -862,6 +921,58 @@ try {
             Press @(0x0D) 'Enter: execute shell command'
             Wait-Until { (Test-Path $marker) -and (Get-Content $marker -Raw).Trim() -eq 'verified-from-real-cmd' } 'real console command wrote file'
             $result.checks += @{ name = 'create-rename-execute'; tabsBefore = $before; tabsAfter = @((Read-Session).tabs).Count; marker = (Get-Content $marker -Raw).Trim() }
+            Snapshot 'after'
+        }
+        'session-restore' {
+            Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
+            $before = (Read-Session).workspace_count
+            Press @(0x11, 0x4E) 'Ctrl+N: create a different workspace with its first CMD session'
+            Wait-Until { (Read-Session).workspace_count -eq $before + 1 } 'new workspace persisted'
+            $workspace = (Read-Session).active_workspace
+            $workspaceId = (Read-Session).workspaces[$workspace].wid
+            if ($workspace -eq 0 -or [string]::IsNullOrWhiteSpace($workspaceId)) { throw 'Expected a distinct named workspace identity' }
+            $names = @('Restore first', 'Restore middle', 'Restore last')
+            for ($i = 0; $i -lt $names.Count; $i++) {
+                if ($i -gt 0) {
+                    $tabsBefore = @((Read-Session).tabs).Count
+                    Focus-Palette 'new cmd' 2000
+                    Press @(0x0D) 'Enter: New CMD shell for restore'
+                    Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 } 'new local CMD session saved'
+                }
+                Press @(0x71) 'F2: name the restore session'
+                Press @(0x11, 0x41) 'Ctrl+A: replace restore session name'
+                Type-Text $names[$i]
+                Press @(0x0D) 'Enter: save restore session name'
+                Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq $names[$i] -and $_.kind -ceq 'cmd' }).Count -eq 1 } 'unique local CMD name persisted'
+            }
+            $tabs = @((Read-Session).tabs)
+            $middleIndex = -1
+            for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
+            if ($middleIndex -lt 0) { throw 'Middle session missing from saved tabs' }
+            Focus-Palette 'Restore middle' $middleIndex
+            Press @(0x0D) 'Enter: select the middle session by name'
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId
+            Snapshot 'action'
+            Restart-SessionRestore 'normal-close' $false
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId
+            Save-Json (Read-Inbox) 'normal-close-after.inbox.json'
+            Save-Json (Read-Session) 'normal-close-after.session.json'
+            Snapshot 'normal-close-after'
+            $result.checks += @{ name = 'normal-close-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
+            $tabs = @((Read-Session).tabs)
+            $firstIndex = -1
+            for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore first') { $firstIndex = $i } }
+            if ($firstIndex -lt 0) { throw 'First session missing from saved tabs' }
+            Focus-Palette 'Restore first' $firstIndex
+            Press @(0x0D) 'Enter: select a different named session before the kill'
+            Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId
+            Snapshot 'kill-action'
+            Restart-SessionRestore 'process-kill' $true
+            Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId
+            Save-Json (Read-Inbox) 'process-kill-after.inbox.json'
+            Save-Json (Read-Session) 'process-kill-after.session.json'
+            $result.checks += @{ name = 'process-kill-selection'; session = 'Restore first'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
+            if ($result.checks.Count -ne 2) { throw 'Both restore checks are required' }
             Snapshot 'after'
         }
         'workspaces' {

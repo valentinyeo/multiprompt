@@ -264,6 +264,11 @@ pub fn publishInboxStateNow() void {
     pos += writeUintTo(json[pos..], @intFromPtr(app_state.g_main_hwnd));
     json[pos] = '"';
     pos += 1;
+    const selection = std.fmt.bufPrint(json[pos..], ",\"active_shell_id\":{d},\"active_workspace\":{d}", .{
+        if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0,
+        app_state.g_active_workspace,
+    }) catch return;
+    pos += selection.len;
     if (app_state.g_single_window) {
         const p_sw = ",\"sw\":1,\"wsl\":[";
         @memcpy(json[pos .. pos + p_sw.len], p_sw);

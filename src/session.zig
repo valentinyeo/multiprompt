@@ -168,6 +168,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
     pos += header.len;
 
     var written_tabs: usize = 0;
+    var active_tab: ?usize = null;
     for (0..app_state.shell_count) |i| {
         if (workspace_filter != null and app_state.shells[i].workspace != workspace_filter.?) continue;
         if (pos >= json_buf.len - 4096) return false;
@@ -176,6 +177,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (i == app_state.active_shell and (!app_state.g_single_window or app_state.shells[i].workspace == app_state.g_active_workspace)) active_tab = written_tabs;
         written_tabs += 1;
         const kind_str: []const u8 = switch (app_state.shells[i].kind) {
             .cmd => "cmd",
@@ -497,11 +499,9 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
     @memcpy(json_buf[pos .. pos + footer_tabs.len], footer_tabs);
     pos += footer_tabs.len;
 
-    if (app_state.active_shell < app_state.shell_count and (!app_state.g_single_window or app_state.shells[app_state.active_shell].workspace == app_state.g_active_workspace) and pos + 32 < json_buf.len) {
-        var at_buf: [32]u8 = undefined;
-        const at = std.fmt.bufPrint(&at_buf, ",\"active_tab\":{d}", .{app_state.active_shell}) catch at_buf[0..0];
-        @memcpy(json_buf[pos .. pos + at.len], at);
-        pos += at.len;
+    if (active_tab) |at| {
+        const selection = std.fmt.bufPrint(json_buf[pos..], ",\"active_tab\":{d},\"active_shell_id\":{d}", .{ at, app_state.shells[app_state.active_shell].shell_id }) catch return false;
+        pos += selection.len;
     }
 
     if (app_state.g_light_theme) {
@@ -784,19 +784,75 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
     pos += 1;
 
     if (workspace_filter != null and !sessionFileIsValid(json_buf[0..pos])) return false;
+    if (workspace_filter == null and @import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) {
+        const previous = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY);
+        defer if (previous) |bytes| std.heap.page_allocator.free(bytes);
+        if (previous) |bytes| {
+            const merged = mergeStartupSelection(std.heap.page_allocator, bytes, json_buf[0..pos]) catch return false;
+            defer std.heap.page_allocator.free(merged);
+            return writeFileAtomicW(path, merged);
+        }
+    }
     const ok = writeFileAtomicW(path, json_buf[0..pos]);
     if (workspace_filter == null) debugLog2("saveSession: ", json_buf[0..pos]);
     return ok;
 }
 
+fn mergeStartupSelection(a: std.mem.Allocator, previous: []const u8, current: []const u8) ![]u8 {
+    var saved = try json_reader.parse(a, previous);
+    defer saved.deinit();
+    var live = try json_reader.parse(a, current);
+    defer live.deinit();
+    if (saved.value != .object or live.value != .object) return error.InvalidSession;
+    const saved_tabs = saved.value.object.getPtr("tabs") orelse return error.InvalidSession;
+    if (saved_tabs.* != .array) return error.InvalidSession;
+    for (json_reader.array(json_reader.field(live.value, "tabs"))) |tab| {
+        const id = json_reader.uint(tab, "shell_id");
+        var found = false;
+        for (saved_tabs.array.items) |old| {
+            if (json_reader.uint(old, "shell_id") == id) {
+                found = true;
+                break;
+            }
+        }
+        if (!found and !@import("launch_cache.zig").cachedShell(@intCast(id))) try saved_tabs.array.append(tab);
+    }
+    const merged_tabs = saved_tabs.array.items;
+    if (json_reader.uint(live.value, "workspace_count") > json_reader.uint(saved.value, "workspace_count")) {
+        for ([_][]const u8{ "single_window", "workspace_count", "workspaces" }) |key| {
+            try saved.value.object.put(saved.arena.allocator(), key, json_reader.field(live.value, key));
+        }
+    }
+    const id = json_reader.uint(live.value, "active_shell_id");
+    for (merged_tabs, 0..) |tab, i| {
+        if (id == 0 or json_reader.uint(tab, "shell_id") != id) continue;
+        try saved.value.object.put(saved.arena.allocator(), "active_shell_id", .{ .integer = @intCast(id) });
+        try saved.value.object.put(saved.arena.allocator(), "active_tab", .{ .integer = @intCast(i) });
+        try saved.value.object.put(saved.arena.allocator(), "active_workspace", .{ .integer = @intCast(json_reader.uint(tab, "workspace")) });
+        break;
+    }
+    return std.json.Stringify.valueAlloc(a, saved.value, .{});
+}
+
+fn selectedSavedTab(json: std.json.Value, tabs: []const SavedTab, selected: u32) ?u32 {
+    for ([_]u64{ selected, json_reader.uint(json, "active_shell_id") }) |id| {
+        if (id == 0) continue;
+        for (tabs, 0..) |tab, i| {
+            if (tab.shell_id == id) return @intCast(tmux_identity.restoreWinner(tabs, i));
+        }
+    }
+    const active = json_reader.uintDefault(json, "active_tab", std.math.maxInt(u32));
+    return if (active < tabs.len) @intCast(tmux_identity.restoreWinner(tabs, @intCast(active))) else null;
+}
+
 pub fn saveSession() void {
     @import("launch_cache.zig").changed();
-    if (@import("launch_cache.zig").pending) return;
     if (app_state.g_account_locked or app_state.g_restoring) return;
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored and @import("launch_cache.zig").selected_shell_id == 0) return;
     logSessionAudit("saveSession:before-write");
     var path_buf: [512]u8 = undefined;
     const path = getSessionPath(&path_buf) orelse return;
-    if (saveSessionTo(path, null)) publishSessionLayout();
+    if (saveSessionTo(path, null) and (!@import("launch_cache.zig").pending or @import("launch_cache.zig").tabs_restored)) publishSessionLayout();
 }
 
 pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
@@ -1395,6 +1451,7 @@ pub fn restoreSession() u32 {
         if (!@import("launch_cache.zig").pending) logSessionAudit("restoreSession:after-spawn-before-save");
         ensureOtherWorkspaceSlot();
         app_state.g_restoring = false;
+        @import("launch_cache.zig").tabs_restored = true;
         saveSession();
     }
     var path_buf: [512]u8 = undefined;
@@ -1423,9 +1480,7 @@ pub fn restoreSession() u32 {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const tab_count = json_reader.sessionTabs(json, tabs[0..], MAX_LWS);
     app_state.g_restored_valid_session = true;
-    var restored_active_tab: ?u32 = null;
-    const active = json_reader.uintDefault(json, "active_tab", std.math.maxInt(u32));
-    if (active < tab_count) restored_active_tab = @intCast(active);
+    const restored_active_tab = selectedSavedTab(json, tabs[0..tab_count], if (@import("launch_cache.zig").pending) @import("launch_cache.zig").selected_shell_id else 0);
     if (json_reader.boolTrue(json, "sound_enabled")) app_state.g_sound_enabled = true;
     if (!prepared) {
         loadGlobalTheme();
@@ -1528,13 +1583,6 @@ pub fn restoreSession() u32 {
         }
     }
 
-    if (restored_active_tab) |at| {
-        if (at < tab_count) {
-            const winner = tmux_identity.restoreWinner(tabs[0..tab_count], at);
-            restored_active_tab = @intCast(winner);
-            if (app_state.g_single_window and winner != at) app_state.g_active_workspace = tabs[winner].workspace;
-        }
-    }
     if (!prepared) logSavedTabsAudit("restoreSession:parsed-session-file", tabs[0..tab_count]);
 
     app_state.group_count = 0;
@@ -1569,12 +1617,23 @@ pub fn restoreSession() u32 {
     }
 
     debugLog("restoreSession: starting restore");
+    const live_shell_count = app_state.shell_count;
     var spawned: u32 = 0;
     var restored_active_shell_id: u32 = 0;
     var restored_shell_ids: [MAX_SHELLS]u32 = [_]u32{0} ** MAX_SHELLS;
     for (0..tab_count) |t| {
         if (@import("launch_cache.zig").closedDuringStartup(tabs[t].shell_id)) continue;
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
+        if (@import("launch_cache.zig").pending and tabs[t].shell_id != 0) {
+            if (findShellById(tabs[t].shell_id)) |idx| {
+                if (idx < live_shell_count) {
+                    restored_shell_ids[t] = app_state.shells[idx].shell_id;
+                    if (restored_active_tab != null and restored_active_tab.? == t) restored_active_shell_id = app_state.shells[idx].shell_id;
+                    spawned += 1;
+                    continue;
+                }
+            }
+        }
         const ok = if (chatBenchEnabled() and isRemoteShellKind(tabs[t].kind)) false else spawnSavedTab(&tabs[t], .continue_latest);
         if (ok) {
             const idx = app_state.shell_count - 1;
@@ -1641,18 +1700,6 @@ pub fn restoreSession() u32 {
         }
     }
 
-    const selected_shell = @import("launch_cache.zig").selected_shell_id;
-    if (@import("launch_cache.zig").pending and selected_shell != 0) {
-        for (tabs[0..tab_count], 0..) |tab, t| {
-            if (tab.shell_id != selected_shell) continue;
-            const restored_id = restored_shell_ids[tmux_identity.restoreWinner(tabs[0..tab_count], t)];
-            if (findShellById(restored_id)) |idx| {
-                app_state.active_shell = idx;
-                app_state.g_active_workspace = app_state.shells[idx].workspace;
-            }
-            break;
-        }
-    }
     const selected_live = @import("launch_cache.zig").selected_live_shell_id;
     if (@import("launch_cache.zig").pending and selected_live != 0) {
         if (findShellById(selected_live)) |idx| {
@@ -1737,4 +1784,122 @@ test "IGSH-556 saved session round trip keeps both group ids and legacy defaults
     try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\",\"group_id\":17}]}", &tabs));
     try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
     try std.testing.expectEqual(@as(u32, 0), tabs[0].starred_group_id);
+}
+
+test "ISSUE-569 stable selection survives skipped tabs and the saved tab cap" {
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":2,\"tabs\":[{\"name\":\"Skipped\"},{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":41},{\"kind\":\"cmd\",\"name\":\"Selected\",\"shell_id\":42,\"workspace\":1},{\"kind\":\"cmd\",\"name\":\"Last\",\"shell_id\":43},{\"kind\":\"cmd\",\"name\":\"Capped\",\"shell_id\":44}]}");
+    defer parsed.deinit();
+    var tabs: [3]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 3), count);
+    const selected = selectedSavedTab(parsed.value, tabs[0..count], 0).?;
+    try std.testing.expectEqual(@as(u32, 1), selected);
+    try std.testing.expectEqual(@as(u32, 42), tabs[selected].shell_id);
+    try std.testing.expectEqual(@as(u8, 1), tabs[selected].workspace);
+}
+
+test "ISSUE-569 stable selection follows the duplicate tmux restore winner" {
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":0,\"tabs\":[{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"Selected\",\"shell_id\":42,\"tmux_session\":\"same\",\"lv\":1},{\"kind\":\"tmux\",\"name\":\"Winner\",\"shell_id\":43,\"tmux_session\":\"same\",\"lv\":2}]}");
+    defer parsed.deinit();
+    var tabs: [3]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(?u32, 2), selectedSavedTab(parsed.value, tabs[0..count], 0));
+    try std.testing.expectEqual(@as(u32, 43), tabs[selectedSavedTab(parsed.value, tabs[0..count], 0).?].shell_id);
+}
+
+test "ISSUE-569 legacy index fallback and startup user selection beat saved selection" {
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_tab\":1,\"tabs\":[{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":41},{\"kind\":\"cmd\",\"name\":\"Middle\",\"shell_id\":42}]}");
+    defer parsed.deinit();
+    var tabs: [2]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], 0));
+    try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 41));
+    try parsed.value.object.put(parsed.arena.allocator(), "active_shell_id", .{ .integer = 999 });
+    try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], 0));
+    try parsed.value.object.put(parsed.arena.allocator(), "active_shell_id", .{ .integer = 41 });
+    try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 999));
+}
+
+test "ISSUE-569 startup selection save preserves full tabs and newly created sessions" {
+    const a = std.testing.allocator;
+    const previous = "{\"active_shell_id\":41,\"active_tab\":0,\"single_window\":true,\"workspace_count\":2,\"tabs\":[{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":41,\"cwd\":\"saved-directory\"},{\"kind\":\"cmd\",\"name\":\"Middle\",\"shell_id\":42,\"workspace\":1,\"bon\":true},{\"kind\":\"cmd\",\"name\":\"Last\",\"shell_id\":43}]}";
+    const current = "{\"active_shell_id\":42,\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Cached\",\"shell_id\":42}]}";
+    const bytes = try mergeStartupSelection(a, previous, current);
+    defer a.free(bytes);
+    var parsed = try json_reader.parse(a, bytes);
+    defer parsed.deinit();
+    var tabs: [4]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 3), count);
+    try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], 0));
+    try std.testing.expect(tabs[1].bon);
+    try std.testing.expectEqualStrings("saved-directory", tabs[0].cwd[0..tabs[0].cwd_len]);
+    try std.testing.expectEqual(@as(u64, 1), json_reader.uint(parsed.value, "active_workspace"));
+    const created = try mergeStartupSelection(a, bytes, "{\"active_shell_id\":99,\"single_window\":true,\"workspace_count\":3,\"workspaces\":[{\"name\":\"First\"},{\"name\":\"Second\"},{\"name\":\"New\"}],\"tabs\":[{\"kind\":\"cmd\",\"name\":\"New\",\"shell_id\":99,\"workspace\":2}]}");
+    defer a.free(created);
+    var new_parsed = try json_reader.parse(a, created);
+    defer new_parsed.deinit();
+    const new_count = json_reader.sessionTabs(new_parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 4), new_count);
+    try std.testing.expectEqual(@as(?u32, 3), selectedSavedTab(new_parsed.value, tabs[0..new_count], 0));
+    try std.testing.expectEqual(@as(u64, 2), json_reader.uint(new_parsed.value, "active_workspace"));
+    try std.testing.expectEqual(@as(u64, 3), json_reader.uint(new_parsed.value, "workspace_count"));
+}
+
+test "ISSUE-569 filtered save records stable selection and filtered index" {
+    const saved_count = app_state.shell_count;
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_active = app_state.active_shell;
+    const saved_workspace = app_state.g_active_workspace;
+    const saved_single = app_state.g_single_window;
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.active_shell = saved_active;
+        app_state.g_active_workspace = saved_workspace;
+        app_state.g_single_window = saved_single;
+    }
+    app_state.shell_count = 3;
+    app_state.active_shell = 2;
+    app_state.g_active_workspace = 1;
+    app_state.g_single_window = true;
+    for (0..3) |i| {
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].shell_id = @intCast(41 + i);
+        app_state.shells[i].workspace = if (i == 0) 0 else 1;
+        app_state.shells[i].name[0] = @intCast('A' + i);
+        app_state.shells[i].name_len = 1;
+    }
+    var temp: [512]u8 = undefined;
+    const len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(len > 0 and len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-569-{d}-{d}.json", .{ temp[0..len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(saveSessionTo(path, 1));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var parsed = try json_reader.parse(std.testing.allocator, bytes);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u64, 43), json_reader.uint(parsed.value, "active_shell_id"));
+    try std.testing.expectEqual(@as(u64, 1), json_reader.uint(parsed.value, "active_tab"));
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 2), count);
+    try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], 0));
+    try std.testing.expect(saveSessionTo(path, 0));
+    const excluded = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(excluded);
+    var excluded_parsed = try json_reader.parse(std.testing.allocator, excluded);
+    defer excluded_parsed.deinit();
+    try std.testing.expect(json_reader.field(excluded_parsed.value, "active_shell_id") == .null);
+    try std.testing.expect(json_reader.field(excluded_parsed.value, "active_tab") == .null);
 }

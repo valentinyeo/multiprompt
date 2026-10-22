@@ -2624,7 +2624,15 @@ pub fn switchToShell(idx: u32) void {
     }
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or !app_state.shells[idx].browser_native) hideBrowserEdgeMasks();
     ensureActiveVisible();
-    if (!defer_browser and !app_state.g_restoring and (idx != prev or unarchived_on_open)) saveSession();
+    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
+        (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
+    {
+        if (@import("launch_cache.zig").pending and idx < app_state.shell_count) {
+            @import("launch_cache.zig").selected_shell_id = app_state.shells[idx].shell_id;
+            @import("launch_cache.zig").selected_live_shell_id = if (@import("launch_cache.zig").tabs_restored or !@import("launch_cache.zig").cachedShell(app_state.shells[idx].shell_id)) app_state.shells[idx].shell_id else 0;
+        }
+        saveSession();
+    }
     if (idx < app_state.shell_count) {
         app_state.shells[idx].notified = false;
         if (app_state.g_skip_view_bump) {

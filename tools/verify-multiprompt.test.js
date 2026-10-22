@@ -210,7 +210,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
 
 test('maintained verification code contains no removable code comments', async () => {
   const { strip } = await import('./strip-comments.mjs');
-  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript'], [read('tools/verify-scratch.test.ps1'), 'powershell']]) {
+  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript'], [read('tools/verify-scratch.test.ps1'), 'powershell'], ...['console', 'inbox', 'launch_cache', 'main', 'session'].map(file => [read(`src/${file}.zig`), 'zig'])]) {
     assert.equal(strip(source, language).commentLines, 0);
   }
 });
@@ -549,4 +549,123 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
   assert.match(workflow, /run: node --test tools\/verify-multiprompt.test.js/);
   assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
+});
+
+test('ISSUE-569 restore registry, real close/kill and persistent private relaunches cannot be skipped', () => {
+  function contract(driver, workflowText) {
+    assert.match(driver, /ValidateSet\([^\n)]*'session-restore'/);
+    assert.match(workflowText, /\$env:FEATURE -notin @\([^\n)]*'session-restore'/);
+    const launch = driver.slice(driver.indexOf("    if ($Feature -eq 'session-restore') {"), driver.indexOf("    if ($Feature -in @('browser-pane-stuck'"));
+    assert.match(launch, /\$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.match(restart, /Doctor\s+if \(\$process.MainWindowHandle -ne \$script:window\) \{ throw/);
+    assert.match(restart, /if \(\$Crash\) \{[\s\S]*?Stop-Process -Id \$process.Id -Force[\s\S]*?\} else \{[\s\S]*?\$process.CloseMainWindow\(\)/);
+    assert.match(restart, /if \(-not \$process.WaitForExit\(20000\)\) \{ throw/);
+    assert.match(restart, /\$stopped = \$job.Stop\(\)/);
+    assert.ok(restart.indexOf('$job.Stop()') < restart.indexOf('$script:job = New-Object VerifyJob'));
+    assert.match(restart, /\$script:process = \$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
+    assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
+    assert.match(restart, /Substring\(\$logStart\)/);
+    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.doesNotMatch(restart, /no-window-restore|Remove-Item|Set-Content|WriteAll|Stop-Process -Name|New-Item/);
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    let offset = -1;
+    for (const step of [
+      "Press @(0x11, 0x4E) 'Ctrl+N:", "@('Restore first', 'Restore middle', 'Restore last')",
+      "Focus-Palette 'new cmd' 2000", "Press @(0x71) 'F2:", 'Type-Text $names[$i]',
+      "Focus-Palette 'Restore middle' $middleIndex", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
+      "Restart-SessionRestore 'normal-close' $false", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
+      "name = 'normal-close-selection'", "Focus-Palette 'Restore first' $firstIndex",
+      "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
+      "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
+      "if ($result.checks.Count -ne 2) { throw", "Snapshot 'after'",
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.doesNotMatch(recipe, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage|Remove-Item/);
+    for (const shot of ['action', 'normal-close-after', 'kill-action', 'after']) assert.ok(recipe.includes(`Snapshot '${shot}'`));
+    assert.ok(driver.indexOf("'process-kill-after.inbox.json'") < driver.indexOf("    $result.status = 'passed'"));
+    assert.match(driver, /feature = \$Feature; status = 'failed'/);
+  }
+  contract(control, workflow);
+  for (const required of [
+    "'session-restore', ", 'Stop-Process -Id $process.Id -Force', '$process.CloseMainWindow()',
+    '$state.hwnd -eq $script:window.ToInt64().ToString()', "$trace -match 'launch step=browser'",
+    "Restart-SessionRestore 'normal-close' $false", "Restart-SessionRestore 'process-kill' $true",
+    "name = 'normal-close-selection'", "name = 'process-kill-selection'",
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken, workflow));
+  }
+  assert.throws(() => contract(control, workflow.replace("'session-restore', ", '')));
+  assert.throws(() => contract(control.replace("'--single-window')", "'--single-window --no-window-restore')"), workflow));
+  const map = read(skill + 'features/session-restore.md');
+  assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), [
+    'Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas',
+  ]);
+  assert.match(read(skill + 'features/README.md'), /\[Session restore\]\(session-restore.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`session-restore`/);
+});
+
+test('ISSUE-569 selection assertions resolve published active identity and require the original workspace', () => {
+  const assertion = control.slice(control.indexOf('function Assert-SessionRestoreSelection('), control.indexOf('function Select-Theme('));
+  function contract(source) {
+    for (const required of [
+      '$state = Read-Inbox', '$saved = Read-Session', '$_.sid -eq $state.active_shell_id',
+      '$selected.Count -eq 1', '$selected[0].name -ceq $Name', '$selected[0].ws -eq $Workspace',
+      '$state.active_workspace -eq $Workspace', '$saved.active_workspace -eq $Workspace',
+      '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId', '$saved.active_shell_id -eq $state.active_shell_id',
+      '$saved.tabs[$saved.active_tab].name -ceq $Name', ").Count -eq 3",
+    ]) assert.ok(source.includes(required), required);
+    assert.doesNotMatch(source, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage/);
+  }
+  contract(assertion);
+  for (const required of ['$_.sid -eq $state.active_shell_id', '$selected[0].name -ceq $Name', '$state.active_workspace -eq $Workspace', '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId', '$saved.active_shell_id -eq $state.active_shell_id']) {
+    assert.throws(() => contract(assertion.replace(required, '$true')));
+  }
+  const publisher = read('src/inbox.zig');
+  assert.match(publisher, /active_shell_id\\":\{d\},\\"active_workspace\\":\{d\}/);
+  assert.match(publisher, /if \(app_state.active_shell < app_state.shell_count\) app_state.shells\[app_state.active_shell\].shell_id else 0/);
+});
+
+test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
+  function contract(session, console, cache, main) {
+    const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
+    assert.doesNotMatch(save, /defer_browser/);
+    assert.match(save, /selected_shell_id = app_state.shells\[idx\].shell_id/);
+    assert.match(save, /saveSession\(\)/);
+    const deferred = cache.slice(cache.indexOf('pub fn deferred('), cache.indexOf('pub fn closedDuringStartup('));
+    assert.doesNotMatch(deferred, /selected_shell_id = state.shells\[state.active_shell\].shell_id/);
+    assert.match(deferred, /shell.shell_id == selected_shell_id/);
+    const persistence = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.doesNotMatch(persistence, /if \(@import\("launch_cache.zig"\).pending\) return;/);
+    assert.match(session, /active_shell_id\\":\{d\}/);
+    assert.match(session, /selectedSavedTab\(json, tabs\[0\.\.tab_count\]/);
+    assert.match(session, /app_state.g_active_workspace = if \(restored_active_shell_id != 0 and app_state.active_shell < app_state.shell_count\)\s+app_state.shells\[app_state.active_shell\].workspace/);
+    assert.match(session, /const live_shell_count = app_state.shell_count/);
+    assert.match(session, /if \(idx < live_shell_count\)/);
+    const close = main.slice(main.lastIndexOf('        WM_CLOSE =>'), main.lastIndexOf('        WM_DESTROY =>'));
+    assert.match(close, /saveSession\(\);\s+launch_cache.finish\(\);[\s\S]*DestroyWindow\(hwnd\)/);
+    assert.doesNotMatch(close, /app_state.active_shell\s*=|app_state.shell_count\s*=/);
+    assert.match(close, /g_current_workspace_restore = app_state.g_quit_all_in_progress/);
+  }
+  const sources = [read('src/session.zig'), read('src/console.zig'), read('src/launch_cache.zig'), read('src/main.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [1, 'if (!app_state.g_restoring and (idx != prev or unarchived_on_open or', 'if (!defer_browser and !app_state.g_restoring and (idx != prev or unarchived_on_open or'],
+    [0, '    logSessionAudit("saveSession:before-write");', '    if (@import("launch_cache.zig").pending) return;\n    logSessionAudit("saveSession:before-write");'],
+    [2, '    if (cached) {\n', '    if (cached) {\n        selected_shell_id = state.shells[state.active_shell].shell_id;\n'],
+    [0, 'if (idx < live_shell_count)', 'if (idx < app_state.shell_count)'],
+    [3, '            saveSession();\n            launch_cache.finish();', '            app_state.active_shell = 0;\n            saveSession();\n            launch_cache.finish();'],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file]);
+    assert.throws(() => contract(...broken));
+  }
 });
