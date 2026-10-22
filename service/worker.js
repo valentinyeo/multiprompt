@@ -419,7 +419,7 @@ export default {
       }
       return reply({ error: 'not_found' }, 404);
     } catch (e) {
-      return reply({ error: e.status ? e.message : 'service_unavailable', server_time: Date.now() }, e.status || 503);
+      return reply({ error: e.status ? e.message : 'service_unavailable', ...(url.pathname === '/v1/sync-records' ? { server_time: Date.now() } : {}) }, e.status || 503);
     }
   }
 };

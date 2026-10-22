@@ -1257,7 +1257,7 @@ test('ISSUE-252 record service rejects credentials keys local paths geometry mal
   for (const bad of [{ ...valid, updated_at: Date.now() + 600000 }, { ...valid, id: '3' }, { ...valid, deleted: true }, { ...valid, device_id: 'unsafe/id' }, { ...valid, session: {} }]) assert.throws(() => validateRecords([bad]));
   assert.throws(() => validateRecords([valid, valid]));
   const { token } = await enroll();
-  assert.equal((await syncPut(token, [{ ...valid, host: { ...valid.host, password: 'device-only' } }])).status, 400);
+  assert.equal((await syncPut(token, [{ ...valid, device_id: token.device_id, host: { ...valid.host, password: 'device-only' } }])).status, 400);
 });
 
 test('ISSUE-252 records are account scoped and unauthorized or revoked devices cannot read or write', async () => {

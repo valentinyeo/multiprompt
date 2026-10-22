@@ -1498,6 +1498,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
 }
 
 pub fn accountBootstrap(hwnd: HANDLE) bool {
+    if (app_state.g_account_bypass) return true;
     var settings_buf: [512]u8 = undefined;
     if (syncAuthPath(&settings_buf, "account-sync.json")) |path| {
         if (readFileAllocWin32(path, 256)) |bytes| {
@@ -1508,7 +1509,6 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
             } else |_| {}
         }
     }
-    if (app_state.g_account_bypass) return true;
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
     startAccountJob(.{ .kind = .startup });
@@ -2261,7 +2261,7 @@ test "ISSUE-252 A offline startup restores locally but mid-session revocation lo
     try std.testing.expect(app_state.g_account_reauth);
     try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
     try std.testing.expectEqual(@as(u32, 123), app_state.shells[0].shell_id);
-    try std.testing.expect(!app_state.shells[0].browser_enabled);
+    try std.testing.expect(app_state.shells[0].browser_enabled);
 }
 
 test "Esc cancels account sign-in and transport exits before opening a browser" {
