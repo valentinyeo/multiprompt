@@ -30,7 +30,8 @@ test('Windows behavioral update tests are required by CI', () => {
   const workflow = read('.github/workflows/test.yml');
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   const update = jobs['test-windows-update'];
-  assert.match(update, /^    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: windows-latest\n/);
+  const build = jobs['build-windows'];
+  assert.match(update, /^    needs: \[changes, build-windows\]\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: windows-latest\n/);
   assert.doesNotMatch(update, /matrix:|matrix\.group/);
   assert.doesNotMatch(jobs.test, /Test safe release updates|update-release/);
   assert.equal((workflow.match(/- name: Test safe release updates/g) || []).length, 1);
@@ -39,12 +40,34 @@ test('Windows behavioral update tests are required by CI', () => {
     'node --test tools/update-release-review.test.js',
     'node --test tools/update-release.test.js',
     'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
-    'zig build -Drelease=true',
-    'powershell -NoProfile -File tools/update-release.test.ps1',
+    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe"',
   ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
   assert.match(update, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
   assert.match(update, /foreach \(\$finding in 1\.\.9\)/);
-  assert.match(update, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-update-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
+  assert.doesNotMatch(update, /zig build|actions\/cache@|actions\/cache\/restore@|Install Zig|ZIG_GLOBAL_CACHE_DIR/);
+  assert.match(update, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: update-verifier/);
+  assert.match(build, /needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: ubuntu-latest/);
+  assert.match(build, /arch: \[arm64, x64\]/);
+  assert.match(build, /if: matrix.arch == 'x64'\n        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all\n/);
+  const releaseBuild = read('.github/workflows/release.yml').match(/run: (zig build -Dtarget=.+)/)[1]
+    .replace('${{ matrix.target }}', 'x86_64-windows-gnu')
+    .replace("${{ github.event_name != 'pull_request' }}", 'true');
+  assert.ok(build.includes(`run: ${releaseBuild} --summary all\n`));
+  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
+  assert.match(build, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-\$\{\{ matrix.arch \}\}-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
+  assert.match(update, /MULTIPROMPT_TEST_SIGNING_KEY: \$\{\{ github.workspace \}\}\/update-verifier\/update-test-key.der/);
+  assert.match(build, /- name: Prepare throwaway update-test signing key\n        if: matrix.arch == 'x64'\n        run: node tools\/update-release-fixtures.mjs --prepare-key zig-out\/bin\/update-test-key.der/);
+  assert.ok(build.indexOf('run: node tools/update-release-fixtures.mjs --prepare-key') < build.indexOf('run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all'));
+  const signer = read('tools/update-release-fixtures.mjs');
+  assert.match(signer, /process.env.MULTIPROMPT_TEST_SIGNING_KEY[\s\S]*createPrivateKey\(\{ key: fs.readFileSync\(process.env.MULTIPROMPT_TEST_SIGNING_KEY\)/);
+  assert.match(signer, /const publicKey = createPublicKey\(privateKey\)/);
+  assert.match(signer, /if \(root === '--prepare-key'\) \{[\s\S]*fs.writeFileSync\(keyPath, privateKey.export\(\{ type: 'pkcs8', format: 'der' \}\)\)/);
+  assert.match(build, /- name: Reject placeholder release signing key\n        if: matrix.arch == 'x64'/);
+  assert.match(build, /trap 'cp "\$RUNNER_TEMP\/release-signing-public-key.txt" "\$key"' EXIT/);
+  assert.match(build, /printf '%s\\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "\$key"/);
+  assert.match(build, /if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "\$RUNNER_TEMP\/placeholder-error.txt" 2>&1; then\n            echo 'Release build did not reject the fake public key loudly'\n            exit 1/);
+  assert.match(build, /grep -F 'Release signing public key is still the all-zero placeholder' "\$RUNNER_TEMP\/placeholder-error.txt"/);
+  assert.doesNotMatch(read('tools/update-release-fixtures.ps1'), /zig\.exe|zig build/);
   const suite = read('tools/update-release.test.ps1');
   for (const name of ['checksum mismatch refused', 'rollback after failed start', 'no automatic restart while running', 'version comparison']) assert.ok(suite.includes(name), name);
 });
