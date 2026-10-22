@@ -570,6 +570,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&inbox_reduction_search_tests.step);
     const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
+    const deepgram_key_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/deepgram-key-source.test.js" });
+    test_step.dependOn(&deepgram_key_source_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
     test_step.dependOn(&session_state_bucket_tests.step);
     const other_workspace_invariant_tests = b.addSystemCommand(&.{ "node", "--test", "tools/other-workspace-invariant.test.js" });

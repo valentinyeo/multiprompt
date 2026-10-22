@@ -1427,10 +1427,14 @@ pub fn voiceHandleUtterance(result: *VoiceResult) void {
 
 fn readDeepgramApiKey(out: []u8) ?[]const u8 {
     if (out.len == 0) return null;
-    const raw_len = GetEnvironmentVariableA("DEEPGRAM_API_KEY", out.ptr, @intCast(out.len));
-    var len: usize = if (raw_len > 0 and raw_len < out.len) @intCast(raw_len) else readUserEnvRegistryAscii("DEEPGRAM_API_KEY", out);
+    var len: usize = readUserEnvRegistryAscii("DEEPGRAM_API_KEY", out);
     while (len > 0 and (out[len - 1] == ' ' or out[len - 1] == '\r' or out[len - 1] == '\n' or out[len - 1] == '\t')) len -= 1;
     return if (len == 0) null else out[0..len];
+}
+
+pub fn logDeepgramKeySource() void {
+    var key_buf: [256]u8 = undefined;
+    debugLog(if (readDeepgramApiKey(&key_buf) != null) "[voice] deepgram key source=registry" else "[voice] deepgram key source=none");
 }
 
 fn readUserEnvRegistryAscii(comptime name: []const u8, out: []u8) usize {
