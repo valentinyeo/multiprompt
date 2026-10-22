@@ -201,7 +201,7 @@ test('data page scripts use the exact-tab serialized CDP session; exceptions fai
     } } },
     withCdpSession: async (tabId, operation) => operation({ tabId }),
   });
-  const start = source.indexOf('async function runInDataTab(');
+  const start = source.indexOf('function isExtensionFrameAccessError(');
   const end = source.indexOf('\nasync function runInTab(', start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end) + '\nglobalThis.run = runInDataTab;', context);
