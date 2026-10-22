@@ -82,7 +82,7 @@ test('global and per-command help document workspace commands without session co
 
 test('CLI transport connects directly to the IPv4 bridge without localhost address fallback', () => {
   const source = fs.readFileSync(wrapper, 'utf8');
-  assert.match(source, /socket\.create_connection\(\("127\.0\.0\.1", int\(port\)\), timeout=5\)/);
+  assert.match(source, /socket\.create_connection\(\("127\.0\.0\.1", int\(port\)\), timeout=min\(5, timeout\)\)/);
 });
 
 test('workspace-list sends a session-independent app request and preserves the complete JSON result', async () => {
@@ -231,7 +231,9 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
+  const fragmentPath = path.join(root, 'changelog.d/IGSH-535-session-open.md');
+  const fragment = fs.existsSync(fragmentPath) ? fs.readFileSync(fragmentPath, 'utf8').trim()
+    : JSON.parse(fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8').match(/\.text = ("[^"\n]+"), \.ticket = "IGSH-535"/)?.[1] || 'null');
   assert.equal(fragment.split('\n').length, 1);
   assert.match(fragment, /workspace/);
 });

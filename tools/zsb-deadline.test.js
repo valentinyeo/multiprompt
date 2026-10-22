@@ -229,7 +229,7 @@ test('ISSUE-154 real Windows CLI times out a missing CDP reply while another req
       reply.on('error', () => {});
     });
   });
-  await new Promise(resolve => server.listen(`\\.\pipe\multiprompt-browser-isolated-${profile}`, resolve));
+  await new Promise(resolve => server.listen(String.raw`\\.\pipe\multiprompt-browser-isolated-${profile}`, resolve));
   t.after(async () => {
     for (const socket of sockets) socket.destroy();
     await new Promise(resolve => server.close(resolve));
@@ -258,7 +258,7 @@ test('ISSUE-154 real Windows CLI times out a missing CDP reply while another req
 
 test('ISSUE-154 native host still answers ping when a reply-pipe client never reads', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
   const sockets = new Set();
-  const pipe = `\\.\pipe\multiprompt-deadline-unread-${process.pid}`;
+  const pipe = String.raw`\\.\pipe\multiprompt-deadline-unread-${process.pid}`;
   const server = net.createServer(socket => {
     sockets.add(socket);
     socket.pause();

@@ -42,6 +42,7 @@ const cases = [
   ['forward', 'extra'],
   ['reload', 'extra'],
   ['extension-reload', 'extra'],
+  ['reset', 'extra'],
   ['theme'],
   ['protect-window', '--unknown'],
   ['browser-drop-gesture', 'extra'],
