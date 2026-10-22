@@ -677,10 +677,30 @@ try {
             $result.checks += @{ name = 'palette-increase-reset'; increasedScale = 110; resetScale = 100 }
             Palette 'restart to update'
             Snapshot 'update-command'
+            $image = New-Object Drawing.Bitmap((Join-Path $Evidence 'update-command.png'))
+            $selectedTextPixels = 0
+            try {
+                $top = $image.Height
+                $bottom = 0
+                for ($y = [int]($image.Height * 0.2); $y -lt [int]($image.Height * 0.8); $y++) {
+                    $pixel = $image.GetPixel([int]($image.Width / 2), $y)
+                    if ($pixel.R -lt 50 -and $pixel.G -gt 70 -and $pixel.G -lt 160 -and $pixel.B -gt 150) {
+                        $top = [Math]::Min($top, $y)
+                        $bottom = [Math]::Max($bottom, $y)
+                    }
+                }
+                for ($y = $top; $y -le $bottom; $y++) {
+                    for ($x = [int]($image.Width * 0.3); $x -lt [int]($image.Width * 0.7); $x++) {
+                        $pixel = $image.GetPixel($x, $y)
+                        if ($pixel.R -gt 180 -and $pixel.G -gt 180 -and $pixel.B -gt 180) { $selectedTextPixels++ }
+                    }
+                }
+                if ($selectedTextPixels -lt 40) { throw 'Update command row is blank or unreadable' }
+            } finally { $image.Dispose() }
             Press @(0x0D) 'Enter: Restart to update with no update ready'
             Doctor
             Snapshot 'update-idle'
-            $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100 }
+            $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
         }
     }
     Doctor
