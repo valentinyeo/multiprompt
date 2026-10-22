@@ -1,5 +1,7 @@
 param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '')
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$script:manifestFault = ''
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:OS -ne 'Windows_NT') { throw 'Run update tests only on GitHub Windows' }
 . "$PSScriptRoot/../src/update_release.ps1" -Mode Library
 

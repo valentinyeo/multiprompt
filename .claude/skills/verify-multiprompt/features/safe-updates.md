@@ -6,9 +6,9 @@ Signed-manifest verification, background staging, explicit and cold apply, helpe
 
 ## How to get to it (user POV)
 
-Dispatch `verify.yml` with `feature=safe-updates` on the branch. This journey uses `tools/update-release-journey.ps1`, not the normal session driver.
+Dispatch `verify.yml` with `feature=safe-updates` on the branch. The shared `control.ps1` validates the executable identity and delegates this feature to `tools/update-release-journey.ps1` instead of the normal session driver.
 
-## Driving it with update-release-journey.ps1
+## Driving it with control.ps1
 
 The disposable GitHub Windows job compiles local fake release executables, creates a throwaway Ed25519 key in memory, embeds its public key in the branch verifier, and serves release downloads from a local folder through the PowerShell library transport. No production signing key or network release is used for swaps.
 

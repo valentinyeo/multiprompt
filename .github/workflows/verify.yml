@@ -103,13 +103,7 @@ jobs:
           @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Full signed local-release swap journey
-        if: env.FEATURE == 'safe-updates'
-        shell: powershell
-        run: |
-          & tools/update-release-journey.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -Evidence "$pwd/evidence"
       - name: Launch Doctor Drive Evidence Cleanup
-        if: env.FEATURE != 'safe-updates'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"

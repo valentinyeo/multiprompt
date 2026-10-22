@@ -69,7 +69,8 @@ test('R8 launch arguments survive update and rollback without readiness flags', 
 test('R9 verify dispatch runs signed local-release consecutive swap and rollback journey', () => {
   const wf = read('.github/workflows/verify.yml');
   assert.match(wf, /'safe-updates'/);
-  assert.match(wf, /tools\/update-release-journey\.ps1/);
+  assert.match(read('.claude/skills/verify-multiprompt/control.ps1'), /tools\/update-release-journey\.ps1/);
+  assert.match(wf, /control\.ps1 -Feature \$env:FEATURE/);
   const journey = read('tools/update-release-journey.ps1');
   for (const scenario of ['second consecutive update', 'immediate-exit rollback', 'signed local release']) assert.ok(journey.includes(scenario), scenario);
 });
