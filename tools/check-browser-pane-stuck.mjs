@@ -71,6 +71,45 @@ function shiftedShortcutTimingContract(source) {
 shiftedShortcutTimingContract(driver);
 assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5\n", '')));
 assert.throws(() => shiftedShortcutTimingContract(driver.replace('ElapsedMilliseconds -ge 1600', 'ElapsedMilliseconds -ge 1000')));
+function browserForegroundContract(source) {
+  const helper = source.match(/function Focus-BrowserPaneOwner\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
+  assert.ok(helper, 'browser launches explicitly activate the main window after docking');
+  const steps = [
+    'Wait-Until {', '$pane = Read-BrowserPane',
+    "$null -ne $pane -and $pane.browser_state -eq 'connected' -and",
+    '$pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)',
+    '} "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25',
+    'Doctor', 'Record "Activate main window after browser-pane-stuck ${Step} docking"',
+    '[void][VerifyNative]::SetForegroundWindow($script:window)',
+    'Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5',
+  ];
+  let offset = -1;
+  for (const step of steps) {
+    const next = helper.indexOf(step, offset + 1);
+    assert.ok(next > offset, `missing or misordered foreground handoff: ${step}`);
+    offset = next;
+  }
+  assert.match(source, /function Open-BrowserPane\([^\n]*\) \{\s*Palette 'open browser'\s*Press @\(0x0D\) 'Enter: Open Browser Pane'\s*\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s*Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s*return \$pane\s*\}/);
+  assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
+  assert.match(source, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/);
+  for (const name of ['Press', 'Type-Text']) {
+    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*Assert-Foreground\\s*Record`));
+  }
+}
+browserForegroundContract(driver);
+for (const [before, after] of [
+  ["$pane.browser_state -eq 'connected' -and", "$pane.browser_state -eq 'opening' -and"],
+  ['$pane.browser_connection_id -eq $ConnectionId -and ', ''],
+  [' -and [VerifyNative]::PaneVisible($script:window)', ''],
+  ['docked pane ready for main-window activation" 25', 'docked pane ready for main-window activation"'],
+  ['    Focus-BrowserPaneOwner $Step $pane.browser_connection_id\n', ''],
+  ["            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id\n", ''],
+  ["throw 'Refusing input: owned app is not foreground'", 'return'],
+  ['    Assert-Foreground\n    Record $Label', '    Record $Label'],
+]) assert.throws(() => browserForegroundContract(driver.replace(before, after)), `reject foreground regression: ${before}`);
+const activation = '    [void][VerifyNative]::SetForegroundWindow($script:window)\n';
+const earlyActivation = driver.replace(activation, '').replace('function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n', `function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n${activation}`);
+assert.throws(() => browserForegroundContract(earlyActivation), 'activation before docking repeats the original race');
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.notEqual(start, -1, `${name} exists`);

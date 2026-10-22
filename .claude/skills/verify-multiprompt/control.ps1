@@ -276,6 +276,18 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
     return $pane
 }
 
+function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and
+            $pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)
+    } "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25
+    Doctor
+    Record "Activate main window after browser-pane-stuck ${Step} docking"
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5
+}
+
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
@@ -283,7 +295,9 @@ function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
         [void][VerifyNative]::SetForegroundWindow($script:window)
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
     } 'browser launch returned foreground to app'
-    return Assert-BrowserPane 'open' $Step $PreviousId
+    $pane = Assert-BrowserPane 'open' $Step $PreviousId
+    Focus-BrowserPaneOwner $Step $pane.browser_connection_id
+    return $pane
 }
 
 function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
@@ -629,6 +643,7 @@ try {
             Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
+            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
             Palette 'close all browser panes'
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
