@@ -137,13 +137,15 @@ jobs:
           New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
           $revision = (git rev-parse HEAD).Trim()
           if ($env:RELEASE_TAG) {
-            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
             if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
-            $checks = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64} [ *]multiprompt-x64\.exe$' })
-            if ($checks.Count -ne 1) { throw 'Expected exactly one x64 checksum' }
-            $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
-            if ((Get-FileHash verify-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Release checksum mismatch' }
-            Move-Item verify-bin/multiprompt-x64.exe verify-bin/multiprompt.exe
+            foreach ($asset in @('multiprompt', 'zigshell-bridge')) {
+              $checks = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $asset + '-x64\.exe$') })
+              if ($checks.Count -ne 1) { throw "Expected exactly one x64 checksum for $asset" }
+              $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
+              if ((Get-FileHash "verify-bin/$asset-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Release checksum mismatch for $asset" }
+              Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$asset.exe"
+            }
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
