@@ -22,7 +22,7 @@ test('ISSUE-252 records default off without disabling existing account synchroni
 
 test('ISSUE-252 palette F1 documentation and changelog expose the supplemental opt-in action', () => {
   for (const file of ['src/command_palette.zig', 'src/sidebar.zig', 'src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) assert.ok(read(file).includes('Sync between laptops'), file);
-  assert.match(read('src/main.zig'), /target == app_state.SEARCH_LAPTOP_SYNC_OFFSET[\s\S]*?accountToggleSync\(\)/);
+  assert.match(read('src/main.zig'), /target == SEARCH_LAPTOP_SYNC_OFFSET[\s\S]*?accountToggleSync\(\)/);
   assert.match(read('src/sidebar.zig'), /L\("Sync between laptops: ON"\).*L\("Sync between laptops: OFF"\)/);
   assert.ok(readChangelogEntry('IGSH-252').length > 0);
   assert.match(read('src/account_records.zig'), /pub const poll_ms = 180000;/);

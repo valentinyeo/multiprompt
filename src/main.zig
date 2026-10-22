@@ -623,6 +623,7 @@ const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
+const SEARCH_LAPTOP_SYNC_OFFSET = @import("app_state.zig").SEARCH_LAPTOP_SYNC_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
 const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
@@ -4309,7 +4310,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     var dbg_cf: [96]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&dbg_cf, "[confirm] sel={d} count={d} target={d} (tabsort_auto={d} manual={d})", .{ app_state.g_search_sel, app_state.g_search_result_count, target, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET }) catch "[confirm fmt-err]");
                 }
-                if (target == app_state.SEARCH_LAPTOP_SYNC_OFFSET) {
+                if (target == SEARCH_LAPTOP_SYNC_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();

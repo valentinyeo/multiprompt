@@ -1232,9 +1232,9 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer if (reply.bytes) |bytes| a.free(bytes);
     defer if (reply.device_keys) |bytes| a.free(bytes);
     defer if (reply.key_error) |bytes| a.free(bytes);
+    if (reply.clock_skew) showHeaderNoticeAscii("Your clock differs by over 5 minutes; sync is using server time. Check your system clock.", 15000, true);
+    if (reply.records_failed and !reply.unauthorized) showHeaderNoticeAscii("Sync history could not update; account layout sync is still working. Will retry.", 5000, true);
     defer {
-        if (reply.clock_skew) showHeaderNoticeAscii("Your clock differs by over 5 minutes; sync is using server time. Check your system clock.", 15000, true);
-        if (reply.records_failed and !reply.unauthorized) showHeaderNoticeAscii("Sync history could not update; account layout sync is still working. Will retry.", 5000, true);
         if (reply.key_error) |text| {
             app_state.g_account_busy = true;
             showSyncMessage(text, true);
@@ -2226,7 +2226,7 @@ test "synchronized provenance is parsed independently and defaults off" {
     try std.testing.expect(!tabs[1].sync_owned);
 }
 
-test "account offline startup unlocks local restore while invalid mid-session credentials preserve shells" {
+test "ISSUE-252 A offline startup restores locally but mid-session revocation locks and preserves shell identities" {
     const old_locked = app_state.g_account_locked;
     const old_bootstrapping = app_state.g_account_bootstrapping;
     const old_reauth = app_state.g_account_reauth;
@@ -2257,11 +2257,11 @@ test "account offline startup unlocks local restore while invalid mid-session cr
     const reply = try std.heap.page_allocator.create(LayoutReply);
     reply.* = .{ .job = .{ .kind = .pull }, .unauthorized = true };
     handleLayoutReply(@bitCast(@intFromPtr(reply)));
-    try std.testing.expect(!app_state.g_account_locked);
+    try std.testing.expect(app_state.g_account_locked);
     try std.testing.expect(app_state.g_account_reauth);
     try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
     try std.testing.expectEqual(@as(u32, 123), app_state.shells[0].shell_id);
-    try std.testing.expect(app_state.shells[0].browser_enabled);
+    try std.testing.expect(!app_state.shells[0].browser_enabled);
 }
 
 test "Esc cancels account sign-in and transport exits before opening a browser" {
