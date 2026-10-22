@@ -53,6 +53,30 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.797", .items = &.{
+        .{ .text = "Typing with zsb now targets the requested tab and rejects unknown flags instead of inserting them into your text.", .ticket = "IGSH-228" },
+        .{ .text = "Browser commands now show help without connecting to your browser or changing anything.", .ticket = "IGSH-232" },
+        .{ .text = "Ctrl+Shift+X inserts the current or most recent browser tab URL into the Chat View message box with a space, ready to keep typing without sending.", .ticket = "IGSH-493" },
+        .{ .text = "Development checks reuse fewer runners without dropping any tests.", .ticket = "IGSH-519" },
+        .{ .text = "Agents can now list workspaces and open an existing remote tmux session as a background tab in a named workspace group.", .ticket = "IGSH-535" },
+        .{ .text = "Chat View now preserves underscores in links and inline code while keeping normal underscore emphasis.", .ticket = "IGSH-537" },
+    } },
+    .{ .ver = "0.28.796", .items = &.{
+        .{ .text = "Chat sync checks now recognize user messages containing literal Markdown characters instead of incorrectly reporting them as missing.", .ticket = "IGSH-406" },
+        .{ .text = "Benchmark results from GitHub can be verified for installation from Linux regardless of checkout line endings.", .ticket = "IGSH-513" },
+        .{ .text = "Healthy remote tabs check their connection less often while idle, while disconnected tabs still retry promptly.", .ticket = "IGSH-513" },
+        .{ .text = "The window no longer flickers when other programs open or switch browser windows.", .ticket = "IGSH-521" },
+    } },
+    .{ .ver = "0.28.795", .items = &.{
+        .{ .text = "Unsent Chat View drafts now stay with their own session across switches and restarts, with a DRAFT label in the sidebar.", .ticket = "IGSH-498" },
+        .{ .text = "The shell view is back to its old maximum width, while full width still fills the window.", .ticket = "IGSH-508" },
+        .{ .text = "Tab activity notifications no longer repeatedly refresh terminal status bars.", .ticket = "IGSH-514" },
+    } },
+    .{ .ver = "0.28.794", .items = &.{
+        .{ .text = "Browser commands no longer fail at random when the browser answers very fast.", .ticket = "IGSH-394" },
+        .{ .text = "Windows paths now keep their backslashes in Chat View.", .ticket = "IGSH-405" },
+        .{ .text = "Multiprompt redraws as fast as before and keeps its smoother edges.", .ticket = "IGSH-444" },
+    } },
     .{ .ver = "0.28.793", .items = &.{
         .{ .text = "Taking a browser screenshot with Ctrl+Shift+S keeps the message box focused with the cursor after the link and one space, without opening the window menu.", .ticket = "IGSH-509" },
     } },

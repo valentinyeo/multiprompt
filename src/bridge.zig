@@ -147,7 +147,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer args.deinit();
 
     _ = args.next();
-    g_window_id = resolveWindowFromEnv(allocator);
     var command = args.next() orelse "native";
     var profile_override: ?[]const u8 = null;
     while (true) {
@@ -162,6 +161,26 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         command = args.next() orelse badArgs(command);
     }
+
+    var help_args = args;
+    if (help_args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return commandHelp(command);
+        if ((std.mem.eql(u8, command, "tab") and std.mem.eql(u8, arg, "close")) or
+            (std.mem.eql(u8, command, "tabs") and std.mem.eql(u8, arg, "--close")))
+        {
+            if (help_args.next()) |flag| {
+                if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) {
+                    return commandHelp(if (std.mem.eql(u8, command, "tab")) "tab close" else "tabs --close");
+                }
+            }
+        }
+    }
+    if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
+        if (args.next() != null) badArgs(command);
+        return usage();
+    }
+
+    if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
 
     if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
 
@@ -400,19 +419,25 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var tab: ?[]const u8 = null;
         if (std.mem.eql(u8, first, "--tab")) {
             tab = args.next() orelse badArgs(command);
+            if (std.mem.startsWith(u8, tab.?, "--")) badArgs(command);
             first = args.next() orelse badArgs(command);
         }
         const keys = std.mem.eql(u8, first, "--keys");
         if (keys) first = args.next() orelse badArgs(command);
-        const second = args.next();
-        const text = try joinRemainingArgs(allocator, &args, second orelse first);
-        defer allocator.free(text);
+        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+            error.InvalidArguments => badArgs(command),
+            else => return err,
+        };
+        defer allocator.free(parsed.text);
+        if (tab != null and parsed.tab != null) badArgs(command);
+        if (parsed.tab) |target| tab = target;
+        const text = parsed.text[parsed.second_offset orelse 0 ..];
 
         var fields = std.array_list.Managed(u8).init(allocator);
         defer fields.deinit();
-        if (second != null) {
+        if (parsed.second_offset) |offset| {
             try fields.appendSlice("\"selector\":");
-            try appendJsonString(&fields, first);
+            try appendJsonString(&fields, parsed.text[0 .. offset - 1]);
             try fields.appendSlice(",");
         }
         try fields.appendSlice("\"text\":");
@@ -576,9 +601,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try fields.print("\"ownerPid\":{d}", .{pid});
         }
         try sendBrowserRequest(allocator, "resolveWindow", fields.items, null);
-    } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
-        if (args.next() != null) badArgs(command);
-        return usage();
     } else if (std.mem.eql(u8, command, "manifest")) {
         const exe_path = args.next() orelse badArgs(command);
         const extension_id = args.next() orelse badArgs(command);
@@ -628,9 +650,9 @@ const usage_text =
     \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
     \\  find <text> [--tab <id|match>] Find text snippets across frames
     \\  click <selector> [--tab <id|match>]  Click a CSS selector across frames
-    \\  type <text>                    Type trusted text at the focused editable
-    \\  type <selector> <text>         Click a selector and replace it with trusted text
-    \\  type --keys [selector] <text>  Type individual keys for keyboard-driven typeaheads
+    \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable
+    \\  type <selector> <text> [--tab <id|match>]  Click a selector and replace it with trusted text
+    \\  type --keys [selector] <text> [--tab <id|match>]  Type individual keys for keyboard-driven typeaheads
     \\  insert <text>                  Insert trusted text at the page cursor
     \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
     \\  eval <js>                      Execute JavaScript in MAIN world; awaits promises
@@ -2204,8 +2226,41 @@ fn handleJsonMessage(allocator: std.mem.Allocator, payload: []const u8) ![]u8 {
     return makeErrorResponse(allocator, id, "unknown method");
 }
 
+fn commandLookup(command: []const u8) []const u8 {
+    return if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+}
+
+fn commandHelp(command: []const u8) !void {
+    const lookup = commandLookup(command);
+    if (std.mem.eql(u8, lookup, "cdp")) {
+        return writeStdout(
+            \\usage: zsb cdp <method> [params-json]
+            \\Send a Chrome DevTools Protocol command. Params must be a JSON object.
+            \\
+            \\Examples:
+            \\  zsb cdp Page.enable
+            \\  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+            \\
+        );
+    }
+    var lines = std.mem.splitScalar(u8, usage_text, '\n');
+    var found = false;
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "  ")) continue;
+        const candidate = line[2..];
+        if (!std.mem.startsWith(u8, candidate, lookup) or
+            (candidate.len > lookup.len and candidate[lookup.len] != ' ')) continue;
+        try writeStdout("usage: ");
+        try writeStdout(if (std.mem.eql(u8, command, "tab")) "tab close" else command);
+        try writeStdout(candidate[lookup.len..]);
+        try writeStdout("\n");
+        found = true;
+    }
+    if (!found) badArgs(command);
+}
+
 fn badArgs(command: []const u8) noreturn {
-    const lookup = if (std.mem.eql(u8, command, "get-text")) "text" else if (std.mem.eql(u8, command, "script")) "eval" else if (std.mem.eql(u8, command, "doctor")) "status" else if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) "help" else if (std.mem.eql(u8, command, "tab") or std.mem.eql(u8, command, "tab close") or std.mem.eql(u8, command, "tabs --close")) "close-tab" else command;
+    const lookup = commandLookup(command);
     var usage_line: ?[]const u8 = null;
     var lines = std.mem.splitScalar(u8, usage_text, '\n');
     var commands = false;
@@ -2360,24 +2415,31 @@ fn parseOnlyTabArg(args: anytype) !?[]const u8 {
 const TextTabArgs = struct {
     text: []u8,
     tab: ?[]const u8 = null,
+    second_offset: ?usize = null,
 };
 
 fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8) !TextTabArgs {
     var text = std.array_list.Managed(u8).init(allocator);
     errdefer text.deinit();
     var tab: ?[]const u8 = null;
+    var text_count: usize = 0;
+    var second_offset: ?usize = null;
     var current: ?[]const u8 = first;
     while (current) |arg| : (current = args.next()) {
         if (std.mem.eql(u8, arg, "--tab")) {
             if (tab != null) return error.InvalidArguments;
             tab = args.next() orelse return error.InvalidArguments;
+            if (std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
         } else {
-            if (text.items.len > 0) try text.append(' ');
+            if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
+            if (text_count > 0) try text.append(' ');
+            if (text_count == 1) second_offset = text.items.len;
+            text_count += 1;
             try text.appendSlice(arg);
         }
     }
     if (text.items.len == 0) return error.InvalidArguments;
-    return .{ .text = try text.toOwnedSlice(), .tab = tab };
+    return .{ .text = try text.toOwnedSlice(), .tab = tab, .second_offset = second_offset };
 }
 
 fn appendTabTargetField(fields: *std.array_list.Managed(u8), target: []const u8) !void {

@@ -82,7 +82,7 @@ fn sendBrowserRequest(allocator: std.mem.Allocator, method: []const u8, fields_j
     std.debug.print("{s}\n", .{request});
 }
 ` + section(app, 'fn zsbBuildBridgeCmd(', 'const ZsbBridgeRun = struct') +
-    section(bridge, 'const LimitTabArgs = struct', 'fn joinRemainingArgs(') +
+    section(bridge, 'const LimitTabArgs = struct', 'fn getString(') +
     section(bridge, 'fn appendJsonString(', 'fn readExact(') +
     section(bridge, 'fn getBool(', 'fn getI64(') +
     section(bridge, 'fn requestBrowserWithRetry(', 'fn requestBrowser(') + String.raw`
@@ -118,8 +118,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
 fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     var args = argv;
     var command = args.next() orelse return error.InvalidArguments;
-` + section(bridge, '    var profile_override:', '    const is_native_host') + '    if (profile_override != null) return error.InvalidArguments;\n' +
+` + section(bridge, '    var profile_override:', '    var help_args = args;') + '    if (profile_override != null) return error.InvalidArguments;\n' +
     '    if (' + section(bridge, 'std.mem.eql(u8, command, "text") or', '    } else if (std.mem.eql(u8, command, "links"))') +
+    '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "type")', '    } else if (std.mem.eql(u8, command, "insert"))') +
     '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "eval") or', '    } else if (std.mem.eql(u8, command, "key"))') +
     '    } else return error.InvalidArguments;\n}\n');
   const executable = path.join(dir, process.platform === 'win32' ? 'transport.exe' : 'transport');
@@ -206,6 +207,41 @@ test('explicit --tab survives transport and retries a non-owning instance, not a
     }
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-228: type preserves text and targets --tab through the real CLI parser', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-type-tab-'));
+  const text = 'Which skill do you use and what is your pass condition?';
+  const selector = '[role="textbox"]';
+  const target = '1813335057';
+  try {
+    const native = nativeHarness(dir);
+    for (const [args, expected] of [
+      [[selector, text, '--tab', target], { selector, text, tab: target }],
+      [['--tab', target, selector, text], { selector, text, tab: target }],
+      [[selector, '--tab', target, text], { selector, text, tab: target }],
+      [[text, '--tab', target], { text, tab: target }],
+      [['--tab', target, text], { text, tab: target }],
+      [['--keys', selector, text, '--tab', target], { selector, text, tab: target, keys: true }],
+      [['--tab', target, '--keys', text], { text, tab: target, keys: true }],
+      [['--keys', text, '--tab', target], { text, tab: target, keys: true }],
+      [[selector, 'hello', 'world', '--tab', target], { selector, text: 'hello world', tab: target }],
+      [[selector, text, '--tab', 'Chat tab'], { selector, text, tab: 'Chat tab' }],
+      [[text], { text }],
+      [[selector, text], { selector, text }],
+      [['--keys', text], { text, keys: true }],
+      [[selector, ''], { selector, text: '' }],
+    ]) {
+      const lines = native('app-command', 'type', ...args).split('\n');
+      const request = JSON.parse(lines[1]);
+      assert.equal(request.method, 'type');
+      assert.equal(request.windowId, windowId);
+      const actual = Object.fromEntries(['selector', 'text', 'tab', 'keys'].filter(key => key in request).map(key => [key, request[key]]));
+      assert.deepEqual(actual, expected, JSON.stringify(args));
+    }
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
