@@ -1988,12 +1988,12 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 }
 
 pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
-    if (app_state.g_account_locked or idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return false;
+    if (app_state.g_account_locked) return false;
+    if (idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return false;
     if (idx == app_state.active_shell) {
         app_state.g_front_period.selected = null;
         @import("main.zig").sessionFrontChanged();
     }
-    if (idx >= app_state.shell_count) return false;
     const kind = app_state.shells[idx].kind;
     if (kind != .vps and kind != .vps2 and kind != .tmux) return false;
     if (@as(usize, @intCast(app_state.next_shell_id)) >= SPAWN_TITLES.len) return false;

@@ -231,7 +231,8 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
+  const filename = path.join(root, 'changelog.d/IGSH-535-session-open.md');
+  const fragment = fs.existsSync(filename) ? fs.readFileSync(filename, 'utf8').trim() : fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8').match(/\.text = "([^"]+)", \.ticket = "IGSH-535"/)?.[1];
   assert.equal(fragment.split('\n').length, 1);
   assert.match(fragment, /workspace/);
 });

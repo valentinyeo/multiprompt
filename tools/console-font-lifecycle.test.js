@@ -41,7 +41,7 @@ function creation(name, signature) {
       .replaceAll('@import("win32.zig").SWP_NOACTIVATE', 'SWP_NOACTIVATE');
     const theme = between(fn(consoleSource, 'finishStartupShell'), '    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);', '\n    if (idx == app_state.active_shell)');
     return `fn ${signature} bool {
-      var job_value = struct { command: [1]u16 = .{0}, kind: ShellKind, job: HANDLE = null, process: HANDLE = null, pid: u32 = 0, hwnd: HANDLE = null, shell_id: usize = 1, owner: HANDLE = g_main_hwnd }{ .kind = kind };
+      var job_value = struct { command: [1]u16 = .{0}, kind: ShellKind, job: HANDLE = null, process: HANDLE = null, pid: u32 = 0, hwnd: HANDLE = null, shell_id: usize = 1, owner: HANDLE }{ .kind = kind, .owner = g_main_hwnd };
       const job = &job_value;
       var si = std.mem.zeroes(STARTUPINFOW);
       ${acquisition}

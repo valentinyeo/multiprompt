@@ -91,5 +91,7 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);
   assert.match(read('build.zig'), /"node", "--test"[^\n]*"tools\/issue-493-tab-url-shortcut\.test\.js"/);
-  assert.match(read('changelog.d/IGSH-493-tab-url-shortcut.md'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
+  const fragment = 'changelog.d/IGSH-493-tab-url-shortcut.md';
+  const entry = fs.existsSync(path.join(__dirname, '..', fragment)) ? read(fragment).trim() : read('src/changelog.zig').match(/\.text = "([^"]+)", \.ticket = "IGSH-493"/)?.[1];
+  assert.match(entry, /^Ctrl\+Shift\+X inserts[^\n]+without sending\.$/);
 });
