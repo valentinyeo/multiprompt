@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn firstShowCommand() i32 {
-    return 5;
+    return 8;
 }
 
 test "IGSH-587 first show preserves maximized creation state without activation" {

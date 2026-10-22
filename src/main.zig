@@ -2848,7 +2848,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (exe_len > 0 and exe_len < 512) {
                 var cmd: [1024]u16 = undefined;
                 var p: usize = 0;
-                const prefix = "cmd.exe /c ping 127.0.0.1 -n 4 >nul & start \"\" \"";
+                const prefix = "cmd.exe /c ping 127.0.0.1 -n 4 >nul & start /max \"\" \"";
                 for (prefix) |c| {
                     cmd[p] = c;
                     p += 1;
@@ -7990,7 +7990,7 @@ pub fn main(init: std.process.Init) void {
         0,
         L("ZigShell"),
         if (IS_DEV) L("multiprompt v" ++ APP_VERSION ++ " [DEV]") else L("multiprompt v" ++ APP_VERSION),
-        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | @import("win32.zig").WS_MAXIMIZE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         1000,
@@ -8017,7 +8017,7 @@ pub fn main(init: std.process.Init) void {
     _ = syncMainWindowDpi(hwnd, 0);
     applyTitleBarTheme();
     launch_cache.restore();
-    _ = ShowWindow(hwnd, SW_SHOW);
+    _ = ShowWindow(hwnd, @import("launch_plan.zig").firstShowCommand());
     _ = InvalidateRect(hwnd, null, 1);
     _ = @import("win32.zig").UpdateWindow(hwnd);
     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);

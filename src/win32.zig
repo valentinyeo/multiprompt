@@ -18,6 +18,7 @@ pub const LPCWSTR = [*:0]const u16;
 pub const HKEY = HANDLE;
 
 pub const WS_OVERLAPPEDWINDOW: u32 = 0x00CF0000;
+pub const WS_MAXIMIZE: u32 = 0x01000000;
 pub const WS_VISIBLE: u32 = 0x10000000;
 pub const WS_POPUP: u32 = 0x80000000;
 pub const WS_CHILD: u32 = 0x40000000;

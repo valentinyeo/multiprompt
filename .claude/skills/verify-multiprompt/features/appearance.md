@@ -1,9 +1,10 @@
 # Appearance
 
-Choose a global color theme through the command palette and confirm both the visible desktop and saved preference change.
+Confirm the main window starts maximized, then choose a global color theme through the command palette and confirm both the visible desktop and saved preference change.
 
 ## Sub-features
 
+- `startup-maximized`: the first main window is maximized without the driver maximizing it.
 - `themes-open`: open the Themes submenu through Ctrl+K.
 - `themes-dark`: select explicit Dark as a known user-created baseline.
 - `themes-light`: select explicit Light and confirm brighter chrome and the saved global preference.
@@ -23,6 +24,7 @@ Preconditions:
 - No existing preference is seeded; the baseline is selected through the UI, even if the initial theme already looks dark.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=appearance`; watch and download as described in the index. This invokes `control.ps1 -Feature appearance` on Windows.
+- **Maximized startup.** Before restoring or moving the window for theme screenshots, Doctor verifies the owned process and `ZigShell` HWND. `IsZoomed` must be true immediately, with no maximize command or retry. `startup-maximized.json`, `startup-maximized.png` and the `startup-maximized` result check record the observation. This appearance journey runs on every code PR; `--single-window --no-window-restore` still uses maximized startup.
 - **Dark baseline.** The helper presses Ctrl+K, types `themes`, Enter, types `dark` and Enter, then Esc. The app saves `dark`. `before.png` shows the normal dark workspace, not just a palette.
 - **Light selection.** Repeat Ctrl+K, `themes`, Enter, then type `light`. `action.png` shows Light selected before Enter. Enter changes the theme; `action-selected.png` shows Light marked current. Esc closes the overlay.
 - **Result.** `after.png` shows the normal light workspace with the same app/version identity. The saved `data/roaming/ZigShell/theme-mode.txt` contains `light`.
