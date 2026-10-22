@@ -176,6 +176,16 @@ pub fn loadRemindersIfNeeded() void {
         e.order = @intCast(json_reader.uint(obj, "order"));
         e.wide_name_len = json_reader.copyWide(obj, "wide_name", &e.wide_name);
         e.group_id = @intCast(json_reader.uint(obj, "group_id"));
+        e.starred_group_id = @intCast(json_reader.uint(obj, "starred_group_id"));
+        if (e.starred_group_id != 0) {
+            var group = std.mem.zeroes(@TypeOf(app_state.groups[0]));
+            group.id = e.starred_group_id;
+            group.name_len = json_reader.copyWide(obj, "starred_group_name", &group.name);
+            group.color_set = json_reader.boolTrue(obj, "starred_group_color_set");
+            group.color = if (group.color_set) @intCast(@min(json_reader.uint(obj, "starred_group_color"), GROUP_COLORS.len - 1)) else 7;
+            group.collapsed = json_reader.boolTrue(obj, "starred_group_collapsed");
+            e.starred_group = group;
+        }
         e.group_name_len = json_reader.copyWide(obj, "group_name", &e.group_name);
         e.group_color_set = json_reader.boolTrue(obj, "group_color_set");
         e.group_color = if (e.group_color_set) @intCast(@min(json_reader.uint(obj, "group_color"), GROUP_COLORS.len - 1)) else 7;
@@ -304,6 +314,34 @@ fn saveReminders() bool {
             json_buf[pos] = '"';
             pos += 1;
         }
+        if (e.starred_group_id != 0) {
+            const key = ",\"starred_group_id\":";
+            @memcpy(json_buf[pos .. pos + key.len], key);
+            pos += key.len;
+            pos += writeUintTo(json_buf[pos..], e.starred_group_id);
+            if (e.starred_group) |group| {
+                const name = ",\"starred_group_name\":\"";
+                @memcpy(json_buf[pos .. pos + name.len], name);
+                pos += name.len;
+                appendJsonEscapedWide(&json_buf, &pos, group.name[0..group.name_len]);
+                json_buf[pos] = '"';
+                pos += 1;
+                const color = ",\"starred_group_color\":";
+                @memcpy(json_buf[pos .. pos + color.len], color);
+                pos += color.len;
+                pos += writeUintTo(json_buf[pos..], group.color);
+                if (group.color_set) {
+                    const explicit = ",\"starred_group_color_set\":true";
+                    @memcpy(json_buf[pos .. pos + explicit.len], explicit);
+                    pos += explicit.len;
+                }
+                if (group.collapsed) {
+                    const collapsed = ",\"starred_group_collapsed\":true";
+                    @memcpy(json_buf[pos .. pos + collapsed.len], collapsed);
+                    pos += collapsed.len;
+                }
+            }
+        }
         if (e.group_id != 0) {
             const group = ",\"group_id\":";
             @memcpy(json_buf[pos .. pos + group.len], group);
@@ -395,6 +433,8 @@ fn reminderFromShell(idx: usize, due_at: u64) ?ReminderEntry {
     e.tmux_host = app_state.shells[idx].tmux_host;
     e.tmux_persisted = true;
     e.favorite = app_state.shells[idx].favorite;
+    e.starred_group_id = app_state.shells[idx].starred_group_id;
+    e.starred_group = if (findGroupIdx(e.starred_group_id)) |gi| app_state.groups[gi] else null;
     e.last_used = app_state.shells[idx].last_used;
     e.input = app_state.shells[idx].input;
     e.visits = app_state.shells[idx].visits;
@@ -572,6 +612,9 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
             }
         }
         if (app_state.g_single_window) app_state.shells[si].workspace = target_slot;
+        if (e.favorite) {
+            if (e.starred_group) |group| app_state.shells[si].starred_group_id = @import("workspaces.zig").restoreSessionGroup(group, target_slot, true);
+        }
         _ = setBlueDot(si, .restore, false);
         app_state.shells[si].activity = .idle;
         app_state.shells[si].last_active = nowFileTime();
@@ -980,9 +1023,15 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
 
     var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, json_buf[0..n], .{}) catch return false;
     defer parsed.deinit();
+    var original_starred_groups: [MAX_SHELLS]u32 = undefined;
+    for (tabs[0..count], 0..) |tab, ti| original_starred_groups[ti] = tab.starred_group_id;
     var original_groups: [MAX_SHELLS]u32 = undefined;
     for (tabs[0..count], 0..) |tab, ti| original_groups[ti] = tab.group_id;
     if (parsed.value.object.get("groups")) |saved_groups| {
+        if (saved_groups == .array) for (saved_groups.array.items) |value| {
+            const id = json_reader.uint(value, "id");
+            if (id < std.math.maxInt(u32)) app_state.next_group_id = @max(app_state.next_group_id, @as(u32, @intCast(id)) + 1);
+        };
         if (saved_groups == .array) for (saved_groups.array.items) |value| {
             if (value != .object) continue;
             const id_value = value.object.get("id") orelse continue;
@@ -990,12 +1039,30 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
             if (id_value != .integer or name_value != .string or id_value.integer <= 0 or id_value.integer > std.math.maxInt(u32)) continue;
             const gid: u32 = @intCast(id_value.integer);
             var used = false;
-            for (tabs[0..count]) |tab| if (tab.group_id == gid) {
+            for (original_groups[0..count], original_starred_groups[0..count]) |home, starred| if (home == gid or starred == gid) {
                 used = true;
             };
             if (!used) continue;
+            for (tabs[0..count], 0..) |*tab, ti| {
+                if (original_starred_groups[ti] != gid) continue;
+                var group = std.mem.zeroes(@TypeOf(app_state.groups[0]));
+                group.id = gid;
+                group.name_len = json_reader.copyWide(value, "name", &group.name);
+                group.collapsed = json_reader.boolTrue(value, "collapsed");
+                group.color = @intCast(@min(json_reader.uint(value, "color"), GROUP_COLORS.len - 1));
+                group.color_set = json_reader.boolTrue(value, "color_set");
+                tab.starred_group_id = @import("workspaces.zig").restoreSessionGroup(group, slot, true);
+            }
+            var home_used = false;
+            for (original_groups[0..count]) |id| if (id == gid) {
+                home_used = true;
+            };
+            if (!home_used) continue;
             var owner: ?u8 = null;
-            for (0..app_state.shell_count) |si| if (app_state.shells[si].group_id == gid) {
+            for (0..app_state.shell_count) |si| if (app_state.shells[si].starred_group_id == gid) {
+                owner = MAX_LWS;
+                break;
+            } else if (app_state.shells[si].group_id == gid) {
                 owner = app_state.shells[si].workspace;
                 break;
             };
@@ -1005,8 +1072,16 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
                 const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, name_value.string) catch continue;
                 defer std.heap.page_allocator.free(wide);
                 for (0..app_state.group_count) |gi| {
+                    var starred_member = false;
+                    for (tabs[0..count]) |tab| if (tab.starred_group_id == app_state.groups[gi].id) {
+                        starred_member = true;
+                    };
+                    if (starred_member) continue;
                     var group_owner: ?u8 = null;
-                    for (0..app_state.shell_count) |si| if (app_state.shells[si].group_id == app_state.groups[gi].id) {
+                    for (0..app_state.shell_count) |si| if (app_state.shells[si].starred_group_id == app_state.groups[gi].id) {
+                        group_owner = MAX_LWS;
+                        break;
+                    } else if (app_state.shells[si].group_id == app_state.groups[gi].id) {
                         group_owner = app_state.shells[si].workspace;
                         break;
                     };

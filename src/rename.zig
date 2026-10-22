@@ -496,7 +496,7 @@ pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
 
 pub fn paletteGroupId() u32 {
     if (app_state.g_search_groupctx_mode) return app_state.g_groupctx_gid;
-    return if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].group_id else 0;
+    return if (app_state.active_shell < app_state.shell_count) @import("sidebar.zig").tabGroupId(app_state.active_shell) else 0;
 }
 
 pub fn groupPaletteCommand(action: usize) usize {
@@ -619,7 +619,7 @@ pub fn runGroupPaletteAction(hwnd: HANDLE, gidx: u32, action: usize) void {
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     } else if (cmd_u == MENU_HEADER_UNGROUP) {
         for (0..app_state.shell_count) |i| {
-            if (app_state.shells[i].group_id == gid) app_state.shells[i].group_id = 0;
+            if (@import("sidebar.zig").tabGroupId(i) == gid) @import("sidebar.zig").setTabGroupId(i, 0);
         }
         deleteGroup(gid);
         normalizeGroupOrder();
@@ -633,7 +633,7 @@ pub fn runGroupPaletteAction(hwnd: HANDLE, gidx: u32, action: usize) void {
         var i: u32 = app_state.shell_count;
         while (i > 0) {
             i -= 1;
-            if (app_state.shells[i].group_id == gid) closeShell(i);
+            if (@import("sidebar.zig").tabGroupId(i) == gid) closeShell(i);
         }
     } else if (cmd_u >= MENU_HEADER_COLOR_BASE and cmd_u < MENU_HEADER_COLOR_BASE + GROUP_COLORS.len) {
         const ci = cmd_u - MENU_HEADER_COLOR_BASE;

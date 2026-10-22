@@ -42,7 +42,7 @@ function harness() {
   const rails = block(sidebar.slice(railStart), 'if (!app_state.g_sidebar_collapsed)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreClosedShellGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '');
+  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
   return `const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
@@ -58,6 +58,7 @@ var groups: [MAX_GROUPS]TabGroup = undefined;
 var group_count: u32 = 0;
 var next_group_id: u32 = 1;
 var g_light_theme = false;
+var g_starred_workspace = false;
 var g_search_groupctx_mode = false;
 var g_groupctx_gid: u32 = 0;
 var active_shell: u32 = 0;
@@ -67,7 +68,7 @@ ${block(state, 'pub const ClosedShell = struct')};
 ${block(state, 'pub const ReminderEntry = struct')};
 ${block(state, 'const SavedTab = struct')};
 const Shell = struct {
-    chat_id: u64 = 0, group_id: u32 = 1, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
+    chat_id: u64 = 0, group_id: u32 = 1, starred_group_id: u32 = 0, favorite: bool = false, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
 };
@@ -455,7 +456,7 @@ test('one rail is painted per header, over every member row, after row backgroun
   const rail = sidebar.slice(start, sidebar.indexOf('const btns_y', start));
   assert.match(rail, /row.kind != \.header/);
   assert.match(rail, /member\.y \+ tabRowH\(\)/);
-  assert.match(rail, /group_id != app_state.groups\[row.gidx\].id/);
+  assert.match(rail, /tabGroupId\(member.shell_idx\) != app_state.groups\[row.gidx\].id/);
   assert.match(rail, /\.top = row.y - app_state.g_sidebar_scroll/);
   assert.match(rail, /\.bottom = bottom - app_state.g_sidebar_scroll/);
   assert.ok(start > sidebar.indexOf('const hl_brush'));

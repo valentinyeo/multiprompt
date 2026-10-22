@@ -470,3 +470,33 @@ test('IGSH-522: hidden pills are shown through the palette and every focus trans
   assert.match(read('src/sidebar.zig'), /g_hide_sidebar or app_state.g_hide_pills\) return null/);
   assert.match(read('src/command_palette.zig'), /defer \{[\s\S]*?\[palette\] ready chars=\{d\} count=\{d\} target=\{d\}/);
 });
+
+test('IGSH-556: Favorites groups journey uses real keys and requires independent saved IDs', () => {
+  const favorites = control.slice(control.indexOf("        'favorites-groups' {"), control.indexOf("        'session-open' {"));
+  function contract(driver, workflowText) {
+    assert.match(driver, /ValidateSet\([^\n)]*'favorites-groups'/);
+    assert.match(workflowText, /\$env:FEATURE -notin @\([^\n)]*'favorites-groups'/);
+    assert.match(favorites, /Press @\(0x12, 0x53\)/);
+    assert.match(favorites, /favorite -eq \$true/);
+    assert.equal((favorites.match(/Palette 'move to group'/g) || []).length, 2);
+    assert.equal((favorites.match(/Type-Text 'new group'/g) || []).length, 2);
+    assert.match(favorites, /Press @\(0x12, 0x31\)/);
+    assert.match(favorites, /\$newGroups\[0\]\.id -ne \$homeGroupId/);
+    assert.match(favorites, /\$state.tabs\[\$tabIndex\].group_id -eq \$homeGroupId -and \$state.tabs\[\$tabIndex\].starred_group_id -eq \$newGroups\[0\].id/);
+    assert.match(favorites, /Snapshot 'starred-grouped'/);
+    assert.match(favorites, /Press @\(0x12, 0x32\)/);
+    assert.match(favorites, /starred_group_id -eq \$favoritesGroupId/);
+    assert.match(favorites, /group_id = \$homeGroupId; starred_group_id = \$favoritesGroupId/);
+    assert.doesNotMatch(favorites, /Set-Content|WriteAllText|SendMessage|PostMessage|skip/i);
+  }
+  contract(control, workflow);
+  assert.throws(() => contract(control.replace("'favorites-groups', ", ''), workflow));
+  assert.throws(() => contract(control, workflow.replace("'favorites-groups', ", '')));
+  assert.ok(control.indexOf('    Doctor\n') < control.indexOf("        'favorites-groups' {"));
+  const map = read(skill + 'features/favorites-groups.md');
+  for (const heading of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) {
+    assert.ok(map.includes(`## ${heading}`));
+  }
+  assert.match(read(skill + 'features/README.md'), /\[Favorites groups\]\(favorites-groups.md\)/);
+  assert.match(read(skill + 'features/workspaces.md'), /\[Favorites groups\]\(favorites-groups.md\)/);
+});

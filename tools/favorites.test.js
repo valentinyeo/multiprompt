@@ -31,7 +31,7 @@ test('favorite toggle, split filter and JSON parser execute as native Zig unit t
 
 test('both initializers and every persisted restore/reconnect path retain favorites', () => {
   assert.match(between('const empty_shell', 'var shells'), /\.favorite = false/);
-  assert.match(between('fn spawnShellWithSession(', 'fn respawnShellInPlace('), /\.favorite = false/);
+  assert.match(between('fn spawnShellWithSession(', 'fn respawnShellInPlace('), /\.favorite = g_starred_workspace and g_pending_new_tab_group != 0,/);
   assert.match(between('fn saveSessionTo(', 'fn saveSession('), /shells\[i\]\.favorite[\s\S]*?\\"favorite\\":true/);
   assert.match(between('fn parseSessionTabs(', 'fn restoreBrowserStateFromSavedTab('), /json_reader\.sessionTabs/);
   assert.match(jsonReader, /"favorite"/);
@@ -151,7 +151,14 @@ test('IGSH-457 production Starred rows include other windows without duplicating
     const start = sidebar.indexOf('pub fn layoutRows(');
     const end = sidebar.indexOf('    const show_section_headers', start);
     assert.ok(start >= 0 && end > start);
-    const production = sidebar.slice(start, end) + '    return 0;\n}\n';
+    const groupIdStart = sidebar.indexOf('pub fn tabGroupId(');
+    const groupIdEnd = sidebar.indexOf('pub fn setTabGroupId(', groupIdStart);
+    const membershipStart = sidebar.indexOf('fn tabInCurrentWorkspace(');
+    const membershipEnd = sidebar.indexOf('pub fn groupFirstShellIdx(', membershipStart);
+    assert.ok(groupIdStart >= 0 && groupIdEnd > groupIdStart);
+    assert.ok(membershipStart >= 0 && membershipEnd > membershipStart);
+    const production = sidebar.slice(groupIdStart, groupIdEnd) + sidebar.slice(membershipStart, membershipEnd) +
+      sidebar.slice(start, end) + '    return 0;\n}\n';
     fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
     fs.writeFileSync(path.join(tmp, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 8; }\n');
     fs.writeFileSync(path.join(tmp, 'integration.zig'), `const std = @import("std");
@@ -159,12 +166,18 @@ const frequent = @import("frequent.zig");
 const MAX_ROWS = 8;
 const LOOK_UNIFIED = false;
 const DEV_TOP_PAD = 0;
-const Row = struct { kind: enum { tab, inbox }, gidx: u32, shell_idx: u32, y: i32 };
+const GROUP_HEADER_H = 24;
+const Row = struct { kind: enum { header, tab, inbox }, gidx: u32, shell_idx: u32, y: i32 };
 const InboxRow = struct { ws: u32, favorite: bool };
 pub var local_favorite = true;
 pub const app_state = struct {
     var g_starred_workspace = true;
+    var g_single_window = true;
+    var g_active_workspace: u8 = 0;
     var shell_count: u32 = 1;
+    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0 }{.{}};
+    var group_count: u32 = 0;
+    var groups = [_]struct { id: u32, collapsed: bool }{.{ .id = 17, .collapsed = false }};
     var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
     var g_inbox_ws_count: u32 = 2;
     var g_inbox_ws = [_]struct { hwnd: usize }{ .{ .hwnd = 1 }, .{ .hwnd = 2 } };
@@ -186,6 +199,19 @@ test "IGSH-457 Starred mirrors local and other-account window favorites after st
     app_state.g_inbox_rows[2].favorite = true;
     try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
     try std.testing.expectEqual(@as(u32, 2), rows[0].shell_idx);
+    local_favorite = true;
+    app_state.group_count = 1;
+    app_state.shells[0].starred_group_id = 17;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(.tab, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(.inbox, rows[2].kind);
+    try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
+    app_state.groups[0].collapsed = true;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(.inbox, rows[1].kind);
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(tmp, 'integration.zig'), '--test-filter', 'IGSH-457'], { encoding: 'utf8', timeout: 120000 });

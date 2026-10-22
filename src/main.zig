@@ -1269,7 +1269,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.809";
+pub const APP_VERSION = "0.28.810";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -2216,7 +2216,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     switch (ht) {
                         .tab => |ti| {
                             if (ti < app_state.shell_count) {
-                                const gid = app_state.shells[ti].group_id;
+                                const gid = @import("sidebar.zig").tabGroupId(ti);
                                 if (gid != 0) target_gidx = findGroupIdx(gid);
                             }
                         },
@@ -2327,8 +2327,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     if (target_opt) |target| {
                         if (target != app_state.drag_src and target < app_state.shell_count and app_state.drag_src < app_state.shell_count) {
-                            const src_gid = app_state.shells[app_state.drag_src].group_id;
-                            const target_gid = app_state.shells[target].group_id;
+                            const src_gid = @import("sidebar.zig").tabGroupId(app_state.drag_src);
+                            const target_gid = @import("sidebar.zig").tabGroupId(target);
                             if (src_gid == target_gid) {
                                 const temp = app_state.shells[app_state.drag_src];
                                 app_state.shells[app_state.drag_src] = app_state.shells[target];
@@ -2357,7 +2357,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             .header => |tgidx| {
                                 if (!app_state.drag_section_only and tgidx < app_state.group_count and app_state.drag_src < app_state.shell_count) {
                                     const target_gid = app_state.groups[tgidx].id;
-                                    if (app_state.shells[app_state.drag_src].group_id != target_gid) {
+                                    if (@import("sidebar.zig").tabGroupId(app_state.drag_src) != target_gid) {
                                         app_state.groups[tgidx].collapsed = false;
                                         if (moveShellToGroupStart(app_state.drag_src, target_gid)) |new_idx| {
                                             app_state.drag_src = new_idx;
@@ -2402,7 +2402,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.groups[gidx].collapsed = !app_state.groups[gidx].collapsed;
                         if (app_state.groups[gidx].collapsed) {
                             const cur_gid = app_state.groups[gidx].id;
-                            if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].group_id == cur_gid) {
+                            if (app_state.active_shell < app_state.shell_count and @import("sidebar.zig").tabGroupId(app_state.active_shell) == cur_gid) {
                                 if (findNextVisibleTab(app_state.active_shell, 1)) |nxt| {
                                     switchToShell(nxt);
                                 } else if (findNextVisibleTab(app_state.active_shell, -1)) |prv| {
@@ -3337,7 +3337,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_TOGGLE_GROUP => {
             if (app_state.active_shell >= app_state.shell_count) return 0;
-            const gid = app_state.shells[app_state.active_shell].group_id;
+            const gid = @import("sidebar.zig").tabGroupId(app_state.active_shell);
             if (gid == 0) return 0;
             if (findGroupIdx(gid)) |gidx| {
                 app_state.groups[gidx].collapsed = !app_state.groups[gidx].collapsed;
@@ -6015,7 +6015,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_TABCTX_GROUP_NEW_TAB_IN) {
                     if (findShellById(app_state.g_tabctx_sid)) |ti| {
-                        app_state.g_pending_new_tab_group = app_state.shells[ti].group_id;
+                        app_state.g_pending_new_tab_group = @import("sidebar.zig").tabGroupId(ti);
                     }
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
@@ -7615,23 +7615,34 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (flen > 0) @memcpy(new_shell.favicon_path[0..flen], transfer.favicon_path[0..flen]);
                             new_shell.favicon_path_len = flen;
 
+                            const max_group_id = @max(transfer.group_id, transfer.starred_group_id);
+                            if (max_group_id < std.math.maxInt(u32)) app_state.next_group_id = @max(app_state.next_group_id, max_group_id + 1);
                             if (transfer.group_id != 0) {
-                                if (findGroupIdx(transfer.group_id) == null and app_state.group_count < MAX_GROUPS) {
-                                    var gname: [64]u16 = std.mem.zeroes([64]u16);
-                                    const glen = @min(transfer.group_name_len, 63);
-                                    for (0..glen) |gi| gname[gi] = @intCast(transfer.group_name[gi]);
-                                    app_state.groups[app_state.group_count] = .{
-                                        .id = transfer.group_id,
-                                        .name = gname,
-                                        .name_len = glen,
-                                        .collapsed = transfer.group_collapsed != 0,
-                                        .color = (transfer.group_color & 127) % @as(u8, @intCast(GROUP_COLORS.len)),
-                                        .color_set = transfer.group_color & 128 != 0,
-                                    };
-                                    app_state.group_count += 1;
-                                    if (transfer.group_id >= app_state.next_group_id) app_state.next_group_id = transfer.group_id + 1;
-                                }
-                                if (findGroupIdx(transfer.group_id) != null) new_shell.group_id = transfer.group_id;
+                                var name: [64]u16 = @splat(0);
+                                const len = @min(transfer.group_name_len, 63);
+                                for (0..len) |ni| name[ni] = transfer.group_name[ni];
+                                new_shell.group_id = @import("workspaces.zig").restoreSessionGroup(.{
+                                    .id = transfer.group_id,
+                                    .name = name,
+                                    .name_len = len,
+                                    .collapsed = transfer.group_collapsed != 0,
+                                    .color = (transfer.group_color & 127) % @as(u8, @intCast(GROUP_COLORS.len)),
+                                    .color_set = transfer.group_color & 128 != 0,
+                                }, new_shell.workspace, false);
+                            }
+
+                            if (transfer.starred_group_id != 0) {
+                                var name: [64]u16 = @splat(0);
+                                const len = @min(transfer.starred_group_name_len, 63);
+                                for (0..len) |ni| name[ni] = transfer.starred_group_name[ni];
+                                new_shell.starred_group_id = @import("workspaces.zig").restoreSessionGroup(.{
+                                    .id = transfer.starred_group_id,
+                                    .name = name,
+                                    .name_len = len,
+                                    .collapsed = transfer.starred_group_collapsed != 0,
+                                    .color = (transfer.starred_group_color & 127) % @as(u8, @intCast(GROUP_COLORS.len)),
+                                    .color_set = transfer.starred_group_color & 128 != 0,
+                                }, new_shell.workspace, true);
                             }
 
                             app_state.shells[app_state.shell_count] = new_shell;

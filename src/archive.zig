@@ -917,7 +917,7 @@ pub fn workspaceHasLockedSession(slot: u8) bool {
 
 pub fn groupHasLockedSession(gid: u32) bool {
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].group_id == gid and app_state.shells[i].locked) return true;
+        if (@import("sidebar.zig").tabGroupId(i) == gid and app_state.shells[i].locked) return true;
     }
     return false;
 }

@@ -9,6 +9,7 @@ pub const Row = struct {
     kind: u8 = 0,
     workspace: u8 = 0,
     group_id: u32 = 0,
+    starred_group_id: u32 = 0,
     agent: u8 = 0,
     pinned: bool = false,
     favorite: bool = false,
@@ -112,4 +113,17 @@ test "ISSUE-502 snapshot rejects invalid row identities and unsafe block ranges"
     defer a.free(oversized);
     @memset(oversized, ' ');
     try std.testing.expect((try decode(a, oversized)) == null);
+}
+
+test "IGSH-556 launch snapshot preserves both memberships with legacy defaults" {
+    const a = std.testing.allocator;
+    const bytes = try encode(a, .{ .active = 1, .rows = &.{.{ .id = 1, .name = &.{ 'C', 'M', 'D' }, .group_id = 17, .starred_group_id = 29 }} });
+    defer a.free(bytes);
+    const restored = (try decode(a, bytes)).?;
+    defer restored.deinit();
+    try std.testing.expectEqual(@as(u32, 17), restored.value.rows[0].group_id);
+    try std.testing.expectEqual(@as(u32, 29), restored.value.rows[0].starred_group_id);
+    const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[67],\"group_id\":17}]}")).?;
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(u32, 0), legacy.value.rows[0].starred_group_id);
 }
