@@ -1139,6 +1139,7 @@ const pasteClipboardToShell = @import("clipboard.zig").pasteClipboardToShell;
 const dictationAudit = @import("voice.zig").dictationAudit;
 const handleDictationReady = @import("voice.zig").handleDictationReady;
 const toggleDictation = @import("voice.zig").toggleDictation;
+const logDeepgramKeySource = @import("voice.zig").logDeepgramKeySource;
 const handleShotPaste = @import("clipboard.zig").handleShotPaste;
 const sendCtrlCToShell = @import("clipboard.zig").sendCtrlCToShell;
 const copyConsoleSelectionToClipboard = @import("clipboard.zig").copyConsoleSelectionToClipboard;
@@ -7756,6 +7757,7 @@ pub fn main(init: std.process.Init) void {
 
     _ = SetErrorMode(SSH_ERROR_MODE);
     crash_recorder.install(&crashSnapshot, APP_VERSION, IS_DEV);
+    logDeepgramKeySource();
 
     _ = SetProcessDpiAwarenessContext(@ptrFromInt(@as(usize, @bitCast(@as(isize, -4)))));
 
