@@ -69,6 +69,7 @@ function browserInputReadyContract(source) {
   assert.match(open, /Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible\(\$script:window\)[^}]*\} 'browser docked before keyboard input' 25/);
   assert.ok(open.indexOf('browser docked before keyboard input') < open.indexOf('browser launch returned foreground to app'));
   assert.match(source, /function Assert-Foreground \{[^}]*throw 'Refusing input: owned app is not foreground'/);
+  assert.match(source, /Assert-BrowserPane 'open' 'shift-b-toggle'[^]*?Wait-Until \{[^}]*browser_state -eq 'connected'[^}]*PaneVisible[^}]*GetForegroundWindow[^}]*\} 'shifted browser docked before keyboard input' 25\s+Palette 'close all browser panes'/);
 }
 browserInputReadyContract(driver);
 assert.throws(() => browserInputReadyContract(driver.replace(/    Wait-Until \{\n        \$pane = Read-BrowserPane[^}]*\} 'browser docked before keyboard input' 25\n/, '')));

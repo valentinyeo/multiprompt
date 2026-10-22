@@ -626,6 +626,11 @@ try {
             Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
+            Wait-Until {
+                $pane = Read-BrowserPane
+                $pane.browser_state -eq 'connected' -and [VerifyNative]::PaneVisible($script:window) -and
+                    [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'shifted browser docked before keyboard input' 25
             Palette 'close all browser panes'
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
