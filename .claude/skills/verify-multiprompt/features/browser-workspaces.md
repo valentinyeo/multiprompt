@@ -26,6 +26,9 @@ The fresh GitHub desktop uses installed Edge and the repository's unmodified
 unpacked extension at the app's normal development extension path. After Edge
 publishes the actual extension ID, the harness registers the matching native
 host executable in the disposable runner's HKCU, removing it during cleanup.
+In each profile, open edge://extensions/, turn on Developer mode through its
+visible UI Automation toggle, and require the real native pipe. No browser
+flags, policies or preference files bypass this user consent step.
 No app state, browser preferences or bookmark files are seeded or edited.
 Common app keystrokes use the strict Doctor-verified main-window foreground guard.
 Browser-only keystrokes validate the exact profile PID/HWND and root owner;

@@ -191,6 +191,12 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
     assert.ok(control.split('\n').some(line => line.includes('Press-WorkspaceBrowser @') && line.includes(label)));
   }
 
+  const extensionSetup = control.slice(control.indexOf('function Enable-WorkspaceExtension('), control.indexOf('function Read-BookmarkUrls('));
+  assert.match(extensionSetup, /Type-Text 'edge:\/\/extensions\/'/);
+  assert.match(extensionSetup, /Name -ne 'Developer mode'[\s\S]*?TogglePattern[\s\S]*?\$toggle.Toggle\(\)/);
+  assert.match(extensionSetup, /GetFiles[\s\S]*?-contains \$pipe/);
+  assert.doesNotMatch(extensionSetup, /Set-Content|WriteAllText|WriteAllBytes|Set-Item|PostMessage/);
+  assert.match(control, /Register-WorkspaceBridge \$root \}\s+Enable-WorkspaceExtension \$root \$index/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
 });

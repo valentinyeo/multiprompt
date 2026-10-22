@@ -674,6 +674,38 @@ function Register-WorkspaceBridge([string]$Root) {
     Record ('Registered real Edge extension native host: ' + $script:extensionIds[0])
 }
 
+function Enable-WorkspaceExtension([string]$Root, [int]$Index) {
+    Palette 'open url in browser'
+    Press @(0x0D) 'Enter: browser URL input for extension setup'
+    Type-Text 'edge://extensions/'
+    Press @(0x0D) 'Enter: open the actual Edge Extensions page'
+    Focus-WorkspaceBrowser $Root
+    Press-WorkspaceBrowser @(0x11, 0x39) 'Ctrl+9: select the Edge Extensions page'
+    Wait-Until {
+        $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
+        $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($node in $nodes) {
+            if ($node.Current.Name -ne 'Developer mode' -or $node.Current.ProcessId -ne $script:bookmarkPid) { continue }
+            $toggle = $null
+            if (-not $node.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) { continue }
+            if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
+                Doctor
+                Record ('Enable Developer mode through the visible Edge Extensions toggle for profile ' + $Index)
+                if ($Index -eq 0) { Snapshot 'extensions-action' }
+                $toggle.Toggle()
+            }
+            return $toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
+        }
+        return $false
+    } 'real Edge Developer mode toggle is on' 60
+    Snapshot ('extensions-enabled-' + $Index)
+    $token = 'e-' + (Split-Path $Root -Leaf)
+    $pipe = '\\.\pipe\multiprompt-browser-isolated-' + $token
+    Wait-Until { [IO.Directory]::GetFiles('\\.\pipe\') -contains $pipe } 'enabled unpacked extension registered its actual workspace native pipe' 60
+    $script:extensionSetups += @{ root = $Root; profileToken = $token; pipe = $pipe; developerMode = 'On'; extensionId = $script:extensionIds[0]; pid = $script:bookmarkPid; hwnd = $script:bookmarkWindow.ToInt64() }
+    Save-Json @($script:extensionSetups) 'workspace-extension-setup.json'
+}
+
 function Read-BookmarkUrls($Node) {
     if ($null -eq $Node) { return }
     if ($Node.PSObject.Properties['url']) { [string]$Node.url }
@@ -1113,6 +1145,7 @@ try {
             Wait-Until { (Read-Session).active_workspace -eq 0 } 'initial workspace active'
             $roots = @()
             $identities = @()
+            $script:extensionSetups = @()
             $browserRoot = Join-Path $scratch 'local/ZigShell/BrowserWorkspaces/edge'
             for ($index = 0; $index -lt 6; $index++) {
                 if ($index -eq 1) {
@@ -1136,6 +1169,7 @@ try {
                     @((Read-Inbox).shells | Where-Object { $_.ws -eq $slot -and $_.br -eq 2 }).Count -gt 0
                 } 'completed workspace profile and live docked browser' 60
                 if ($index -eq 0) { Register-WorkspaceBridge $root }
+                Enable-WorkspaceExtension $root $index
                 $roots += $root
                 $identities += $id
                 Snapshot ('workspace-' + $index)
