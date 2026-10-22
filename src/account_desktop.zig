@@ -586,14 +586,29 @@ fn accountHostConfigPath(a: std.mem.Allocator) ![]const u8 {
     return std.fmt.allocPrint(a, "{s}\\.ssh\\config", .{profile[0..n]});
 }
 fn accountReadHostConfig(path: []const u8) !?[]u8 {
-    if (readFileAllocWin32(path, session_layout.max_bytes)) |bytes| return bytes;
+    const w = @import("win32.zig");
     var wide: [600]u16 = undefined;
     const wpath = win32WidePath(&wide, path) orelse return error.Storage;
-    if (GetFileAttributesW(wpath.ptr) != 0xffffffff) return error.Storage;
-    const code = @import("win32.zig").GetLastError();
-    if (code != 2 and code != 3) return error.Storage;
-    return null;
+    const file = w.CreateFileW(wpath.ptr, w.GENERIC_READ, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) {
+        const code = w.GetLastError();
+        if (code != 2 and code != 3) return error.Storage;
+        return null;
+    }
+    defer _ = CloseHandle(file);
+    var size: i64 = 0;
+    if (w.GetFileSizeEx(file, &size) == 0 or size < 0 or size >= session_layout.max_bytes) return error.Storage;
+    const bytes = try std.heap.page_allocator.alloc(u8, @intCast(size));
+    errdefer std.heap.page_allocator.free(bytes);
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var n: DWORD = 0;
+        if (w.ReadFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &n, null) == 0 or n == 0) return error.Storage;
+        total += n;
+    }
+    return bytes;
 }
+
 fn accountApplyHosts(a: std.mem.Allocator, before: []const account_hosts.Host, after: []const account_hosts.Host, original: []const u8) !void {
     const path = try accountHostConfigPath(a);
     const current = try accountReadHostConfig(path);
