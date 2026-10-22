@@ -10,8 +10,10 @@ pub fn main() !void {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("| Name | Value | Flag |\n|---|---|---|\n| Alpha | 100 | ready |\n| Beta | 200 | done |");
     var frequency: i64 = 0;
     if (w.QueryPerformanceFrequency(&frequency) == 0) return error.NoCounter;
+    const warmup_builds: usize = 500;
+    const measured_builds: usize = 20_000;
     var total_ticks: i64 = 0;
-    for (0..2050) |index| {
+    for (0..warmup_builds + measured_builds) |index| {
         app_state.g_chat_tables.clear(std.heap.page_allocator);
         var start: i64 = 0;
         var end: i64 = 0;
@@ -19,7 +21,7 @@ pub fn main() !void {
         const layout = render.benchTableLayout(dc, text, 0, 688) orelse return error.NoLayout;
         _ = w.QueryPerformanceCounter(&end);
         if (layout.table.columns != 3 or layout.table.rows.items.len != 3) return error.WrongTable;
-        if (index >= 50) total_ticks += end - start;
+        if (index >= warmup_builds) total_ticks += end - start;
     }
-    std.debug.print("CHAT_TABLE_SAMPLE builds=2000 ticks={d} frequency={d}\n", .{ total_ticks, frequency });
+    std.debug.print("CHAT_TABLE_SAMPLE builds={d} ticks={d} frequency={d}\n", .{ measured_builds, total_ticks, frequency });
 }
