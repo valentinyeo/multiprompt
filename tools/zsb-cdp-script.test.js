@@ -41,6 +41,7 @@ function harness(command = async () => ({}), timers = {}) {
     stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     errorText: error => error.message || String(error),
     cdpOperationChains: new Map(), cdpSessionCancels: new Map(), debuggedTabs: new Set(),
+    emulatedTabs: new Map(), lostEmulationTabs: new Map(),
     screenshotCdpDetachTimers: new Map(), screenshotCdpDetachInFlight: new Map(),
     screenshotCdpPageEnabledTabs: new Set(),
     setTimeout: (fn, ms) => { scheduled.push(ms); return (timers.setTimeout || setTimeout)(fn, ms); },

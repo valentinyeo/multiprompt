@@ -623,3 +623,33 @@ test('release version guard compares against the current git master with a fixed
   assert.match(guard, /catch/);
   assert.match(guard, /1\.0\.71/);
 });
+
+test('rebased CDP scripts preserve emulation and hold long steps without the ordinary session deadline', async () => {
+  const h = harness({ timeoutMs: 20 });
+  await h.run({ method: 'emulate', device: 'iphone' });
+  const timers = [];
+  h.context.setTimeout = (fn, ms) => {
+    timers.push(ms);
+    return setTimeout(fn, ms === 20000 ? 30 : ms === 15000 ? 20 : ms);
+  };
+  const result = await h.run({ method: 'cdp', script: [{ waitMs: 20000 }, { method: 'Synthetic.enableUnknown', timeoutMs: 1000 }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), [{ waitMs: 20000 }, { method: 'Synthetic.enableUnknown', result: { acted: true, actionCount: 1 } }]);
+  assert.equal(timers.filter(ms => ms === 15000).length, 1, 'only restoration uses the emulation timeout, not the script session');
+  assert.equal(h.overrides.get(1).metrics.width, 390);
+  assert.equal(h.emulated(1), true);
+  await h.run({ method: 'emulate', device: 'off' });
+});
+
+test('rebased CDP script reset cancels delayed steps before any later command', async () => {
+  const h = harness();
+  let release;
+  h.context.setTimeout = (fn, ms) => ms === 20000 ? (release = fn, undefined) : setTimeout(fn, ms);
+  const pending = assert.rejects(h.run({ method: 'cdp', script: [{ waitMs: 20000 }, { method: 'Synthetic.enableUnknown' }] }), /CDP session reset/);
+  await new Promise(resolve => setImmediate(resolve));
+  const current = vm.runInContext('cdpOperationChains.get(1)', h.context);
+  await h.run({ method: 'reset' });
+  await pending;
+  release();
+  await assert.rejects(current, /CDP session reset/);
+  assert.equal(h.calls.some(call => call.method === 'Synthetic.enableUnknown'), false);
+});

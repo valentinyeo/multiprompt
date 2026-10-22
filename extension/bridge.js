@@ -2619,7 +2619,7 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation, retainEmulation = false, resetState = false) {
+function withCdpSession(tabId, operation, retainEmulation = false, resetState = false, timeoutMs = retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000) {
   if (cdpOperationChains.get(tabId) && !emulatedTabs.has(tabId)) {
     return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
   }
@@ -2671,12 +2671,14 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
       checkSession();
       await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
       checkSession();
-      const result = await withTimeout(operation(debuggee, () => active && !reset, sendCommand), retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000, "CDP operation timed out; run zsb reset");
+      const result = timeoutMs === null
+        ? await operation(debuggee, () => active && !reset, sendCommand)
+        : await withTimeout(operation(debuggee, () => active && !reset, sendCommand), timeoutMs, "CDP operation timed out; run zsb reset");
       succeeded = true;
       return result;
     } finally {
       active = false;
-      if (reset) return;
+      checkSession();
       const emulation = emulatedTabs.get(tabId);
       let cleanupError;
       if (emulation && !retainEmulation && !resetState) {
@@ -2875,7 +2877,10 @@ async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
   if (message.script !== undefined) {
     validateCdpScript(message.script);
-    return withCdpSession(tabId, async (debuggee, checkSession) => {
+    return withCdpSession(tabId, async (debuggee, isActive) => {
+      const checkSession = () => {
+        if (!isActive()) throw new Error("CDP session reset; retry command");
+      };
       const results = [];
       for (const [index, step] of message.script.entries()) {
         try {
@@ -2889,7 +2894,7 @@ async function sendCdp(message) {
         }
       }
       return results;
-    }, null);
+    }, false, true, null);
   }
   const cdpMethod = stringOr(message.cdpMethod, "");
   if (!cdpMethod) throw new Error("missing cdpMethod");
