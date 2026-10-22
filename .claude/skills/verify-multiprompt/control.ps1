@@ -266,7 +266,7 @@ public static class PaneLayoutProof {
             proof["railRect"] = new int[] { railX, railTop, railRight, railBottom };
             proof["iconPixelBounds"] = new int[] { minX, minY, maxX + 1, maxY + 1 };
             proof["iconPixels"] = iconPixels;
-            Require(railRight < minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor);
+            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor);
         }
         return proof;
     }
