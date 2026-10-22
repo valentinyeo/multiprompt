@@ -53,6 +53,17 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.802", .items = &.{
+        .{ .text = "Multiprompt now downloads verified updates automatically, lets you restart when ready, and returns to the previous version if an update cannot start.", .ticket = "IGSH-246" },
+        .{ .text = "Server address, port and username changes now sync between your laptops while keeping your local credentials and backing up your SSH settings.", .ticket = "IGSH-252" },
+        .{ .text = "Chat checks no longer mistake build progress and helper notifications for missing messages.", .ticket = "IGSH-380" },
+        .{ .text = "Chat sync checks no longer report missing conversations for resumed Claude sessions.", .ticket = "IGSH-412" },
+        .{ .text = "Chat tables stay quick when you switch between tabs.", .ticket = "IGSH-436" },
+        .{ .text = "The shell uses Nordwand Mono SemiBold again and keeps it after new sessions, reconnects, restarts and zoom.", .ticket = "IGSH-456" },
+        .{ .text = "Updates are verified faster without reducing test coverage.", .ticket = "IGSH-519" },
+        .{ .text = "Tabs opened at launch are saved again, so they come back after a restart.", .ticket = "IGSH-543" },
+        .{ .text = "Startup regression checks now work reliably on fresh checkouts.", .ticket = "IGSH-543" },
+    } },
     .{ .ver = "0.28.801", .items = &.{
         .{ .text = "Run several browser debugging commands in one session, with event waits and complete profiling results saved to a file.", .ticket = "IGSH-221" },
     } },
