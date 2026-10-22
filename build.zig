@@ -475,8 +475,8 @@ pub fn build(b: *std.Build) void {
     palette_rows_tests.setName("test palette rows");
     test_step.dependOn(&palette_rows_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
-    close_all_browser_panes_tests.setName("test close all browser panes");
     test_step.dependOn(&close_all_browser_panes_tests.step);
+    close_all_browser_panes_tests.setName("test close all browser panes");
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     shortcuts_doc_tests.setName("test shortcuts doc");
     test_step.dependOn(&shortcuts_doc_tests.step);
@@ -599,11 +599,11 @@ pub fn build(b: *std.Build) void {
     screenshot_pipeline_tests.setName("test screenshot pipeline");
     test_step.dependOn(&screenshot_pipeline_tests.step);
     const paste_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/paste-focus.test.js" });
-    paste_focus_tests.setName("test paste focus");
     test_step.dependOn(&paste_focus_tests.step);
+    paste_focus_tests.setName("test paste focus");
     const shell_focus_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shell-focus.test.js" });
-    shell_focus_tests.setName("test shell focus");
     test_step.dependOn(&shell_focus_tests.step);
+    shell_focus_tests.setName("test shell focus");
     const console_font_lifecycle_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font-lifecycle.test.js" });
     console_font_lifecycle_tests.setName("test console font lifecycle");
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
@@ -723,34 +723,37 @@ pub fn build(b: *std.Build) void {
         &idle_front_tests.step,
         &zsb_deadline_tests.step,
     };
-    for (test_step.dependencies.items) |test_dependency| {
-        if (test_dependency.cast(std.Build.Step.Run)) |command| {
-            if (command.producer == null and std.mem.indexOfScalar(*std.Build.Step, &serial_tests, test_dependency) == null) {
-                command.stdio = .{ .check = .empty };
-                command.has_side_effects = true;
-                command.step.makeFn = runCapturedTest;
+    if (b.graph.host.result.os.tag == .windows) {
+        for (test_step.dependencies.items) |test_dependency| {
+            if (test_dependency.cast(std.Build.Step.Run)) |command| {
+                if (command.producer == null and std.mem.indexOfScalar(*std.Build.Step, &serial_tests, test_dependency) == null) {
+                    command.stdio = .{ .check = .empty };
+                    command.has_side_effects = true;
+                    command.step.makeFn = runCapturedTest;
+                }
             }
         }
     }
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry, pane spacing and launch fixtures"),
-        b.step("test-group-2", "Run chat CPU and idle regressions"),
+        b.step("test-group-1", "Run desktop, telemetry, pane spacing, chat drafts and view gaps"),
+        b.step("test-group-2", "Run screenshot fixtures, chat CPU and table regressions"),
         b.step("test-group-3", "Run portable modules, source checks, bridge profiles and deadlines"),
-        b.step("test-group-4", "Run Chat View, sync protocol, screenshot and compiler-backed fixtures"),
+        b.step("test-group-4", "Run native chat performance, sync, frequent, launch, flicker and idle regressions"),
         b.step("test-group-5", "Run SSH reconnect fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
-            dependency == &launch_regression.step or dependency == &pane_spacing_tests.step or
-            dependency == &chat_view_console_visibility_tests.step or dependency == &run_bridge_tests.step)
+            dependency == &pane_spacing_tests.step or dependency == &chat_drafts_tests.step or
+            dependency == &chat_view_gaps_tests.step or dependency == &chat_view_console_visibility_tests.step or
+            dependency == &run_bridge_tests.step)
             0
-        else if (dependency == &chat_cpu_regression.step or dependency == &idle_front_tests.step)
-            1
-        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_sync_protocol_tests.step or
-            dependency == &frequent_integration_tests.step or dependency == &chat_drafts_tests.step or
-            dependency == &chat_table_tests.step or dependency == &run_chat_perf_tests.step or
+        else if (dependency == &chat_cpu_regression.step or dependency == &chat_table_tests.step or
             dependency == &screenshot_pipeline_tests.step)
+            1
+        else if (dependency == &run_sync_protocol_tests.step or dependency == &frequent_integration_tests.step or
+            dependency == &run_chat_perf_tests.step or dependency == &launch_regression.step or
+            dependency == &window_flicker_tests.step or dependency == &idle_front_tests.step)
             3
         else if (dependency == &ssh_reconnect_tests.step)
             4
