@@ -12,7 +12,7 @@
 - Keep the initial CMD tab in console view, not Chat View.
 - Ctrl+K `move to group`, Enter, type `new group`, Enter groups the selected session. Escape leaves the inline rename with the app's default group name and gray color.
 - Ctrl+K `open browser`, Enter docks the browser without an extension, just as in browser-pane-stuck.
-- Win+Up maximizes the main window; Ctrl+1 returns input focus to the original console.
+- Create a second, ungrouped CMD through Ctrl+K `new cmd` so the original grouped row stays unselected with its complete rail visible. Win+Up maximizes the main window; Ctrl+2 returns input focus to the ungrouped console.
 - Themes → Dark through Ctrl+K selects the known dark palette; no settings are seeded.
 
 ## Driving it with control.ps1
@@ -20,12 +20,12 @@
 Dispatch `gh workflow run verify.yml -f feature=pane-layout` against the proposed revision. Pull requests include pane-layout alongside appearance, workspace-focus and browser-pane-stuck.
 
 1. Launch the real isolated app and pass Doctor. Choose Dark with the existing Themes helper. Require one CMD session with no saved Chat View preference.
-2. Use the real Move to Group submenu (palette target 6301), create a new group and read the app-written membership from session.json. Escape the inline rename. Never create fixtures, seed preferences or post private app messages.
+2. Use the real Move to Group submenu (palette target 6301), create a new group and read the app-written membership from session.json. Escape the inline rename. Create a second ungrouped CMD through the real palette, require its saved ungrouped membership and active selection, and use its published shell ID for console/browser ownership. This preserves the full continuous-rail positive control without requiring a rail to cross a selected row. Never create fixtures, seed preferences or post private app messages.
 3. Open a browser through the existing Open-BrowserPane helper. Wait for connected state, a positive connection ID and a visible HWND carrying `ZigShellPaneOwner` for the verified main window. No extension is needed.
-4. Maximize with real Win+Up, require IsZoomed, and select CMD with Ctrl+1. Require console foreground, the real shell-ID title and visible ConsoleWindowClass through UIA. Match UIA bounds against GetWindowRect, then capture `pane-layout.png` and its focus/UIA snapshots.
+4. Maximize with real Win+Up, require IsZoomed, and select the ungrouped CMD with Ctrl+2. Require console foreground, the real shell-ID title and visible ConsoleWindowClass through UIA. Match UIA bounds against GetWindowRect, then capture `pane-layout.png` and its focus/UIA snapshots.
 5. Compute the shared slot's expected ring bounds from the client screen rect, the actual browser HWND left edge, default sidebar width, recorded DPI and saved UI scale. Find the dominant focus-gray stroke in a narrow top-edge band, rejecting a missing or short stroke. Allow antialias blending, but not arbitrary colors. Require a matching pixel at every position along all four straight sides (with only a stroke-width perpendicular search); exclude rounded corners. The measured console HWND must be wholly inside the ring's inner edges.
 6. Scan every pixel in the pane gap across the full client height. Reject focus-gray or divider-gray pixels outside the one-stroke-wide, 32-scaled-pixel centered splitter grip. The gap must also be strictly beyond the ring's outer edge.
-7. Find the sidebar group stroke by its app-default gray color and a long vertical pixel run, not an invented UIA node. Derive the first row from that observed header top. Find the real CMD icon's contrasting pixels against the sampled active-row background in its icon area, require visible glyph height/area, save their bounding box and require at least four scaled pixels between it and the rail. A clipped icon cannot pass merely because the rail overwrote its leftmost pixels.
+7. Find the sidebar group stroke by its app-default gray color and a long vertical pixel run, not an invented UIA node. Derive the first row from that observed header top. Find the real CMD icon's contrasting pixels against the sampled unselected-row background in its icon area, require visible glyph height/area, save their bounding box and require at least four scaled pixels between it and the rail. A clipped icon cannot pass merely because the rail overwrote its leftmost pixels.
 8. Every assertion prints `pane-layout <step> PASS`; any missing precondition or failed assertion throws. Inspect pane-layout.png, pane-layout-pixels.json, pane-layout-rects.json, action/before/after images, UIA/focus snapshots, result.json and owned-job cleanup. Measurements are read-only and persisted separately from app data.
 
 ## Gotchas
