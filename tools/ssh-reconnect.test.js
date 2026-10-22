@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
@@ -13,7 +13,7 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
-async function zig(code, filter, state = true, expected = 0) {
+async function zig(code, filter, state = true, expected = 0, failure = /expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
@@ -29,7 +29,7 @@ async function zig(code, filter, state = true, expected = 0) {
     });
     assert.equal(result.status, expected, result.stdout + result.stderr);
     if (expected === 0) assert.match(result.stderr, /All \d+ tests passed/);
-    else assert.match(result.stderr, /expected 15000, found 1000/);
+    else assert.match(result.stderr, failure);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -118,15 +118,14 @@ fn repositionActive() void {}
 fn fetchTmuxSessions() void {}
 ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 = 60000; ' + body('hostProbeBusy', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + body('reconnectAllowed', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + ' };'}
 `;
-function runtime(tests) {
+function runtime(tests, input = source) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
+  return prelude + functions.map(name => body(name, input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
 }
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
-  test('ISSUE-543 loading remote tabs ignore timer disconnect manual reconnect and resume signals', async () => {
-    await zig(runtime(`
+  const loadingChecks = `
 test "ISSUE-543 loading remote tabs" {
     for ([_]ShellKind{ .tmux, .vps, .vps2 }) |kind| {
         shells[0] = .{ .kind = kind, .console_inflight = true, .process = null };
@@ -140,7 +139,13 @@ test "ISSUE-543 loading remote tabs" {
         try std.testing.expectEqual(@as(usize, 0), kills);
     }
 }
-`), 'ISSUE-543 loading');
+`;
+  test('ISSUE-543 loading remote tabs ignore timer disconnect manual reconnect and resume signals', async () => {
+    await zig(runtime(loadingChecks), 'ISSUE-543 loading');
+  });
+  test('ISSUE-543 negative control: original reconnect tick disconnects a loading tab', async () => {
+    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })).join('\n').replaceAll('app_state.', '');
+    await zig(runtime(loadingChecks, original), 'ISSUE-543 loading', true, 1, /TestUnexpectedResult/);
   });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
     if (modern) {

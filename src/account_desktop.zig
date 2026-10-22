@@ -764,12 +764,15 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const initial_json = try accountReadLayout(alloc, remote.bytes);
     const initial = try session_layout.parse(alloc, initial_json);
     defer initial.deinit();
+    var hosts_ready = g_account_hosts_cache.arena != null;
     if (remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
         var host_arena = std.heap.ArenaAllocator.init(a);
-        errdefer host_arena.deinit();
-        const discovered = try accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{});
-        if (g_account_hosts_cache.arena) |*old| old.deinit();
-        g_account_hosts_cache = .{ .arena = host_arena, .hosts = discovered, .refreshed_at = GetTickCount64() };
+        const discovered: ?[]const account_hosts.Host = accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{}) catch null;
+        hosts_ready = discovered != null;
+        if (discovered) |found| {
+            if (g_account_hosts_cache.arena) |*old| old.deinit();
+            g_account_hosts_cache = .{ .arena = host_arena, .hosts = found, .refreshed_at = GetTickCount64() };
+        } else host_arena.deinit();
     }
     const hosts = g_account_hosts_cache.hosts;
     var attempts: usize = 0;
@@ -785,8 +788,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer edited.deinit();
             rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
         }
-        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) hosts else null;
+        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
+        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) hosts else server.value.hosts) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const put = try account_client.request("PUT", "/v1/layout", access, body);
         remote.deinit();

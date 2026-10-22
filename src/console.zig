@@ -2085,15 +2085,16 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         return false;
     };
     job.* = .{ .shell_id = title_id, .kind = kind, .owner = app_state.g_main_hwnd, .job = app_state.g_job, .command = cmd_buf, .cwd = @splat(0), .has_cwd = false, .environment = environment, .old_process = app_state.shells[idx].process, .old_pid = if (terminate_existing) app_state.shells[idx].pid else 0 };
+    unregisterShellExitWait(idx);
     _ = startup_inflight.fetchAdd(1, .acq_rel);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, startupShellWorker, .{job}) catch {
         _ = startup_inflight.fetchSub(1, .acq_rel);
         _ = @import("win32.zig").FreeEnvironmentStringsW(environment);
         std.heap.page_allocator.destroy(job);
+        registerShellExitWait(idx);
         return false;
     };
     thread.detach();
-    unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
     app_state.next_shell_id += 1;
 
