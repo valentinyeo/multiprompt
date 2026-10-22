@@ -30,12 +30,13 @@ for (const [file, names] of [
 }
 
 function prMatrixContract(source) {
-  assert.match(source, /feature:.*github\.event_name == 'pull_request'.*fromJSON\('\["appearance", "browser-pane-stuck"\]'\)/);
+  const features = JSON.parse(source.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)?.[1] || '[]');
+  for (const feature of ['appearance', 'browser-pane-stuck']) assert.ok(features.includes(feature), `PR matrix includes ${feature}`);
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
   for (const trigger of ['src/**', 'tools/check-browser-pane-stuck.mjs']) assert.ok(source.includes(`      - ${trigger}`));
 }
 prMatrixContract(workflow);
-assert.throws(() => prMatrixContract(workflow.replace('["appearance", "browser-pane-stuck"]', '["appearance"]')));
+assert.throws(() => prMatrixContract(workflow.replace('"browser-pane-stuck"', '"missing-browser-pane-stuck"')));
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
