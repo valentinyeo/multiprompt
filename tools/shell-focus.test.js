@@ -77,3 +77,71 @@ test('workspace focus journey reads cross-process Edit text with a bounded read-
     assert.throws(() => auditWorkspaceFocusJourney(source.replace(before, after)), `mutation must fail: ${before}`);
   }
 });
+
+function paletteHandoff(main) {
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN => {'), main.indexOf('        WM_APP_SEARCH_CLOSE => {'));
+  const handoff = open.match(/            if \(wp == 1 and foregroundIsOurs\(\) and focusGuard\(hwnd\)\) \{[^]*?\n            \}/)?.[0];
+  assert.ok(handoff, 'authorize the frame before AttachThreadInput can reuse console authorization');
+  const active = open.indexOf('app_state.g_search_active = true;');
+  assert.ok(active >= 0 && active < open.indexOf(handoff), 'activation callbacks must see the palette as active');
+  assert.ok(open.indexOf(handoff) < open.indexOf('hideShellsForOverlay();'), 'park the frame before hiding a foreground console or browser');
+  assert.match(open, /hideShellsForOverlay\(\);[^]*_ = SetFocus\(app_state.g_main_hwnd\);/);
+  return handoff;
+}
+
+test('palette handoff authorizes the frame and blocks reentrant shell repair before overlay setup', () => {
+  const main = fs.readFileSync(path.resolve(__dirname, '..', 'src/main.zig'), 'utf8').replaceAll('\r\n', '\n');
+  const handoff = paletteHandoff(main);
+  for (const broken of [
+    main.replace(' and focusGuard(hwnd)', ''),
+    main.replace(handoff, '').replace('        WM_APP_SEARCH_OPEN => {', `        WM_APP_SEARCH_OPEN => {\n${handoff}`),
+    main.replace(handoff, '').replace('            altqLog("palette_focus', `${handoff}\n            altqLog("palette_focus`),
+  ]) assert.throws(() => paletteHandoff(broken));
+  const run = new Function('wp', 'hwnd', 'app_state', 'foregroundIsOurs', 'focusGuard', 'cancelShellRefocus', 'GetForegroundWindow', 'GetCurrentThreadId', 'GetWindowThreadProcessId', 'AttachThreadInput', 'SetForegroundWindow', 'SetFocus', handoff.replaceAll(' and ', ' && ').replaceAll('_ = ', ''));
+  for (const previous of ['console', 'browser', 'frame', 'foreign']) {
+    for (const allowed of [false, true]) {
+      const state = { g_search_active: true, g_browser_focus_mode: true };
+      const calls = [];
+      let authorized = 'console';
+      let foreground = previous;
+      let focused = previous;
+      run(1, 'frame', state, () => previous !== 'foreign', target => {
+        if (allowed) authorized = target;
+        return allowed;
+      }, () => calls.push('cancel'), () => foreground, () => 1, target => target === 'frame' ? 1 : 2,
+      (from, to, attach) => {
+        assert.equal(authorized, 'frame');
+        calls.push(attach ? 'attach' : 'detach');
+        return 1;
+      }, target => {
+        assert.equal(state.g_search_active, true);
+        foreground = target;
+        calls.push('foreground');
+      }, target => { focused = target; calls.push('focus'); });
+      if (allowed && previous !== 'foreign') {
+        assert.equal(foreground, 'frame');
+        assert.equal(focused, 'frame');
+        assert.equal(state.g_browser_focus_mode, false);
+        assert.deepEqual(calls, previous === 'frame' ? ['cancel', 'foreground', 'focus'] : ['cancel', 'attach', 'foreground', 'focus', 'detach']);
+      } else assert.deepEqual(calls, []);
+    }
+  }
+});
+
+function auditOverlayHide(source) {
+  const hide = body(source, 'hideShellsForOverlay', 'showActiveShellAfterOverlay');
+  for (const target of ['app_state.shells[i].hwnd', 'app_state.g_chat_status_hwnd', 'app_state.g_chat_transcript_hwnd', 'app_state.g_chat_composer_hwnd']) {
+    assert.ok(hide.includes(`SetWindowPos(${target}, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)`), `${target} must hide without selecting another active window`);
+  }
+  assert.doesNotMatch(hide, /ShowWindow\(/);
+  assert.match(source, /const SetWindowPos = @import\("focus.zig"\).SetWindowPos;/);
+}
+
+test('overlay hides cannot reactivate the console after palette frame handoff', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src/rename.zig'), 'utf8');
+  auditOverlayHide(source);
+  for (const flag of ['SWP_HIDEWINDOW', 'SWP_NOMOVE', 'SWP_NOSIZE', 'SWP_NOZORDER', 'SWP_NOACTIVATE']) {
+    assert.throws(() => auditOverlayHide(source.replaceAll(flag, '0')));
+  }
+  assert.throws(() => auditOverlayHide(source.replace('SetWindowPos(app_state.shells[i].hwnd, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)', 'ShowWindow(app_state.shells[i].hwnd, SW_HIDE)')));
+});
