@@ -657,7 +657,7 @@ function Focus-Palette([string]$Query, [int]$Target) {
         Doctor
         Assert-Foreground
         [void][VerifyNative]::SetForegroundWindow($script:window)
-        [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
     } 'command palette initialized and owned frame focused' 20
     Type-Text $Query
     Wait-Until {
