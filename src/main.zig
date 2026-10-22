@@ -4258,6 +4258,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_WIN_SNAP => {
+            if (wp == 2 and activeBrowserHasForegroundFocus()) return 0;
             var mi: MONITORINFO = std.mem.zeroes(MONITORINFO);
             mi.cbSize = @sizeOf(MONITORINFO);
             const mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);

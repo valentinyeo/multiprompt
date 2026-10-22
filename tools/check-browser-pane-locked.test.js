@@ -111,6 +111,26 @@ test('browser-focused Aero Snap cannot maximize the owner frame while normal fra
   }
 });
 
+test('browser-focused Win+Up cannot maximize through the app snap command', () => {
+  function contract(source) {
+    const start = source.indexOf('        WM_APP_WIN_SNAP => {');
+    assert.notEqual(start, -1);
+    const handler = source.slice(start, source.indexOf('\n        WM_APP_', start + 1));
+    assert.match(handler, /WM_APP_WIN_SNAP => \{\s*if \(wp == 2 and activeBrowserHasForegroundFocus\(\)\) return 0;\s*var mi: MONITORINFO/);
+    assert.match(handler, /2 => _ = ShowWindow\(hwnd, SW_MAXIMIZE\)/);
+  }
+  contract(main);
+  for (const [before, after] of [
+    ['if (wp == 2 and activeBrowserHasForegroundFocus()) return 0;', ''],
+    ['wp == 2 and activeBrowserHasForegroundFocus()', 'wp == 0 and activeBrowserHasForegroundFocus()'],
+    ['wp == 2 and activeBrowserHasForegroundFocus()', 'wp == 2'],
+    ['2 => _ = ShowWindow(hwnd, SW_MAXIMIZE)', '2 => {}'],
+  ]) {
+    assert.ok(main.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => contract(main.replaceAll(before, after)), `reject ${before}`);
+  }
+});
+
 test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op and non-docked windows', () => {
   assert.ok(main.includes('_ = @import("browser_pane.zig");'));
   for (const name of [
