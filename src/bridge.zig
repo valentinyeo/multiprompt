@@ -401,7 +401,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "snapshot", fields.items, null);
     } else if (std.mem.eql(u8, command, "find")) {
         const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const parsed = collectTextAndTabArgs(allocator, &args, first, false) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
@@ -415,7 +415,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "find", fields.items, null);
     } else if (std.mem.eql(u8, command, "click")) {
         const first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const parsed = collectTextAndTabArgs(allocator, &args, first, false) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
@@ -427,22 +427,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (parsed.tab) |target| try appendTabTargetField(&fields, target);
         try sendBrowserRequest(allocator, "click", fields.items, null);
     } else if (std.mem.eql(u8, command, "type")) {
-        var first = args.next() orelse badArgs(command);
-        var tab: ?[]const u8 = null;
-        if (std.mem.eql(u8, first, "--tab")) {
-            tab = args.next() orelse badArgs(command);
-            if (std.mem.startsWith(u8, tab.?, "--")) badArgs(command);
-            first = args.next() orelse badArgs(command);
-        }
-        const keys = std.mem.eql(u8, first, "--keys");
-        if (keys) first = args.next() orelse badArgs(command);
-        const parsed = collectTextAndTabArgs(allocator, &args, first) catch |err| switch (err) {
+        const first = args.next() orelse badArgs(command);
+        const parsed = collectTextAndTabArgs(allocator, &args, first, true) catch |err| switch (err) {
             error.InvalidArguments => badArgs(command),
             else => return err,
         };
         defer allocator.free(parsed.text);
-        if (tab != null and parsed.tab != null) badArgs(command);
-        if (parsed.tab) |target| tab = target;
         const text = parsed.text[parsed.second_offset orelse 0 ..];
 
         var fields = std.array_list.Managed(u8).init(allocator);
@@ -454,8 +444,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         try fields.appendSlice("\"text\":");
         try appendJsonString(&fields, text);
-        if (tab) |target| try appendTabTargetField(&fields, target);
-        if (keys) try fields.appendSlice(",\"keys\":true");
+        if (parsed.tab) |target| try appendTabTargetField(&fields, target);
+        if (parsed.keys) try fields.appendSlice(",\"keys\":true");
+        if (parsed.raw_enter) try fields.appendSlice(",\"rawEnter\":true");
         try sendBrowserRequest(allocator, "type", fields.items, null);
     } else if (std.mem.eql(u8, command, "insert")) {
         const first = args.next() orelse badArgs(command);
@@ -655,9 +646,11 @@ const usage_text =
     \\  snapshot [--limit n|--full] [--tab <id|match>]  Return compact page state across frames
     \\  find <text> [--tab <id|match>] Find text snippets across frames
     \\  click <selector> [--tab <id|match>]  Click across frames; reports via=cdp (trusted) or frame-dom-fallback (untrusted)
-    \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable
+    \\  type <text> [--tab <id|match>]  Type trusted text at the focused editable; newlines become line breaks
     \\  type <selector> <text> [--tab <id|match>]  Click a selector and replace it with trusted text
     \\  type --keys [selector] <text> [--tab <id|match>]  Type individual keys for keyboard-driven typeaheads
+    \\  type --raw-enter [--keys] [selector] <text> [--tab <id|match>]  Press Enter at each newline (submits chat composers)
+    \\    --tab, --keys, and --raw-enter may appear in any order, each at most once
     \\  insert <text>                  Insert trusted text at the page cursor
     \\  cursor [on|off|move x y|click x y]  Show/animate the visual cursor overlay
     \\  frames [--tab <id|match>]      List frameId, parentFrameId and URL (read-only)
@@ -2517,12 +2510,16 @@ const TextTabArgs = struct {
     text: []u8,
     tab: ?[]const u8 = null,
     second_offset: ?usize = null,
+    keys: bool = false,
+    raw_enter: bool = false,
 };
 
-fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8) !TextTabArgs {
+fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []const u8, allow_type_flags: bool) !TextTabArgs {
     var text = std.array_list.Managed(u8).init(allocator);
     errdefer text.deinit();
     var tab: ?[]const u8 = null;
+    var keys = false;
+    var raw_enter = false;
     var text_count: usize = 0;
     var second_offset: ?usize = null;
     var current: ?[]const u8 = first;
@@ -2531,6 +2528,12 @@ fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []c
             if (tab != null) return error.InvalidArguments;
             tab = args.next() orelse return error.InvalidArguments;
             if (std.mem.startsWith(u8, tab.?, "--")) return error.InvalidArguments;
+        } else if (allow_type_flags and std.mem.eql(u8, arg, "--keys")) {
+            if (keys) return error.InvalidArguments;
+            keys = true;
+        } else if (allow_type_flags and std.mem.eql(u8, arg, "--raw-enter")) {
+            if (raw_enter) return error.InvalidArguments;
+            raw_enter = true;
         } else {
             if (std.mem.startsWith(u8, arg, "--")) return error.InvalidArguments;
             if (text_count > 0) try text.append(' ');
@@ -2540,7 +2543,7 @@ fn collectTextAndTabArgs(allocator: std.mem.Allocator, args: anytype, first: []c
         }
     }
     if (text.items.len == 0) return error.InvalidArguments;
-    return .{ .text = try text.toOwnedSlice(), .tab = tab, .second_offset = second_offset };
+    return .{ .text = try text.toOwnedSlice(), .tab = tab, .second_offset = second_offset, .keys = keys, .raw_enter = raw_enter };
 }
 
 fn appendTabTargetField(fields: *std.array_list.Managed(u8), target: []const u8) !void {
