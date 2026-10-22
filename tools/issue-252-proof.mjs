@@ -34,7 +34,11 @@ if (mode === 'public') {
   const testedHead = command('git', ['log', '-1', '--format=%H', '--', '.', ':(exclude)GATES.md']).trim();
   assert.equal(command('git', ['diff', '--name-only', testedHead, 'HEAD', '--', '.', ':(exclude)GATES.md']).trim(), '');
   if (mode === 'pr') {
-    const checks = json(['pr', 'checks', '139', '--json', 'name,state,bucket,link']);
+    const checks = json(['api', `repos/valentinyeo/multiprompt/commits/${head}/check-runs?per_page=100`]).check_runs.map(check => ({
+      name: check.name,
+      state: check.conclusion || check.status,
+      bucket: check.status !== 'completed' ? 'pending' : check.conclusion === 'success' ? 'pass' : check.conclusion === 'skipped' ? 'skipping' : 'fail',
+    }));
     const codeChecks = json(['api', `repos/valentinyeo/multiprompt/commits/${testedHead}/check-runs?per_page=100`]).check_runs;
     for (const name of ['build-x64', 'build-arm64', 'test', 'test-vps (1)', 'test-vps (2)', 'test-windows (1)', 'test-windows (2)', 'test-windows (3)', 'test-windows (4)', 'no-comments', 'secret-scan', 'extension-version']) {
       assert.ok(codeChecks.some(check => check.name === name && check.conclusion === 'success'), `Missing green check: ${name}`);
