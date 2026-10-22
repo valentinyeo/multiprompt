@@ -33,12 +33,14 @@ const CHAT_OUTBOX_LOAD_LIMIT = 16 * 1024 * 1024;
 const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
-const ReconnectState = struct { fn ok(_: *@This()) void {} };
+const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
 const Shell = struct { shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 fn debugLog(_: []const u8) void {}
 fn sshOutboxFlushed(_: u32) void {}
 fn repositionActive() void {}
+fn showReconnectedConsole(_: u32) void {}
+fn invalidateReconnectContent(_: u32) void {}
 fn InvalidateRect(_: anytype, _: ?*anyopaque, _: u32) u32 { return 0; }
 fn saveSession() void {}
 var shells = [_]Shell{.{}};
@@ -647,6 +649,8 @@ test "ISSUE-501 reattach flushes FIFO exactly once through confirmed outbox stat
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 0), writes);
     sshReconnectOk(0);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), writes);
     sshReconnectOk(0);
     chatOutboxTick();
@@ -968,7 +972,7 @@ function runHarness(control = false) {
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = names.map(body).join('\n').replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery');
-    functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk') : 'fn sshReconnectOk(_: u32) void {}');
+    functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'settlement') {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
       assert.notEqual(functions, names.map(body).join('\n'));

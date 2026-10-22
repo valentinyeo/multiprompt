@@ -1,10 +1,12 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const APP_VERSION = @import("main.zig").APP_VERSION;
+const update_release = @import("update_release.zig");
 const update_check = @import("update_check.zig");
 const mp_version_marker = @import("main.zig").mp_version_marker;
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
+const DT_WORDBREAK = @import("win32.zig").DT_WORDBREAK;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
 const DT_VCENTER = @import("win32.zig").DT_VCENTER;
 const DT_CENTER = @import("win32.zig").DT_CENTER;
@@ -146,7 +148,29 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
     return 3;
 }
 
+var release_ready = false;
+var restart_after_download = false;
+
 pub fn updateCardPoll() void {
+    if (update_release.poll()) |version| {
+        release_ready = true;
+        @memcpy(app_state.g_update_ver[0..version.len], version);
+        app_state.g_update_ver_len = version.len;
+        if (restart_after_download and !update_release.checking()) {
+            restart_after_download = false;
+            updateCardRelaunch(app_state.g_main_hwnd);
+        }
+        if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
+    if (restart_after_download and !update_release.checking()) {
+        restart_after_download = false;
+        @import("console.zig").showHeaderNoticeAscii("No verified update available. Please try again later.", 6000, false);
+    }
+    if (release_ready) {
+        release_ready = false;
+        app_state.g_update_ver_len = 0;
+    }
     if (app_state.g_update_path_len == 0) return;
     const stamp = update_check.statFile(&app_state.g_update_path) orelse return;
     if (app_state.g_update_startup_stamp) |s0| {
@@ -179,6 +203,12 @@ pub fn updateCardDismiss() void {
 }
 
 pub fn updateCardRelaunch(hwnd: HANDLE) void {
+    if (app_state.g_update_relaunching) return;
+    if (update_release.checking()) {
+        restart_after_download = true;
+        @import("console.zig").showHeaderNoticeAscii("Update still downloading. Will restart when ready.", 6000, false);
+        return;
+    }
     if (app_state.g_update_ver_len == 0 or app_state.g_update_path_len == 0 or app_state.g_update_relaunching) return;
     rememberOpenWorkspaceForQuit();
     var ctx = ZigShellWindowList{
@@ -204,8 +234,10 @@ pub fn updateCardRelaunch(hwnd: HANDLE) void {
             np += 1;
         }
     }
-    if (!update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np])) {
+    const launched = if (release_ready or update_release.hasStaged()) update_release.restart(pids[0..np]) else update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]);
+    if (!launched) {
         debugLog("update-card: could not start relaunch helper");
+        @import("console.zig").showHeaderNoticeAscii("Could not start update. Please try again.", 6000, true);
         return;
     }
     app_state.g_update_relaunching = true;
@@ -226,12 +258,12 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
     const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
     const accent: DWORD = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(63, 120, 190));
-    var text_buf: [48]u8 = undefined;
-    const text = std.fmt.bufPrint(&text_buf, "v{s} is ready", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
+    var text_buf: [96]u8 = undefined;
+    const text = std.fmt.bufPrint(&text_buf, "Update ready: restart to get v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
     _ = SelectObject(hdc, font_title);
     _ = SetTextColor(hdc, bright);
-    var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(25) };
-    drawAscii(hdc, text, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(46) };
+    drawAscii(hdc, text, &text_rc, DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
 
     _ = SelectObject(hdc, font_subtitle);
     var close_rc = updateCardCloseRect(card);
@@ -251,7 +283,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     _ = DeleteObject(pen);
     _ = SetTextColor(hdc, RGB(255, 255, 255));
     var btn_rc = btn;
-    drawAscii(hdc, "Relaunch", &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    drawAscii(hdc, "Restart", &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 pub fn hostBusyAgentCount(host: u8) u16 {

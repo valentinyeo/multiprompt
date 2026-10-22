@@ -922,6 +922,29 @@ test("issue: a focused Facebook popup never replaces the session's pane", async 
   assert.equal((await h.api.listTabs({ windowId: 10 })).tabs[0].id, 1);
 });
 
+test("issue: only the bound popup can serve its session, never focus or an unscoped URL", async () => {
+  const h = createHarness();
+  h.setTab({ id: 1, windowId: 10, active: true, url: "edge://settings/privacy" });
+  await h.api.protectWindow({ windowId: 10, shellId: 101, ownerPid: 1000 });
+  h.setWindow(10, "popup");
+  h.flushSave();
+  h.reloadRegistry();
+  assert.equal((await h.api.resolveWindow({ shellId: 101, ownerPid: 1000 })).windowId, 10);
+  await h.api.protectWindow({ windowId: 10, shellId: 101, ownerPid: 1000 });
+  assert.equal((await h.api.dispatch({ method: "tabs", windowId: 10 })).tabs[0].id, 1);
+  await h.focusWindow(10);
+  await assert.rejects(h.api.resolveWindow({ focused: true }), /no focused pane window/);
+  await assert.rejects(h.api.resolveWindow({ match: "settings/privacy" }), /no window with tab url matching/);
+  await assert.rejects(h.api.resolveWindow({ shellId: 101, ownerPid: 2000 }), /not found \(no active tab\)/);
+  await assert.rejects(h.api.protectWindow({ windowId: 10, shellId: 101, ownerPid: 2000 }), /already belongs/);
+  h.setTab({ id: 2, windowId: 20, active: true, url: "edge://settings/privacy" });
+  h.setWindow(20, "popup");
+  await h.focusWindow(20);
+  assert.equal((await h.api.resolveWindow({ shellId: 101, ownerPid: 1000, focused: true })).windowId, 10);
+  await assert.rejects(h.api.protectWindow({ windowId: 20, shellId: 101, ownerPid: 1000 }), /not found \(no active tab\)/);
+  await assert.rejects(h.api.dispatch({ method: "tabs", windowId: 20 }), /not found \(no active tab\)/);
+});
+
 test("issue: window resolution rejects other sessions and ambiguous URL matches", async () => {
   const h = createHarness();
   h.setTab({ id: 1, windowId: 10, active: true, url: "https://shared.example/" });
@@ -935,27 +958,35 @@ test("issue: window resolution rejects other sessions and ambiguous URL matches"
   await assert.rejects(h.api.protectWindow({ windowId: 10, shellId: 102 }), /already belongs/);
 });
 
-test("issue: a recreated normal pane resolves by its exact beacon, not popup focus", async () => {
-  const h = createHarness();
-  const nonce = "ZSPANE14-6183294";
-  h.setTab({ id: 1, windowId: 10, active: true, url: `data:text/html,<title>${nonce}</title>` });
-  await h.api.protectWindow({ windowId: 10, shellId: 101 });
-  h.removeWindow(10);
-  h.setTab({ id: 2, windowId: 30, active: false, url: `data:text/html,<title>${nonce}</title>` });
-  h.setTab({ id: 3, windowId: 30, active: true, url: "https://secondary.example/" });
-  h.setTab({ id: 4, windowId: 20, active: true, url: "https://facebook.com/login" });
-  h.setWindow(20, "popup");
-  await h.focusWindow(20);
-  await assert.rejects(h.api.listTabs({ windowId: 10 }), /not found \(no active tab\)/);
-  const fresh = await h.api.resolveWindow({ shellId: 101, match: nonce });
-  assert.equal(fresh.windowId, 30);
-  await h.api.protectWindow({ windowId: fresh.windowId, shellId: 101 });
-  assert.equal((await h.api.getTargetTab({ windowId: 30 })).id, 3);
-  const opened = await h.api.dispatch({ method: "navigate", windowId: fresh.windowId, url: "https://opened.example/" });
-  assert.equal(opened.tab.windowId, 30);
-  assert.equal((await h.api.listTabs({ windowId: 30 })).tabs.find((tab) => tab.target).id, opened.tab.id);
-  assert.deepEqual(h.outsideWindows, []);
-});
+for (const type of ["normal", "popup"]) {
+  test(`issue: a recreated ${type} pane resolves by its exact beacon, not popup focus`, async () => {
+    const h = createHarness();
+    const nonce = "ZSPANE14-6183294";
+    h.setTab({ id: 1, windowId: 10, active: true, url: `data:text/html,<title>${nonce}</title>` });
+    await h.api.protectWindow({ windowId: 10, shellId: 101 });
+    h.removeWindow(10);
+    h.setTab({ id: 2, windowId: 30, active: false, url: `data:text/html,<title>${nonce}</title>` });
+    h.setTab({ id: 3, windowId: 30, active: true, url: "https://secondary.example/" });
+    h.setWindow(30, type);
+    h.setTab({ id: 4, windowId: 20, active: true, url: "https://facebook.com/login" });
+    h.setWindow(20, "popup");
+    await h.focusWindow(20);
+    await assert.rejects(h.api.listTabs({ windowId: 10 }), /not found \(no active tab\)/);
+    if (type === "popup") {
+      await assert.rejects(h.api.resolveWindow({ match: nonce }), /no window with tab url matching/);
+      await assert.rejects(h.api.resolveWindow({ shellId: 101, match: `${nonce}-other` }), /no window with tab url matching/);
+      await assert.rejects(h.api.protectWindow({ windowId: 30, shellId: 101 }), /not found \(no active tab\)/);
+    }
+    const fresh = await h.api.resolveWindow({ shellId: 101, match: nonce });
+    assert.equal(fresh.windowId, 30);
+    await h.api.protectWindow({ windowId: fresh.windowId, shellId: 101 });
+    assert.equal((await h.api.getTargetTab({ windowId: 30 })).id, 3);
+    const opened = await h.api.dispatch({ method: "navigate", windowId: fresh.windowId, url: "https://opened.example/" });
+    assert.equal(opened.tab.windowId, 30);
+    assert.equal((await h.api.listTabs({ windowId: 30 })).tabs.find((tab) => tab.target).id, opened.tab.id);
+    assert.deepEqual(h.outsideWindows, []);
+  });
+}
 
 test("issue: foreign extension tabs cannot become default targets or receive CDP input", async () => {
   const h = createHarness();

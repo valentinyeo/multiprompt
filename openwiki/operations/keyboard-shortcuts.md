@@ -165,6 +165,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reconnect active SSH/tmux tab |
+| Ctrl+K → Start new session | Restart an ended server session with the same name (also in tab actions) |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
@@ -267,7 +268,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | (agent-reported) Session ETA countdown | Sidebar row shows time left + a progress line; toggle either from Ctrl+K → ETA Countdown Numbers / ETA Progress Line |
 | Ctrl+K → Estimate Accuracy | See how each agent's time estimates compare to how long tasks actually took |
 | Ctrl+K → Restart multiprompt | Save session and relaunch the app |
-| Ctrl+K → Update: Relaunch | Relaunch onto the installed new version (same as the sidebar card) |
+| Ctrl+K → Restart to update | Restart when an update is ready (same as the sidebar card) |
 | F1 | This shortcuts overview |
 
 ### Clipboard

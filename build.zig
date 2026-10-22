@@ -6,6 +6,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
+    const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
+    if (release) {
+        const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
+        if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
+        var key: [32]u8 = undefined;
+        std.base64.standard.Decoder.decode(&key, encoded) catch @panic("Invalid release signing public key: expected base64 raw 32-byte key");
+        if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
+    }
+
 
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
@@ -103,6 +112,8 @@ pub fn build(b: *std.Build) void {
     const bridge_opts = b.addOptions();
     bridge_opts.addOption([]const u8, "extension_version", manifest.value.version);
     bridge_exe.root_module.addOptions("bridge_config", bridge_opts);
+    bridge_exe.root_module.linkSystemLibrary("gdiplus", .{});
+    bridge_exe.root_module.linkSystemLibrary("ole32", .{});
     bridge_exe.subsystem = .Console;
     b.installArtifact(bridge_exe);
 
@@ -376,7 +387,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(chat_complete_tests).step);
     var previous_chat_run: ?*std.Build.Step = null;
-    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
+    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -429,7 +440,7 @@ pub fn build(b: *std.Build) void {
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = .Debug,
         }),
-        .filters = &.{ "IGSH-443", "IGSH-456" },
+        .filters = &.{ "IGSH-443", "IGSH-456", "ISSUE-456" },
     });
     const run_shell_font_migration_tests = b.addRunArtifact(shell_font_migration_tests);
     test_step.dependOn(&run_shell_font_migration_tests.step);
@@ -443,7 +454,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
-    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js" });
+    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
@@ -477,6 +488,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&zsb_who_tests.step);
     const zsb_selftest_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-selftest.test.js", "tools/zsb-selftest-docs.test.js" });
     vps_test_step.dependOn(&zsb_selftest_tests.step);
+    const internal_page_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-internal-pages.test.js" });
+    test_step.dependOn(&internal_page_tests.step);
+    vps_test_step.dependOn(&internal_page_tests.step);
     const bridge_routing_tests = b.addSystemCommand(&.{ "node", "--test", "extension/bridge-routing.test.js" });
     test_step.dependOn(&bridge_routing_tests.step);
     const zsb_extension_frames_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-extension-frames.test.js" });
@@ -522,7 +536,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
-    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js" });
+    const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
     vps_test_step.dependOn(&ssh_reconnect_tests.step);
@@ -545,12 +559,20 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
+    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    if (b.graph.host.result.os.tag == .windows) {
+        zsb_deadline_tests.step.dependOn(&bridge_install.step);
+        zsb_deadline_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+    }
+    test_step.dependOn(&zsb_deadline_tests.step);
+    const zsb_type_newlines_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-type-newlines.test.js" });
+    test_step.dependOn(&zsb_type_newlines_tests.step);
+    vps_test_step.dependOn(&zsb_type_newlines_tests.step);
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
-    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
     vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
@@ -564,6 +586,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&inbox_reduction_search_tests.step);
     const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
+    const deepgram_key_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/deepgram-key-source.test.js" });
+    test_step.dependOn(&deepgram_key_source_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
     test_step.dependOn(&session_state_bucket_tests.step);
     const other_workspace_invariant_tests = b.addSystemCommand(&.{ "node", "--test", "tools/other-workspace-invariant.test.js" });
@@ -609,23 +633,24 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry and compiler-backed integration tests"),
+        b.step("test-group-1", "Run desktop, telemetry, SSH and compiler-backed integration tests"),
         b.step("test-group-2", "Run Chat View regression and CPU fixtures"),
-        b.step("test-group-3", "Run portable modules, source regressions and SSH fixtures"),
+        b.step("test-group-3", "Run portable modules, source regressions and compiler-backed fixtures"),
         b.step("test-group-4", "Run sync protocol and desktop interaction fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
             dependency == &chat_switch_tests.step or dependency == &frequent_integration_tests.step or
-            dependency == &chat_drop_tests.step or dependency == &reply_quote_tests.step or
-            dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
+            dependency == &reply_quote_tests.step or dependency == &chat_skill_tab_tests.step or
+            dependency == &ssh_reconnect_tests.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &chat_cpu_regression.step)
             1
         else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
             dependency == &launch_regression.step or dependency == &chat_table_tests.step or
             dependency == &screenshot_pipeline_tests.step or dependency == &chat_view_console_visibility_tests.step or
-            dependency == &zsb_interaction_tests.step)
+            dependency == &zsb_interaction_tests.step or dependency == &chat_drafts_tests.step or
+            dependency == &window_flicker_tests.step)
             3
         else
             2;

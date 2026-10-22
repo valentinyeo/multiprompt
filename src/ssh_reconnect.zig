@@ -1,15 +1,27 @@
 const std = @import("std");
 
-pub const Phase = enum { connected, disconnected, reconnecting, closed };
+pub const Phase = enum { connected, disconnected, reconnecting, ended, closed };
 
 pub fn backoffMs(attempt: u8, jitter: u64) u64 {
     const base = @min(@as(u64, 1000) << @as(u6, @intCast(@min(attempt, 5))), 30_000);
     return @min(base + jitter % (base / 4 + 1), 30_000);
 }
 
+pub fn eventEffects(is_active: bool) struct { invalidate_content: bool, relayout: bool, focus: bool } {
+    return .{ .invalidate_content = is_active, .relayout = false, .focus = false };
+}
+
 pub const State = struct {
     phase: Phase = .connected,
     attempts: u8 = 0,
+    awaiting_probe: bool = false,
+    create_session: bool = false,
+    healthy_attach: bool = false,
+    ever_healthy: bool = false,
+    restored_session: bool = false,
+    creating_session: bool = false,
+    gone_probe_deadline: ?u64 = null,
+    gone_results: u8 = 0,
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
     veto_until: ?u64 = null,
@@ -50,7 +62,7 @@ pub const State = struct {
     }
 
     pub fn lost(self: *State, now: u64, jitter: u64) void {
-        if (self.phase == .closed or self.phase == .disconnected) return;
+        if (self.phase == .closed or self.phase == .ended or self.phase == .disconnected) return;
         self.phase = .disconnected;
         self.delay_ms = backoffMs(self.attempts, jitter);
         self.next_tick = now + self.delay_ms;
@@ -63,11 +75,13 @@ pub const State = struct {
     }
 
     pub fn due(self: State, now: u64) bool {
-        return self.phase == .disconnected and now >= self.next_tick;
+        return self.phase == .disconnected and !self.awaiting_probe and now >= self.next_tick;
     }
 
     pub fn start(self: *State) void {
-        if (self.phase == .closed) return;
+        if (self.phase == .closed or self.phase == .ended) return;
+        self.ever_healthy = self.ever_healthy or self.healthy_attach;
+        self.healthy_attach = false;
         self.phase = .reconnecting;
         self.attempts +|= 1;
         self.veto_until = null;
@@ -75,14 +89,43 @@ pub const State = struct {
 
     pub fn manual(self: *State, now: u64) void {
         if (self.phase == .closed or self.phase == .reconnecting) return;
+        if (self.phase == .ended) self.create_session = true;
+        self.awaiting_probe = false;
+        self.gone_results = 0;
+        self.gone_probe_deadline = null;
         self.phase = .disconnected;
         self.next_tick = now;
         self.delay_ms = 0;
     }
 
     pub fn ok(self: *State) void {
+        if (self.phase == .closed or self.phase == .ended) return;
+        self.* = .{ .healthy_attach = true, .ever_healthy = true };
+    }
+
+    pub fn observeGone(self: *State, gone: bool, process_alive: bool, now: u64) bool {
+        const eligible = self.phase != .reconnecting and self.phase != .closed and self.phase != .ended and
+            !self.create_session and !self.creating_session and (self.ever_healthy or self.healthy_attach or self.restored_session);
+        self.gone_results = if (gone and eligible and !process_alive) self.gone_results +| 1 else 0;
+        self.awaiting_probe = self.gone_results > 0;
+        self.gone_probe_deadline = if (self.awaiting_probe) self.gone_probe_deadline orelse now + 20_000 else null;
+        return self.gone_results >= 2;
+    }
+
+    pub fn expireProbeWait(self: *State, now: u64, spawn_tick: u64) void {
+        if (!self.awaiting_probe) return;
+        if (self.gone_results > 0) {
+            if (now >= (self.gone_probe_deadline orelse return)) self.awaiting_probe = false;
+        } else if (now -| spawn_tick >= 45_000) {
+            self.awaiting_probe = false;
+        }
+    }
+
+    pub fn end(self: *State) void {
         if (self.phase == .closed) return;
-        self.* = .{};
+        self.phase = .ended;
+        self.next_tick = 0;
+        self.awaiting_probe = false;
     }
 
     pub fn close(self: *State) void {
@@ -97,6 +140,89 @@ pub fn attached(output: []const u8, session: []const u8) bool {
         if (std.mem.eql(u8, line, session)) return true;
     }
     return false;
+}
+
+pub fn sessionExists(output: []const u8, session: []const u8) bool {
+    var lines = std.mem.tokenizeAny(u8, output, "\r\n");
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "@@S ") and std.mem.eql(u8, line[4..], session)) return true;
+    }
+    return false;
+}
+
+pub fn sessionGone(output: []const u8, session: []const u8, ssh_ok: bool, exit_code: u32) bool {
+    return ssh_ok and exit_code == 0 and attached(output, "@@MP_LIVE@@") and attached(output, "@@LS_OK@@") and !sessionExists(output, session);
+}
+
+test "ISSUE-521 reconnect effects only invalidate active content and never layout or focus" {
+    for ([_]bool{ false, true }) |is_active| {
+        const effects = eventEffects(is_active);
+        try std.testing.expectEqual(is_active, effects.invalidate_content);
+        try std.testing.expect(!effects.relayout);
+        try std.testing.expect(!effects.focus);
+    }
+}
+
+test "ISSUE-521 session gone requires successful complete probe and exact session names" {
+    const output = "work\r\n@@S work-long\r\n@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n";
+    try std.testing.expect(sessionGone(output, "work", true, 0));
+    try std.testing.expect(!sessionGone(output, "work-long", true, 0));
+    try std.testing.expect(!sessionGone(output, "work", false, 0));
+    try std.testing.expect(!sessionGone(output, "work", true, 255));
+    try std.testing.expect(!sessionGone("@@S other\n", "work", true, 0));
+    try std.testing.expect(!sessionGone("banner @@MP_LIVE@@\n", "work", true, 0));
+    try std.testing.expect(!sessionGone("", "work", false, 1));
+    try std.testing.expect(!sessionGone("@@MP_LIVE@@\n", "work", true, 0));
+    try std.testing.expect(sessionGone("@@LS_OK@@\n@@MP_LIVE@@\n", "work", true, 0));
+    try std.testing.expect(!sessionGone("@@S work\n@@MP_LIVE@@\n", "work", true, 0));
+}
+
+test "ISSUE-521 ended tabs never reconnect until explicit new session request" {
+    var state: State = .{};
+    state.end();
+    state.lost(100, 1);
+    state.start();
+    state.ok();
+    try std.testing.expectEqual(Phase.ended, state.phase);
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+    state.manual(200);
+    try std.testing.expect(state.create_session);
+    try std.testing.expect(state.due(200));
+    state.start();
+    state.ok();
+    try std.testing.expect(!state.create_session);
+    state.lost(300, 0);
+    state.awaiting_probe = true;
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+    state.awaiting_probe = false;
+    try std.testing.expect(state.due(std.math.maxInt(u64)));
+}
+
+pub fn probeMisses(previous: u8, ok: bool) u8 {
+    return if (ok) 0 else previous +| 1;
+}
+
+pub fn probeUnreachable(misses: u8, process_alive: bool) bool {
+    return misses >= 3 and !process_alive;
+}
+
+test "ISSUE-511 probe misses count per result reset on success and saturate" {
+    var misses: u8 = 0;
+    for (1..4) |expected| {
+        misses = probeMisses(misses, false);
+        try std.testing.expectEqual(@as(u8, @intCast(expected)), misses);
+    }
+    try std.testing.expectEqual(@as(u8, 0), probeMisses(misses, true));
+    try std.testing.expectEqual(@as(u8, 1), probeMisses(probeMisses(misses, true), false));
+    try std.testing.expectEqual(std.math.maxInt(u8), probeMisses(std.math.maxInt(u8), false));
+}
+
+test "ISSUE-511 failed probes never override a live transport and require three misses" {
+    for (0..256) |count| {
+        const misses: u8 = @intCast(count);
+        try std.testing.expect(!probeUnreachable(misses, true));
+        try std.testing.expectEqual(count >= 3, probeUnreachable(misses, false));
+    }
 }
 
 test "ISSUE-501 backoff grows caps bounds jitter and resets after success" {
@@ -219,5 +345,98 @@ test "ISSUE-512 confirmed failures explain their cause and manual retry still sk
         state.manual(20_000);
         try std.testing.expect(!state.due(20_000));
         try std.testing.expect(state.noticeReason(20_000, true) == null);
+    }
+}
+
+test "ISSUE-511 gone requires two consecutive results and never overrides a live transport" {
+    var state: State = .{ .healthy_attach = true };
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(!state.observeGone(false, false, 0));
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(!state.observeGone(true, true, 0));
+    try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+    try std.testing.expect(!state.observeGone(true, false, 0));
+    try std.testing.expect(state.observeGone(true, false, 0));
+}
+
+test "ISSUE-511 creating reconnecting and never attached tabs cannot be gone" {
+    for ([_]State{ .{}, .{ .phase = .reconnecting, .healthy_attach = true }, .{ .create_session = true, .healthy_attach = true } }) |initial| {
+        var state = initial;
+        for (0..4) |_| try std.testing.expect(!state.observeGone(true, false, 0));
+        state.ok();
+        try std.testing.expect(!state.observeGone(true, false, 0));
+        try std.testing.expect(state.observeGone(true, false, 0));
+    }
+}
+
+fn testGoneLifecycle(restored: bool, output: []const u8) !void {
+    var state: State = .{ .restored_session = restored };
+    if (!restored) state.ok();
+    const gone = sessionGone(output, "work", true, 0);
+    try std.testing.expect(gone);
+    for (0..3) |i| {
+        try std.testing.expect(!state.observeGone(gone, true, @intCast(i)));
+        try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+    }
+    state.confirmDisconnect(100, "process-exit-event", false);
+    state.lost(100, 0);
+    try std.testing.expect(state.due(state.next_tick));
+    state.start();
+    state.healthy_attach = false;
+    state.confirmDisconnect(2000, "process-exit-event", false);
+    state.lost(2000, 0);
+    state.awaiting_probe = true;
+    try std.testing.expect(!state.observeGone(gone, false, 60_000));
+    state.expireProbeWait(61_000, 1100);
+    try std.testing.expect(!state.due(61_000));
+    try std.testing.expectEqual(@as(u8, 1), state.gone_results);
+    if (state.observeGone(gone, false, 62_000)) state.end();
+    try std.testing.expectEqual(Phase.ended, state.phase);
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+}
+
+test "ISSUE-511 lifecycle healthy respawn attach exit confirms ended" {
+    try testGoneLifecycle(false, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 lifecycle restored named tab confirms ended" {
+    try testGoneLifecycle(true, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 lifecycle no server confirms ended and live transport is vetoed" {
+    try testGoneLifecycle(false, "@@LS_OK@@\n@@MP_LIVE@@\n");
+    try testGoneLifecycle(true, "@@LS_OK@@\n@@MP_LIVE@@\n");
+}
+
+test "ISSUE-511 confirmation hold starts at first gone not spawn and times out to backoff" {
+    var state: State = .{};
+    state.ok();
+    state.lost(100, 0);
+    try std.testing.expect(!state.observeGone(true, false, 60_000));
+    state.expireProbeWait(79_999, 0);
+    try std.testing.expect(!state.due(79_999));
+    state.expireProbeWait(80_000, 0);
+    try std.testing.expect(state.due(80_000));
+    state.start();
+    try std.testing.expectEqual(@as(u8, 1), state.gone_results);
+    state.lost(81_000, 0);
+    if (state.observeGone(true, false, 82_000)) state.end();
+    try std.testing.expectEqual(Phase.ended, state.phase);
+}
+
+test "ISSUE-511 creating sessions stay protected after failed creation respawn" {
+    for ([_]State{
+        .{ .ever_healthy = true, .create_session = true },
+        .{ .restored_session = true, .creating_session = true },
+        .{ .ever_healthy = true, .creating_session = true },
+    }) |initial| {
+        var state = initial;
+        state.start();
+        state.lost(100, 0);
+        for (0..3) |i| try std.testing.expect(!state.observeGone(true, false, @intCast(i)));
+        try std.testing.expectEqual(@as(u8, 0), state.gone_results);
+        state.ok();
+        try std.testing.expect(!state.observeGone(true, false, 1000));
+        try std.testing.expect(state.observeGone(true, false, 2000));
     }
 }

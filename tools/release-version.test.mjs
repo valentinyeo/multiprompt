@@ -85,7 +85,9 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
-  assert.doesNotMatch(workflow, /secrets\.|--draft/);
+  assert.doesNotMatch(workflow, /--draft/);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
   assert.match(workflow, /if: github.event_name != 'pull_request'/);
@@ -107,9 +109,31 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
+  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
+  assert.match(tests, /ARM64: \$\{\{ needs\.build-arm64\.result \}\}/);
+});
+
+test('aggregate routing requires the update job and rejects every unsuccessful heavy dependency', () => {
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const aggregate = tests.split('\n  test-result:\n')[1];
+  assert.match(aggregate, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
+  assert.match(aggregate, /UPDATE: \$\{\{ needs\.test-windows-update\.result \}\}/);
+  assert.match(aggregate, /for result in failure cancelled skipped; do/);
+  assert.match(aggregate, /if require_jobs success true success success success "\$result"; then exit 1; fi/);
+  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$ARM64" "\$UPDATE"/);
+  const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
+  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', ARM64: 'success', UPDATE: 'success' };
+  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
+  const result = run({});
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Aggregate routing controls passed/);
+  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', ARM64: 'skipped', UPDATE: 'skipped' }).status, 0);
+  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'ARM64', 'UPDATE']) {
+    for (const status of ['failure', 'cancelled', 'skipped']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
+  }
+  assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
 test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {
@@ -122,8 +146,8 @@ test('four Windows and two VPS jobs retain the upstream test graph and folded se
   assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
   assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
   const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
-  assert.match(vps, /name: Build the account Worker\n        if: matrix.group == 1/);
-  assert.match(vps, /name: Run account Worker tests\n        if: matrix.group == 1/);
+  assert.match(vps, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
+  assert.match(vps, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
   assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
   assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);

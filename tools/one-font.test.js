@@ -80,7 +80,7 @@ test('scanner rejects literals, UTF-16 names, theme JSON, LOGFONT and unknown GD
   ]) assert.notEqual(violations(source).length, 0, source);
   assert.deepEqual(violations('CreateFontW(18, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 0, 0, L("IBM Plex Sans SmBld"));'), []);
   assert.deepEqual(violations('const face = "IBM Plex Sans Medm";'), []);
-  assert.deepEqual(violations('const SHELL_FACE = "Hack";'), []);
+  assert.deepEqual(violations('const SHELL_FACE = MONO_FACE;'), []);
   assert.deepEqual(violations('const MONO_FACE = "Nordwand Mono MP SemiBold";'), []);
   assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono MP SemiBold"/);
   assert.deepEqual(violations('L("Segoe UI Symbol"); L("Segoe UI Emoji");'), []);
@@ -149,6 +149,15 @@ test('CI includes both structural regressions and authentic Windows GDI selectio
   assert.match(build, /test_step\.dependOn\(&b\.addRunArtifact\(font_tests\)\.step\)/);
 });
 
+function chatMetricPolicy(render) {
+  const measurements = render.split('\n').filter(line => line.includes('DrawTextW(') && line.includes('L("Ag")'));
+  assert.equal(measurements.length, 3);
+  for (const measurement of measurements) assert.match(measurement, /chatLineHeight\(DrawTextW\(/);
+  assert.equal(measurements.filter(line => line.includes('DrawTextW(hdc,')).length, 2);
+  assert.equal(measurements.filter(line => line.includes('DrawTextW(self.hdc,')).length, 1);
+  assert.match(render, /pub fn lineHeight\(self: \*TableMeasureBackend\) i32 \{[^]*?return chatLineHeight\(DrawTextW\(self\.hdc/);
+}
+
 test('Chat View uses grayscale Regular body text, real Bold emphasis and unchanged centralized leading', () => {
   const fonts = read('src/fonts.zig');
   assert.match(fonts, /UI_MEDIUM_FACE = "IBM Plex Sans Medm"/);
@@ -171,6 +180,13 @@ test('Chat View uses grayscale Regular body text, real Bold emphasis and unchang
   assert.match(read('src/chat_composer.zig'), /\.chat\(-uiScaled\(app_state\.g_chat_font_pt\), false, false, false, \.\{\}\)/);
   const render = read('src/chat_render.zig');
   assert.match(render, /style\.bold or level > 0, style\.italic, false, \.\{\}/);
-  assert.equal((render.match(/chatLineHeight\(DrawTextW/g) || []).length, 4);
+  chatMetricPolicy(render);
   assert.match(read('src/chat_composer.zig'), /chatLineHeight\(one\.bottom - one\.top\)/);
+});
+
+test('IGSH-436 cached table metrics still reject bypassing centralized leading', () => {
+  const render = read('src/chat_render.zig');
+  const regression = render.replace('return chatLineHeight(DrawTextW(self.hdc,', 'return (DrawTextW(self.hdc,');
+  assert.notEqual(regression, render);
+  assert.throws(() => chatMetricPolicy(regression), assert.AssertionError);
 });

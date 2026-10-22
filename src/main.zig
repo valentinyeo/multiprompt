@@ -479,6 +479,7 @@ const workspaceStripHitTest = @import("sidebar.zig").workspaceStripHitTest;
 const hitTestSidebar = @import("sidebar.zig").hitTestSidebar;
 const sidebarStickyCardHitTest = @import("capacity.zig").sidebarStickyCardHitTest;
 const UPDATE_CHECK_MS = @import("app_state.zig").UPDATE_CHECK_MS;
+const update_release = @import("update_release.zig");
 const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
@@ -703,6 +704,7 @@ const SEARCH_WSMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_NEW_OFFS
 const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET;
 const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
 const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
+const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
 const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
 const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
 const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
@@ -738,7 +740,6 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
-const SPAWN_TITLES = @import("app_state.zig").SPAWN_TITLES;
 const defaultWorkspaceName = @import("workspaces.zig").defaultWorkspaceName;
 const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const findWorkspace = @import("workspaces.zig").findWorkspace;
@@ -1138,6 +1139,7 @@ const pasteClipboardToShell = @import("clipboard.zig").pasteClipboardToShell;
 const dictationAudit = @import("voice.zig").dictationAudit;
 const handleDictationReady = @import("voice.zig").handleDictationReady;
 const toggleDictation = @import("voice.zig").toggleDictation;
+const logDeepgramKeySource = @import("voice.zig").logDeepgramKeySource;
 const handleShotPaste = @import("clipboard.zig").handleShotPaste;
 const sendCtrlCToShell = @import("clipboard.zig").sendCtrlCToShell;
 const copyConsoleSelectionToClipboard = @import("clipboard.zig").copyConsoleSelectionToClipboard;
@@ -1266,7 +1268,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.798";
+pub const APP_VERSION = "0.28.801";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1325,6 +1327,10 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == update_release.WM_RESPONSIVE) {
+        update_release.ready();
+        return 0;
+    }
     defer if (msg != WM_DESTROY and msg != 0x0082) sessionFrontChanged();
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -1351,6 +1357,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (app_state.g_app_closing or initializeDeferred(hwnd)) {
             _ = KillTimer(hwnd, launch_cache.TIMER_STARTUP);
             launch_cache.pending = false;
+            saveSession();
             launch_cache.changed();
             @import("account_desktop.zig").resumeStartupReply();
         }
@@ -4741,11 +4748,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    if (app_state.g_update_ver_len > 0) {
-                        updateCardRelaunch(hwnd);
-                    } else {
-                        updateCardPoll();
-                    }
+                    updateCardPoll();
+                    updateCardRelaunch(hwnd);
                     return 0;
                 }
                 if (target == SEARCH_RESTART_OFFSET) {
@@ -5991,14 +5995,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
-                    const tc_sid = app_state.g_tabctx_sid;
+                    const tc_sid = if (target == SEARCH_TABCTX_START_SESSION and app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
-                        if (target == SEARCH_TABCTX_RECONNECT) {
+                        if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {
                             app_state.g_search_active = false;
                             app_state.g_search_tabctx_mode = false;
                             app_state.g_search_groupctx_mode = false;
@@ -6689,6 +6693,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                     return 0;
                 }
+                if (got_code and exit_code == @import("win32.zig").STILL_ACTIVE) return 0;
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
@@ -7520,7 +7525,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                                 return 0;
                             }
                         }
-                        if (app_state.shell_count < MAX_SHELLS and @as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
+                        if (app_state.shell_count < MAX_SHELLS) {
+                            const shell_id = app_state.allocateShellId() orelse return 0;
                             const adopt_h: HANDLE = @ptrFromInt(transfer.console_hwnd);
 
                             _ = ShowWindow(adopt_h, SW_HIDE);
@@ -7552,8 +7558,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.inbox_excluded = transfer.inbox_excluded != 0;
                             new_shell.claude_session = transfer.claude_session != 0;
                             new_shell.tmux_host = transfer.tmux_host;
-                            new_shell.shell_id = app_state.next_shell_id;
-                            app_state.next_shell_id += 1;
+                            new_shell.shell_id = shell_id;
 
                             const nlen = @min(transfer.name_len, 63);
                             for (0..nlen) |ni| {
@@ -7745,6 +7750,7 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
     if (update_check.runRelaunchHelperIfRequested()) return;
@@ -7771,11 +7777,14 @@ pub fn main(init: std.process.Init) void {
         return;
     }
 
+    if (update_release.startup(args)) return;
+
     var console_fonts = @import("console.zig").registerBundledConsoleFonts();
     defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
 
     _ = SetErrorMode(SSH_ERROR_MODE);
     crash_recorder.install(&crashSnapshot, APP_VERSION, IS_DEV);
+    logDeepgramKeySource();
 
     _ = SetProcessDpiAwarenessContext(@ptrFromInt(@as(usize, @bitCast(@as(isize, -4)))));
 
@@ -7939,6 +7948,8 @@ pub fn main(init: std.process.Init) void {
     _ = @import("win32.zig").UpdateWindow(hwnd);
     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
 
+    _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
+    update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
         _ = TranslateMessage(&msg);
@@ -8098,10 +8109,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 new_shell.last_used = app_state.g_adopt_last_used;
                 new_shell.input = app_state.g_adopt_input;
                 new_shell.visits = app_state.g_adopt_visits;
-                if (@as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
-                    new_shell.shell_id = app_state.next_shell_id;
-                    app_state.next_shell_id += 1;
-                }
+                new_shell.shell_id = app_state.allocateShellId() orelse return true;
 
                 if (app_state.g_adopt_name_len > 0) {
                     for (0..app_state.g_adopt_name_len) |ni| {
@@ -8182,7 +8190,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .updates => {
             updateCardInit();
-            if (!startUpdateCardWatch()) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
+            _ = startUpdateCardWatch();
+            _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
             restoreRegisteredWorkspaceWindows();
             checkDueReminders();

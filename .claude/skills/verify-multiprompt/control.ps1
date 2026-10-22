@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'inbox', 'command-palette', 'session-open', 'browser-pane-stuck', 'chat-tables', 'safe-updates')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -9,6 +9,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
+switch ($Feature) {
+        'safe-updates' {
+            if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before update journey' }
+            if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable version mismatch before update journey' }
+            & "$PSScriptRoot/../../../tools/update-release-journey.ps1" -Exe $Exe -Evidence $Evidence
+            return
+        }
+}
+
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type -TypeDefinition @'
 using System;
@@ -78,7 +87,7 @@ public static class VerifyNative {
     }
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr hwnd, string name);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     public static bool PaneVisible(IntPtr owner) {
         Rect frame;
@@ -215,6 +224,7 @@ $process = $null
 $job = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
+$script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -225,6 +235,21 @@ function Save-Json($Value, [string]$Name) {
 function Record([string]$Action) {
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
+}
+
+function Prepare-ScratchEvidence([string]$Path) {
+    $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
+            Save-Json @($script:scratchLinks) 'scratch-links.json'
+            $entry.Delete()
+            Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } else {
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
+        }
+    }
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20) {
@@ -276,11 +301,24 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
     return $pane
 }
 
+function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and
+            $pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)
+    } "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25
+    Doctor
+    Record "Activate main window after browser-pane-stuck ${Step} docking"
+    [void][VerifyNative]::SetForegroundWindow($script:window)
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "browser-pane-stuck ${Step}: main window is foreground" 5
+}
+
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
-    return Assert-BrowserPane 'open' $Step $PreviousId
+    $pane = Assert-BrowserPane 'open' $Step $PreviousId
+    Focus-BrowserPaneOwner $Step $pane.browser_connection_id
+    return $pane
 }
 
 function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
@@ -340,6 +378,10 @@ function Assert-Foreground {
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'owned app foreground for keyboard input'
     Assert-Foreground
     Record $Label
     [VerifyNative]::Chord($Keys)
@@ -423,7 +465,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
@@ -431,6 +473,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     $env:USERPROFILE = Join-Path $scratch 'profile'
     $env:HOME = $env:USERPROFILE
+    $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
     $job = New-Object VerifyJob
@@ -458,6 +501,35 @@ try {
             $light = Sidebar-Luminance 'after'
             if ($light -lt $dark + 60) { throw "Visible sidebar did not become light: $dark -> $light" }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
+        }
+        'chat-tables' {
+            $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'
+            $command += ' && echo table-ready>"' + (Join-Path $scratch 'table-ready.txt') + '"'
+            Type-Text $command
+            Press @(0x0D) 'Enter: print table and persist console completion marker in CMD'
+            Wait-Until { Test-Path (Join-Path $scratch 'table-ready.txt') } 'real console table command completed'
+            Press @(0x12, 0x43) 'Alt+C: open formatted Chat View'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_tab -ge 0 -and $state.active_tab -lt @($state.tabs).Count } 'saved initial table tab'
+            $tableTab = (Read-Session).active_tab
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Wait-Until { (Test-Path $log) -and (Get-Content $log -Raw) -match 'CHAT_TABLE rows=1 columns=2 .*source=box' } 'formatted table built from real console output'
+            Wait-Until { (Read-Session).tabs[$tableTab].cv } 'Chat View preference persisted for table tab'
+            Snapshot 'before'
+            $buildsBefore = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            $tabsBefore = @((Read-Session).tabs).Count
+            Palette 'new cmd'
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: create another real CMD tab'
+            Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 -and (Read-Session).active_tab -ne $tableTab } 'new CMD tab active and saved'
+            Snapshot 'away'
+            $awayLogLength = (Get-Content $log -Raw).Length
+            Press @(0x11, 0x10, 0x09) 'Ctrl+Shift+Tab: return to table Chat View'
+            Wait-Until { (Read-Session).active_tab -eq $tableTab -and (Read-Session).tabs[$tableTab].cv } 'original Chat View tab active again'
+            Wait-Until { $text = Get-Content $log -Raw; $text.Length -gt $awayLogLength -and $text.Substring($awayLogLength) -match '\[switch\] chat painted in' } 'returned Chat View painted'
+            Snapshot 'after'
+            $buildsAfter = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            if ($buildsAfter -ne $buildsBefore) { throw "Unchanged table rebuilt across tab switch: $buildsBefore -> $buildsAfter" }
+            $result.checks += @{ name = 'console-table-switch-return'; tableTab = $tableTab; buildsBefore = $buildsBefore; buildsAfter = $buildsAfter; marker = (Get-Content (Join-Path $scratch 'table-ready.txt') -Raw).Trim(); chatViewSaved = $true }
         }
         'sessions' {
             $before = @( (Read-Session).tabs ).Count
@@ -622,6 +694,7 @@ try {
             Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
+            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
             Palette 'close all browser panes'
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
@@ -640,6 +713,32 @@ try {
             Wait-Until { $state = Read-Session; -not ($state.PSObject.Properties.Name -contains 'ui_scale') -or $state.ui_scale -eq 100 } 'UI scale reset to default'
             Snapshot 'reset'
             $result.checks += @{ name = 'palette-increase-reset'; increasedScale = 110; resetScale = 100 }
+            Palette 'restart to update'
+            Snapshot 'update-command'
+            $image = New-Object Drawing.Bitmap((Join-Path $Evidence 'update-command.png'))
+            $selectedTextPixels = 0
+            try {
+                $top = $image.Height
+                $bottom = 0
+                for ($y = [int]($image.Height * 0.2); $y -lt [int]($image.Height * 0.8); $y++) {
+                    $pixel = $image.GetPixel([int]($image.Width / 2), $y)
+                    if ($pixel.R -lt 50 -and $pixel.G -gt 70 -and $pixel.G -lt 160 -and $pixel.B -gt 150) {
+                        $top = [Math]::Min($top, $y)
+                        $bottom = [Math]::Max($bottom, $y)
+                    }
+                }
+                for ($y = $top; $y -le $bottom; $y++) {
+                    for ($x = [int]($image.Width * 0.3); $x -lt [int]($image.Width * 0.7); $x++) {
+                        $pixel = $image.GetPixel($x, $y)
+                        if ($pixel.R -gt 180 -and $pixel.G -gt 180 -and $pixel.B -gt 180) { $selectedTextPixels++ }
+                    }
+                }
+                if ($selectedTextPixels -lt 40) { throw 'Update command row is blank or unreadable' }
+            } finally { $image.Dispose() }
+            Press @(0x0D) 'Enter: Restart to update with no update ready'
+            Doctor
+            Snapshot 'update-idle'
+            $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
         }
     }
     Doctor
@@ -666,7 +765,18 @@ try {
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
             } finally {
-                if (Test-Path $scratch) { Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force }
+                if (Test-Path $scratch) {
+                    Prepare-ScratchEvidence $scratch
+                    $data = Join-Path $Evidence 'data'
+                    New-Item -ItemType Directory -Force $data | Out-Null
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while ($true) {
+                        try { Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break } catch {
+                            if ([DateTime]::UtcNow -ge $deadline) { throw }
+                            Start-Sleep -Milliseconds 200
+                        }
+                    }
+                }
             }
         }
         if (Test-Path $scratch) {

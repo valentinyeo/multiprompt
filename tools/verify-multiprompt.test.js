@@ -83,11 +83,16 @@ test('G2: keyboard palette creates a group and waits for its real saved name and
 
 test('G2: offline startup uses the actual ephemeral app-owned loopback listener', () => {
   assert.match(read('src/account_desktop.zig'), /GetEnvironmentVariableA\("MULTIPROMPT_NO_LOGIN"[\s\S]*?g_account_bypass = true/);
-  assert.match(read('src/main.zig'), /\.links => \{\s*launch_cache\.step\(\.links\);\s*if \(std\.Thread\.spawn\(\.\{\}, notifyListenerThread, \.\{\}\)\) \|notify_thread\| \{[^{}]*\} else \|_\| \{[^{}]*\}\s*startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/);
+  const main = read('src/main.zig');
+  const startupListener = /\.links => \{\s*launch_cache\.step\(\.links\);\s*if \(std\.Thread\.spawn\(\.\{\}, notifyListenerThread, \.\{\}\)\) \|notify_thread\| \{[^{}]*\} else \|_\| \{[^{}]*\}\s*startTunnelInboundListener\(\);\s*if \(!@import\("session\.zig"\)\.prepareStartupRestore\(\)\)/;
+  assert.match(main, startupListener);
+  assert.doesNotMatch(main.replace('startTunnelInboundListener();', ''), startupListener);
+  assert.match(main, /startup_phase = @enumFromInt\(@intFromEnum\(startup_phase\) \+ 1\);/);
   assert.match(read('src/launch_plan.zig'), /pub const Deferred = enum \{[^}]*\blinks,\s*tabs,/);
   assert.match(read('src/account_desktop.zig'), /pub fn accountBootstrap\(hwnd: HANDLE\) bool \{\s*if \(app_state\.g_account_bypass\) return true;/);
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
   assert.match(read('src/session.zig'), /fn startupRestoreWorker\([^\n]*\) void \{\s*_ = @import\("console\.zig"\)\.resolveSshPath\(false\);/);
+  assert.match(read('src/main.zig'), /listener_status\.load\(\.acquire\)[\s\S]*?\.pending => return false/);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
@@ -114,6 +119,22 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.match(transport, /\$response\.ok -ne \$true/);
   assert.match(transport, /finally \{ \$reply.Dispose\(\); \$client.Dispose\(\) \}/);
   assert.doesNotMatch(transport, /Start-Process|Invoke-Expression|PostMessage/);
+});
+
+test('docked native browser handoff retains identity, visibility and strict foreign-input guards', () => {
+  const guard = control.slice(control.indexOf('function Assert-Foreground {'), control.indexOf('function Press('));
+  const handoff = control.slice(control.indexOf('function Focus-BrowserPaneOwner('), control.indexOf('function Assert-ConnectedPaneStaysVisible('));
+  const refusesForeign = /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/;
+  const dockedOwner = /\$pane.browser_state -eq 'connected' -and\s*\$pane.browser_connection_id -eq \$ConnectionId -and \[VerifyNative\]::PaneVisible\(\$script:window\)/;
+  const waitsBeforeActivation = /Wait-Until \{[\s\S]*\} "browser-pane-stuck \$\{Step\}: docked pane ready for main-window activation" 25\s*Doctor\s*Record[^\n]*\n\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/;
+  const verifiesForeground = /Wait-Until \{ \[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window \} "browser-pane-stuck \$\{Step\}: main window is foreground" 5/;
+  for (const pattern of [dockedOwner, waitsBeforeActivation, verifiesForeground]) {
+    assert.match(handoff, pattern);
+    assert.throws(() => assert.match(handoff.replace(pattern, ''), pattern));
+  }
+  assert.match(handoff, /Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id/);
+  assert.match(guard, refusesForeign);
+  assert.throws(() => assert.match(guard.replace(refusesForeign, ''), refusesForeign));
 });
 
 test('G2: discovery, creation and repeat use saved names and identical arguments', () => {
@@ -151,10 +172,29 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllBytes[\s\S]*?\.request.bin/);
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
-  assert.match(control, /function Press[\s\S]*?Doctor\s+Assert-Foreground/);
+  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
-  assert.match(control, /Copy-Item \$scratch[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
+  assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-Item \$scratch -Recurse -Force/);
+});
+
+test('audit verification is isolated from unchanged desktop journeys and retains fixture evidence', () => {
+  const auditJob = workflow.slice(workflow.indexOf('  chat-sync-audit:'), workflow.indexOf('  verify:'));
+  assert.match(auditJob, /if: inputs\.feature == 'chat-sync-audit'/);
+  assert.match(auditJob, /runs-on: ubuntu-latest/);
+  assert.match(auditJob, /run: zig build chat-audit/);
+  assert.match(auditJob, /set -o pipefail/);
+  assert.match(auditJob, /python3 tools\/chat-sync-audit\.test\.py -v 2>&1 \| tee evidence\/fixtures\.log/);
+  assert.match(auditJob, /git rev-parse HEAD > evidence\/revision\.txt/);
+  assert.match(auditJob, /if: always\(\)/);
+  assert.match(auditJob, /name: verify-chat-sync-audit/);
+  for (const ending of ['\n', '\r\n']) {
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+  }
+  assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
+  assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
+  assert.equal(fs.existsSync(path.join(root, skill, 'features/chat-sync-audit.md')), false);
+  assert.match(read(skill + 'SKILL.md'), /\[Chat sync audit\]\(diagnostics\/chat-sync-audit.md\)/);
 });
 
 test('maintained verification code contains no removable code comments', async () => {
@@ -175,4 +215,17 @@ test('G3: four-section feature map is indexed and workspace entry points link it
   assert.match(workspaces, /zsb session-open --workspace/);
   assert.match(workspaces, /\[Session open\]\(session-open.md\)/);
   assert.match(map, /not a Windows journey result/);
+});
+
+
+test('chat table journey waits for the Chat View tab to be saved before recording its identity', () => {
+  const table = control.slice(control.indexOf("        'chat-tables' {"), control.indexOf("        'sessions' {"));
+  const ready = /Wait-Until \{ \$state = Read-Session; \$null -ne \$state -and @\(\$state\.tabs\)\.Count -gt 0 -and \$state\.active_tab -ge 0 -and \$state\.active_tab -lt @\(\$state\.tabs\)\.Count \} 'saved initial table tab'\s+\$tableTab = \(Read-Session\)\.active_tab/;
+  assert.match(table, ready);
+  const completion = /\$command \+= ' && echo table-ready>"' \+ \(Join-Path \$scratch 'table-ready\.txt'\) \+ '"'\s+Type-Text \$command\s+Press @\(0x0D\)/;
+  assert.match(table, completion);
+  assert.doesNotMatch(table.replace(' && echo table-ready', ' && echo wrong-marker'), completion);
+  assert.match(table, /Press @\(0x12, 0x43\) 'Alt\+C: open formatted Chat View'\s+Wait-Until/);
+  assert.doesNotMatch(table.replace('Wait-Until { $state = Read-Session;', 'Write-Output { $state = Read-Session;'), ready);
+  assert.doesNotMatch(table.replace('$state.active_tab -lt @($state.tabs).Count', '$true'), ready);
 });

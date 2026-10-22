@@ -204,6 +204,7 @@ const SEARCH_WSMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_NEW_OFFS
 const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET;
 const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
 const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
+const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
 const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
 const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
 const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
@@ -531,6 +532,7 @@ pub fn recordPaletteUsage(target: usize) void {
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
+    if (target == SEARCH_TABCTX_START_SESSION) return "start new session";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
@@ -764,7 +766,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_MODE_OFFSET => "browser pane mode",
         SEARCH_BROWSER_ENGINE_OFFSET => "browser engine",
         SEARCH_RESTART_OFFSET => "restart multiprompt",
-        SEARCH_UPDATE_OFFSET => "update relaunch new version",
+        SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
         SEARCH_ZSB_REBIND_OFFSET => "rebind browser pane",
         SEARCH_SHELL_DIAG_OFFSET => "copy shell diagnostics",
         SEARCH_SYNC_NAME_OFFSET => "use agent or tmux name",
@@ -1785,8 +1787,14 @@ pub fn updateSearchResults() void {
             const k = app_state.shells[ti].kind;
             if (k == .vps or k == .vps2 or k == .tmux) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Reconnect", app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
+                    const ended = app_state.shells[ti].ssh_reconnect.phase == .ended;
+                    const label = if (ended) "Start new session" else "Reconnect";
+                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                        if (ended) {
+                            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
+                        } else {
+                            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
+                        }
                         app_state.g_search_result_count += 1;
                     }
                 }
@@ -2386,7 +2394,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_update = app_state.g_update_ver_len > 0 and app_state.g_search_len == 0;
         if (!show_update and app_state.g_search_len > 0) {
-            const update_labels = [_][]const u8{ "update", "relaunch", "new version", "upgrade" };
+            const update_labels = [_][]const u8{ "update", "restart to update", "relaunch", "new version", "upgrade" };
             for (update_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_update = true;
@@ -2636,7 +2644,12 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_reconnect) {
+        if (app_state.shells[app_state.active_shell].ssh_reconnect.phase == .ended) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Start new session", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
+                app_state.g_search_result_count += 1;
+            }
+        } else if (show_reconnect) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RECONNECT_OFFSET;
             app_state.g_search_result_count += 1;
         }

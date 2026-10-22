@@ -86,7 +86,7 @@ pub fn restore() void {
         var shell = state.empty_shell;
         shell.console_inflight = true;
         shell.shell_id = row.id;
-        state.next_shell_id = @max(state.next_shell_id, row.id +| 1);
+        if (state.next_shell_id != 0 and row.id >= state.next_shell_id) state.next_shell_id = row.id +% 1;
         cached_ids[i] = row.id;
         shell.chat_id = row.chat_id;
         shell.kind = @enumFromInt(row.kind);
@@ -161,13 +161,12 @@ pub fn deferred() void {
             }
         }
         var kept: u32 = 0;
-        state.next_shell_id = 1;
         for (0..state.shell_count) |i| {
             const shell = state.shells[i];
             if (std.mem.indexOfScalar(u32, cached_ids[0..cached_count], shell.shell_id) != null) continue;
             state.shells[kept] = shell;
             if (shell.shell_id == selected_id) selected_live_shell_id = shell.shell_id;
-            state.next_shell_id = @max(state.next_shell_id, shell.shell_id +| 1);
+            if (state.next_shell_id != 0 and shell.shell_id >= state.next_shell_id) state.next_shell_id = shell.shell_id +% 1;
             kept += 1;
         }
         state.shell_count = kept;
