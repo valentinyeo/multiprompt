@@ -63,6 +63,7 @@ function harness() {
     section(extension, 'function withTimeout(', 'async function handleCreatedNavigationTarget(') +
     section(extension, 'function clearScreenshotCdpDetachTimer(', 'async function tryAcceptPendingDialog(') +
     section(extension, 'async function sendCdp(', 'async function consoleAction(') +
+    section(extension, 'function isBrowserInternalTab(', 'function paneContentTab(') +
     section(extension, 'async function getTargetTab(', 'function rememberZsbTargetTab(') +
     '\nglobalThis.api = { withCdpSession, handleHostMessage, dispatch, connect };', context);
   const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };

@@ -279,7 +279,10 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     Palette 'open browser'
     Press @(0x0D) 'Enter: Open Browser Pane'
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'browser launch returned foreground to app'
+    Wait-Until {
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'browser launch returned foreground to app'
     return Assert-BrowserPane 'open' $Step $PreviousId
 }
 
@@ -670,7 +673,17 @@ try {
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
             } finally {
-                if (Test-Path $scratch) { Copy-Item $scratch (Join-Path $Evidence 'data') -Recurse -Force }
+                if (Test-Path $scratch) {
+                    $data = Join-Path $Evidence 'data'
+                    New-Item -ItemType Directory -Force $data | Out-Null
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while ($true) {
+                        try { Copy-Item (Join-Path $scratch '*') $data -Recurse -Force; break } catch {
+                            if ([DateTime]::UtcNow -ge $deadline) { throw }
+                            Start-Sleep -Milliseconds 200
+                        }
+                    }
+                }
             }
         }
         if (Test-Path $scratch) {
