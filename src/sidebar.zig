@@ -3459,11 +3459,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var bt_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Open Browser Pane"), -1, &bt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) L("Retry Browser Pane") else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_launch_tick != 0) L("Close Browser Pane") else L("Open Browser Pane"), -1, &bt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bt_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+A"), -1, &bt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) L("Alt+Shift+A") else L("Alt+A"), -1, &bt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_url) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));

@@ -747,7 +747,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
         SEARCH_SKILLS_BACK_OFFSET => "back",
-        SEARCH_BROWSER_TOGGLE_OFFSET => "open browser pane",
+        SEARCH_BROWSER_TOGGLE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
         SEARCH_BROWSER_URL_OFFSET => "browser open url",
         SEARCH_BROWSER_INSTRUCT_OFFSET => "browser control instructions",
         SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser focus address bar",
@@ -3557,7 +3557,7 @@ pub fn updateSearchResults() void {
         var show_browser_toggle = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const browser_labels = [_][]const u8{ "browser", "web", "edge", "pane", "open browser", "show browser", "recover browser", "alt a", "alt b" };
+            const browser_labels = [_][]const u8{ "browser", "web", "edge", "pane", "open browser", "show browser", "recover browser", "retry browser", "retry browser pane", "close browser pane", "alt a", "alt b" };
             for (browser_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_browser_toggle = true;

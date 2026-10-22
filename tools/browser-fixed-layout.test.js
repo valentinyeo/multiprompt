@@ -50,7 +50,7 @@ test("placeholder paints the slot, is overlay-aware, and is wired into WM_PAINT"
   assert.match(paint, /g_inbox_active/, "skips under overlays");
   assert.match(paint, /themeConsoleBg\(\)/, "fills with the theme background");
   assert.match(paint, /Opening browser/);
-  assert.match(paint, /Browser not open/);
+  assert.match(paint, /Browser could not connect/);
   assert.match(functionBody("browserPlaceholderPure"), /BROWSER_PLACEHOLDER_NOT_OPEN_MS/);
   assert.match(source, /test "browserPlaceholderPure/);
   assert.equal((source.match(/paintBrowserPlaceholder\(/g) || []).length, 3, "definition + both WM_PAINT paths");
