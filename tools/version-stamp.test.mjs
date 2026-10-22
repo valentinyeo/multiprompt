@@ -166,7 +166,7 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
         assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
       }
       for (const [name, cap, prefix, run] of [
-        ['test', 1600, 'shards-v6-group-', 'Run tests'],
+        ['test', 1600, 'shards-v7-group-', 'Run tests'],
         ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests'],
       ]) {
         const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];

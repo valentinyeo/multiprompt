@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Test release version
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 3
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 5
         run: node --test tools/release-version.test.mjs
       - name: Check version rule
         if: steps.paths.outputs.heavy == 'true'
