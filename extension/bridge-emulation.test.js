@@ -549,8 +549,13 @@ for (const method of ['tabs', 'activeTab', 'url', 'frames', 'text', 'links', 'sn
     const result = await h.run({ method });
     assert.equal(result.method, method);
     assert.equal(result.acted, true);
-    assert.match(result.warning, /emulation lost/i);
-    assert.equal(result.emulationLost, !['reset', 'closeTab'].includes(method));
+    if (method === 'reset') {
+      assert.equal(result.warning, undefined);
+      assert.equal(result.emulationLost, undefined);
+    } else {
+      assert.match(result.warning, /emulation lost/i);
+      assert.equal(result.emulationLost, method !== 'closeTab');
+    }
     assert.equal(h.context.actionCalls, 1);
   });
 }
@@ -576,8 +581,9 @@ test('reset clears lost emulation and permits viewport-sensitive commands again'
   h.fail(undefined);
   const result = await h.run({ method: 'reset' });
   assert.equal(result.reset, true);
-  assert.match(result.warning, /emulation lost/i);
-  assert.equal(result.emulationLost, false);
+  assert.equal(result.warning, undefined);
+  assert.equal(result.emulationLost, undefined);
+  assert.equal(vm.runInContext('lostEmulationTabs.size', h.context), 0);
   await h.run({ method: 'key', combo: 'Enter' });
 });
 
@@ -652,4 +658,29 @@ test('rebased CDP script reset cancels delayed steps before any later command', 
   release();
   await assert.rejects(current, /CDP session reset/);
   assert.equal(h.calls.some(call => call.method === 'Synthetic.enableUnknown'), false);
+});
+
+test('reset with lost emulation bypasses target lookup and background debugger attach', async () => {
+  const h = harness({ realTarget: true });
+  await h.run({ method: 'emulate', device: 'iphone' });
+  h.fail('Emulation.setDeviceMetricsOverride');
+  await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  h.fail(undefined);
+  assert.equal(vm.runInContext('lostEmulationTabs.has(1)', h.context), true);
+  h.context.chrome.tabs.query = async () => [{ id: 1, windowId: 10, active: false, url: 'https://example.test' }];
+  vm.runInContext(`
+    targetLookups = 0;
+    originalGetTargetTab = getTargetTab;
+    getTargetTab = async message => { targetLookups++; return originalGetTargetTab(message); };
+    sendResponse = (message, response) => { resetResponse = response; };
+  `, h.context);
+  const start = h.calls.length;
+  await h.context.handleHostMessage({ method: 'reset', windowId: 10, tabId: 1 });
+  assert.equal(h.context.resetResponse.ok, true);
+  assert.equal(h.context.resetResponse.result.reset, true);
+  assert.equal(h.context.targetLookups, 0);
+  assert.equal(h.calls.slice(start).filter(call => call.method === 'attach').length, 0);
+  assert.equal(h.attached.size, 0);
+  assert.equal(vm.runInContext('lostEmulationTabs.size', h.context), 0);
+  assert.equal(h.context.resetResponse.result.warning, undefined);
 });
