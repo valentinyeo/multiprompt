@@ -810,7 +810,8 @@ function Assert-SeededWorkspaceUpgrade {
         [IO.File]::WriteAllText($cookies, 'synthetic pre-upgrade cookie marker')
         [IO.File]::WriteAllText((Join-Path $seedRoot 'Local State'), 'synthetic pre-upgrade encryption key marker')
         $before = @((Get-FileHash $bookmarks).Hash, (Get-FileHash $cookies).Hash, (Get-FileHash (Join-Path $seedRoot 'Local State')).Hash)
-        @{ single_window = $true; workspace_count = 1; active_workspace = 0; active_tab = 0; workspaces = @(@{ wid = 'igsh224-upgrade-original'; name = 'Upgrade original' }); tabs = @(@{ kind = 'cmd'; workspace = 0 }) } | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $env:APPDATA 'ZigShell/session.json')
+        $seedSession = @{ single_window = $true; workspace_count = 1; active_workspace = 0; active_tab = 0; workspaces = @(@{ wid = 'igsh224-upgrade-original'; name = 'Other' }); tabs = @(@{ kind = 'cmd'; name = 'Upgrade shell'; workspace = 0 }) }
+        [IO.File]::WriteAllText((Join-Path $env:APPDATA 'ZigShell/session.json'), ($seedSession | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
         $upgradeJob = New-Object VerifyJob
         $upgradeProcess = $upgradeJob.Start($Exe, $scratch, (Join-Path $Evidence 'upgrade-stdout.log'), (Join-Path $Evidence 'upgrade-stderr.log'))
         $script:process = $upgradeProcess

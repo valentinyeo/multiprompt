@@ -249,5 +249,7 @@ test('IGSH-224 synthetic upgrade proof exercises production roots markers native
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
   const upgrade = control.slice(control.indexOf('function Assert-SeededWorkspaceUpgrade'), control.indexOf('function Select-Theme('));
   for (const required of ['Get-FileHash $bookmarks', 'Get-FileHash $cookies', 'originalBrowserLaunched = $false', 'workspace-upgrade.json', 'upgrade-process-tree.json', 'New workspace stole', 'newRoot', 'Get-CimInstance Win32_Process']) assert.ok(upgrade.includes(required), required);
+  assert.match(upgrade, /name = 'Upgrade shell'/);
+  assert.match(upgrade, /New-Object Text.UTF8Encoding\(\$false\)/);
   assert.ok(control.indexOf('Assert-SeededWorkspaceUpgrade }') < control.indexOf('$process = $job.Start($Exe, $scratch'));
 });
