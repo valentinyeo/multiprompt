@@ -1800,7 +1800,6 @@ async function evalAction(message) {
     if (!blockedByCsp(error)) throw error;
   }
 
-  // Runtime.evaluate without a context targets the top page, never the requested subframe.
   if (frameId !== 0) throw new Error(`eval in frame ${frameId} blocked by Content Security Policy`);
   return withCdpSession(tab.id, async (debuggee) => {
     const reply = await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
@@ -1899,7 +1898,6 @@ async function clickAction(message) {
   const offset = await frameViewportOffset(tab.id, target.frameId);
   let reason = "frame coordinates unavailable";
   if (offset) {
-    // Ancestor scrolling can change the leaf viewport; measure again before dispatch.
     if (target.frameId !== 0) {
       target = { ...await runInFrame(tab.id, target.frameId, locateSelectorForTrustedInput, [selector, false, false, false]), frameId: target.frameId };
     }
@@ -1916,7 +1914,6 @@ async function clickAction(message) {
       });
       return { clicked: true, trusted: true, selector, text: target.text, frameId: target.frameId, via: "cdp", x, y };
     } catch (error) {
-      // Never replay a possibly delivered click, including an operation/attach timeout.
       if (inputStarted || /timed out/i.test(errorText(error))) throw error;
       reason = `debugger unavailable: ${errorText(error)}`;
     }
@@ -1978,7 +1975,6 @@ async function frameViewportOffset(tabId, frameId) {
     visited.add(current.frameId);
     const parent = byId.get(current.parentFrameId);
     if (!parent) return null;
-    // URLs are not identities: redirects, srcdoc and same-URL siblings are common.
     const token = crypto.randomUUID();
     let rect = null;
     try {

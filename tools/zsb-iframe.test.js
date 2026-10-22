@@ -89,7 +89,6 @@ function harness({ redirected = false, inaccessible = false, attachError, inputE
         frames.get(43).buttonLeft = 30;
       },
     };
-    // The same-URL sibling deliberately appears first in the parent DOM.
     parent.iframes.unshift(element);
   }
   const chrome = {
@@ -208,7 +207,6 @@ test("IGSH-305 frame eval never falls back to a top-frame CSP or data-page conte
   await assert.rejects(h.api.evalAction({ frameId: 43, code: "document.title" }), /frame 43.*Content Security Policy/);
   h.tab.url = "data:text/html,top";
   h.contexts.get(43).frameLabel = "child";
-  // Use a non-CSP frame to verify data: on the top tab doesn't override --frame.
   h.contexts.get(44).frameLabel = "child";
   assert.equal(await h.api.evalAction({ frameId: 44, code: "frameLabel" }), "child");
   assert.equal(h.calls.length, 0);
