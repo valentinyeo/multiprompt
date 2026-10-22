@@ -32,6 +32,40 @@ test('Windows behavioral update tests are required by CI', () => {
   for (const name of ['checksum mismatch refused', 'rollback after failed start', 'no automatic restart while running', 'version comparison']) assert.ok(suite.includes(name), name);
 });
 
+const repeatedProcessPathFilters = source => {
+  const lines = [];
+  for (const match of source.matchAll(/\bWhere-Object\s*\{/gi)) {
+    let depth = 1;
+    let end = match.index + match[0].length;
+    while (end < source.length && depth > 0) {
+      if (source[end] === '{') depth++;
+      if (source[end] === '}') depth--;
+      end++;
+    }
+    const block = source.slice(match.index, end);
+    if ((block.match(/\$_\.Path\b/gi) || []).length > 1) lines.push(source.slice(0, match.index).split('\n').length);
+  }
+  return lines;
+};
+
+test('process path guard detects repeated reads in single-line and nested filters', () => {
+  assert.deepEqual(repeatedProcessPathFilters('Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($Root) }'), [1]);
+  assert.deepEqual(repeatedProcessPathFilters('Get-Process | Where-Object {\n if ($_.Path) { $_.Path -eq $target }\n}'), [1]);
+  assert.deepEqual(repeatedProcessPathFilters('Get-Process | Where-Object { $p = $_.Path; $p -and $p.StartsWith($Root) }'), []);
+  assert.deepEqual(repeatedProcessPathFilters('Get-Process | Where-Object { $_.Path -eq $target }\nGet-Process | Where-Object { $_.Path -eq $other }'), []);
+});
+
+test('PowerShell test helpers read each process path once per filter', () => {
+  const violations = [];
+  for (const directory of ['tools', '.claude/skills/verify-multiprompt']) {
+    for (const name of fs.readdirSync(path.join(root, directory), { recursive: true }).filter(name => /\.ps1$/i.test(name))) {
+      const file = path.join(directory, name);
+      for (const line of repeatedProcessPathFilters(read(file))) violations.push(`${file}:${line}`);
+    }
+  }
+  assert.deepEqual(violations, [], 'Snapshot $_.Path once before checking or invoking methods on it');
+});
+
 test('the update command cannot be interpreted as a snippet', () => {
   const state = read('src/app_state.zig');
   const value = name => Number(new RegExp(`pub const ${name}: usize = (\\d+);`).exec(state)[1]);

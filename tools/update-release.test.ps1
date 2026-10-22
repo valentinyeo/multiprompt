@@ -12,7 +12,7 @@ function Refuses([scriptblock]$Action, [string]$Message) {
     Assert $refused $Message
 }
 function Stop-FixtureApps {
-    Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue; $null = $_.WaitForExit(5000) }
+    Get-Process | Where-Object { $processPath = $_.Path; $processPath -and $processPath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue; $null = $_.WaitForExit(5000) }
 }
 function Wait-File([string]$Path) {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -239,7 +239,7 @@ try {
         if ([DateTime]::UtcNow -gt $rollbackDeadline) { throw 'Rollback arguments changed or retained readiness flag' }
         Start-Sleep -Milliseconds 100
     }
-    $restored = @(Get-Process | Where-Object { $_.Path -eq $target })
+    $restored = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
     Assert ($restored.Count -eq 1) 'Rollback did not leave exactly one app running'
     Start-Sleep -Seconds 61
     Assert (-not $restored[0].HasExited) 'Old rollback app killed on ready deadline'
@@ -263,7 +263,7 @@ try {
     Install-Update $target 'x64' '999' '1.10.0'
     Assert ($script:timeoutObserved -and $script:unboundedObserved) 'Long exit was not supervised until completion'
     Wait-File "$target.starts"
-    $running = @(Get-Process | Where-Object { $_.Path -eq $target })
+    $running = @(Get-Process | Where-Object { $processPath = $_.Path; $processPath -eq $target })
     Assert ($running.Count -eq 1) 'Exit-timeout recovery left no runnable app'
     Passed 'exit timeout relaunches runnable old app'
     $journeySucceeded = $true
