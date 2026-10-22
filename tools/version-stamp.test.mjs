@@ -167,6 +167,17 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
   }
 });
 
+test('test-vps skips account Worker build and tests on STAMP PRs', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const vps = workflow.split('\n  test-vps:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  const steps = vps.split(/(?=^      - )/m).filter(step => /worker\.test\.js|wrangler deploy --dry-run/.test(step));
+  assert.ok(steps.some(step => step.includes('worker.test.js')));
+  assert.ok(steps.some(step => step.includes('wrangler deploy --dry-run')));
+  for (const step of steps) {
+    assert.match(step, /if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1\n/);
+  }
+});
+
 test('build, CI, installer and documentation use the stamp contract', () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /const version_stamp_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/version-stamp\.test\.mjs", "tools\/release-version\.test\.mjs" \}\);/);
