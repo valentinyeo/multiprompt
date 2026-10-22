@@ -31,7 +31,7 @@ function harness() {
     ...['SIDEBAR_W', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'),
   ];
-  if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects'].map(n => fn(layout, n)));
+  if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
   const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
 const app_state = @This();
@@ -242,14 +242,15 @@ test "all production pane consumers share outer margins and gaps" {
                             const c = chatViewLayout();
                             repositionActive();
                             const primary = activePaneRects(test_client).primary;
+                            const inner = activePaneContentRect(test_client);
                             if (!chat_on) {
-                                const expected = centeredConsoleColumn(primary.right, primary.left, 0, consoleCellW());
-                                try std.testing.expectEqual(if (full) primary.left else expected.left, shell_rect.left);
-                                try std.testing.expectEqual(if (full) primary.right - primary.left else expected.width, shell_rect.right - shell_rect.left);
-                                try std.testing.expectEqual(primary.top + threadTitleHeight(), shell_rect.top);
-                                try std.testing.expectEqual(primary.bottom, shell_rect.bottom);
+                                const expected = centeredConsoleColumn(inner.right, inner.left, 0, consoleCellW());
+                                try std.testing.expectEqual(if (full) inner.left else expected.left, shell_rect.left);
+                                try std.testing.expectEqual(if (full) inner.right - inner.left else expected.width, shell_rect.right - shell_rect.left);
+                                try std.testing.expectEqual(inner.top + threadTitleHeight(), shell_rect.top);
+                                try std.testing.expectEqual(inner.bottom, shell_rect.bottom);
                             }
-                            const content = chat_style.contentColumn(primary.left, primary.right - primary.left, false, browserSplitPermilleForActiveShell(), if (full) primary.right - primary.left else uiScaled(760), 0);
+                            const content = chat_style.contentColumn(inner.left, inner.right - inner.left, false, browserSplitPermilleForActiveShell(), if (full) inner.right - inner.left else uiScaled(760), 0);
                             try std.testing.expectEqual(content.left, c.transcript.left);
                             try std.testing.expectEqual(content.width, c.composer_card.right - c.composer_card.left);
                             const margin = if (hidden) uiScaled(8) else burn.left;
@@ -339,7 +340,9 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
 });
 
 test('pane consumers use the shared production rectangles and spacing tokens', { skip: !layout.includes('pub fn paneRects(') }, () => {
-  for (const source of [chat, browser, capacity, layout]) assert.match(source, /activePaneRects\(/);
+  assert.match(chat, /activePaneContentRect\(/);
+  assert.match(fn(layout, 'activePaneContentRect'), /activePaneRects\(client\)\.primary/);
+  for (const source of [browser, capacity, layout]) assert.match(source, /activePaneRects\(/);
   assert.match(read('update_card'), /paneGap\(\)/);
   assert.match(read('sidebar'), /activePaneRects\(client_rc\)\.sidebar/);
   assert.match(read('console'), /@import\("window_layout.zig"\)\.repositionActive/);

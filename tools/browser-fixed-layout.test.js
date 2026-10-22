@@ -33,7 +33,7 @@ test("console and Chat View reserve the same slot before a browser is visible", 
   const rep = functionBody("repositionActive");
   assert.doesNotMatch(rep, /browserLayoutActive/);
   assert.equal((rep.match(/browserSlotReserved\(\)/g) || []).length, 2, "chat branch + console branch");
-  assert.match(functionBody("chatViewLayout"), /activePaneRects\(rc\)\.primary/);
+  assert.match(functionBody("chatViewLayout"), /activePaneContentRect\(rc\)/);
   assert.match(functionBody("activePaneRects"), /browserSlotReserved\(\)/);
   assert.doesNotMatch(functionBody("chatViewLayout"), /chatBrowserVisible|centeredConsoleColumn/);
   assert.match(functionBody("threadTitleBandRightFor"), /browserSlotReserved\(\)/);

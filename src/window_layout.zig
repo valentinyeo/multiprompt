@@ -124,6 +124,17 @@ pub fn activePaneRects(client: RECT) PaneRects {
     return paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
 }
 
+pub fn activePaneContentRect(client: RECT) RECT {
+    const pane = activePaneRects(client).primary;
+    const inset = paneFocusInset();
+    return .{
+        .left = pane.left + inset,
+        .top = pane.top + inset,
+        .right = pane.right - inset,
+        .bottom = pane.bottom - inset,
+    };
+}
+
 pub fn repositionActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.shells[app_state.active_shell].hwnd == null or app_state.g_main_hwnd == null) return;
@@ -163,7 +174,7 @@ pub fn repositionActive() void {
     }
     if (LOOK_UNIFIED) {
         ensureDevThemeInitialized();
-        const pane = activePaneRects(rc).primary;
+        const pane = activePaneContentRect(rc);
         const con_top = pane.top + threadTitleHeight();
         const h = pane.bottom - con_top;
         const sh = app_state.shells[app_state.active_shell].hwnd;

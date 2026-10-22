@@ -156,6 +156,6 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);
   assert.ok(close.indexOf('applyBlackConsoleBackground') < close.indexOf('showShellConsole'));
   assert.match(body(source, 'respawnShellInPlace'), /\.full_width = saved_full_width/);
-  assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('activePaneRects(rc).primary'));
-  assert.match(body(source, 'chatViewLayout'), /activePaneRects\(rc\)\.primary/);
+  assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('activePaneContentRect(rc)'));
+  assert.match(body(source, 'chatViewLayout'), /activePaneContentRect\(rc\)/);
 });
