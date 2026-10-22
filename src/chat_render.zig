@@ -561,30 +561,42 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     return null;
 }
 
-fn chatTableCellSize(hdc: HANDLE, text: []const u16, bold: bool) chat_markdown.TableSize {
-    const old = SelectObject(hdc, chatRichFont(.{ .bold = bold }, 0));
-    defer _ = SelectObject(hdc, old);
-    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-    var height = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
-    var buf: [512]chat_markdown.Span = undefined;
-    const spans = if (text.len <= buf.len) buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return .{ .width = chatTextWidth(hdc, text), .height = height };
-    defer if (text.len > buf.len) std.heap.page_allocator.free(spans);
-    const n = chat_markdown.inlineSpans(text, spans);
-    var width: i32 = 0;
-    for (spans[0..n]) |span| {
-        var style = span.style;
-        style.bold = style.bold or bold;
-        _ = SelectObject(hdc, chatRichFont(style, 0));
-        width += chatTextWidth(hdc, text[span.text.start..span.text.end]);
-        height = @max(height, chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX)));
+const TableMeasureBackend = struct {
+    pub const Font = HANDLE;
+    hdc: HANDLE,
+
+    pub fn font(_: *TableMeasureBackend, style: chat_markdown.Style) Font {
+        return chatRichFont(style, 0);
     }
-    return .{ .width = width, .height = height };
+
+    pub fn select(self: *TableMeasureBackend, value: Font) Font {
+        return SelectObject(self.hdc, value);
+    }
+
+    pub fn lineHeight(self: *TableMeasureBackend) i32 {
+        var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+        return chatLineHeight(DrawTextW(self.hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
+    }
+
+    pub fn width(self: *TableMeasureBackend, text: []const u16) i32 {
+        return chatTextWidth(self.hdc, text);
+    }
+};
+
+const TableMeasurer = @import("chat_table_measure.zig").Measurer(TableMeasureBackend);
+var table_metrics: TableMeasurer.Metrics = .{};
+
+pub fn resetTableMetrics() void {
+    table_metrics = .{};
 }
 
 fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*chat_markdown.TableLayout {
     const start = GetTickCount64();
     const before = app_state.g_chat_tables.builds;
-    const table = app_state.g_chat_tables.layout(std.heap.page_allocator, text, offset, .{ .view_w = @max(1, width), .font_pt = app_state.g_chat_font_pt, .scale = uiScaled(1024), .pad_x = uiScaled(10), .pad_y = uiScaled(6) }, hdc, chatTableCellSize) catch return null;
+    table_metrics.invalidate(app_state.g_chat_font_pt, uiScaled(1024));
+    var measure = TableMeasurer{ .backend = .{ .hdc = hdc }, .metrics = &table_metrics };
+    defer measure.deinit();
+    const table = app_state.g_chat_tables.layout(std.heap.page_allocator, text, offset, .{ .view_w = @max(1, width), .font_pt = app_state.g_chat_font_pt, .scale = uiScaled(1024), .pad_x = uiScaled(10), .pad_y = uiScaled(6) }, &measure, TableMeasurer.cell) catch return null;
     if (app_state.g_chat_tables.builds != before) {
         chatPerf("table layout", start, text.len);
         var log: [192]u8 = undefined;
@@ -3713,4 +3725,19 @@ test "ISSUE-458 real window captures table thumb drags until release and cancels
     _ = w.SendMessageW(hwnd, WM_MOUSEMOVE, 1, (500 << 16) | 2000);
     try std.testing.expectEqual(@as(i32, 0), layout.scroll);
     try std.testing.expect(!app_state.g_chat_sel_dragging);
+}
+
+test "IGSH-436 production table layout reuses its cached build" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    defer app_state.g_chat_tables.clear(std.heap.page_allocator);
+    app_state.g_chat_tables.clear(std.heap.page_allocator);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| 1 | 2 |");
+    const before = app_state.g_chat_tables.builds;
+    const first = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 2), first.table.columns);
+    try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
+    const second = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(first, second);
+    try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
 }

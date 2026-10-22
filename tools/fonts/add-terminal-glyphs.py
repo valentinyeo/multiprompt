@@ -12,6 +12,8 @@ UPSTREAM_URL = "https://github.com/tywr/Nordwand-Mono/releases/download/1.3.1/No
 UPSTREAM_ARCHIVE_SHA256 = "9725cfd15e21dede25c64c80aab54dcc3f27c4a127d20f13478c121aee5ae6c5"
 UPSTREAM_SHA256 = "e6a0635eb33c27a73b7d84f85233e04e6942422ccd325930175ff79343647b50"
 VERSION_SUFFIX = "; terminal glyphs added by Multiprompt"
+CODE_PAGE_RANGE1 = 1 << 0
+CODE_PAGE_RANGE2 = (1 << 31) | (1 << 30)
 
 
 def polygon(pen, points):
@@ -207,6 +209,8 @@ def main():
     font["maxp"].recalc(font)
     font["post"].formatType = 2.0
     font["OS/2"].recalcUnicodeRanges(font)
+    font["OS/2"].ulCodePageRange1 = CODE_PAGE_RANGE1
+    font["OS/2"].ulCodePageRange2 = CODE_PAGE_RANGE2
     names = {
         1: "Nordwand Mono MP SemiBold",
         2: "Regular",

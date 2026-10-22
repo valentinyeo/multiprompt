@@ -85,7 +85,9 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
-  assert.doesNotMatch(workflow, /secrets\.|--draft/);
+  assert.doesNotMatch(workflow, /--draft/);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
   assert.match(workflow, /if: github.event_name != 'pull_request'/);
@@ -107,9 +109,10 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
+  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
   assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
+  assert.match(tests, /ARM64: \$\{\{ needs\.build-arm64\.result \}\}/);
 });
 
 test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {

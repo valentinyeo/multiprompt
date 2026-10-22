@@ -385,7 +385,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
     .{ .a = "Ctrl+K \u{2192} Restart multiprompt", .b = "Save session and relaunch the app", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Update: Relaunch", .b = "Relaunch onto the installed new version (same as the sidebar card)", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Restart to update", .b = "Restart when an update is ready (same as the sidebar card)", .header = false },
     .{ .a = "F1", .b = "This shortcuts overview", .header = false },
     .{ .a = "Clipboard", .b = "", .header = true },
     .{ .a = "Ctrl+V / Ctrl+Shift+V", .b = "Paste into the focused shell", .header = false },

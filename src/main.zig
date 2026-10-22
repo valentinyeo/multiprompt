@@ -479,6 +479,7 @@ const workspaceStripHitTest = @import("sidebar.zig").workspaceStripHitTest;
 const hitTestSidebar = @import("sidebar.zig").hitTestSidebar;
 const sidebarStickyCardHitTest = @import("capacity.zig").sidebarStickyCardHitTest;
 const UPDATE_CHECK_MS = @import("app_state.zig").UPDATE_CHECK_MS;
+const update_release = @import("update_release.zig");
 const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
@@ -1267,7 +1268,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.800";
+pub const APP_VERSION = "0.28.801";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1326,6 +1327,10 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == update_release.WM_RESPONSIVE) {
+        update_release.ready();
+        return 0;
+    }
     defer if (msg != WM_DESTROY and msg != 0x0082) sessionFrontChanged();
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -4723,11 +4728,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    if (app_state.g_update_ver_len > 0) {
-                        updateCardRelaunch(hwnd);
-                    } else {
-                        updateCardPoll();
-                    }
+                    updateCardPoll();
+                    updateCardRelaunch(hwnd);
                     return 0;
                 }
                 if (target == SEARCH_RESTART_OFFSET) {
@@ -7720,6 +7722,7 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
     if (update_check.runRelaunchHelperIfRequested()) return;
@@ -7745,6 +7748,8 @@ pub fn main(init: std.process.Init) void {
         sendNotify(payload);
         return;
     }
+
+    if (update_release.startup(args)) return;
 
     var console_fonts = @import("console.zig").registerBundledConsoleFonts();
     defer @import("console.zig").unregisterBundledConsoleFonts(&console_fonts);
@@ -7915,6 +7920,8 @@ pub fn main(init: std.process.Init) void {
     _ = @import("win32.zig").UpdateWindow(hwnd);
     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
 
+    _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
+    update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
         _ = TranslateMessage(&msg);
@@ -8158,7 +8165,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .updates => {
             updateCardInit();
-            if (!startUpdateCardWatch()) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
+            _ = startUpdateCardWatch();
+            _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
             restoreRegisteredWorkspaceWindows();
             checkDueReminders();

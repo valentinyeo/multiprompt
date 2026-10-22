@@ -420,9 +420,13 @@ pub fn reclaimShell(pid: DWORD, kind: ShellKind) bool {
 }
 
 pub const BundledConsoleFonts = struct {
-    paths: [3][520]u16 = std.mem.zeroes([3][520]u16),
-    registered: [3]bool = @splat(false),
+    paths: [2][520]u16 = std.mem.zeroes([2][520]u16),
+    registered: [2]bool = @splat(false),
 };
+
+pub fn bundledShellFontFileName(buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "NordwandMono-SemiBold-{x:0>16}.ttf", .{std.hash.Wyhash.hash(0, @import("fonts.zig").MONO_SEMIBOLD)}) catch unreachable;
+}
 
 pub fn registerBundledConsoleFonts() BundledConsoleFonts {
     var result: BundledConsoleFonts = .{};
@@ -438,10 +442,10 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
     directory[local_len + 9] = '\\';
     directory[local_len + 15] = 0;
     _ = w.CreateDirectoryW(@ptrCast(&directory), null);
+    var font_name_buf: [64]u8 = undefined;
     const files = .{
-        .{ "Hack-Regular.ttf", @embedFile("fonts/Hack-Regular.ttf") },
-        .{ "Hack-Bold.ttf", @embedFile("fonts/Hack-Bold.ttf") },
-        .{ "LICENSE-Hack.md", @embedFile("fonts/LICENSE-Hack.md") },
+        .{ bundledShellFontFileName(&font_name_buf), @import("fonts.zig").MONO_SEMIBOLD },
+        .{ "LICENSE-NordwandMono.txt", @embedFile("fonts/LICENSE-NordwandMono.txt") },
     };
     inline for (files, 0..) |file, i| {
         const path = &result.paths[i];
@@ -464,7 +468,7 @@ pub fn registerBundledConsoleFonts() BundledConsoleFonts {
                 _ = CloseHandle(output);
             }
         }
-        if (i < 2) {
+        if (i == 0) {
             if (cached) result.registered[i] = w.AddFontResourceExW(@ptrCast(path), 0, null) > 0;
             if (!result.registered[i]) debugLog("[consolefont] shell font registration failed");
         }

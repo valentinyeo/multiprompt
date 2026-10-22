@@ -23,8 +23,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify responsive startup ordering and original regression controls
-        env:
-          STARTUP_BEFORE_REF: 508459a0022bb944a152d4f897d196d27dbb5455
         run: node --test tools/startup-responsive.test.js
       - name: Classify changed paths
         id: paths
@@ -123,9 +121,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-
       - name: Cache Zig
         if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -133,9 +131,9 @@ jobs:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v4-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
         if: steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
@@ -149,6 +147,37 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Test safe release updates
+        if: matrix.group == 1
+        run: |
+          $before = "$env:RUNNER_TEMP/update-review-before"
+          New-Item -ItemType Directory -Force $before | Out-Null
+          git fetch origin 1e557042ad06b6371baec41ab803dc759c989378
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git archive --format=tar --output="$env:RUNNER_TEMP/update-review-before.tar" 1e557042ad06b6371baec41ab803dc759c989378 -- src/main.zig src/update_release.zig src/update_release.ps1 src/update_card.zig tools/update-release.test.ps1 .github/workflows/verify.yml .github/workflows/release.yml build.zig
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -xf "$env:RUNNER_TEMP/update-review-before.tar" -C $before
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:UPDATE_SOURCE_ROOT = $before
+          node --test tools/update-release-review.test.js > "$env:RUNNER_TEMP/update-review-before.log"
+          $beforeExit = $LASTEXITCODE
+          Remove-Item Env:UPDATE_SOURCE_ROOT
+          $beforeLog = Get-Content "$env:RUNNER_TEMP/update-review-before.log" -Raw
+          if ($beforeExit -ne 1) { throw 'Review regression controls did not fail on the review baseline' }
+          foreach ($finding in 1..9) {
+            if ($beforeLog -notmatch "not ok $finding - R$finding ") { throw "Finding R$finding did not fail first" }
+            Write-Host "FAILING FIRST R$finding CONFIRMED against review baseline"
+          }
+          node --test tools/update-release-review.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tools/update-release.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          zig build -Drelease=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run tests
         if: steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
@@ -175,6 +204,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: service/package-lock.json
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
@@ -246,7 +277,8 @@ jobs:
       - name: Build the account Worker
         if: matrix.group == 1
         working-directory: service
-        run: npm ci && npx wrangler deploy --dry-run --outdir .build
+        timeout-minutes: 2
+        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
         if: matrix.group == 1
         run: node --test service/test/infra.test.js service/test/worker.test.js
@@ -254,17 +286,55 @@ jobs:
   build-arm64:
     name: build-arm64
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Restore Zig toolchain (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Cache Zig toolchain
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-arm64-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v4-arm64-
+      - name: Cache Zig
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-arm64-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v4-arm64-
       - name: Install Zig 0.16.0
         run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
-          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Build release executables for arm64
-        run: zig build -Dtarget=aarch64-windows-gnu
+        run: zig build -Dtarget=aarch64-windows-gnu --summary all
 
   test-result:
     name: test
@@ -279,7 +349,7 @@ jobs:
           HEAVY: ${{ needs.changes.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
-          ARM64: ${{ github.event_name == 'pull_request' && needs.build-arm64.result || 'success' }}
+          ARM64: ${{ needs.build-arm64.result }}
         run: |
           require_jobs() {
             [ "$1" = success ] || return 1

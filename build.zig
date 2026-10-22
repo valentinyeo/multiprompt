@@ -6,6 +6,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
+    const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
+    if (release) {
+        const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
+        if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
+        var key: [32]u8 = undefined;
+        std.base64.standard.Decoder.decode(&key, encoded) catch @panic("Invalid release signing public key: expected base64 raw 32-byte key");
+        if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
+    }
+
 
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
@@ -362,7 +371,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(chat_complete_tests).step);
     var previous_chat_run: ?*std.Build.Step = null;
-    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
+    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -415,7 +424,7 @@ pub fn build(b: *std.Build) void {
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
             .optimize = .Debug,
         }),
-        .filters = &.{ "IGSH-443", "IGSH-456" },
+        .filters = &.{ "IGSH-443", "IGSH-456", "ISSUE-456" },
     });
     const run_shell_font_migration_tests = b.addRunArtifact(shell_font_migration_tests);
     test_step.dependOn(&run_shell_font_migration_tests.step);
@@ -429,7 +438,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
-    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js" });
+    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
@@ -608,23 +617,24 @@ pub fn build(b: *std.Build) void {
     wine_step.dependOn(&wine_tests.step);
 
     const test_groups = [_]*std.Build.Step{
-        b.step("test-group-1", "Run desktop, telemetry and compiler-backed integration tests"),
+        b.step("test-group-1", "Run desktop, telemetry, SSH and compiler-backed integration tests"),
         b.step("test-group-2", "Run Chat View regression and CPU fixtures"),
-        b.step("test-group-3", "Run portable modules, source regressions and SSH fixtures"),
+        b.step("test-group-3", "Run portable modules, source regressions and compiler-backed fixtures"),
         b.step("test-group-4", "Run sync protocol and desktop interaction fixtures"),
     };
     for (test_step.dependencies.items) |dependency| {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
             dependency == &chat_switch_tests.step or dependency == &frequent_integration_tests.step or
-            dependency == &chat_drop_tests.step or dependency == &reply_quote_tests.step or
-            dependency == &chat_skill_tab_tests.step or dependency == &bridge_version_heal_tests.step)
+            dependency == &reply_quote_tests.step or dependency == &chat_skill_tab_tests.step or
+            dependency == &ssh_reconnect_tests.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &chat_cpu_regression.step)
             1
         else if (dependency == &run_sync_protocol_tests.step or dependency == &version_stamp_tests.step or
             dependency == &launch_regression.step or dependency == &chat_table_tests.step or
             dependency == &screenshot_pipeline_tests.step or dependency == &chat_view_console_visibility_tests.step or
-            dependency == &zsb_interaction_tests.step)
+            dependency == &zsb_interaction_tests.step or dependency == &chat_drafts_tests.step or
+            dependency == &window_flicker_tests.step)
             3
         else
             2;
