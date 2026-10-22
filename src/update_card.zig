@@ -219,7 +219,7 @@ pub fn updateCardRelaunch(hwnd: HANDLE) void {
             np += 1;
         }
     }
-    const launched = if (update_release.hasStaged()) update_release.restart(pids[0..np]) else update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]);
+    const launched = if (release_ready or update_release.hasStaged()) update_release.restart(pids[0..np]) else update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]);
     if (!launched) {
         debugLog("update-card: could not start relaunch helper");
         return;

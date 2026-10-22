@@ -46,7 +46,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $Root 'local'
     $env:USERPROFILE = Join-Path $Root 'profile'
     $env:HOME = $env:USERPROFILE
-    $env:IGSH_246 = '0'
+    $env:IGSH_246 = '1'
     $env:MULTIPROMPT_NO_LOGIN = ''
     Copy-Item -LiteralPath $Verifier -Destination "$Root/verifier.exe" -Force
     $env:MULTIPROMPT_TEST_VERIFIER = "$Root/verifier.exe"
@@ -58,11 +58,50 @@ try {
         Assert ($event.WaitOne(15000)) 'Sign-in screen did not report responsive readiness'
         $signedOut.Refresh()
         Assert (-not $signedOut.HasExited -and $signedOut.MainWindowHandle -ne [IntPtr]::Zero) 'Sign-in readiness had no live main window'
-        Assert ($signedOut.Responding) 'Sign-in process is unresponsive'
+        Start-Sleep -Seconds 2
+        Assert ($signedOut.Responding) 'Sign-in process is unresponsive during background network check'
+        if ($Evidence) {
+            New-Item -ItemType Directory -Force $Evidence | Out-Null
+            Add-Type -AssemblyName System.Drawing
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
+            $rectangle = New-Object UpdateProof+Rect
+            Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
+            $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            $dc = $graphics.GetHdc()
+            try { Assert ([UpdateProof]::PrintWindow($signedOut.MainWindowHandle, $dc, 2)) 'Sign-in screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+            try { $bitmap.Save((Join-Path $Evidence 'sign-in-ready.png')) } finally { $bitmap.Dispose() }
+        }
         Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Signed-out startup restored sessions'
         Passed 'sign-in screen responsive ready before deferred tabs'
-    } finally { if (-not $signedOut.HasExited) { $signedOut.Kill(); $signedOut.WaitForExit() }; $event.Dispose() }
+    } finally {
+        Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $signedOut.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        if (-not $signedOut.HasExited) { $signedOut.Kill(); $signedOut.WaitForExit() }
+        $event.Dispose()
+    }
     Assert ($timer.Elapsed.TotalSeconds -lt 20) 'Sign-in launch was blocked'
+    $env:IGSH_246 = '0'
+    Select-Release 'v1.10.0'
+    $cold = Join-Path $Root 'cold.exe'
+    Copy-Item -LiteralPath $Verifier -Destination $cold
+    Assert (Save-Update $cold '0.0.0' 'x64') 'Cold-launch fixture was not staged'
+    $env:IGSH_246 = '1'
+    $coldStart = Start-Process $cold -ArgumentList ' "--name" "Review Desk" "--other" "C:\tail\\"' -PassThru
+    Assert ($coldStart.WaitForExit(20000)) 'Cold launch did not hand off its staged update before restoring tabs'
+    Wait-File "$cold.starts"
+    $coldDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while (Test-Path "$cold.update/ready.txt") {
+        if ([DateTime]::UtcNow -gt $coldDeadline) { throw 'Cold staged update did not finish' }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert ((Get-FileHash $cold).Hash -eq (Get-FileHash "$Root/v1.10.0/multiprompt-x64.exe").Hash) 'Cold staged swap did not install verified update'
+    Assert ((Get-Content "$cold.starts" -Raw).Contains('--name|Review Desk|--other|C:\tail\|--update-ready|')) 'Real app update did not forward launch arguments'
+    Assert (-not (Test-Path "$env:APPDATA/ZigShell/session.json")) 'Cold update restored tabs before swapping'
+    Passed 'real cold-launch staged apply preserves launch arguments before tabs'
+    Stop-FixtureApps
+    Remove-Item "$Root/zigshell-bridge.exe" -Force
+    $env:IGSH_246 = '0'
+
 
     Copy-Item "$Root/fixture.exe" $target -Force
     Copy-Item "$Root/fixture.exe" "$Root/zigshell-bridge.exe" -Force

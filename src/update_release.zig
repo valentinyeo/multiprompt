@@ -154,7 +154,7 @@ pub fn hasStaged() bool {
 }
 
 pub fn restart(pids: []const u32) bool {
-    if (!enabled() or !hasStaged()) return false;
+    if (!enabled()) return false;
     var buf: [100]u8 = undefined;
     const name = std.fmt.bufPrint(&buf, "Local\\MultipromptApply-{d}-{d}", .{ win.GetCurrentProcessId(), win.GetTickCount64() }) catch return false;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, name) catch return false;

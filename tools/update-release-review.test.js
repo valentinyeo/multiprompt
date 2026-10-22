@@ -46,6 +46,8 @@ test('R5 detached manifest signatures required before trusting checksums', () =>
 test('R6 accepted event occurs before waiting on background download lock', () => {
   const ps = read('src/update_release.ps1');
   assert.ok(ps.indexOf('$accepted.Set()') < ps.indexOf('$mutex.WaitOne('));
+  assert.doesNotMatch(body(read('src/update_release.zig'), 'pub fn restart(', 'pub fn runHelperIfRequested'), /!hasStaged\(\)/);
+  assert.match(read('src/update_card.zig'), /release_ready or update_release\.hasStaged\(\)/);
   assert.match(ps, /\$mutex\.WaitOne\(\$\(if \(\$Mode -eq 'Apply'\) \{ -1 \}/);
 });
 test('R7 old-process exit timeout has a runnable recovery path', () => {

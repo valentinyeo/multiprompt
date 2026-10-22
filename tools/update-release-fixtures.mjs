@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('Throwaway signing runs only inside GitHub');
 const root = process.argv[2];
@@ -19,4 +20,15 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
   fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt.sig'), sign(null, sums, privateKey));
   fs.writeFileSync(path.join(dir, 'wrong.sig'), sign(null, sums, wrong.privateKey));
 }
-console.log('Signed throwaway local-release fixtures prepared');
+fs.mkdirSync('dist', { recursive: true });
+fs.copyFileSync(path.join(root, 'v1.10.0/SHA256SUMS.txt'), 'dist/SHA256SUMS.txt');
+const seed = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32);
+const run = spawnSync(process.execPath, ['tools/sign-release.mjs'], { encoding: 'utf8', env: { ...process.env, MULTIPROMPT_RELEASE_SIGNING_KEY: seed.toString('base64') } });
+seed.fill(0);
+if (run.status !== 0) throw new Error('Production release signing failed with the job-only key');
+if (!fs.readFileSync('dist/SHA256SUMS.txt.sig').equals(fs.readFileSync(path.join(root, 'v1.10.0/SHA256SUMS.txt.sig')))) throw new Error('Production release signature differs from fixture signature');
+const otherSeed = wrong.privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32);
+const refused = spawnSync(process.execPath, ['tools/sign-release.mjs'], { encoding: 'utf8', env: { ...process.env, MULTIPROMPT_RELEASE_SIGNING_KEY: otherSeed.toString('base64') } });
+otherSeed.fill(0);
+if (refused.status === 0 || !refused.stderr.includes('does not match the embedded public key')) throw new Error('Production release signer accepted a mismatching key');
+console.log('Signed throwaway local-release fixtures prepared; production signer accepted matching key and rejected mismatching key');

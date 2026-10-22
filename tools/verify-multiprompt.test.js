@@ -88,6 +88,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(read('src/account_desktop.zig'), /pub fn accountBootstrap\(hwnd: HANDLE\) bool \{\s*if \(app_state\.g_account_bypass\) return true;/);
   assert.match(read('src/session.zig'), /pub fn prepareStartupRestore\(\) bool \{[^}]*std\.Thread\.spawn\(\.\{\}, startupRestoreWorker,/);
   assert.match(read('src/session.zig'), /fn startupRestoreWorker\([^\n]*\) void \{\s*_ = @import\("console\.zig"\)\.resolveSshPath\(false\);/);
+  assert.match(read('src/main.zig'), /listener_status\.load\(\.acquire\)[\s\S]*?\.pending => return false/);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
