@@ -25,7 +25,7 @@ function runHarness(control = false) {
     fs.writeFileSync(path.join(dir, 'test.zig'), String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
-const app_state = struct { const CHAT_MAX_BLOCKS = 256; };
+const CHAT_MAX_BLOCKS = 256;
 const ChatBlock = chat_markdown.Block;
 const ChatBlockRole = chat_markdown.Role;
 const link_detect = @import("link_detect.zig");
