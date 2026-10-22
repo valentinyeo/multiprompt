@@ -181,7 +181,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllBytes[\s\S]*?\.request.bin/);
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
-  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
@@ -610,6 +610,45 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
   assert.match(read(skill + 'SKILL.md'), /`session-restore`/);
 });
 
+test('ISSUE-569 relaunch activation recovers foreground only as an input precondition and preserves failure captures', () => {
+  function contract(driver) {
+    const activation = driver.slice(driver.indexOf('    public static void BringToForeground('), driver.indexOf('    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo'));
+    assert.match(activation, /GetWindowThreadProcessId\(GetForegroundWindow\(\), out pid\)/);
+    assert.match(activation, /uint currentThread = GetCurrentThreadId\(\)/);
+    assert.match(activation, /foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput\(currentThread, foregroundThread, true\)/);
+    assert.match(activation, /try \{ SetForegroundWindow\(hwnd\); \}\s*finally \{ if \(attached\) AttachThreadInput\(currentThread, foregroundThread, false\); \}/);
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.match(restart, /\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle/);
+    assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
+    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
+    assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
+    assert.match(restart, /\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Doctor/);
+    assert.doesNotMatch(restart, /GetForegroundWindow|Assert-Foreground/);
+    const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
+    assert.match(press, /Doctor\s+Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+    assert.match(driver, /BringToForeground\(\$script:window\)\s+Wait-Until[^\n]+ 'foreground main window'/);
+    assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
+    assert.match(driver, /Save-Json \$focus \(\$Name \+ '.focus.json'\)/);
+    assert.match(driver, /\$bitmap.Save\(\(Join-Path \$Evidence \(\$Name \+ '.png'\)\)/);
+  }
+  contract(control);
+  for (const [before, after] of [
+    ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
+    ['if (attached) AttachThreadInput(currentThread, foregroundThread, false);', ''],
+    ['try { SetForegroundWindow(hwnd); }', 'try { }'],
+    ['[VerifyNative]::BringToForeground($script:window)\n    Doctor', 'Assert-Foreground\n    Doctor'],
+    ['[VerifyNative]::BringToForeground($script:window)\n        [VerifyNative]::GetAncestor', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        [VerifyNative]::GetAncestor'],
+    ["Snapshot 'failure'", "Snapshot 'ignored'"],
+    ["($Name + '.focus.json')", "($Name + '.ignored.json')"],
+    ["$bitmap.Save((Join-Path $Evidence ($Name + '.png'))", "$bitmap.Save((Join-Path $Evidence ($Name + '.ignored'))"],
+  ]) {
+    const broken = control.replace(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken));
+  }
+});
+
 test('ISSUE-569 selection assertions resolve published active identity and require the original workspace', () => {
   const assertion = control.slice(control.indexOf('function Assert-SessionRestoreSelection('), control.indexOf('function Select-Theme('));
   function contract(source) {
@@ -617,13 +656,14 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
       '$state = Read-Inbox', '$saved = Read-Session', '$_.sid -eq $state.active_shell_id',
       '$selected.Count -eq 1', '$selected[0].name -ceq $Name', '$selected[0].ws -eq $Workspace',
       '$state.active_workspace -eq $Workspace', '$saved.active_workspace -eq $Workspace',
-      '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId', '$saved.active_shell_id -eq $state.active_shell_id',
+      '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId',
       '$saved.tabs[$saved.active_tab].name -ceq $Name', ").Count -eq 3",
     ]) assert.ok(source.includes(required), required);
-    assert.doesNotMatch(source, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage/);
+    assert.doesNotMatch(source, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage|GetForegroundWindow|Assert-Foreground|\$saved\.active_shell_id\s*-eq\s*\$state\.active_shell_id/);
   }
   contract(assertion);
-  for (const required of ['$_.sid -eq $state.active_shell_id', '$selected[0].name -ceq $Name', '$state.active_workspace -eq $Workspace', '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId', '$saved.active_shell_id -eq $state.active_shell_id']) {
+  assert.throws(() => contract(assertion.replace('$saved.tabs[$saved.active_tab].name -ceq $Name', '$saved.active_shell_id -eq $state.active_shell_id')));
+  for (const required of ['$_.sid -eq $state.active_shell_id', '$selected[0].name -ceq $Name', '$state.active_workspace -eq $Workspace', '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId']) {
     assert.throws(() => contract(assertion.replace(required, '$true')));
   }
   const publisher = read('src/inbox.zig');

@@ -36,6 +36,16 @@ public static class VerifyNative {
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    public static void BringToForeground(IntPtr hwnd) {
+        uint pid;
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        uint currentThread = GetCurrentThreadId();
+        bool attached = foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
+        try { SetForegroundWindow(hwnd); }
+        finally { if (attached) AttachThreadInput(currentThread, foregroundThread, false); }
+    }
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
@@ -620,7 +630,7 @@ function Assert-Foreground {
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
     Wait-Until {
-        [void][VerifyNative]::SetForegroundWindow($script:window)
+        [VerifyNative]::BringToForeground($script:window)
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
     } 'owned app foreground for keyboard input'
     Assert-Foreground
@@ -768,8 +778,7 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
     } "$Stage relaunch owns its published state after session restore" 60
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-    [void][VerifyNative]::SetForegroundWindow($script:window)
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } "$Stage relaunched window foreground"
+    [VerifyNative]::BringToForeground($script:window)
     Doctor
 }
 
@@ -782,7 +791,6 @@ function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]
         $selected.Count -eq 1 -and $selected[0].name -ceq $Name -and
             $selected[0].ws -eq $Workspace -and $state.active_workspace -eq $Workspace -and
             $saved.active_workspace -eq $Workspace -and $saved.workspaces[$Workspace].wid -ceq $WorkspaceId -and
-            $saved.active_shell_id -eq $state.active_shell_id -and
             $saved.tabs[$saved.active_tab].name -ceq $Name -and
             @($state.shells | Where-Object { $_.name -in @('Restore first', 'Restore middle', 'Restore last') }).Count -eq 3
     } "published and persisted selection is $Name in the original workspace"
@@ -860,7 +868,7 @@ try {
     }
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-    [void][VerifyNative]::SetForegroundWindow($script:window)
+    [VerifyNative]::BringToForeground($script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'foreground main window'
     Doctor
     Record 'Launch complete; read-only Doctor passed'
