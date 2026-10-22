@@ -136,8 +136,6 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
-    const table_bench = b.addTest(.{ .root_module = exe.root_module, .filters = &.{"IGSH-436 table build benchmark"} });
-    b.step("bench-chat-tables", "Measure real GDI table builds").dependOn(&b.addRunArtifact(table_bench).step);
     const main_test_step = b.step("test-main", "Run desktop module tests");
     main_test_step.dependOn(&run_exe_tests.step);
 
@@ -431,7 +429,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
-    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js" });
+    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
@@ -630,7 +628,6 @@ pub fn build(b: *std.Build) void {
             2;
         test_groups[group].dependOn(dependency);
     }
-    test_groups[3].dependOn(&bridge_install.step);
     test_step.dependencies.clearRetainingCapacity();
     const selected_group = b.option(u8, "test-group", "Run one desktop test group (1-4)");
     if (selected_group) |group| {

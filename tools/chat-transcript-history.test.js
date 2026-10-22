@@ -143,7 +143,7 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
 fn captureScreenText(_: u32, _: []u16) ?usize { capture_count += 1; return capture_result; }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
-fn chatApplyDisplayGlyphs(_: []u16) void {}
+fn chatApplyDisplayGlyphs(_: []u16, _: []const ChatBlock) void {}
 fn chatLatestAgentReply(_: []u16) usize { return 0; }
 fn findShellById(id: u32) ?usize { for (shells, 0..) |s, i| if (s.shell_id == id) return i; return null; }
 fn saveSession() void {}

@@ -15,9 +15,9 @@ function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-capture-'));
   try {
     copyZig(['chat_markdown.zig', 'link_detect.zig', 'voice_filter.zig'], dir);
-    let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer', 'chatDisplayGlyph', 'chatApplyDisplayGlyphs'].map(body).join('\n');
+    let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer', 'chatDisplayGlyph', 'chatApplyDisplayGlyphs', 'chatConsoleTableRows'].map(body).join('\n');
     const glyphMap = source.match(/const CHAT_DISPLAY_GLYPH_MAP = [^]*?\n};/)[0];
-    if (control === 'glyphs') functions = functions.replace(body('chatApplyDisplayGlyphs'), 'fn chatApplyDisplayGlyphs(buf: []u16) void { for (buf) |*c| c.* = chatDisplayGlyph(c.*); }');
+    if (control === 'glyphs') functions = functions.replace(body('chatApplyDisplayGlyphs'), 'fn chatApplyDisplayGlyphs(buf: []u16, _: []const ChatBlock) void { for (buf) |*c| c.* = chatDisplayGlyph(c.*); }');
     let chrome = body('captureChatTranscript').match(/\((?:!table_line and )?!tool_header and voice_filter\.isClaudeChrome\(line\)\)/)[0];
     if (control === 'chrome') chrome = chrome.replace('!table_line and ', '');
     if (control === 'reflow') functions = functions.replace('previous_was_divider = is_divider or table_line;', 'previous_was_divider = is_divider;').replace('const table_line = chat_markdown.consoleTableLine(line);', '');
@@ -25,6 +25,7 @@ function runHarness(control = false) {
     fs.writeFileSync(path.join(dir, 'test.zig'), String.raw`
 const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
+const app_state = struct { const CHAT_MAX_BLOCKS = 256; };
 const ChatBlock = chat_markdown.Block;
 const ChatBlockRole = chat_markdown.Role;
 const link_detect = @import("link_detect.zig");
@@ -46,9 +47,10 @@ test "table surface: chrome filtering keeps structural borders but hides real ch
         .{ .text = w("ordinary prose"), .table = false, .hidden = false },
     }) |sample| {
         const line = sample.text;
-        const table_line = chat_markdown.consoleTableLine(line);
+        const table_line = sample.table;
         const tool_header = false;
         try std.testing.expectEqual(sample.table, table_line);
+        try std.testing.expectEqual(sample.table, chat_markdown.consoleTableLine(line));
         try std.testing.expectEqual(sample.hidden, ${chrome});
     }
 }
@@ -59,7 +61,7 @@ test "table surface: IGSH-436 clipped table rows use display glyphs outside a cl
     var blocks: [8]ChatBlock = undefined;
     const count = chatClassifyBlocks(&buf, &blocks);
     for (blocks[0..count]) |block| try std.testing.expect(block.kind != .table);
-    chatApplyDisplayGlyphs(&buf);
+    chatApplyDisplayGlyphs(&buf, blocks[0..count]);
     try std.testing.expectEqualSlices(u16, w("| • | * |\r\n+---+---+"), &buf);
 }
 test "table surface: IGSH-436 symbol-only boxed chrome outside a table stays hidden" {
@@ -67,7 +69,11 @@ test "table surface: IGSH-436 symbol-only boxed chrome outside a table stays hid
     var blocks: [8]ChatBlock = undefined;
     const count = chatClassifyBlocks(line, &blocks);
     for (blocks[0..count]) |block| try std.testing.expect(block.kind != .table);
-    const table_line = chat_markdown.consoleTableLine(line);
+    var scratch: [64]u16 = undefined;
+    var table_rows: [1]bool = undefined;
+    chatConsoleTableRows(line, line.len, &scratch, &table_rows);
+    const table_line = table_rows[0];
+    try std.testing.expect(!table_line);
     const tool_header = false;
     try std.testing.expect(${chrome});
 }
@@ -108,12 +114,25 @@ test "table surface: complete captured box grid is exactly one table block" {
         row_count += 1;
         at = @min(end + 2, text.len);
     }
+    const raw = try a.alloc(u16, row_count * 128);
+    defer a.free(raw);
+    @memset(raw, ' ');
+    for (0..row_count) |i| @memcpy(raw[i * 128..][0..g_chat_line_lens[i]], text[g_chat_line_starts[i]..][0..g_chat_line_lens[i]]);
+    const scratch = try a.alloc(u16, raw.len + row_count * 2);
+    defer a.free(scratch);
+    const table_rows = try a.alloc(bool, row_count);
+    defer a.free(table_rows);
+    chatConsoleTableRows(raw, 128, scratch, table_rows);
+    const raw_count = chatClassifyBlocks(text, &blocks);
+    try std.testing.expectEqual(@as(usize, 3), raw_count);
+    for (0..row_count) |i| try std.testing.expectEqual(g_chat_line_starts[i] >= blocks[1].start and g_chat_line_starts[i] < blocks[1].start + blocks[1].len, table_rows[i]);
     const reflowed = try a.dupe(u16, text);
     defer a.free(reflowed);
     const reflow_len = chatReflowTranscript(reflowed, g_chat_line_starts[0..row_count], g_chat_line_lens[0..row_count], &([_]bool{false} ** 32), &.{});
     const raw_table = try a.dupe(u16, reflowed[0..reflow_len]);
     defer a.free(raw_table);
-    chatApplyDisplayGlyphs(reflowed[0..reflow_len]);
+    const classified = chatClassifyBlocks(reflowed[0..reflow_len], &blocks);
+    chatApplyDisplayGlyphs(reflowed[0..reflow_len], blocks[0..classified]);
     try std.testing.expectEqual(@as(u16, 0x2022), reflowed[0]);
     const table_start = std.mem.indexOfScalar(u16, raw_table, 0x250c).?;
     try std.testing.expectEqualSlices(u16, raw_table[table_start..reflow_len], reflowed[table_start..reflow_len]);

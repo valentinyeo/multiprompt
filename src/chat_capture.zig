@@ -501,16 +501,14 @@ fn chatDisplayGlyph(c: u16) u16 {
     return c;
 }
 
-pub fn chatApplyDisplayGlyphs(buf: []u16) void {
+pub fn chatApplyDisplayGlyphs(buf: []u16, blocks: []const ChatBlock) void {
     var start: usize = 0;
-    while (start < buf.len) {
-        const end = std.mem.indexOfScalarPos(u16, buf, start, '\n') orelse buf.len;
-        const line = buf[start..end];
-        if (!chat_markdown.consoleTableLine(line)) {
-            for (line) |*c| c.* = chatDisplayGlyph(c.*);
-        }
-        start = @min(end + 1, buf.len);
+    for (blocks) |block| {
+        if (block.kind != .table) continue;
+        for (buf[start..block.start]) |*c| c.* = chatDisplayGlyph(c.*);
+        start = block.start + block.len;
     }
+    for (buf[start..]) |*c| c.* = chatDisplayGlyph(c.*);
 }
 
 test "chatDisplayGlyph maps glyphs IBM Plex Sans lacks to ones it has" {
@@ -1048,6 +1046,32 @@ pub fn captureScreenText(shell_index: u32, out: []u16) ?usize {
     return chat_history.screenText(app_state.g_chat_raw[0..chars_read], width, rows, out);
 }
 
+fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_rows: []bool) void {
+    @memset(table_rows, false);
+    var starts: [1200]usize = undefined;
+    var count: usize = 0;
+    var len: usize = 0;
+    while (count < @min(table_rows.len, starts.len) and count * width < raw.len) : (count += 1) {
+        const row_start = count * width;
+        const line = std.mem.trim(u16, raw[row_start..@min(row_start + width, raw.len)], &.{ ' ', '\t', 0 });
+        if (line.len + 2 > scratch.len - len) break;
+        starts[count] = len;
+        @memcpy(scratch[len..][0..line.len], line);
+        len += line.len;
+        scratch[len] = '\r';
+        scratch[len + 1] = '\n';
+        len += 2;
+    }
+    var blocks: [app_state.CHAT_MAX_BLOCKS]ChatBlock = undefined;
+    const block_count = chatClassifyBlocks(scratch[0..len], &blocks);
+    var row: usize = 0;
+    for (blocks[0..block_count]) |block| {
+        if (block.kind != .table) continue;
+        while (row < count and starts[row] < block.start) : (row += 1) {}
+        while (row < count and starts[row] < block.start + block.len) : (row += 1) table_rows[row] = true;
+    }
+}
+
 pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?usize {
     if (shell_index >= app_state.shell_count or out.len < 2) return null;
     const pid = app_state.shells[shell_index].pid;
@@ -1120,6 +1144,8 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     }
     if (status_only) return 0;
 
+    var table_rows: [1200]bool = @splat(false);
+    chatConsoleTableRows(app_state.g_chat_raw[0..chars_read], width, out, table_rows[0..rows]);
     var out_len: usize = 0;
     var line_count: usize = 0;
     var hidden_tool_rows: u32 = 0;
@@ -1166,7 +1192,7 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
                 continue;
             }
         }
-        const table_line = chat_markdown.consoleTableLine(line);
+        const table_line = table_rows[row];
         if (table_line) hiding_tool_block = false;
         const tool_header = !table_line and (chatLineIsToolActivity(line) or chatLineIsGenericToolHeader(line));
         if (chatLineIsAgentStatusNoise(line) or chatLineIsCollapsedToolSummary(line) or

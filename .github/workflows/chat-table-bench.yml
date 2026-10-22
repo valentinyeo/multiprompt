@@ -2,6 +2,7 @@ name: Chat table bench
 on:
   pull_request:
     paths:
+      - build.zig
       - src/chat_render.zig
       - src/chat_markdown.zig
       - src/chat_table_measure.zig
@@ -35,23 +36,30 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force evidence | Out-Null
-          $render = Get-Content after/src/chat_render.zig -Raw
-          $start = $render.IndexOf('test "IGSH-436 table build benchmark"')
-          if ($start -lt 0) { throw 'Table benchmark test missing' }
-          $benchmark = $render.Substring($start)
-          Add-Content before/src/chat_render.zig "`n$benchmark"
-          Copy-Item after/build.zig before/build.zig
+          node --test after/tools/chat-table-bench/bench.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Benchmark controls failed' }
           foreach ($revision in @('before', 'after')) {
             git -C $revision rev-parse HEAD | Set-Content "evidence/$revision-revision.txt"
-            $env:APPDATA = Join-Path $pwd "evidence/$revision"
-            $env:ZIGSHELL_DEBUG = '1'
-            New-Item -ItemType Directory -Force "$env:APPDATA/ZigShell" | Out-Null
-            Push-Location $revision
-            zig build bench-chat-tables --summary all 2>&1 | Tee-Object "../evidence/$revision-build.log"
-            if ($LASTEXITCODE -ne 0) { throw "Table benchmark failed for $revision" }
-            Pop-Location
+            node after/tools/chat-table-bench/prepare.js $revision
+            if ($LASTEXITCODE -ne 0) { throw "Benchmark preparation failed for $revision" }
+            $source = (Resolve-Path $revision).Path
+            $prefix = Join-Path $pwd "evidence/$revision-bin"
+            zig build --build-file after/tools/chat-table-bench/build.zig "-Dsource=$source" --prefix $prefix --summary all 2>&1 | Tee-Object "evidence/$revision-build.log"
+            if ($LASTEXITCODE -ne 0) { throw "Table benchmark build failed for $revision" }
+            git -C $revision diff --exit-code -- build.zig
+            if ($LASTEXITCODE -ne 0) { throw 'Revision build graph changed' }
+          }
+          foreach ($sample in 1..7) {
+            $order = if ($sample % 2) { @('before', 'after') } else { @('after', 'before') }
+            foreach ($revision in $order) {
+              $env:APPDATA = Join-Path $pwd "evidence/$revision-$sample"
+              $env:ZIGSHELL_DEBUG = '0'
+              & "./evidence/$revision-bin/bin/chat-table-bench.exe" 2>&1 | Tee-Object "evidence/$revision-$sample.log"
+              if ($LASTEXITCODE -ne 0) { throw "Table benchmark sample failed for $revision" }
+            }
           }
           node after/tools/chat-table-bench/summary.js evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Table benchmark comparison failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

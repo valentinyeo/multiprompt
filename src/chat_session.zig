@@ -1025,7 +1025,7 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], screen_blocks[0..screen_count]);
         app_state.g_chat_block_count = screen_count;
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
-        chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len]);
+        chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
     }
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
         var latest: [8192]u16 = undefined;
