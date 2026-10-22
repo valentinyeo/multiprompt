@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { readChangelogFragment } = require('./changelog');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const shortcuts = read('src/shortcuts.zig');
@@ -91,5 +92,5 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);
   assert.match(read('build.zig'), /"node", "--test"[^\n]*"tools\/issue-493-tab-url-shortcut\.test\.js"/);
-  assert.match(read('changelog.d/IGSH-493-tab-url-shortcut.md'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
+  assert.match(readChangelogFragment('IGSH-493-tab-url-shortcut.md'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
 });

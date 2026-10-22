@@ -4,6 +4,8 @@ const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
+const os = require('node:os');
+const { readChangelogFragment } = require('./changelog');
 
 const root = path.resolve(__dirname, '..');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
@@ -231,15 +233,66 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
+  const fragment = readChangelogFragment('IGSH-535-session-open.md').trim();
   assert.equal(fragment.split('\n').length, 1);
   assert.match(fragment, /workspace/);
+});
+
+test('changelog lookup preserves pending text and the release script folds the same text by ticket', async t => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-lookup-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const filename = 'DEMO-1-note.md';
+  const fragmentPath = path.join('changelog.d', filename);
+  const text = 'A workspace with "quotes", C:\\new and\ta tab.\nSecond line.\n';
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.797";\n',
+    'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+    [fragmentPath.replaceAll(path.sep, '/')]: text,
+  };
+  fs.mkdirSync(path.join(dir, 'changelog.d'));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.writeFileSync(path.join(dir, fragmentPath), text);
+  assert.equal(readChangelogFragment(filename, dir), text);
+  const stamp = stampTree(files);
+  fs.writeFileSync(path.join(dir, 'src/changelog.zig'), stamp.files['src/changelog.zig']);
+  fs.unlinkSync(path.join(dir, fragmentPath));
+  assert.equal(readChangelogFragment(filename, dir), text);
+  assert.throws(() => readChangelogFragment('DEMO-2-missing.md', dir), /Missing changelog fragment.*DEMO-2/);
+  assert.throws(() => readChangelogFragment('../DEMO-1-note.md', dir), /Invalid changelog fragment filename/);
+  fs.writeFileSync(path.join(dir, fragmentPath), 'Invalid pending text.\n');
+  assert.equal(readChangelogFragment(filename, dir), 'Invalid pending text.\n');
+  assert.throws(() => assert.match(readChangelogFragment(filename, dir), /workspace/), assert.AssertionError);
+  fs.unlinkSync(path.join(dir, fragmentPath));
+  fs.mkdirSync(path.join(dir, fragmentPath));
+  assert.throws(() => readChangelogFragment(filename, dir), { code: 'EISDIR' });
+});
+
+test('tools tests use readChangelogFragment instead of directly reading fragment paths', () => {
+  function check(source, file) {
+    assert.doesNotMatch(source, /['"`]changelog\.d[\\/][^'"`]+\.md['"`]|(['"`])changelog\.d\1\s*,\s*['"`][^'"`]+\.md['"`]/,
+      `${file}: use readChangelogFragment from tools/changelog.js so tests survive releases`);
+  }
+  const directory = 'changelog.d';
+  const filename = 'DEMO-1-note.md';
+  const fragment = `${directory}/${filename}`;
+  for (const source of [
+    `fs.readFileSync(path.join(root, '${fragment}'), 'utf8')`,
+    `read('${fragment}')`,
+    `fs.readFileSync(path.join(root, '${directory}', '${filename}'), 'utf8')`,
+  ]) {
+    assert.throws(() => check(source, 'positive-control.test.js'), /use readChangelogFragment/);
+  }
+  check(`readChangelogFragment('${filename}')`, 'helper-control.test.js');
+  for (const file of fs.readdirSync(__dirname).filter(file => file.endsWith('.test.js'))) {
+    check(fs.readFileSync(path.join(__dirname, file), 'utf8'), file);
+  }
 });
 
 test('changed code contains no removable comments and the comment oracle rejects a positive control', async () => {
   const { tokenize } = await import('./strip-comments.mjs');
   assert.equal(tokenize('const x = 1; // forbidden\n', 'javascript').comments.length, 1);
-  const files = ['build.zig', 'src/app_state.zig', 'src/browser_bridge.zig', 'src/console.zig', 'src/main.zig', 'src/win32.zig', 'tools/vps-multiprompt-browser.sh', 'tools/zsb-session-open.test.js'];
+  const files = ['build.zig', 'src/app_state.zig', 'src/browser_bridge.zig', 'src/console.zig', 'src/main.zig', 'src/win32.zig', 'tools/vps-multiprompt-browser.sh', 'tools/zsb-session-open.test.js', 'tools/changelog.js', 'tools/issue-493-tab-url-shortcut.test.js'];
   for (const file of files) {
     const language = file.endsWith('.zig') ? 'zig' : file.endsWith('.sh') ? 'shell' : 'javascript';
     const comments = tokenize(fs.readFileSync(path.join(root, file), 'utf8'), language).comments.filter(c => !c.reason);
