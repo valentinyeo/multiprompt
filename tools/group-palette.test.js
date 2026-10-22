@@ -444,7 +444,7 @@ test('extracted production group default, migration, explicit colors and palette
     assert.equal(result.status, 0, result.stdout + result.stderr);
     console.log(result.stderr.trim());
     for (const [name, mutate] of [
-      ['rail over highlighted rows', text => text.replace('if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;', 'continue;')],
+      ['rail over highlighted rows', text => text.replace('if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;', 'if (app_state.shell_count > 0) continue;')],
       ['empty root group rows', text => text.replace('if (app_state.g_search_len > 0) appendGroupPaletteResults();', 'appendGroupPaletteResults();')],
       ['closed tab color loss', text => text.replace('app_state.groups[idx].color_set = saved.color_set;', 'app_state.groups[idx].color_set = false;')],
       ['zero color export loss', text => text.replace('if (app_state.groups[gi].color_set)', 'if (app_state.groups[gi].color != 0)')],
