@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.818", .items = &.{
+        .{ .text = "Links open in your default desktop browser when the session browser pane is off, with a toggle in Ctrl+K.", .ticket = "IGSH-573" },
+    } },
     .{ .ver = "0.28.817", .items = &.{
         .{ .text = "Right-click a link in Chat View and choose Copy link to copy just its address.", .ticket = "IGSH-574" },
     } },
