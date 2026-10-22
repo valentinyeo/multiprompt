@@ -103,7 +103,7 @@ Download artifact `verify-<feature>`; GitHub extracts it into a directory of tha
 - `process-tree.json`: kernel job accounting, including total owned processes and zero active processes after termination.
 - `build.json`, `doctor.json`: source revision/release, executable hash/version and PID/HWND identity.
 - `scratch-transient-files.json`: inventory of browser process locks excluded from durable evidence; these may disappear after the owned job stops.
-- `scratch-reparse-points.json`: inventory of scratch junctions/symlinks retained as metadata, never traversed during evidence copying or deletion.
+- `scratch-links.json`: inventory of scratch junctions/symlinks retained as metadata, never traversed during evidence copying or deletion.
 - `stdout.log`, `stderr.log`, and `data/`: the isolated app's saved files, debug/session-audit logs and any file created by the user journey, copied before scratch removal.
 
 A proof requires the real user path, action plus resulting state, and independently read side effects. A screenshot alone, a green unit test, a log claiming an action, or hand-written app state is insufficient. For appearance, require both a persisted `light` preference and the visible sidebar becoming substantially brighter than the user-selected Dark baseline. Other journeys assert their own saved state/files/window titles. Download and look at the screenshots yourself; reject blank, occluded, login-only, wrong-build or unchanged images even if JSON says passed. A screenshot's existence or luminance is not a substitute for that review.

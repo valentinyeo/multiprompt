@@ -341,15 +341,15 @@ function Record([string]$Action) {
 function Prepare-ScratchEvidence([string]$Path) {
     $blockedAttributes = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
     foreach ($entry in Get-ChildItem -LiteralPath $Path -Force) {
-        if (-not $entry.PSIsContainer -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
-            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
-            $entry.Delete()
-        } elseif (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             $script:scratchLinks += @{ path = $entry.FullName.Substring($scratch.Length + 1); attributes = $entry.Attributes.ToString(); linkType = $entry.LinkType; target = @($entry.Target) }
             Save-Json @($script:scratchLinks) 'scratch-links.json'
             $entry.Delete()
             Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
+        } elseif (-not $entry.PSIsContainer -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
+            [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
+            $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
+            $entry.Delete()
         } else {
             $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
             if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
@@ -485,7 +485,7 @@ function Snapshot([string]$Name) {
 }
 
 function Assert-Foreground {
-    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
+    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
 }
 
 function Press([int[]]$Keys, [string]$Label) {
@@ -595,6 +595,18 @@ function Focus-WorkspaceBrowser([string]$Root) {
         [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow
     } 'exact workspace browser owns keyboard input'
+}
+
+function Press-WorkspaceBrowser([int[]]$Keys, [string]$Label) {
+    Doctor
+    Wait-Until {
+        [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        [VerifyNative]::GetAncestor($foreground, 2) -eq $script:bookmarkWindow -and
+            [VerifyNative]::GetAncestor($foreground, 3) -eq $script:window
+    } 'exact owned profile browser foreground for keyboard input'
+    Record $Label
+    [VerifyNative]::Chord($Keys)
 }
 
 function Palette([string]$Query) {
@@ -1160,16 +1172,17 @@ try {
             Type-Text 'IGSH224 Journey'
             Press @(0x0D) 'Enter: save workspace name'
             Wait-Until { (Read-Session).workspaces[5].name -ceq 'IGSH224 Journey' } 'workspace rename persisted'
-            Palette 'browser open url'
+            Palette 'open url in browser'
+            Snapshot 'url-action'
             Press @(0x0D) 'Enter: browser URL input in the palette'
             Type-Text $bookmark
             Press @(0x0D) 'Enter: navigate to the synthetic bookmark URL'
             Wait-Until { (Read-Session).tabs | Where-Object { $_.PSObject.Properties['burl'] -and $_.burl -eq $bookmark } } 'app observed browser navigation' 60
             Focus-WorkspaceBrowser $targetRoot
-            Press @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
+            Press-WorkspaceBrowser @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
             Snapshot 'bookmark-action'
-            Press @(0x0D) 'Enter: save favorite'
-            Press @(0x1B) 'Esc: close favorite dialog'
+            Press-WorkspaceBrowser @(0x0D) 'Enter: save favorite'
+            Press-WorkspaceBrowser @(0x1B) 'Esc: close favorite dialog'
             Focus-WorkspaceShell
             Assert-WorkspaceProfile 'renamed' $targetId $targetRoot $bookmark
             Palette 'sort workspaces'
@@ -1346,6 +1359,7 @@ try {
             } finally {
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
+                    Save-Json @($script:scratchLinks) 'scratch-links.json'
                     Save-Json @($script:transientEvidence.ToArray()) 'scratch-transient-files.json'
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
@@ -1362,7 +1376,7 @@ try {
         if (Test-Path $scratch) {
             $deadline = [DateTime]::UtcNow.AddSeconds(20)
             while (Test-Path $scratch) {
-                try { Remove-EvidenceTree $scratch } catch {
+                try { Remove-Item $scratch -Recurse -Force } catch {
                     if ([DateTime]::UtcNow -ge $deadline) { throw }
                     Start-Sleep -Milliseconds 200
                 }

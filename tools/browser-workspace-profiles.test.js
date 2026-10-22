@@ -67,7 +67,10 @@ test('IGSH-224 full browser checks build the native executable before sweeping r
   assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
   assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath/);
   assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\)/);
-  assert.doesNotMatch(read('.github/workflows/test.yml'), /run: node --test tools\/zsb-help\.test\.js/);
+  const workflow = read('.github/workflows/test.yml');
+  const sweep = /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\} -Dcpu=x86_64_v3\s+- name: Sweep real zsb.exe command help\s+if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 3\s+run: node --test tools\/zsb-help\.test\.js/;
+  assert.match(workflow, sweep);
+  assert.doesNotMatch(workflow.replace('run: zig build test --summary all', 'run: echo skipped'), sweep);
 });
 
 test('IGSH-224 conversions retain durable workspace IDs independently of window transport IDs', () => {
