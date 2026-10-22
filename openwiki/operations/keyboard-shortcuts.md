@@ -234,7 +234,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: Clear Offline Queue" | Drop this tab's queued offline Chat View messages |
 | Ctrl+K "Chat View: Retry Unsent Messages" | Re-send this tab's Not-sent Chat View messages in order |
 | Ctrl+K "Chat View: Discard Unsent Messages" | Drop this tab's Not-sent Chat View messages |
-| Ctrl+K "Chat View: Send Claude's Queued Message Now" | A message marked 'queued in Claude' waits until Claude finishes; this sends it now (same as clicking the bubble or Ctrl+X Ctrl+S in the terminal) |
+| Ctrl+K "Chat View: Send Claude's Queued Message Now" | Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble) |
 | Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide |
 | Ctrl+K → Token Ladder: Open Dashboard | Open the Token Ladder page with every plan's usage and reset clock in the browser pane |
 | Alt+V | Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View |
@@ -243,7 +243,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+R | Read the agent's last reply aloud again, right now, even with Voice Mode off |
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
-| Alt+A | Toggle this tab's workspace browser pane; its profile identity appears on opening |
+| Alt+A | Toggle the Edge browser pane for this tab |
 | Alt+Shift+A | Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane) |
 | Ctrl+Shift+S | Screenshot browser tab, paste link + space, focus Chat View composer or shell |
 | Ctrl+Shift+X | Insert current browser tab URL (or most recent) + space at the Chat View caret; never send |

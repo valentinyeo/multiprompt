@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'browser-workspaces', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -28,38 +28,13 @@ using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
-    [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
-    [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
-    public static void FocusOwnedWindow(IntPtr hwnd, int expectedPid, IntPtr frame) {
-        uint owner;
-        uint target = GetWindowThreadProcessId(hwnd, out owner);
-        if (owner != expectedPid || Class(frame) != "ZigShell" || GetAncestor(hwnd, 3) != frame || (hwnd != frame && Class(hwnd) != "Chrome_WidgetWin_1")) throw new InvalidOperationException("Focus window ownership mismatch");
-        SetForegroundWindow(hwnd);
-        if (GetForegroundWindow() != hwnd) {
-            BringWindowToTop(hwnd);
-            Rect bounds;
-            if (!GetWindowRect(hwnd, out bounds)) throw new InvalidOperationException("Owned browser bounds unavailable");
-            Point point = new Point { X = hwnd == frame ? bounds.Left + 100 : bounds.Right - 160, Y = bounds.Top + 22 };
-            if (hwnd == frame && GetAncestor(WindowFromPoint(point), 2) != hwnd) point.Y = bounds.Top + 8;
-            if (GetAncestor(WindowFromPoint(point), 2) != hwnd || GetAncestor(WindowFromPoint(point), 3) != frame) throw new InvalidOperationException("Refusing click outside the exact owned browser");
-            if (!SetCursorPos(point.X, point.Y)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            Input[] click = new Input[2];
-            click[0].data.mouse = new Mouse { flags = 2 };
-            click[1].data.mouse = new Mouse { flags = 4 };
-            if (SendInput(2, click, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Owned browser click failed");
-            Thread.Sleep(100);
-        }
-        if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Owned frame could not become foreground");
-        GuiThreadInfo info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
-        if (!GetGUIThreadInfo(target, ref info) || info.Active != hwnd || GetAncestor(info.Focus, 3) != frame || (hwnd != frame && GetAncestor(info.Focus, 2) != hwnd)) throw new InvalidOperationException("Owned window did not receive keyboard focus");
-    }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
@@ -70,6 +45,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
@@ -472,7 +448,6 @@ $warmup = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
-$script:transientEvidence = New-Object System.Collections.ArrayList
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 
@@ -481,7 +456,6 @@ function Save-Json($Value, [string]$Name) {
 }
 
 function Record([string]$Action) {
-    if ($Feature -eq 'browser-workspaces') { Write-Host ('workspace action: ' + $Action) }
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
 }
@@ -507,15 +481,6 @@ function Prepare-ScratchEvidence([string]$Path) {
                     Save-Json @($script:scratchLinks) 'scratch-links.json'
                     $entry.Delete()
                     Record 'Cleanup: recorded and unlinked scratch reparse point without traversing its target'
-                } elseif ($entry -is [IO.FileInfo] -and $entry.Name -in @('lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket')) {
-                    [void]$script:transientEvidence.Add(@{ path = $entry.FullName.Substring($scratch.Length); kind = 'browser process lock; not durable evidence' })
-                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
-                    while ($true) {
-                        try { $entry.Delete(); break } catch {
-                            if ([DateTime]::UtcNow -ge $deadline) { throw }
-                            Start-Sleep -Milliseconds 200
-                        }
-                    }
                 } else {
                     $entry.Attributes = $entry.Attributes -band (-bnot $blockedAttributes)
                     if ($entry -is [IO.DirectoryInfo]) { Prepare-ScratchEvidence $entry.FullName }
@@ -733,7 +698,6 @@ function Assert-Foreground {
 }
 
 function Press([int[]]$Keys, [string]$Label) {
-    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }
     Doctor
     Wait-Until {
         [void][VerifyNative]::SetForegroundWindow($script:window)
@@ -749,63 +713,6 @@ function Type-Text([string]$Text) {
     Assert-Foreground
     Record ('Type ' + $Text)
     [VerifyNative]::Text($Text)
-}
-
-function Focus-WorkspaceShell {
-    Doctor
-    Record 'Focus the verified owned app frame for workspace keyboard commands'
-    Wait-Until {
-        [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($null -eq $focused) { return $false }
-        $owner = [int]$focused.Current.ProcessId
-        $owner -gt 0 -and [Diagnostics.Process]::GetProcessById($owner).ProcessName -ne 'msedge'
-    } 'workspace shell owns keyboard input'
-}
-
-function Focus-WorkspaceBrowser([string]$Root) {
-    $script:bookmarkWindow = [IntPtr]::Zero
-    Wait-Until {
-        $browsers = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine -notlike '*--type=*' })
-        if ($browsers.Count -ne 1) { return $false }
-        $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-        $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($node in $nodes) {
-            if ($node.Current.ProcessId -ne $browsers[0].ProcessId -or $node.Current.ClassName -ne 'Chrome_WidgetWin_1' -or $node.Current.NativeWindowHandle -eq 0) { continue }
-            $candidate = [IntPtr]$node.Current.NativeWindowHandle
-            if ([VerifyNative]::GetAncestor($candidate, 3) -ne $script:window) { continue }
-            $script:bookmarkWindow = $candidate
-            $script:bookmarkPid = [int]$browsers[0].ProcessId
-            return $true
-        }
-        return $false
-    } 'exact profile browser HWND belongs to the owned app' 60
-    Record 'Focus the actual owned Edge window for the keyboard favorite action'
-    Wait-Until {
-        [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
-        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:bookmarkWindow
-    } 'exact workspace browser owns keyboard input'
-}
-
-function Press-WorkspaceBrowser([int[]]$Keys, [string]$Label) {
-    Doctor
-    Wait-Until {
-        [VerifyNative]::FocusOwnedWindow($script:bookmarkWindow, $script:bookmarkPid, $script:window)
-        $foreground = [VerifyNative]::GetForegroundWindow()
-        [VerifyNative]::GetAncestor($foreground, 2) -eq $script:bookmarkWindow -and
-            [VerifyNative]::GetAncestor($foreground, 3) -eq $script:window
-    } 'exact owned profile browser foreground for keyboard input'
-    Record $Label
-    [VerifyNative]::Chord($Keys)
-}
-
-function Focus-WorkspaceFrame {
-    Doctor
-    Record 'Activate the exact owned app frame before workspace keyboard input'
-    Wait-Until {
-        [VerifyNative]::FocusOwnedWindow($script:window, $process.Id, $script:window)
-        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-    } 'exact owned workspace frame receives keyboard focus'
 }
 
 function Click-WorkspacePill([int]$Workspace) {
@@ -868,38 +775,16 @@ function Wait-ConsoleText([string]$Command) {
 }
 
 function Palette([string]$Query) {
-    if ($Feature -eq 'browser-workspaces') { Focus-WorkspaceFrame }
-    if ($Feature -eq 'browser-workspaces') {
-        $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-        $start = (Get-Content $log -Raw).Length
-    }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
-    if ($Feature -eq 'browser-workspaces') {
-        Wait-Until {
-            $trace = (Get-Content $log -Raw).Substring($start)
-            $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and
-                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
-                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-        } 'workspace palette initialized and owned frame focused'
-    }
     Type-Text $Query
-    if ($Feature -eq 'browser-workspaces') {
-        Focus-WorkspaceFrame
-        Wait-Until {
-            (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=\d+(?:\r?\n|$)') -and
-                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
-                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-        } 'workspace palette consumed the full query with a matching command'
-    }
 }
 
-function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace') {
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
     Doctor
     Assert-Foreground
     Record ('zsb ' + ($Arguments -join ' '))
     $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))
     $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")
-    if ($Session -ne 'workspace') { $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:${Session}:${payload}`n") }
     [IO.File]::WriteAllBytes((Join-Path $Evidence ($Name + '.request.bin')), $wire)
     $client = New-Object Net.Sockets.TcpClient
     $reply = New-Object IO.MemoryStream
@@ -926,182 +811,6 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Se
         if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
         return $response
     } finally { $reply.Dispose(); $client.Dispose() }
-}
-
-function Register-WorkspaceBridge([string]$Root) {
-    $script:extensionIds = @()
-    Wait-Until {
-        foreach ($name in @('Preferences', 'Secure Preferences')) {
-            $path = Join-Path $Root ('Default/' + $name)
-            if (-not (Test-Path $path)) { continue }
-            $saved = Get-Content $path -Raw | ConvertFrom-Json
-            if (-not $saved.PSObject.Properties['extensions'] -or -not $saved.extensions.PSObject.Properties['settings']) { continue }
-            $script:extensionIds = @($saved.extensions.settings.PSObject.Properties | Where-Object { $_.Value.PSObject.Properties['path'] -and $_.Value.path -eq $script:extensionPath } | ForEach-Object { $_.Name })
-            if ($script:extensionIds.Count -eq 1) { return $true }
-        }
-        return $false
-    } 'real unpacked extension identity saved by Edge' 60
-    $manifest = Join-Path $scratch 'native-host.json'
-    $hostExe = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
-    if (-not (Test-Path $hostExe)) { throw 'Matching native host executable missing' }
-    $value = @{ name = 'com.zigshell.bridge'; description = 'GitHub isolated workspace verification'; path = $hostExe; type = 'stdio'; allowed_origins = @('chrome-extension://' + $script:extensionIds[0] + '/') }
-    [IO.File]::WriteAllText($manifest, ($value | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
-    $registry = 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.zigshell.bridge'
-    if (Test-Path $registry) { throw 'Fresh runner already has a native host registration' }
-    New-Item -Path $registry -Force | Out-Null
-    $script:nativeRegistry = $registry
-    Set-Item -Path $script:nativeRegistry -Value $manifest
-    Record ('Registered real Edge extension native host: ' + $script:extensionIds[0])
-}
-
-function Enable-WorkspaceExtension([string]$Root, [int]$Index) {
-    Focus-WorkspaceBrowser $Root
-    Press-WorkspaceBrowser @(0x12, 0x44) 'Alt+D: focus the actual Edge address bar'
-    Doctor
-    $foreground = [VerifyNative]::GetForegroundWindow()
-    if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:bookmarkWindow -or [VerifyNative]::GetAncestor($foreground, 3) -ne $script:window) { throw 'Refusing URL input: exact owned profile browser is not foreground' }
-    Record 'Type edge://extensions/ in the real Edge address bar'
-    [VerifyNative]::Text('edge://extensions/')
-    Press-WorkspaceBrowser @(0x0D) 'Enter: open the actual Edge Extensions page'
-    Wait-Until {
-        $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
-        $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($node in $nodes) {
-            if ($node.Current.Name -ne 'Extensions menu' -or $node.Current.ProcessId -ne $script:bookmarkPid) { continue }
-            Doctor
-            if ($Index -eq 0) { Snapshot 'extensions-action' }
-            Record ('Open the actual Edge Extensions sidebar for profile ' + $Index)
-            $menu = $node.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            $menu.Invoke()
-            return $true
-        }
-        return $false
-    } 'open the narrow Edge Extensions navigation menu' 60
-    Wait-Until {
-        $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
-        $nodes = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($node in $nodes) {
-            if ($node.Current.Name -ne 'Developer mode' -or $node.Current.ProcessId -ne $script:bookmarkPid) { continue }
-            $toggle = $null
-            if (-not $node.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) { continue }
-            if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off) {
-                Doctor
-                Record ('Enable Developer mode through the visible Edge Extensions toggle for profile ' + $Index)
-                $toggle.Toggle()
-            }
-            return $toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
-        }
-        return $false
-    } 'real Edge Developer mode toggle is on' 60
-    Snapshot ('extensions-enabled-' + $Index)
-    $token = 'e-' + (Split-Path $Root -Leaf)
-    $pipe = '\\.\pipe\multiprompt-browser-isolated-' + $token
-    Wait-Until { [IO.Directory]::GetFiles('\\.\pipe\') -contains $pipe } 'enabled unpacked extension registered its actual workspace native pipe' 60
-    $script:extensionSetups += @{ root = $Root; profileToken = $token; pipe = $pipe; developerMode = 'On'; extensionId = $script:extensionIds[0]; pid = $script:bookmarkPid; hwnd = $script:bookmarkWindow.ToInt64() }
-    Save-Json @($script:extensionSetups) 'workspace-extension-setup.json'
-}
-
-function Read-BookmarkUrls($Node) {
-    if ($null -eq $Node) { return }
-    if ($Node.PSObject.Properties['url']) { [string]$Node.url }
-    if ($Node.PSObject.Properties['children']) { foreach ($child in $Node.children) { Read-BookmarkUrls $child } }
-}
-
-function Assert-WorkspaceProfile([string]$Stage, [string]$Id, [string]$Root, [string]$Bookmark) {
-    Wait-Until {
-        $state = Read-Session
-        if ($null -eq $state) { return $false }
-        if ($state.PSObject.Properties['single_window'] -and $state.single_window) {
-            if ($state.workspaces[$state.active_workspace].wid -cne $Id) { return $false }
-        } elseif (-not $state.PSObject.Properties['workspace_id'] -or $state.workspace_id -cne $Id) { return $false }
-        if ($state.tabs[$state.active_tab].burl -cne $Bookmark) { return $false }
-        $file = Join-Path $Root 'Default/Bookmarks'
-        if (-not (Test-Path $file)) { return $false }
-        $bookmarks = Get-Content $file -Raw | ConvertFrom-Json
-        $urls = @($bookmarks.roots.PSObject.Properties | ForEach-Object { Read-BookmarkUrls $_.Value })
-        if ($Bookmark -notin $urls) { return $false }
-        $live = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine -notlike '*--type=*' })
-        if ($live.Count -ne 1) { return $false }
-        $script:profileObservation = @{ stage = $Stage; workspaceId = $Id; root = $Root; bookmarkUrls = $urls; browserPid = $live[0].ProcessId; commandLine = $live[0].CommandLine; state = $state }
-        return $true
-    } ($Stage + ': same saved workspace ID, live profile root and user-created bookmark') 60
-    if (@(Get-ChildItem (Split-Path $Root) -Directory).Count -ne 6) { throw 'Lifecycle created an unexpected profile root' }
-    $script:profileObservations += $script:profileObservation
-    Save-Json $script:profileObservations 'workspace-lifecycle.json'
-    $extensionStates = foreach ($profile in Get-ChildItem (Split-Path $Root) -Directory) {
-        $preferences = Get-Content (Join-Path $profile.FullName 'Default/Secure Preferences') -Raw | ConvertFrom-Json
-        $extension = $preferences.extensions.settings.PSObject.Properties[$script:extensionIds[0]].Value
-        @{ root = $profile.FullName; developerMode = $preferences.extensions.ui.developer_mode; disableReasons = @($extension.disable_reasons) }
-    }
-    Save-Json @($extensionStates) ($Stage + '.extension-states.json')
-    [void][VerifyNative]::SetForegroundWindow($script:window)
-    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 3) -eq $script:window } 'original owned workspace foreground for lifecycle screenshot'
-    Snapshot $Stage
-}
-
-function Assert-SeededWorkspaceUpgrade {
-    $freshScratch = $script:scratch
-    $freshWindow = $script:window
-    $freshProcess = $script:process
-    $upgradeJob = $null
-    $upgradeProcess = $null
-    try {
-        $script:scratch = Join-Path $freshScratch 'upgrade'
-        foreach ($directory in @('roaming/ZigShell', 'local/ZigShell/EdgeUserData/Default/Network', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
-        $env:APPDATA = Join-Path $scratch 'roaming'
-        $env:LOCALAPPDATA = Join-Path $scratch 'local'
-        $seedRoot = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
-        $bookmarks = Join-Path $seedRoot 'Default/Bookmarks'
-        $cookies = Join-Path $seedRoot 'Default/Network/Cookies'
-        [IO.File]::WriteAllText($bookmarks, 'synthetic pre-upgrade bookmark marker')
-        [IO.File]::WriteAllText($cookies, 'synthetic pre-upgrade cookie marker')
-        [IO.File]::WriteAllText((Join-Path $seedRoot 'Local State'), 'synthetic pre-upgrade encryption key marker')
-        $before = @((Get-FileHash $bookmarks).Hash, (Get-FileHash $cookies).Hash, (Get-FileHash (Join-Path $seedRoot 'Local State')).Hash)
-        $seedSession = @{ single_window = $true; workspace_count = 1; active_workspace = 0; active_tab = 0; workspaces = @(@{ wid = 'igsh224-upgrade-original'; name = 'Other' }); tabs = @(@{ kind = 'cmd'; name = 'Upgrade shell'; workspace = 0 }) }
-        [IO.File]::WriteAllText((Join-Path $env:APPDATA 'ZigShell/session.json'), ($seedSession | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
-        $upgradeJob = New-Object VerifyJob
-        $upgradeProcess = $upgradeJob.Start($Exe, $scratch, (Join-Path $Evidence 'upgrade-stdout.log'), (Join-Path $Evidence 'upgrade-stderr.log'))
-        $script:process = $upgradeProcess
-        Wait-Until {
-            $upgradeProcess.Refresh()
-            $script:window = $upgradeProcess.MainWindowHandle
-            $state = Read-Inbox
-            $script:window -ne [IntPtr]::Zero -and (Test-Path ($seedRoot + '.workspace-owner')) -and
-                $null -ne $state -and @($state.shells).Count -gt 0
-        } 'upgraded app adopts the existing shared profile without launching Chromium' 60
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('igsh224-upgrade-original')))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
-        if ((Get-Content ($seedRoot + '.workspace-owner') -Raw) -cne ('e-' + $hash)) { throw 'Upgrade assigned the existing profile to the wrong workspace' }
-        [void][VerifyNative]::ShowWindow($script:window, 9)
-        [void][VerifyNative]::SetForegroundWindow($script:window)
-        Doctor
-        Press @(0x11, 0x4E) 'Ctrl+N: create a new workspace after upgrading the synthetic existing install'
-        Wait-Until { (Read-Session).workspace_count -eq 2 -and (Read-Session).active_workspace -eq 1 } 'new upgrade workspace saved'
-        $newId = (Read-Session).workspaces[1].wid
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try { $newHash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($newId)))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
-        $newRoot = Join-Path $env:LOCALAPPDATA ('ZigShell/BrowserWorkspaces/edge/' + $newHash)
-        Press @(0x12, 0x41) 'Alt+A: launch only the new workspace browser after upgrade'
-        Wait-Until { @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($newRoot) -and $_.CommandLine -notlike '*--type=*' }).Count -eq 1 } 'new workspace uses a separate live profile root' 60
-        $after = @((Get-FileHash $bookmarks).Hash, (Get-FileHash $cookies).Hash, (Get-FileHash (Join-Path $seedRoot 'Local State')).Hash)
-        if (($before -join ',') -cne ($after -join ',')) { throw 'Upgrade changed existing bookmark cookie or encryption key marker bytes' }
-        if ((Test-Path (Join-Path $newRoot 'Default/Bookmarks')) -and (Get-Content (Join-Path $newRoot 'Default/Bookmarks') -Raw).Contains('synthetic pre-upgrade')) { throw 'New workspace copied the existing profile' }
-        if ((Get-Content ($seedRoot + '.workspace-owner') -Raw) -cne ('e-' + $hash)) { throw 'New workspace stole the existing profile owner' }
-        Save-Json @{ originalWorkspace = 'igsh224-upgrade-original'; originalRoot = $seedRoot; owner = 'e-' + $hash; newWorkspace = $newId; newRoot = $newRoot; before = $before; after = $after; markerFiles = @($bookmarks, $cookies, (Join-Path $seedRoot 'Local State')); originalBrowserLaunched = $false } 'workspace-upgrade.json'
-        $result.checks += @{ name = 'synthetic-pre-upgrade-profile-preserved'; originalRoot = $seedRoot; newRoot = $newRoot; markerHashesUnchanged = $true }
-    } finally {
-        if ($null -ne $upgradeJob) {
-            $stopped = $upgradeJob.Stop()
-            Save-Json @{ totalProcesses = $stopped.TotalProcesses; activeAfterStop = $stopped.ActiveProcesses } 'upgrade-process-tree.json'
-            $upgradeJob.Dispose()
-        }
-        if ($null -ne $upgradeProcess) { $upgradeProcess.Dispose() }
-        $script:scratch = $freshScratch
-        $script:window = $freshWindow
-        $script:process = $freshProcess
-        $env:APPDATA = Join-Path $scratch 'roaming'
-        $env:LOCALAPPDATA = Join-Path $scratch 'local'
-    }
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot) {
@@ -1147,12 +856,6 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
-    if ($Feature -eq 'browser-workspaces') {
-        $script:extensionPath = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
-        New-Item -ItemType Directory -Force (Split-Path $script:extensionPath) | Out-Null
-        Copy-Item (Join-Path $PSScriptRoot '../../../extension') $script:extensionPath -Recurse
-    }
-    if ($Feature -eq 'browser-workspaces') { Assert-SeededWorkspaceUpgrade }
     $job = New-Object VerifyJob
     $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
     Wait-Until {
@@ -1570,166 +1273,6 @@ try {
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
         }
-        'browser-workspaces' {
-            Press @(0x11, 0x4E) 'Ctrl+N: create a workspace and persist the fresh workspace layout'
-            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['workspace_count'] -and $state.workspace_count -eq 2 } 'initial and new workspaces saved'
-            Press @(0x12, 0x32) 'Alt+2: return to the initial workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'initial workspace active'
-            $roots = @()
-            $identities = @()
-            $script:extensionSetups = @()
-            $browserRoot = Join-Path $scratch 'local/ZigShell/BrowserWorkspaces/edge'
-            for ($index = 0; $index -lt 6; $index++) {
-                if ($index -eq 1) {
-                    Press @(0x12, 0x33) 'Alt+3: select the already created second workspace'
-                    Wait-Until { (Read-Session).active_workspace -eq 1 } 'second workspace active'
-                } elseif ($index -gt 1) {
-                    Press @(0x11, 0x4E) 'Ctrl+N: create an independent workspace'
-                    Wait-Until { (Read-Session).workspace_count -eq $index + 1 } 'new workspace saved'
-                }
-                $state = Read-Session
-                $slot = [int]$state.active_workspace
-                $id = [string]$state.workspaces[$slot].wid
-                if (-not $id) { throw 'Workspace has no stable ID' }
-                $sha = [Security.Cryptography.SHA256]::Create()
-                try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($id)))).Replace('-', '').ToLowerInvariant().Substring(0, 30) } finally { $sha.Dispose() }
-                $root = Join-Path $browserRoot $hash
-                Press @(0x12, 0x41) 'Alt+A: open this workspace browser pane'
-                Wait-Until {
-                    (Test-Path (Join-Path $root '.multiprompt-clone-complete')) -and
-                    (Test-Path (Join-Path $root 'Local State')) -and
-                    @((Read-Inbox).shells | Where-Object { $_.ws -eq $slot -and $_.br -eq 2 }).Count -gt 0
-                } 'completed workspace profile and live docked browser' 60
-                if ($index -eq 0) { Register-WorkspaceBridge $root }
-                Enable-WorkspaceExtension $root $index
-                $roots += $root
-                $identities += $id
-                Snapshot ('workspace-' + $index)
-                if ($index -eq 0) { Snapshot 'action' }
-                Focus-WorkspaceFrame
-            }
-            if (@($roots | Select-Object -Unique).Count -ne 6) { throw 'Workspaces reused a browser profile root' }
-            $live = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*--user-data-dir=*' -and $_.CommandLine -notlike '*--type=*' })
-            foreach ($root in $roots) {
-                if (@($live | Where-Object { $_.CommandLine.Contains($root) }).Count -ne 1) { throw "Expected exactly one live browser process for $root" }
-            }
-            Save-Json @($live | Select-Object ProcessId, ParentProcessId, CommandLine) 'workspace-browser-processes.json'
-            Press @(0x12, 0x32) 'Alt+2: return to the first workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'first workspace restored'
-            if ((Read-Session).workspaces[0].wid -ne $identities[0]) { throw 'Workspace ID changed on return' }
-            if (@(Get-ChildItem $browserRoot -Directory).Count -ne 6) { throw 'Switching created another browser profile' }
-            if ((Test-Path (Join-Path $scratch 'local/ZigShell/EdgeUserData')) -or (Test-Path (Join-Path $scratch 'local/ZigShell/ChromeUserData'))) { throw 'Fresh launches wrote a shared seed' }
-            $result.checks += @{ name = 'six-stable-live-workspace-profiles'; workspaceIds = $identities; roots = $roots; liveProfiles = 6; sharedSeedCreated = $false; nativeExtensionRouting = 'real unpacked extension and native host; zsb lifecycle below' }
-            $script:profileObservations = @()
-            $targetId = $identities[5]
-            $targetRoot = $roots[5]
-            $bookmark = 'https://example.com/?igsh224=workspace-five'
-            Press @(0x12, 0x37) 'Alt+7: select the sixth workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 5 } 'sixth workspace active'
-            Palette 'rename workspace'
-            Snapshot 'rename-action'
-            Press @(0x0D) 'Enter: Rename workspace'
-            Snapshot 'rename-editor'
-            Press @(0x11, 0x41) 'Ctrl+A: replace workspace name'
-            Type-Text 'IGSH224 Journey'
-            Press @(0x0D) 'Enter: save workspace name'
-            Wait-Until { (Read-Session).workspaces[5].name -ceq 'IGSH224 Journey' } 'workspace rename persisted'
-            Palette 'open url in browser'
-            Snapshot 'url-action'
-            Press @(0x0D) 'Enter: browser URL input in the palette'
-            Type-Text $bookmark
-            Press @(0x0D) 'Enter: navigate to the synthetic bookmark URL'
-            Wait-Until { (Read-Session).tabs | Where-Object { $_.PSObject.Properties['burl'] -and $_.burl -eq $bookmark } } 'app observed browser navigation' 60
-            Focus-WorkspaceBrowser $targetRoot
-            Press-WorkspaceBrowser @(0x11, 0x39) 'Ctrl+9: select the URL tab opened by the palette'
-            Wait-Until {
-                $browser = [System.Windows.Automation.AutomationElement]::FromHandle($script:bookmarkWindow)
-                $edits = $browser.FindAll([System.Windows.Automation.TreeScope]::Subtree, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
-                foreach ($edit in $edits) {
-                    if ($edit.Current.Name -ne 'Address and search bar') { continue }
-                    $value = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                    if ($value.Current.Value -in @($bookmark, $bookmark.Substring(8))) {
-                        Save-Json @{ url = $value.Current.Value; hwnd = $script:bookmarkWindow.ToInt64(); pid = $script:bookmarkPid } 'bookmark-page.json'
-                        return $true
-                    }
-                }
-                return $false
-            } 'actual owned browser address bar shows the synthetic bookmark URL' 60
-            Press-WorkspaceBrowser @(0x11, 0x44) 'Ctrl+D: bookmark this page in Edge'
-            Snapshot 'bookmark-action'
-            Press-WorkspaceBrowser @(0x0D) 'Enter: save favorite'
-            Press-WorkspaceBrowser @(0x1B) 'Esc: close favorite dialog'
-            Assert-WorkspaceProfile 'renamed' $targetId $targetRoot $bookmark
-            Palette 'sort workspaces'
-            Press @(0x0D) 'Enter: Sort Workspaces'
-            for ($step = 0; $step -lt 5; $step++) { Press @(0x28) 'Down: select the sixth workspace in sort list' }
-            Press @(0x11, 0x26) 'Ctrl+Up: move the workspace one position earlier'
-            Wait-Until { (Read-Session).workspaces[4].wid -ceq $targetId } 'workspace reorder persisted'
-            Press @(0x1B) 'Esc: close workspace sort list'
-            Assert-WorkspaceProfile 'reordered' $targetId $targetRoot $bookmark
-            Palette 'window mode'
-            Press @(0x0D) 'Enter: convert to multi-window mode'
-            Wait-Until { $state = Read-Session; $state.PSObject.Properties['workspace_id'] -and $state.workspace_id -ceq $targetId -and -not $state.PSObject.Properties['single_window'] } 'standalone identity persisted' 60
-            Assert-WorkspaceProfile 'multi-window' $targetId $targetRoot $bookmark
-            Wait-Until { @(Get-ChildItem (Join-Path $scratch 'roaming/ZigShell') -Filter 'inbox-*.json').Count -eq 6 } 'six standalone workspace windows published' 60
-            Palette 'window mode'
-            Press @(0x0D) 'Enter: convert back to single-window mode'
-            Wait-Until { $state = Read-Session; $state.PSObject.Properties['single_window'] -and $state.single_window -and $state.workspace_count -eq 6 -and $state.workspaces[4].wid -ceq $targetId } 'all workspace identities and order restored' 90
-            Assert-WorkspaceProfile 'single-window' $targetId $targetRoot $bookmark
-            Palette 'close workspace'
-            Press @(0x0D) 'Enter: close this named workspace'
-            Wait-Until { @((Read-Session).workspaces | Where-Object { $_.wid -ceq $targetId }).Count -eq 0 } 'target workspace closed and saved'
-            Snapshot 'workspace-closed'
-            Palette 'IGSH224 Journey'
-            Press @(0x0D) 'Enter: reopen the named workspace'
-            Wait-Until { $state = Read-Session; $state.workspaces[$state.active_workspace].wid -ceq $targetId } 'same workspace identity reopened' 60
-            $state = Read-Session
-            $script:browserShellId = $state.tabs[$state.active_tab].shell_id
-            Palette 'open browser'
-            Press @(0x0D) 'Enter: reopen the workspace browser pane'
-            Wait-Until {
-                $pane = Read-BrowserPane
-                $null -ne $pane -and $pane.browser_state -eq 'connected' -and
-                    $pane.browser_connection_id -gt 0 -and $pane.browser_window_id -gt 0 -and
-                    [VerifyNative]::PaneVisible($script:window)
-            } 'workspace-reopened: exact shell has a connected extension browser pane' 60
-            Save-Json (Read-BrowserPane) 'workspace-reopened-pane.json'
-            Focus-BrowserPaneOwner 'workspace-reopened' (Read-BrowserPane).browser_connection_id
-            Assert-WorkspaceProfile 'reopened' $targetId $targetRoot $bookmark
-            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            $script:zsbPort = 0
-            Wait-Until {
-                $listener = [regex]::Match((Get-Content $log -Raw), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
-                if (-not $listener.Success) { return $false }
-                $script:zsbPort = [int]$listener.Groups[1].Value
-                @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
-            } 'original app-owned zsb listener remains live'
-            $state = Read-Session
-            $targetTab = $state.tabs[$state.active_tab]
-            $targetKey = 'zss-' + $targetTab.shell_id
-            $foreignTab = @($state.tabs | Where-Object { (-not $_.PSObject.Properties['workspace']) -or $_.workspace -eq 0 })[0]
-            $foreignKey = 'zss-' + $foreignTab.shell_id
-            $token = 'e-' + (Split-Path $targetRoot -Leaf)
-            Wait-Until { [IO.Directory]::GetFiles('\\.\pipe\') -contains ('\\.\pipe\multiprompt-browser-isolated-' + $token) } 'reopened workspace native host registered its exact profile pipe' 60
-            Focus-BrowserPaneOwner 'workspace-reopened-zsb' (Read-BrowserPane).browser_connection_id
-            $routed = Invoke-Zsb @('url') $script:zsbPort 'zsb-target-url' $targetKey
-            if ($routed.result.url -cne $bookmark) { throw 'zsb reached the wrong workspace browser host' }
-            Press @(0x12, 0x32) 'Alt+2: select another workspace before requesting the parked target'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'foreign workspace selected'
-            Focus-BrowserPaneOwner 'workspace-parked-zsb' (Read-BrowserPane).browser_connection_id
-            $parked = Invoke-Zsb @('url') $script:zsbPort 'zsb-parked-target-url' $targetKey
-            $foreign = Invoke-Zsb @('url') $script:zsbPort 'zsb-foreign-url' $foreignKey
-            if ($parked.result.url -cne $bookmark -or $foreign.result.url -ceq $bookmark) { throw 'zsb borrowed the foreground or wrong workspace host' }
-            if ((Read-Session).active_workspace -ne 0) { throw 'Background zsb routing changed the active workspace' }
-            $foreignBookmarks = Join-Path $roots[0] 'Default/Bookmarks'
-            if ((Test-Path $foreignBookmarks) -and (Get-Content $foreignBookmarks -Raw).Contains($bookmark)) { throw 'Target bookmark leaked into the other workspace profile' }
-            Save-Json @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine) 'workspace-host-processes.json'
-            Palette 'IGSH224 Journey'
-            Press @(0x0D) 'Enter: return to the verified workspace'
-            Assert-WorkspaceProfile 'after' $targetId $targetRoot $bookmark
-            $result.checks += @{ name = 'workspace-lifecycle-and-zsb'; workspaceId = $targetId; root = $targetRoot; bookmark = $bookmark; stages = @($script:profileObservations | ForEach-Object { $_.stage }); targetSession = $targetKey; foreignSession = $foreignKey; targetReply = $routed; parkedReply = $parked; foreignReply = $foreign; extensionId = $script:extensionIds[0]; profileToken = $token; realLogin = 'post-install laptop1 only' }
-
-        }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
             Wait-Until { [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox window state'
@@ -1932,8 +1475,6 @@ try {
             } finally {
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
-                    Save-Json @($script:scratchLinks) 'scratch-links.json'
-                    Save-Json @($script:transientEvidence.ToArray()) 'scratch-transient-files.json'
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
                     $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -1962,9 +1503,6 @@ try {
     }
     if ($null -ne $warmup) { $warmup.Dispose() }
     if ($null -ne $warmupJob) { $warmupJob.Dispose() }
-    if (Get-Variable nativeRegistry -Scope Script -ErrorAction SilentlyContinue) {
-        if (Test-Path $script:nativeRegistry) { Remove-Item $script:nativeRegistry -Force }
-    }
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $process) { $process.Dispose() }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }

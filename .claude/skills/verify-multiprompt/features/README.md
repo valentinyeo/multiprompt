@@ -65,6 +65,3 @@ These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconn
 - Inbox window state, saved published attention and user toggle: `src/inbox.zig:240`, `src/inbox.zig:1358`, `src/inbox.zig:1670`.
 
 Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.
-
-- [Workspace browser profiles](browser-workspaces.md): six independent live Edge
-  profiles, stable workspace identity and park/return; no extension prerequisites.

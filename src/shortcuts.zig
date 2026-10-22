@@ -173,7 +173,7 @@ const activeBrowserHwndLive = @import("browser_pane.zig").activeBrowserHwndLive;
 const activeShellHasShotUrlPane = @import("browser_pane.zig").activeShellHasShotUrlPane;
 const activeBrowserHasForegroundFocus = @import("browser_pane.zig").activeBrowserHasForegroundFocus;
 const activeBrowserSurfaceHasForegroundFocus = @import("browser_pane.zig").activeBrowserSurfaceHasForegroundFocus;
-const spawnBrowserCliForShell = @import("browser_pane.zig").spawnBrowserCliForShell;
+const spawnBrowserCliHidden = @import("browser_pane.zig").spawnBrowserCliHidden;
 const bridgeExePath = @import("browser_pane.zig").bridgeExePath;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
@@ -353,7 +353,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Clear Offline Queue\"", .b = "Drop this tab's queued offline Chat View messages", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Retry Unsent Messages\"", .b = "Re-send this tab's Not-sent Chat View messages in order", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Discard Unsent Messages\"", .b = "Drop this tab's Not-sent Chat View messages", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "A message marked 'queued in Claude' waits until Claude finishes; this sends it now (same as clicking the bubble or Ctrl+X Ctrl+S in the terminal)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
     .{ .a = "Alt+V", .b = "Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View", .header = false },
@@ -362,7 +362,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+R", .b = "Read the agent's last reply aloud again, right now, even with Voice Mode off", .header = false },
     .{ .a = "Alt+[ / Alt+]", .b = "Read previous / next agent reply aloud; Chat View follows the spoken reply", .header = false },
     .{ .a = "Alt+W", .b = "Open a URL in a new pane tab and focus the browser", .header = false },
-    .{ .a = "Alt+A", .b = "Toggle this tab's workspace browser pane; its profile identity appears on opening", .header = false },
+    .{ .a = "Alt+A", .b = "Toggle the Edge browser pane for this tab", .header = false },
     .{ .a = "Alt+Shift+A", .b = "Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane)", .header = false },
     .{ .a = "Ctrl+Shift+S", .b = "Screenshot browser tab, paste link + space, focus Chat View composer or shell", .header = false },
     .{ .a = "Ctrl+Shift+X", .b = "Insert current browser tab URL (or most recent) + space at the Chat View caret; never send", .header = false },
@@ -1103,7 +1103,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (wp != WM_KEYDOWN) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
 
         const fg = GetForegroundWindow();
-        var is_ours = (fg == app_state.g_main_hwnd) or (app_state.g_search_active and foregroundHwndIsOurs(fg));
+        var is_ours = (fg == app_state.g_main_hwnd);
         if (!is_ours) {
             for (0..app_state.shell_count) |i| {
                 if (fg == app_state.shells[i].hwnd) {
@@ -2142,7 +2142,7 @@ pub fn recordNativeBrowserDropGesture(pt: POINT) void {
         "\"{s}\" --window {d} browser-drop-gesture",
         .{ bridgeExePath(), window_id },
     ) catch return;
-    spawnBrowserCliForShell(idx, cmd);
+    spawnBrowserCliHidden(cmd);
 }
 
 pub fn mouseHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {

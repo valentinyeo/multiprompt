@@ -500,9 +500,6 @@ pub fn build(b: *std.Build) void {
     bridge_profile_tests.step.dependOn(&bridge_install.step);
     bridge_profile_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_profile_tests.step);
-    const browser_workspace_profile_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-workspace-profiles.test.js" });
-    test_step.dependOn(&browser_workspace_profile_tests.step);
-    vps_test_step.dependOn(&browser_workspace_profile_tests.step);
     const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js" });
     test_step.dependOn(&browser_profile_isolation_tests.step);
     const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js" });

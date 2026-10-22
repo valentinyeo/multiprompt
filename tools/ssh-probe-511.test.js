@@ -81,9 +81,16 @@ test('ISSUE-511 each host probe logs exit elapsed misses and sanitized output ta
   assert.match(capture, /\.len = total, \.success = false, \.exit_code = 1/);
 });
 
-test('ISSUE-511 relaunch queues remote tabs and reconnect timer staggers host starts', () => {
-  const restore = body('spawnSavedTab', read('session.zig'));
-  assert.match(restore, /else if \(app_state\.g_restoring and isRemoteShellKind\(tabs\[t\]\.kind\)\)\s*preserveFailedRemoteSavedTab\(tab\) != null/);
+test('IGSH-568 relaunch spawns saved remote tabs directly instead of deferring to probes', () => {
+  const session = read('session.zig');
+  const restore = body('spawnSavedTab', session);
+  assert.match(restore, /const ok = if \(reclaimed\)\s*true\s*else if \(tmux_name != null\)\s*spawnShellWithSession\(tabs\[t\]\.kind, tmux_name, null, null\)\s*else\s*spawnShellWithSession\(tabs\[t\]\.kind, null, tab_cwd, startup_cmd\);/);
+  assert.doesNotMatch(restore, /preserveFailedRemoteSavedTab\(/);
+  assert.doesNotMatch(session, /"restore-pending"/);
+  assert.match(body('preserveFailedRemoteSavedTab', session), /sshDisconnect\(idx, "restore-spawn-failed"\)/);
+});
+
+test('IGSH-568 reconnect timer staggers host starts without an in-flight cap', () => {
   const account = body('applyServerLayout', read('account_desktop.zig'));
   assert.doesNotMatch(account, /spawnShellWithSession\(/);
   assert.match(account, /sshDisconnect\(app_state\.shell_count - 1, "account-restore-pending"\)/);
@@ -92,9 +99,9 @@ test('ISSUE-511 relaunch queues remote tabs and reconnect timer staggers host st
   assert.ok(1000 / Number(timer[1]) <= 3);
   const tick = body('sshAutoReconnectTick', send);
   assert.match(tick, /var attempted = \[_\]bool\{false\} \*\* 256/);
-  assert.match(tick, /if \(!attempted\[host\] and reconnecting\[host\] < 3 and shell\.ssh_reconnect\.due\(now\)\)/);
-  assert.match(tick, /attempted\[host\] = true;\s*reconnecting\[host\] \+= 1;\s*sshReconnectAttempt/);
-  assert.match(tick, /phase == \.reconnecting\) reconnecting\[shell\.tmux_host\] \+= 1/);
+  assert.match(tick, /if \(!attempted\[host\] and shell\.ssh_reconnect\.due\(now\)\)/);
+  assert.match(tick, /attempted\[host\] = true;\s*sshReconnectAttempt/);
+  assert.doesNotMatch(tick, /reconnecting\[/);
   assert.doesNotMatch(tick, /phase == \.reconnecting\) attempted/);
   assert.match(reconnect, /base \+ jitter % \(base \/ 4 \+ 1\)/);
 });

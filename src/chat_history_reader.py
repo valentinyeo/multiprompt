@@ -1235,7 +1235,8 @@ def stop_response(q):
         reason = "invalid_tmux_name"
     else:
         try:
-            subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", key], check=True, capture_output=True, timeout=5)
+            keys = ["C-x", "C-s"] if op == "send_queued" else [key]
+            subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"
     status = "error" if reason else "ok"
@@ -1365,7 +1366,7 @@ def serve(source):
                 raise ValueError("invalid request id")
             if query.get("op") == "send":
                 wire = send_response(query)
-            elif query.get("op") in ("stop", "permission"):
+            elif query.get("op") in ("stop", "permission", "send_queued"):
                 wire = stop_response(query)
             elif query.get("op") == "settle":
                 wire = settle_response(query, source)

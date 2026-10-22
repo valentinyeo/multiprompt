@@ -68,7 +68,6 @@ var g_profile_token: []const u8 = "";
 var g_window_id: ?i64 = 1813400851;
 var calls: usize = 0;
 var replies: []const []const u8 = &.{};
-var zsb_profile_token: [32]u8 = std.mem.zeroes([32]u8);
 fn bridgeExePath() []const u8 { return "zigshell-bridge.exe"; }
 fn Sleep(_: u32) void {}
 fn GetTickCount64() u64 { return 0; }
