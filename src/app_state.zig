@@ -274,6 +274,7 @@ pub const Shell = struct {
     wait_handle: HANDLE,
     wake_id: u32 = 0,
     shell_id: u32,
+    title_id: u32 = 0,
     chat_id: u64 = 0,
     favicon_hicon: ?HANDLE,
     favicon_path: [512]u8,
@@ -1378,6 +1379,7 @@ pub const SEARCH_TABCTX_CHAT_ALLOW: usize = 7180;
 pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
 pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
+pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -1643,7 +1645,85 @@ pub var g_graceful_exit: bool = false;
 pub var g_quit_all_in_progress: bool = false;
 pub var g_app_closing: bool = false;
 
-const SPAWN_TITLE_CAP: usize = 1024;
+pub const SPAWN_TITLE_CAP: usize = 1024;
+
+var next_console_title_id: u32 = 1;
+
+pub fn allocateShellId() ?u32 {
+    return allocateShellIdFrom(&next_shell_id, shells[0..shell_count]);
+}
+
+fn allocateShellIdFrom(next: *u32, current: anytype) ?u32 {
+    while (next.* != 0) {
+        const id = next.*;
+        next.* +%= 1;
+        var used = false;
+        for (current) |shell| {
+            if (shell.shell_id == id) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) return id;
+    }
+    return null;
+}
+
+pub fn allocateConsoleTitleId() ?u32 {
+    return allocateConsoleTitleIdFrom(&next_console_title_id, shells[0..shell_count]);
+}
+
+fn allocateConsoleTitleIdFrom(next: *u32, current: anytype) ?u32 {
+    var used: [SPAWN_TITLE_CAP]bool = @splat(false);
+    for (current) |shell| {
+        if (shell.title_id < SPAWN_TITLE_CAP) used[shell.title_id] = true;
+    }
+    var candidate: u32 = if (next.* == 0 or next.* >= SPAWN_TITLE_CAP) 1 else next.*;
+    for (1..SPAWN_TITLE_CAP) |_| {
+        const id = candidate;
+        candidate = if (candidate + 1 == SPAWN_TITLE_CAP) 1 else candidate + 1;
+        if (!used[id]) {
+            next.* = candidate;
+            return id;
+        }
+    }
+    return null;
+}
+
+test "ISSUE-511 shell ids never recycle after close and stop at exhaustion" {
+    const Used = struct { shell_id: u32 };
+    const current = [_]Used{ .{ .shell_id = 1 }, .{ .shell_id = 2 } };
+    var next: u32 = 1;
+    try std.testing.expectEqual(@as(?u32, 3), allocateShellIdFrom(&next, &current));
+    const empty: []const Used = &.{};
+    for (4..SPAWN_TITLE_CAP * 4) |expected| {
+        try std.testing.expectEqual(@as(?u32, @intCast(expected)), allocateShellIdFrom(&next, empty));
+    }
+    next = std.math.maxInt(u32);
+    try std.testing.expectEqual(@as(?u32, std.math.maxInt(u32)), allocateShellIdFrom(&next, empty));
+    try std.testing.expectEqual(@as(?u32, null), allocateShellIdFrom(&next, empty));
+}
+
+test "ISSUE-511 console title ids wrap skip live titles and stay bounded" {
+    const Used = struct { title_id: u32 = 0 };
+    const current = [_]Used{ .{ .title_id = 1 }, .{ .title_id = 2 }, .{ .title_id = 1023 } };
+    var next: u32 = 1023;
+    try std.testing.expectEqual(@as(?u32, 3), allocateConsoleTitleIdFrom(&next, &current));
+    for (0..SPAWN_TITLE_CAP * 4) |_| {
+        const id = allocateConsoleTitleIdFrom(&next, &current).?;
+        try std.testing.expect(id > 2 and id < SPAWN_TITLE_CAP - 1);
+    }
+    for ([_]u32{ 0, 1024, std.math.maxInt(u32) }) |invalid| {
+        next = invalid;
+        try std.testing.expectEqual(@as(?u32, 3), allocateConsoleTitleIdFrom(&next, &current));
+    }
+    var full: [SPAWN_TITLE_CAP - 1]Used = @splat(.{});
+    for (&full, 1..) |*shell, id| shell.title_id = @intCast(id);
+    try std.testing.expectEqual(@as(?u32, null), allocateConsoleTitleIdFrom(&next, &full));
+    full[511].title_id = 0;
+    try std.testing.expectEqual(@as(?u32, 512), allocateConsoleTitleIdFrom(&next, &full));
+}
+
 pub const SPAWN_TITLES = blk: {
     @setEvalBranchQuota(800000);
     var titles: [SPAWN_TITLE_CAP]LPCWSTR = undefined;

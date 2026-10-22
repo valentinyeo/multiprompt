@@ -2250,6 +2250,7 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
     };
     if (app_state.g_app_closing or app_state.shells[idx].browser_hwnd != job.hwnd) return;
     app_state.shells[idx].browser_docking = false;
+    publishInboxState();
     if (app_state.g_account_locked) {
         parkBrowserWindow(job.hwnd);
         return;
@@ -2997,13 +2998,17 @@ pub fn closeBrowserForShell(idx: u32) void {
             _ = PostMessageW(bh, WM_CLOSE, 0, 0);
         }
     }
+    const had_window_id = app_state.shells[idx].browser_window_id != 0;
     resetBrowserConnection(&app_state.shells[idx]);
     for (&app_state.g_browser_resolve_inflight) |*entry| {
         if (entry.shell_id == app_state.shells[idx].shell_id) entry.* = .{};
     }
     if (app_state.g_browser_pending_activate_sid == app_state.shells[idx].shell_id) app_state.g_browser_pending_activate_sid = 0;
     deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
-    removePaneSessionFilesForShell(idx);
+    if (had_window_id) removePaneSessionFilesForShell(idx);
+    removePaneShellKeyFileForShell(idx);
+    var key_buf: [64]u8 = undefined;
+    removeWebView2SessionFile(shellZsbSessionKey(app_state.shells[idx].shell_id, &key_buf));
     if (idx == app_state.active_shell) {
         app_state.g_slot_placeholder_since = 0;
         cancelBrowserVisibilitySettle();

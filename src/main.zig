@@ -704,6 +704,7 @@ const SEARCH_WSMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_WSMOVE_NEW_OFFS
 const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET;
 const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
 const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
+const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
 const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
 const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
 const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
@@ -739,7 +740,6 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
-const SPAWN_TITLES = @import("app_state.zig").SPAWN_TITLES;
 const defaultWorkspaceName = @import("workspaces.zig").defaultWorkspaceName;
 const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const findWorkspace = @import("workspaces.zig").findWorkspace;
@@ -5971,14 +5971,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
-                    const tc_sid = app_state.g_tabctx_sid;
+                    const tc_sid = if (target == SEARCH_TABCTX_START_SESSION and app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
-                        if (target == SEARCH_TABCTX_RECONNECT) {
+                        if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {
                             app_state.g_search_active = false;
                             app_state.g_search_tabctx_mode = false;
                             app_state.g_tabctx_sid = 0;
@@ -6666,6 +6666,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     debugLog(std.fmt.bufPrint(&exit_log, "WM_APP_SHELL_EXITED id={d} reason=already-disconnected-or-closed exit_code={d} known={}", .{ exited_id, exit_code, got_code }) catch "WM_APP_SHELL_EXITED log-overflow");
                     return 0;
                 }
+                if (got_code and exit_code == @import("win32.zig").STILL_ACTIVE) return 0;
                 const now = GetTickCount64();
                 const in_resume_window = now < app_state.g_resume_until_tick;
                 const k = app_state.shells[idx].kind;
@@ -7497,7 +7498,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                                 return 0;
                             }
                         }
-                        if (app_state.shell_count < MAX_SHELLS and @as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
+                        if (app_state.shell_count < MAX_SHELLS) {
+                            const shell_id = app_state.allocateShellId() orelse return 0;
                             const adopt_h: HANDLE = @ptrFromInt(transfer.console_hwnd);
 
                             _ = ShowWindow(adopt_h, SW_HIDE);
@@ -7529,8 +7531,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.inbox_excluded = transfer.inbox_excluded != 0;
                             new_shell.claude_session = transfer.claude_session != 0;
                             new_shell.tmux_host = transfer.tmux_host;
-                            new_shell.shell_id = app_state.next_shell_id;
-                            app_state.next_shell_id += 1;
+                            new_shell.shell_id = shell_id;
 
                             const nlen = @min(transfer.name_len, 63);
                             for (0..nlen) |ni| {
@@ -8079,10 +8080,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 new_shell.last_used = app_state.g_adopt_last_used;
                 new_shell.input = app_state.g_adopt_input;
                 new_shell.visits = app_state.g_adopt_visits;
-                if (@as(usize, @intCast(app_state.next_shell_id)) < SPAWN_TITLES.len) {
-                    new_shell.shell_id = app_state.next_shell_id;
-                    app_state.next_shell_id += 1;
-                }
+                new_shell.shell_id = app_state.allocateShellId() orelse return true;
 
                 if (app_state.g_adopt_name_len > 0) {
                     for (0..app_state.g_adopt_name_len) |ni| {

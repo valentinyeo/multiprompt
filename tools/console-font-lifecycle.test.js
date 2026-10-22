@@ -39,9 +39,9 @@ function creation(name, signature) {
       .replaceAll('@ptrCast(job.environment)', 'null')
       .replaceAll('if (job.has_cwd) @ptrCast(&job.cwd) else null', 'null')
       .replaceAll('@import("win32.zig").SWP_NOACTIVATE', 'SWP_NOACTIVATE');
-    const theme = between(fn(consoleSource, 'finishStartupShell'), '    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);', '\n    if (idx == app_state.active_shell)');
+    const theme = between(fn(consoleSource, 'finishStartupShell'), '    if (job.kind != .gitbash) applyBlackConsoleBackground(job.pid);', '\n    if (job.reconnect)');
     return `fn ${signature} bool {
-      var job_value = struct { command: [1]u16 = .{0}, kind: ShellKind, job: HANDLE = null, process: HANDLE = null, pid: u32 = 0, hwnd: HANDLE = null, shell_id: usize = 1, owner: HANDLE }{ .kind = kind, .owner = g_main_hwnd };
+      var job_value = struct { command: [1]u16 = .{0}, kind: ShellKind, job: HANDLE = null, process: HANDLE = null, pid: u32 = 0, hwnd: HANDLE = null, shell_id: usize = 1, title_id: usize = 1, owner: HANDLE }{ .kind = kind, .owner = g_main_hwnd };
       const job = &job_value;
       var si = std.mem.zeroes(STARTUPINFOW);
       ${acquisition}
@@ -56,6 +56,8 @@ function creation(name, signature) {
   const block = between(body, start, '    var style = GetWindowLongPtrW(').replace(/^ +if \(cmd_hwnd != null\) \{\n/m, '');
   return `fn ${signature} bool {
     const title_id: usize = 1;
+    ${name === 'respawnShellInPlace' ? 'const shell_id: u32 = 1;' : ''}
+    ${name === 'respawnShellInPlace' ? 'const idx: u32 = @intCast(slot);' : ''}
     var si = std.mem.zeroes(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     const cmd_ptr = L("shell");
@@ -67,6 +69,9 @@ function creation(name, signature) {
 }
 
 function harness() {
+  const state = read('app_state.zig');
+  const shellIds = state.match(/^pub const SPAWN_TITLE_CAP: usize = \d+;$/m)[0] + '\n' +
+    ['allocateShellId', 'allocateShellIdFrom'].map(name => fn(state, name)).join('\n');
   const core = ['applyThemedConsoleFont', 'applyBlackConsoleBackground', 'applyConsoleThemeToAllShells',
     'mainWindowDpi', 'syncMainWindowDpi', 'baseFont96', 'viewportGrowthNeedsRemoteRedraw',
     'normalizeAttachedConsoleViewport', 'normalizeConsoleFont', 'fontGenStale', 'nextStaleFontShell',
@@ -109,12 +114,12 @@ fn pollFonts() void {
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
-    .replaceAll('@import("console.zig").', '')
+    .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
-  return prelude + `\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
+  return prelude + `\n${shellIds}\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
 }
 
 const prelude = String.raw`
@@ -136,8 +141,10 @@ const CONSOLE_SCREEN_BUFFER_INFOEX = struct { cbSize: u32 = 0, dwSize: COORD = .
 const PROCESS_INFORMATION = struct { dwProcessId: u32 = 0, hThread: HANDLE = null, hProcess: HANDLE = null };
 const STARTUPINFOW = struct { cb: u32 = 0 };
 const Shell = struct {
+    spawn_tick: u64 = 0,
+    ssh_reconnect: struct { awaiting_probe: bool = false } = .{},
     hwnd: HANDLE = null, process: HANDLE = null, pid: u32 = 0, kind: ShellKind = .cmd,
-    shell_id: u32 = 0, full_width: bool = false, console_font_logged: bool = false,
+    shell_id: u32 = 0, title_id: u32 = 0, full_width: bool = false, console_font_logged: bool = false,
     base_font_h: i16 = 0, base_font_w: i16 = 0, base_font_dpi: i32 = 96,
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
@@ -170,6 +177,7 @@ const SWP_NOZORDER = 2;
 const SWP_NOMOVE = 4;
 const SWP_NOSIZE = 8;
 const SWP_NOACTIVATE = 16;
+const SWP_NOREDRAW = 8;
 const TIMER_FONT_SYNC = 1;
 const FONT_SYNC_TICK_MS = 20;
 const TIMER_CHAT_BROWSER_SWAP = 2;
@@ -293,6 +301,7 @@ fn debugLog(text: []const u8) void { if (std.mem.indexOf(u8, text, "selection fa
 fn requestRemoteTmuxPaneRedraw(_: u32) void { redraws += 1; }
 fn shellProcessAliveForRead(i: usize) bool { return shells[i].pid != 0 and consoles[shells[i].pid].live; }
 fn GetTickCount64() u64 { return 1; }
+fn sshRequestSessionProbe() void {}
 fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?usize) usize { return 1; }
 fn KillTimer(_: HANDLE, _: usize) BOOL { return 1; }
 fn GetDpiForWindow(_: HANDLE) u32 { return g_main_monitor_dpi; }
@@ -397,7 +406,7 @@ fn updateMainWindowTitle() void {}
 fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
 fn prepare() BundledConsoleFonts {
-    shells = @splat(.{}); shell_count = 0; active_shell = 0; next_pid = 2;
+    shells = @splat(.{}); shell_count = 0; active_shell = 0; next_shell_id = 1; next_pid = 2;
     consoles = @splat(.{}); attached = 0; registered_font_count = 0; last_written = &.{}; registrations = 0; removals = 0;
     event_count = 0; writes = 0; resets = 0; redraws = 0; read_failures = 0;
     fail_set = false; reject_shell_font = false; fail_attach = false; fail_registration = false; selection_errors = 0;
@@ -605,7 +614,7 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
 
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
   const source = harness();
-  for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel']) {
+  for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel', 'allocateShellId', 'allocateShellIdFrom']) {
     assert.ok(source.includes(`fn ${name}(`), name);
   }
   assert.match(source, /var g_starred_workspace = false/);

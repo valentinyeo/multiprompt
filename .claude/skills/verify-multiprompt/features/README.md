@@ -1,6 +1,6 @@
 # Multiprompt desktop verification map
 
-Read the matching feature before dispatching `verify.yml`. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. File stems are the workflow's `feature` input.
+Read the matching feature before dispatching. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. Baseline file stems are `verify.yml`'s `feature` input; the SSH maps below use the separate reconnect workflow.
 
 ## Baseline preconditions
 
@@ -14,7 +14,7 @@ Read the matching feature before dispatching `verify.yml`. Each file uses four s
 
 Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; a new workflow can first run through the PR trigger, defaulting to appearance. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
-Every recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Coordinates never target input.
+Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Coordinates never target input.
 
 ## Proof and failure reporting
 
@@ -39,6 +39,14 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
 
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Successful remote/AI/browser journeys still need their real prerequisites and are not verified by this map; the browser recovery journey deliberately has no extension attached.
+
+### SSH reconnect maps
+
+- [SSH tab reconnect](ssh-tab-reconnect.md): background transport loss without layout/focus disruption; case A.
+- [Ended remote session](ended-remote-session.md): confirmed missing tmux session stops retries and shows Session ended; case B.
+- [Saved remote workspace](saved-remote-workspace.md): two seeded remote tabs restore to a usable workspace; launch/Doctor.
+
+These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconnect/`, not `control.ps1` or `verify.yml`'s feature input. Read the shared skill's Drive section for dispatch, stand-in boundary, artifacts and cleanup. Only SSH is replaced; native app layout, focus, reconnect and ended-session state run for real on GitHub Windows.
 
 ## Code interview anchors
 

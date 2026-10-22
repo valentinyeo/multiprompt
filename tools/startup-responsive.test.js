@@ -140,7 +140,8 @@ test('ISSUE-543 cached clicks survive restoration without consuming a new title 
   const deferred = body(cache, 'deferred');
   assert.match(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
   assert.match(deferred, /closed_shells\[closed_count\] = id/);
-  assert.match(deferred, /state\.next_shell_id = 1/);
+  assert.doesNotMatch(deferred, /state\.next_shell_id = 1/);
+  assert.match(body(read('src/console.zig'), 'spawnShellWithSession'), /allocateConsoleTitleId\(\)/);
   assert.match(deferred, /state\.shells\[kept\] = shell/);
   assert.match(deferred, /state\.shell_count = kept/);
   const restore = body(read('src/session.zig'), 'restoreSession');
