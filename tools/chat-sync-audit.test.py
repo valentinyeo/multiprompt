@@ -131,6 +131,92 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
                 self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
 
+    def test_settle_pending_drops_text_appended_during_wait(self):
+        reader = audit.load_reader()
+        text = 'The neutral assistant message is still being written'
+        event = dict(type='assistant', message=dict(role='assistant', content=text))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            finding = dict(kind='pane_missing', text=text,
+                           transcript_lines=audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=text)))
+            self.assertEqual(finding['transcript_lines'], [])
+            def append(seconds):
+                self.assertEqual(seconds, audit.SETTLE_SECONDS)
+                with path.open('a') as source:
+                    source.write(json.dumps(event) + '\n')
+            with patch.object(audit, 'transcript_evidence', wraps=audit.transcript_evidence) as evidence:
+                self.assertEqual(audit.settle_pending(reader, path, wire, [finding], append), [])
+                evidence.assert_called_once_with(reader, path, wire, finding)
+            self.assertEqual(finding['transcript_lines'][0]['location'], 'after_snapshot')
+
+    def test_settle_pending_keeps_text_that_never_lands_and_waits_once(self):
+        reader = audit.load_reader()
+        findings = [dict(kind='pane_missing', text=text, transcript_lines=[]) for text in
+                    ('The first neutral message never lands', 'The second neutral message never lands')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            with patch.object(audit.time, 'sleep') as sleep:
+                self.assertEqual(audit.settle_pending(reader, path, self.wire([]), findings, sleep), findings)
+                sleep.assert_called_once_with(audit.SETTLE_SECONDS)
+            self.assertTrue(all(item['transcript_lines'] == [] for item in findings))
+
+    def test_settle_pending_does_not_wait_without_empty_pane_evidence(self):
+        findings = [dict(kind='pane_missing', transcript_lines=[dict(record='conversation', location='in_window')]),
+                    dict(kind='turn_missing', transcript_lines=[])]
+        with patch.object(audit.time, 'sleep') as sleep, patch.object(audit, 'transcript_evidence') as evidence:
+            for items in ([], findings):
+                self.assertEqual(audit.settle_pending(None, None, self.wire([]), items, sleep), items)
+            sleep.assert_not_called()
+            evidence.assert_not_called()
+
+    def test_settle_pending_preserves_conversation_drift(self):
+        cases = [([dict(record='conversation', location='in_window')], True),
+                 ([dict(record='conversation', location='before_cold_tail')], True),
+                 ([dict(record='thinking', location='in_window')], False),
+                 ([dict(record='conversation', location='after_snapshot')], False),
+                 ([dict(record='thinking', location='in_window'),
+                   dict(record='conversation', location='in_window')], True)]
+        for rows, kept in cases:
+            with self.subTest(rows=rows):
+                finding = dict(kind='pane_missing', text='neutral message', transcript_lines=[])
+                other = dict(kind='turn_missing', transcript_lines=[])
+                with patch.object(audit.time, 'sleep') as sleep, \
+                     patch.object(audit, 'transcript_evidence', return_value=rows) as evidence:
+                    result = audit.settle_pending(None, None, self.wire([]), [finding, other], sleep)
+                    self.assertEqual(result, [finding, other] if kept else [other])
+                    self.assertEqual(finding['transcript_lines'], rows)
+                    sleep.assert_called_once_with(audit.SETTLE_SECONDS)
+                    evidence.assert_called_once_with(None, None, self.wire([]), finding)
+
+    def test_audit_pane_settles_pending_against_original_snapshot(self):
+        reader = audit.load_reader()
+        text = 'The neutral assistant message is still being written'
+        event = dict(type='assistant', message=dict(role='assistant', content=text))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            capture = '● ' + text + '\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else '{"probe":0,"present":false}\n'
+            def append(seconds):
+                self.assertEqual(seconds, audit.SETTLE_SECONDS)
+                with path.open('a') as source:
+                    source.write(json.dumps(event) + '\n')
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire) as response, \
+                 patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit, 'transcript_evidence', wraps=audit.transcript_evidence) as evidence:
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), append), [])
+                response.assert_called_once()
+                self.assertEqual(evidence.call_count, 2)
+                self.assertTrue(all(call.args[2] == wire for call in evidence.call_args_list))
+
     def test_ticket_deduplication_keeps_open_tickets_and_refiles_done(self):
         finding = dict(kind='raw_markup', session='neutral-session', transcript='/neutral.jsonl',
                        transcript_lines=[dict(line=12, timestamp='2026-10-17T15:06:45Z')], text='neutral example')

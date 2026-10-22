@@ -4,10 +4,12 @@ import importlib.util
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+SETTLE_SECONDS = 5
 
 
 def load_reader():
@@ -113,7 +115,21 @@ def transcript_evidence(reader, path, wire, finding):
     return evidence[-8:]
 
 
-def audit_pane(reader, pane, session, agent, agent_pid, binary):
+def settle_pending(reader, path, wire, findings, sleep=time.sleep):
+    if not any(item['kind'] == 'pane_missing' and not item['transcript_lines'] for item in findings):
+        return findings
+    sleep(SETTLE_SECONDS)
+    settled = []
+    for item in findings:
+        if item['kind'] == 'pane_missing' and not item['transcript_lines']:
+            item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
+            if item['transcript_lines'] and all(row['record'] != 'conversation' or row['location'] == 'after_snapshot' for row in item['transcript_lines']):
+                continue
+        settled.append(item)
+    return settled
+
+
+def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep):
     resolved = reader.resolve_tmux_agent(agent, session, agent_pid)
     if not resolved:
         return [dict(kind='transcript_missing', session=session, pane=pane, text='Live agent transcript could not be resolved')]
@@ -148,7 +164,7 @@ def audit_pane(reader, pane, session, agent, agent_pid, binary):
         if item['kind'] == 'pane_missing' and item['transcript_lines'] and all(row['record'] != 'conversation' or row['location'] == 'after_snapshot' for row in item['transcript_lines']):
             continue
         findings.append(item)
-    return findings
+    return settle_pending(reader, path, wire, findings, sleep)
 
 
 def ticket_is_open(ticket):
