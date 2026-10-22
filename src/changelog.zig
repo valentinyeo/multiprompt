@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.801", .items = &.{
+        .{ .text = "Run several browser debugging commands in one session, with event waits and complete profiling results saved to a file.", .ticket = "IGSH-221" },
+    } },
     .{ .ver = "0.28.800", .items = &.{
         .{ .text = "Typing multi-line text with zsb now adds line breaks instead of pressing Enter, so chat messages are no longer sent by accident.", .ticket = "IGSH-212" },
     } },

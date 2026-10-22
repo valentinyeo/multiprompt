@@ -5,7 +5,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import worker, { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
 
-let mf, db;
+let mf, db, hostClient;
 const mail = [], usageToken = 'u'.repeat(43);
 const base = 'http://localhost';
 const encode = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -27,6 +27,8 @@ async function enroll() {
 }
 const auth = token => ({ Authorization: 'Bearer ' + token.access_token });
 before(async () => {
+  const { default: fixture } = await import('../../tools/account-hosts-fixture.js');
+  hostClient = fixture.build(readFileSync(new URL('../../src/account_desktop.zig', import.meta.url), 'utf8'));
   mf = new Miniflare(convertV4MiniflareOptions({ outboundService: async req => {
     if (req.url === 'https://api.resend.com/emails') { mail.push(await req.json()); return new Response('{"id":"test"}'); }
     assert.fail('Unexpected outbound request: ' + req.url);
@@ -1207,4 +1209,90 @@ test('device key regression: real Ed25519 and live-probe wire keys remain accept
     assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status: 'pending' });
     assert.equal((await db.prepare('SELECT public_key FROM device_keys WHERE device_id=?').bind(token.device_id).first()).public_key, public_key);
   }
+});
+
+after(() => hostClient?.cleanup());
+async function hostPair() {
+  const first = (await enroll()).token, second = (await enroll()).token;
+  const host = { slot: 0, name: 'Host 1', hostname: 'old.example', port: 22, user: 'owner' };
+  const headers = token => ({ ...auth(token), 'X-Layout-Features': 'hosts' });
+  const get = async token => {
+    const response = await request('/v1/layout', { headers: headers(token) });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const initial = await get(first);
+  const seeded = await request('/v1/layout', { method: 'PUT', headers: headers(first), body: JSON.stringify({ base_revision: initial.revision, layout: { ...initial.layout, hosts: [host] } }) });
+  assert.equal(seeded.status, 200);
+  const config = 'Host remote-1\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\n  IdentityFile ~/.ssh/local_key\r\n  ProxyCommand custom-proxy %h\r\nHost other\r\n  HostName untouched.example\r\n';
+  const one = { token: first, config, base: null }, two = { token: second, config, base: null };
+  const sync = async laptop => {
+    const snapshot = await get(laptop.token);
+    const result = hostClient.run({ local: host, base: laptop.base, remote: snapshot.layout.hosts[0], config: laptop.config, fail_resolve: laptop.fail_resolve || false });
+    if (result.puts) {
+      const put = await request('/v1/layout', { method: 'PUT', headers: headers(laptop.token), body: JSON.stringify({ base_revision: snapshot.revision, layout: { ...snapshot.layout, hosts: [result.host] } }) });
+      assert.equal(put.status, 200);
+    }
+    laptop.config = result.config;
+    laptop.base = result.base === null ? null : JSON.parse(result.base);
+    return result;
+  };
+  await sync(one); await sync(two);
+  return { one, two, sync, get, config };
+}
+
+test('ISSUE-252 two account laptops receive remote hostname port and user changes', async () => {
+  const { one, two, sync } = await hostPair();
+  one.config = one.config.replace('old.example', 'new.example').replace('Port 22', 'Port 2222').replace('User owner', 'User newuser');
+  await sync(one);
+  const result = await sync(two);
+  assert.equal(result.puts, 0);
+  assert.match(two.config, /hostname new.example\r\n/);
+  assert.match(two.config, /Port 2222\r\n/);
+  assert.match(two.config, /user newuser\r\n/);
+});
+
+test('ISSUE-252 two account laptops push local-only address changes', async () => {
+  const { one, two, sync, get } = await hostPair();
+  two.config = two.config.replace('old.example', 'local.example');
+  const result = await sync(two);
+  assert.equal(result.puts, 1);
+  assert.equal((await get(one.token)).layout.hosts[0].hostname, 'local.example');
+  await sync(one);
+  assert.match(one.config, /hostname local.example/);
+});
+
+test('ISSUE-252 two account laptops keep local conflicts and log them', async () => {
+  const { one, two, sync, get } = await hostPair();
+  one.config = one.config.replace('old.example', 'remote.example');
+  await sync(one);
+  two.config = two.config.replace('old.example', 'local.example');
+  const result = await sync(two);
+  assert.equal(result.conflicts, 1);
+  assert.equal((await get(one.token)).layout.hosts[0].hostname, 'local.example');
+  assert.match(two.config, /HostName local.example/);
+});
+
+test('ISSUE-252 two account laptops back up SSH config and preserve private settings', async () => {
+  const { one, two, sync, config } = await hostPair();
+  one.config = one.config.replace('old.example', 'remote.example');
+  await sync(one);
+  const result = await sync(two);
+  assert.equal(result.backup, config);
+  assert.match(result.backup_path, /config\.\d+\.bak$/);
+  for (const line of ['  IdentityFile ~/.ssh/local_key\r\n', '  ProxyCommand custom-proxy %h\r\n', 'Host other\r\n  HostName untouched.example\r\n']) assert.ok(two.config.includes(line));
+});
+
+test('ISSUE-252 two account laptops leave all state untouched after failed SSH resolve', async () => {
+  const { one, two, sync, get, config } = await hostPair();
+  one.config = one.config.replace('old.example', 'remote.example');
+  await sync(one);
+  const before = await get(one.token), base = structuredClone(two.base);
+  two.fail_resolve = true;
+  const result = await sync(two);
+  assert.equal(result.puts, 0);
+  assert.equal(result.backup, null);
+  assert.equal(two.config, config);
+  assert.deepEqual(two.base, base);
+  assert.deepEqual(await get(one.token), before);
 });

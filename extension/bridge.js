@@ -291,7 +291,9 @@ async function handleHostMessage(message) {
   try {
     if (extensionOutdated && message.method !== "extensionReload") console.warn(EXTENSION_OUTDATED_ERROR);
     const actionTimeoutMs = message.method === "screenshot" || message.method === "shoturl" ? 35000 : 15000;
-    const result = await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
+    const result = message.method === "cdp" && message.script !== undefined
+      ? await dispatch(message)
+      : await withTimeout(dispatch(message), actionTimeoutMs, `${message.method} timed out`);
     if (result?.error === "page_error") {
       sendResponse(message, { ok: false, error: "page_error", result });
       return;
@@ -302,6 +304,7 @@ async function handleHostMessage(message) {
     sendResponse(message, {
       ok: false,
       error: error?.message || String(error),
+      ...(error?.failedStep ? { failedStep: error.failedStep, results: error.results || [] } : {}),
     });
     if (reloadPending) scheduleExtensionReload();
   }
@@ -2591,7 +2594,7 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation) {
+function withCdpSession(tabId, operation, timeoutMs = 10000) {
   if (cdpOperationChains.get(tabId)) {
     return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
   }
@@ -2618,7 +2621,7 @@ function withCdpSession(tabId, operation) {
       checkSession();
       await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
       checkSession();
-      return await withTimeout(operation(debuggee), 10000, "CDP operation timed out; run zsb reset");
+      return await (timeoutMs === null ? operation(debuggee, checkSession) : withTimeout(operation(debuggee, checkSession), timeoutMs, "CDP operation timed out; run zsb reset"));
     } finally {
       if (cdpOperationChains.get(tabId) === current) {
         await withTimeout(chrome.debugger.detach(debuggee), 1000, "CDP detach timed out; run zsb reset");
@@ -2712,11 +2715,91 @@ async function captureScreenshotViaCdp(tabId, timeoutMs = 10000) {
 
 async function sendCdp(message) {
   const tabId = (await getTargetTab(message)).id;
+  if (message.script !== undefined) {
+    validateCdpScript(message.script);
+    return withCdpSession(tabId, async (debuggee, checkSession) => {
+      const results = [];
+      for (const [index, step] of message.script.entries()) {
+        try {
+          checkSession();
+          results.push(await runCdpScriptStep(debuggee, step, checkSession));
+        } catch (cause) {
+          const error = new Error(`CDP script step ${index + 1} (${step.method || step.waitEvent || "waitMs"}) failed: ${errorText(cause)}`);
+          error.failedStep = index + 1;
+          error.results = results;
+          throw error;
+        }
+      }
+      return results;
+    }, null);
+  }
   const cdpMethod = stringOr(message.cdpMethod, "");
   if (!cdpMethod) throw new Error("missing cdpMethod");
 
   return withCdpSession(tabId, (debuggee) =>
     chrome.debugger.sendCommand(debuggee, cdpMethod, message.params || {}));
+}
+
+function validateCdpScript(script) {
+  if (!Array.isArray(script) || script.length === 0 || script.length > 1000) {
+    throw new Error("CDP script must be an array of 1-1000 steps");
+  }
+  let budget = 0;
+  for (const [index, step] of script.entries()) {
+    const invalid = (reason) => {
+      const error = new Error(`CDP script step ${index + 1}: ${reason}`);
+      error.failedStep = index + 1;
+      throw error;
+    };
+    if (!step || typeof step !== "object" || Array.isArray(step)) invalid("expected an object");
+    if (Object.keys(step).some((key) => !["method", "params", "waitEvent", "timeoutMs", "waitMs"].includes(key))) invalid("unknown field");
+    if (step.method !== undefined && (typeof step.method !== "string" || !step.method.trim())) invalid("invalid method");
+    if (step.waitEvent !== undefined && (typeof step.waitEvent !== "string" || !step.waitEvent.trim())) invalid("invalid waitEvent");
+    if (step.params !== undefined && (!step.method || !step.params || typeof step.params !== "object" || Array.isArray(step.params))) invalid("params must be an object with a method");
+    if (step.waitMs !== undefined) {
+      if (!Number.isInteger(step.waitMs) || step.waitMs < 0 || step.waitMs > 300000 || Object.keys(step).length !== 1) invalid("waitMs must be a standalone delay (0-300000)");
+      budget += step.waitMs;
+    } else {
+      if (!step.method && !step.waitEvent) invalid("missing method, waitEvent or waitMs");
+      const timeout = step.timeoutMs ?? 15000;
+      if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 300000) invalid("timeoutMs must be 1-300000");
+      budget += timeout;
+    }
+    if (budget > 300000) invalid("total script timeout budget exceeds 300000 ms");
+  }
+}
+
+async function runCdpScriptStep(debuggee, step, checkSession) {
+  if (step.waitMs !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+    return { waitMs: step.waitMs };
+  }
+  let listener;
+  let active = true;
+  try {
+    return await withTimeout((async () => {
+      if (step.waitEvent?.startsWith("Page.")) await chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+      if (!active) return;
+      checkSession();
+      let event;
+      if (step.waitEvent) {
+        event = new Promise((resolve) => {
+          listener = (source, method, params) => {
+            if (source.tabId === debuggee.tabId && !source.sessionId && method === step.waitEvent) resolve(params || {});
+          };
+          chrome.debugger.onEvent.addListener(listener);
+        });
+      }
+      const result = step.method ? await chrome.debugger.sendCommand(debuggee, step.method, step.params || {}) : undefined;
+      return {
+        ...(step.method ? { method: step.method, result: result ?? {} } : { waitEvent: step.waitEvent }),
+        ...(event ? { event: await event } : {}),
+      };
+    })(), step.timeoutMs ?? 15000, "CDP step timed out");
+  } finally {
+    active = false;
+    if (listener) chrome.debugger.onEvent.removeListener(listener);
+  }
 }
 
 async function consoleAction(message) {

@@ -352,9 +352,11 @@ fn accountResumeJob(kind: AccountJobKind) AccountJob {
 }
 fn accountDeleteToken() void {
     var buf: [512]u8 = undefined;
-    if (syncAuthPath(&buf, "account-device.dat")) |path| {
-        var wide: [600]u16 = undefined;
-        if (win32WidePath(&wide, path)) |wp| _ = DeleteFileW(wp.ptr);
+    for ([_][]const u8{ "account-device.dat", "account-hosts-base.dat" }) |suffix| {
+        if (syncAuthPath(&buf, suffix)) |path| {
+            var wide: [600]u16 = undefined;
+            if (win32WidePath(&wide, path)) |wp| _ = DeleteFileW(wp.ptr);
+        }
     }
 }
 fn accountLock() void {
@@ -503,6 +505,51 @@ fn accountAppendSshFile(path: []const u8, bytes: []const u8) !void {
     }
 }
 
+fn accountApplyHostAddresses(a: std.mem.Allocator, before: []const account_hosts.Host, after: []const account_hosts.Host) !void {
+    var changed = false;
+    for (after) |host| {
+        if (account_hosts.find(before, host.slot)) |old| changed = changed or !account_hosts.sameAddress(old, host);
+    }
+    if (!changed) return;
+    const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+    var ssh_buf: [1024]u8 = undefined;
+    var ssh_len: usize = 0;
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
+    for (before) |old| {
+        const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh_buf[0..ssh_len], aliases[old.slot] });
+        const output = try accountSshOutput(a, command, 5000);
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+        var current = old;
+        current.hostname = resolved.hostname;
+        current.port = resolved.port;
+        current.user = resolved.user;
+        if (!account_hosts.sameAddress(old, current)) return error.HostChanged;
+    }
+    var profile_buf: [512]u8 = undefined;
+    const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
+    if (n == 0 or n >= profile_buf.len) return error.Storage;
+    const config = try std.fmt.allocPrint(a, "{s}\\.ssh\\config", .{profile_buf[0..n]});
+    const original = readFileAllocWin32(config, 1024 * 1024) orelse return error.Storage;
+    defer std.heap.page_allocator.free(original);
+    if (original.len >= 1024 * 1024) return error.Storage;
+    var rewritten: []const u8 = original;
+    for (after) |host| {
+        if (account_hosts.find(before, host.slot)) |old| rewritten = try account_hosts.rewriteConfig(a, rewritten, aliases[host.slot], old, host);
+    }
+    var stamp: [2]DWORD = undefined;
+    @import("win32.zig").GetSystemTimeAsFileTime(&stamp);
+    const backup = try std.fmt.allocPrint(a, "{s}.{d}.bak", .{ config, (@as(u64, stamp[1]) << 32) | stamp[0] });
+    var config_buf: [520]u16 = undefined;
+    var backup_buf: [520]u16 = undefined;
+    const config_w = @import("file_io.zig").win32WidePath(&config_buf, config) orelse return error.Storage;
+    const backup_w = @import("file_io.zig").win32WidePath(&backup_buf, backup) orelse return error.Storage;
+    const kernel = struct {
+        extern "kernel32" fn CopyFileW(LPCWSTR, LPCWSTR, i32) callconv(.winapi) i32;
+    };
+    if (kernel.CopyFileW(config_w.ptr, backup_w.ptr, 1) == 0) return error.Storage;
+    if (!writeFileAtomicW(config, rewritten)) return error.Storage;
+}
+
 fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![]const account_hosts.Host {
     const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
     const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
@@ -519,11 +566,14 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
     const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
     const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
     const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
-    var hosts: std.ArrayList(account_hosts.Host) = .empty;
-    for (aliases, names, 0..) |alias, name, slot| {
+    var resolved_hosts: [3]account_hosts.Resolved = undefined;
+    for (aliases, &resolved_hosts) |alias, *resolved| {
         const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
         const output = try accountSshOutput(a, command, 5000);
-        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+        resolved.* = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
+    }
+    var hosts: std.ArrayList(account_hosts.Host) = .empty;
+    for (aliases, names, resolved_hosts, 0..) |alias, name, resolved, slot| {
         const missing = account_hosts.shouldImport(alias, resolved);
         var incoming: ?account_hosts.Host = null;
         if (missing) {
@@ -775,6 +825,15 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         } else host_arena.deinit();
     }
     const hosts = g_account_hosts_cache.hosts;
+    var host_base: []const account_hosts.Host = &.{};
+    if (readDpapiFile("account-hosts-base.dat", 64 * 1024)) |bytes| {
+        defer a.free(bytes);
+        if (std.json.parseFromSlice([]const account_hosts.Host, alloc, bytes, .{ .allocate = .alloc_always })) |parsed| {
+            account_hosts.validate(parsed.value) catch return error.InvalidHosts;
+            host_base = parsed.value;
+        } else |_| {}
+    }
+    var synced_hosts = hosts;
     var attempts: usize = 0;
     while (attempts < 3) : (attempts += 1) {
         const json = try accountReadLayout(alloc, remote.bytes);
@@ -788,8 +847,15 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer edited.deinit();
             rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
         }
-        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) hosts else server.value.hosts) else null;
+        const merged_hosts = try alloc.dupe(account_hosts.Host, hosts);
+        for (merged_hosts) |*host| {
+            const merged = account_hosts.rebase(host.*, account_hosts.find(host_base, host.slot), account_hosts.find(server.value.hosts orelse &.{}, host.slot));
+            host.* = merged.host;
+            if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
+        }
+        synced_hosts = merged_hosts;
+        if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
+        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) synced_hosts else server.value.hosts) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const put = try account_client.request("PUT", "/v1/layout", access, body);
         remote.deinit();
@@ -799,6 +865,19 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         if (remote.status != 409) return error.Network;
     }
     if (remote.status != 200) return error.Conflict;
+    if (remote.hosts_supported and hosts_ready) {
+        try accountApplyHostAddresses(alloc, hosts, synced_hosts);
+        const encoded_hosts = try std.json.Stringify.valueAlloc(alloc, synced_hosts, .{ .emit_null_optional_fields = false });
+        if (!writeDpapiFile("account-hosts-base.dat", encoded_hosts)) return error.Storage;
+        var host_arena = std.heap.ArenaAllocator.init(a);
+        const owned = std.json.parseFromSlice([]const account_hosts.Host, host_arena.allocator(), encoded_hosts, .{ .allocate = .alloc_always }) catch |err| {
+            host_arena.deinit();
+            return err;
+        };
+        const refreshed_at = g_account_hosts_cache.refreshed_at;
+        if (g_account_hosts_cache.arena) |*old| old.deinit();
+        g_account_hosts_cache = .{ .arena = host_arena, .hosts = owned.value, .refreshed_at = refreshed_at };
+    }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");

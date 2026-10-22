@@ -409,7 +409,26 @@ pub fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     return entry;
 }
 
+fn chatActivateTables(entry: ?*ChatHistoryEntry) void {
+    const shell_id = if (entry) |e| e.key.shell_id else 0;
+    if (app_state.g_chat_tables_shell_id == shell_id) return;
+    for (app_state.g_chat_histories.items) |previous| {
+        if (!previous.retired and previous.key.shell_id == app_state.g_chat_tables_shell_id) {
+            std.mem.swap(@import("chat_markdown.zig").TableCache, &app_state.g_chat_tables, &previous.tables);
+            break;
+        }
+    }
+    app_state.g_chat_tables.deinit(std.heap.page_allocator);
+    app_state.g_chat_tables = .{};
+    if (entry) |next| std.mem.swap(@import("chat_markdown.zig").TableCache, &app_state.g_chat_tables, &next.tables);
+    app_state.g_chat_tables_shell_id = shell_id;
+}
+
 pub fn chatHistoryForget(shell_id: u32) void {
+    if (app_state.g_chat_tables_shell_id == shell_id) {
+        app_state.g_chat_tables.clear(std.heap.page_allocator);
+        app_state.g_chat_tables_shell_id = 0;
+    }
     var i: usize = 0;
     while (i < app_state.g_chat_histories.items.len) {
         const entry = app_state.g_chat_histories.items[i];
@@ -422,6 +441,7 @@ pub fn chatHistoryForget(shell_id: u32) void {
             i += 1;
             continue;
         }
+        entry.tables.deinit(std.heap.page_allocator);
         entry.history.deinit(std.heap.page_allocator);
         std.heap.page_allocator.destroy(entry);
         _ = app_state.g_chat_histories.swapRemove(i);
@@ -803,6 +823,7 @@ pub fn chatFileOnReady() void {
         if (!entry.loading_disk) chatFetchRelease();
         if (entry.retired) {
             if (entry.result) |*history| history.deinit(std.heap.page_allocator);
+            entry.tables.deinit(std.heap.page_allocator);
             entry.history.deinit(std.heap.page_allocator);
             std.heap.page_allocator.destroy(entry);
             _ = app_state.g_chat_histories.swapRemove(i - 1);
@@ -827,6 +848,10 @@ pub fn chatFileOnReady() void {
                 };
                 suffix.deinit(std.heap.page_allocator);
             } else {
+                if (!belongs_to_active or !app_state.g_chat_active) {
+                    const tables = if (app_state.g_chat_tables_shell_id == entry.key.shell_id) &app_state.g_chat_tables else &entry.tables;
+                    tables.refresh(std.heap.page_allocator, entry.history.blocks.items, history.blocks.items);
+                }
                 entry.history.deinit(std.heap.page_allocator);
                 entry.history = history;
             }
@@ -930,6 +955,7 @@ fn refreshChatBlockCache(force: bool) bool {
     const key = chatFileIdentity();
     chatFileRequest(key);
     const entry = if (app_state.g_chat_active) chatHistoryEntry(key) else null;
+    if (app_state.g_chat_active) chatActivateTables(entry orelse chatHistoryEntry(chatCacheIdentity()));
     const from_file = if (entry) |e| e.history.blocks.items.len > 0 else false;
     app_state.g_chat_file_valid = from_file;
     const file_missing = if (entry) |e| e.missing_message[0] != 0 else false;
@@ -998,7 +1024,7 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_tables.refresh(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count], screen_blocks[0..screen_count]);
         app_state.g_chat_block_count = screen_count;
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
-        chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len]);
+        chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
     }
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
         var latest: [8192]u16 = undefined;
@@ -1067,7 +1093,8 @@ pub fn chatDeferTranscriptLoad() void {
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_layout_reuse = 0;
-    app_state.g_chat_tables.clear(std.heap.page_allocator);
+    const cached = chatHistoryEntry(chatCacheIdentity());
+    chatActivateTables(cached);
     app_state.g_chat_block_count = 0;
     app_state.g_chat_last_len = 0;
     app_state.g_chat_last_hash = 0;
@@ -1079,7 +1106,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_screen_working = false;
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_cache_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
-    if (chatHistoryEntry(chatCacheIdentity())) |entry| {
+    if (cached) |entry| {
         const history = &entry.history;
         if (chatEnsureTranscriptCapacity(history.text.items.len, history.blocks.items.len)) {
             app_state.g_chat_last_hash = history.revision;
@@ -1251,4 +1278,47 @@ fn chatDeliveryPending(shell_id: u32) bool {
         if (app_state.shells[idx].shell_id == shell_id) return true;
     }
     return false;
+}
+
+test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {
+    const md = @import("chat_markdown.zig");
+    const saved_tables = app_state.g_chat_tables;
+    const saved_owner = app_state.g_chat_tables_shell_id;
+    const saved_histories = app_state.g_chat_histories;
+    app_state.g_chat_tables = .{};
+    app_state.g_chat_tables_shell_id = 0;
+    app_state.g_chat_histories = .empty;
+    defer {
+        chatHistoryForget(43601);
+        chatHistoryForget(43602);
+        app_state.g_chat_tables.deinit(std.heap.page_allocator);
+        app_state.g_chat_histories.deinit(std.heap.page_allocator);
+        app_state.g_chat_tables = saved_tables;
+        app_state.g_chat_tables_shell_id = saved_owner;
+        app_state.g_chat_histories = saved_histories;
+    }
+    const one = chatHistoryEntry(chat_transcript.Identity.init(43601, 0, false, "", "")).?;
+    const two = chatHistoryEntry(chat_transcript.Identity.init(43602, 0, false, "", "")).?;
+    const Measure = struct {
+        fn cell(calls: *usize, text: []const u16, _: bool) md.TableSize {
+            calls.* += 1;
+            return .{ .width = @intCast(text.len * 8), .height = 20 };
+        }
+    };
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| one | two |");
+    const key = md.TableKey{ .view_w = 100, .font_pt = 13, .scale = 1024, .pad_x = 10, .pad_y = 6 };
+    var calls: usize = 0;
+    for (0..4) |_| {
+        chatActivateTables(one);
+        _ = try app_state.g_chat_tables.layout(std.heap.page_allocator, text, 0, key, &calls, Measure.cell);
+        chatActivateTables(two);
+        _ = try app_state.g_chat_tables.layout(std.heap.page_allocator, text, 0, key, &calls, Measure.cell);
+    }
+    try std.testing.expectEqual(@as(usize, 8), calls);
+    chatActivateTables(two);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_tables.builds);
+    chatHistoryForget(43602);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_chat_tables.entries.count());
+    chatActivateTables(one);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_chat_tables.entries.count());
 }

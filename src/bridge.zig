@@ -182,9 +182,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (g_window_id == null) g_window_id = resolveWindowFromEnv(allocator);
 
+    const is_script = std.mem.eql(u8, command, "cdp") and blk: {
+        var script_args = args;
+        const flag = script_args.next() orelse break :blk false;
+        break :blk std.mem.eql(u8, flag, "--script") or std.mem.eql(u8, flag, "--script-json");
+    };
     const is_native_host = std.mem.eql(u8, command, "native") or std.mem.startsWith(u8, command, "chrome-extension://");
     if (!is_native_host) {
-        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{});
+        const watchdog = try std.Thread.spawn(.{}, commandDeadline, .{is_script});
         watchdog.detach();
     }
     if (std.mem.eql(u8, command, "profile-clone")) return runProfileClone(allocator, &args, command);
@@ -535,8 +540,37 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try sendBrowserRequest(allocator, "shoturl", if (user_initiated) "\"userInitiated\":true" else "", null);
     } else if (std.mem.eql(u8, command, "cdp")) {
         const cdp_method = args.next() orelse badArgs(command);
+        if (std.mem.eql(u8, cdp_method, "--script") or std.mem.eql(u8, cdp_method, "--script-json")) {
+            const source = args.next() orelse badArgs(command);
+            var output_path: ?[]const u8 = null;
+            if (args.next()) |flag| {
+                if (!std.mem.eql(u8, flag, "--out")) badArgs(command);
+                output_path = args.next() orelse badArgs(command);
+                if (output_path.?.len == 0) badArgs(command);
+            }
+            if (args.next() != null) badArgs(command);
+            const script = if (std.mem.eql(u8, cdp_method, "--script-json"))
+                try allocator.dupe(u8, source)
+            else
+                try readCdpScript(allocator, source);
+            defer allocator.free(script);
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, script, .{}) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => badArgs(command),
+            };
+            defer parsed.deinit();
+            if (parsed.value != .array) badArgs(command);
+            var fields = std.array_list.Managed(u8).init(allocator);
+            defer fields.deinit();
+            try fields.appendSlice("\"script\":");
+            try fields.appendSlice(script);
+            const response = try requestBrowser(allocator, "cdp", fields.items, GetTickCount64() + 320_000);
+            defer allocator.free(response);
+            try writeCdpScriptResponse(allocator, response, output_path);
+            return;
+        }
         const params_json = args.next();
-        if (args.next() != null or cdp_method.len == 0) badArgs(command);
+        if (args.next() != null or cdp_method.len == 0 or std.mem.startsWith(u8, cdp_method, "--")) badArgs(command);
         if (params_json) |params| {
             const parsed = std.json.parseFromSlice(std.json.Value, allocator, params, .{}) catch |err| switch (err) {
                 error.OutOfMemory => return err,
@@ -660,6 +694,7 @@ const usage_text =
     \\  console [-n N|--clear]         Return recent console and page-log entries
     \\  shoturl                        Upload active tab screenshot and paste its link into the owning shell
     \\  cdp <method> [params-json]     Send a Chrome DevTools Protocol command
+    \\  cdp --script FILE|- [--out FILE]  Run CDP steps in one attached session
     \\  resolve-window [--shell-id N] [--owner-pid N] [--match <substr>] [--focused]   Resolve a normal pane window
     \\  manifest <exe> <extension-id>  Print a Native Messaging manifest
     \\  version                        Print version
@@ -1130,7 +1165,12 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
     return null;
 }
 
-fn commandDeadline() void {
+fn commandDeadline(is_script: bool) void {
+    if (is_script) {
+        Sleep(360_000);
+        writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb script exceeded its 360 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
+        std.process.exit(1);
+    }
     Sleep(60_000);
     writeStdout("{\"ok\":false,\"error\":\"command_timeout\",\"message\":\"zsb command exceeded its 60 second deadline; run zsb reset to reconnect without reopening the pane\"}\n") catch {};
     std.process.exit(1);
@@ -1180,6 +1220,85 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
 
         try writeNativeMessageLocked(&context, response);
     }
+}
+
+fn readCdpScript(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const from_stdin = std.mem.eql(u8, path, "-");
+    const path_z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_z);
+    const file = if (from_stdin) std.Io.File.stdin().handle else CreateFileA(path_z.ptr, GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+    if (file == INVALID_HANDLE_VALUE) return error.OpenScriptFailed;
+    defer if (!from_stdin) {
+        _ = CloseHandle(file);
+    };
+    var bytes = std.array_list.Managed(u8).init(allocator);
+    errdefer bytes.deinit();
+    var buffer: [4096]u8 = undefined;
+    while (true) {
+        var read: windows.DWORD = 0;
+        if (ReadFile(file, &buffer, buffer.len, &read, null) == 0) {
+            if (GetLastError() == 109) break;
+            return error.ReadScriptFailed;
+        }
+        if (read == 0) break;
+        if (bytes.items.len + read > 1024 * 1024) return error.ScriptTooLarge;
+        try bytes.appendSlice(buffer[0..read]);
+    }
+    return bytes.toOwnedSlice();
+}
+
+fn writeCdpScriptResponse(allocator: std.mem.Allocator, response: []const u8, output_path: ?[]const u8) !void {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object or !getBool(parsed.value.object.get("ok"))) {
+        try writeStdout(response);
+        try writeStdout("\n");
+        std.process.exit(1);
+    }
+    if (getString(parsed.value.object.get("extensionVersion"))) |loaded| {
+        if (!std.mem.eql(u8, loaded, version)) {
+            const message = try std.fmt.allocPrint(allocator, "extension version {s} does not match bridge {s}: reload the extension in chrome://extensions; script was not replayed", .{ loaded, version });
+            defer allocator.free(message);
+            const failure = try makeBridgeCliErrorResponse(allocator, "cdp", message, null);
+            defer allocator.free(failure);
+            try writeStdout(failure);
+            try writeStdout("\n");
+            std.process.exit(1);
+        }
+    }
+    const result = parsed.value.object.get("result") orelse return error.InvalidCdpScriptResponse;
+    if (result != .array) return error.InvalidCdpScriptResponse;
+    const json = try std.json.Stringify.valueAlloc(allocator, result, .{});
+    defer allocator.free(json);
+    if (output_path) |path| {
+        try writeFileBytes(allocator, path, json);
+    } else {
+        try writeStdout(json);
+        try writeStdout("\n");
+    }
+}
+
+test "IGSH-221 native script file input and complete JSON output round trip" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(base);
+    const input_path = try std.fmt.allocPrint(allocator, "{s}\\steps.json", .{base});
+    defer allocator.free(input_path);
+    const output_path = try std.fmt.allocPrint(allocator, "{s}\\results.json", .{base});
+    defer allocator.free(output_path);
+    const script = "[{\"method\":\"Profiler.enable\"},{\"waitMs\":500}]";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "steps.json", .data = script });
+    const input = try readCdpScript(allocator, input_path);
+    defer allocator.free(input);
+    try std.testing.expectEqualStrings(script, input);
+    const result = "[{\"method\":\"Profiler.stop\",\"result\":{\"profile\":{\"samples\":[1,2,3]}}}]";
+    try writeCdpScriptResponse(allocator, "{\"ok\":true,\"result\":" ++ result ++ "}", output_path);
+    const saved = try tmp.dir.readFileAlloc(std.testing.io, "results.json", allocator, .limited(4096));
+    defer allocator.free(saved);
+    try std.testing.expectEqualStrings(result, saved);
 }
 
 fn sendBrowserRequest(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, output_path: ?[]const u8) !void {
@@ -2270,11 +2389,19 @@ fn commandHelp(command: []const u8) !void {
     if (std.mem.eql(u8, lookup, "cdp")) {
         return writeStdout(
             \\usage: zsb cdp <method> [params-json]
+            \\       zsb cdp --script <file.json|-> [--out FILE]
             \\Send a Chrome DevTools Protocol command. Params must be a JSON object.
+            \\Scripts run ordered steps in ONE attached session on the same target tab.
+            \\Steps: {"method":"Profiler.enable","params":{}}, {"waitMs":500},
+            \\       {"method":"Page.reload","waitEvent":"Page.loadEventFired","timeoutMs":15000}.
+            \\Use - for stdin; print a JSON result array or write it to --out FILE.
+            \\Errors stop at failedStep (1-based) and include completed results; no replay.
+            \\Step timeout defaults to 15000 ms; total timeout budget is at most 300000 ms.
             \\
             \\Examples:
             \\  zsb cdp Page.enable
             \\  zsb cdp Runtime.evaluate '{"expression":"document.title"}'
+            \\  zsb cdp --script profile.json --out results.json
             \\
         );
     }
