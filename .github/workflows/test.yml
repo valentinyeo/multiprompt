@@ -264,8 +264,7 @@ jobs:
         run: |
           $deadline = [DateTime]::UtcNow.AddMinutes(4)
           do {
-            $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts" --paginate | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0) { throw 'Could not list update artifacts' }
+            $artifacts = Invoke-RestMethod -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' } -TimeoutSec 20 -ErrorAction Stop
             if ($artifacts.artifacts | Where-Object { $_.name -eq $env:ARTIFACT -and -not $_.expired }) { break }
             if ([DateTime]::UtcNow -ge $deadline) { throw 'Timed out waiting for x64 update verifier' }
             Start-Sleep -Seconds 2

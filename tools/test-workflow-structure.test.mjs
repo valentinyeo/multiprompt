@@ -51,6 +51,8 @@ test('each test job classifies after full-history checkout and gates all heavy s
   assert.match(build, /b\.dupe\("--test-reporter=tap"\)/);
   assert.match(build, /b\.dupe\("--test-reporter-destination=stderr"\)/);
   const parallel = build.slice(build.indexOf('for ([_]*std.Build.Step.Run{'), build.indexOf('const test_groups'));
+  assert.match(build, /if \(b\.graph\.host\.result\.os\.tag == \.windows\) \{\s*for \(\[_\]\*std\.Build\.Step\.Run/);
+  assert.match(parallel, /--test-concurrency=1/);
   assert.doesNotMatch(parallel, /chat_view_gaps_tests/);
   for (const file of ['chat-cpu', 'ssh-reconnect', 'ssh-clock-standby']) {
     assert.match(fs.readFileSync(new URL(`./${file}.test.js`, import.meta.url), 'utf8'), /\['test', '-j1',/);

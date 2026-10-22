@@ -633,16 +633,21 @@ pub fn build(b: *std.Build) void {
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 
-    for ([_]*std.Build.Step.Run{
-        chat_cpu_regression, frequent_integration_tests, ssh_reconnect_tests,
-        window_flicker_tests, chat_switch_tests, bridge_version_heal_tests, reply_quote_tests, chat_skill_tab_tests,
-    }) |run| {
-        run.argv.insertSlice(b.allocator, 1, &.{
-            .{ .bytes = b.dupe("--test-reporter=tap") },
-            .{ .bytes = b.dupe("--test-reporter-destination=stderr") },
-        }) catch @panic("OOM");
-        run.has_side_effects = true;
-        run.expectExitCode(0);
+    if (b.graph.host.result.os.tag == .windows) {
+        for ([_]*std.Build.Step.Run{
+            chat_cpu_regression, frequent_integration_tests, ssh_reconnect_tests, version_stamp_tests,
+            window_flicker_tests, chat_switch_tests, reply_quote_tests, chat_skill_tab_tests,
+            console_font_lifecycle_tests, launch_regression, chat_table_tests, screenshot_pipeline_tests,
+            chat_view_console_visibility_tests, chat_drafts_tests, idle_front_tests,
+        }) |run| {
+            run.argv.insertSlice(b.allocator, 1, &.{
+                .{ .bytes = b.dupe("--test-reporter=tap") },
+                .{ .bytes = b.dupe("--test-reporter-destination=stderr") },
+                .{ .bytes = b.dupe("--test-concurrency=1") },
+            }) catch @panic("OOM");
+            run.has_side_effects = true;
+            run.expectExitCode(0);
+        }
     }
 
     const test_groups = [_]*std.Build.Step{
@@ -658,7 +663,7 @@ pub fn build(b: *std.Build) void {
             dependency == &window_flicker_tests.step or dependency == &bridge_version_heal_tests.step)
             0
         else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
-            dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
+            dependency == &pane_spacing_tests.step)
             1
         else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step)
             4

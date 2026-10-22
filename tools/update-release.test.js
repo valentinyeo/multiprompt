@@ -41,7 +41,7 @@ test('Windows behavioral update tests are required by CI', () => {
   assert.match(build, /run: zig build update-verifier -Dtarget=x86_64-windows-gnu -Drelease=true --summary all/);
   assert.ok(build.indexOf('actions/upload-artifact@') < build.indexOf('name: Build release executable for x64'));
   assert.ok(read('build.zig').includes('b.step("update-verifier", "Build the signed-update release verifier").dependOn(&b.addInstallArtifact(exe, .{}).step)'));
-  assert.match(update, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Could not list update artifacts' \}/);
+  assert.match(update, /Invoke-RestMethod[^\n]+-TimeoutSec 20 -ErrorAction Stop/);
   assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
   assert.match(update, /fail-fast: false/);
   assert.match(source, /runs-on: ubuntu-latest/);
