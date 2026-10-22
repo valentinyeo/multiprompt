@@ -1,5 +1,5 @@
 name: Chat bench A/B
-run-name: chat bench ${{ inputs.tag_a || 'v0.28.789' }} vs ${{ inputs.tag_b || 'v0.28.793' }}
+run-name: chat bench ${{ inputs.tag_a || 'v0.28.806' }} vs ${{ github.event_name == 'pull_request' && github.head_ref || inputs.build_b && github.ref_name || inputs.tag_b }}
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       tag_b:
-        description: Second release tag, such as v0.28.786
+        description: Second release tag, or version label when build_b is enabled
         required: true
         type: string
       runs:
@@ -17,11 +17,20 @@ on:
         required: true
         default: '3'
         type: string
+      build_b:
+        description: Build this branch as B instead of downloading tag_b
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - .github/workflows/chat-bench-ab.yml
       - .gitattributes
       - tools/chat-bench/**
+      - tools/chat-bench.test.mjs
+      - src/chat_session.zig
+      - src/browser_pane.zig
+      - src/browser_workspace_profile.zig
 
 permissions:
   contents: read
@@ -31,24 +40,28 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.789' || inputs.tag_a }}
-      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.793' || inputs.tag_b }}
+      TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.806' || inputs.tag_a }}
+      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.808' || inputs.tag_b }}
+      BUILD_B: ${{ github.event_name == 'pull_request' || inputs.build_b }}
       RUNS: ${{ github.event_name == 'pull_request' && '3' || inputs.runs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           path: candidate
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: tooling
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Test summary calculations
-        run: node --test candidate/tools/chat-bench-ab-summary.test.js
+        run: |
+          node --test candidate/tools/chat-bench-ab-summary.test.js
+          node --test candidate/tools/chat-bench.test.mjs
       - name: Download and verify release executables
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,6 +76,7 @@ jobs:
             if [ "$label" = B ]; then tag="$TAG_B"; fi
             dir="results/releases/$label"
             mkdir -p "$dir"
+            if [ "$label" = B ] && [ "$BUILD_B" = true ]; then continue; fi
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt
             mapfile -t lines < <(grep -E '^[a-fA-F0-9]{64} [ *]multiprompt-x64\.exe$' "$dir/SHA256SUMS.txt")
             test "${#lines[@]}" -eq 1
@@ -104,7 +118,16 @@ jobs:
           export ZIG=/opt/chat-bench/zig-x86_64-linux-0.16.0/zig
           export ZIG_GLOBAL_CACHE_DIR=/opt/chat-bench/zig-global-cache
           export ZIG_LOCAL_CACHE_DIR=/opt/chat-bench/zig-local-cache
-          cd tooling
+          if [ "$BUILD_B" = true ]; then
+            cd "$GITHUB_WORKSPACE/candidate"
+            "$ZIG" build -Dtarget=x86_64-windows-gnu
+            cp zig-out/bin/multiprompt.exe /opt/chat-bench/results/releases/B/multiprompt-x64.exe
+            {
+              git rev-parse HEAD
+              sha256sum /opt/chat-bench/results/releases/B/multiprompt-x64.exe
+            } > /opt/chat-bench/results/releases/B/verified.txt
+          fi
+          cd /opt/chat-bench/tooling
           node -e 'const fs = require("fs"); for (const r of JSON.parse(fs.readFileSync("../results/manifest.json"))) console.log([r.label, r.path].join("\t"))' > ../results/plan.tsv
           while IFS=$'\t' read -r label result; do
             out="/opt/chat-bench/results/$(dirname "$result")"
@@ -151,6 +174,21 @@ jobs:
       - name: Write A/B summary
         if: always()
         run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
+      - name: Require every branch-build benchmark check to pass
+        if: env.BUILD_B == 'true'
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const runs = JSON.parse(fs.readFileSync('results/manifest.json')).filter(run => run.label === 'B');
+          assert.equal(runs.length, Number(process.env.RUNS));
+          for (const run of runs) {
+            const result = JSON.parse(fs.readFileSync(`results/${run.path}`));
+            assert.equal(result.status, 'PASS', JSON.stringify(result.failures));
+            assert.deepEqual(result.failures, []);
+          }
+          console.log('All branch-build benchmark checks passed');
+          NODE
       - name: Upload all benchmark evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
