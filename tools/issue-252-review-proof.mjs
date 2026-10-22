@@ -14,7 +14,9 @@ if (process.argv[2] === 'regressions') {
   assert.equal(pr.state, 'open');
   assert.equal(pr.merged, false);
   const checks = JSON.parse(command('gh', ['api', `repos/valentinyeo/multiprompt/commits/${head}/check-runs?per_page=100`])).check_runs;
-  const nonrelease = checks.filter(check => !['build-x64', 'build-arm64', 'release'].includes(check.name));
+  const runs = JSON.parse(command('gh', ['api', `repos/valentinyeo/multiprompt/actions/runs?head_sha=${head}&per_page=100`])).workflow_runs;
+  const releases = new Set(runs.filter(run => run.name === 'Release').map(run => String(run.id)));
+  const nonrelease = checks.filter(check => !releases.has(check.details_url.match(/actions\/runs\/(\d+)/)?.[1]));
   for (const name of ['test', 'test-vps (1)', 'test-vps (2)', 'test-windows (1)', 'test-windows (2)', 'test-windows (3)', 'test-windows (4)', 'no-comments', 'secret-scan', 'extension-version']) assert.ok(nonrelease.some(check => check.name === name && check.conclusion === 'success'), name);
   for (const check of nonrelease) assert.equal(check.conclusion, 'success', check.name);
   assert.equal(command('git', ['diff', '--name-only', 'HEAD', '--', '.', ':(exclude)GATES.md']).trim(), '');
