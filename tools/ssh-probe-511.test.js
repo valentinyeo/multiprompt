@@ -139,7 +139,7 @@ test('ISSUE-521 healthy probes confirm missing sessions before ending and skip e
   assert.match(worker, /listing=\$\(tmux list-sessions -F '@@S #\{session_name\}' 2>&1\); if \[ \$\? -eq 0 \]/);
   assert.match(worker, /\.sessionGone\(/);
   const finish = body('sshProbeFinish', send);
-  assert.match(finish, /if \(shell\.ssh_reconnect\.observeGone\(item\.session_gone, process_alive\)\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
+  assert.match(finish, /if \(shell\.ssh_reconnect\.observeGone\(item\.session_gone, process_alive, GetTickCount64\(\)\)\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
   assert.match(finish, /phase == \.ended/);
   assert.match(body('sshProbeStart', send), /phase == \.ended/);
   assert.match(body('sshAutoReconnectTick', send), /phase == \.ended/);
