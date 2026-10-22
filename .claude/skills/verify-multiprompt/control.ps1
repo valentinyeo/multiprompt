@@ -455,10 +455,58 @@ function Type-Text([string]$Text) {
 }
 
 function Click-WorkspacePill([int]$Workspace) {
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not $state.hide_sidebar -and -not $state.sidebar_collapsed -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.snoozed }).Count -eq 0 -and (-not $state.ui_scale -or $state.ui_scale -eq 100)
+    } "visible unsnoozed workspace pill $Workspace at default layout"
     Doctor
     Assert-Foreground
     Record ("Click workspace pill for stored workspace $Workspace")
+    [void][VerifyNative]::DwmFlush()
     [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
+function Focus-Palette([string]$Query, [int]$Target) {
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $start = (Get-Content $log -Raw).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    Wait-Until {
+        $trace = (Get-Content $log -Raw).Substring($start)
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $script:window.ToInt64()
+    } 'command palette initialized and owned frame focused'
+    Type-Text $Query
+    Wait-Until {
+        (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
+    } "palette query consumed and expected command $Target selected"
+}
+
+function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
+    Wait-Until {
+        $state = Read-Session
+        if ($null -eq $state -or $state.active_workspace -ne $Workspace -or $state.active_tab -ne $Tab -or $state.tabs[$Tab].kind -ne 'cmd' -or [bool]$state.tabs[$Tab].cv -ne $Chat) { return $false }
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window) { return $false }
+        if (-not $Chat) {
+            return [VerifyNative]::Class($foreground) -eq 'ConsoleWindowClass' -and [VerifyNative]::Title($foreground).EndsWith(('ZigShell-' + $state.tabs[$Tab].shell_id), [StringComparison]::Ordinal)
+        }
+        $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Composer)
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $foreground -eq $script:window -and $element.Current.ProcessId -eq $process.Id -and -not $element.Current.IsOffscreen -and $focused.Current.NativeWindowHandle -eq $Composer
+    } "workspace $Workspace session $Tab Chat View=$Chat visible and input ready"
+}
+
+function Wait-ConsoleText([string]$Command) {
+    Wait-Until {
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        if ([VerifyNative]::GetAncestor($foreground, 2) -ne $script:window -or [VerifyNative]::Class($foreground) -ne 'ConsoleWindowClass') { return $false }
+        $console = [System.Windows.Automation.AutomationElement]::FromHandle($foreground)
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+        $document = $console.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -eq $document) { return $false }
+        $pattern = $document.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
+        $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
+    } "console visibly contains staged command: $Command"
 }
 
 function Palette([string]$Query) {
@@ -769,14 +817,26 @@ try {
                 $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
             } 'initial CMD session saved' 60
             $initial = Read-Session
-            if ($initial.active_workspace -ne 0) { throw 'Expected first stored workspace' }
+            if ($initial.active_workspace -ne 0 -or $initial.workspace_count -ne 1) { throw 'Expected one initial stored workspace' }
             $initialTab = $initial.active_tab
-            Palette 'per tab'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            if ($initial.hide_pills) {
+                Focus-Palette 'workspace switcher' 6213
+                Press @(0x0D) 'Enter: show workspace switcher'
+            }
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not $state.hide_sidebar -and -not $state.sidebar_collapsed
+            } 'workspace switcher shown and saved'
+            Wait-WorkspaceSurface 0 $initialTab $false
+            Snapshot 'pills-ready'
+            Focus-Palette 'per tab' 6345
             Press @(0x0D) 'Enter: Chat View per tab'
             Wait-Until {
                 $state = Read-Session
                 $null -ne $state -and -not ($state.PSObject.Properties.Name -contains 'chat_view_mode')
             } 'per-session Chat View mode saved'
+            Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
                 Press @(0x12, 0x43) 'Alt+C: enable Chat View for the test session'
@@ -805,14 +865,19 @@ try {
             } 'initial text landed in Chat View typing box'
             Snapshot 'action'
             Press @(0x11, 0x4E) 'Ctrl+N: create second workspace'
-            Wait-Until { (Read-Session).workspace_count -eq $initial.workspace_count + 1 } 'second workspace saved'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and $state.workspace_count -eq $initial.workspace_count + 1 -and $state.active_workspace -eq 1 -and $state.active_tab -ne $initialTab -and $state.tabs[$state.active_tab].workspace -eq 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+            } 'second workspace and distinct CMD session saved'
             $second = (Read-Session).active_workspace
+            $secondTab = (Read-Session).active_tab
+            Wait-WorkspaceSurface $second $secondTab $false
             Press @(0x12, 0x32) 'Alt+2: return to first workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'first workspace active'
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
             Press @(0x12, 0x27) 'Alt+Right: leave Chat View workspace'
-            Wait-Until { (Read-Session).active_workspace -eq $second } 'second workspace active'
+            Wait-WorkspaceSurface $second $secondTab $false
             Press @(0x12, 0x25) 'Alt+Left: return to Chat View workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'Chat View workspace returned'
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
             Type-Text 'workspace-focus-chat'
             $expectedText = 'before-workspace-focus-chat'
             Wait-Until {
@@ -826,9 +891,9 @@ try {
             Write-Output 'workspace-focus chat PASS'
             Snapshot 'chat-returned'
             Click-WorkspacePill $second
-            Wait-Until { (Read-Session).active_workspace -eq $second } 'pill left Chat View workspace'
+            Wait-WorkspaceSurface $second $secondTab $false
             Click-WorkspacePill 0
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'pill returned to Chat View workspace'
+            Wait-WorkspaceSurface 0 $initialTab $true $composerHandle
             Type-Text '-pill'
             Wait-Until {
                 [VerifyNative]::EditText([IntPtr]$composerHandle) -ceq ($expectedText + '-pill')
@@ -839,29 +904,35 @@ try {
             $result.checks += @{ name = 'workspace-focus-chat-pill'; text = ($expectedText + '-pill'); composer = $composerHandle; activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
             Write-Output 'workspace-focus chat pill PASS'
             Press @(0x12, 0x43) 'Alt+C: switch to shell console'
+            Wait-WorkspaceSurface 0 $initialTab $false
             $pillMarker = Join-Path $scratch 'workspace-focus-shell-pill.txt'
             if (Test-Path $pillMarker) { throw 'Pill shell marker must not exist before input' }
             Type-Text 'echo workspace-focus-shell-pill'
+            Wait-ConsoleText 'echo workspace-focus-shell-pill'
             Click-WorkspacePill $second
-            Wait-Until { (Read-Session).active_workspace -eq $second } 'pill left shell workspace'
+            Wait-WorkspaceSurface $second $secondTab $false
             if ((Read-Session).workspaces[0].focus -ne 'shell') { throw 'Pill mouse-down did not capture the newly selected shell surface' }
             Click-WorkspacePill 0
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'pill returned to shell workspace'
+            Wait-WorkspaceSurface 0 $initialTab $false
             Type-Text ('>"' + $pillMarker + '"')
+            Wait-ConsoleText ('echo workspace-focus-shell-pill>"' + $pillMarker + '"')
             Press @(0x0D) 'Enter: execute in pill-restored shell without a console click'
             Wait-Until { (Test-Path $pillMarker) -and (Get-Content $pillMarker -Raw).Trim() -ceq 'workspace-focus-shell-pill' } 'pill-restored console executed typed command'
             $pillState = Read-Session
             if ($pillState.active_tab -ne $initialTab -or $pillState.workspaces[0].focus -ne 'shell') { throw 'Pill return lost shell focus or selected session' }
             $result.checks += @{ name = 'workspace-focus-shell-pill'; marker = (Get-Content $pillMarker -Raw).Trim(); activeTab = $pillState.active_tab; savedFocus = $pillState.workspaces[0].focus }
             Write-Output 'workspace-focus shell pill PASS'
+            Wait-WorkspaceSurface 0 $initialTab $false
             $marker = Join-Path $scratch 'workspace-focus-shell.txt'
             if (Test-Path $marker) { throw 'Shell focus marker must not exist before input' }
             Type-Text 'echo workspace-focus-shell'
+            Wait-ConsoleText 'echo workspace-focus-shell'
             Press @(0x12, 0x27) 'Alt+Right: leave shell workspace'
-            Wait-Until { (Read-Session).active_workspace -eq $second } 'second workspace active from shell'
+            Wait-WorkspaceSurface $second $secondTab $false
             Press @(0x12, 0x25) 'Alt+Left: return to shell workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'shell workspace returned'
+            Wait-WorkspaceSurface 0 $initialTab $false
             Type-Text ('>"' + $marker + '"')
+            Wait-ConsoleText ('echo workspace-focus-shell>"' + $marker + '"')
             Press @(0x0D) 'Enter: execute in restored shell without a click'
             Wait-Until { (Test-Path $marker) -and (Get-Content $marker -Raw).Trim() -ceq 'workspace-focus-shell' } 'restored console executed the typed command'
             $shellState = Read-Session

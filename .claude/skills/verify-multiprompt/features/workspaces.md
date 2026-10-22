@@ -34,12 +34,10 @@ Preconditions:
 
 Dispatch `gh workflow run verify.yml -f feature=workspace-focus`; Windows selects `control.ps1 -Feature workspace-focus`. Pull requests run this alongside the unchanged appearance journey.
 
-- Wait for workspace 1's CMD session to be saved. Use Ctrl+K `per tab` to select per-session Chat View, then Alt+C if that session's Chat View is off. Wait for the saved enabled state and the owned frame's visible native Edit child. Restore and foreground the frame, wait for that exact Edit HWND to have focus, then type `before-` and require its exact value before switching. All waits have timeouts; CMD supports this without Claude or an account.
-- Create workspace 2 with Ctrl+N, return with Alt+2, then switch away with Alt+Right and back with Alt+Left.
-- Without clicking or issuing another focus command, type `workspace-focus-chat`. Read the original Edit control's text with read-only WM_GETTEXT and a one-second SendMessageTimeout and require exactly `before-workspace-focus-chat`, the same focused HWND, the same selected session and saved workspace focus `chat`.
-- Press Alt+C to return to the shell. Type `echo workspace-focus-shell` without Enter, switch away and back with Alt+Right / Alt+Left, then append redirection to the isolated `workspace-focus-shell.txt` and press Enter without clicking.
-- Require that previously absent file to contain exactly `workspace-focus-shell`, the same selected session and saved workspace focus `shell`. The harness never writes the marker or session state.
-- Require `workspace-focus chat PASS` and `workspace-focus shell PASS` in the job log. A missing text value, file, focus target or selected session fails the job; inspect `before.png`, `action.png`, `chat-returned.png`, `after.png`, `actions.json`, `result.json` and the retained data.
+- Show the default-hidden workspace switcher through Ctrl+K before any pill click; wait for saved visibility, expanded sidebar and the default unsnoozed layout.
+- Follow the [complete workspace-focus step and bounded-readiness table](workspace-focus.md#driving-it-with-controlps1). It enumerates setup, keyboard and pill returns in both Chat View and the console, no-click text assertions, staged commands and cleanup.
+- Require all four `workspace-focus ... PASS` outcomes and a passed `result.json`. Every transition waits for the selected saved session, matching view and actual input surface, not just the active workspace index.
+- Inspect `pills-ready.png`, `action.png`, `chat-returned.png`, `after.png`, timestamped `actions.json`, saved state and debug logs. Readiness checks never click a composer or repair focus after switching.
 
 This journey covers local CMD and Chat View typing focus, not account sync, agents, SSH or browser focus. The Zig workspace regression also covers persisted focus round trips; this desktop journey does not relaunch the app.
 

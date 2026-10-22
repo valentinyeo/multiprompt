@@ -1458,6 +1458,13 @@ fn appendGroupPaletteResults() void {
 }
 
 pub fn updateSearchResults() void {
+    defer {
+        if (app_state.g_search_active) {
+            var trace: [128]u8 = undefined;
+            const target = if (app_state.g_search_sel < app_state.g_search_result_count) app_state.g_search_results[app_state.g_search_sel] else 0;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[palette] ready chars={d} count={d} target={d}", .{ app_state.g_search_len, app_state.g_search_result_count, target }) catch "[palette] trace overflow");
+        }
+    }
     app_state.g_search_result_count = 0;
     if (app_state.g_search_len == 0) app_state.g_multiprompt_logged_in = hasMultipromptLogin();
     if (app_state.g_search_rename_input_mode) {
