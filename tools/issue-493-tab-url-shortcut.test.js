@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { readChangelogEntry } = require('./changelog-entry');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const shortcuts = read('src/shortcuts.zig');
@@ -91,11 +92,5 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);
   assert.match(read('build.zig'), /"node", "--test"[^\n]*"tools\/issue-493-tab-url-shortcut\.test\.js"/);
-  const fragmentPath = path.join(__dirname, '..', 'changelog.d/IGSH-493-tab-url-shortcut.md');
-  const entry = fs.existsSync(fragmentPath)
-    ? fs.readFileSync(fragmentPath, 'utf8').trim()
-    : read('src/changelog.zig').split('\n')
-      .find(line => line.includes('.ticket = "IGSH-493"'))?.match(/\.text = "([^"]*)"/)?.[1];
-  assert.ok(entry, 'URL shortcut needs an unreleased fragment or its published changelog entry');
-  assert.match(entry, /^Ctrl\+Shift\+X inserts[^\n]+without sending\.$/);
+  assert.match(readChangelogEntry('IGSH-493'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
 });

@@ -52,6 +52,7 @@ const cases = [
   ['doctor', 'extra'],
   ['tabs', '--unknown'],
   ['active-tab', 'extra'],
+  ['frames', '--unknown'],
   ['url', '--unknown'],
   ['activate', 'not-a-number'],
   ['close-tab'],
