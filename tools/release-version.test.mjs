@@ -109,34 +109,36 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: prepare/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
+  assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
-  assert.match(tests, /ARM64: \$\{\{ needs\.build-arm64\.result \}\}/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker\]/);
+  assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
-test('aggregate routing requires the update job and rejects every unsuccessful heavy dependency', () => {
+test('aggregate routing requires the update and Worker jobs and rejects every unsuccessful heavy dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[changes, test, test-vps, build-arm64, test-windows-update\]/);
+  assert.match(aggregate, /needs: \[changes, test, test-vps, build-windows, test-windows-update, test-worker\]/);
   assert.match(aggregate, /UPDATE: \$\{\{ needs\.test-windows-update\.result \}\}/);
+  assert.match(aggregate, /WORKER: \$\{\{ needs\.test-worker\.result \}\}/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /if require_jobs success true success success success "\$result"; then exit 1; fi/);
-  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$ARM64" "\$UPDATE"/);
+  assert.match(aggregate, /if require_jobs success true success success success "\$result" success; then exit 1; fi/);
+  assert.match(aggregate, /if require_jobs success true success success success success "\$result"; then exit 1; fi/);
+  assert.match(aggregate, /require_jobs "\$CHANGES" "\$HEAVY" "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER"/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', ARM64: 'success', UPDATE: 'success' };
+  const success = { CHANGES: 'success', HEAVY: 'true', WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Aggregate routing controls passed/);
-  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', ARM64: 'skipped', UPDATE: 'skipped' }).status, 0);
-  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'ARM64', 'UPDATE']) {
+  assert.equal(run({ HEAVY: 'false', WINDOWS: 'skipped', VPS: 'skipped', BUILD: 'skipped', UPDATE: 'skipped', WORKER: 'skipped' }).status, 0);
+  for (const job of ['CHANGES', 'WINDOWS', 'VPS', 'BUILD', 'UPDATE', 'WORKER']) {
     for (const status of ['failure', 'cancelled', 'skipped']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
   }
   assert.equal(run({ HEAVY: 'invalid' }).status, 1);
 });
 
-test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {
+test('four Windows and two VPS jobs retain the upstream test graph with independent Worker checks', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
@@ -145,9 +147,21 @@ test('four Windows and two VPS jobs retain the upstream test graph and folded se
   assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
   assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
   assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
-  const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
-  assert.match(vps, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
-  assert.match(vps, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP' && matrix\.group == 1/);
+  const vps = tests.split('\n  test-vps:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  const worker = tests.split('\n  test-worker:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  assert.doesNotMatch(vps, /Build the account Worker|Run account Worker tests|cache: npm/);
+  assert.match(worker, /needs: changes\n    if: needs.changes.outputs.heavy == 'true'\n    runs-on: ubuntu-latest\n    timeout-minutes: 10/);
+  assert.match(worker, /actions\/checkout@[a-f0-9]{40}\n        with:\n          fetch-depth: 0/);
+  assert.match(worker, /actions\/setup-node@[a-f0-9]{40}\n        with:\n          node-version: 22\n          cache: npm\n          cache-dependency-path: service\/package-lock.json/);
+  assert.match(worker, /name: Build the account Worker\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        working-directory: service\n        timeout-minutes: 2\n        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build/);
+  assert.match(worker, /name: Run account Worker tests\n        if: steps\.rule\.outputs\.kind != 'STAMP'\n        run: node --test service\/test\/infra.test.js service\/test\/worker.test.js/);
+  for (const name of ['Restore Zig toolchain (PR)', 'Cache Zig toolchain', 'Install Zig 0.16.0']) {
+    const step = vps.split(/(?=^      - )/m).find(step => step.startsWith(`      - name: ${name}\n`));
+    assert.ok(step);
+    assert.ok(worker.includes(step));
+  }
+  assert.ok(worker.indexOf('name: Install Zig') < worker.indexOf('name: Run account Worker tests'));
+  assert.doesNotMatch(worker, /zig build|ZIG_GLOBAL_CACHE_DIR|\.zig-cache|matrix:/);
   assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
   assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);

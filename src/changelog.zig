@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.804", .items = &.{
+        .{ .text = "Preview a page as an iPhone, Pixel, or custom screen size with zsb emulate, keeping the mobile view across page changes until you turn it off.", .ticket = "IGSH-127" },
+    } },
     .{ .ver = "0.28.803", .items = &.{
         .{ .text = "Messages from other agents now show formatted headings, lists, tables, links, and code inside their blue bubbles.", .ticket = "IGSH-376" },
         .{ .text = "Remote tabs no longer drop every half minute when the server is slow.", .ticket = "IGSH-511" },
