@@ -60,3 +60,12 @@ test('IGSH-224 profile completion has its own native message ID', () => {
   assert.ok(profile);
   assert.deepEqual(declarations.filter(value => value[2] === profile[2]).map(value => value[1]), ['WM_APP_BROWSER_PROFILE_READY']);
 });
+
+test('IGSH-224 full browser checks build the native executable before sweeping real CLI help', () => {
+  const build = read('build.zig');
+  assert.match(build, /const bridge_help_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help\.test\.js" \}\)/);
+  assert.match(build, /bridge_help_tests\.step\.dependOn\(&bridge_install\.step\)/);
+  assert.match(build, /bridge_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath/);
+  assert.match(build, /test_step\.dependOn\(&bridge_help_tests\.step\)/);
+  assert.doesNotMatch(read('.github/workflows/test.yml'), /run: node --test tools\/zsb-help\.test\.js/);
+});
