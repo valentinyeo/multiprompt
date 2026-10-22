@@ -152,6 +152,7 @@ jobs:
       - name: Test safe release updates
         if: matrix.group == 1
         run: |
+          node --test tools/update-release-review.test.js
           node --test tools/update-release.test.js
           powershell -NoProfile -File tools/update-release.test.ps1
       - name: Run tests
