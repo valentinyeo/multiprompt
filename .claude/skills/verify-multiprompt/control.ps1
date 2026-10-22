@@ -373,6 +373,7 @@ function Snapshot([string]$Name) {
 }
 
 function Assert-Foreground {
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'owned app regains foreground before input' 10
     if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
 }
 

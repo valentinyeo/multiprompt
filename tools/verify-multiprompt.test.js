@@ -117,6 +117,16 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.doesNotMatch(transport, /Start-Process|Invoke-Expression|PostMessage/);
 });
 
+test('native browser handoff is awaited without removing the foreground input guard', () => {
+  const guard = control.slice(control.indexOf('function Assert-Foreground {'), control.indexOf('function Press('));
+  const waitsForOwner = /Wait-Until \{ \[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window \} 'owned app regains foreground before input' 10/;
+  const refusesForeign = /if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}/;
+  assert.match(guard, waitsForOwner);
+  assert.match(guard, refusesForeign);
+  assert.throws(() => assert.match(guard.replace(waitsForOwner, ''), waitsForOwner));
+  assert.throws(() => assert.match(guard.replace(refusesForeign, ''), refusesForeign));
+});
+
 test('G2: discovery, creation and repeat use saved names and identical arguments', () => {
   assert.match(journey, /Invoke-Zsb @\('workspace-list'\)/);
   assert.match(journey, /\$_.id -eq \$workspaceBefore -and \$_.name -ceq \$workspaceName -and \$_.active -eq \$true/);
