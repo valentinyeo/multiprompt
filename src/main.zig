@@ -4727,11 +4727,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
-                    if (app_state.g_update_ver_len > 0) {
-                        updateCardRelaunch(hwnd);
-                    } else {
-                        updateCardPoll();
-                    }
+                    updateCardPoll();
+                    updateCardRelaunch(hwnd);
                     return 0;
                 }
                 if (target == SEARCH_RESTART_OFFSET) {

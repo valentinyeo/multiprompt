@@ -149,14 +149,23 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
 }
 
 var release_ready = false;
+var restart_after_download = false;
 
 pub fn updateCardPoll() void {
     if (update_release.poll()) |version| {
         release_ready = true;
         @memcpy(app_state.g_update_ver[0..version.len], version);
         app_state.g_update_ver_len = version.len;
+        if (restart_after_download and !update_release.checking()) {
+            restart_after_download = false;
+            updateCardRelaunch(app_state.g_main_hwnd);
+        }
         if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
+    }
+    if (restart_after_download and !update_release.checking()) {
+        restart_after_download = false;
+        @import("console.zig").showHeaderNoticeAscii("No verified update available. Please try again later.", 6000, false);
     }
     if (release_ready) {
         release_ready = false;
@@ -194,6 +203,12 @@ pub fn updateCardDismiss() void {
 }
 
 pub fn updateCardRelaunch(hwnd: HANDLE) void {
+    if (app_state.g_update_relaunching) return;
+    if (update_release.checking()) {
+        restart_after_download = true;
+        @import("console.zig").showHeaderNoticeAscii("Update still downloading. Will restart when ready.", 6000, false);
+        return;
+    }
     if (app_state.g_update_ver_len == 0 or app_state.g_update_path_len == 0 or app_state.g_update_relaunching) return;
     rememberOpenWorkspaceForQuit();
     var ctx = ZigShellWindowList{
@@ -222,6 +237,7 @@ pub fn updateCardRelaunch(hwnd: HANDLE) void {
     const launched = if (release_ready or update_release.hasStaged()) update_release.restart(pids[0..np]) else update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]);
     if (!launched) {
         debugLog("update-card: could not start relaunch helper");
+        @import("console.zig").showHeaderNoticeAscii("Could not start update. Please try again.", 6000, true);
         return;
     }
     app_state.g_update_relaunching = true;

@@ -130,6 +130,11 @@ pub fn beginCheck() void {
     checker = spawn("Check", &.{}, "");
 }
 
+pub fn checking() bool {
+    const process = checker orelse return false;
+    return win.WaitForSingleObject(process, 0) == 0x102;
+}
+
 pub fn poll() ?[]const u8 {
     if (!enabled() or !initialize()) return null;
     if (checker) |process| {

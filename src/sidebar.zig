@@ -2571,6 +2571,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var ub: [64]u8 = undefined;
                             const ut = if (app_state.g_update_ver_len > 0)
                                 (std.fmt.bufPrint(&ub, "Restart to update to v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Restart to update")
+                            else if (@import("update_release.zig").checking())
+                                "Restart to update (still downloading)"
                             else
                                 "Restart to update (no update ready)";
                             drawAscii(hdc, ut, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
