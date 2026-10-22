@@ -97,7 +97,7 @@ test('IGSH-522 phased startup persists the initial session after consoles finish
     assert.ok(main.includes(original));
     assert.throws(() => verify(main.replace(original, replacement)), assert.AssertionError);
   }
-  assert.throws(() => verify(execFileSync('git', ['show', 'cc26027:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
+  assert.throws(() => verify(execFileSync('git', ['show', '2031a233bb99897988a93e498c2fe3b42bc40e9e:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
 });
 
 test('ISSUE-543 hidden browser beacons get tool-window ownership before docking', () => {
