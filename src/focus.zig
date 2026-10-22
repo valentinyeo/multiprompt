@@ -267,6 +267,7 @@ fn focusGuardLanded(hwnd: HANDLE) void {
         app_state.g_focus_authorized_hwnd = null;
         app_state.g_focus_authorized_until = 0;
         app_state.g_focus_browser_shell_id = 0;
+        @import("workspaces.zig").captureWorkspaceFocus();
     }
 }
 

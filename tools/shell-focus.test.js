@@ -216,11 +216,7 @@ test('overlay hides cannot reactivate the console after palette frame handoff', 
 
 test('landed handoffs consume authority without losing the exact return surface', () => {
   const focus = fs.readFileSync(path.resolve(__dirname, '..', 'src/focus.zig'), 'utf8');
-  const landed = focus.match(/fn focusGuardLanded\(hwnd: HANDLE\) void \{([^]*?)\n\}/)?.[1];
-  assert.ok(landed);
-  const run = new Function('hwnd', 'app_state', 'GetTickCount64', 'focusGuardSurface', landed
-    .replace('now -| app_state.g_focus_user_action_tick', 'Math.max(0, now - app_state.g_focus_user_action_tick)')
-    .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+  const run = workspacePillLanding(focus);
   for (const target of ['console', 'composer', 'pane']) {
     const state = {
       active_shell: 0, shell_count: 1, shells: [{ shell_id: 7, browser_hwnd: 'pane' }],
@@ -230,11 +226,15 @@ test('landed handoffs consume authority without losing the exact return surface'
       g_focus_paste_target: null, g_focus_return_hwnd: 'old', g_focus_typing_tick: 900,
     };
     const before = { ...state };
-    run('unrelated', state, () => 1300, hwnd => hwnd);
+    let captures = 0;
+    const capture = () => captures++;
+    run('unrelated', state, () => 1300, hwnd => hwnd, capture);
     assert.deepEqual(state, before, 'unrelated landing must not consume a pending handoff');
-    run(target, state, () => 2501, hwnd => hwnd);
+    run(target, state, () => 2501, hwnd => hwnd, capture);
     assert.deepEqual(state, before, 'expired authority must not change remembered focus');
-    run(target, state, () => 1300, hwnd => hwnd);
+    assert.equal(captures, 0, 'unrelated or expired handoffs cannot capture workspace focus');
+    run(target, state, () => 1300, hwnd => hwnd, capture);
+    assert.equal(captures, 1, 'capture the newly landed surface before a pill activates the frame');
     assert.equal(state.g_focus_return_hwnd, target);
     assert.equal(state.g_focus_typing_tick, 0);
     assert.equal(state.g_focus_authorized_hwnd, null);
@@ -294,4 +294,65 @@ test('palette activation unlock rejects baseline 77519a8', { skip: !process.env.
   const focus = fs.readFileSync(path.join(root, 'src/focus.zig'), 'utf8');
   const baseline = execFileSync('git', ['show', `${process.env.PALETTE_BASELINE}:src/main.zig`], { cwd: root, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
   assert.throws(() => auditPaletteUnlock(baseline, focus), /const tap_alt/, 'the native-unlock assertion must fail on the actual previous implementation');
+});
+
+function workspacePillLanding(focus) {
+  const landed = focus.match(/fn focusGuardLanded\(hwnd: HANDLE\) void \{([^]*?)\n\}/)?.[1];
+  assert.ok(landed);
+  return new Function('hwnd', 'app_state', 'GetTickCount64', 'focusGuardSurface', 'captureWorkspaceFocus', landed
+    .replace('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()')
+    .replace('now -| app_state.g_focus_user_action_tick', 'Math.max(0, now - app_state.g_focus_user_action_tick)')
+    .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+}
+
+function assertWorkspacePillCapture(focus) {
+  const root = path.resolve(__dirname, '..');
+  const workspaces = fs.readFileSync(path.join(root, 'src/workspaces.zig'), 'utf8');
+  const captureBody = workspaces.match(/pub fn captureWorkspaceFocus\(\) void \{([^]*?)\n\}/)?.[1];
+  assert.ok(captureBody);
+  const capture = new Function('app_state', 'GetFocus', 'activeShellHasForegroundFocus', 'rememberWorkspaceFocus', captureBody
+    .replace('const shell = &', 'const shell = ')
+    .replace(/const input: app_state\.WorkspaceFocus = if \(([^]*?)\)\s*\.chat\s*else if \(([^]*?)\)\s*\.shell\s*else\s*\.none;/, 'const input = ($1) ? "chat" : ($2) ? "shell" : "none";')
+    .replace('@import("win32.zig").GetFocus()', 'GetFocus()')
+    .replace('@import("focus.zig").activeShellHasForegroundFocus()', 'activeShellHasForegroundFocus()')
+    .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+  const rememberBody = workspaces.match(/fn rememberWorkspaceFocus\([^]*?\) void \{([^]*?)\n\}/)?.[1];
+  assert.ok(rememberBody);
+  const remember = new Function('app_state', 'ws', 'shell_id', 'input', 'MAX_LWS', rememberBody
+    .replace('input == .none', 'input == "none"').replace(/\bor\b/g, '||'));
+  const land = workspacePillLanding(focus);
+  for (const surface of ['shell', 'chat']) {
+    const state = {
+      active_shell: 0, shell_count: 1, shells: [{ shell_id: 7, workspace: 0, browser_hwnd: null }],
+      g_restoring: false, g_starred_workspace: false, g_single_window: true, g_active_workspace: 0,
+      g_chat_active: surface === 'chat', g_chat_composer_hwnd: 'composer',
+      g_ws_last_shell: [7], g_ws_focus: [surface === 'shell' ? 'chat' : 'shell'],
+      g_focus_browser_shell_id: 0, g_focus_authorized_hwnd: surface, g_focus_authorized_until: 2500,
+      g_focus_user_action_tick: 0, g_focus_paste_target: null, g_focus_return_hwnd: 'old', g_focus_typing_tick: 900,
+    };
+    let foreground = surface;
+    let focused = surface === 'chat' ? 'composer' : 'console';
+    const record = () => capture(state, () => focused, () => foreground === 'shell', (ws, id, input) => remember(state, ws, id, input, 16));
+    land(surface, state, () => 1300, hwnd => hwnd, record);
+    assert.equal(state.g_focus_authorized_hwnd, null);
+    assert.equal(state.g_focus_authorized_until, 0);
+    assert.equal(state.g_focus_return_hwnd, surface);
+    assert.equal(state.g_ws_focus[0], surface, 'landing must capture the selected surface before pill activation');
+    foreground = 'frame';
+    focused = surface === 'chat' ? 'composer' : 'frame';
+    record();
+    assert.equal(state.g_ws_focus[0], surface, 'frame activation must not resurrect stale workspace focus');
+    assert.equal(state.g_ws_last_shell[0], 7);
+  }
+}
+
+test('workspace pills preserve the observed shell landing just as synchronous composer repair preserves chat', () => {
+  const focus = fs.readFileSync(path.resolve(__dirname, '..', 'src/focus.zig'), 'utf8');
+  assertWorkspacePillCapture(focus);
+  assert.throws(() => assertWorkspacePillCapture(focus.replace('@import("workspaces.zig").captureWorkspaceFocus();', '')), /landing must capture/);
+});
+
+test('workspace pill capture rejects the actual 3729aa3 implementation', { skip: !process.env.WORKSPACE_FOCUS_BASELINE }, () => {
+  const baseline = execFileSync('git', ['show', `${process.env.WORKSPACE_FOCUS_BASELINE}:src/focus.zig`], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' });
+  assert.throws(() => assertWorkspacePillCapture(baseline), /landing must capture/, 'the old app must fail the same shell/chat landing scenario');
 });

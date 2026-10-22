@@ -310,3 +310,31 @@ for (const [index, before] of [
   assert.throws(() => authorizationLifetimeContract(...sources), assert.AssertionError, `reject stale authorization: ${index} ${before}`);
 }
 console.log('workspace-focus static checks passed (owned injected shortcut authority, strict optional journey reads, exact native focus, read-only waits, negative controls; Windows CI still required)');
+
+function workspaceFocusLandingContract(focus, workspaces) {
+  const foreground = focus.slice(focus.indexOf('pub noinline fn SetForegroundWindow('), focus.indexOf('pub noinline fn SetFocus('));
+  const setFocus = focus.slice(focus.indexOf('pub noinline fn SetFocus('), focus.indexOf('fn focusGuardLanded('));
+  assert.match(foreground, /if \(result != 0 and hwnd != app_state\.g_main_hwnd\) focusGuardLanded\(hwnd\);/);
+  assert.match(setFocus, /if \(GetFocus\(\) == hwnd\) focusGuardLanded\(hwnd\);/);
+  const landed = focus.slice(focus.indexOf('fn focusGuardLanded('), focus.indexOf('pub noinline fn AttachThreadInput('));
+  assert.match(landed, /app_state\.g_focus_browser_shell_id = 0;\s*@import\("workspaces.zig"\)\.captureWorkspaceFocus\(\);\s*\}\s*\}/, 'capture the observed landing before frame activation can obscure the console');
+  assert.equal((landed.match(/captureWorkspaceFocus\(/g) || []).length, 1);
+  const capture = workspaces.slice(workspaces.indexOf('pub fn captureWorkspaceFocus('), workspaces.indexOf('test "IGSH-522 workspace return'));
+  assert.match(capture, /if \(app_state\.g_restoring or app_state\.g_starred_workspace or app_state\.active_shell >= app_state\.shell_count\) return;/);
+  assert.match(capture, /if \(app_state\.g_single_window and shell\.workspace != app_state\.g_active_workspace\) return;/);
+  assert.match(capture, /GetFocus\(\) == app_state\.g_chat_composer_hwnd\)\s*\.chat\s*else if \(@import\("focus.zig"\)\.activeShellHasForegroundFocus\(\)\)\s*\.shell\s*else\s*\.none;/);
+  assert.match(workspaces, /if \(ws >= MAX_LWS or input == \.none\) return;/);
+}
+
+const workspaces = read('src/workspaces.zig');
+workspaceFocusLandingContract(focusSource, workspaces);
+for (const [before, after] of [
+  ['@import("workspaces.zig").captureWorkspaceFocus();', ''],
+  ['if (GetFocus() == hwnd) focusGuardLanded(hwnd);', 'focusGuardLanded(hwnd);'],
+  ['if (result != 0 and hwnd != app_state.g_main_hwnd) focusGuardLanded(hwnd);', 'focusGuardLanded(hwnd);'],
+]) {
+  const broken = focusSource.replace(before, after);
+  assert.notEqual(broken, focusSource);
+  assert.throws(() => workspaceFocusLandingContract(broken, workspaces), assert.AssertionError);
+}
+console.log('workspace-focus landed surface capture checks passed');
