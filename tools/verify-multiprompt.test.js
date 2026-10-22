@@ -350,11 +350,14 @@ test('IGSH-522: workspace return grants a bounded owned-input handoff, never bac
     ['app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd', 'app_state.shells[idx].browser_hwnd'],
     ['GetTickCount64() + 1500', 'GetTickCount64() + 60000'],
     ['app_state.g_focus_browser_shell_id = 0;', ''],
-    ['        focusActiveShell();\n    } else {', '        app_state.g_focus_user_action_tick = GetTickCount64();\n        focusActiveShell();\n    } else {'],
+    [/        focusActiveShell\(\);\r?\n    } else \{/, '        app_state.g_focus_user_action_tick = GetTickCount64();\n        focusActiveShell();\n    } else {'],
   ]) {
-    const broken = switching.replace(before, after);
-    assert.notEqual(broken, switching);
-    assert.throws(() => assertsWorkspaceFocusHandoff(broken));
+    for (const newline of ['\n', '\r\n']) {
+      const source = switching.replace(/\r?\n/g, newline);
+      const broken = source.replace(before, after);
+      assert.notEqual(broken, source);
+      assert.throws(() => assertsWorkspaceFocusHandoff(broken));
+    }
   }
   const focusJourney = control.slice(control.indexOf("        'workspace-focus' {"), control.indexOf("        'inbox' {"));
   const returning = focusJourney.slice(focusJourney.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
