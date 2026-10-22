@@ -36,7 +36,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
-    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or x.group_id != y.group_id or x.starred_group_id != y.starred_group_id or !layout.sameGroup(x.group, y.group) or !layout.sameGroup(x.starred_group, y.starred_group) or (x.favorite orelse false) != (y.favorite orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -121,14 +121,6 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
                 t.name = edited.tabs[ei].name;
                 t.manual = edited.tabs[ei].manual;
             }
-            if (edited.tabs[ei].group_id != base.tabs[bi].group_id or !layout.sameGroup(edited.tabs[ei].group, base.tabs[bi].group)) {
-                t.group_id = edited.tabs[ei].group_id;
-                t.group = edited.tabs[ei].group;
-            }
-            if (edited.tabs[ei].starred_group_id != base.tabs[bi].starred_group_id or !layout.sameGroup(edited.tabs[ei].starred_group, base.tabs[bi].starred_group)) {
-                t.starred_group_id = edited.tabs[ei].starred_group_id;
-                t.starred_group = edited.tabs[ei].starred_group;
-            }
             if (!eq(u8, edited.tabs[ei].workspace, base.tabs[bi].workspace)) t.workspace = edited.tabs[ei].workspace;
         }
         try tabs.append(a, t);
@@ -191,9 +183,6 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
     try ws.appendSlice(a, remote.workspaces);
     var records: std.array_list.Managed(std.json.Value) = .init(a);
     const old_ws = root.object.get("workspaces");
-    var groups = root.object.get("groups") orelse std.json.Value{ .array = .init(a) };
-    if (groups != .array) return error.InvalidLayout;
-    var group_ids: std.AutoHashMap(u32, u32) = .init(a);
     for (remote.tabs) |t| {
         var record: std.json.Value = .{ .object = .empty };
         for (old.array.items) |r| {
@@ -217,28 +206,6 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         try normalized.object.put(a, "tmux_host", .{ .integer = t.tmux_host });
         try normalized.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, t.workspace).?) });
         try normalized.object.put(a, "manual", .{ .bool = t.manual });
-        inline for (.{ "group_id", "starred_group_id" }, .{ "group", "starred_group" }) |id_key, group_key| {
-            const source_id = @field(t, id_key);
-            var id: u32 = 0;
-            if (source_id != 0) {
-                if (group_ids.get(source_id)) |mapped| {
-                    id = mapped;
-                } else if (@field(t, group_key)) |group| {
-                    var next_id: u32 = source_id;
-                    for (groups.array.items) |existing| next_id = @max(next_id, @as(u32, @intCast(@import("json_reader.zig").uint(existing, "id"))) + 1);
-                    id = next_id;
-                    var value: std.json.Value = .{ .object = .empty };
-                    try value.object.put(a, "id", .{ .integer = id });
-                    try value.object.put(a, "name", .{ .string = group.name });
-                    try value.object.put(a, "collapsed", .{ .bool = group.collapsed });
-                    try value.object.put(a, "color", .{ .integer = group.color });
-                    try value.object.put(a, "color_set", .{ .bool = group.color_set });
-                    try groups.array.append(value);
-                    try group_ids.put(source_id, id);
-                }
-            }
-            try normalized.object.put(a, id_key, .{ .integer = id });
-        }
         if (t.favorite) |favorite| try normalized.object.put(a, "favorite", .{ .bool = favorite });
         const cached_used = record.object.get("used");
         const used = layout.maxUsed(t.used, if (cached_used != null and cached_used.? == .integer and cached_used.?.integer >= 0) @import("json_reader.zig").uint(record, "used") else null);
@@ -314,17 +281,6 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
     } else {
         _ = root.object.swapRemove("settings");
     }
-    var used_groups: std.json.Array = .init(a);
-    for (groups.array.items) |group| {
-        const id = @import("json_reader.zig").uint(group, "id");
-        var used = false;
-        for (records.items) |record| {
-            if (@import("json_reader.zig").uint(record, "group_id") == id or @import("json_reader.zig").uint(record, "starred_group_id") == id) used = true;
-        }
-        if (used) try used_groups.append(group);
-    }
-    if (used_groups.items.len > 64) return error.LayoutCapacity;
-    try root.object.put(a, "groups", .{ .array = used_groups });
     try root.object.put(a, "tabs", .{ .array = records });
     try root.object.put(a, "workspaces", .{ .array = workspaces });
     try root.object.put(a, "workspace_count", .{ .integer = @intCast(ws.items.len) });
@@ -890,40 +846,4 @@ test "ISSUE-423 settings survive apply held edits cache and layout encoding" {
     explicit_defaults.settings = .{};
     try std.testing.expect(equal(initial, explicit_defaults));
     try std.testing.expect(!publishNeeded(initial, explicit_defaults, explicit_defaults));
-}
-
-test "IGSH-556 account rebase and restore cache preserve independent groups" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    var base_tab = one;
-    base_tab.favorite = true;
-    base_tab.group_id = 17;
-    base_tab.group = .{ .name = "Home" };
-    var edited_tab = base_tab;
-    edited_tab.starred_group_id = 29;
-    edited_tab.starred_group = .{ .name = "Favorites", .color = 2 };
-    var remote_tab = base_tab;
-    remote_tab.group_id = 41;
-    remote_tab.group = .{ .name = "Other home" };
-    const base = Layout{ .workspaces = &test_ws, .tabs = &.{base_tab} };
-    const edited = Layout{ .workspaces = &test_ws, .tabs = &.{edited_tab} };
-    const remote = Layout{ .workspaces = &test_ws, .tabs = &.{remote_tab} };
-    const rebased = try rebase(a, base, edited, remote);
-    try std.testing.expectEqual(@as(u32, 41), rebased.tabs[0].group_id);
-    try std.testing.expectEqual(@as(u32, 29), rebased.tabs[0].starred_group_id);
-    try std.testing.expect(!equal(base, edited));
-    const bytes = try prepareCache(a, "{\"tabs\":[]}", rebased);
-    const parsed = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
-    defer parsed.deinit();
-    const record = parsed.value.object.get("tabs").?.array.items[0];
-    const reader = @import("json_reader.zig");
-    const home_id = reader.uint(record, "group_id");
-    const starred_id = reader.uint(record, "starred_group_id");
-    try std.testing.expect(home_id != 0 and starred_id != 0 and home_id != starred_id);
-    try std.testing.expectEqual(@as(usize, 2), parsed.value.object.get("groups").?.array.items.len);
-    const again = try prepareCache(a, bytes, rebased);
-    const restored = try std.json.parseFromSlice(std.json.Value, a, again, .{});
-    defer restored.deinit();
-    try std.testing.expectEqual(@as(usize, 2), restored.value.object.get("groups").?.array.items.len);
 }

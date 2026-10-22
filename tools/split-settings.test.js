@@ -135,7 +135,7 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
   const desktop = read('src/account_desktop.zig');
   const layout = read('src/account_layout.zig');
   const audit = (client, desktop, session) => {
-    assert.ok(client.includes('X-Layout-Features: favorite,used,visits,input,settings,hosts,groups\\r\\n'));
+    assert.ok(client.includes('X-Layout-Features: favorite,used,visits,input,settings,hosts\\r\\n'));
     assert.match(desktop, /return \.\{ \.settings = app_state.g_layout_settings,/);
     assert.match(desktop, /app_state.g_layout_settings = desired.settings;/);
     assert.match(desktop, /TIMER_ACCOUNT_SAVE, 2000/);

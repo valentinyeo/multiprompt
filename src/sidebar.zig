@@ -1106,12 +1106,12 @@ pub fn normalizeGroupOrder() void {
         tmp[written] = app_state.shells[i];
         written += 1;
         consumed[i] = true;
-        const gid = tabGroupId(i);
+        const gid = app_state.shells[i].group_id;
         if (gid == 0) continue;
         var j: u32 = i + 1;
         while (j < app_state.shell_count) : (j += 1) {
             if (consumed[j]) continue;
-            if (tabGroupId(j) == gid) {
+            if (app_state.shells[j].group_id == gid) {
                 tmp[written] = app_state.shells[j];
                 written += 1;
                 consumed[j] = true;
@@ -1172,7 +1172,7 @@ pub inline fn shellSidebarTier(i: usize) SidebarTier {
 
 fn sidebarHasVisibleSessions() bool {
     for (0..app_state.shell_count) |i| {
-        if (!tabInCurrentWorkspace(i)) continue;
+        if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
         if (!tabPassesUnreadFilter(i)) continue;
         return true;
     }
@@ -1426,7 +1426,7 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
         for (0..sorted_n) |si| {
             const i: usize = sorted[si];
             if (!tabPassesUnreadFilter(i)) continue;
-            const gid = tabGroupId(i);
+            const gid = app_state.shells[i].group_id;
             if (gid == 0 and show_section_headers) {
                 const tier = shellSidebarTier(i);
                 if (last_section == null or last_section.? != tier) {
@@ -1465,8 +1465,8 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
         const gid = app_state.groups[gidx].id;
         var has_visible_member = false;
         for (0..app_state.shell_count) |i| {
-            if (tabGroupId(i) != gid) continue;
-            if (!tabInCurrentWorkspace(i)) continue;
+            if (app_state.shells[i].group_id != gid) continue;
+            if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
             if (!tabPassesUnreadFilter(i)) continue;
             has_visible_member = true;
             break;
@@ -1480,8 +1480,8 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
         while (member_tier_pass >= @intFromEnum(SidebarTier.recent)) : (member_tier_pass -= 1) {
             const member_tier: SidebarTier = @enumFromInt(@as(u1, @intCast(member_tier_pass)));
             for (0..app_state.shell_count) |i| {
-                if (tabGroupId(i) != gid) continue;
-                if (!tabInCurrentWorkspace(i)) continue;
+                if (app_state.shells[i].group_id != gid) continue;
+                if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
                 if (!tabPassesUnreadFilter(i) or shellSidebarTier(i) != member_tier) continue;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gidx), .shell_idx = @intCast(i), .y = y };
                 count += 1;
@@ -1496,9 +1496,9 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
         if (show_section_headers) {
             var has_section_tabs = false;
             for (0..app_state.shell_count) |i| {
-                if (!tabInCurrentWorkspace(i)) continue;
+                if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
                 if (!tabPassesUnreadFilter(i)) continue;
-                if (tabGroupId(i) != 0 or shellSidebarTier(i) != want_tier) continue;
+                if (app_state.shells[i].group_id != 0 or shellSidebarTier(i) != want_tier) continue;
                 has_section_tabs = true;
                 break;
             }
@@ -1510,9 +1510,9 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
             }
         }
         for (0..app_state.shell_count) |i| {
-            if (!tabInCurrentWorkspace(i)) continue;
+            if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
             if (!tabPassesUnreadFilter(i)) continue;
-            if (tabGroupId(i) != 0 or shellSidebarTier(i) != want_tier) continue;
+            if (app_state.shells[i].group_id != 0 or shellSidebarTier(i) != want_tier) continue;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();

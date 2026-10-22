@@ -106,7 +106,7 @@
   ["app_state.zig", "var g_pollshell_count"],
   ["diagnostics.zig", "fn logPollShellEnter"],
   ["session.zig", "fn saveSessionTo"],
-  ["account_desktop.zig", "fn captureLayoutGroup"],
+  ["account_desktop.zig", "fn captureSessionLayout"],
   ["app_state.zig", "var g_account_locked"],
   ["account_desktop.zig", "fn accountJobFree"],
   ["app_state.zig", "const AccountClosed"],

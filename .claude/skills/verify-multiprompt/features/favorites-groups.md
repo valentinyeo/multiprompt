@@ -27,5 +27,6 @@ Preconditions: baseline Doctor passes on a fresh single-window instance with its
 ## Gotchas
 
 - Groups use their real default saved names. This journey does not type into an inline rename editor or seed JSON.
-- This covers local CMD membership independence, not remote windows, account sync, all group context actions or relaunch persistence.
+- Group memberships are local to this device; account layout sync is unchanged and does not sync groups across devices.
+- This journey covers local CMD membership independence, not remote windows, all group context actions or relaunch persistence.
 - Static contract checks are not proof of a passed Windows journey; GitHub must run the real desktop verification.

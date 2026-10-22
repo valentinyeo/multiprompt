@@ -5,27 +5,11 @@ const Allocator = std.mem.Allocator;
 pub const max_bytes = 1024 * 1024;
 pub const Host = @import("account_hosts.zig").Host;
 pub const Workspace = struct { name: []const u8 };
-pub const Group = struct {
-    name: []const u8,
-    collapsed: bool = false,
-    color: u8 = 7,
-    color_set: bool = false,
-};
-
-pub fn sameGroup(a: ?Group, b: ?Group) bool {
-    if (a == null or b == null) return a == null and b == null;
-    return std.mem.eql(u8, a.?.name, b.?.name) and a.?.collapsed == b.?.collapsed and a.?.color == b.?.color and a.?.color_set == b.?.color_set;
-}
-
 pub const Tab = struct {
     kind: []const u8 = "tmux",
     name: []const u8,
     manual: bool = false,
     favorite: ?bool = null,
-    group_id: u32 = 0,
-    starred_group_id: u32 = 0,
-    group: ?Group = null,
-    starred_group: ?Group = null,
     used: ?u64 = null,
     input: ?u64 = null,
     visits: ?[]const u64 = null,
@@ -76,9 +60,6 @@ pub fn validate(layout: Layout) !void {
     for (layout.tabs, 0..) |tab, i| {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
-        for ([_]?Group{ tab.group, tab.starred_group }) |maybe_group| {
-            if (maybe_group) |group| if (!validText(group.name, 64) or group.color >= 8) return error.InvalidLayout;
-        }
         if (tab.used) |used| if (used > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.input) |input| if (input > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.visits) |visits| {
@@ -523,24 +504,4 @@ test "ISSUE-423 settings reject unknown keys and every nonboolean value through 
             } else |_| {}
         }
     }
-}
-
-test "IGSH-556 account layout round trip keeps independent group ids and old defaults" {
-    const a = std.testing.allocator;
-    var tab = test_tab;
-    tab.favorite = true;
-    tab.group_id = 17;
-    tab.starred_group_id = 29;
-    tab.group = .{ .name = "Home", .color = 2 };
-    tab.starred_group = .{ .name = "Favorites", .collapsed = true };
-    const bytes = try encode(a, .{ .workspaces = &test_ws, .tabs = &.{tab} });
-    defer a.free(bytes);
-    const restored = try parse(a, bytes);
-    defer restored.deinit();
-    try std.testing.expectEqual(@as(u32, 17), restored.value.tabs[0].group_id);
-    try std.testing.expectEqual(@as(u32, 29), restored.value.tabs[0].starred_group_id);
-    try std.testing.expect(sameGroup(tab.starred_group, restored.value.tabs[0].starred_group));
-    const legacy = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"Old\",\"tmux_session\":\"old\",\"tmux_host\":0,\"workspace\":\"Other\"}]}");
-    defer legacy.deinit();
-    try std.testing.expectEqual(@as(u32, 0), legacy.value.tabs[0].starred_group_id);
 }
