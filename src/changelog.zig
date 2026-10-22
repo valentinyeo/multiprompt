@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.821", .items = &.{
+        .{ .text = "Multiprompt always opens maximized when you start or relaunch it.", .ticket = "IGSH-587" },
+    } },
     .{ .ver = "0.28.820", .items = &.{
         .{ .text = "In Chat View, Ctrl+X then Ctrl+S sends your message into a busy Claude session right away, like Claude's own Ctrl+X Ctrl+S.", .ticket = "IGSH-564" },
     } },
