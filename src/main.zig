@@ -3420,7 +3420,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_SEND => {
-            sendChatPrompt();
+            if (wp == 1) @import("chat_send.zig").chatSteerPrompt() else sendChatPrompt();
             return 0;
         },
         WM_APP_VOICE_SPEECH_START => {
