@@ -462,6 +462,10 @@ pub fn appendJsonEscaped(out: []u8, pos: *usize, value: []const u8) void {
 }
 
 fn lockWorkspaceRegistry() HANDLE {
+    return lockWorkspaceRegistryWithTimeout(if (app_state.g_main_hwnd != null and @import("launch_cache.zig").pending and !app_state.g_account_locked) 0 else 5000);
+}
+
+fn lockWorkspaceRegistryWithTimeout(timeout: DWORD) HANDLE {
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return null;
     var name_buf: [96]u8 = undefined;
@@ -469,7 +473,7 @@ fn lockWorkspaceRegistry() HANDLE {
     var wide: [96]u16 = std.mem.zeroes([96]u16);
     for (name, 0..) |c, i| wide[i] = c;
     const mutex = CreateMutexW(null, 0, @ptrCast(&wide)) orelse return null;
-    const result = WaitForSingleObject(mutex, if (app_state.g_main_hwnd != null and @import("launch_cache.zig").pending) 0 else 5000);
+    const result = WaitForSingleObject(mutex, timeout);
     if (result != 0 and result != 0x80) {
         _ = CloseHandle(mutex);
         return null;
@@ -987,6 +991,37 @@ pub fn removeMyHostedEntriesAndSave() void {
         wi += 1;
     }
     if (removed) writeWorkspaceRegistryFile();
+}
+
+var startup_registry_retries: u32 = 0;
+var startup_registry_waiting = false;
+var startup_registry_ready = std.atomic.Value(bool).init(false);
+
+fn startupRegistryWaitWorker() void {
+    if (lockWorkspaceRegistryWithTimeout(5000)) |mutex| unlockWorkspaceRegistry(mutex);
+    startup_registry_ready.store(true, .release);
+}
+
+pub fn reconcileStartupWorkspaceRegistry(force_scan: bool) bool {
+    if (startup_registry_waiting) {
+        if (!startup_registry_ready.load(.acquire)) return false;
+        startup_registry_waiting = false;
+        startup_registry_retries = 0;
+        _ = reconcileWorkspaceRegistry(force_scan);
+        return true;
+    }
+    if (reconcileWorkspaceRegistry(force_scan)) {
+        startup_registry_retries = 0;
+        return true;
+    }
+    startup_registry_retries += 1;
+    if (startup_registry_retries < 100) return false;
+    startup_registry_retries = 0;
+    startup_registry_ready.store(false, .release);
+    const thread = std.Thread.spawn(.{}, startupRegistryWaitWorker, .{}) catch return true;
+    startup_registry_waiting = true;
+    thread.detach();
+    return false;
 }
 
 pub fn reconcileWorkspaceRegistry(force_scan: bool) bool {

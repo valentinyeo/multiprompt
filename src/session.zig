@@ -1559,7 +1559,7 @@ pub fn restoreSession() u32 {
     var restored_active_shell_id: u32 = 0;
     var restored_shell_ids: [MAX_SHELLS]u32 = [_]u32{0} ** MAX_SHELLS;
     for (0..tab_count) |t| {
-        if (@import("launch_cache.zig").closedDuringStartup(tabs[t].chat_id)) continue;
+        if (@import("launch_cache.zig").closedDuringStartup(tabs[t].shell_id)) continue;
         if (tmux_identity.restoreWinner(tabs[0..tab_count], t) != t) continue;
         const ok = if (chatBenchEnabled() and isRemoteShellKind(tabs[t].kind)) false else spawnSavedTab(&tabs[t], .continue_latest);
         if (ok) {
@@ -1624,14 +1624,16 @@ pub fn restoreSession() u32 {
         }
     }
 
-    const selected_chat = @import("launch_cache.zig").selected_chat_id;
-    if (@import("launch_cache.zig").pending and selected_chat != 0) {
-        for (app_state.shells[0..app_state.shell_count], 0..) |shell, i| {
-            if (shell.chat_id == selected_chat) {
-                app_state.active_shell = @intCast(i);
-                app_state.g_active_workspace = shell.workspace;
-                break;
+    const selected_shell = @import("launch_cache.zig").selected_shell_id;
+    if (@import("launch_cache.zig").pending and selected_shell != 0) {
+        for (tabs[0..tab_count], 0..) |tab, t| {
+            if (tab.shell_id != selected_shell) continue;
+            const restored_id = restored_shell_ids[tmux_identity.restoreWinner(tabs[0..tab_count], t)];
+            if (findShellById(restored_id)) |idx| {
+                app_state.active_shell = idx;
+                app_state.g_active_workspace = app_state.shells[idx].workspace;
             }
+            break;
         }
     }
     const selected_live = @import("launch_cache.zig").selected_live_shell_id;

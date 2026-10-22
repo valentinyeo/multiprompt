@@ -39,7 +39,7 @@ const std = @import("std");
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
-    kind: ShellKind = .tmux, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
+    kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
@@ -125,6 +125,23 @@ function runtime(tests) {
   return prelude + functions.map(name => body(name).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm')).join('\n') + tests;
 }
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
+  test('ISSUE-543 loading remote tabs ignore timer disconnect manual reconnect and resume signals', async () => {
+    await zig(runtime(`
+test "ISSUE-543 loading remote tabs" {
+    for ([_]ShellKind{ .tmux, .vps, .vps2 }) |kind| {
+        shells[0] = .{ .kind = kind, .console_inflight = true, .process = null };
+        sshAutoReconnectTick();
+        sshDisconnect(0, "test");
+        markSshTabDisconnected(0);
+        sshReconnectNow(0);
+        sshReconnectArm(null, "resume");
+        try std.testing.expect(!shells[0].disconnected);
+        try std.testing.expectEqual(@as(usize, 0), spawns);
+        try std.testing.expectEqual(@as(usize, 0), kills);
+    }
+}
+`), 'ISSUE-543 loading');
+  });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
     if (modern) {
       await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-501 imported logic" { _ = reconnect; }', 'ISSUE-501');

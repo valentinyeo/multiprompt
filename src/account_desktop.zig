@@ -361,6 +361,7 @@ fn accountLock() void {
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
+    _ = KillTimer(app_state.g_main_hwnd, @import("launch_cache.zig").TIMER_STARTUP);
     app_state.g_account_dirty_at = 0;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     app_state.g_search_active = false;
@@ -507,22 +508,22 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
     const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
     var ssh_buf: [1024]u8 = undefined;
     var ssh_len: usize = 0;
-    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return &.{};
+    if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
     const ssh = ssh_buf[0..ssh_len];
     const path = std.mem.trim(u8, ssh, "\" ");
-    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return &.{};
+    const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return error.SshUnavailable;
     const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
     var profile_buf: [512]u8 = undefined;
     const n = GetEnvironmentVariableA("USERPROFILE", &profile_buf, profile_buf.len);
-    if (n == 0 or n >= profile_buf.len) return &.{};
+    if (n == 0 or n >= profile_buf.len) return error.Storage;
     const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
     const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
     const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
     var hosts: std.ArrayList(account_hosts.Host) = .empty;
     for (aliases, names, 0..) |alias, name, slot| {
         const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
-        const output = accountSshOutput(a, command, 5000) catch continue;
-        const resolved = account_hosts.parseSshConfig(output) orelse continue;
+        const output = try accountSshOutput(a, command, 5000);
+        const resolved = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
         const missing = account_hosts.shouldImport(alias, resolved);
         var incoming: ?account_hosts.Host = null;
         if (missing) {
@@ -801,6 +802,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     };
 }
 fn layoutSyncWorker(submitted: AccountJob) void {
+    _ = @import("console.zig").resolveSshPath(false);
     const job = if (submitted.kind == .startup and submitted.base == null and submitted.edited == null) accountResumeJob(.startup) else submitted;
     const a = std.heap.page_allocator;
     const reply = a.create(LayoutReply) catch {
@@ -1075,7 +1077,11 @@ pub fn resumeStartupReply() void {
 pub fn handleLayoutReply(lp: LPARAM) void {
     if (lp != 0 and @import("launch_cache.zig").pending) {
         const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
-        if (!reply.unauthorized and !reply.signed_out and reply.job.kind == .startup) {
+        if (!reply.unauthorized and !reply.signed_out and !reply.cancelled and (reply.job.kind == .startup or (reply.job.kind == .login and reply.bytes != null))) {
+            if (app_state.g_account_locked and reply.bytes != null) {
+                app_state.g_account_locked = false;
+                _ = PostMessageW(app_state.g_main_hwnd, @import("launch_cache.zig").WM_DEFERRED, 0, 0);
+            }
             startup_reply = lp;
             return;
         }

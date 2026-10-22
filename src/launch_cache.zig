@@ -15,12 +15,11 @@ pub var cached = false;
 var started: i64 = 0;
 var frequency: i64 = 1;
 var chat_id: u64 = 0;
-pub var selected_chat_id: u64 = 0;
+pub var selected_shell_id: u32 = 0;
 pub var selected_live_shell_id: u32 = 0;
 var cached_ids: [state.MAX_SHELLS]u32 = @splat(0);
-var cached_chat_ids: [state.MAX_SHELLS]u64 = @splat(0);
 var cached_count: usize = 0;
-var closed_chats: [state.MAX_SHELLS]u64 = @splat(0);
+var closed_shells: [state.MAX_SHELLS]u32 = @splat(0);
 var closed_count: usize = 0;
 var sidebar_painted = false;
 var chat_painted = false;
@@ -88,7 +87,6 @@ pub fn restore() void {
         shell.shell_id = row.id;
         state.next_shell_id = @max(state.next_shell_id, row.id +| 1);
         cached_ids[i] = row.id;
-        cached_chat_ids[i] = row.chat_id;
         shell.chat_id = row.chat_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
@@ -147,8 +145,8 @@ pub fn deferred() void {
     debugLog(std.fmt.bufPrint(&buf, "launch deferred-start ms={d}", .{elapsed()}) catch return);
     if (cached) {
         const selected_id = if (state.active_shell < state.shell_count) state.shells[state.active_shell].shell_id else 0;
-        if (state.active_shell < state.shell_count) selected_chat_id = state.shells[state.active_shell].chat_id;
-        for (cached_ids[0..cached_count], cached_chat_ids[0..cached_count]) |id, chat| {
+        if (state.active_shell < state.shell_count) selected_shell_id = state.shells[state.active_shell].shell_id;
+        for (cached_ids[0..cached_count]) |id| {
             var present = false;
             for (state.shells[0..state.shell_count]) |shell| {
                 if (shell.shell_id == id) {
@@ -156,8 +154,8 @@ pub fn deferred() void {
                     break;
                 }
             }
-            if (!present and chat != 0) {
-                closed_chats[closed_count] = chat;
+            if (!present) {
+                closed_shells[closed_count] = id;
                 closed_count += 1;
             }
         }
@@ -177,8 +175,8 @@ pub fn deferred() void {
     }
 }
 
-pub fn closedDuringStartup(chat: u64) bool {
-    return pending and chat != 0 and std.mem.indexOfScalar(u64, closed_chats[0..closed_count], chat) != null;
+pub fn closedDuringStartup(shell_id: u32) bool {
+    return pending and shell_id != 0 and std.mem.indexOfScalar(u32, closed_shells[0..closed_count], shell_id) != null;
 }
 
 pub fn bindRestoredChat() void {

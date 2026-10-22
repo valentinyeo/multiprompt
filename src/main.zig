@@ -1339,11 +1339,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         return 0;
     }
     if (msg == launch_cache.WM_DEFERRED) {
-        if (!launch_cache.pending) return 0;
+        if (!launch_cache.pending or app_state.g_account_locked) return 0;
         _ = SetTimer(hwnd, launch_cache.TIMER_STARTUP, 10, null);
         return 0;
     }
     if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP) {
+        if (app_state.g_account_locked) {
+            _ = KillTimer(hwnd, launch_cache.TIMER_STARTUP);
+            return 0;
+        }
         if (app_state.g_app_closing or initializeDeferred(hwnd)) {
             _ = KillTimer(hwnd, launch_cache.TIMER_STARTUP);
             launch_cache.pending = false;
@@ -6641,6 +6645,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             }
             if (idx_opt) |idx| {
+                if (app_state.shells[idx].console_inflight) return 0;
                 var exit_code: DWORD = std.math.maxInt(DWORD);
                 const got_code = app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0;
                 if (app_state.shells[idx].ssh_reconnect.phase == .closed or
@@ -7919,7 +7924,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .workspace_registry => {
             migrateWorkspacesFromSessionFiles();
-            if (!reconcileWorkspaceRegistry(true)) return false;
+            if (!@import("workspaces.zig").reconcileStartupWorkspaceRegistry(true)) return false;
         },
         .browser_config => {
             loadBrowserEngineConfig();
@@ -8006,7 +8011,9 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             launch_cache.step(.links);
             if (std.Thread.spawn(.{}, notifyListenerThread, .{})) |notify_thread| {
                 notify_thread.detach();
-            } else |_| {}
+            } else |_| {
+                @import("notifications.zig").listener_status.store(.failed, .release);
+            }
             startTunnelInboundListener();
             if (!@import("session.zig").prepareStartupRestore()) {
                 showHeaderNoticeAscii("Could not start session restore", 5000, true);
@@ -8015,6 +8022,14 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .tabs => {
             if (app_state.g_account_locked or !@import("session.zig").startupRestoreReady()) return false;
+            switch (@import("notifications.zig").listener_status.load(.acquire)) {
+                .pending => return false,
+                .failed => {
+                    showHeaderNoticeAscii("Could not start the notification listener. Relaunch to retry.", 30000, true);
+                    return true;
+                },
+                .ready => {},
+            }
             launch_cache.deferred();
             launch_cache.step(.tabs);
             app_state.g_startup_progress = true;
@@ -8126,7 +8141,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             _ = EnumWindows(&enumCloseStrayZspane, 0);
         },
         .publish => {
-            if (!reconcileWorkspaceRegistry(false)) return false;
+            if (!@import("workspaces.zig").reconcileStartupWorkspaceRegistry(false)) return false;
             publishInboxState();
         },
         .updates => {
