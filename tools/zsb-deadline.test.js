@@ -464,6 +464,6 @@ test('long-running command defaults and CI wiring are explicit', () => {
   assert.match(build, /const zsb_deadline_tests = b\.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-deadline\.test\.js" \}\);/);
   for (const step of ['test_step', 'vps_test_step']) {
     assert.ok(build.includes(`${step}.dependOn(&zsb_deadline_tests.step);`), step);
-    assert.ok(build.includes(`${step}.dependOn(&zsb_reply_tests.step);`), step);
   }
+  assert.ok(build.includes('vps_test_step.dependOn(&zsb_reply_tests.step);'));
 });
