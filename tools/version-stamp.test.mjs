@@ -274,6 +274,43 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   assert.equal(r.git('ls-tree', '-r', '--name-only', 'origin/master', '--', 'changelog.d'), 'changelog.d/README.md');
 });
 
+for (const outcome of ['green', 'red', 'pending']) test({ green: 'release merges its own PR after green checks when auto-merge is refused', red: 'release does not merge on a red check when auto-merge is refused', pending: 'release does not merge while checks are pending when auto-merge is refused' }[outcome], { skip: process.platform === 'win32' }, t => {
+  const r = repo(t, { ...base(), 'changelog.d/DEMO-2-release.md': 'Feature.\n' });
+  const remote = path.join(r.dir, 'origin.git');
+  r.git('init', '--bare', remote);
+  r.git('remote', 'add', 'origin', remote);
+  r.git('push', 'origin', 'master');
+  const bin = path.join(r.dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nconst log = event => fs.appendFileSync(process.env.GH_LOG, JSON.stringify(event) + '\\n');\nlog({ args });\nconst stateFile = process.env.GH_STATE;\nconst state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { created: false, merged: false, views: 0 };\nconst outcome = process.env.GH_OUTCOME;\nif (args[1] === 'create') { state.created = true; console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'list') console.log(JSON.stringify(state.created && !state.merged ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'merge' && args.includes('--auto')) { console.error('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'); process.exit(1); }\nelse if (args[1] === 'merge') { execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state.merged = true; }\nelse if (args[1] === 'view') { state.views++; const green = outcome === 'green' && state.views >= 4; const checks = outcome === 'red' ? [{ __typename: 'CheckRun', name: 'windows-release', status: 'COMPLETED', conclusion: 'FAILURE' }] : green ? [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }, { __typename: 'CheckRun', name: 'optional', status: 'COMPLETED', conclusion: 'SKIPPED' }, { __typename: 'CheckRun', name: 'neutral', status: 'COMPLETED', conclusion: 'NEUTRAL' }, { __typename: 'StatusContext', context: 'external', state: 'SUCCESS' }] : outcome === 'green' && state.views === 2 ? [] : outcome === 'green' && state.views === 3 ? [{ __typename: 'StatusContext', context: 'external', state: 'EXPECTED' }] : [{ __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null }, { __typename: 'CheckRun', name: 'optional', status: 'QUEUED', conclusion: null }]; const view = { state: state.merged ? 'MERGED' : outcome === 'pending' && state.views >= 5 ? 'CLOSED' : 'OPEN', statusCheckRollup: state.views % 2 ? checks.reverse() : checks }; log({ view }); console.log(JSON.stringify(view)); }\nelse process.exit(2);\nfs.writeFileSync(stateFile, JSON.stringify(state));\n`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_OUTCOME: outcome, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, outcome === 'green' ? 0 : 1, result.stderr);
+  assert.match(result.stderr, /Auto merge is not allowed for this repository/);
+  const events = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const requests = events.filter(event => event.args).map(event => event.args);
+  assert.equal(requests.some(args => args.includes('--admin')), false);
+  assert.equal(requests.filter(args => args[1] === 'merge' && args.includes('--auto')).length, 1);
+  const merges = requests.filter(args => args[1] === 'merge' && !args.includes('--auto'));
+  if (outcome === 'green') {
+    assert.match(result.stdout, /NOTHING_TO_STAMP 0\.28\.736/);
+    assert.deepEqual(merges, [['pr', 'merge', '1', '--squash', '--delete-branch']]);
+    const mergeIndex = events.findIndex(event => event.args?.[1] === 'merge' && !event.args.includes('--auto'));
+    const views = events.slice(0, mergeIndex).filter(event => event.view).map(event => event.view);
+    assert.equal(views.length, 5);
+    assert.deepEqual(views.slice(-2).map(view => view.statusCheckRollup.map(check => check.name || check.context).sort()), [['external', 'neutral', 'optional', 'test'], ['external', 'neutral', 'optional', 'test']]);
+    for (const view of views.slice(-2)) assert.ok(view.statusCheckRollup.every(check => check.__typename === 'CheckRun' ? check.status === 'COMPLETED' && ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(check.conclusion) : check.state === 'SUCCESS'));
+    assert.ok(events.slice(mergeIndex + 1).some(event => event.view?.state === 'MERGED'));
+    assert.equal(r.git('show', 'origin/master:src/main.zig'), main.replace('735', '736').trim());
+  } else {
+    assert.equal(merges.length, 0);
+    assert.match(result.stderr, outcome === 'red' ? /Release PR check failed \(windows-release\)/ : /Release PR closed without merging/);
+    assert.equal(events.filter(event => event.view).length, outcome === 'red' ? 1 : 5);
+    assert.equal(r.git('show', 'origin/master:src/main.zig'), main.trim());
+  }
+  assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
+});
+
 test('installer rejects obsolete PC source directory usage without consulting gh or lh', { skip: process.platform === 'win32' }, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'version-install-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
