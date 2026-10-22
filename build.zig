@@ -534,12 +534,17 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&chat_view_console_visibility_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
+    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    if (b.graph.host.result.os.tag == .windows) {
+        zsb_deadline_tests.step.dependOn(&bridge_install.step);
+        zsb_deadline_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+    }
+    test_step.dependOn(&zsb_deadline_tests.step);
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
-    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
     vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);

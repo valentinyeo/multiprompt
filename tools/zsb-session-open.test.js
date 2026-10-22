@@ -83,7 +83,7 @@ test('global and per-command help document workspace commands without session co
 
 test('CLI transport connects directly to the IPv4 bridge without localhost address fallback', () => {
   const source = fs.readFileSync(wrapper, 'utf8');
-  assert.match(source, /socket\.create_connection\(\("127\.0\.0\.1", int\(port\)\), timeout=5\)/);
+  assert.match(source, /socket\.create_connection\(\("127\.0\.0\.1", int\(port\)\), timeout=min\(5, timeout\)\)/);
 });
 
 test('workspace-list sends a session-independent app request and preserves the complete JSON result', async () => {
