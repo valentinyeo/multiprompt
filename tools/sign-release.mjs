@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+const encoded = process.env.MULTIPROMPT_RELEASE_SIGNING_KEY || '';
+if (!/^[A-Za-z0-9+/]{43}=$/.test(encoded)) throw new Error('Configure MULTIPROMPT_RELEASE_SIGNING_KEY as base64 raw 32-byte Ed25519 seed');
+const seed = Buffer.from(encoded, 'base64');
+const key = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
+seed.fill(0);
+delete process.env.MULTIPROMPT_RELEASE_SIGNING_KEY;
+const expected = Buffer.from(fs.readFileSync('src/release_signing_public_key.txt', 'utf8').trim(), 'base64');
+const publicKey = createPublicKey(key);
+if (expected.length !== 32 || expected.every(byte => byte === 0) || !publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).equals(expected)) throw new Error('Release signing key does not match the embedded public key');
+const manifest = fs.readFileSync('dist/SHA256SUMS.txt');
+const signature = sign(null, manifest, key);
+if (!verify(null, manifest, publicKey, signature)) throw new Error('Release manifest signature self-check failed');
+fs.writeFileSync('dist/SHA256SUMS.txt.sig', signature);
+console.log('Release checksum manifest signed and verified');

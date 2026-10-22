@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
@@ -20,15 +19,15 @@ function body(source, name) {
 }
 
 function responsiveOrdering(main, consoleSource, session) {
-  const dispatch = body(main, 'wndProc');
-  const posted = dispatch.slice(dispatch.indexOf('if (msg == launch_cache.WM_DEFERRED)'), dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'));
-  assert.match(posted, /SetTimer\(hwnd, launch_cache\.TIMER_STARTUP/);
-  assert.doesNotMatch(posted, /initializeDeferred|launch_cache\.deferred/);
   const initialize = body(main, 'initializeDeferred');
   assert.match(initialize, /switch \(startup_phase\)/);
   assert.doesNotMatch(initialize, /Sleep\(|WaitFor|resolveSshPath\(|pollShellNames\(/);
   assert.match(initialize, /startupRestoreReady\(\)\) return false/);
   assert.ok(initialize.indexOf('startupRestoreReady()') < initialize.indexOf('launch_cache.deferred()'));
+  const dispatch = body(main, 'wndProc');
+  const posted = dispatch.slice(dispatch.indexOf('if (msg == launch_cache.WM_DEFERRED)'), dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'));
+  assert.match(posted, /SetTimer\(hwnd, launch_cache\.TIMER_STARTUP/);
+  assert.doesNotMatch(posted, /initializeDeferred|launch_cache\.deferred/);
   const spawn = body(consoleSource, 'spawnShellWithSession');
   const asyncStart = spawn.indexOf('if (asynchronous) {');
   assert.notEqual(asyncStart, -1);
@@ -79,25 +78,25 @@ test('ISSUE-543 startup returns to input-priority timers before waiting on any c
 });
 
 test('IGSH-522 phased startup persists the initial session after consoles finish and saving is unblocked', () => {
-  const verify = main => {
-    const dispatch = body(main, 'wndProc');
-    const timer = dispatch.slice(dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'), dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_SAVE)'));
+  const verify = (timer, initialize) => {
     assert.match(timer, /if \(app_state\.g_app_closing or initializeDeferred\(hwnd\)\) \{\s*_ = KillTimer\(hwnd, launch_cache\.TIMER_STARTUP\);\s*launch_cache\.pending = false;\s*saveSession\(\);\s*launch_cache\.changed\(\);/);
-    const initialize = body(main, 'initializeDeferred');
     assert.ok(initialize.indexOf('startup_inflight.load(.acquire) != 0) return false') < initialize.indexOf('.done => return true'));
     assert.match(initialize, /startup_inflight\.load\(\.acquire\) != 0\) return false/);
   };
   const main = read('src/main.zig');
-  verify(main);
+  const dispatch = body(main, 'wndProc');
+  const timer = dispatch.slice(dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'), dispatch.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_SAVE)'));
+  const initialize = body(main, 'initializeDeferred');
+  verify(timer, initialize);
   for (const replacement of [
     'launch_cache.pending = false;',
     'saveSession();\n            launch_cache.pending = false;',
   ]) {
     const original = 'launch_cache.pending = false;\n            saveSession();';
-    assert.ok(main.includes(original));
-    assert.throws(() => verify(main.replace(original, replacement)), assert.AssertionError);
+    assert.ok(timer.includes(original));
+    assert.throws(() => verify(timer.replace(original, replacement), initialize), assert.AssertionError);
   }
-  assert.throws(() => verify(execFileSync('git', ['show', '2031a233bb99897988a93e498c2fe3b42bc40e9e:src/main.zig'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })), assert.AssertionError);
+  assert.throws(() => verify(read('tools/fixtures/igsh-543/save-before/startup-timer.zig'), body(read('tools/fixtures/igsh-543/save-before/main.zig'), 'initializeDeferred')), { code: 'ERR_ASSERTION', operator: 'match' });
 });
 
 test('ISSUE-543 hidden browser beacons get tool-window ownership before docking', () => {
@@ -159,17 +158,15 @@ test('ISSUE-543 startup retries contested registry ownership without waiting on 
   assert.match(initialize, /reconcileStartupWorkspaceRegistry\(false\)\) return false/);
 });
 
-if (process.env.STARTUP_BEFORE_REF) {
-  const before = file => execFileSync('git', ['show', `${process.env.STARTUP_BEFORE_REF}:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
-  test('ISSUE-543 negative control: the real pre-fix UI startup fails the responsiveness oracle', () => {
-    assert.throws(() => responsiveOrdering(before('src/main.zig'), before('src/console.zig'), before('src/session.zig')), assert.AssertionError);
-  });
-  test('ISSUE-543 negative control: the real pre-fix visible browser launch fails the taskbar oracle', () => {
-    assert.throws(() => taskbarOrdering(before('src/browser_pane.zig')), assert.AssertionError);
-  });
-}
+const before = file => read(`tools/fixtures/igsh-543/startup-before/${path.basename(file)}`);
+test('ISSUE-543 negative control: the real pre-fix UI startup fails the responsiveness oracle', () => {
+  assert.throws(() => responsiveOrdering(before('src/main.zig'), before('src/console.zig'), before('src/session.zig')), { code: 'ERR_ASSERTION', operator: 'match' });
+});
+test('ISSUE-543 negative control: the real pre-fix visible browser launch fails the taskbar oracle', () => {
+  assert.throws(() => taskbarOrdering(before('src/browser_pane.zig')), { code: 'ERR_ASSERTION', operator: 'match' });
+});
 
-const reviewBefore = file => execFileSync('git', ['show', `cb15de6:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+const reviewBefore = file => read(`tools/fixtures/igsh-543/review-before/${path.basename(file)}`);
 const reviewCases = [
   ['loading shells bypass reconnect until worker completion', read => {
     const consoleSource = read('src/console.zig');
@@ -193,7 +190,7 @@ const reviewCases = [
     const worker = body(source, 'startupShellWorker');
     assert.ok(worker.indexOf('killProcessTree(job.old_pid)') < worker.indexOf('CreateProcessW('));
     assert.match(worker, /CloseHandle\(job\.old_process\)/);
-  }],
+  }, 'doesNotMatch'],
   ['cached zero-chat tab close and selection use saved shell identity', read => {
     const source = read('src/launch_cache.zig');
     const deferred = body(source, 'deferred');
@@ -207,11 +204,11 @@ const reviewCases = [
     assert.match(restore, /findShellById\(restored_id\)/);
   }],
   ['signed-out startup timer stops and sign-in resumes the saved phase', read => {
+    const account = read('src/account_desktop.zig');
+    assert.match(body(account, 'accountLock'), /KillTimer\([^;]*TIMER_STARTUP/);
     const main = body(read('src/main.zig'), 'wndProc');
     const timer = main.slice(main.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_STARTUP)'), main.indexOf('if (msg == WM_TIMER and wp == launch_cache.TIMER_SAVE)'));
     assert.match(timer, /if \(app_state\.g_account_locked\) \{\s*_ = KillTimer\(hwnd, launch_cache\.TIMER_STARTUP\);\s*return 0/);
-    const account = read('src/account_desktop.zig');
-    assert.match(body(account, 'accountLock'), /KillTimer\([^;]*TIMER_STARTUP/);
     const reply = body(account, 'handleLayoutReply');
     assert.match(reply, /reply\.job\.kind == \.login and reply\.bytes != null/);
     assert.match(reply, /g_account_locked = false;\s*_ = PostMessageW\([^;]*WM_DEFERRED/);
@@ -219,6 +216,7 @@ const reviewCases = [
   }],
   ['registry retries are capped before a background five-second fallback', read => {
     const source = read('src/workspaces.zig');
+    assert.match(body(source, 'lockWorkspaceRegistry'), /pending and !app_state\.g_account_locked\) 0 else 5000/);
     const reconcile = body(source, 'reconcileStartupWorkspaceRegistry');
     assert.match(reconcile, /startup_registry_retries < 100\) return false/);
     assert.match(reconcile, /Thread\.spawn\([^;]*startupRegistryWaitWorker/);
@@ -227,7 +225,6 @@ const reviewCases = [
     assert.match(finish, /_ = reconcileWorkspaceRegistry\(force_scan\);\s*return true/);
     assert.match(body(source, 'startupRegistryWaitWorker'), /lockWorkspaceRegistryWithTimeout\(5000\)/);
     assert.match(body(source, 'startupRegistryWaitWorker'), /unlockWorkspaceRegistry\(mutex\)/);
-    assert.match(body(source, 'lockWorkspaceRegistry'), /pending and !app_state\.g_account_locked\) 0 else 5000/);
   }],
   ['account SSH discovery resolves before startup and cannot publish an unresolved empty list', read => {
     const source = read('src/account_desktop.zig');
@@ -244,7 +241,7 @@ const reviewCases = [
     assert.match(request, /if \(hosts_ready\) synced_hosts else server\.value\.hosts/);
     const resolve = body(read('src/console.zig'), 'resolveSshPath');
     assert.match(resolve, /defer app_state\.g_ssh_resolved = true/);
-  }],
+  }, '=='],
   ['tabs await the published notification listener port', read => {
     const source = read('src/main.zig');
     const init = body(source, 'initializeDeferred');
@@ -254,7 +251,7 @@ const reviewCases = [
     assert.match(tabs, /\.failed => \{[^}]*showHeaderNoticeAscii[^}]*return true/);
     const listener = body(read('src/notifications.zig'), 'notifyListenerThread');
     assert.ok(listener.indexOf('g_notify_bound_port = bound_port') < listener.indexOf('listener_status.store(.ready, .release)'));
-  }],
+  }, '=='],
   ['failed local workers retain a visible terminal error state', read => {
     const complete = body(read('src/console.zig'), 'finishStartupShell');
     assert.match(complete, /launch_failed = true/);
@@ -264,7 +261,7 @@ const reviewCases = [
     assert.match(paint, /if \(launch_failed\) L\("Terminal could not start/);
   }],
 ];
-for (const [name, verify] of reviewCases) {
+for (const [name, verify, operator = 'match'] of reviewCases) {
   test(`ISSUE-543 ${name}`, () => verify(read));
-  test(`ISSUE-543 negative control: ${name}`, () => assert.throws(() => verify(reviewBefore), assert.AssertionError));
+  test(`ISSUE-543 negative control: ${name}`, () => assert.throws(() => verify(reviewBefore), { code: 'ERR_ASSERTION', operator }));
 }
