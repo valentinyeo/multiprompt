@@ -21,7 +21,8 @@ function audit(source, documented) {
 test('ISSUE-252 every local session serializer field has an explicit inventory policy', () => {
   const source = section('src/session.zig', 'pub fn saveSessionTo(', '\npub fn saveSession(') +
     section('src/sidebar.zig', 'pub fn writeArchiveMarkers(', '\npub fn restoreArchiveMarkers(') +
-    section('src/frequent.zig', 'pub fn writeInput(', '\ntest ');
+    section('src/frequent.zig', 'pub fn writeInput(', '\ntest ') +
+    section('src/workspaces.zig', 'fn exportSlotSessionFile(', '\nfn ');
   audit(source, inventory.session.fields);
   assert.throws(() => audit(source + '\nconst added = "\\"unreviewed_secret\\":true";', inventory.session.fields), /unreviewed_secret/);
   for (const field of ['cwd', 'ccwd', 'favicon_path', 'pid', 'shell_id', 'wid', 'bsplit', 'burl', 'archive_rows', 'done_rows']) assert.equal(inventory.session.fields[field], 'never-sync');

@@ -296,13 +296,30 @@ pub fn accountPush() void {
     if (!app_state.g_account_sync_enabled or app_state.g_account_busy or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
     accountArmTimer(account_records.poll_ms);
     var job = accountResumeJob(.push);
-    if (job.edited == null) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const current = captureSessionLayout(arena.allocator(), false) catch return;
-        job.edited = session_layout.encode(std.heap.page_allocator, current) catch return;
-        job.saved_at = syncNow();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const base = session_layout.parse(alloc, app_state.g_account_local_base orelse "{\"workspaces\":[],\"tabs\":[]}") catch {
+        accountJobFree(job);
+        return;
+    };
+    const current = accountCapturePush(alloc, base.value) catch {
+        accountJobFree(job);
+        return;
+    };
+    const encoded = session_layout.encode(std.heap.page_allocator, current) catch {
+        accountJobFree(job);
+        return;
+    };
+    var unchanged = false;
+    if (job.edited) |pending| {
+        if (session_layout.parse(alloc, pending)) |previous| {
+            unchanged = account_layout.equal(previous.value, current);
+        } else |_| {}
+        std.heap.page_allocator.free(pending);
     }
+    job.edited = encoded;
+    if (!unchanged or job.saved_at == 0) job.saved_at = syncNow();
     job.sync = true;
     app_state.g_account_host_dirty = false;
     startAccountJob(job);
@@ -390,6 +407,7 @@ fn accountDeletePending() void {
     }
 }
 fn accountResumeJob(kind: AccountJobKind) AccountJob {
+    if (kind != .push) return .{ .kind = kind };
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var buf: [512]u8 = undefined;
@@ -567,9 +585,18 @@ fn accountHostConfigPath(a: std.mem.Allocator) ![]const u8 {
     if (n == 0 or n >= profile.len) return error.Storage;
     return std.fmt.allocPrint(a, "{s}\\.ssh\\config", .{profile[0..n]});
 }
+fn accountReadHostConfig(path: []const u8) !?[]u8 {
+    if (readFileAllocWin32(path, session_layout.max_bytes)) |bytes| return bytes;
+    var wide: [600]u16 = undefined;
+    const wpath = win32WidePath(&wide, path) orelse return error.Storage;
+    if (GetFileAttributesW(wpath.ptr) != 0xffffffff) return error.Storage;
+    const code = @import("win32.zig").GetLastError();
+    if (code != 2 and code != 3) return error.Storage;
+    return null;
+}
 fn accountApplyHosts(a: std.mem.Allocator, before: []const account_hosts.Host, after: []const account_hosts.Host, original: []const u8) !void {
     const path = try accountHostConfigPath(a);
-    const current = readFileAllocWin32(path, session_layout.max_bytes);
+    const current = try accountReadHostConfig(path);
     defer if (current) |bytes| std.heap.page_allocator.free(bytes);
     if (!std.mem.eql(u8, current orelse "", original)) return error.HostConfigChanged;
     var config = original;
@@ -801,7 +828,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const captured = try session_layout.parse(alloc, job.edited.?);
     var local = captured.value;
     const config_path = try accountHostConfigPath(alloc);
-    const config_bytes = readFileAllocWin32(config_path, session_layout.max_bytes);
+    const config_bytes = try accountReadHostConfig(config_path);
     defer if (config_bytes) |bytes| a.free(bytes);
     const config = config_bytes orelse "";
     local.hosts = state.local.hosts;

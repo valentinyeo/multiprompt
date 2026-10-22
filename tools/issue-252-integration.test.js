@@ -37,6 +37,9 @@ function audit(state, desktop, main) {
   assert.ok(request.lastIndexOf('reply.bytes =') > proof);
   assert.doesNotMatch(request, /state\.local = desired/);
   assert.match(body(desktop, 'accountApplyHosts'), /if \(!std\.mem\.eql\(u8, current orelse "", original\)\) return error.HostConfigChanged/);
+  assert.match(body(desktop, 'accountReadHostConfig'), /if \(code != 2 and code != 3\) return error.Storage/);
+  assert.match(body(desktop, 'accountPush'), /const current = accountCapturePush/);
+  assert.match(body(desktop, 'accountPush'), /job.edited = encoded/);
   assert.match(body(desktop, 'accountSyncHosts'), /const output = try accountSshOutput/);
   assert.doesNotMatch(body(desktop, 'accountSyncHosts'), /host_keys|known_hosts|keygen|readKeys/);
   assert.match(body(desktop, 'accountHostWatchThread'), /WaitForMultipleObjects\(handles.len, &handles, 0, 0xFFFFFFFF\)/);
