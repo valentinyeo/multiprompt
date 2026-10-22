@@ -12,7 +12,7 @@
 
 Run `zsb emulate iphone`, `zsb emulate pixel`, or `zsb emulate 390x844 --mobile` against the session's target tab. Use `zsb emulate 800x600` for a desktop viewport, and `zsb emulate off` to return to normal. Run `zsb emulate --help` without a connected browser. Reload if the current document was already served using its previous user agent.
 
-## Driving it with verify.yml
+## Driving it with control.ps1
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=browser-emulation`. This map uses `control.ps1 -Feature browser-emulation` to launch `browser-emulation.mjs` inside the existing kill-on-close Windows Job, rather than launching the desktop app. The workflow builds the real native bridge and installs pinned Puppeteer only to obtain Chrome for Testing. The driver refuses execution outside GitHub Windows.
 
