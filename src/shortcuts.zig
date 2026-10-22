@@ -353,7 +353,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Clear Offline Queue\"", .b = "Drop this tab's queued offline Chat View messages", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Retry Unsent Messages\"", .b = "Re-send this tab's Not-sent Chat View messages in order", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Discard Unsent Messages\"", .b = "Drop this tab's Not-sent Chat View messages", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "A message marked 'queued in Claude' waits until Claude finishes; this sends it now (same as clicking the bubble or Ctrl+X Ctrl+S in the terminal)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
     .{ .a = "Alt+V", .b = "Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View", .header = false },

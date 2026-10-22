@@ -169,6 +169,18 @@ test('turning the switch off executes the original console path', () => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /All 1 tests passed/);
 });
+test('IGSH-564 force send routes tmux through the existing key worker and presses Claude keys', () => {
+  assert.match(body('chatEchoPushQueuedNow'), /chatTmuxSendEligible\(app_state\.active_shell\)[^]*chatAgentKey\(app_state\.active_shell, 0x18\)/);
+  assert.match(body('chatEchoPushQueuedNow'), /sendClaudeSendQueuedNowToShell\(app_state\.active_shell\)/);
+  assert.match(body('chatAgentKey'), /std\.Thread\.spawn\(\.\{\}, chatStopTmuxThread, \.\{ key, digit \}\)/);
+  assert.match(body('chatStopTmuxThread'), /digit == 0x18[^]*"send_queued"/);
+  assert.match(body('chatStopTmuxThread'), /const permission = digit != 0x1B and digit != 0x18;/);
+  assert.match(body('chatStopTmuxThread'), /chatHistoryPersistent\(/);
+  const reader = fs.readFileSync(path.join(__dirname, '../src/chat_history_reader.py'), 'utf8');
+  assert.match(reader, /keys = \["C-x", "C-s"\] if op == "send_queued"/);
+  assert.match(reader, /subprocess\.run\(\["tmux", "send-keys", "-t", "=" \+ name \+ ":", \*keys\]/);
+  assert.match(reader, /query\.get\("op"\) in \("stop", "permission", "send_queued"\)/);
+});
 test('worker uses existing persistent reader and background settlement uses pure transcript policy', () => {
   assert.match(source, /const ISSUE_349_TMUX_SEND = true;/);
   assert.match(body('chatTmuxSendStart'), /std\.Thread\.spawn\([^]*chatTmuxSendThread/);
@@ -184,7 +196,8 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(settle, /\.activity == \.active/);
   assert.doesNotMatch(settle, /chatTmuxSendStart|pasteText|sendEnterToShell/);
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
-  assert.match(body('chatPaintEchoStatus'), /pendingLabel\(phase, link_down, e\.transcript_queued\)/);
-  assert.match(body('chatPaintEchoStatus'), /Queued, session is busy/);
+  assert.match(body('chatPaintEchoStatus'), /pendingLabel\(phase, link_down\)/);
+  assert.match(body('chatPaintEchoStatus'), /Queued in Claude/);
+  assert.doesNotMatch(body('chatPaintEchoStatus'), /Waiting to send|Waiting for transcript|Queued, session is busy/);
   assert.doesNotMatch(body('chatPaintEchoStatus'), /Delivered/);
 });
