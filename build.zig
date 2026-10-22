@@ -188,6 +188,9 @@ pub fn build(b: *std.Build) void {
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
     test_step.dependOn(&version_stamp_tests.step);
     vps_test_step.dependOn(&version_stamp_tests.step);
+    const changelog_entry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/changelog-entry.test.js", "tools/changelog-fragment-reads.test.js" });
+    test_step.dependOn(&changelog_entry_tests.step);
+    vps_test_step.dependOn(&changelog_entry_tests.step);
     const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
     test_step.dependOn(&smooth_shapes_tests.step);
     vps_test_step.dependOn(&smooth_shapes_tests.step);

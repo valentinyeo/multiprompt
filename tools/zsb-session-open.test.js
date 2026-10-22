@@ -4,6 +4,7 @@ const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
+const { readChangelogEntry } = require('./changelog-entry');
 
 const root = path.resolve(__dirname, '..');
 const wrapper = process.env.ZSB_WRAPPER_SH || path.join(__dirname, 'vps-multiprompt-browser.sh');
@@ -231,7 +232,7 @@ test('documentation and changelog cover both commands and their safety contract'
     assert.match(text, /existing/);
     assert.match(text, /background/);
   }
-  const fragment = fs.readFileSync(path.join(root, 'changelog.d/IGSH-535-session-open.md'), 'utf8').trim();
+  const fragment = readChangelogEntry('IGSH-535').trim();
   assert.equal(fragment.split('\n').length, 1);
   assert.match(fragment, /workspace/);
 });
