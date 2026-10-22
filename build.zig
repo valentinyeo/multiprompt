@@ -537,6 +537,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&zsb_session_open_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
+    const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });
+    vps_test_step.dependOn(&zsb_deadline_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
@@ -569,6 +571,10 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_drop_tests.step);
     const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
     vps_test_step.dependOn(&crash_reports_tests.step);
+    const idle_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-513-idle-front.test.js" });
+    idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&idle_front_tests.step);
+    vps_test_step.dependOn(&idle_front_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
         "node",                                   "--test",                              "--test-concurrency=4",
         "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",

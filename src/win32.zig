@@ -1427,3 +1427,8 @@ pub extern "gdi32" fn GetFontData(HANDLE, DWORD, DWORD, ?*anyopaque, DWORD) call
 pub extern "user32" fn UpdateWindow(hWnd: HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceCounter(value: *i64) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceFrequency(value: *i64) callconv(WINAPI) BOOL;
+
+pub extern "kernel32" fn GetEnvironmentStringsW() callconv(WINAPI) ?[*:0]u16;
+pub extern "kernel32" fn FreeEnvironmentStringsW([*:0]u16) callconv(WINAPI) BOOL;
+pub extern "user32" fn MsgWaitForMultipleObjects(DWORD, ?[*]const HANDLE, BOOL, DWORD, DWORD) callconv(WINAPI) DWORD;
+pub extern "user32" fn PeekMessageW(*MSG, HANDLE, UINT, UINT, UINT) callconv(WINAPI) BOOL;
