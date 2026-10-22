@@ -82,7 +82,7 @@ test('CLI reads files and fails closed', t => {
 
 test('workflow preserves all triggers, both architectures, immutable builds and version concurrency', () => {
   assert.match(workflow, /push:\n    branches: \[master\]\n    tags: \['v\*'\]/);
-  assert.match(workflow, /pull_request:/);
+  assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /secrets\.|--draft/);
@@ -98,6 +98,60 @@ test('workflow preserves all triggers, both architectures, immutable builds and 
   assert(fs.readFileSync(path.join(root, 'tools/public_audit.py'), 'utf8').includes('tools/release-version.test.mjs'));
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
+});
+
+test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', () => {
+  const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
+  assert.equal(jobs['pr-build'], undefined);
+  assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
+  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.release, /needs: \[prepare, build\]/);
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  assert.match(tests, /name: build-arm64\n    needs: changes\n    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'/);
+  assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
+  assert.match(tests, /needs: \[changes, test, test-vps, build-arm64\]/);
+});
+
+test('four Windows and two VPS jobs retain the upstream test graph and folded service checks', () => {
+  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
+  assert.deepEqual(matrices, [[1, 2, 3, 4], [1, 2]]);
+  assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
+  assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
+  assert.match(tests, /run: zig build test --summary all -Dtest-group=\$\{\{ matrix.group \}\}/);
+  assert.match(tests, /run: zig build test-vps --summary all -Dtest-vps-group=\$\{\{ matrix.group \}\}/);
+  const vps = tests.split('\n  test-vps:\n')[1].split('\n  build-arm64:\n')[0];
+  assert.match(vps, /name: Build the account Worker\n        if: matrix.group == 1/);
+  assert.match(vps, /name: Run account Worker tests\n        if: matrix.group == 1/);
+  assert.match(build, /const zsb_help_tests = b.addSystemCommand\(&\.\{ "node", "--test", "tools\/zsb-help.test.js" \}\)/);
+  assert.match(build, /zsb_help_tests.step.dependOn\(&bridge_install.step\)/);
+  assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
+});
+
+test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {
+  for (const file of ['gitleaks', 'no-comments', 'docs-site', 'verify']) {
+    const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
+    assert.match(text, /^  pull_request:/m, file);
+    assert.match(text, /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
+  }
+  const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
+  assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
+  assert.match(scan, /^  schedule:/m);
+  assert.match(scan, /^  workflow_dispatch:/m);
+});
+
+test('one lightweight workflow preserves both check names and checker suites', () => {
+  const checks = fs.readFileSync(path.join(root, '.github/workflows/no-comments.yml'), 'utf8');
+  assert.match(checks, /^  push:\n    branches: \[master\]/m);
+  for (const name of ['no-comments', 'extension-version']) assert.match(checks, new RegExp(`^    name: ${name}$`, 'm'));
+  for (const command of [
+    'node --test tools/strip-comments.test.js',
+    'node tools/strip-comments.mjs --check',
+    'node --test tools/check-extension-version.test.js',
+    'node tools/check-extension-version.mjs origin/${{ github.base_ref }}',
+  ]) assert(checks.includes(command), command);
+  assert(!fs.existsSync(path.join(root, '.github/workflows/extension-version.yml')));
 });
 
 for (const event of ['push', 'pull_request', 'workflow_dispatch']) {

@@ -443,10 +443,12 @@ pub fn build(b: *std.Build) void {
     bridge_bad_args_tests.step.dependOn(&bridge_install.step);
     bridge_bad_args_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
     test_step.dependOn(&bridge_bad_args_tests.step);
-    const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
-    zsb_help_tests.step.dependOn(&bridge_install.step);
-    zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
-    test_step.dependOn(&zsb_help_tests.step);
+    if (b.graph.host.result.os.tag == .windows) {
+        const zsb_help_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help.test.js" });
+        zsb_help_tests.step.dependOn(&bridge_install.step);
+        zsb_help_tests.setEnvironmentVariable("BRIDGE_EXE", b.getInstallPath(.bin, "zigshell-bridge.exe"));
+        test_step.dependOn(&zsb_help_tests.step);
+    }
     const zsb_help_dispatch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-help-dispatch.test.js" });
     test_step.dependOn(&zsb_help_dispatch_tests.step);
     const tmux_identity_tests = b.addTest(.{ .root_module = b.createModule(.{
