@@ -286,8 +286,8 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
 function assertsFrozen(source, driver, app, yaml) {
   assertsJourney(source);
   const marker = driver.slice(driver.indexOf('function Read-BrowserFrozen'), driver.indexOf('function Assert-BrowserPane'));
-  assert.match(marker, /\[uint32\]\$ShellId/);
-  assert.match(marker, /Join-Path \$scratch \("roaming\/ZigShell\/panehib-zss-\$ShellId.flag"\)/);
+  assert.match(marker, /\[uint32\]\$SessionId/);
+  assert.match(marker, /Join-Path \$scratch \("roaming\/ZigShell\/panehib-zss-\$SessionId.flag"\)/);
   assert.match(marker, /Test-Path -LiteralPath \$path -PathType Leaf/);
   assert.match(marker, /Get-Content -LiteralPath \$path -Raw -ErrorAction Stop\).Trim\(\) -ceq '1'\) \{ return \$true \}/);
   assert.match(marker, /catch \{ return \$null \}/);

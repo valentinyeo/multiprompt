@@ -851,8 +851,8 @@ function Wait-SwitchNativeHost {
     } 'native messaging host reconnect on extension keepalive' 90
 }
 
-function Read-BrowserFrozen([uint32]$ShellId) {
-    $path = Join-Path $scratch ("roaming/ZigShell/panehib-zss-$ShellId.flag")
+function Read-BrowserFrozen([uint32]$SessionId) {
+    $path = Join-Path $scratch ("roaming/ZigShell/panehib-zss-$SessionId.flag")
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         try { if ((Get-Content -LiteralPath $path -Raw -ErrorAction Stop).Trim() -ceq '1') { return $true } } catch { return $null }
         return $null
