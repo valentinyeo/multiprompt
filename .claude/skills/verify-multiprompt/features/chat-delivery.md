@@ -1,5 +1,4 @@
-Chat delivery
-=============
+# Chat delivery
 
 ## Sub-features
 
