@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.822", .items = &.{
+        .{ .text = "Group lines no longer cross the selected session’s highlight or leave little line fragments beside it.", .ticket = "IGSH-591" },
+    } },
     .{ .ver = "0.28.821", .items = &.{
         .{ .text = "Multiprompt always opens maximized when you start or relaunch it.", .ticket = "IGSH-587" },
     } },
