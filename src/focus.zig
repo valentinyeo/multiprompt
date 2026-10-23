@@ -133,32 +133,8 @@ fn focusGuardActivationAllows(now: u64, until: u64, foreground_owned: bool, targ
     return target == main_hwnd or target == active_console;
 }
 
-fn activationShellRefocusNeeded(activation_authority: bool, frame_foreground: bool, denied_foreground: bool) bool {
-    return activation_authority and frame_foreground and denied_foreground;
-}
-
-var activation_shell_refocus = struct {
-    target: HANDLE = null,
-    until: u64 = 0,
-    input_tick: u64 = 0,
-    delay_ms: UINT = 0,
-    extra_retries: u32 = 0,
-}{};
-
 pub fn focusGuardNoteActivation() void {
-    activation_shell_refocus = .{};
     app_state.g_focus_activation_until = GetTickCount64() + 1000;
-}
-
-test "ISSUE-569 refocus only after activation denied by foreign foreground wins the frame" {
-    try std.testing.expect(activationShellRefocusNeeded(true, true, true));
-    try std.testing.expect(!activationShellRefocusNeeded(false, true, true));
-    try std.testing.expect(!activationShellRefocusNeeded(true, false, true));
-    try std.testing.expect(!activationShellRefocusNeeded(true, true, false));
-    try std.testing.expect(!activationShellRefocusNeeded(false, false, true));
-    try std.testing.expect(!activationShellRefocusNeeded(false, true, false));
-    try std.testing.expect(!activationShellRefocusNeeded(true, false, false));
-    try std.testing.expect(!activationShellRefocusNeeded(false, false, false));
 }
 
 fn focusGuardSurface(hwnd: HANDLE) HANDLE {
@@ -459,7 +435,6 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
         if (!browser_popup_active and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
             armBrowserEdgeMaskRaise();
         }
-        refocusShellAfterActivation(hwnd);
     } else {
         browserTrace("FGevt not-ours -> hide masks");
         hideBrowserEdgeMasks();
@@ -468,25 +443,6 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         invalidateBrowserBottomMask();
     }
-}
-
-fn refocusShellAfterActivation(hwnd: HANDLE) void {
-    if (hwnd != app_state.g_main_hwnd or GetForegroundWindow() != hwnd) return;
-    focusGuardReadMouse();
-    const pending = activation_shell_refocus;
-    activation_shell_refocus = .{};
-    const target = activeShellHwndForFocusGuard();
-    const activation_authority = focusGuardActivationAllows(GetTickCount64(), app_state.g_focus_activation_until, true, target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, focusGuardActivationTarget());
-    const denied_foreground = pending.target != null and pending.target == target and pending.until == app_state.g_focus_activation_until and pending.input_tick == app_state.g_focus_input_tick;
-    if (!activationShellRefocusNeeded(activation_authority, hwnd == app_state.g_main_hwnd and GetForegroundWindow() == hwnd, denied_foreground)) return;
-    if (app_state.g_edit_hwnd != null or app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or app_state.g_snippet_create_active) return;
-    if (app_state.g_chat_active or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
-    if (app_state.g_browser_focus_mode or activeBrowserHasForegroundFocus() or activeBrowserTransientPopupHasForegroundFocus()) return;
-    if (app_state.g_popup_menu_active or app_state.g_move_size_active) return;
-    const focused = GetFocus();
-    if (focused != null and focused != app_state.g_main_hwnd) return;
-    requestShellRefocus(pending.delay_ms, pending.extra_retries);
-    activation_shell_refocus = .{};
 }
 
 fn browserOrphanWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LONG, idChild: LONG, eventThread: DWORD, eventTime: DWORD) callconv(WINAPI) void {
@@ -984,12 +940,7 @@ pub fn requestNativeBrowserFocus() void {
 }
 
 pub fn requestShellRefocus(delay_ms: UINT, extra_retries: u32) void {
-    const target = activeShellHwndForFocusGuard();
-    const allowed = focusGuard(target);
-    if (!foregroundIsOurs() and focusGuardActivationAllows(GetTickCount64(), app_state.g_focus_activation_until, true, target, app_state.g_focus_return_hwnd, app_state.g_main_hwnd, focusGuardActivationTarget())) {
-        activation_shell_refocus = .{ .target = target, .until = app_state.g_focus_activation_until, .input_tick = app_state.g_focus_input_tick, .delay_ms = delay_ms, .extra_retries = extra_retries };
-    }
-    if (!allowed) return;
+    if (!focusGuard(activeShellHwndForFocusGuard())) return;
     if (app_state.g_main_hwnd == null or app_state.shell_count == 0) return;
     if (app_state.g_inbox_active) return;
     if (app_state.g_all_sessions_active) return;
@@ -1004,7 +955,6 @@ pub fn requestShellRefocus(delay_ms: UINT, extra_retries: u32) void {
 }
 
 pub fn cancelShellRefocus(hwnd: HANDLE) void {
-    activation_shell_refocus = .{};
     app_state.g_refocus_remaining = 0;
     app_state.g_refocus_waiting_for_alt_release = false;
     app_state.g_ws_switch_focus_grace = 0;
