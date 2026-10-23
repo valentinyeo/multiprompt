@@ -1606,7 +1606,7 @@ try {
             Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'
             if (-not $overlayLaunch.overlayAtLaunch) { throw 'Shortcuts was not posted before the restored launch appeared' }
             if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor while Shortcuts is open' }
-            Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'
+            if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }
             Wait-Until {
                 [VerifyNative]::PaneVisible($script:window) -and
                     $null -ne (Read-Inbox) -and @((Read-Inbox).shells).Count -gt 0

@@ -213,7 +213,7 @@ function launchJourneyContract(source) {
     "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
     'if (-not $overlayLaunch.overlayAtLaunch)',
     'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
-    "Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'",
+    "if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }",
     '[VerifyNative]::PaneVisible($script:window)',
     "'startup restored the owned browser pane without an open command' 60",
     "Assert-BrowserLaunchOnOwnMonitor 'restored'", '$_.pid -in @($initialLaunch.launches',
@@ -306,13 +306,13 @@ test('restored launch contract rejects the old visible-pane wait and overlay byp
     "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
     'if (-not $overlayLaunch.overlayAtLaunch)',
     'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
-    "Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'",
+    "if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }",
     'restoredOverlay = $overlayLaunch',
   ]) {
     assert.ok(driver.includes(before), before);
     assert.throws(() => launchJourneyContract(driver.replaceAll(before, '')), `reject ${before}`);
   }
-  const escape = "            Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'\n";
+  const escape = "            if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }\n";
   assert.throws(() => launchJourneyContract(driver.replace(escape, '').replace('            $launchObservedAt =', escape + '            $launchObservedAt =')));
   assert.throws(() => launchJourneyContract(driver.replace("} 'relaunch main window ready for Shortcuts'", "    [VerifyNative]::PaneVisible($script:window)\n            } 'relaunch main window ready for Shortcuts'")));
   const start = driver.indexOf('            $script:overlayLaunches =');
