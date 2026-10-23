@@ -506,6 +506,7 @@ pub extern "user32" fn GetFocus() callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetSystemMenu(HANDLE, BOOL) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetWindowRect(HANDLE, *RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn MonitorFromWindow(HANDLE, DWORD) callconv(WINAPI) HANDLE;
+pub extern "user32" fn MonitorFromPoint(POINT, DWORD) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMonitorInfoW(HANDLE, *MONITORINFO) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDpiForWindow(HANDLE) callconv(WINAPI) u32;
 pub const MONITORINFO = extern struct {
@@ -514,6 +515,7 @@ pub const MONITORINFO = extern struct {
     rcWork: RECT,
     dwFlags: DWORD,
 };
+pub const MONITOR_DEFAULTTOPRIMARY: DWORD = 1;
 pub const MONITOR_DEFAULTTONEAREST: DWORD = 2;
 pub extern "user32" fn SetProcessDpiAwarenessContext(?*anyopaque) callconv(WINAPI) BOOL;
 pub extern "user32" fn EnumDisplayMonitors(HANDLE, ?*const RECT, *const fn (HANDLE, HANDLE, ?*RECT, LPARAM) callconv(WINAPI) BOOL, LPARAM) callconv(WINAPI) BOOL;

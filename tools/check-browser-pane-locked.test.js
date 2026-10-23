@@ -142,6 +142,241 @@ test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op 
   ]) assert.ok(pane.includes(`test "${name}"`), name);
 });
 
+function launchBoundsContract(source) {
+  const formatter = body(source, 'paneLaunchFallbackBounds');
+  assert.match(formatter, /std\.fmt\.bufPrint\(buf, " --window-position=\{d\},\{d\} --window-size=400,400", \.\{ work\.left, work\.top \}\)/);
+  const fallback = body(source, 'appendPaneLaunchFallbackBounds');
+  assert.match(fallback, /if \(app_state\.g_main_hwnd != null\)\s*win\.MonitorFromWindow\(app_state\.g_main_hwnd, win\.MONITOR_DEFAULTTOPRIMARY\)\s*else\s*win\.MonitorFromPoint\(\.\{ \.x = 0, \.y = 0 \}, win\.MONITOR_DEFAULTTOPRIMARY\)/);
+  assert.match(fallback, /info\.cbSize = @sizeOf\(win\.MONITORINFO\)/);
+  assert.match(fallback, /if \(win\.GetMonitorInfoW\(monitor, &info\) == 0\) return/);
+  assert.match(fallback, /paneLaunchFallbackBounds\(info\.rcWork, &buf\)/);
+  const launch = body(source, 'shellExecuteEdgeUrl');
+  assert.equal((launch.match(/appendPaneLaunchFallbackBounds\(&params, &pos\)/g) || []).length, 2);
+  assert.doesNotMatch(launch, /--window-position=-32000,-32000/);
+  assert.match(source, /test "pane launch fallback bounds stay inside the owner monitor work area"/);
+  assert.match(source, /x >= work\.left and y >= work\.top/);
+  assert.match(source, /x \+ width <= work\.right and y \+ height <= work\.bottom/);
+}
+
+test('fresh launch fallbacks format the owner monitor work area and include Zig bounds regressions', () => {
+  launchBoundsContract(pane);
+  assert.match(win, /pub extern "user32" fn MonitorFromPoint\(POINT, DWORD\) callconv\(WINAPI\) HANDLE;/);
+  assert.match(win, /pub const MONITOR_DEFAULTTOPRIMARY: DWORD = 1;/);
+  for (const [before, after] of [
+    ['.{ work.left, work.top }', '.{ -32000, -32000 }'],
+    ['paneLaunchFallbackBounds(info.rcWork, &buf)', 'paneLaunchFallbackBounds(info.rcMonitor, &buf)'],
+    ['win.MONITOR_DEFAULTTOPRIMARY', 'win.MONITOR_DEFAULTTONEAREST'],
+    ['appendPaneLaunchFallbackBounds(&params, &pos);', 'appendBrowserWideAscii(&params, &pos, " --window-position=-32000,-32000 --window-size=400,400");'],
+    ['x + width <= work.right and y + height <= work.bottom', 'true'],
+  ]) {
+    assert.ok(pane.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => launchBoundsContract(pane.replaceAll(before, after)), `reject ${before}`);
+  }
+});
+
+function launchJourneyContract(source) {
+  const proof = source.slice(source.indexOf('function Assert-BrowserLaunchOnOwnMonitor('), source.indexOf('function Focus-LockedBrowser('));
+  for (const step of [
+    'Doctor', "GetProp($browser, 'ZigShellPaneOwner') -ne $script:window",
+    'MonitorFromWindow($script:window, 1)', 'GetMonitorInfoW($monitor, [ref]$info)',
+    "(Join-Path $env:LOCALAPPDATA 'ZigShell') -replace '\\\\', '/'", '[regex]::Escape($profile)',
+    `Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'"`,
+    "($_.CommandLine -replace '\\\\', '/') -match $profileArgument -and $_.CommandLine.Contains('--window-position=')",
+    '/(?:ChromeUserData|EdgeUserData)',
+    '$x -ge $info.Monitor.Left -and $x -lt $info.Monitor.Right',
+    '$y -ge $info.Monitor.Top -and $y -lt $info.Monitor.Bottom',
+    'GetWindowThreadProcessId($browser, [ref]$browserPid)',
+    'GetDpiForWindow($script:window)', 'GetDpiForWindow($browser)',
+    '$launches.Count -eq 0', '$browserPid -notin', '-not $_.parsed -or -not $_.inside',
+    '$mainDpi -eq 0 -or $paneDpi -ne $mainDpi',
+    'commandLine = $_.CommandLine', 'monitor = $info.Monitor', 'mainDpi = $mainDpi; paneDpi = $paneDpi',
+    'Save-Json $proof ("browser-pane-locked-launch-$Step.json")',
+  ]) assert.ok(proof.includes(step), step);
+  const journey = source.slice(source.indexOf("        'browser-pane-locked' {"), source.indexOf("        'browser-pane-stuck' {"));
+  let offset = -1;
+  for (const step of [
+    'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
+    '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'",
+    "Open-BrowserPane 'locked-open'", "Assert-BrowserLaunchOnOwnMonitor 'initial'",
+    '$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$relaunchStopped = $job.Stop()',
+    'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
+    '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
+    '$job.Dispose()', '$job = New-Object VerifyJob', '$process = $job.Start(',
+    '$script:window = $process.MainWindowHandle', "'relaunch main window ready for Shortcuts' 60 20",
+    '[VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)',
+    '$overlayPostedAt = [DateTime]::UtcNow',
+    'MonitorFromWindow($script:window, 1)', 'GetMonitorInfoW($monitor, [ref]$info)',
+    '$script:overlayLaunches = @(Get-CimInstance Win32_Process', '$script:overlayLaunches.Count -gt 0',
+    "'positioned isolated browser launched while Shortcuts is open' 60",
+    '$launchObservedAt = [DateTime]::UtcNow',
+    'overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt',
+    "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
+    'if (-not $overlayLaunch.overlayAtLaunch)',
+    'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
+    "if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }",
+    '[VerifyNative]::PaneVisible($script:window)',
+    "'startup restored the owned browser pane without an open command' 60",
+    "Assert-BrowserLaunchOnOwnMonitor 'restored'", '$_.pid -in @($initialLaunch.launches',
+    "Write-Host 'browser-pane-locked launch-on-own-monitor PASS'",
+  ]) {
+    const next = journey.indexOf(step, offset + 1);
+    assert.ok(next > offset, `missing or misordered ${step}`);
+    offset = next;
+  }
+  assert.match(source, /\[DllImport\("user32.dll", SetLastError=true\)\] public static extern bool PostMessage\(IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam\);/);
+  assert.match(source, /function Wait-Until\([^\n]+\[int\]\$PollMilliseconds = 200\)/);
+  const wait = source.slice(source.indexOf('function Wait-Until('), source.indexOf('function Read-Session'));
+  assert.match(wait, /Start-Sleep -Milliseconds \$PollMilliseconds/);
+  const early = journey.slice(journey.indexOf('$process = $job.Start('), journey.indexOf('$overlayPostedAt ='));
+  assert.doesNotMatch(early, /PaneVisible|Read-Inbox|Doctor|Press /);
+  assert.match(early, /if \(-not \[VerifyNative\]::PostMessage\([^\n]+\)\) \{ throw /);
+  const overlay = journey.slice(journey.indexOf('$monitor ='), journey.indexOf('            Press @(0x1B)'));
+  const normalizeIndent = value => value.trim().split('\n').map(line => line.trim()).join('\n');
+  const collection = proof.slice(proof.indexOf('    $monitor ='), proof.indexOf('    [uint32]$browserPid'));
+  const [monitor, launches] = collection.split('    $launches = @(');
+  assert.ok(normalizeIndent(overlay).includes(normalizeIndent(monitor)));
+  assert.ok(normalizeIndent(overlay).includes(normalizeIndent('$script:overlayLaunches = @(' + launches)));
+  for (const field of ['launches = $script:overlayLaunches', 'monitor = $info.Monitor', 'mainHwnd = $script:window.ToInt64()', 'overlayPostedAt = $overlayPostedAt', 'launchObservedAt = $launchObservedAt']) assert.ok(overlay.includes(field), field);
+  assert.ok(journey.includes('restoredOverlay = $overlayLaunch'));
+  const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
+  assert.ok(press.indexOf('Assert-Foreground') >= 0);
+  assert.ok(press.indexOf('[VerifyNative]::Chord($Keys)') > press.indexOf('Assert-Foreground'));
+  assert.equal((journey.match(/Open-BrowserPane /g) || []).length, 1);
+  const setup = source.slice(source.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'))"), source.indexOf("    if ($Feature -eq 'appearance') {"));
+  assert.match(setup, /Microsoft\/Edge\/Application\/msedge.exe/);
+  assert.match(setup, /Join-Path \$env:LOCALAPPDATA 'ZigShell\/EdgeUserData'/);
+  assert.match(setup, /\$warmupJob.Start\(\$edge/);
+  assert.match(setup, /'isolated browser rendered setup page before the pane adoption deadline starts' 60/);
+  assert.match(setup, /ShowWindow\(\$warmup.MainWindowHandle, 0\)/);
+  assert.doesNotMatch(setup, /if \(\$Feature -eq 'browser-pane-locked'\)|Chrome|browser engine|browser-engine.txt|CloseMainWindow|\$warmupJob.Stop/);
+  const stop = source.slice(source.indexOf('    public Accounting Stop()'), source.indexOf('    public void Dispose()', source.indexOf('    public Accounting Stop()')));
+  assert.match(stop, /TerminateJobObject\(job, 1\)/);
+  assert.match(stop, /if \(info.ActiveProcesses == 0\) return info/);
+  return proof;
+}
+
+test('journey proves first and restored browser launches use the owner monitor and matching DPI without vacuous success', () => {
+  const proof = launchJourneyContract(driver);
+  for (const before of [
+    "Assert-BrowserLaunchOnOwnMonitor 'initial'", "Assert-BrowserLaunchOnOwnMonitor 'restored'",
+    '$process.CloseMainWindow()', '$launches.Count -eq 0',
+    '$x -ge $info.Monitor.Left', '$y -lt $info.Monitor.Bottom',
+    '$paneDpi -ne $mainDpi', "Name = 'chrome.exe'", "Name = 'msedge.exe'",
+    '$browserPid -notin', '$_.pid -in @($initialLaunch.launches',
+    '$warmupStopped = $warmupJob.Stop()', 'ReadAccounting().ActiveProcesses -gt 0',
+    "Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'",
+    "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
+    'if (info.ActiveProcesses == 0) return info',
+    "Write-Host 'browser-pane-locked launch-on-own-monitor PASS'",
+  ]) {
+    assert.ok(driver.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => launchJourneyContract(driver.replaceAll(before, '')), `reject ${before}`);
+  }
+  const pattern = proof.match(/\$point = \[regex\]::Match\(\$_.CommandLine, '([^']+)'\)/)[1];
+  const rect = { left: 0, top: 0, right: 1920, bottom: 1080 };
+  for (const [argument, inside] of [
+    ['0,40', true], ['1919,1079', true], ['-32000,-32000', false],
+    ['-2560,-493', false], ['1920,0', false], ['0,1080', false], ['invalid', false],
+  ]) {
+    const match = new RegExp(pattern).exec(`chrome.exe --window-position=${argument} --window-size=400,400`);
+    const actual = !!match && +match[1] >= rect.left && +match[1] < rect.right && +match[2] >= rect.top && +match[2] < rect.bottom;
+    assert.equal(actual, inside, argument);
+  }
+});
+
+test('restored launch contract rejects the old visible-pane wait and overlay bypasses', () => {
+  const oldStart = driver.indexOf('            $script:window = [IntPtr]::Zero', driver.indexOf("        'browser-pane-locked' {"));
+  const oldEnd = driver.indexOf("            $script:browserShellId = (Read-Inbox).shells[0].sid", oldStart);
+  const previousStartup = `            $script:window = [IntPtr]::Zero
+            Wait-Until {
+                $process.Refresh()
+                $script:window = $process.MainWindowHandle
+                $script:window -ne [IntPtr]::Zero -and [VerifyNative]::PaneVisible($script:window) -and
+                    $null -ne (Read-Inbox) -and @((Read-Inbox).shells).Count -gt 0
+            } 'startup restored the owned browser pane without an open command' 60
+`;
+  assert.throws(() => launchJourneyContract(driver.slice(0, oldStart) + previousStartup + driver.slice(oldEnd)));
+  const oldVisibleWait = driver.replace("'relaunch main window ready for Shortcuts' 60 20", "'relaunch main window ready for Shortcuts' 60");
+  assert.throws(() => launchJourneyContract(oldVisibleWait));
+  for (const before of [
+    'public static extern bool PostMessage', 'Start-Sleep -Milliseconds $PollMilliseconds',
+    '[VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)',
+    '$overlayPostedAt = [DateTime]::UtcNow', '$script:overlayLaunches.Count -gt 0',
+    'overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt',
+    "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
+    'if (-not $overlayLaunch.overlayAtLaunch)',
+    'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
+    "if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }",
+    'restoredOverlay = $overlayLaunch',
+  ]) {
+    assert.ok(driver.includes(before), before);
+    assert.throws(() => launchJourneyContract(driver.replaceAll(before, '')), `reject ${before}`);
+  }
+  const escape = "            if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }\n";
+  assert.throws(() => launchJourneyContract(driver.replace(escape, '').replace('            $launchObservedAt =', escape + '            $launchObservedAt =')));
+  assert.throws(() => launchJourneyContract(driver.replace("} 'relaunch main window ready for Shortcuts'", "    [VerifyNative]::PaneVisible($script:window)\n            } 'relaunch main window ready for Shortcuts'")));
+  const start = driver.indexOf('            $script:overlayLaunches =');
+  for (const [before, after] of [
+    ['$x -ge $info.Monitor.Left', '$true'],
+    ["Name = 'msedge.exe'", "Name = 'other.exe'"],
+    ['--window-position=', '--window-size='],
+  ]) {
+    const changed = driver.slice(0, start) + driver.slice(start).replace(before, after);
+    assert.throws(() => launchJourneyContract(changed), `reject overlay-only ${before}`);
+  }
+});
+
+test('launch selection accepts both isolated engines and slash styles but excludes warmup and unrelated processes', () => {
+  const proof = launchJourneyContract(driver);
+  const profileSuffix = proof.match(/Join-Path \$env:LOCALAPPDATA '([^']+)'/)[1];
+  const normalization = proof.match(/\$profile = [^\n]+ -replace '([^']+)', '\/'/)[1];
+  const normalize = value => value.replace(new RegExp(normalization, 'g'), '/');
+  const local = 'C:\\Temp\\browser setup (1)';
+  const profile = normalize(path.win32.join(local, profileSuffix));
+  const escaped = profile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const argument = proof.match(/\$profileArgument = '([^']+)' \+ \[regex\]::Escape\(\$profile\) \+ '([^']+)'/);
+  const pattern = new RegExp(argument[1] + escaped + argument[2], 'i');
+  const filter = proof.match(/Get-CimInstance Win32_Process -Filter "([^"]+)"/)[1];
+  const names = [...filter.matchAll(/Name = '([^']+)'/g)].map(match => match[1]);
+  const selects = (name, commandLine) => names.includes(name.toLowerCase()) && pattern.test(normalize(commandLine)) && commandLine.includes('--window-position=');
+  for (const name of ['chrome.exe', 'msedge.exe']) {
+    for (const data of ['ChromeUserData', 'EdgeUserData']) {
+      for (const separator of ['/', '\\']) {
+        const directory = path.win32.join(local, 'ZigShell', data).replaceAll('\\', separator);
+        const command = `${name} --user-data-dir="${directory}"`;
+        assert.ok(selects(name, `${command} --window-position=0,40`), `${name} ${data} ${separator}`);
+        assert.ok(!selects(name, command), 'rendered warmup has no launch coordinates');
+        assert.ok(!selects(name, `${command.replace(data, data + '-other')} --window-position=0,40`), 'profile prefix is not enough');
+      }
+    }
+  }
+  const command = `msedge.exe --user-data-dir="${profile}/EdgeUserData" --window-position=0,40`;
+  assert.ok(selects('MSEDGE.EXE', command));
+  assert.ok(selects('msedge.exe', command.toUpperCase().replace('--WINDOW-POSITION=', '--window-position=')));
+  assert.ok(selects('msedge.exe', command.replace('/EdgeUserData', '\\EdgeUserData')));
+  assert.ok(!selects('other.exe', command));
+  assert.ok(!selects('msedge.exe', command.replace('C:', 'D:')));
+  assert.ok(!selects('msedge.exe', command.replace('--user-data-dir=', '--other-user-data-dir=')));
+  assert.ok(!selects('msedge.exe', command.replace('EdgeUserData', 'Default')));
+  assert.ok(!selects('msedge.exe', command.replace('EdgeUserData"', 'EdgeUserData"-other')));
+  assert.ok(!selects('msedge.exe', command.replace('--window-position=', '--window-size=')));
+});
+
+test('setup contract rejects Chrome overrides and palette switching', () => {
+  const setupStart = "    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked')) {";
+  for (const addition of [
+    "        if ($Feature -eq 'browser-pane-locked') {}",
+    "        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'",
+    "        Palette 'browser engine'",
+    "        Get-Content 'browser-engine.txt'",
+    '        $warmup.CloseMainWindow()',
+    '        $warmupJob.Stop()',
+  ]) {
+    assert.ok(driver.includes(setupStart));
+    assert.throws(() => launchJourneyContract(driver.replace(setupStart, `${setupStart}\n${addition}`)), addition);
+  }
+});
+
 function journeyContract(source) {
   const journey = source.slice(source.indexOf("        'browser-pane-locked' {"), source.indexOf("        'browser-pane-stuck' {"));
   assert.ok(journey.length > 0);
@@ -158,7 +393,8 @@ function journeyContract(source) {
     "Assert-LockedBrowserRect $browser $dockRect 'maximize-blocked'",
     "Snapshot 'after'",
   ]) assert.ok(journey.includes(step), step);
-  assert.doesNotMatch(journey, /Press @|MoveWindow|PostMessage|SendMessage/);
+  const lockedInput = journey.slice(journey.indexOf("Write-Host 'browser-pane-locked launch-on-own-monitor PASS'"));
+  assert.doesNotMatch(lockedInput, /Press @|MoveWindow|PostMessage|SendMessage/);
   const mouse = source.slice(source.indexOf('    static void MouseAt('), source.indexOf('    public static void ClickClient('));
   assert.match(mouse, /SendInput\(1,/);
   assert.match(mouse, /flags = flags \| 0xC001/);
@@ -212,7 +448,7 @@ test('pane-lock journey is mapped, indexed, allowed and included in the pull-req
   assert.ok(read(`${directory}/features/README.md`).includes('](browser-pane-locked.md)'));
   assert.ok(read(`${directory}/SKILL.md`).includes('`browser-pane-locked`'));
   for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) assert.ok(map.includes(`## ${section}`));
-  for (const marker of ['drag-blocked PASS', 'maximize-blocked PASS', 'tag=... version=...']) assert.ok(map.includes(marker));
+  for (const marker of ['drag-blocked PASS', 'maximize-blocked PASS', 'launch-on-own-monitor PASS', 'tag=... version=...']) assert.ok(map.includes(marker));
 });
 
 test('existing browser recovery static contracts remain unchanged', async () => {
@@ -226,9 +462,17 @@ test('changed code is comment-free and the user-facing fragment follows the chan
     ['src/browser_pane.zig', 'zig'], ['src/main.zig', 'zig'], ['src/win32.zig', 'zig'],
     [`${directory}/control.ps1`, 'powershell'], ['.github/workflows/verify.yml', 'yaml'],
     ['tools/check-browser-pane-locked.test.js', 'javascript'], ['tools/verify-multiprompt.test.js', 'javascript'],
+    ['tools/browser-overlay.test.js', 'javascript'],
   ]) assert.equal(strip(read(file), language).commentLines, 0, file);
   const fragment = readChangelogEntry('IGSH-566').trim();
   assert.equal(fragment.split('\n').length, 1);
   assert.equal(fragment, 'The browser pane stays in place: it can no longer be dragged away or maximized to full screen.');
   assert.match(read('openwiki/browser/routing-state-machine.md'), /cannot be dragged away or maximized to full screen/);
+});
+
+test('launch-scale feature map and changelog describe first launch and restored startup verification', () => {
+  for (const marker of ['normal scale', 'first launch', 'relaunch', 'GetDpiForWindow', 'rcMonitor', 'browser-pane-locked-launch-initial.json', 'browser-pane-locked-launch-restored.json', 'Shortcuts', '20 ms', '0x8035', 'overlayAtLaunch', 'browser-pane-locked-launch-restored-overlay.json', 'single-monitor', 'fallback cannot change DPI']) assert.ok(map.includes(marker), marker);
+  const fragment = readChangelogEntry('IGSH-601').trim();
+  assert.equal(fragment, 'The browser pane opens at its normal size after a relaunch on a two-monitor setup.');
+  assert.equal(fragment.split('\n').length, 1);
 });

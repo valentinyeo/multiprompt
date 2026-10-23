@@ -33,6 +33,7 @@ using System.Threading;
 public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct MonitorInfo { public uint Size; public Rect Monitor, Work; public uint Flags; }
     [StructLayout(LayoutKind.Sequential)] struct Message { public IntPtr Hwnd; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; }
     [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; }
@@ -40,6 +41,7 @@ public static class VerifyNative {
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint pid);
@@ -56,6 +58,8 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
@@ -611,13 +615,13 @@ function Remove-ScratchPath([string]$Path) {
     }
 }
 
-function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20) {
+function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20, [int]$PollMilliseconds = 200) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     do {
         if ($process.HasExited) { throw "App exited while waiting for $Description" }
         try { if (& $Condition) { return } } catch { $lastError = $_.Exception.Message }
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds $PollMilliseconds
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Missing precondition or resulting state: $Description. $lastError"
 }
@@ -678,6 +682,40 @@ function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     $pane = Assert-BrowserPane 'open' $Step $PreviousId
     Focus-BrowserPaneOwner $Step $pane.browser_connection_id
     return $pane
+}
+
+function Assert-BrowserLaunchOnOwnMonitor([string]$Step) {
+    Doctor
+    $browser = [VerifyNative]::PaneWindow($script:window)
+    if ($browser -eq [IntPtr]::Zero -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Launch scale requires an owned pane HWND' }
+    $monitor = [VerifyNative]::MonitorFromWindow($script:window, 1)
+    $info = New-Object VerifyNative+MonitorInfo
+    $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+    if (-not [VerifyNative]::GetMonitorInfoW($monitor, [ref]$info)) { throw 'Owner monitor rectangle unavailable' }
+    $profile = (Join-Path $env:LOCALAPPDATA 'ZigShell') -replace '\\', '/'
+    $profileArgument = '(?:^|\s)--user-data-dir="?' + [regex]::Escape($profile) + '/(?:ChromeUserData|EdgeUserData)"?(?=\s|$)'
+    $launches = @(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'" | Where-Object {
+        ($_.CommandLine -replace '\\', '/') -match $profileArgument -and $_.CommandLine.Contains('--window-position=')
+    } | ForEach-Object {
+        $point = [regex]::Match($_.CommandLine, '(?:^|\s)--window-position=(-?\d+),(-?\d+)(?:\s|$)')
+        $x = $null; $y = $null; $inside = $false
+        if ($point.Success) {
+            $x = [int]$point.Groups[1].Value; $y = [int]$point.Groups[2].Value
+            $inside = $x -ge $info.Monitor.Left -and $x -lt $info.Monitor.Right -and
+                $y -ge $info.Monitor.Top -and $y -lt $info.Monitor.Bottom
+        }
+        @{ pid = $_.ProcessId; commandLine = $_.CommandLine; parsed = $point.Success; x = $x; y = $y; inside = $inside }
+    })
+    [uint32]$browserPid = 0
+    [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
+    $mainDpi = [VerifyNative]::GetDpiForWindow($script:window)
+    $paneDpi = [VerifyNative]::GetDpiForWindow($browser)
+    $proof = @{ step = $Step; launches = $launches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); paneHwnd = $browser.ToInt64(); panePid = $browserPid; mainDpi = $mainDpi; paneDpi = $paneDpi }
+    Save-Json $proof ("browser-pane-locked-launch-$Step.json")
+    if ($launches.Count -eq 0 -or $browserPid -notin @($launches | ForEach-Object { $_.pid })) { throw 'No isolated browser launch command line for the owned pane' }
+    if (@($launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor' }
+    if ($mainDpi -eq 0 -or $paneDpi -ne $mainDpi) { throw "Pane DPI $paneDpi differs from owner DPI $mainDpi" }
+    return $proof
 }
 
 function Focus-LockedBrowser([IntPtr]$Browser) {
@@ -1516,7 +1554,68 @@ try {
         'browser-pane-locked' {
             Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             $script:browserShellId = (Read-Inbox).shells[0].sid
+            if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0) {
+                $warmupStopped = $warmupJob.Stop()
+                Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'
+            }
             $pane = Open-BrowserPane 'locked-open'
+            $initialLaunch = Assert-BrowserLaunchOnOwnMonitor 'initial'
+            Doctor
+            Record 'Close owned app normally and relaunch with its saved browser pane'
+            if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Owned app did not close normally for relaunch' }
+            $relaunchStopped = $job.Stop()
+            Save-Json $relaunchStopped 'browser-pane-locked-relaunch-stopped.json'
+            if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0) {
+                $warmupStopped = $warmupJob.Stop()
+                Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'
+            }
+            $job.Dispose()
+            $job = New-Object VerifyJob
+            $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
+            $script:window = [IntPtr]::Zero
+            Wait-Until {
+                $process.Refresh()
+                $script:window = $process.MainWindowHandle
+                $script:window -ne [IntPtr]::Zero
+            } 'relaunch main window ready for Shortcuts' 60 20
+            if (-not [VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not open Shortcuts before the restored browser launch' }
+            $overlayPostedAt = [DateTime]::UtcNow
+            $monitor = [VerifyNative]::MonitorFromWindow($script:window, 1)
+            $info = New-Object VerifyNative+MonitorInfo
+            $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+            if (-not [VerifyNative]::GetMonitorInfoW($monitor, [ref]$info)) { throw 'Owner monitor rectangle unavailable' }
+            $profile = (Join-Path $env:LOCALAPPDATA 'ZigShell') -replace '\\', '/'
+            $profileArgument = '(?:^|\s)--user-data-dir="?' + [regex]::Escape($profile) + '/(?:ChromeUserData|EdgeUserData)"?(?=\s|$)'
+            Wait-Until {
+                $script:overlayLaunches = @(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'" | Where-Object {
+                    ($_.CommandLine -replace '\\', '/') -match $profileArgument -and $_.CommandLine.Contains('--window-position=')
+                } | ForEach-Object {
+                    $point = [regex]::Match($_.CommandLine, '(?:^|\s)--window-position=(-?\d+),(-?\d+)(?:\s|$)')
+                    $x = $null; $y = $null; $inside = $false
+                    if ($point.Success) {
+                        $x = [int]$point.Groups[1].Value; $y = [int]$point.Groups[2].Value
+                        $inside = $x -ge $info.Monitor.Left -and $x -lt $info.Monitor.Right -and
+                            $y -ge $info.Monitor.Top -and $y -lt $info.Monitor.Bottom
+                    }
+                    @{ pid = $_.ProcessId; commandLine = $_.CommandLine; parsed = $point.Success; x = $x; y = $y; inside = $inside }
+                })
+                $script:overlayLaunches.Count -gt 0
+            } 'positioned isolated browser launched while Shortcuts is open' 60
+            $launchObservedAt = [DateTime]::UtcNow
+            $overlayLaunch = @{ launches = $script:overlayLaunches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); overlayPostedAt = $overlayPostedAt; launchObservedAt = $launchObservedAt; overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt }
+            Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'
+            if (-not $overlayLaunch.overlayAtLaunch) { throw 'Shortcuts was not posted before the restored launch appeared' }
+            if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor while Shortcuts is open' }
+            if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }
+            Wait-Until {
+                [VerifyNative]::PaneVisible($script:window) -and
+                    $null -ne (Read-Inbox) -and @((Read-Inbox).shells).Count -gt 0
+            } 'startup restored the owned browser pane without an open command' 60
+            $script:browserShellId = (Read-Inbox).shells[0].sid
+            $restoredLaunch = Assert-BrowserLaunchOnOwnMonitor 'restored'
+            if (@($restoredLaunch.launches | Where-Object { $_.pid -in @($initialLaunch.launches | ForEach-Object { $_.pid }) }).Count -ne 0) { throw 'Relaunch reused an initial browser process instead of launching at startup' }
+            $result.checks += @{ name = 'browser-pane-locked launch-on-own-monitor'; initial = $initialLaunch; restored = $restoredLaunch; restoredOverlay = $overlayLaunch }
+            Write-Host 'browser-pane-locked launch-on-own-monitor PASS'
             $browser = [VerifyNative]::PaneWindow($script:window)
             if ($browser -eq [IntPtr]::Zero) { throw 'No visible owned docked browser HWND' }
             $dockRect = New-Object VerifyNative+Rect
