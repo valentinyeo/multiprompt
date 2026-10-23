@@ -240,6 +240,11 @@ public static class VerifyNative {
         } else if (PaneVisible(owner)) return false;
         return true;
     }
+    public static void RequireSwitchStart(IntPtr owner, IntPtr composer, IntPtr sourceConsole, string sourceSuffix, IntPtr sourceBrowser, Rect sourceDock, string sourceDraft, IntPtr targetConsole, string targetSuffix, IntPtr targetBrowser, Rect targetDock, string targetDraft) {
+        if (sourceConsole == targetConsole || (sourceBrowser == targetBrowser && sourceBrowser != IntPtr.Zero) || sourceSuffix == targetSuffix || sourceDraft == targetDraft) throw new InvalidOperationException("Source and target sessions are not distinct");
+        if (!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)) throw new InvalidOperationException("Source session is not the visible foreground session before Ctrl+Tab");
+        if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw new InvalidOperationException("Target session is already visible before Ctrl+Tab; this sample would not be a switch");
+    }
     static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         if (dock.Right - dock.Left < 16 || dock.Bottom - dock.Top < 200) throw new InvalidOperationException("Browser content area is too small");
         int x = dock.Left + (dock.Right - dock.Left) / 2;
@@ -3133,6 +3138,8 @@ try {
                             Doctor
                             Assert-Foreground
                         }
+                        $source = 1 - $target
+                        [VerifyNative]::RequireSwitchStart($script:window, $composerHandle, $consoles[$source], ('ZigShell-' + $shellIds[$source]), $browsers[$source], $docks[$source], $drafts[$source], $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $drafts[$target])
                         Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
                         $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
@@ -3145,20 +3152,21 @@ try {
                             $freeze.target_color_painted_ms = $measurement[0]
                         }
                         Wait-WorkspaceSurface $initial.active_workspace $target $chat ($composerHandle.ToInt32())
-                        $pattern = 'switch-timing: to=' + $target + ' total_us=\d+[^\r\n]*'
+                        $pattern = 'switch-timing: to=(\d+) total_us=\d+[^\r\n]*'
                         $debugAfter = (Get-Content $log -Raw) -join ''
                         $traceMatches = @()
                         if ($debugAfter.Length -ge $logStart) { $traceMatches = [regex]::Matches($debugAfter.Substring($logStart), $pattern) }
                         Save-Json @{ mode = $mode; sample = $sample; start = $logStart; end = $debugAfter.Length; complete = $debugAfter.Length -ge $logStart } ("$mode-$sample-log-range.json")
-                        $steps = $null
-                        if ($traceMatches.Count -eq 1) {
-                            $line = $traceMatches[0].Value
-                            [void]$traceLines.Add($line)
-                            $steps = @{}
-                            foreach ($field in [regex]::Matches($line, '(\w+_us)=(\d+)')) { $steps[$field.Groups[1].Value] = [double]$field.Groups[2].Value }
-                        }
+                        if ($traceMatches.Count -ne 1 -or [int]$traceMatches[0].Groups[1].Value -ne $target) { throw "Sample was not exactly one app switch to session $target; switch-timing lines in its log range: $($traceMatches.Count)" }
+                        $line = $traceMatches[0].Value
+                        [void]$traceLines.Add($line)
+                        $steps = @{}
+                        foreach ($field in [regex]::Matches($line, '(\w+_us)=(\d+)')) { $steps[$field.Groups[1].Value] = [double]$field.Groups[2].Value }
                         $traces[$mode] += $steps
                         if ($frozen) {
+                            $frozenText = $debugAfter.Substring($freeze.log_start)
+                            $idPattern = 'shell=' + $shellIds[$target] + ' '
+                            if ($frozenText -notmatch ('(?s)browser freeze confirmed: ' + $idPattern + '.*hook: Ctrl\+Tab shift=0 -> NEXT_TAB.*browser wake sent: ' + $idPattern + '.*switchToShell: ' + (1 - $target) + ' -> ' + $target + ' ')) { throw "Frozen target $target was not frozen before Ctrl+Tab and woken by it in the app log" }
                             Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$target]) } 'target freeze marker removed by app wake'
                             $freeze.marker_cleared = $true
                             $freeze.status = 'painted-and-awake'
