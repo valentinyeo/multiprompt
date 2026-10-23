@@ -69,6 +69,7 @@ function audit(source) {
   assert.match(source, /accountSyncHosts\(host_arena\.allocator\(\), initial\.value\.hosts orelse &\.\{\}, removed\)/);
   assert.match(source, /g_account_hosts_cache\.hosts = try account_hosts\.withoutRemoved\(cache_arena\.allocator\(\), g_account_hosts_cache\.hosts, removed\)/);
   assert.match(source, /const merged_hosts = try account_hosts\.withoutRemoved\(alloc, hosts, removed\)/);
+  assert.match(source, /const publish_hosts = if \(hosts_ready\) synced_hosts else server\.value\.hosts;\s*rebased\.hosts = if \(remote\.hosts_supported\) try account_hosts\.withoutRemoved\(alloc, publish_hosts orelse &\.\{\}, removed\) else null;/);
   assert.match(source, /synced_hosts = try account_hosts\.withoutRemoved\(alloc, if \(hosts_ready\) synced_hosts else host_base, removed\)/);
   assert.match(source, /if \(job\.kind == \.remove_host and !remote\.removal_supported\) return error\.RemovalUnsupported/);
   assert.match(source, /if \(hosts_ready and job\.kind != \.remove_host\) try accountApplyHostAddresses/);
@@ -85,6 +86,8 @@ test('IGSH-600 desktop filters all publish paths and confirms before queuing rem
     'if (account_hosts.isRemoved(removed, @intCast(slot))) continue;',
     'g_account_hosts_cache.hosts = try account_hosts.withoutRemoved(cache_arena.allocator(), g_account_hosts_cache.hosts, removed);',
     'const merged_hosts = try account_hosts.withoutRemoved(alloc, hosts, removed);',
+    'const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;',
+    'try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed)',
     'if (hosts_ready and job.kind != .remove_host) try accountApplyHostAddresses',
     'if (MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Remove server"), 4 | 0x20 | 0x100) != 6) return;',
   ]) {
@@ -95,11 +98,15 @@ test('IGSH-600 desktop filters all publish paths and confirms before queuing rem
 
 test('IGSH-600 removal journey is wired into Test with production Zig sync and host tests', () => {
   assert.match(read('.github/workflows/test.yml'), /node --test service\/test\/infra\.test\.js service\/test\/worker\.test\.js/);
+  const wiring = workflow => assert.match(workflow, /node --test tools\/startup-responsive\.test\.js tools\/test-workflow-structure\.test\.mjs tools\/account-host-removal\.test\.js/);
+  const workflow = read('.github/workflows/test.yml');
+  wiring(workflow);
+  assert.throws(() => wiring(workflow.replace(' tools/account-host-removal.test.js', '')), assert.AssertionError);
   assert.match(read('service/test/worker.test.js'), /IGSH-600 remove slot 2[^]*hostClient\.run\([^]*removal_journey: true/);
   assert.match(read('tools/account-hosts.test.js'), /--test-filter', 'IGSH-600'/);
   assert.match(read('build.zig'), /"src\/account_hosts\.zig"/);
   assert.match(read('build.zig'), /vps_test_step\.dependOn\(account_test_step\)/);
-  assert.match(read('.claude/skills/verify-multiprompt/features/account-hosts.md'), /remove[^]*sync twice[^]*restart/i);
+  assert.match(read('.claude/skills/verify-multiprompt/diagnostics/account-hosts.md'), /remove[^]*sync twice[^]*restart/i);
   const layoutSource = read('src/session_layout.zig');
   assert.match(layoutSource, /pub fn jsonStringify\(self: Layout/);
   assert.match(layoutSource, /for \(slots\) \|slot\| try json\.write\(slot\)/);

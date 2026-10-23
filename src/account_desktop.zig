@@ -903,7 +903,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         }
         synced_hosts = merged_hosts;
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) synced_hosts else try account_hosts.withoutRemoved(alloc, server.value.hosts orelse &.{}, removed)) else null;
+        const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
+        rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const put = try account_client.request("PUT", "/v1/layout", access, body);
         remote.deinit();

@@ -136,7 +136,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: steps.paths.outputs.heavy == 'true'
         with:
@@ -428,9 +428,9 @@ jobs:
         working-directory: service
         timeout-minutes: 2
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
-      - name: Run account Worker tests and deterministic server removal journey
+      - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js tools/account-host-removal.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
