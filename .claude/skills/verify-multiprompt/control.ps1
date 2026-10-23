@@ -1239,7 +1239,7 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
         $state = Read-Inbox
-        $trace = (Get-Content $log -Raw).Substring($logStart)
+        $trace = ((Get-Content $log -Raw) -join '').Substring($logStart)
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
             $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
             $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
