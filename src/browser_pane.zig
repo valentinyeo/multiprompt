@@ -1006,7 +1006,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     }
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
     appendBrowserWideAscii(&params, &pos, launch_dir);
-    appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode ");
+    appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode ");
     const extension_path = edgeExtensionPath();
     if (extension_path.len > 0) {
         appendBrowserWideAscii(&params, &pos, "--load-extension=\"");
