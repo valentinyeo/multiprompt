@@ -11,6 +11,7 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 - `system-notice`: transcript system notices explain terminal-only text rather than missing messages.
 - `unsettled-line`: recheck unmatched lines after a short settling wait before reporting them.
 - `background-task-status`: Claude background-command, idle-compaction, monitor and still-running status lines are excluded.
+- `scrollback-above-question`: lines above the newest question in Chat View's first screen load on scroll up and are not reported.
 - Existing audit fixtures also cover renderer drift, cold-tail evidence, thinking, tools and pending deliveries.
 
 ## How to get to it (user POV)

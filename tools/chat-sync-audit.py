@@ -117,6 +117,22 @@ def transcript_evidence(reader, path, wire, finding):
     return evidence[-8:]
 
 
+def not_drift(item, wire):
+    if item['kind'] != 'pane_missing' or not item['transcript_lines']:
+        return False
+    user = False
+    for line in wire.splitlines()[1:-1]:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict) and row.get('role') == 'user':
+            user = True
+            break
+    return all(row['record'] != 'conversation' or row['location'] == 'after_snapshot' or
+               row['location'] == 'before_cold_tail' and user for row in item['transcript_lines'])
+
+
 def settle_pending(reader, path, wire, findings, sleep=time.sleep):
     if not any(item['kind'] == 'pane_missing' and not item['transcript_lines'] for item in findings):
         return findings
@@ -125,7 +141,7 @@ def settle_pending(reader, path, wire, findings, sleep=time.sleep):
     for item in findings:
         if item['kind'] == 'pane_missing' and not item['transcript_lines']:
             item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
-            if item['transcript_lines'] and all(row['record'] != 'conversation' or row['location'] == 'after_snapshot' for row in item['transcript_lines']):
+            if not_drift(item, wire):
                 continue
         settled.append(item)
     return settled
@@ -163,7 +179,7 @@ def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep
         item['text'] = item.get('text', '')[:80]
         item.update(context)
         item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
-        if item['kind'] == 'pane_missing' and item['transcript_lines'] and all(row['record'] != 'conversation' or row['location'] == 'after_snapshot' for row in item['transcript_lines']):
+        if not_drift(item, wire):
             continue
         findings.append(item)
     return settle_pending(reader, path, wire, findings, sleep)
