@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.847", .items = &.{
+        .{ .text = "The AI status card’s hover details now show each account’s weekly reset day and local time, countdown, pending bonus reset and usage pace.", .ticket = "IGSH-703" },
+        .{ .text = "Muted sessions no longer show in the Inbox, and mute now stays in sync across your devices.", .ticket = "IGSH-706" },
+    } },
     .{ .ver = "0.28.846", .items = &.{
         .{ .text = "Press Ctrl+H to snooze a session with Remind Me.", .ticket = "IGSH-702" },
         .{ .text = "Remind Me now offers In 1, 2, 3, 6 and 12 hours and Tomorrow evening, and Tomorrow morning is now 9:00 AM.", .ticket = "IGSH-702" },
