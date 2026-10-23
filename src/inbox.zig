@@ -768,7 +768,8 @@ test "used JSON field supports old and formatted session and inbox records" {
 pub fn inboxRowVisible(r: *const InboxRow) bool {
     if (r.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[r.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
         const idx = findShellById(r.sid) orelse return false;
-        if (app_state.shells[idx].inbox_excluded or app_state.shells[idx].muted) return false;
+        if (app_state.shells[idx].inbox_excluded) return false;
+        if (app_state.shells[idx].muted) return false;
     }
     if (app_state.g_unread_only and !r.att) return false;
     if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
