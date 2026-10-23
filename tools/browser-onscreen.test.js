@@ -14,7 +14,7 @@ function body(text, name) {
 
 test('the one wrapper that moves a pane keeps the on-screen set current', () => {
   const wrapper = body(src('browser_pane.zig'), 'setBrowserWindowPosAsync');
-  assert.match(wrapper, /moveLeavesOnScreen\(x, BROWSER_PARK_X,/);
+  assert.match(wrapper, /moveLeavesOnScreen\(browserRectIsParked\(rect\),/);
   assert.match(wrapper, /g_browser_onscreen\.mark\(/);
   assert.match(wrapper, /g_browser_onscreen\.unmark\(/);
 });

@@ -55,5 +55,5 @@ test("placeholder paints the slot, is overlay-aware, and is wired into WM_PAINT"
   assert.match(functionBody("browserPlaceholderPure"), /BROWSER_PLACEHOLDER_NOT_OPEN_MS/);
   assert.match(source, /test "browserPlaceholderPure/);
   assert.equal((source.match(/paintBrowserPlaceholder\(/g) || []).length, 3, "definition + both WM_PAINT paths");
-  assert.match(functionBody("browserPaneCoversSlot"), /BROWSER_PARK_X/, "a parked pane does not count as covering");
+  assert.match(functionBody("browserPaneCoversSlot"), /return !browserRectIsParked\(wr\)/, "a parked pane does not count as covering");
 });

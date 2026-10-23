@@ -50,7 +50,7 @@ test("same-sized painted chat browsers are uncovered before draft binding withou
   assert.match(switching, order);
   assert.doesNotMatch(switching.replace('.revealPaintedChatBrowser();', '.positionActiveBrowser();'), order);
   const park = pane.slice(pane.indexOf('pub fn parkBrowserWindow('), pane.indexOf('fn hideBrowserWindowHard('));
-  assert.match(park, /BROWSER_PARK_X, BROWSER_PARK_Y, 0, 0, SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE/);
+  assert.match(park, /target.left, target.top, 0, 0, SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE/);
   assert.match(park, /showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\)/);
   const extension = fs.readFileSync(path.join(__dirname, '..', 'extension', 'bridge.js'), 'utf8');
   assert.match(extension, /async function setPageLifecycle\(debuggee, state\) \{[^]*Page\.setWebLifecycleState", \{ state \}/);
