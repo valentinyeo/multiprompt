@@ -1,0 +1,87 @@
+[
+  {
+    "name": "tmux",
+    "base": "SEARCH_TMUX_OFFSET",
+    "size": "MAX_TMUX_SESSIONS"
+  },
+  {
+    "name": "new",
+    "base": "SEARCH_NEW_OFFSET",
+    "size": "NUM_BUTTONS"
+  },
+  {
+    "name": "skills",
+    "base": "SEARCH_SKILL_ROW_OFFSET",
+    "size": "MAX_PALETTE_SKILLS"
+  },
+  {
+    "name": "snippets",
+    "base": "SEARCH_SNIPPET_OFFSET",
+    "size": "MAX_SNIPPETS"
+  },
+  {
+    "name": "workspace_delete",
+    "base": "SEARCH_WORKSPACE_DELETE_OFFSET",
+    "size": "MAX_WORKSPACES"
+  },
+  {
+    "name": "workspace_sort",
+    "base": "SEARCH_WSSORT_OFFSET",
+    "size": "MAX_LWS"
+  },
+  {
+    "name": "workspace_move",
+    "base": "SEARCH_WSMOVE_OFFSET",
+    "size": "MAX_LWS"
+  },
+  {
+    "name": "workspace",
+    "base": "SEARCH_WORKSPACE_OFFSET",
+    "size": "MAX_WORKSPACES"
+  },
+  {
+    "name": "tab_context_group_add",
+    "base": "SEARCH_TABCTX_GROUP_ADD_OFFSET",
+    "size": "MAX_GROUPS"
+  },
+  {
+    "name": "custom_command",
+    "base": "SEARCH_CUSTOMCMD_OFFSET",
+    "size": "MAX_CUSTOM_CMDS"
+  },
+  {
+    "name": "archived",
+    "base": "SEARCH_ARCHIVED_OFFSET",
+    "size": 64
+  },
+  {
+    "name": "reminder",
+    "base": "SEARCH_REMINDER_ROW_OFFSET",
+    "size": "MAX_REMINDERS"
+  },
+  {
+    "name": "session_overview",
+    "base": "SEARCH_SESSION_OVERVIEW_ROW_OFFSET",
+    "size": "MAX_SESSION_OVERVIEW_SEARCH_ROWS"
+  },
+  {
+    "name": "group_context",
+    "base": "SEARCH_GROUPCTX_BASE",
+    "size": "SEARCH_GROUPCTX_COUNT"
+  },
+  {
+    "name": "group_move",
+    "base": "SEARCH_GROUPMOVE_GROUP_OFFSET",
+    "size": "MAX_GROUPS"
+  },
+  {
+    "name": "reminder_preset",
+    "base": "SEARCH_REMIND_PRESET_OFFSET",
+    "size": "REMIND_PRESET_COUNT"
+  },
+  {
+    "name": "snoozed_workspace",
+    "base": "SEARCH_WS_SNOOZED_ROW_OFFSET",
+    "size": "MAX_REMINDERS"
+  }
+]
