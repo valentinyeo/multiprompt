@@ -1289,7 +1289,6 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         zsbSendError(client, "multiprompt-browser: no verb\n");
         return;
     }
-    argc = zsbStripAgentActivation(argv[0..], argc);
     const remote_verbs = [_][]const u8{
         "activate",         "active-tab",     "back",          "browser-drop-gesture",
         "cdp",              "click",          "close-tab",     "console",
@@ -1330,6 +1329,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         return;
     }
     zsbTouchSession(session);
+    argc = zsbStripAgentActivation(argv[0..], argc);
 
     if (std.mem.eql(u8, argv[0], "pane-info")) {
         if (argc != 1) {

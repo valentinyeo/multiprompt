@@ -99,7 +99,7 @@ test('remote command arguments retain inline operations without local file optio
 
 test('remote policy precedes pane lookup, app dispatch and bridge launch', () => {
   const { start, end } = policy();
-  assert.ok(worker.indexOf('argc = zsbStripAgentActivation(') < start);
+  assert.ok(worker.indexOf('argc = zsbStripAgentActivation(') > end);
   for (const operation of [
     'sendZsbWorkspaceResponse(', 'queueZsbBindRequestEx(', 'zsbSessionHasWebView2(',
     'queueZsbOpenRequest(', 'queueZsbSidebarRequest(', 'zsbResolvePaneWindowId(',
