@@ -699,8 +699,15 @@ def wire_row(message):
     return json.dumps(message, ensure_ascii=True, separators=(",", ":"))
 
 
+def load_line(raw):
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeError):
+        return None
+
+
 def asks_question(raw, agent):
-    message = conversation_event(json.loads(raw), agent)
+    message = conversation_event(load_line(raw), agent)
     return message is not None and message.get("role") == "user"
 
 
@@ -713,12 +720,12 @@ def read_tail(source, size, agent, captured=None, fill=True):
     shown = 0
     offset = base
     if fill:
-        held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(json.loads(raw), agent, base))
+        held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(load_line(raw), agent, base))
         fill = fill and held < TAIL_BYTES // 2
         fill_at = base
     for raw in reversed(older.splitlines(keepends=True)):
         offset -= len(raw)
-        messages = conversation_rows(json.loads(raw), agent, offset)
+        messages = conversation_rows(load_line(raw), agent, offset)
         shown += sum(len(wire_row(row)) + 1 for row in messages)
         if shown > TAIL_BYTES:
             break
@@ -1159,7 +1166,7 @@ def response(q, source=None, as_owner=False):
         groups = []
         consumed = base
         for raw in data.splitlines(keepends=True):
-            event = json.loads(raw)
+            event = load_line(raw)
             messages = conversation_rows(event, agent, consumed)
             message = next((row for row in messages if row["role"] in ("user", "assistant")), None)
             if ISSUE_349_QUEUED_STAMP_FROM_QUEUE and agent == "claude" and isinstance(event, dict):

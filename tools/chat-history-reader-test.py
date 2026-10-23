@@ -1307,14 +1307,13 @@ class HistoryReaderTest(unittest.TestCase):
         _, rows = self.read()
         self.assertEqual(rows[0]['text'], 'codex prompt')
 
-    def test_untrusted_identity_and_corrupt_records_fail_not_partial_success(self):
+    def test_untrusted_identity_fails_and_corrupt_record_is_skipped(self):
         self.query['sid'] = '../escape'
         with self.assertRaises(ValueError):
             reader.response(self.query)
         self.query['sid'] = 'sid'
         self.path.write_text('{invalid}\n')
-        with self.assertRaises(ValueError):
-            reader.response(self.query)
+        self.assertEqual(self.read()[1], [])
 
     def test_50mb_cold_start_reads_only_tail_and_rejects_706_positive_control(self):
         self.path.write_text(json.dumps(dict(type='progress', text='x' * (40 * 1024 * 1024))) + '\n')
@@ -1608,6 +1607,41 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn('stdin history', p.stdout)
         self.assertTrue(p.stdout.endswith('@@MP_END@@\n'))
+
+    def test_corrupt_line_keeps_other_messages(self):
+        corrupt = b'{"type":"assistant","message":{"ro\n'
+
+        def texts(rows):
+            return [row['text'] for row in rows if row['role'] in ('user', 'assistant')]
+
+        self.write(self.event('before'))
+        with self.path.open('ab') as output:
+            output.write(corrupt)
+            output.write((json.dumps(self.event('after')) + '\n').encode())
+        fields, rows = self.read()
+        self.assertEqual(texts(rows), ['before', 'after'])
+        self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
+        self.write(self.event('first'))
+        self.read()
+        with self.path.open('ab') as output:
+            output.write(corrupt)
+            output.write((json.dumps(self.event('second')) + '\n').encode())
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(texts(rows), ['second'])
+        self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
+        question = dict(type='user', message=dict(role='user', content='QUESTION-690'))
+        with self.path.open('wb') as output:
+            output.write((json.dumps(question) + '\n').encode())
+            output.write(corrupt)
+            for index in range(5):
+                output.write((json.dumps(self.event('answer-%d ' % index + 'x' * 150000)) + '\n').encode())
+        self.query.update(cached_sid='', inode=0, offset=0)
+        fields, rows = self.read()
+        self.assertIn('QUESTION-690', [text[:12] for text in texts(rows)])
+        self.assertIn('answer-4', [text[:8] for text in texts(rows)])
 
 
 class IGSH412ResumedSessionTest(unittest.TestCase):
