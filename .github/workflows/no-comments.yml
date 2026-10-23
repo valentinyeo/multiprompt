@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -31,6 +33,26 @@ jobs:
         run: node --test tools/strip-comments.test.js
       - name: Fail on any code comment
         run: node tools/strip-comments.mjs --check
+      - name: Test routing ID checker
+        if: success() || failure()
+        run: node --test tools/check-routing-ids.test.js
+      - name: Check routing IDs
+        if: success() || failure()
+        run: node tools/check-routing-ids.mjs
+      - name: Test regression input checker
+        if: success() || failure()
+        run: node --test tools/check-regression-inputs.test.js
+      - name: Check durable regression inputs
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        run: node tools/check-regression-inputs.mjs origin/${{ github.base_ref }}
+      - name: Test PowerShell host name checker
+        if: success() || failure()
+        shell: pwsh
+        run: node --test tools/check-powershell-host-names.test.js
+      - name: Check PowerShell host names
+        if: success() || failure()
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1 -Root .
 
   extension-version:
     name: extension-version

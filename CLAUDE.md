@@ -25,3 +25,16 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - **Never use Ctrl+Alt shortcuts** (AltGr on US-International layouts).
 - The browser extension targets Chrome and loads unpacked from `extension/`.
 - Keep this file under 80 lines.
+
+## Rules and what enforces them
+
+| Rule | Enforced by |
+| --- | --- |
+| Allocate distinct routing IDs outside registered dynamic bands. | `tools/check-routing-ids.mjs`, `tools/routing-id-bands.json` |
+| Snapshot regression inputs in `tools/fixtures/<ticket>/`, not Git history. | `tools/check-regression-inputs.mjs` (new reads in PR diffs) |
+| Do not bind PowerShell host-owned variables or name functions after aliases. | `tools/check-powershell-host-names.ps1` |
+| Keep palette, tab actions and shortcut documentation aligned. | `tools/palette-rows.test.js`, `tools/shortcuts-doc.test.js` |
+| Never hand-edit app versions; stamp after merge. | `tools/version-stamp.mjs check` in `test.yml` |
+| Keep code comment-free. | `tools/strip-comments.mjs --check` |
+| Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
+| Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
