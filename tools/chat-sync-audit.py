@@ -38,13 +38,17 @@ def normalize(text):
 def pane_candidates(capture):
     candidates = []
     lines = capture.splitlines()
-    prompt, pending = 0, (0, 0)
-    for line_no, line in enumerate(lines[:-8], 1):
+    prompt, pending = 0, False
+    for line_no, line in enumerate(lines, 1):
         line = ANSI.sub('', line).strip()
-        if line.startswith('● '):
-            pending = (prompt, line_no) if re.fullmatch(r'● Advising using .+ \d+(?:\.\d+)+', line) else (0, 0)
+        if re.fullmatch(r'● Advising using .+ \d+(?:\.\d+)+', line):
+            pending = True
         elif re.match(r'^[❯›>] ', line):
-            prompt = line_no
+            prompt, pending = line_no, False
+        elif re.match(r'^● [A-Za-z_]+\(', line) and line_no < len(lines) and ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
+            pending = False
+        if line_no > len(lines) - 8:
+            continue
         if line.startswith('● ') and not re.match(r'^● [A-Za-z_]+\(', line):
             if ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
                 continue
@@ -79,7 +83,11 @@ def pane_candidates(capture):
         text = normalize(text)
         if len(text) >= 20:
             candidates.append(dict(text=text[:80], probe=text[:60], pane_line=line_no))
-    return [candidate for candidate in candidates if not pending[0] < candidate['pane_line'] < pending[1]]
+    if pending:
+        for candidate in candidates:
+            if candidate['pane_line'] >= prompt:
+                candidate['advising'] = True
+    return candidates
 
 
 def transcript_evidence(reader, path, wire, finding):
@@ -164,7 +172,7 @@ def settle_pending(reader, path, wire, findings, sleep=time.sleep):
     for item in findings:
         if item['kind'] == 'pane_missing' and not item['transcript_lines']:
             item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
-            if not_drift(item, wire):
+            if not_drift(item, wire) or item.get('advising') and not item['transcript_lines']:
                 continue
         settled.append(item)
     return settled
@@ -198,7 +206,8 @@ def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep
             if item['present']:
                 continue
             candidate = candidates[item['probe']]
-            item = dict(kind='pane_missing', text=candidate['text'], pane_line=candidate['pane_line'])
+            item = dict(candidate, kind='pane_missing')
+            del item['probe']
         item['text'] = item.get('text', '')[:80]
         item.update(context)
         item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
