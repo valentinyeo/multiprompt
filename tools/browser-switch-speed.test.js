@@ -457,3 +457,11 @@ test('each frozen sample records independent native-loop visible, marker-cleared
   for (const before of ['File.ReadAllText(frozenMarker).Trim() != "1"', '!System.IO.File.Exists(frozenMarker)', 'awake >= 0', 'painted, visible, awake']) assert.throws(() => assertsWakeTiming(native.replaceAll(before, 'false'), journey));
   for (const field of ['window_visible_ms', 'wake_flag_cleared_ms', 'target_color_painted_ms']) assert.throws(() => assertsWakeTiming(native, journey.replace(`$freeze.${field} = $measurement`, '$ignored = $measurement')));
 });
+
+test('timing log appends permit concurrent evidence readers without permitting another writer', () => {
+  const io = read('src/file_io.zig');
+  const append = io.slice(io.indexOf('pub fn win32OpenAppend('), io.indexOf('pub fn win32WriteAll('));
+  const sharedRead = /CreateFileW\(w.ptr, GENERIC_WRITE, FILE_SHARE_READ, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null\)/;
+  assert.match(append, sharedRead);
+  for (const sharing of ['0', 'FILE_SHARE_READ | FILE_SHARE_WRITE']) assert.doesNotMatch(append.replace('GENERIC_WRITE, FILE_SHARE_READ,', `GENERIC_WRITE, ${sharing},`), sharedRead);
+});

@@ -51,7 +51,7 @@ pub fn win32OpenWrite(path: []const u8) ?HANDLE {
 pub fn win32OpenAppend(path: []const u8) ?HANDLE {
     var wbuf: [520]u16 = undefined;
     const w = win32WidePath(&wbuf, path) orelse return null;
-    const h = CreateFileW(w.ptr, GENERIC_WRITE, 0, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    const h = CreateFileW(w.ptr, GENERIC_WRITE, FILE_SHARE_READ, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
     if (h == INVALID_HANDLE_VALUE_PTR) return null;
     _ = SetFilePointerEx(h, 0, null, FILE_END);
     return h;
