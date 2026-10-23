@@ -33,6 +33,7 @@ pub fn publishNeeded(local: Layout, base: Layout, synced: Layout) bool {
 }
 
 fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
+    if (!eq(u8, a.removed_hosts orelse &.{}, b.removed_hosts orelse &.{})) return false;
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
@@ -61,7 +62,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
         try tabs.append(a, tab);
     }
     if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
-    return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
@@ -82,7 +83,8 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
         try tabs.insert(a, @min(i, tabs.items.len), t);
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, .{ .name = t.workspace });
     }
-    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    const removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
+    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layout {
@@ -167,7 +169,9 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             @field(settings.?, field.name) = value;
         }
     }
-    const result = Layout{ .settings = settings, .revision = remote.revision, .hosts = remote.hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    var removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
+    removed = try @import("account_hosts.zig").mergeRemoved(a, removed, remote.removed_hosts orelse &.{});
+    const result = Layout{ .settings = settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = if (removed.len > 0) removed else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
     try layout.validate(result);
     return result;
 }
@@ -846,4 +850,30 @@ test "ISSUE-423 settings survive apply held edits cache and layout encoding" {
     explicit_defaults.settings = .{};
     try std.testing.expect(equal(initial, explicit_defaults));
     try std.testing.expect(!publishNeeded(initial, explicit_defaults, explicit_defaults));
+}
+
+test "IGSH-600 tombstones survive rebase held edits apply and equality" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const empty = Layout{ .workspaces = &.{}, .tabs = &.{} };
+    var base = empty;
+    base.removed_hosts = &.{2};
+    var edited = empty;
+    edited.removed_hosts = &.{1};
+    var remote = empty;
+    remote.removed_hosts = &.{0};
+    const rebased = try rebase(a, base, edited, remote);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2 }, rebased.removed_hosts.?);
+    const held = try keepHeld(a, base, empty, &.{});
+    try std.testing.expectEqualSlices(u8, &.{2}, held.removed_hosts.?);
+    const applied = try apply(a, empty, &.{}, remote, 9, 256);
+    try std.testing.expectEqualSlices(u8, &.{0}, applied.removed_hosts.?);
+    try std.testing.expect(!equal(empty, base));
+    try std.testing.expect(equal(base, held));
+    try std.testing.expect(!publishNeeded(held, base, base));
+    const encoded = try layout.encode(a, rebased);
+    const parsed = try layout.parse(a, encoded);
+    defer parsed.deinit();
+    try std.testing.expect(equal(rebased, parsed.value));
 }

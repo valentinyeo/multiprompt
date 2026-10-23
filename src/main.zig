@@ -628,6 +628,9 @@ const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
 const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
+const SEARCH_REMOVE_SERVER_1_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_1_OFFSET;
+const SEARCH_REMOVE_SERVER_2_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_2_OFFSET;
+const SEARCH_REMOVE_SERVER_3_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_3_OFFSET;
 const SEARCH_SKILLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SKILLS_MENU_OFFSET;
 const SEARCH_SKILLS_BACK_OFFSET = @import("app_state.zig").SEARCH_SKILLS_BACK_OFFSET;
 const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET;
@@ -1270,7 +1273,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.823";
+pub const APP_VERSION = "0.28.825";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -4391,6 +4394,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     accountSignOut();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_REMOVE_SERVER_1_OFFSET or target == SEARCH_REMOVE_SERVER_2_OFFSET or target == SEARCH_REMOVE_SERVER_3_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("account_desktop.zig").accountRemoveServer(@intCast(target - SEARCH_REMOVE_SERVER_1_OFFSET));
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

@@ -326,6 +326,32 @@ pub fn accountPush() void {
     };
     startAccountJob(.{ .kind = .push, .base = base, .edited = encoded });
 }
+pub fn accountRemoveServer(slot: u8) void {
+    if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_busy or g_account_key_prompt_active) return;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const parsed = session_layout.parse(a, app_state.g_account_base orelse return) catch return;
+    defer parsed.deinit();
+    if (account_hosts.isRemoved(parsed.value.removed_hosts orelse &.{}, slot)) return;
+    const host = account_hosts.find(parsed.value.hosts orelse &.{}, slot) orelse {
+        showHeaderNoticeAscii("No account server in this slot", 4000, false);
+        return;
+    };
+    const text = std.fmt.allocPrint(a, "Remove {s} ({s}) from your account on every device?\nLocal SSH settings and sessions will stay unchanged.", .{ host.name, host.hostname }) catch return;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
+    if (MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Remove server"), 4 | 0x20 | 0x100) != 6) return;
+    const base_bytes = app_state.g_account_local_base orelse app_state.g_account_base orelse return;
+    const held = session_layout.parse(a, base_bytes) catch return;
+    defer held.deinit();
+    const local = accountCapturePush(a, held.value) catch return;
+    const edited = session_layout.encode(std.heap.page_allocator, local) catch return;
+    const base = std.heap.page_allocator.dupe(u8, base_bytes) catch {
+        std.heap.page_allocator.free(edited);
+        return;
+    };
+    startAccountJob(.{ .kind = .remove_host, .slot = slot, .base = base, .edited = edited });
+}
 fn accountDeletePending() void {
     var buf: [512]u8 = undefined;
     if (syncAuthPath(&buf, "account-layout-pending.json")) |path| {
@@ -550,7 +576,7 @@ fn accountApplyHostAddresses(a: std.mem.Allocator, before: []const account_hosts
     if (!writeFileAtomicW(config, rewritten)) return error.Storage;
 }
 
-fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![]const account_hosts.Host {
+fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host, removed: []const u8) ![]const account_hosts.Host {
     const aliases = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
     const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
     var ssh_buf: [1024]u8 = undefined;
@@ -566,14 +592,16 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
     const folder = try std.fmt.allocPrint(a, "{s}\\.ssh", .{profile_buf[0..n]});
     const config = try std.fmt.allocPrint(a, "{s}\\config", .{folder});
     const known = try std.fmt.allocPrint(a, "{s}\\known_hosts", .{folder});
-    var resolved_hosts: [3]account_hosts.Resolved = undefined;
-    for (aliases, &resolved_hosts) |alias, *resolved| {
+    var resolved_hosts: [3]account_hosts.Resolved = @splat(.{ .hostname = "", .port = 22, .user = "" });
+    for (aliases, &resolved_hosts, 0..) |alias, *resolved, slot| {
+        if (account_hosts.isRemoved(removed, @intCast(slot))) continue;
         const command = try std.fmt.allocPrint(a, "{s}-G {s}", .{ ssh, alias });
         const output = try accountSshOutput(a, command, 5000);
         resolved.* = account_hosts.parseSshConfig(output) orelse return error.InvalidHosts;
     }
     var hosts: std.ArrayList(account_hosts.Host) = .empty;
     for (aliases, names, resolved_hosts, 0..) |alias, name, resolved, slot| {
+        if (account_hosts.isRemoved(removed, @intCast(slot))) continue;
         const missing = account_hosts.shouldImport(alias, resolved);
         var incoming: ?account_hosts.Host = null;
         if (missing) {
@@ -612,7 +640,7 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
             }
             accountAppendSshFile(config, block) catch continue;
         } else host.host_keys = keys[0..@min(keys.len, 4)];
-        host.name = name;
+        host.name = try a.dupe(u8, account_hosts.displayName(remote, @intCast(slot), name));
         try hosts.append(a, host);
     }
     return hosts.toOwnedSlice(a);
@@ -814,10 +842,20 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const initial_json = try accountReadLayout(alloc, remote.bytes);
     const initial = try session_layout.parse(alloc, initial_json);
     defer initial.deinit();
+    if (job.kind == .remove_host and !remote.removal_supported) return error.RemovalUnsupported;
+    var removed = initial.value.removed_hosts orelse &.{};
+    if (job.kind == .remove_host) removed = try account_hosts.addRemoved(alloc, removed, job.slot orelse return error.InvalidHosts);
+    if (g_account_hosts_cache.arena) |*cache_arena| {
+        for (removed) |slot| {
+            if (account_hosts.find(g_account_hosts_cache.hosts, slot) == null) continue;
+            g_account_hosts_cache.hosts = try account_hosts.withoutRemoved(cache_arena.allocator(), g_account_hosts_cache.hosts, removed);
+            break;
+        }
+    }
     var hosts_ready = g_account_hosts_cache.arena != null;
-    if (remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
+    if (job.kind != .remove_host and remote.hosts_supported and account_hosts.shouldRefresh(GetTickCount64(), g_account_hosts_cache.refreshed_at, job.kind == .login or job.kind == .startup, g_account_hosts_cache.hosts, initial.value.hosts orelse &.{})) {
         var host_arena = std.heap.ArenaAllocator.init(a);
-        const discovered: ?[]const account_hosts.Host = accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{}) catch null;
+        const discovered: ?[]const account_hosts.Host = accountSyncHosts(host_arena.allocator(), initial.value.hosts orelse &.{}, removed) catch null;
         hosts_ready = discovered != null;
         if (discovered) |found| {
             if (g_account_hosts_cache.arena) |*old| old.deinit();
@@ -836,6 +874,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     var synced_hosts = hosts;
     var attempts: usize = 0;
     while (attempts < 3) : (attempts += 1) {
+        if (job.kind == .remove_host and !remote.removal_supported) return error.RemovalUnsupported;
         const json = try accountReadLayout(alloc, remote.bytes);
         const server = try session_layout.parse(alloc, json);
         defer server.deinit();
@@ -847,7 +886,16 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer edited.deinit();
             rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
         }
-        const merged_hosts = try alloc.dupe(account_hosts.Host, hosts);
+        removed = try account_hosts.mergeRemoved(alloc, removed, rebased.removed_hosts orelse &.{});
+        if (g_account_hosts_cache.arena) |*cache_arena| {
+            for (removed) |slot| {
+                if (account_hosts.find(g_account_hosts_cache.hosts, slot) == null) continue;
+                g_account_hosts_cache.hosts = try account_hosts.withoutRemoved(cache_arena.allocator(), g_account_hosts_cache.hosts, removed);
+                break;
+            }
+        }
+        rebased.removed_hosts = if (remote.removal_supported and removed.len > 0) removed else null;
+        const merged_hosts = try account_hosts.withoutRemoved(alloc, hosts, removed);
         for (merged_hosts) |*host| {
             const merged = account_hosts.rebase(host.*, account_hosts.find(host_base, host.slot), account_hosts.find(server.value.hosts orelse &.{}, host.slot));
             host.* = merged.host;
@@ -855,7 +903,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         }
         synced_hosts = merged_hosts;
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
-        rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) synced_hosts else server.value.hosts) else null;
+        const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
+        rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const put = try account_client.request("PUT", "/v1/layout", access, body);
         remote.deinit();
@@ -865,18 +914,25 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         if (remote.status != 409) return error.Network;
     }
     if (remote.status != 200) return error.Conflict;
-    if (remote.hosts_supported and hosts_ready) {
-        try accountApplyHostAddresses(alloc, hosts, synced_hosts);
+    const final_json = try accountReadLayout(alloc, remote.bytes);
+    const final_layout = try session_layout.parse(alloc, final_json);
+    defer final_layout.deinit();
+    removed = try account_hosts.mergeRemoved(alloc, removed, final_layout.value.removed_hosts orelse &.{});
+    synced_hosts = try account_hosts.withoutRemoved(alloc, if (hosts_ready) synced_hosts else host_base, removed);
+    if (remote.hosts_supported and (hosts_ready or removed.len > 0)) {
+        if (hosts_ready and job.kind != .remove_host) try accountApplyHostAddresses(alloc, try account_hosts.withoutRemoved(alloc, hosts, removed), synced_hosts);
         const encoded_hosts = try std.json.Stringify.valueAlloc(alloc, synced_hosts, .{ .emit_null_optional_fields = false });
         if (!writeDpapiFile("account-hosts-base.dat", encoded_hosts)) return error.Storage;
-        var host_arena = std.heap.ArenaAllocator.init(a);
-        const owned = std.json.parseFromSlice([]const account_hosts.Host, host_arena.allocator(), encoded_hosts, .{ .allocate = .alloc_always }) catch |err| {
-            host_arena.deinit();
-            return err;
-        };
-        const refreshed_at = g_account_hosts_cache.refreshed_at;
-        if (g_account_hosts_cache.arena) |*old| old.deinit();
-        g_account_hosts_cache = .{ .arena = host_arena, .hosts = owned.value, .refreshed_at = refreshed_at };
+        if (hosts_ready) {
+            var host_arena = std.heap.ArenaAllocator.init(a);
+            const owned = std.json.parseFromSlice([]const account_hosts.Host, host_arena.allocator(), encoded_hosts, .{ .allocate = .alloc_always }) catch |err| {
+                host_arena.deinit();
+                return err;
+            };
+            const refreshed_at = g_account_hosts_cache.refreshed_at;
+            if (g_account_hosts_cache.arena) |*old| old.deinit();
+            g_account_hosts_cache = .{ .arena = host_arena, .hosts = owned.value, .refreshed_at = refreshed_at };
+        }
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     accountSyncDeviceKeys(access, job, reply) catch {
@@ -2256,7 +2312,7 @@ test "authenticated layout capacity failure cannot relock an already running pro
 }
 
 test "device key errors stay silent for background jobs and explicit jobs retain one plain message" {
-    for ([_]AccountJobKind{ .startup, .login, .pull, .push, .devices, .revoke, .signout, .device_keys, .decide_keys }) |kind| {
+    for ([_]AccountJobKind{ .startup, .login, .pull, .push, .devices, .revoke, .signout, .device_keys, .decide_keys, .remove_host }) |kind| {
         var reply: LayoutReply = .{ .job = .{ .kind = kind } };
         defer if (reply.key_error) |text| std.heap.page_allocator.free(text);
         accountDeviceKeyError(&reply, "The public key file id_ed25519.pub is missing next to your private key.");

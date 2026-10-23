@@ -53,6 +53,13 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.825", .items = &.{
+        .{ .text = "The browser pane opens at its normal size after a relaunch on a two-monitor setup.", .ticket = "IGSH-601" },
+    } },
+    .{ .ver = "0.28.824", .items = &.{
+        .{ .text = "Server names set in your account now stay the same when your apps sync.", .ticket = "IGSH-576" },
+        .{ .text = "Chat View delivery checks now cover busy agents, suggested replies, and steering.", .ticket = "IGSH-595" },
+    } },
     .{ .ver = "0.28.823", .items = &.{
         .{ .text = "After renaming a tab with F2, you can keep typing commands without clicking the console again.", .ticket = "IGSH-597" },
     } },

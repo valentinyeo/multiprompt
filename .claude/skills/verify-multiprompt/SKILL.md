@@ -22,7 +22,7 @@ gh run watch <id> --interval 60
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, and `browser-emulation`. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, and `browser-emulation`. [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
@@ -70,6 +70,12 @@ The `browser-pane-stuck` journey reads the app-published `browser_state`, `brows
 
 Bounded condition waits inspect actual saved state and window titles. A missing precondition fails the journey with an error and retained evidence. Never change the expected outcome, write settings yourself, add a test-only setter, or skip the failing action to make a run green. Fix a broken driver only when the real user path is unchanged.
 
+### Chat delivery
+
+Read [Chat delivery](features/chat-delivery.md). Dispatch `gh workflow run verify.yml --ref ceo/IGSH-595 -f feature=chat-delivery -f tag=v0.28.811` and repeat with `tag=v0.28.821`; omit the tag for a branch build. After merge the default-branch dispatch may omit `--ref`. The artifact is `verify-chat-delivery`, with root `result.json` status and all three named cases. This journey delegates from control.ps1 to tools/verify-chat-delivery/drive.ps1 and uses the reconnect pattern's explicit saved-session exception: isolated saved tmux tabs plus the production ssh-path.txt override, never an app test setter.
+
+The remote-shell stand-in launches Python with the app-supplied embedded reader and its real stdin protocol. Fake tmux supplies scripted capture-pane screens and logs raw timestamped send-keys arguments; its busy/grey-suggestion screens are mirrored into the attached console. Real SendInput selects the tab, opens Chat View, types and sends or steers. Separate owned jobs/profiles keep all three cases independent. Doctor, screenshots, buffer/invocation/debug logs, and zero-process cleanup are mandatory. The result's agentBoundary is stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. It does not verify SSH networking, agent consumption, responses or transcript discovery. The local direct-input suggestion gap remains uncovered. Require paired GitHub regression evidence, not only local source contracts.
+
 ### SSH reconnect and ended sessions
 
 The separate [verify-reconnect.yml](../../../.github/workflows/verify-reconnect.yml) workflow drives the same real Windows app with the helpers in [tools/verify-reconnect/](../../../tools/verify-reconnect/). It never runs on the Linux server. Read [SSH tab reconnect](features/ssh-tab-reconnect.md), [ended remote session](features/ended-remote-session.md), and [saved remote workspace](features/saved-remote-workspace.md) before dispatching:
@@ -116,7 +122,7 @@ For example:
 gh run download <id> -n verify-appearance -D /tmp/verify-multiprompt-<id>
 ```
 
-Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. Ordinary desktop journeys use no synthetic accounts, transcripts, remote servers or mocked UI. Reconnect seeds saved tabs and replaces SSH; the branch Chat View painter uses a synthetic message; safe updates uses signed fixture releases; emulation serves a synthetic page to real Chrome. None proves live agent or account behavior.
+Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. Ordinary desktop journeys use no synthetic accounts, transcripts, remote servers or mocked UI. Reconnect seeds saved tabs and replaces SSH; the branch Chat View painter uses a synthetic message; safe updates uses signed fixture releases; emulation serves a synthetic page to real Chrome; chat delivery replaces the remote-shell boundary with a stand-in. None proves live agent or account behavior.
 
 ## Cleanup
 

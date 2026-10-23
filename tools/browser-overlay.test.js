@@ -27,11 +27,12 @@ test("one overlay-aware helper decides whether a pane may occupy the visible lay
   assert.match(runtime, /browserChromeHiddenForOverlay\(\)/, "the overlay check is part of the gate");
 });
 
-test("the launch beacon never starts on-screen over an overlay or for a background shell", () => {
+test("the launch beacon keeps pane placement gated and uses the owner monitor fallback", () => {
   const launch = functionBody("shellExecuteEdgeUrl");
   assert.match(launch, /if \(browserPaneMayOccupyLayout\(li\)\)/, "the pane-rect placement is gated by the overlay-aware helper");
   assert.doesNotMatch(launch, /--window-position=90,90/, "no generic on-screen fallback may paint a fresh pane before adoption");
-  assert.match(launch, /--window-position=-32000,-32000 --window-size=400,400/, "the fallback parks the beacon off-screen");
+  assert.equal((launch.match(/appendPaneLaunchFallbackBounds\(&params, &pos\)/g) || []).length, 2, "both fallback branches use the owner monitor");
+  assert.doesNotMatch(launch, /--window-position=-32000,-32000/, "fresh Chrome windows must not inherit another monitor DPI");
 });
 
 test("adoption completion parks instead of showing while an overlay is open", () => {

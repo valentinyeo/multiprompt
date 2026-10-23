@@ -79,6 +79,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-573 | Links use the desktop browser when the pane is off. | none | not covered | Click a local Chat View URL with pane off/on and the external-links preference toggled; assert request/window ownership and pane state. Check console Ctrl+C with/without selection separately. |
 | IGSH-574 | Right-click a chat link to copy its address. | chat-view | partial | Native URL extraction is supplemental; right-click a local URL with trailing punctuation, choose Copy link and compare clipboard. Nonlinks must omit the item. |
 | IGSH-587 | Startup and relaunch open maximized. | appearance | partial | First startup passes on v0.28.821. Restore the frame, Restart and create another workspace window, then require new windows maximized before input; update/rollback/crash relaunch geometry also needs checks. |
+| IGSH-600 | Removing an account server stays removed across devices and restarts. | account-hosts (Test workflow) | partial | Deterministic Miniflare and production-sync fixtures plus Zig host filters; native confirmation and real sign-in remain unverified. |
 | IGSH-591 | Group lines stay clear of the selected session row. | group-rail | covered | — |
 
 ## Live results on this pass

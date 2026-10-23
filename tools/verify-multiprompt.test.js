@@ -915,3 +915,16 @@ test('ISSUE-569 Starred restore never queues a hide for its already selected con
     assert.throws(() => contract(...broken), assert.AssertionError, before);
   }
 });
+
+test('chat-delivery is an explicit saved-tmux boundary journey, not a live-delivery claim by the toggle journey', () => {
+  assert.match(control, /ValidateSet\([^\n]*'chat-delivery'/);
+  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-delivery'/);
+  const dispatch = control.slice(control.indexOf("        'chat-delivery' {"), control.indexOf("        'safe-updates' {"));
+  assert.match(dispatch, /verify-chat-delivery\/drive.ps1/);
+  assert.match(dispatch, /ExpectedVersion \$ExpectedVersion -ExpectedHash \$ExpectedHash -Evidence \$Evidence/);
+  assert.match(dispatch, /if \(\$LASTEXITCODE -ne 0\)/);
+  assert.match(read(skill + 'features/README.md'), /\[Chat delivery\]\(chat-delivery.md\)/);
+  assert.match(read(skill + 'features/chat-view.md'), /\[Chat delivery\]\(chat-delivery.md\)/);
+  assert.match(read(skill + 'features/chat-delivery.md'), /production `ssh-path.txt` override/);
+  assert.match(read(skill + 'features/chat-delivery.md'), /not real Claude or a real server/);
+});

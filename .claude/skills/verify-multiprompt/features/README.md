@@ -24,6 +24,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Diagnostic verification
 
+- [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
+
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
 ## Features
@@ -43,6 +45,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Pane layout](pane-layout.md): keep the console focus border continuous, the pane gap clear and the gray group line separate from the first session icon.
 - [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
+- [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
 
