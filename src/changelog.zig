@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.828", .items = &.{
+        .{ .text = "Group lines now sit at the far left edge of the sidebar.", .ticket = "IGSH-591" },
+        .{ .text = "A group's line no longer runs through group headers.", .ticket = "IGSH-591" },
+        .{ .text = "Chat View messages no longer get glued to text left in a session's input box.", .ticket = "IGSH-608" },
+        .{ .text = "A message that arrived no longer shows Delivery unconfirmed.", .ticket = "IGSH-608" },
+    } },
     .{ .ver = "0.28.827", .items = &.{
         .{ .text = "Multiprompt now reopens on the workspace and session you had selected, including the Starred view, even after an unexpected exit.", .ticket = "IGSH-569" },
     } },
