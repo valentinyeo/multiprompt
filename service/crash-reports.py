@@ -29,7 +29,7 @@ def utc(seconds):
 
 
 def format_report(report):
-    return '\n'.join([
+    text = '\n'.join([
         'Device: ' + (report['device_name'] or report['device_id']),
         'Report: ' + report['report_id'],
         'Received: ' + utc(report['received_at']),
@@ -41,6 +41,7 @@ def format_report(report):
         'Stack trace:',
         report['stack_trace'],
     ])
+    return ''.join(f'\\u{ord(c):04x}' if ord(c) < 32 and c not in '\n\t' or 127 <= ord(c) <= 159 else c for c in text)
 
 
 def main(argv=None):
@@ -80,7 +81,7 @@ def main(argv=None):
     if not result[0]['success']:
         raise RuntimeError('D1 query failed')
     rows = result[0]['results']
-    print(json.dumps(rows, ensure_ascii=False) if args.json else '\n\n'.join(format_report(row) for row in rows))
+    print(json.dumps(rows, ensure_ascii=True) if args.json else '\n\n'.join(format_report(row) for row in rows))
 
 
 if __name__ == '__main__':

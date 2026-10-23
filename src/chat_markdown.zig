@@ -258,16 +258,46 @@ const InlineAtom = struct { span: Span, end: usize };
 
 threadlocal var inline_scan_units: usize = 0;
 
-fn inlineClosing(text: []const u16, start: usize, comptime c: u16) ?usize {
-    var pos = start;
-    while (pos < text.len) : (pos += 1) {
-        if (@import("builtin").is_test) inline_scan_units += 1;
-        if (text[pos] == c) return pos;
-    }
-    return null;
-}
+const InlineScan = struct {
+    from: [3]usize = @splat(0),
+    next: [3]?usize = @splat(null),
+    ready: [3]bool = @splat(false),
 
-fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
+    fn closing(self: *InlineScan, text: []const u16, start: usize, comptime c: u16) ?usize {
+        const k = switch (c) {
+            ']' => 0,
+            ')' => 1,
+            '>' => 2,
+            else => unreachable,
+        };
+        var limit = text.len;
+        var following: ?usize = null;
+        if (self.ready[k]) {
+            if (start >= self.from[k]) {
+                if (self.next[k]) |next| {
+                    if (start <= next) return next;
+                } else return null;
+            } else {
+                limit = self.from[k];
+                following = self.next[k];
+            }
+        }
+        var pos = start;
+        while (pos < limit) : (pos += 1) {
+            if (@import("builtin").is_test) inline_scan_units += 1;
+            if (text[pos] == c) {
+                following = pos;
+                break;
+            }
+        }
+        self.from[k] = start;
+        self.next[k] = following;
+        self.ready[k] = true;
+        return following;
+    }
+};
+
+fn inlineAtom(text: []const u16, pos: usize, scan: *InlineScan) ?InlineAtom {
     if (text[pos] == '`') {
         var content = pos + 1;
         while (content < text.len and text[content] == '`') : (content += 1) {}
@@ -284,9 +314,9 @@ fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
         }
     }
     if (text[pos] == '[') {
-        if (inlineClosing(text, pos + 1, ']')) |label_end| {
+        if (scan.closing(text, pos + 1, ']')) |label_end| {
             if (label_end + 1 < text.len and text[label_end + 1] == '(') {
-                if (inlineClosing(text, label_end + 2, ')')) |url_end| {
+                if (scan.closing(text, label_end + 2, ')')) |url_end| {
                     const url = text[label_end + 2 .. url_end];
                     const http = std.unicode.utf8ToUtf16LeStringLiteral("http://");
                     const https = std.unicode.utf8ToUtf16LeStringLiteral("https://");
@@ -298,7 +328,7 @@ fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
         }
     }
     if (text[pos] == '<') {
-        if (inlineClosing(text, pos + 1, '>')) |end| {
+        if (scan.closing(text, pos + 1, '>')) |end| {
             const url = text[pos + 1 .. end];
             if (link_detect.scheme(url)) {
                 for (url) |c| if (!link_detect.isUrlChar(c)) return null;
@@ -328,7 +358,7 @@ fn underscoreFlanking(text: []const u16, start: usize, end: usize) struct { open
     return .{ .open = left and (!right or before_punct), .close = right and (!left or after_punct) };
 }
 
-fn emphasisEnd(text: []const u16, start: usize, len: usize) ?usize {
+fn emphasisEnd(text: []const u16, start: usize, len: usize, scan: *InlineScan) ?usize {
     const c = text[start];
     var run_end = start + len;
     if (c == '_') {
@@ -341,7 +371,7 @@ fn emphasisEnd(text: []const u16, start: usize, len: usize) ?usize {
             pos += 2;
             continue;
         }
-        if (inlineAtom(text, pos)) |atom| {
+        if (inlineAtom(text, pos, scan)) |atom| {
             pos = atom.end;
             continue;
         }
@@ -361,6 +391,8 @@ fn emphasisEnd(text: []const u16, start: usize, len: usize) ?usize {
 }
 
 pub fn inlineSpans(text: []const u16, out: []Span) usize {
+    var scan_state: InlineScan = .{};
+    const scan = &scan_state;
     var n: usize = 0;
     var pos: usize = 0;
     var style: Style = .{};
@@ -385,7 +417,7 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
             pos += 2;
             continue;
         }
-        if (inlineAtom(text, pos)) |atom| {
+        if (inlineAtom(text, pos, scan)) |atom| {
             out[n] = atom.span;
             out[n].style.bold = style.bold;
             out[n].style.italic = style.italic;
@@ -399,7 +431,7 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
             const k: usize = if (double) 0 else 1;
             const len: usize = if (double) 2 else 1;
             if (closes[k] == null) {
-                if (emphasisEnd(text, pos, len)) |end| {
+                if (emphasisEnd(text, pos, len, scan)) |end| {
                     closes[k] = end;
                     if (k == 0) style.bold = true else style.italic = true;
                     pos += len;
@@ -411,7 +443,7 @@ pub fn inlineSpans(text: []const u16, out: []Span) usize {
         pos += 1;
         if (c == '_' or c == '`') while (pos < text.len and text[pos] == c) : (pos += 1) {};
         while (pos < text.len and text[pos] != '*' and text[pos] != '_' and text[pos] != '`' and text[pos] != '[' and text[pos] != '\\' and
-            (closes[0] == null or closes[0].? != pos) and (closes[1] == null or closes[1].? != pos) and inlineAtom(text, pos) == null) : (pos += 1)
+            (closes[0] == null or closes[0].? != pos) and (closes[1] == null or closes[1].? != pos) and inlineAtom(text, pos, scan) == null) : (pos += 1)
         {}
         out[n] = .{ .text = .{ .start = start, .end = pos }, .style = style };
         n += 1;

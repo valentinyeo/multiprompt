@@ -184,6 +184,20 @@ pub fn logNotifyListenerStatus(label: []const u8, port: u16, err: i32) void {
 pub const ListenerStatus = enum(u8) { pending, ready, failed };
 pub var listener_status = std.atomic.Value(ListenerStatus).init(.pending);
 
+fn diagKeyPath(buf: *[560]u8, port: u16) ?[]const u8 {
+    var dir_buf: [512]u8 = undefined;
+    const dir = getSessionDir(&dir_buf) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}\\diag-key-{d}", .{ dir, port }) catch null;
+}
+
+fn diagQueryWithKey(request: []const u8, key: [32]u8) ?[]const u8 {
+    if (request.len < 65 or request[64] != ':') return null;
+    var supplied: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&supplied, request[0..64]) catch return null;
+    if (!std.crypto.timing_safe.eql([32]u8, supplied, key)) return null;
+    return request[65..];
+}
+
 pub fn notifyListenerThread() void {
     defer if (listener_status.load(.acquire) == .pending) {
         listener_status.store(.failed, .release);
@@ -222,14 +236,34 @@ pub fn notifyListenerThread() void {
         logNotifyListenerStatus("no free notify port", 0, WSAGetLastError());
         return;
     }
+    defer _ = closesocket(srv);
     app_state.g_notify_bound_port = bound_port;
     listener_status.store(.ready, .release);
     logNotifyListenerStatus("listening", bound_port, 0);
+    var diag_key: [32]u8 = undefined;
+    const diag_ready = diag_setup: {
+        if (@import("win32.zig").BCryptGenRandom(null, &diag_key, diag_key.len, 0x00000002) < 0) break :diag_setup false;
+        const diag_key_hex = std.fmt.bytesToHex(diag_key, .lower);
+        var dir_buf: [512]u8 = undefined;
+        const dir = getSessionDir(&dir_buf) orelse break :diag_setup false;
+        win32MakeDir(dir);
+        var key_path_buf: [560]u8 = undefined;
+        const key_path = diagKeyPath(&key_path_buf, bound_port) orelse break :diag_setup false;
+        break :diag_setup @import("file_io.zig").writeFileAtomicW(key_path, &diag_key_hex);
+    };
 
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
 
+        const timeout_ms: u32 = 5000;
+        const win32 = @import("win32.zig");
+        if (win32.setsockopt(client, win32.SOL_SOCKET, 0x1006, @ptrCast(&timeout_ms), @sizeOf(u32)) != 0 or
+            win32.setsockopt(client, win32.SOL_SOCKET, 0x1005, @ptrCast(&timeout_ms), @sizeOf(u32)) != 0)
+        {
+            _ = closesocket(client);
+            continue;
+        }
         var buf: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
         const n = recv(client, &buf, @intCast(buf.len), 0);
 
@@ -245,7 +279,11 @@ pub fn notifyListenerThread() void {
         }
 
         if (std.mem.startsWith(u8, trimmed, "DIAG:")) {
-            sendDiagResponseForRequest(client, trimmed["DIAG:".len..]);
+            if (diag_ready) {
+                if (diagQueryWithKey(trimmed["DIAG:".len..], diag_key)) |query| {
+                    sendDiagResponseForRequest(client, query);
+                }
+            }
             _ = closesocket(client);
             continue;
         }
@@ -1430,20 +1468,56 @@ fn hardeningConnect(port: u16) !SOCKET {
 }
 
 test "hardening notify TCP does not return shell diagnostics" {
-    const client = try hardeningConnect(try hardeningNotifyPort());
-    defer _ = closesocket(client);
-    const request = "DIAG:all\n";
-    try std.testing.expectEqual(@as(i32, request.len), send(client, request.ptr, request.len, 0));
-    var response: [256]u8 = undefined;
-    try std.testing.expectEqual(@as(i32, 0), recv(client, &response, response.len, 0));
+    const port = try hardeningNotifyPort();
     var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
-    var len: u32 = 0;
-    const deadline = GetTickCount64() + 1000;
-    while (len == 0 and GetTickCount64() < deadline) {
-        len = dequeueNotification(&payload);
-        if (len == 0) Sleep(1);
+    try std.testing.expectEqual(@as(u32, 0), dequeueNotification(&payload));
+    {
+        const client = try hardeningConnect(port);
+        defer _ = closesocket(client);
+        const request = "DIAG:all\n";
+        try std.testing.expectEqual(@as(i32, request.len), send(client, request.ptr, request.len, 0));
+        var response: [256]u8 = undefined;
+        try std.testing.expectEqual(@as(i32, 0), recv(client, &response, response.len, 0));
+        try std.testing.expectEqual(@as(u32, 0), dequeueNotification(&payload));
     }
-    try std.testing.expectEqualStrings("DIAG:all", payload[0..len]);
+    var dir_buf: [512]u8 = undefined;
+    const dir = getSessionDir(&dir_buf) orelse return error.NoDiagKeyPath;
+    var key_path_buf: [560]u8 = undefined;
+    const key_path = try std.fmt.bufPrint(&key_path_buf, "{s}\\diag-key-{d}", .{ dir, port });
+    const key_file = win32OpenRead(key_path) orelse return error.NoDiagKeyFile;
+    defer _ = CloseHandle(key_file);
+    var key_hex: [65]u8 = @splat(0);
+    try std.testing.expectEqual(@as(usize, 64), win32ReadAll(key_file, &key_hex));
+    var wrong_key = key_hex;
+    wrong_key[0] = if (wrong_key[0] == '0') '1' else '0';
+    var wrong_buf: [80]u8 = undefined;
+    const wrong_request = try std.fmt.bufPrint(&wrong_buf, "DIAG:{s}:all\n", .{wrong_key[0..64]});
+    const invalid_requests = [_][]const u8{
+        "DIAG:\n",
+        "DIAG:abcd:all\n",
+        "DIAG:" ++ "0" ** 64 ++ "\n",
+        "DIAG:" ++ "0" ** 65 ++ ":all\n",
+        "DIAG:" ++ "z" ** 64 ++ ":all\n",
+        wrong_request,
+    };
+    for (invalid_requests) |request| {
+        const client = try hardeningConnect(port);
+        defer _ = closesocket(client);
+        try std.testing.expectEqual(@as(i32, @intCast(request.len)), send(client, request.ptr, @intCast(request.len), 0));
+        var response: [256]u8 = undefined;
+        try std.testing.expectEqual(@as(i32, 0), recv(client, &response, response.len, 0));
+        try std.testing.expectEqual(@as(u32, 0), dequeueNotification(&payload));
+    }
+    const client = try hardeningConnect(port);
+    defer _ = closesocket(client);
+    var request_buf: [80]u8 = undefined;
+    const request = try std.fmt.bufPrint(&request_buf, "DIAG:{s}:all\n", .{key_hex[0..64]});
+    try std.testing.expectEqual(@as(i32, @intCast(request.len)), send(client, request.ptr, @intCast(request.len), 0));
+    var response: [256]u8 = undefined;
+    const n = recv(client, &response, response.len, 0);
+    try std.testing.expect(n > 0);
+    try std.testing.expectEqual(@as(u8, '{'), response[0]);
+    try std.testing.expectEqual(@as(u32, 0), dequeueNotification(&payload));
 }
 
 test "hardening listeners close idle clients and serve the next request" {

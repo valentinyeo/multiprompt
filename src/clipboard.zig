@@ -25,6 +25,7 @@ const GetStdHandle = @import("win32.zig").GetStdHandle;
 const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
 const WriteConsoleInputW = @import("win32.zig").WriteConsoleInputW;
 const GlobalLock = @import("win32.zig").GlobalLock;
+const GlobalSize = @import("win32.zig").GlobalSize;
 const GlobalUnlock = @import("win32.zig").GlobalUnlock;
 const GlobalFree = @import("win32.zig").GlobalFree;
 const OpenClipboard = @import("win32.zig").OpenClipboard;
@@ -512,13 +513,16 @@ pub fn writeUnicodeCharsAsInput(handle: HANDLE, chars: []const u16, lf_to_cr: bo
 
 fn copyUnicodeClipboardTextMaybe(data: HANDLE, text_buf: []u16) ?usize {
     if (text_buf.len == 0) return null;
+    const source_units = GlobalSize(data) / @sizeOf(u16);
+    if (source_units == 0) return null;
     if (GlobalLock(data)) |ptr| {
         defer _ = GlobalUnlock(data);
         const src: [*]const u16 = @ptrCast(@alignCast(ptr));
         var text_len: usize = 0;
-        while (text_len < text_buf.len - 1 and src[text_len] != 0) : (text_len += 1) {
+        while (text_len < @min(text_buf.len - 1, source_units) and src[text_len] != 0) : (text_len += 1) {
             text_buf[text_len] = src[text_len];
         }
+        if (text_len == source_units) return null;
         text_buf[text_len] = 0;
         return text_len;
     }
@@ -534,10 +538,19 @@ fn copyAnsiClipboardTextMaybe(data: HANDLE, text_buf: []u16, code_page: UINT) ?u
     if (GlobalLock(data)) |ptr| {
         defer _ = GlobalUnlock(data);
         const src: [*]const u8 = @ptrCast(@alignCast(ptr));
-        const converted = MultiByteToWideChar(code_page, 0, src, -1, text_buf.ptr, @intCast(text_buf.len));
+        const source_len = GlobalSize(data);
+        const end = std.mem.indexOfScalar(u8, src[0..source_len], 0) orelse return null;
+        if (end > std.math.maxInt(i32)) return null;
+        if (end == 0) {
+            text_buf[0] = 0;
+            return 0;
+        }
+        if (text_buf.len == 1) return null;
+        const converted = MultiByteToWideChar(code_page, 0, src, @intCast(end), text_buf.ptr, @intCast(text_buf.len - 1));
         if (converted > 0) {
             const converted_len: usize = @intCast(converted);
-            if (converted_len > 0) return @min(converted_len - 1, text_buf.len - 1);
+            text_buf[converted_len] = 0;
+            return converted_len;
         }
         return null;
     }

@@ -191,14 +191,14 @@ pub fn startFaviconFetch(shell_idx: u32) void {
 fn appendFaviconRemoteCommand(shell: *const Shell, buf: []u16, pos: *usize) bool {
     var cwd_ok = shell.cached_cwd_len > 0;
     for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| {
-        if (c == '\'') {
+        if (std.mem.indexOfScalar(u8, "\x00'\"\\$`\r\n", c) != null) {
             cwd_ok = false;
             break;
         }
     }
     var tmux_ok = shell.kind == .tmux and shell.tmux_session_len > 0;
     for (shell.tmux_session[0..shell.tmux_session_len]) |c| {
-        if (c == '\'') {
+        if (std.mem.indexOfScalar(u8, "\x00'\"\\$`\r\n", c) != null) {
             tmux_ok = false;
             break;
         }
