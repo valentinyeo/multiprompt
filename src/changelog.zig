@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.852", .items = &.{
+        .{ .text = "Fixed drafts duplicating or reverting when new chat messages arrive.", .ticket = "IGSH-720" },
+        .{ .text = "Chat now keeps your place when you scroll up instead of jumping to new messages.", .ticket = "IGSH-720" },
+    } },
     .{ .ver = "0.28.851", .items = &.{
         .{ .text = "Switching back to a sleeping browser pane now shows its page sooner.", .ticket = "IGSH-712" },
         .{ .text = "A starred session now always shows in Favorites, even when it is muted or left out of the Inbox.", .ticket = "IGSH-719" },
