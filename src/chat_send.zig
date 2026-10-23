@@ -23,6 +23,7 @@ const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const AttachConsole = @import("win32.zig").AttachConsole;
 const FreeConsole = @import("win32.zig").FreeConsole;
 const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
+const ReadConsoleOutputAttribute = @import("win32.zig").ReadConsoleOutputAttribute;
 const WriteConsoleInputW = @import("win32.zig").WriteConsoleInputW;
 const OpenClipboard = @import("win32.zig").OpenClipboard;
 const CloseClipboard = @import("win32.zig").CloseClipboard;
@@ -33,6 +34,7 @@ const INPUT_RECORD = @import("win32.zig").INPUT_RECORD;
 const GetExitCodeProcess = @import("win32.zig").GetExitCodeProcess;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const CONSOLE_SCREEN_BUFFER_INFO = @import("win32.zig").CONSOLE_SCREEN_BUFFER_INFO;
+const COORD = @import("win32.zig").COORD;
 const L = @import("startup.zig").L;
 const ShellKind = @import("app_state.zig").ShellKind;
 const ChatBlock = @import("app_state.zig").ChatBlock;
@@ -1441,13 +1443,30 @@ fn chatOutboxPrefixOf(text: []const u16, out: *[20]u16) []const u16 {
     return out[0..n];
 }
 
-fn chatInputRowIsIdle(row: []const u16) bool {
+fn chatInputRowIsIdle(row: []const u16, attributes: []const u16) bool {
     if (row.len == 0) return false;
     if (row[0] != 0x276F and row[0] != 0x203A) return false;
+    var blank = true;
     for (row[1..]) |c| {
-        if (c != ' ' and c != 0xA0) return false;
+        if (c != ' ' and c != 0xA0) blank = false;
     }
-    return true;
+    if (blank) return true;
+    if (attributes.len != row.len or row.len < 3 or (row[1] != ' ' and row[1] != 0xA0)) return false;
+    const foreground_mask: u16 = 0x000F;
+    const reverse_video: u16 = 0x4000;
+    const gray_foreground: u16 = 0x0008;
+    if (attributes[2] & reverse_video == 0) return false;
+    const default_foreground = attributes[1] & foreground_mask;
+    var saw_gray = false;
+    for (row[2..], attributes[2..], 0..) |c, attr, i| {
+        if (i != 0 and attr & reverse_video != 0) return false;
+        if (c == ' ' or c == 0xA0) continue;
+        const foreground = attr & foreground_mask;
+        if (i == 0 and foreground == default_foreground) continue;
+        if (foreground == default_foreground or foreground != gray_foreground) return false;
+        saw_gray = true;
+    }
+    return saw_gray;
 }
 
 test "Chat View idle input row detection" {
@@ -1455,11 +1474,42 @@ test "Chat View idle input row detection" {
     const idle_gt = std.unicode.utf8ToUtf16LeStringLiteral("\u{203A}   ");
     const typed = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello");
     const not_prompt = std.unicode.utf8ToUtf16LeStringLiteral("$ hello");
-    try std.testing.expect(chatInputRowIsIdle(idle));
-    try std.testing.expect(chatInputRowIsIdle(idle_gt));
-    try std.testing.expect(!chatInputRowIsIdle(typed));
-    try std.testing.expect(!chatInputRowIsIdle(not_prompt));
-    try std.testing.expect(!chatInputRowIsIdle(idle[0..0]));
+    try std.testing.expect(chatInputRowIsIdle(idle, &.{}));
+    try std.testing.expect(chatInputRowIsIdle(idle_gt, &.{}));
+    try std.testing.expect(!chatInputRowIsIdle(typed, &.{}));
+    try std.testing.expect(!chatInputRowIsIdle(not_prompt, &.{}));
+    try std.testing.expect(!chatInputRowIsIdle(idle[0..0], &.{}));
+}
+
+test "ISSUE-599 suggestion row counts idle" {
+    const row = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello");
+    try std.testing.expect(chatInputRowIsIdle(row, &.{ 7, 7, 0x4008, 8, 8, 8, 8 }));
+    try std.testing.expect(chatInputRowIsIdle(row, &.{ 7, 7, 0x4007, 8, 8, 8, 8 }));
+    const alternate = std.unicode.utf8ToUtf16LeStringLiteral("\u{203A} hello");
+    try std.testing.expect(chatInputRowIsIdle(alternate, &.{ 15, 15, 0x4008, 8, 8, 8, 8 }));
+}
+
+test "ISSUE-599 typed text row counts busy" {
+    const row = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello");
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 7, 7, 7, 7, 7 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 8, 8, 8, 8, 8 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 0x4007, 7, 7, 7, 7 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 8, 8, 0x4007, 7, 7, 7, 7 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 8, 8, 0x4008, 8, 8, 8, 8 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 0x4008, 8, 7, 8, 8 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 0x4008, 8, 8 }));
+}
+
+test "ISSUE-599 typed text with the inverse cursor after it counts busy" {
+    const row = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F} hello ");
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 7, 7, 7, 7, 7, 0x4007 }));
+    try std.testing.expect(!chatInputRowIsIdle(row, &.{ 7, 7, 8, 8, 8, 8, 8, 0x4008 }));
+}
+
+test "ISSUE-599 blank row still idle" {
+    const row = std.unicode.utf8ToUtf16LeStringLiteral("\u{276F}  \u{A0}");
+    try std.testing.expect(chatInputRowIsIdle(row, &.{ 7, 7, 0x4007, 7 }));
+    try std.testing.expect(chatInputRowIsIdle(row, &.{}));
 }
 
 fn chatOutboxInputRowIdle(shell_index: u32) bool {
@@ -1484,7 +1534,16 @@ fn chatOutboxInputRowIdle(shell_index: u32) bool {
     while (r > 0) {
         r -= 1;
         const line = chatTrimRawConsoleRow(width, chars_read, r);
-        if (line.len > 0 and (line[0] == 0x276F or line[0] == 0x203A)) return chatInputRowIsIdle(line);
+        if (line.len > 0 and (line[0] == 0x276F or line[0] == 0x203A)) {
+            if (chatInputRowIsIdle(line, &.{})) return true;
+            const attributes = std.heap.page_allocator.alloc(u16, line.len) catch return false;
+            defer std.heap.page_allocator.free(attributes);
+            const column = (@intFromPtr(line.ptr) - @intFromPtr(&app_state.g_chat_raw[r * width])) / @sizeOf(u16);
+            const origin = COORD{ .x = @intCast(column), .y = @intCast(@as(i32, start_row) + @as(i32, @intCast(r))) };
+            var attributes_read: DWORD = 0;
+            if (ReadConsoleOutputAttribute(handle, attributes.ptr, @intCast(line.len), origin, &attributes_read) == 0 or attributes_read != line.len) return false;
+            return chatInputRowIsIdle(line, attributes);
+        }
     }
     return false;
 }

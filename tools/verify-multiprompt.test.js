@@ -971,3 +971,29 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.doesNotMatch(agent, /Sleep\(|SetConsoleTextAttribute|AttachConsole|CreateProcess/);
   assert.doesNotMatch(chat, /Start-Sleep|AddSeconds|Set-Content|WriteAll|PostMessage|Invoke-Zsb/);
 });
+
+test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four Zig regressions', () => {
+  const send = read('src/chat_send.zig');
+  const idle = send.slice(send.indexOf('fn chatInputRowIsIdle('), send.indexOf('test "Chat View idle input row detection"'));
+  const capture = send.slice(send.indexOf('fn chatOutboxInputRowIdle('), send.indexOf('fn sendTextToShellVerifiedAt('));
+  assert.match(idle, /row: \[\]const u16, attributes: \[\]const u16/);
+  assert.match(idle, /if \(blank\) return true/);
+  assert.match(idle, /attributes.len != row.len/);
+  assert.match(idle, /attributes\[2\] & reverse_video == 0/);
+  assert.match(idle, /default_foreground = attributes\[1\] & foreground_mask/);
+  assert.match(idle, /if \(foreground == default_foreground or foreground != gray_foreground\) return false/);
+  assert.doesNotMatch(idle, /app_state|ReadConsole|Sleep|GetTickCount/);
+  assert.match(capture, /@intFromPtr\(line.ptr\) - @intFromPtr\(&app_state.g_chat_raw\[r \* width\]\)/);
+  assert.match(capture, /\.x = @intCast\(column\), \.y = @intCast\(@as\(i32, start_row\) \+ @as\(i32, @intCast\(r\)\)\)/);
+  assert.match(capture, /ReadConsoleOutputAttribute\(handle, attributes.ptr, @intCast\(line.len\), origin, &attributes_read\) == 0 or attributes_read != line.len/);
+  assert.match(capture, /return chatInputRowIsIdle\(line, attributes\)/);
+  assert.match(read('src/win32.zig'), /pub extern "kernel32" fn ReadConsoleOutputAttribute\(HANDLE, \[\*\]u16, DWORD, COORD, \*DWORD\) callconv\(WINAPI\) BOOL/);
+  const cases = [...send.matchAll(/test "ISSUE-599 ([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(cases, [
+    'suggestion row counts idle',
+    'typed text row counts busy',
+    'typed text with the inverse cursor after it counts busy',
+    'blank row still idle',
+  ]);
+  assert.match(read('tools/chat-local-agent.c'), /WriteConsoleW\(output, clear,[^\n]+\n\s*CONSOLE_SCREEN_BUFFER_INFO info;\s*if \(!GetConsoleScreenBufferInfo\(output, &info\)\) return 4;\s*COORD origin = \{0, info.srWindow.Bottom\}/);
+});
