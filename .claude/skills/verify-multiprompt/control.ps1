@@ -2454,6 +2454,15 @@ try {
                             $freeze.log_end = ((Get-Content $log -Raw) -join '').Length
                         }
                     }
+                    if ($mode -eq 'browser_on') {
+                        $offMedian = Get-SwitchMedian $timings.browser_off.samples_ms
+                        $onMedian = Get-SwitchMedian $timings.browser_on.samples_ms
+                        if ($onMedian - $offMedian -gt 50) {
+                            $gapCase.phase = 'switch-gap'
+                            $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; required <= 50 ms"
+                            throw $gapCase.detail
+                        }
+                    }
                 }
                 foreach ($mode in $modes) { $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms }
                 $gapCase.phase = 'switch-gap'
@@ -2512,12 +2521,19 @@ try {
                                 $arguments += ' cdp ' + $probe.method + ' "' + $params.Replace('"', '\"') + '"'
                             }
                             $prefix = Join-Path $Evidence ('switch-failure-' + $probe.name)
-                            $probeProcess = $job.Start((Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'), $scratch, ($prefix + '.stdout.json'), ($prefix + '.stderr.log'), $arguments)
+                            $probeJob = New-Object VerifyJob
+                            $probeProcess = $null
                             try {
+                                $probeProcess = $probeJob.Start((Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'), $scratch, ($prefix + '.stdout.json'), ($prefix + '.stderr.log'), $arguments)
                                 $exited = $probeProcess.WaitForExit(30000)
-                                $probeResults += @{ name = $probe.name; exited = $exited; windowId = $diagnosticPane.browser_window_id }
-                                if (-not $exited) { break }
-                            } finally { $probeProcess.Dispose() }
+                            } finally {
+                                try { $probeStopped = $probeJob.Stop() } finally {
+                                    if ($null -ne $probeProcess) { $probeProcess.Dispose() }
+                                    $probeJob.Dispose()
+                                }
+                            }
+                            $probeResults += @{ name = $probe.name; exited = $exited; windowId = $diagnosticPane.browser_window_id; activeAfterStop = $probeStopped.ActiveProcesses }
+                            if (-not $exited) { break }
                         }
                         Save-Json $probeResults 'switch-failure-browser-diagnostics.json'
                     } catch { Save-Json @{ error = $_.Exception.Message } 'switch-failure-browser-diagnostics.json' }

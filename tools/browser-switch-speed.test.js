@@ -516,3 +516,20 @@ test('failure-only pixel diagnostics compare the same visible patch with and wit
   assert.match(journey, /ReadSwitchScreenPatch\(\$docks\[\$target\], \$true\)/);
   assert.doesNotMatch(native, /ReadSwitchScreenPatch/);
 });
+
+test('a completed warm pair can fail fast at the same threshold while every successful run still checks every warm and frozen pair', () => {
+  const early = journey.slice(journey.indexOf("if ($mode -eq 'browser_on')"), journey.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
+  for (const literal of ['Get-SwitchMedian $timings.browser_off.samples_ms', 'Get-SwitchMedian $timings.browser_on.samples_ms', 'if ($onMedian - $offMedian -gt 50)', "$gapCase.phase = 'switch-gap'", 'throw $gapCase.detail']) assert.ok(early.includes(literal), literal);
+  assert.ok(journey.indexOf("if ($mode -eq 'browser_on')") > journey.indexOf('$timings[$mode].samples_ms[$sample] = $measurement[0]'));
+  assertsJourney(journey);
+  assertsFrozen(journey, control, browser, workflow);
+});
+
+test('failure probes own separate single-launch jobs and stop only their own process trees', () => {
+  const probes = journey.slice(journey.indexOf('foreach ($probe in $probes)'));
+  assert.match(probes, /\$probeJob = New-Object VerifyJob/);
+  assert.match(probes, /\$probeProcess = \$probeJob.Start/);
+  assert.match(probes, /\$probeStopped = \$probeJob.Stop/);
+  assert.match(probes, /\$probeJob.Dispose\(\)/);
+  assert.doesNotMatch(probes, /\$job.Start|\$job.Stop/);
+});
