@@ -38,7 +38,9 @@ test('Reply shares delivery, quotes before skills, and clears only after outbox 
 
 test('context Reply handles user and agent blocks but not tool-only blocks', () => {
   const render = read('src/chat_render.zig');
-  assert.match(render, /AppendMenuW\(menu, MF_STRING, 4, L\("Reply"\)\)/);
+  assert.match(render, /fn chatContextMenuItems\([^]*?if \(reply\) \.reply else null/);
+  assert.match(render, /AppendMenuW\(menu, MF_STRING, @intFromEnum\(item\), item\.text\(\)\)/);
+  assert.match(render, /chatContextMenuItems\([^\n]*reply_text != null/);
   assert.match(render, /4 => if \(reply_text\) \|text\| \{[^]*?selectChatReply\(text\)/);
   assert.ok(render.indexOf("reply_text = std.heap.page_allocator.dupe") < render.indexOf("const cmd = TrackPopupMenu"));
   assert.match(render, /block.role == \.prose or block.role == \.code/);

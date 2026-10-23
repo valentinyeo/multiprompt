@@ -4599,6 +4599,7 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
                 app_state.g_chat_block_count = 0;
                 @memset(app_state.g_chat_capture[0..app_state.g_chat_last_len], 'x');
                 _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
+                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
                 _ = @This().PostMessageW(target, WM_KEYDOWN, 0x0D, 0);
             } else _ = EndMenu();
         }
