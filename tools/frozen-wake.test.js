@@ -10,6 +10,7 @@ const state = read('src/app_state.zig');
 const main = read('src/main.zig');
 const win = read('src/win32.zig');
 const workflow = read('.github/workflows/verify.yml');
+const { readChangelogEntry } = require('./changelog-entry');
 const body = (source, name) => {
   const start = source.indexOf(`fn ${name}(`);
   assert.notEqual(start, -1, name);
@@ -87,7 +88,7 @@ test('existing freeze deadlines, exemptions and UI-thread completion wiring rema
   assert.match(bridge, /pub fn zsbRunBridgeOnce/);
   assert.match(body(bridge, 'zsbRunBridgeOnce'), /CreateProcessW/);
   assert.match(workflow, /node --test [^\n]*tools\/frozen-wake.test.js/);
-  assert.equal(read('changelog.d/IGSH-606-frozen-wake.md').trim(), 'Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.');
+  assert.equal(readChangelogEntry('IGSH-606').trim(), 'Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.');
 });
 
 test('wake changes introduce no code comments', async () => {
