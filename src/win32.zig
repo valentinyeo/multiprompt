@@ -880,6 +880,7 @@ pub extern "kernel32" fn GetSystemTimeAsFileTime(lpSystemTimeAsFileTime: *[2]DWO
 pub extern "kernel32" fn GetLocalTime(lpSystemTime: *SYSTEMTIME) callconv(WINAPI) void;
 pub extern "kernel32" fn TzSpecificLocalTimeToSystemTime(lpTimeZoneInformation: ?*anyopaque, lpLocalTime: *const SYSTEMTIME, lpUniversalTime: *SYSTEMTIME) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn SystemTimeToFileTime(lpSystemTime: *const SYSTEMTIME, lpFileTime: *FILETIME) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn FileTimeToLocalFileTime(lpFileTime: *const FILETIME, lpLocalFileTime: *FILETIME) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn FileTimeToSystemTime(lpFileTime: *const FILETIME, lpSystemTime: *SYSTEMTIME) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn SystemTimeToTzSpecificLocalTime(lpTimeZoneInformation: ?*anyopaque, lpUniversalTime: *const SYSTEMTIME, lpLocalTime: *SYSTEMTIME) callconv(WINAPI) BOOL;
 

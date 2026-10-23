@@ -139,7 +139,9 @@ test("configured rows pair weekly usage with its reset and retain secondary quot
   assert.match(card, /const goal_count = @min\(g_ai_pace\.goal_count, g_ai_pace\.goals\.len\)/);
   assert.match(card, /while \(slot < goal_count\)/);
   assert.match(card, /aiPaceProviderLabel\(&goal\)/);
-  assert.match(card, /"WEEK \{s\} \| RESET \{s\}"/);
+  assert.match(card, /formatAiPaceResetDetail\(&weekly_detail_buf, local, weekly_reset\)/);
+  assert.match(card, /"WEEK USED \| \{s\}", \.\{aiPaceWord\(goal\.pace\)\}/);
+  assert.match(card, /formatAiPaceBonusReset\(&bonus_buf, local\)/);
   assert.match(card, /"5H \{s\} \| R \{s\}/);
   assert.match(card, /FABLE \{s\}/);
   assert.match(card, /progress_text: \[\]const u8 = if \(goal\.retrying\)[\s\S]*"RETRY"/);
