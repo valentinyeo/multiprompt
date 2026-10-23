@@ -145,3 +145,13 @@ test('native console switches show and focus the console before queuing browser 
   for (const name of ['positionActiveBrowser', 'updateBrowserVisibility']) assert.match(body(pane, name), /if \(app_state.g_browser_console_switch_preparing\) return/);
   assert.match(state, /g_browser_console_switch_preparing: bool = false/);
 });
+
+test('native console focus retains shared masks until queued geometry instead of hiding and repainting them synchronously', () => {
+  const hide = body(pane, 'hideActiveBrowser');
+  assert.match(hide, /if \(!app_state.g_browser_console_switch_preparing\) hideBrowserEdgeMasks\(\)/);
+  assert.match(hide, /parkBrowserWindow\(bh\)/);
+  const place = body(pane, 'positionBrowserEdgeMasks');
+  const guard = place.indexOf('if (app_state.g_browser_console_switch_preparing) return;');
+  assert.ok(guard >= 0 && guard < place.indexOf('ensureBrowserEdgeMaskWindows()'));
+  assert.ok(guard < place.indexOf('moveBrowserEdgeMask('));
+});

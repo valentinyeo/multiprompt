@@ -3238,7 +3238,7 @@ pub fn hideActiveBrowser() void {
     defer switch_timing.record(.hide_prev_browser, timing_started);
     browserTrace("hideActiveBrowser");
     cancelBrowserVisibilitySettle();
-    hideBrowserEdgeMasks();
+    if (!app_state.g_browser_console_switch_preparing) hideBrowserEdgeMasks();
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         parkBrowserWindow(bh);
@@ -4254,6 +4254,7 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
 
 fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
     if (!BROWSER_EDGE_MASKS) return;
+    if (app_state.g_browser_console_switch_preparing) return;
     if (app_state.g_monitor_transition.active) {
         hideBrowserEdgeMasks();
         return;
