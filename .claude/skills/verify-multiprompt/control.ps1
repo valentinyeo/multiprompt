@@ -366,6 +366,71 @@ public static class VerifyNative {
         }
         throw new InvalidOperationException("No painted user message bubble in transcript");
     }
+    public static Point[] SelectTranscriptText(IntPtr hwnd, uint pid, IntPtr owner) {
+        Point bubble = MessageBubblePoint(hwnd);
+        Rect rect;
+        if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
+        Point start, end;
+        using (var pixels = new System.Drawing.Bitmap(rect.Right - rect.Left, rect.Bottom - rect.Top))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
+            int bx = bubble.X - rect.Left, by = bubble.Y - rect.Top;
+            int fill = pixels.GetPixel(bx, by).ToArgb();
+            var seen = new bool[pixels.Width, pixels.Height];
+            var pending = new Queue<Point>();
+            pending.Enqueue(new Point { X = bx, Y = by });
+            seen[bx, by] = true;
+            int left = bx, right = bx, top = by, bottom = by;
+            int[] dx = { -1, 1, 0, 0 }, dy = { 0, 0, -1, 1 };
+            while (pending.Count > 0) {
+                Point p = pending.Dequeue();
+                left = Math.Min(left, p.X); right = Math.Max(right, p.X);
+                top = Math.Min(top, p.Y); bottom = Math.Max(bottom, p.Y);
+                for (int i = 0; i < 4; i++) {
+                    int x = p.X + dx[i], y = p.Y + dy[i];
+                    if (x < 0 || y < 0 || x >= pixels.Width || y >= pixels.Height || seen[x, y]) continue;
+                    seen[x, y] = true;
+                    if (pixels.GetPixel(x, y).ToArgb() == fill) pending.Enqueue(new Point { X = x, Y = y });
+                }
+            }
+            int inset = Math.Max(4, Math.Min(right - left, bottom - top) / 5);
+            int glyphLeft = right, glyphRight = left, glyphTop = -1, glyphBottom = -1;
+            var background = System.Drawing.Color.FromArgb(fill);
+            for (int y = top + inset; y <= bottom - inset; y++) {
+                bool ink = false;
+                for (int x = left + inset; x <= right - inset; x++) {
+                    var c = pixels.GetPixel(x, y);
+                    if (Math.Max(Math.Abs(c.R - background.R), Math.Max(Math.Abs(c.G - background.G), Math.Abs(c.B - background.B))) < 40) continue;
+                    ink = true;
+                    glyphLeft = Math.Min(glyphLeft, x); glyphRight = Math.Max(glyphRight, x);
+                }
+                if (ink) {
+                    if (glyphTop < 0) glyphTop = y;
+                    glyphBottom = y;
+                } else if (glyphTop >= 0) break;
+            }
+            if (glyphTop < 0 || glyphRight - glyphLeft < 24) throw new InvalidOperationException("No partial text span in the owned user bubble");
+            int lineY = rect.Top + (glyphTop + glyphBottom) / 2;
+            start = new Point { X = rect.Left + glyphLeft + 2, Y = lineY };
+            end = new Point { X = start.X + (glyphRight - glyphLeft) / 3, Y = lineY };
+        }
+        uint actualPid;
+        GetWindowThreadProcessId(hwnd, out actualPid);
+        if (actualPid != pid || Class(hwnd) != "ZigShellChatTranscript" || GetAncestor(hwnd, 2) != owner ||
+            GetForegroundWindow() != owner || WindowFromPoint(start) != hwnd || WindowFromPoint(end) != hwnd)
+            throw new InvalidOperationException("Selection is not in the foreground owned transcript");
+        MouseAt(start.X, start.Y, 0);
+        MouseAt(start.X, start.Y, 2);
+        try {
+            for (int step = 1; step <= 12; step++) {
+                Point p = new Point { X = start.X + (end.X - start.X) * step / 12, Y = start.Y };
+                if (WindowFromPoint(p) != hwnd) throw new InvalidOperationException("Selection drag left the owned transcript");
+                MouseAt(p.X, p.Y, 0);
+                Thread.Sleep(20);
+            }
+        } finally { MouseAt(end.X, end.Y, 4); }
+        return new Point[] { start, end };
+    }
     public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {
         Rect frame;
         Point origin = new Point();
@@ -2668,6 +2733,8 @@ try {
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
             $menuCheck = @{ name = 'message-menu'; passed = $false; reason = 'not reached' }
+            $selectionCheck = @{ name = 'selection-enter-reply'; ticket = 'IGSH-717'; passed = $false; reason = 'not reached' }
+            $result.checks += $selectionCheck
             $greyCheck = @{ name = 'grey-buttons'; passed = $false; reason = 'not reached' }
             $result.checks += $menuCheck
             $result.checks += $greyCheck
@@ -2775,6 +2842,38 @@ try {
                             $menuCheck.reason = ''
                         } catch {
                             $menuCheck.reason = $_.Exception.Message
+                            throw
+                        }
+                        try {
+                            $quoteLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count
+                            $stdinBytesBeforeReply = (Get-Item ($prefix + '-stdin.bin')).Length
+                            Doctor
+                            Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
+                            $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
+                            Snapshot 'selection-enter-reply-selected'
+                            Press @(0x0D) 'IGSH-717: Enter quotes the transcript selection instead of sending'
+                            Wait-Until {
+                                @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count -gt $quoteLinesBefore
+                            } 'IGSH-717 Enter creates a reply quote'
+                            $quoteLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' })
+                            if ($quoteLines.Count -ne $quoteLinesBefore + 1 -or $quoteLines[-1] -cnotmatch '\[chat\] reply quote chars=(\d+)$') { throw 'Expected exactly one observable quote after selection Enter' }
+                            $quoteChars = [int]$Matches[1]
+                            if ($quoteChars -le 0 -or $quoteChars -ge $message.Length) { throw 'Enter did not quote only a nonempty part of the message' }
+                            Wait-Until {
+                                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                                $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                                $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                                $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle -and [VerifyNative]::EditText([IntPtr]$composer.Current.NativeWindowHandle) -ceq ''
+                            } 'IGSH-717 quote leaves the empty composer focused'
+                            Snapshot 'selection-enter-reply'
+                            if ((Get-Item ($prefix + '-stdin.bin')).Length -ne $stdinBytesBeforeReply) { throw 'Selection Enter sent input instead of only quoting' }
+                            $selectionCheck.quoteChars = $quoteChars
+                            $selectionCheck.messageChars = $message.Length
+                            $selectionCheck.passed = $true
+                            $selectionCheck.reason = ''
+                            Press @(0x1B) 'Esc: cancel the selection reply quote'
+                        } catch {
+                            $selectionCheck.reason = $_.Exception.Message
                             throw
                         }
                     }

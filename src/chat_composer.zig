@@ -350,6 +350,8 @@ pub fn selectChatReply(text: []const u16) void {
     @memcpy(app_state.g_chat_reply[0..bytes.len], bytes);
     app_state.g_chat_reply_len = bytes.len;
     chatReplyRefreshPreview();
+    var log_buf: [80]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log_buf, "[chat] reply quote chars={d}", .{text.len}) catch "[chat] reply quote");
     chatAcClose();
     layoutChatControls();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -1099,6 +1101,7 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
         return 0;
     }
+    if (msg == 0x0102 and app_state.g_chat_sel_transcript_focus and @import("chat_render.zig").chatSelectionReply(msg, wp, lp)) return 0;
     if (msg == 0x0201 or msg == 0x0102) app_state.g_chat_sel_transcript_focus = false;
     if ((msg == 0x0201 or msg == 0x0102) and app_state.g_chat_sel_active) {
         chatSelectionClear();
