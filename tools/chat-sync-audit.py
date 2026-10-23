@@ -68,7 +68,8 @@ def pane_candidates(capture):
             continue
         if line.startswith('● ') and re.match(r'^Build in progress \(~?\d+(?:\.\d+)? min\); ', text):
             continue
-        if re.fullmatch(r'[A-Z][a-z]+ing \d+ [^,…]+(?:(?:, [a-z]+ing \d+ [^,…]+)+…?|…)', text):
+        if re.fullmatch(r'[A-Z][a-z]+ing (?:\d+ |[~/])[^,…]+(?:(?:, [a-z]+ing (?:\d+ |[~/])[^,…]+)+…?|…)',
+                        wrapped if line.startswith('● ') else text):
             continue
         text = normalize(text)
         if len(text) >= 20:

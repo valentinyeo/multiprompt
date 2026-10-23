@@ -116,6 +116,19 @@ class ChatSyncAuditTest(unittest.TestCase):
                          ['This neutral reply wraps onto a second row and is real chat'])
         self.assertEqual([item['pane_line'] for item in candidates], [5])
 
+    def test_igsh634_single_file_tool_status_is_not_a_chat_turn(self):
+        path = '~/projects/demo/tool-results/' + 'a' * 80 + '/result.txt'
+        status = '● Reading ' + path + '…'
+        reply = '● Reading ~/projects/app/src/main.zig, the bug sits in the pane'
+        capture = [status, status[:100], '  ' + status[100:],
+                   '● Reading ' + path + ', running 2 shell commands…',
+                   reply, '  resize handler and I will fix it next.',
+                   '● Checking 2 neutral builds before the release went out'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['text'] for item in candidates],
+                         [reply[2:], 'Checking 2 neutral builds before the release went out'])
+        self.assertEqual([item['pane_line'] for item in candidates], [5, 7])
+
     def test_igsh380_build_progress_banner_is_not_a_chat_turn(self):
         capture = ['● Build in progress (~7 min); preparing preview images',
                    '● Build in progress: the compiler found a real error',

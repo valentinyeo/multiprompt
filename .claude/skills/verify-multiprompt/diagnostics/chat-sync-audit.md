@@ -11,6 +11,7 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 - `running-tool`: running-tool rows are not mistaken for conversation.
 - `wrapped-tool-status` (IGSH-620): elapsed-time status lines are excluded even when hard-wrapped; real replies ending in a middle dot remain auditable.
 - `wrapped-status-summary` (IGSH-633): live tool-group summaries that wrap over several rows before their elapsed time are excluded; real wrapped replies remain auditable.
+- `single-file-tool-status` (IGSH-634): live "<verb>ing <path>…" tool status lines are excluded, also when the path wraps; real replies starting with a path remain auditable.
 - `system-notice`: transcript system notices explain terminal-only text rather than missing messages.
 - `unsettled-line`: recheck unmatched lines after a short settling wait before reporting them.
 - `background-task-status`: Claude background-command, idle-compaction, monitor and still-running status lines are excluded.
