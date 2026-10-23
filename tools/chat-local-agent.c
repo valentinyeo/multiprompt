@@ -6,7 +6,8 @@
 int main(int argc, char **argv) {
     if (argc != 3) return 1;
     BOOL suggestion = strcmp(argv[1], "suggestion") == 0;
-    if (!suggestion && strcmp(argv[1], "typed") != 0) return 1;
+    BOOL working = strcmp(argv[1], "working") == 0;
+    if (!suggestion && !working && strcmp(argv[1], "typed") != 0) return 1;
     char path[MAX_PATH];
     if (snprintf(path, sizeof(path), "%s-stdin.bin", argv[2]) >= (int)sizeof(path)) return 2;
     FILE *received = fopen(path, "wb");
@@ -23,8 +24,15 @@ int main(int argc, char **argv) {
     CONSOLE_SCREEN_BUFFER_INFO info;
     if (!GetConsoleScreenBufferInfo(output, &info)) return 4;
     COORD origin = {0, info.srWindow.Bottom};
+    if (working) {
+        COORD status = {0, (SHORT)(info.srWindow.Bottom - 2)};
+        const WCHAR *thinking = L"\x273b Thinking\x2026 (esc to interrupt)";
+        if (!SetConsoleCursorPosition(output, status) || !WriteConsoleW(output, thinking, (DWORD)wcslen(thinking), &written, NULL)) return 4;
+    }
     if (!SetConsoleCursorPosition(output, origin)) return 4;
-    const WCHAR *prompt = suggestion
+    const WCHAR *prompt = working
+        ? L"\x276f "
+        : suggestion
         ? L"\x276f \x1b[90m\x1b[7mT\x1b[27m\x1b[2mry a suggested reply\x1b[22m\x1b[39m\r\x1b[2C"
         : L"\x276f user draft\x1b[7m \x1b[27m";
     if (!WriteConsoleW(output, prompt, (DWORD)wcslen(prompt), &written, NULL)) return 4;

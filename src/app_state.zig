@@ -655,6 +655,8 @@ pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
 pub var g_inbox_button_hover: bool = false;
+pub var g_chat_stop_hover: bool = false;
+pub var g_chat_stop_shown: bool = false;
 
 pub const MAX_GROUPS: usize = 16;
 pub const GROUP_COLORS = [_]DWORD{
@@ -2446,6 +2448,8 @@ pub const ChatViewLayout = struct {
     send_btn: RECT,
     attach_btn: RECT,
     stop_btn: RECT,
+    send_shown: bool,
+    stop_shown: bool,
 };
 
 pub const CHAT_SUMMARY_VERBS = [_][]const u8{

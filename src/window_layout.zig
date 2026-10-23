@@ -212,7 +212,7 @@ pub fn invalidateSidebar() void {
     _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
 }
 
-fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
+fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, stop }) void {
     const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
     const bg = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
     const brush = CreateSolidBrush(bg);
@@ -225,13 +225,21 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool) void {
     _ = SelectObject(hdc, old_pen);
     _ = DeleteObject(brush);
     _ = DeleteObject(pen);
+    const ink = if (enabled)
+        (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(8, 20, 28))
+    else
+        customColorOr("subtitle", if (app_state.g_light_theme) RGB(150, 155, 165) else RGB(110, 116, 128));
+    if (glyph == .stop) {
+        const side = @max(uiScaled(8), @divTrunc((rc.bottom - rc.top) * 34, 100));
+        const left = rc.left + @divTrunc(rc.right - rc.left - side, 2);
+        const top = rc.top + @divTrunc(rc.bottom - rc.top - side, 2);
+        fillRoundRectAA(hdc, .{ .left = left, .top = top, .right = left + side, .bottom = top + side }, uiScaled(2), ink);
+        return;
+    }
     const glyph_h = @max(uiScaled(10), @divTrunc((rc.bottom - rc.top) * 42, 100));
     const glyph_font = CreateFontW(-glyph_h, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Segoe UI Symbol"));
     const old_font = SelectObject(hdc, glyph_font);
-    _ = SetTextColor(hdc, if (enabled)
-        (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(8, 20, 28))
-    else
-        customColorOr("subtitle", if (app_state.g_light_theme) RGB(150, 155, 165) else RGB(110, 116, 128)));
+    _ = SetTextColor(hdc, ink);
     var text_rc = rc;
     _ = DrawTextW(hdc, L("\u{25B6}"), -1, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     _ = SelectObject(hdc, old_font);
@@ -278,6 +286,10 @@ pub fn chatWorkingTimesPoll() void {
 pub fn chatWorkingBarVisible() bool {
     return app_state.ISSUE_265_WORKING_BAR and app_state.g_chat_active and app_state.active_shell < app_state.shell_count and
         (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0);
+}
+
+pub fn chatStopVisible() bool {
+    return chatWorkingBarVisible() and !chatPermissionVisible();
 }
 
 pub fn chatWorkingBarTick() void {
@@ -346,7 +358,7 @@ pub fn chatPermissionRect(action: @import("chat_permission.zig").Action) ?RECT {
     const gap = uiScaled(8);
     const width = @divTrunc(layout.transcript.right - layout.transcript.left - gap * (count - 1), count);
     const left = layout.transcript.left + index * (width + gap);
-    return .{ .left = left, .right = left + width, .top = layout.stop_btn.top, .bottom = layout.stop_btn.bottom };
+    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + uiScaled(2), .bottom = layout.composer_card.top - uiScaled(2) };
 }
 
 fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
@@ -391,34 +403,60 @@ pub fn paintChatView(hdc: HANDLE) void {
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
     const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
-    paintChatButton(hdc, layout.send_btn, has_text);
+    if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
+    if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
     paintChatAttachButton(hdc, layout.attach_btn);
+    logChatButtons(layout);
     if (chatPermissionVisible()) {
         paintChatPermission(hdc, card_border);
         return;
     }
-    if (app_state.g_chat_working_applied_len == 0) return;
-    const old_font = SelectObject(hdc, ensureChatFont());
-    defer _ = SelectObject(hdc, old_font);
-    var line = RECT{
-        .left = layout.transcript.left,
-        .top = layout.transcript.bottom,
-        .right = layout.transcript.right,
-        .bottom = layout.composer_card.top,
-    };
-    if (chatWorkingBarVisible()) {
-        paintChatSurface(hdc, layout.stop_btn, app_state.g_chat_input_color, card_border, uiScaled(6));
-        var stop_text = layout.stop_btn;
-        _ = SetTextColor(hdc, customColorOr("text", if (app_state.g_light_theme) RGB(40, 44, 52) else RGB(220, 224, 232)));
-        _ = DrawTextW(hdc, L("Stop"), -1, &stop_text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        line.right = layout.stop_btn.left - uiScaled(10);
-        if (verboseLoggingEnabled()) {
-            var log: [128]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ layout.stop_btn.left, layout.stop_btn.top, layout.stop_btn.right, layout.stop_btn.bottom }) catch "");
-        }
+    if (app_state.g_chat_working_applied_len > 0) {
+        const old_font = SelectObject(hdc, ensureChatFont());
+        defer _ = SelectObject(hdc, old_font);
+        var line = RECT{
+            .left = layout.transcript.left,
+            .top = layout.transcript.bottom,
+            .right = layout.transcript.right,
+            .bottom = layout.composer_card.top,
+        };
+        _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(135, 139, 147)));
+        _ = DrawTextW(hdc, &app_state.g_chat_working_applied, @intCast(app_state.g_chat_working_applied_len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
-    _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(135, 139, 147)));
-    _ = DrawTextW(hdc, &app_state.g_chat_working_applied, @intCast(app_state.g_chat_working_applied_len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    paintChatStopTooltip(hdc, layout);
+}
+
+var chat_buttons_logged: [13]i32 = @splat(std.math.minInt(i32));
+
+fn logChatButtons(layout: @import("app_state.zig").ChatViewLayout) void {
+    if (!verboseLoggingEnabled()) return;
+    const card = layout.composer_card;
+    const send = layout.send_btn;
+    const stop = layout.stop_btn;
+    const now = [_]i32{ card.left, card.top, card.right, card.bottom, send.left, send.top, send.right, send.bottom, stop.left, stop.top, stop.right, stop.bottom, @as(i32, @intFromBool(layout.send_shown)) + 2 * @as(i32, @intFromBool(layout.stop_shown)) };
+    if (std.mem.eql(i32, &now, &chat_buttons_logged)) return;
+    chat_buttons_logged = now;
+    var log: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] composer card {d},{d},{d},{d} size={d}", .{ card.left, card.top, card.right, card.bottom, send.right - send.left }) catch "");
+    if (layout.send_shown) debugLog(std.fmt.bufPrint(&log, "[chat] send rect {d},{d},{d},{d}", .{ send.left, send.top, send.right, send.bottom }) catch "");
+    if (layout.stop_shown) debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ stop.left, stop.top, stop.right, stop.bottom }) catch "");
+}
+
+fn paintChatStopTooltip(hdc: HANDLE, layout: @import("app_state.zig").ChatViewLayout) void {
+    if (!app_state.g_chat_stop_hover or !layout.stop_shown) return;
+    const text = L("Stop (Esc)");
+    const old_font = SelectObject(hdc, @import("drawing.zig").uiFontSubtitle());
+    defer _ = SelectObject(hdc, old_font);
+    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = DrawTextW(hdc, text, -1, &calc, @import("win32.zig").DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    const width = calc.right - calc.left + uiScaled(12);
+    const left = @max(layout.composer_card.left, layout.stop_btn.right - width);
+    var tip = RECT{ .left = left, .top = layout.composer_card.top - uiScaled(28), .right = left + width, .bottom = layout.composer_card.top - uiScaled(4) };
+    const brush = CreateSolidBrush(@import("themes.zig").themeSidebarBg());
+    _ = @import("win32.zig").FillRect(hdc, &tip, brush);
+    _ = DeleteObject(brush);
+    _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    _ = DrawTextW(hdc, text, -1, &tip, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 pub fn invalidateSpinnerRects() void {
@@ -479,7 +517,7 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
         const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(28) };
         for ([_]bool{ false, true }) |enabled| {
             _ = w.FillRect(dc, &area, brush);
-            paintChatButton(dc, rc, enabled);
+            paintChatButton(dc, rc, enabled, .send);
             const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
             const fill = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
             var blended: usize = 0;

@@ -2596,6 +2596,99 @@ try {
                     if (-not $typedCheck.passed) { throw 'Chat View overwrote a local typed draft or stopped keeping its message queued' }
                 }
             }
+            $stopCheck = @{ name = 'stop-in-box'; passed = $false; entry = 'Chat View working composer'; reason = 'not reached' }
+            $result.checks += $stopCheck
+            $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $stopPrefix = Join-Path $scratch 'local-route-working'
+            $readStopFrame = {
+                $frame = @{ card = $null; size = 0; send = $null; stop = $null; anyStop = $null }
+                if (-not (Test-Path $debugLog)) { return $frame }
+                foreach ($line in @((Get-Content $debugLog -Raw) -split "`r?`n")) {
+                    if ($line -match '\[chat\] composer card (-?\d+),(-?\d+),(-?\d+),(-?\d+) size=(\d+)') {
+                        $frame.card = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4])
+                        $frame.size = [int]$Matches[5]
+                        $frame.send = $null
+                        $frame.stop = $null
+                    } elseif ($line -match '\[chat\] send rect (-?\d+),(-?\d+),(-?\d+),(-?\d+)') {
+                        $frame.send = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4])
+                    } elseif ($line -match '\[chat\] stop rect (-?\d+),(-?\d+),(-?\d+),(-?\d+)') {
+                        $frame.stop = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4])
+                        $frame.anyStop = $frame.stop
+                    }
+                }
+                return $frame
+            }
+            $insideCard = { param($rect, $card) $rect[0] -ge $card[0] -and $rect[1] -ge $card[1] -and $rect[2] -le $card[2] -and $rect[3] -le $card[3] }
+            try {
+                $beforeStop = Read-Session
+                Palette 'new cmd'
+                Press @(0x0D) 'Enter: create local console for the in-box Stop check'
+                Wait-Until {
+                    $state = Read-Session
+                    @($state.tabs).Count -eq @($beforeStop.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+                } 'new local CMD session saved for the in-box Stop check'
+                $stopState = Read-Session
+                $stopTab = $stopState.active_tab
+                if ($stopState.tabs[$stopTab].PSObject.Properties['cv'] -and $stopState.tabs[$stopTab].cv) {
+                    Press @(0x12, 0x43) 'Alt+C: show new working console'
+                }
+                Wait-WorkspaceSurface $stopState.active_workspace $stopTab $false
+                Type-Text ('"' + $localAgent + '" working "' + $stopPrefix + '"')
+                Press @(0x0D) 'Enter: launch working Claude stand-in'
+                Wait-Until {
+                    if (-not (Test-Path ($stopPrefix + '-ready.json'))) { return $false }
+                    $script:stopReady = Get-Content ($stopPrefix + '-ready.json') -Raw | ConvertFrom-Json
+                    $script:stopReady.chars.Count -eq 32
+                } 'working stand-in rendered its status line and empty prompt'
+                if ($script:stopReady.chars[0] -ne 0x276F -or $script:stopReady.chars[1] -ne 32) { throw 'Working stand-in did not render the Claude prompt glyph and separator' }
+                Wait-Until {
+                    $inbox = Read-Inbox
+                    @($inbox.shells | Where-Object { $_.sid -eq $stopState.tabs[$stopTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
+                } 'working claude.exe detected as Claude' -Seconds 45
+                Press @(0x12, 0x43) 'Alt+C: open working agent Chat View'
+                Wait-Until {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                    $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                    $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                    $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle
+                } 'owned working Chat View composer focused'
+                Wait-Until { $null -ne (& $readStopFrame).anyStop } 'app painted a Stop control for the working agent' -Seconds 45
+                $empty = & $readStopFrame
+                $stopCheck.empty = $empty
+                if ($null -eq $empty.card) { throw ('No composer card logged; Stop rect ' + ($empty.anyStop -join ',') + ' is not inside the message box') }
+                if ($null -eq $empty.stop) { throw 'Latest composer frame has no Stop while the agent is working' }
+                $stopW = $empty.stop[2] - $empty.stop[0]
+                $stopH = $empty.stop[3] - $empty.stop[1]
+                if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
+                if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
+                if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
+                Type-Text 'x'
+                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
+                $typed = & $readStopFrame
+                $stopCheck.typed = $typed
+                if (($typed.stop[2] - $typed.stop[0]) -ne $typed.size -or ($typed.stop[3] - $typed.stop[1]) -ne $typed.size) { throw 'Stop changed size after typing' }
+                if ($typed.send[2] -gt $typed.stop[0]) { throw ('Send rect ' + ($typed.send -join ',') + ' is not left of Stop rect ' + ($typed.stop -join ',')) }
+                if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
+                Snapshot 'stop-in-box'
+                Press @(0x1B) 'Esc: stop the working agent from the composer'
+                Wait-Until {
+                    $stdin = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                    try {
+                        $buffer = New-Object IO.MemoryStream
+                        try {
+                            $stdin.CopyTo($buffer)
+                            $stopBytes = $buffer.ToArray()
+                        } finally { $buffer.Dispose() }
+                    } finally { $stdin.Dispose() }
+                    $stopCheck.receivedBytes = $stopBytes.Length
+                    $stopBytes -contains [byte]0x1B
+                } 'Esc reached the working stand-in stdin'
+                $stopCheck.passed = $true
+                $stopCheck.reason = ''
+            } catch {
+                $stopCheck.reason = $_.Exception.Message
+                throw
+            }
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
