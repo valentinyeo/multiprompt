@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.827", .items = &.{
+        .{ .text = "Multiprompt now reopens on the workspace and session you had selected, including the Starred view, even after an unexpected exit.", .ticket = "IGSH-569" },
+    } },
     .{ .ver = "0.28.826", .items = &.{
         .{ .text = "Removing a server from your account now keeps it removed on every device.", .ticket = "IGSH-600" },
     } },
