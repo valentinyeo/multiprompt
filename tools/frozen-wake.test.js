@@ -44,7 +44,8 @@ function lifecycleContract(source) {
   assert.match(send, /std.Thread.spawn\(.\{\}, browserLifecycleWorker, .\{job\}\)/);
   assert.match(send, /thread.detach\(\)/);
   assert.match(send, /if \(app_state.shells\[idx\].browser_lifecycle_pending\) return false/);
-  assert.match(worker, /requestBrowserForWindow\(allocator, job.window_id, profile\[0\.\.profile_len\], "cdp", fields, null\) catch break :lifecycle/);
+  assert.match(worker, /requestBrowserForWindow\(allocator, job.window_id, if \(own_token.len > 0\) own_token else profile\[0\.\.profile_len\], "cdp", fields, null\) catch break :lifecycle/);
+  assert.match(worker, /const own_token = std.mem.sliceTo\(&job.profile, 0\);/);
   assert.match(worker, /GetEnvironmentVariableA\("MULTIPROMPT_BROWSER_PROFILE"/);
   assert.match(worker, /if \(job.frozen\) @as\(\[\]const u8, "frozen"\) else "active"/);
   assert.match(worker, /job.confirmed = browserLifecycleReplySucceeded\(reply\)/);

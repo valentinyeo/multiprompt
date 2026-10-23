@@ -370,7 +370,7 @@ test('frozen returns require five fresh app-published freezes per view, native c
 });
 
 function assertsSwitchExtension(driver) {
-  const setup = driver.slice(driver.indexOf("    if ($Feature -eq 'browser-switch-speed') {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
     "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
@@ -408,7 +408,7 @@ test('new measurement code adds no removable code comments', async () => {
 });
 
 function assertsRealBridge(driver, yaml) {
-  const setup = driver.slice(driver.indexOf("    if ($Feature -eq 'browser-switch-speed') {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",
     "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",
