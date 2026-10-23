@@ -85,6 +85,7 @@ fn fontSyncMarkAllStale(_: HANDLE, _: []const u8) void {}
 fn fontSyncActiveNow() void {}
 fn sessionFrontChanged() void {}
 fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
+fn refocusShellAfterActivation(_: HANDLE) void {}
 fn syncPaneFocusModeFromForeground(_: HANDLE, _: bool) void {}
 fn leftMouseButtonDown() bool { return false; }
 fn clearSelectedTabDotOnReturn() void {}

@@ -6871,23 +6871,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 const alt_down = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
                 if (focusGuardComposerRepairAllowed()) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=activate-composer composer={X}", .{ altqPtr(app_state.g_chat_composer_hwnd) }) catch "[refocus-skip] reason=activate-composer");
                     _ = SetFocus(app_state.g_chat_composer_hwnd);
                     altqLog("composer_focus site=activate pending={} handoff_left={} chat={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), app_state.g_chat_active });
                 } else if (app_state.shell_count > 0 and app_state.g_edit_hwnd == null and !app_state.g_search_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
                     app_state.g_refocus_waiting_for_alt_release = alt_down;
                     requestShellRefocus(if (alt_down) 80 else 120, if (alt_down) 40 else 6);
-                } else {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=activate-overlay-or-no-shell count={} edit={X} search={} changelog={} url_picker={} snippet={}", .{ app_state.shell_count, altqPtr(app_state.g_edit_hwnd), app_state.g_search_active, app_state.g_changelog_active, app_state.g_url_picker_active, app_state.g_snippet_create_active }) catch "[refocus-skip] reason=activate-overlay-or-no-shell");
                 }
             } else {
                 updateBrowserVisibility();
                 hideBrowserEdgeMasks();
                 if (systemAltTabSuppressionActive() or GetTickCount64() >= app_state.g_ws_switch_focus_grace) {
-                    var skip_buf: [192]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=activate-inactive grace={} alt_tab_until={} rem={}", .{ app_state.g_ws_switch_focus_grace, app_state.g_system_alt_tab_until, app_state.g_refocus_remaining }) catch "[refocus-skip] reason=activate-inactive");
                     cancelShellRefocus(hwnd);
                     _ = SetTimer(hwnd, TIMER_HOOK_UNINSTALL, 150, null);
                 }
@@ -7359,20 +7352,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = KillTimer(hwnd, TIMER_REFOCUS);
                 if (app_state.g_search_active) {
                     altqLog("palette_refocus suppressed foreground={X} rem={} wait_alt={}", .{ altqPtr(GetForegroundWindow()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-search rem={} wait_alt={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release }) catch "[refocus-skip] reason=timer-search");
                     cancelShellRefocus(hwnd);
                     return 0;
                 }
                 if (!focusGuard(if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard())) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-authority target={X} composer={X} chat={} action={} input={} return={X} authorized={X} until={} activation={} foreground={X} restoring={} pending={} starred={}", .{ altqPtr(activeShellHwndForFocusGuard()), altqPtr(app_state.g_chat_composer_hwnd), app_state.g_chat_active, app_state.g_focus_user_action_tick, app_state.g_focus_input_tick, altqPtr(app_state.g_focus_return_hwnd), altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, app_state.g_focus_activation_until, altqPtr(GetForegroundWindow()), app_state.g_restoring, launch_cache.pending, app_state.g_starred_workspace }) catch "[refocus-skip] reason=timer-authority");
                     cancelShellRefocus(hwnd);
                     return 0;
                 }
                 if (app_state.g_popup_menu_active or app_state.g_move_size_active) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-menu-or-move popup={} move={}", .{ app_state.g_popup_menu_active, app_state.g_move_size_active }) catch "[refocus-skip] reason=timer-menu-or-move");
                     cancelShellRefocus(hwnd);
                     return 0;
                 }
@@ -7382,8 +7369,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const now_tick = GetTickCount64();
                 const inbox_force = now_tick < app_state.g_inbox_shell_focus_until;
                 if (now_tick < app_state.g_system_alt_tab_until and !foregroundIsOurs()) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-system-alt-tab now={} until={} foreground={X}", .{ now_tick, app_state.g_system_alt_tab_until, altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=timer-system-alt-tab");
                     cancelShellRefocus(hwnd);
                     return 0;
                 }
@@ -7391,8 +7376,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 var retry_delay: UINT = 250;
                 const ours_now = foregroundIsOurs();
                 if (chord_held) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-chord-held ours={} rem={} alt={}", .{ ours_now, app_state.g_refocus_remaining, alt_held }) catch "[refocus-skip] reason=timer-chord-held");
                     app_state.g_refocus_waiting_for_alt_release = true;
                     if (ours_now and app_state.g_refocus_remaining > 0) {
                         app_state.g_refocus_remaining -= 1;
@@ -7402,8 +7385,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         cancelShellRefocus(hwnd);
                     }
                 } else if (app_state.g_refocus_waiting_for_alt_release) {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-alt-release ours={} rem={} alt={}", .{ ours_now, app_state.g_refocus_remaining, alt_held }) catch "[refocus-skip] reason=timer-alt-release");
                     app_state.g_refocus_waiting_for_alt_release = false;
                     if (ours_now and app_state.g_refocus_remaining > 0) {
                         app_state.g_refocus_remaining -= 1;
@@ -7434,14 +7415,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         retry = true;
                     }
                 } else {
-                    var skip_buf: [512]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=timer-surface shell_focused={} inbox_force={} ours={} count={} mouse={} edit={X} search={} changelog={} url_picker={} snippet={}", .{ app_state.g_shell_focused, inbox_force, ours_now, app_state.shell_count, mouse_down, altqPtr(app_state.g_edit_hwnd), app_state.g_search_active, app_state.g_changelog_active, app_state.g_url_picker_active, app_state.g_snippet_create_active }) catch "[refocus-skip] reason=timer-surface");
                     cancelShellRefocus(hwnd);
                 }
                 if (retry) {
                     _ = SetTimer(hwnd, TIMER_REFOCUS, retry_delay, null);
-                    var retry_buf: [128]u8 = undefined;
-                    debugLog(std.fmt.bufPrint(&retry_buf, "[refocus-scheduled] retry delay={} rem={} wait_alt={}", .{ retry_delay, app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release }) catch "[refocus-scheduled] retry");
                 } else if (!inbox_force) {
                     app_state.g_inbox_shell_focus_until = 0;
                 }
