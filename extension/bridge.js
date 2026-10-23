@@ -2635,7 +2635,7 @@ function clearScreenshotCdpDetachTimer(tabId) {
   screenshotCdpDetachTimers.delete(tabId);
 }
 
-function withCdpSession(tabId, operation, retainEmulation = false, resetState = false, timeoutMs = retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000) {
+function withCdpSession(tabId, operation, retainEmulation = false, resetState = false, timeoutMs = retainEmulation || emulatedTabs.has(tabId) ? 15000 : 10000, emulateFocus = true) {
   if (cdpOperationChains.get(tabId) && !emulatedTabs.has(tabId)) {
     return Promise.reject(new Error("CDP session busy; run zsb reset to cancel the stuck command"));
   }
@@ -2685,7 +2685,7 @@ function withCdpSession(tabId, operation, retainEmulation = false, resetState = 
         checkSession();
       }
       checkSession();
-      await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
+      if (emulateFocus) await withTimeout(chrome.debugger.sendCommand(debuggee, "Emulation.setFocusEmulationEnabled", { enabled: true }), 2000, "CDP focus setup timed out; run zsb reset");
       checkSession();
       const result = timeoutMs === null
         ? await operation(debuggee, () => active && !reset, sendCommand)
@@ -2952,7 +2952,7 @@ async function sendCdp(message) {
       if (cdpMethod === "Emulation.clearDeviceMetricsOverride") cleanup = [["Emulation.setDeviceMetricsOverride", emulation.metrics]];
     }
     return sendCommand(cdpMethod, message.params || {}, cleanup || []);
-  }, false, !cleanup && !readOnly && !ownOverride);
+  }, false, !cleanup && !readOnly && !ownOverride, undefined, cdpMethod !== "Page.setWebLifecycleState");
 }
 
 function validateCdpScript(script) {
