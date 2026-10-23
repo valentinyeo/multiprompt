@@ -2762,13 +2762,6 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
-                Snapshot 'grey-buttons-stop'
-                try {
-                    $greyCheck.empty = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'grey-buttons-stop.png'), $script:window, $empty.card, $empty.stop, $null)
-                } catch {
-                    $greyCheck.reason = $_.Exception.Message
-                    throw
-                }
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
                 $typed = & $readStopFrame
@@ -2778,14 +2771,6 @@ try {
                 if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
                 Snapshot 'stop-in-box'
                 Snapshot 'grey-buttons'
-                try {
-                    $greyCheck.typed = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'grey-buttons.png'), $script:window, $typed.card, $typed.stop, $typed.send)
-                    $greyCheck.passed = $true
-                    $greyCheck.reason = ''
-                } catch {
-                    $greyCheck.reason = $_.Exception.Message
-                    throw
-                }
                 Press @(0x1B) 'Esc: stop the working agent from the composer'
                 Wait-Until {
                     $stdin = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
@@ -2803,6 +2788,14 @@ try {
                 $stopCheck.reason = ''
             } catch {
                 $stopCheck.reason = $_.Exception.Message
+                throw
+            }
+            try {
+                $greyCheck.typed = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'grey-buttons.png'), $script:window, $typed.card, $typed.stop, $typed.send)
+                $greyCheck.passed = $true
+                $greyCheck.reason = ''
+            } catch {
+                $greyCheck.reason = $_.Exception.Message
                 throw
             }
         }

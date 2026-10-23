@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const allowed = /^(?:Hack|IBM Plex Sans(?: (?:Medm|SmBld|Regular|Italic|Medium|Medium Italic|SemiBold|Bold|Bold Italic))?|Nordwand Mono(?: MP SemiBold| (?:Regular|SemiBold|Bold))?|Segoe UI (?:Symbol|Emoji))$/;
+const allowed = /^(?:Hack|IBM Plex Sans(?: (?:Medm|SmBld|Regular|Italic|Medium|Medium Italic|SemiBold|Bold|Bold Italic))?|Nordwand Mono(?: MP SemiBold| (?:Regular|SemiBold|Bold))?|Segoe UI (?:Symbol|Emoji)|Segoe Fluent Icons|Segoe MDL2 Assets)$/;
 const knownFace = /^(?:Inter(?: .*)?|Segoe UI(?: .*)?|Consolas(?: .*)?|Cascadia.*|JetBrains.*|Arial(?: .*)?|Calibri(?: .*)?|Tahoma|Verdana|Courier.*|Lucida.*|Caskaydia.*|FiraCode.*|Hack(?: Nerd.*)?|IBM Plex(?: [A-Z][A-Za-z]*){1,4}|Nordwand Mono(?: [A-Z][A-Za-z]*){0,3})$/;
 
 function literals(source) {
@@ -84,6 +84,8 @@ test('scanner rejects literals, UTF-16 names, theme JSON, LOGFONT and unknown GD
   assert.deepEqual(violations('const MONO_FACE = "Nordwand Mono MP SemiBold";'), []);
   assert.match(read('src/fonts.zig'), /MONO_FACE = "Nordwand Mono MP SemiBold"/);
   assert.deepEqual(violations('L("Segoe UI Symbol"); L("Segoe UI Emoji");'), []);
+  assert.deepEqual(violations('const face = L("Segoe Fluent Icons");'), []);
+  assert.deepEqual(violations('const face = L("Segoe MDL2 Assets");'), []);
 });
 
 test('all genuine face files and both OFL licenses ship together', () => {

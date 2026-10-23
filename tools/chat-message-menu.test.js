@@ -66,6 +66,7 @@ test('IGSH-718 enabled button backgrounds are neutral, hover is lighter, disable
   assert.match(paint, /const hover = glyph == .stop and app_state.g_chat_stop_hover/);
   const shades = paint.match(/if \(app_state.g_light_theme\) \(if \(hover\) (\d+) else (\d+)\) else \(if \(hover\) (\d+) else (\d+)\)/);
   assert.ok(shades);
+  assert.deepEqual(shades.slice(1).map(Number), [128, 104, 84, 64]);
   assert.ok(Number(shades[1]) > Number(shades[2]));
   assert.ok(Number(shades[3]) > Number(shades[4]));
   assert.match(paint, /if \(enabled\) RGB\(grey, grey, grey\) else customColorOr\("overlay_input_bg", if \(app_state.g_light_theme\) RGB\(236, 238, 243\) else RGB\(38, 42, 52\)\)/);
@@ -85,7 +86,10 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);
   assert.match(control, /Math.Max\(c.R, Math.Max\(c.G, c.B\)\) - Math.Min\(c.R, Math.Min\(c.G, c.B\)\) > 12 \|\| c.ToArgb\(\) == bg.ToArgb\(\)/);
-  assert.match(control, /Snapshot 'grey-buttons-stop'/);
+  assert.doesNotMatch(control, /grey-buttons-stop|\$greyCheck\.empty/);
+  assert.equal((control.match(/\[VerifyNative\]::GreyButtonPixels\(/g) || []).length, 1);
+  assert.match(control, /GreyButtonPixels\(\(Join-Path \$Evidence 'grey-buttons\.png'\), \$script:window, \$typed\.card, \$typed\.stop, \$typed\.send\)/);
+  assert.match(control, /\$stopCheck\.reason = \$_\.Exception\.Message\s*throw\s*\}\s*try \{\s*\$greyCheck\.typed = \[VerifyNative\]::GreyButtonPixels/);
   assert.match(control, /Snapshot 'grey-buttons'/);
   assert.match(control, /\$menuCheck.reason = \$_.Exception.Message\s*throw/);
   assert.match(control, /\$greyCheck.reason = \$_.Exception.Message\s*throw/);

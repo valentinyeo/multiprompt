@@ -519,8 +519,8 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
         for ([_]bool{ false, true }) |enabled| {
             _ = w.FillRect(dc, &area, brush);
             paintChatButton(dc, rc, enabled, .send);
-            const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
-            const fill = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
+            const enabled_bg = if (app_state.g_light_theme) RGB(104, 104, 104) else RGB(64, 64, 64);
+            const fill = if (enabled) enabled_bg else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
             var blended: usize = 0;
             var y = rc.top;
             while (y < rc.top + uiScaled(4)) : (y += 1) {
