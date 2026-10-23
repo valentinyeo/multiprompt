@@ -44,7 +44,15 @@ def pane_candidates(capture):
             if ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
                 continue
             text = line[2:].strip()
-            if text.endswith('·') and re.fullmatch(r'(?:\d+[hms]\s*)+…?', ANSI.sub('', lines[line_no]).strip()):
+            continuation = []
+            for following in lines[line_no:]:
+                following = ANSI.sub('', following)
+                if not following.strip() or not following[0].isspace() or following.lstrip().startswith('⎿'):
+                    break
+                continuation.append(following.strip())
+            wrapped = ' '.join([text] + continuation)
+            if re.search(r' · (?:\d+[hms]\s*)+…?$', wrapped) or (
+                    text.endswith('·') and re.fullmatch(r'(?:\d+[hms]\s*)+…?', ' '.join(continuation))):
                 continue
         elif re.match(r'^[❯›>] ', line):
             text = line[2:].strip()
