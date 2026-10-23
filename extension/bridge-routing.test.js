@@ -475,15 +475,20 @@ test("issue: retargeting a user tab gives no agent provenance, and explicit user
   assert.equal(h.createdTabs.length, 3);
 });
 
-test("issue: --new-tab always creates, including beside the active launch beacon", async () => {
+test("IGSH-613 navigate without a tag still creates a tab after the launch tag is consumed", async () => {
   const h = createHarness();
   h.setTab({ id: 1, windowId: 10, active: true, url: "data:text/html,<title>ZSPANE1-2</title>" });
   const first = (await h.api.navigate({ windowId: 10, url: "https://first.example/", newTab: true })).tab;
+  assert.equal(first.id, 1);
+  assert.equal(h.createdTabs.length, 0);
   const second = (await h.api.navigate({ windowId: 10, url: "https://second.example/", newTab: true })).tab;
   assert.notEqual(first.id, second.id);
-  assert.equal(h.createdTabs.length, 2);
-  assert.equal(h.updatedTabs.length, 0);
-  assert.equal(h.getTab(1).url, "data:text/html,<title>ZSPANE1-2</title>");
+  assert.equal(h.createdTabs.length, 1);
+  assert.equal(h.createdTabs[0].url, "https://second.example/");
+  assert.equal(h.createdTabs[0].active, false);
+  assert.equal(h.updatedTabs.length, 1);
+  assert.equal(h.getTab(1).url, "https://first.example/");
+  assert.equal((await h.api.getTargetTab({ windowId: 10 })).id, second.id);
 });
 
 test("issue: reuse authority cannot cross a pane registration to another session", async () => {
@@ -1157,19 +1162,53 @@ test("issue: only an explicit activate (the app's own user action) selects the n
   assert.deepEqual(h.createdTabs.map((tab) => tab.active), [false, false, true]);
 });
 
-test("issue: an agent navigate preserves the active launch placeholder and creates in background", async () => {
-  const h = createHarness({ protectedFocused: false });
-  const beacon = { id: 5, windowId: 10, active: true, url: "data:text/html,<title>ZSPANE3-42</title>" };
-  h.setTab(beacon);
-  const opened = (await h.api.dispatch({ method: "navigate", windowId: 10, url: "https://ticket.example/" })).tab;
-  assert.equal(h.createdTabs.length, 1);
-  assert.equal(h.updatedTabs.length, 0);
-  assert.notEqual(opened.id, 5);
-  assert.equal(opened.active, false);
-  assert.equal(h.getTab(5).url, beacon.url);
-  assert.equal((await h.api.getTargetTab({ windowId: 10 })).id, opened.id);
-  assert.deepEqual(h.outsideWindows, []);
+test("IGSH-613 navigate replaces the only tag tab and remembers it without leaving a data address", async () => {
+  for (const url of ["https://ticket.example/", "about:blank"]) {
+    for (const active of [false, true]) {
+      for (const activate of [false, true]) {
+        const h = createHarness({ protectedFocused: false });
+        h.setTab({ id: 5, windowId: 10, active, url: "data:text/html,<title>ZSPANE3-42</title>" });
+        h.setTab({ id: 6, windowId: 11, active: true, url: "https://other.example/" });
+        const opened = (await h.api.dispatch({ method: "navigate", windowId: 10, url, activate })).tab;
+        const { tabs } = await h.api.listTabs({ windowId: 10 });
+        assert.equal(tabs.length, 1);
+        assert.equal(tabs[0].url, url);
+        assert.ok(tabs.every((tab) => !/ZSPANE|data:text\/html/.test(tab.url)));
+        assert.equal(h.createdTabs.length, 0);
+        assert.equal(h.updatedTabs.length, 1);
+        assert.equal(opened.id, 5);
+        assert.equal(opened.active, active || activate);
+        assert.equal((await h.api.getTargetTab({ windowId: 10 })).id, 5);
+        assert.equal(h.getTab(6).url, "https://other.example/");
+        assert.deepEqual(h.outsideWindows, []);
+      }
+    }
+  }
 });
+
+for (const event of ["runtime.onStartup", "runtime.onInstalled"]) {
+  test(`IGSH-613 ${event} removes only tag tabs in windows with real content`, async () => {
+    const h = createHarness();
+    const beaconUrl = "data:text/html,<title>ZSPANE3-42</title><style>body{background:%23000;margin:0}</style>";
+    h.setTab({ id: 1, windowId: 10, active: false, url: beaconUrl });
+    h.setTab({ id: 2, windowId: 10, active: true, url: "https://keep.example/" });
+    h.setTab({ id: 3, windowId: 11, active: true, url: beaconUrl });
+    h.setTab({ id: 4, windowId: 12, active: true, url: "https://other.example/" });
+    h.setTab({ id: 5, windowId: 13, active: true, url: beaconUrl });
+    h.setTab({ id: 6, windowId: 13, active: false, url: beaconUrl });
+    h.setTab({ id: 7, windowId: 10, active: false, url: "data:text/html,<title>Keep me</title>" });
+    await h.listeners[event]();
+    assert.equal(h.getTab(1), undefined);
+    assert.equal(h.getTab(2).url, "https://keep.example/");
+    assert.equal(h.getTab(3).url, beaconUrl);
+    assert.equal(h.getTab(4).url, "https://other.example/");
+    assert.equal(h.getTab(5).url, beaconUrl);
+    assert.equal(h.getTab(6).url, beaconUrl);
+    assert.equal(h.getTab(7).url, "data:text/html,<title>Keep me</title>");
+    assert.equal(h.createdTabs.length, 0);
+    assert.equal(h.updatedTabs.length, 0);
+  });
+}
 
 test("issue: a woken pane window is created inactive and only for a launch placeholder", async () => {
   const h = createHarness();

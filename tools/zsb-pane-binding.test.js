@@ -159,15 +159,26 @@ test("a remembered placeholder tab is not used for reads", async () => {
   assert.equal((await h.api.textAction({ windowId: 10 })).text, "Real page");
 });
 
-test("agent navigate preserves the launch placeholder and targets a background tab", async () => {
-  const h = browserHarness();
-  h.openWindow(10);
-  await h.chrome.tabs.create({ windowId: 10, url: BEACON_URL, active: true });
-  h.setFocused(false);
-  const opened = (await h.api.navigate({ windowId: 10, url: "https://example.test/page" })).tab;
-  assert.equal(opened.active, false, "the agent page must remain in the background");
-  assert.equal([...h.tabs.values()].find((tab) => tab.active).url, BEACON_URL);
-  assert.equal((await h.api.textAction({ windowId: 10 })).tab.id, opened.id);
+test("IGSH-613 agent navigate replaces the launch placeholder in place and targets that tab", async () => {
+  for (const active of [false, true]) {
+    for (const activate of [false, true]) {
+      const h = browserHarness();
+      h.openWindow(10);
+      const beacon = await h.chrome.tabs.create({ windowId: 10, url: BEACON_URL, active });
+      h.setFocused(false);
+      const url = "https://example.test/page";
+      const opened = (await h.api.navigate({ windowId: 10, url, activate })).tab;
+      assert.equal(opened.id, beacon.id);
+      assert.equal(opened.url, url);
+      assert.equal(opened.active, active || activate);
+      const tabs = await h.chrome.tabs.query({ windowId: 10 });
+      assert.equal(tabs.length, 1, "navigation must reuse the launch tab without adding a tab");
+      assert.ok(tabs.every((tab) => tab.url !== BEACON_URL && !tab.url.includes("ZSPANE")));
+      assert.equal(tabs[0].id, beacon.id);
+      assert.equal(tabs[0].url, url);
+      assert.equal((await h.api.textAction({ windowId: 10 })).tab.id, beacon.id);
+    }
+  }
 });
 
 test("issue: navigate --new-tab appends a background tab without replacing the existing real page", async () => {
