@@ -168,9 +168,32 @@ def zsb_sockets(paths, session):
     return ranked
 
 
+def caller_uid(client):
+    for path, family in (("/proc/net/tcp", socket.AF_INET), ("/proc/net/tcp6", socket.AF_INET6)):
+        try:
+            endpoints = []
+            for address in (client.getpeername(), client.getsockname()):
+                host, port = address[:2]
+                if family == socket.AF_INET6 and ":" not in host:
+                    host = "::ffff:" + host
+                packed = socket.inet_pton(family, host)
+                encoded = "".join(packed[index:index + 4][::-1].hex() for index in range(0, len(packed), 4))
+                endpoints.append(f"{encoded.upper()}:{port:04X}")
+            with open(path, encoding="utf-8") as table:
+                for line in table:
+                    row = line.split()
+                    if len(row) > 7 and row[1:3] == endpoints:
+                        return int(row[7])
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def handle(client, directory):
     try:
         with client:
+            if caller_uid(client) != os.getuid():
+                return
             message = read_message(client)
             if not message:
                 return
