@@ -1177,17 +1177,14 @@ test "ISSUE-611 failed remote restore keeps Chat View, lock and browser state" {
     tab.burl_len = url.len;
     const saved_count = app_state.shell_count;
     const saved_shells = app_state.shells[0..1].*;
-    const saved_next_id = app_state.next_shell_id;
     const saved_bench_dir_len = app_state.g_chat_bench_dir_len;
     defer {
         app_state.shells[0..1].* = saved_shells;
         app_state.shell_count = saved_count;
-        app_state.next_shell_id = saved_next_id;
         app_state.g_chat_bench_dir_len = saved_bench_dir_len;
     }
     app_state.shell_count = 0;
     app_state.shells[0] = empty_shell;
-    app_state.next_shell_id = 1;
     app_state.g_chat_bench_dir_len = 1;
     const idx = preserveFailedRemoteSavedTab(&tab) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(u32, 0), idx);
