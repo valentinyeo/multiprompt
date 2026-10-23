@@ -2752,12 +2752,13 @@ try {
                 $ids = @($rows[$rows.Count - 1].Groups[1].Value -split ' ')
                 @($expectedIds | Where-Object { $_ -notin $ids }).Count -eq 0
             } 'Remind Me preset rows published after Ctrl+H'
-            Snapshot 'picker'
+            Snapshot 'action'
             $trace = ((Get-Content $log -Raw) -join '').Substring($start)
             $pickerRows = @([regex]::Matches($trace, '\[palette\] rows chars=0 count=\d+ ids=([^\r\n]*)'))
             $pickerIds = @($pickerRows[$pickerRows.Count - 1].Groups[1].Value -split ' ')
             $stateAfter = Read-Session
             if ($stateAfter.tabs[$stateAfter.active_tab].tmux_session -cne 'verify-1' -or @($stateAfter.tabs).Count -ne @($baseline.tabs).Count + 1) { throw 'remind-me: a session was hidden or changed' }
+            Snapshot 'after'
             $result.checks += @{ name = 'remind-me-ctrl-h'; entry = 'Ctrl+H'; presetBase = $presetBase; pickerRowIds = $pickerIds; sessionsBefore = @($baseline.tabs).Count; sessionsAfter = @($stateAfter.tabs).Count }
         }
         'group-rail' {

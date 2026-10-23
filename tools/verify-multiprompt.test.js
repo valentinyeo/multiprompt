@@ -1613,7 +1613,7 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
   const journey = control.slice(control.indexOf("        'remind-me' {"), control.indexOf("        'group-rail' {"));
   assert.match(journey, /Press @\(0x11, 0x48\)/);
   assert.match(journey, /SEARCH_REMIND_PRESET_OFFSET/);
-  assert.match(journey, /Snapshot 'picker'/);
+  assert.match(journey, /Snapshot 'action'[\s\S]*Snapshot 'after'/);
   assert.match(journey, /Remind Me preset rows published after Ctrl\+H/);
   assert.match(journey, /pickerRowIds = \$pickerIds/);
   const dismissal = /Press @\(0x1B\)|presetRowsGoneAfterEsc|Snapshot 'closed'/;
