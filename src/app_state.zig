@@ -1456,6 +1456,8 @@ pub const PaletteUsage = struct {
 };
 pub var g_palette_usage: [MAX_PALETTE_USAGE]PaletteUsage = [_]PaletteUsage{.{}} ** MAX_PALETTE_USAGE;
 pub var g_palette_usage_count: u32 = 0;
+pub const SEARCH_PALETTE_HEADER_OFFSET: usize = 11000;
+pub const PALETTE_HEADER_COUNT: usize = 9;
 
 pub var g_pending_spawn_cmd: [256]u8 = std.mem.zeroes([256]u8);
 pub var g_pending_spawn_cmd_len: u32 = 0;

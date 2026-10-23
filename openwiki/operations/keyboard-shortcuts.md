@@ -44,7 +44,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K → **Account: Sign Out**: clear this device's DPAPI login, attempt server revocation, and immediately lock the full window. Offline sign-out is local only; revoke the device from another signed-in device when back online.
 - Ctrl+K → **Account: Devices**: list device names/IDs; Yes revokes the displayed device, No advances, Cancel closes. Revoking this device signs it out.
 - Ctrl+K → **Sync: Pull Now**: fetch the account layout now (or send pending local edits first), reconcile workspaces/names/order and synchronized tmux tabs without killing remote tmux. Local-only tabs and unsynchronized attachments are retained.
-- Ctrl+K opens with your last 5 sessions: with nothing typed, the palette leads with the 5 sessions you viewed most recently across every workspace, newest first, each with its workspace name. The first row is the session you just left, so Ctrl+K then Enter still hops back. Snoozed workspaces and filed-away (hidden) tabs are left out, and the tab you are on is not listed.
+- Ctrl+K opens with your last 5 sessions: with nothing typed, the palette leads with the 5 sessions you viewed most recently across every workspace, newest first, each with its workspace name. The first row is the session you just left, so Ctrl+K then Enter still hops back. Snoozed workspaces and filed-away (hidden) tabs are left out, and the tab you are on is not listed. Below them a Most used header lists your ten most used commands by use count, then every other command sits under a group header (Sessions, Workspaces and windows, Sidebar and tabs, Look and settings, Debug and repair, Browser, Account and usage, Chat View). Within each part safe commands come before closing or removing ones. Up and Down skip headers. Typing a query shows the ranked list without headers.
 - Ctrl+K: Quick switcher — search/switch tabs + spawn new shells by name. Also exposes **"Open sessions in this folder"** (search "folder"/"sessions"/"repo"): when a VPS/tmux tab is focused, bulk-attaches every *other* tmux session on the **same host** whose cwd is under the focused session's folder (prefix match on `#{session_path}`). Requires the VPS list source to emit the path — the inline fallback already sends `-F '#{session_name}|#{session_activity}|#{session_path}'`; for `~/.local/bin/tmux-list.sh` append `|#{session_path}` to its `-F` format (4th field after ram; client parser detects path by leading `/`, ram by all-digits, so it tolerates 2–4 fields). Until a host emits the path, the entry just won't match there.
 - Alt+T: New workspace tmux tab in its configured or inferred remote folder. A workspace-scoped `commands.json` default with `alt_t` (for example `"claude"`) starts that program in the folder after shell startup; without it, the new tab is a neutral shell. The sidebar '+ New tab' button and Ctrl+T outside browser focus use the same path.
 - Ctrl+T: New workspace tmux tab outside browser focus, same as Alt+T and '+ New tab'. In a focused docked browser, Ctrl+T and Ctrl+K go to the browser; Ctrl+Shift+K opens the multiprompt palette.
@@ -57,7 +57,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+Shift+R: Reconnect/reattach the active SSH/tmux tab (recovers a dropped/black session by respawning ssh + reattaching the tmux session). Also a right-click tab menu item ("Reconnect"). No-op on cmd/pwsh tabs.
 - Ctrl+Shift+E: Archive the active tmux tab (press TWICE within 2.5s — the thread band shows the confirm prompt). Kills the remote tmux session (frees VPS RAM), saves {name, tmux session, host, Claude session id, cwd} to archive.json, closes the tab. Resurrect via Ctrl+K: type the archived name -> '\u21A9 <name>' row recreates the tmux session and relaunches `claude --resume <sid>` (or --continue without a stored id). The Claude session id arrives via the SESSION: hook broadcast (v0.28.247). Also available as Ctrl+K 'Archive Session' and in the right-click tab menu (explicit pick = confirmed, no double-press; v0.28.249)
 - Ctrl+Shift+B: Cycle sidebar: open -> collapsed -> hidden (0px focus mode) -> open. Ctrl+K 'Sidebar: Expand/Collapse/Hide' jump to a state directly
-- Ctrl+Shift+O: Toggle the docked Edge browser pane for the active tab (v0.28.264 — owner-docked top-level borderless Edge, per session; console reflows left, pane docks right). Also Ctrl+K 'Browser: Open URL...' and 'Insert browser-control instructions' (pastes the `zsb` usage guide into the shell). Drive the pane from the session via the `zsb` CLI (on each shell's PATH) or browser-cli/Playwriter. NOTE: the Edge extension + native-messaging host load from the `zigshell-browser-pane` repo folder — keep it; deleting it breaks browser CONTROL (the pane still docks). Windows-only; no VPS path yet
+- Ctrl+Shift+O: Toggle the docked Edge browser pane for the active tab (v0.28.264 — owner-docked top-level borderless Edge, per session; console reflows left, pane docks right). Also Ctrl+K 'Browser: Open URL...' and 'Browser: Insert Agent Instructions' (pastes the `zsb` usage guide into the shell). Drive the pane from the session via the `zsb` CLI (on each shell's PATH) or browser-cli/Playwriter. NOTE: the Edge extension + native-messaging host load from the `zigshell-browser-pane` repo folder — keep it; deleting it breaks browser CONTROL (the pane still docks). Windows-only; no VPS path yet
 - **Browser-focus escape hatches (v0.28.293):** while the docked Edge pane has FOCUS (the Ctrl+Shift+M isolation state where all keys go to Edge natively), a small set of one-press Alt combos still reach ZigShell — Edge ignores the Alt namespace, so claiming them costs no native browser shortcut. **Alt+I** = jump to Inbox (no Ctrl+Shift+M dance first), **Alt+1..9** = switch workspace (1 is Starred; 2-9 are the first eight stored workspaces), **Alt+J / Alt+K** = cycle workspace (the workspace ones are single-window-mode only, mirroring the shell-focused binds). Everything else still passes to Edge (Alt+Left/Right stay browser back/forward). Mnemonic: Ctrl = Edge, Alt = ZigShell. Implemented in the `keyboardHookProc` browser-focus passthrough block; F1 overview lists the three rows
 - Alt+S: Favorite or unfavorite this session. Starred tabs show a small yellow dot and keep it after restart, tmux adoption, or moving tabs. Ctrl+K has `Favorite: Toggle` with its current on/off state; right-click a tab for `Favorite` / `Unfavorite`. Alt+Shift+S still reaches the browser extension.
 - Alt+P: Keep the active tab awake — exempts its docked browser pane from freezing/hibernation (v0.28.635). Also Ctrl+K "Keep Tab Awake: On/Off" and the right-click tab menu. Sidebar shows a pin glyph on awake tabs and "z" on frozen/hibernated panes. See [pane hibernation](../browser/pane-hibernation.md)
@@ -198,7 +198,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+K -&gt; Sync: Pull Now | Reconcile server workspaces and synchronized tmux tabs |
 | Ctrl+Shift+K | Open command palette from any multiprompt surface, including browser |
-| Ctrl+K → Reconnect Claude: Primary / Secondary | Force sign-in one telemetry profile in its own terminal |
+| Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
 | Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
 | Ctrl+Shift+G | Cycle Combined, VPS, and Today's AI telemetry cards |
 | Alt+T | New workspace tmux tab (optional configured program) |
@@ -256,20 +256,20 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+X | Insert current browser tab URL (or most recent) + space at the Chat View caret; never send |
 | Ctrl+Shift+L / Ctrl+L | Focus browser address bar |
 | Alt+Q | Jump between shell and browser pane |
-| Ctrl+K → Browser engine | Switch every pane between dedicated Edge and dedicated Chrome profiles |
-| Ctrl+K → Browser mode | Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar |
+| Ctrl+K → Browser: Switch All Panes to Chrome / Edge | Switch every pane between dedicated Edge and dedicated Chrome profiles |
+| Ctrl+K → Browser: Use Browser Address Bar and Tabs / Use App Address Bar | Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar |
 | Alt+Left / Alt+Right (browser focus) | Browser back / forward |
 | Alt+I (browser focus) | Open Inbox |
 | Alt+1..9 (browser focus) | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
 | Alt+J / Alt+K (browser focus) | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | URL bar ‹ / › | Browser back / forward |
-| Ctrl+K Auto-suspend | Toggle idle browser pane suspension |
+| Ctrl+K → Browser: Auto-Suspend Idle Panes | Toggle idle browser pane suspension |
 | Alt+P | Keep this tab's browser pane awake (exempt from freeze/hibernate) |
 | Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |
 | Ctrl+K → Hibernate Browser Panes Now | Immediately hibernate every parked, unpinned browser pane |
 | Ctrl+K -&gt; External Browser Links When Pane Off | Toggle desktop browser for HTTP(S) links when the session pane is off (default on) |
 | Ctrl+K → Close All Browser Panes | Close browser panes in every workspace and keep their saved URLs |
-| Ctrl+K → Insert browser-control instructions | Paste the multiprompt-browser guide into the active shell |
+| Ctrl+K → Browser: Insert Agent Instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |
 | Ctrl+Click URL in shell | Open link in the docked browser pane (was: default browser) |
 | Ctrl+K -&gt; Changelog | what changed in each version |

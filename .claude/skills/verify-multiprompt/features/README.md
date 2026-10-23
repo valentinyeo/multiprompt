@@ -12,7 +12,7 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 ## Driving conventions
 
-Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout and chat-view-everywhere. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere and palette-order. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
@@ -34,6 +34,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.
 - [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
+- [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Group rail](group-rail.md): keep both grouped selections clear of the gray rail and the space below the group free of stray rail pixels.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.

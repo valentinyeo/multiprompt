@@ -156,7 +156,7 @@ test("the two new Ctrl+K offsets are excluded from the open-ended new-window/new
 test("right-click tab-context row toggles keep_awake on the captured tab, not the active one", () => {
   assert.match(source, /const SEARCH_TABCTX_KEEPAWAKE: usize = 7115;/);
   assert.match(source, /tc_kaw = if \(findShellById\(g_tabctx_sid\)\) \|ti\| shells\[ti\]\.keep_awake else false/);
-  assert.match(source, /result_idx == SEARCH_TABCTX_KEEPAWAKE\) \(if \(tc_kaw\) L\("Let Browser Pane Hibernate"\) else L\("Keep Tab Awake"\)\)/);
+  assert.match(source, /result_idx == SEARCH_TABCTX_KEEPAWAKE\) \(if \(tc_kaw\) L\("Keep Tab Awake: On"\) else L\("Keep Tab Awake: Off"\)\)/);
   assert.match(source, /else if \(target == SEARCH_TABCTX_KEEPAWAKE\) \{\s*shells\[ti\]\.keep_awake = !shells\[ti\]\.keep_awake;/);
   assert.match(source, /target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE\) \{/);
 });

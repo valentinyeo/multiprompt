@@ -324,6 +324,7 @@ const reminderDueLabel = @import("reminders.zig").reminderDueLabel;
 const remindPresetLabel = @import("reminders.zig").remindPresetLabel;
 const remindPresetHint = @import("reminders.zig").remindPresetHint;
 const activeRemoteContextForCodexTmux = @import("command_palette.zig").activeRemoteContextForCodexTmux;
+const paletteHeaderIndex = @import("command_palette.zig").paletteHeaderIndex;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const sessionOverviewKindLabel = @import("archive.zig").sessionOverviewKindLabel;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
@@ -2508,7 +2509,23 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = DeleteObject(sel_br);
                     }
 
-                    if (result_idx >= app_state.SEARCH_GROUPCTX_BASE and result_idx < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) {
+                    if (paletteHeaderIndex(result_idx)) |header| {
+                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(120, 120, 120) else RGB(140, 140, 140)));
+                        const header_label: [*:0]const u16 = switch (header) {
+                            0 => L("MOST USED"),
+                            1 => L("SESSIONS"),
+                            2 => L("WORKSPACES AND WINDOWS"),
+                            3 => L("SIDEBAR AND TABS"),
+                            4 => L("LOOK AND SETTINGS"),
+                            5 => L("DEBUG AND REPAIR"),
+                            6 => L("BROWSER"),
+                            7 => L("ACCOUNT AND USAGE"),
+                            else => L("CHAT VIEW"),
+                        };
+                        var header_rc = RECT{ .left = ox + 12, .top = ry + @divTrunc(row_h, 3), .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, header_label, -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (result_idx >= app_state.SEARCH_GROUPCTX_BASE and result_idx < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
                         var label: [192]u16 = undefined;
@@ -2598,7 +2615,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     } else if (is_mobile_toggle) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        const mob_label = if (app_state.g_mobile_mode) L("Mobile Latency: ON") else L("Mobile Latency: OFF");
+                        const mob_label = if (app_state.g_mobile_mode) L("Mobile Latency Mode: On") else L("Mobile Latency Mode: Off");
                         var mob_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, mob_label, -1, &mob_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_workspace_back) {
@@ -3208,7 +3225,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var uu_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Unarchive Unattached (Ctrl+W) Sessions"), -1, &uu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Restore Disconnected Workspace Sessions"), -1, &uu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var uu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3339,7 +3356,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var login_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 150, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_usage_login_primary) L("Reconnect Claude: Primary") else L("Reconnect Claude: Secondary"), -1, &login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (is_usage_login_primary) L("Usage: Sign In to Primary Claude Account") else L("Usage: Sign In to Secondary Claude Account"), -1, &login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var login_hint_rc = RECT{ .left = ox + overlay_w - 150, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3572,7 +3589,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var bf_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("ZigBrowser: Focus address bar"), -1, &bf_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Browser: Focus Address Bar"), -1, &bf_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bf_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3581,7 +3598,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var bj_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("ZigBrowser: Jump to/from browser pane"), -1, &bj_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Browser: Switch Focus Between Terminal and Pane"), -1, &bj_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bj_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3590,25 +3607,25 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         const be_label = if (app_state.g_browser_engine == .edge)
-                            L("Browser Engine: Switch every pane to dedicated Chrome")
+                            L("Browser: Switch All Panes to Chrome")
                         else
-                            L("Browser Engine: Switch every pane to dedicated Edge");
+                            L("Browser: Switch All Panes to Edge");
                         var be_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, be_label, -1, &be_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_browser_mode) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         const bm_label = if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native)
-                            L("ZigBrowser: Switch to custom URL bar")
+                            L("Browser: Use App Address Bar")
                         else
-                            L("ZigBrowser: Switch to native browser chrome");
+                            L("Browser: Use Browser Address Bar and Tabs");
                         var bm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, bm_label, -1, &bm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_zsb_rebind) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var zr_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("multiprompt-browser: Rebind active pane"), -1, &zr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Browser: Repair Agent Connection"), -1, &zr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var zr_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3617,7 +3634,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var sd_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Copy Shell Diagnostics"), -1, &sd_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Copy Session Diagnostics"), -1, &sd_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sd_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3626,7 +3643,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var sn_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_sync_name) L("Use Agent/Tmux Name") else L("Rename Session"), -1, &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (is_sync_name) L("Use Agent or Terminal Session Name") else L("Rename Session"), -1, &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sn_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3644,7 +3661,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var bs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (app_state.g_browser_autosuspend) L("ZigBrowser: Auto-suspend idle panes: On") else L("ZigBrowser: Auto-suspend idle panes: Off"), -1, &bs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (app_state.g_browser_autosuspend) L("Browser: Auto-Suspend Idle Panes: On") else L("Browser: Auto-Suspend Idle Panes: Off"), -1, &bs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bs_hint_buf: [16]u8 = undefined;
@@ -3677,7 +3694,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var bi_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Insert browser-control instructions"), -1, &bi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Browser: Insert Agent Instructions"), -1, &bi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bi_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3935,7 +3952,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_VIEW_CHAT) L("Always Chat View for this session") else if (result_idx == SEARCH_TABCTX_VIEW_SHELL) L("Always shell view for this session") else if (result_idx == SEARCH_TABCTX_VIEW_CLEAR) L("Clear Always view for this session") else if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Activity") else L("Mute Activity")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Don't Keep Alive") else L("Keep Alive on Exit")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_LOCK) (if (tc_locked) L("Unlock Session") else L("Lock Session")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Let Browser Pane Hibernate") else L("Keep Tab Awake")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move tab to new workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Hide Browser Pane") else L("Show Browser Pane")) else L("Tab action");
+                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_VIEW_CHAT) L("Always Chat View for this session") else if (result_idx == SEARCH_TABCTX_VIEW_SHELL) L("Always shell view for this session") else if (result_idx == SEARCH_TABCTX_VIEW_CLEAR) L("Clear Always view for this session") else if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect Tab") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_LOCK) (if (tc_locked) L("Unlock Session") else L("Lock Session")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {
@@ -3954,7 +3971,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var rw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Rename Current Workspace"), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Rename Workspace"), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rw_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3963,7 +3980,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
                         var cx_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("New Codex tmux Session"), -1, &cx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("New Codex Session in This Folder"), -1, &cx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
                         var host: u8 = 0;
                         var cwd_buf: [256]u8 = undefined;

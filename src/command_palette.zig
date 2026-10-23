@@ -249,6 +249,9 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const CustomCmd = @import("app_state.zig").CustomCmd;
 const MAX_PALETTE_USAGE = @import("app_state.zig").MAX_PALETTE_USAGE;
+const SEARCH_PALETTE_HEADER_OFFSET = @import("app_state.zig").SEARCH_PALETTE_HEADER_OFFSET;
+const PALETTE_HEADER_COUNT = @import("app_state.zig").PALETTE_HEADER_COUNT;
+const MAX_TMUX_SESSIONS = @import("app_state.zig").MAX_TMUX_SESSIONS;
 const PaletteUsage = @import("app_state.zig").PaletteUsage;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
@@ -552,23 +555,23 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
             SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat clear bubbles cache",
-            SEARCH_TABCTX_RECONNECT => "reconnect",
+            SEARCH_TABCTX_RECONNECT => "reconnect tab",
             SEARCH_TABCTX_INBOX_EXCLUDE => if (tab != null and tab.?.inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
             SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
-            SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute activity" else "mute activity",
-            SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "don't keep alive" else "keep alive on exit",
+            SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
+            SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "keep alive: on" else "keep alive: off",
             SEARCH_TABCTX_PIN_TOP => if (tab != null and tab.?.pinned_top) "unpin from top" else "pin to top",
             SEARCH_TABCTX_LOCK => if (tab != null and tab.?.locked) "unlock session" else "lock session",
-            SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "let browser pane hibernate" else "keep tab awake",
+            SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "keep tab awake: on" else "keep tab awake: off",
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
             SEARCH_TABCTX_GROUP_REMOVE => "remove from group",
             SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new tab in group",
-            SEARCH_TABCTX_MOVE_NEW_WS => "move tab to new workspace",
+            SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
             SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
             SEARCH_TABCTX_ARCHIVE => if (tab != null and tab.?.tmux_session_len > 0) "archive session" else "close session",
             SEARCH_TABCTX_END_TMUX => "end tmux session",
-            SEARCH_TABCTX_BROWSER => if (tab != null and tab.?.browser_enabled) "hide browser pane" else "show browser pane",
+            SEARCH_TABCTX_BROWSER => if (tab != null and tab.?.browser_enabled) "close browser pane" else "open browser pane",
             else => null,
         };
     }
@@ -768,11 +771,11 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_BROWSER_TOGGLE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
         SEARCH_BROWSER_URL_OFFSET => "browser open url",
-        SEARCH_BROWSER_INSTRUCT_OFFSET => "browser control instructions",
-        SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser focus address bar",
-        SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "switch shell browser focus",
+        SEARCH_BROWSER_INSTRUCT_OFFSET => "browser: insert agent instructions",
+        SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser: focus address bar",
+        SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "browser: switch focus between terminal and pane",
         SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET => "external browser links when pane off",
-        SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser auto suspend",
+        SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser: auto-suspend idle panes",
         SEARCH_KEEPAWAKE_OFFSET => "keep tab awake",
         SEARCH_HIBERNATE_NOW_OFFSET => "hibernate browser panes now",
         SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET => "close all browser panes",
@@ -781,13 +784,13 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHANGELOG_OFFSET => "changelog",
         SEARCH_BROWSER_BACK_OFFSET => "browser back",
         SEARCH_BROWSER_FORWARD_OFFSET => "browser forward",
-        SEARCH_BROWSER_MODE_OFFSET => "browser pane mode",
-        SEARCH_BROWSER_ENGINE_OFFSET => "browser engine",
+        SEARCH_BROWSER_MODE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native) "browser: use app address bar" else "browser: use browser address bar and tabs",
+        SEARCH_BROWSER_ENGINE_OFFSET => if (app_state.g_browser_engine == .edge) "browser: switch all panes to chrome" else "browser: switch all panes to edge",
         SEARCH_RESTART_OFFSET => "restart multiprompt",
         SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
-        SEARCH_ZSB_REBIND_OFFSET => "rebind browser pane",
-        SEARCH_SHELL_DIAG_OFFSET => "copy shell diagnostics",
-        SEARCH_SYNC_NAME_OFFSET => "use agent or tmux name",
+        SEARCH_ZSB_REBIND_OFFSET => "browser: repair agent connection",
+        SEARCH_SHELL_DIAG_OFFSET => "copy session diagnostics",
+        SEARCH_SYNC_NAME_OFFSET => "use agent or terminal session name",
         SEARCH_RENAME_SYNC_OFFSET => "rename session",
         SEARCH_END_TMUX_OFFSET => "end tmux session",
         SEARCH_REMIND_ME_OFFSET => "remind me",
@@ -795,7 +798,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_WS_SNOOZE_OFFSET => "workspace snooze",
         SEARCH_WS_SNOOZED_OFFSET => "workspace snoozed wake",
         SEARCH_WS_BRINGBACK_OFFSET => "workspace bring back all sessions",
-        SEARCH_CODEX_TMUX_OFFSET => "new codex tmux session",
+        SEARCH_CODEX_TMUX_OFFSET => "new codex session in this folder",
         SEARCH_SNIPPETS_MENU_OFFSET => "use snippets",
         SEARCH_SNIPPET_CREATE_OFFSET => "create snippet",
         SEARCH_SNIPPET_BACK_OFFSET => "back",
@@ -805,9 +808,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_PIN_TOP_OFFSET => "pin tab to top",
         SEARCH_LOCK_SESSION_OFFSET => "lock session",
         SEARCH_UNARCHIVE_HIDDEN_OFFSET => "restore workspace waiting sessions",
-        SEARCH_UNARCHIVE_UNATTACHED_OFFSET => "unarchive unattached sessions",
-        SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "reconnect claude primary telemetry",
-        SEARCH_USAGE_LOGIN_INNE_OFFSET => "reconnect claude secondary telemetry",
+        SEARCH_UNARCHIVE_UNATTACHED_OFFSET => "restore disconnected workspace sessions",
+        SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account",
+        SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account",
         SEARCH_RENAMEWIN_OFFSET => "rename workspace",
         SEARCH_MOBILE_OFFSET => "mobile latency mode",
         SEARCH_ADDFAVICON_OFFSET => "add favicon",
@@ -1021,6 +1024,262 @@ fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
     while (i > 0) : (i -= 1) results[i] = results[i - 1];
     results[0] = target;
     return true;
+}
+
+pub const PALETTE_MOST_USED_ROWS: usize = 10;
+pub const PALETTE_GROUP_SESSIONS: u8 = 0;
+pub const palette_header_names = [PALETTE_HEADER_COUNT][]const u8{ "Most used", "Sessions", "Workspaces and windows", "Sidebar and tabs", "Look and settings", "Debug and repair", "Browser", "Account and usage", "Chat View" };
+
+pub fn paletteHeaderIndex(target: usize) ?usize {
+    if (target >= SEARCH_PALETTE_HEADER_OFFSET and target < SEARCH_PALETTE_HEADER_OFFSET + PALETTE_HEADER_COUNT) return target - SEARCH_PALETTE_HEADER_OFFSET;
+    return null;
+}
+
+pub fn paletteRowIsHeader(target: usize) bool {
+    return paletteHeaderIndex(target) != null;
+}
+
+fn paletteRowIsSession(target: usize) bool {
+    return target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS;
+}
+
+pub fn paletteGroupOf(target: usize) ?u8 {
+    if (paletteRowIsSession(target)) return 0;
+    if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
+    if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
+    if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) return 0;
+    if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
+    if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
+    if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
+    return switch (target) {
+        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
+        SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_LOCK_SESSION_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
+        SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
+        SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
+        SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
+        SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
+        SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET, SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET, SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        else => null,
+    };
+}
+
+const PaletteOrderRow = struct {
+    target: usize,
+    group: u8,
+    command: bool,
+    safe: bool,
+    used: bool,
+    usage: PaletteUsage,
+    label: []const u8,
+};
+
+var g_palette_order_rows: [app_state.g_search_results.len]PaletteOrderRow = undefined;
+var g_palette_order_out: [app_state.g_search_results.len]usize = undefined;
+var g_palette_order_pick: [app_state.g_search_results.len]usize = undefined;
+
+fn paletteUsageOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bool {
+    if (a.usage.count != b.usage.count) return a.usage.count > b.usage.count;
+    if (a.usage.last_used != b.usage.last_used) return a.usage.last_used > b.usage.last_used;
+    return std.ascii.lessThanIgnoreCase(a.label, b.label);
+}
+
+fn paletteOrderOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bool {
+    if (a.safe != b.safe) return a.safe;
+    return paletteUsageOutranks(a, b);
+}
+
+fn sortPaletteOrderPick(pick: []usize) void {
+    var i: usize = 1;
+    while (i < pick.len) : (i += 1) {
+        const key = pick[i];
+        var j = i;
+        while (j > 0 and paletteOrderOutranks(&g_palette_order_rows[key], &g_palette_order_rows[pick[j - 1]])) : (j -= 1) pick[j] = pick[j - 1];
+        pick[j] = key;
+    }
+}
+
+fn groupEmptyPaletteResults(lead: usize) void {
+    const total: usize = app_state.g_search_result_count;
+    if (lead >= total or total + PALETTE_HEADER_COUNT > app_state.g_search_results.len) return;
+    const rows = g_palette_order_rows[0 .. total - lead];
+    for (rows, 0..) |*row, i| {
+        const target = app_state.g_search_results[lead + i];
+        const command = !paletteRowIsSession(target);
+        row.* = .{
+            .target = target,
+            .group = paletteGroupOf(target) orelse PALETTE_GROUP_SESSIONS,
+            .command = command,
+            .safe = !paletteTargetIsDestructive(target),
+            .used = false,
+            .usage = if (command) paletteUsageFor(target) else .{},
+            .label = (if (command) palettePrimaryLabel(target) else null) orelse "",
+        };
+    }
+    var band_len: usize = 0;
+    while (band_len < PALETTE_MOST_USED_ROWS) : (band_len += 1) {
+        var best: ?usize = null;
+        for (rows, 0..) |*row, i| {
+            if (!row.command or row.used or row.usage.count == 0) continue;
+            if (best == null or paletteUsageOutranks(row, &rows[best.?])) best = i;
+        }
+        const chosen = best orelse break;
+        rows[chosen].used = true;
+        g_palette_order_pick[band_len] = chosen;
+    }
+    var out_len: usize = 0;
+    for (app_state.g_search_results[0..lead]) |target| {
+        g_palette_order_out[out_len] = target;
+        out_len += 1;
+    }
+    if (band_len > 0) {
+        sortPaletteOrderPick(g_palette_order_pick[0..band_len]);
+        g_palette_order_out[out_len] = SEARCH_PALETTE_HEADER_OFFSET;
+        out_len += 1;
+        for (g_palette_order_pick[0..band_len]) |i| {
+            g_palette_order_out[out_len] = rows[i].target;
+            out_len += 1;
+        }
+    }
+    for (0..PALETTE_HEADER_COUNT - 1) |group| {
+        var pick_len: usize = 0;
+        for (rows, 0..) |*row, i| {
+            if (row.group != group or row.used or !row.command) continue;
+            g_palette_order_pick[pick_len] = i;
+            pick_len += 1;
+        }
+        sortPaletteOrderPick(g_palette_order_pick[0..pick_len]);
+        for (rows, 0..) |*row, i| {
+            if (row.group != group or row.used or row.command) continue;
+            g_palette_order_pick[pick_len] = i;
+            pick_len += 1;
+        }
+        if (pick_len == 0) continue;
+        g_palette_order_out[out_len] = SEARCH_PALETTE_HEADER_OFFSET + 1 + group;
+        out_len += 1;
+        for (g_palette_order_pick[0..pick_len]) |i| {
+            g_palette_order_out[out_len] = rows[i].target;
+            out_len += 1;
+        }
+    }
+    @memcpy(app_state.g_search_results[0..out_len], g_palette_order_out[0..out_len]);
+    app_state.g_search_result_count = @intCast(out_len);
+}
+
+fn nextSelectablePaletteRow(from: u32, backward: bool, wrap: bool) ?u32 {
+    const count = app_state.g_search_result_count;
+    if (count == 0) return null;
+    var sel = @min(from, count - 1);
+    var steps: u32 = 0;
+    while (paletteRowIsHeader(app_state.g_search_results[sel])) : (steps += 1) {
+        if (steps >= count) return null;
+        if (backward) {
+            if (sel > 0) {
+                sel -= 1;
+            } else if (wrap) {
+                sel = count - 1;
+            } else return null;
+        } else {
+            if (sel + 1 < count) {
+                sel += 1;
+            } else if (wrap) {
+                sel = 0;
+            } else return null;
+        }
+    }
+    return sel;
+}
+
+pub fn stepOverPaletteHeaders(backward: bool, wrap: bool) void {
+    if (app_state.g_search_result_count == 0) return;
+    if (nextSelectablePaletteRow(app_state.g_search_sel, backward, wrap) orelse nextSelectablePaletteRow(app_state.g_search_sel, !backward, false)) |sel| app_state.g_search_sel = sel;
+}
+
+fn expectGroupedPalette(input: []const usize, lead: usize, expected: []const usize) !void {
+    @memcpy(app_state.g_search_results[0..input.len], input);
+    app_state.g_search_result_count = @intCast(input.len);
+    groupEmptyPaletteResults(lead);
+    try std.testing.expectEqualSlices(usize, expected, app_state.g_search_results[0..app_state.g_search_result_count]);
+}
+
+test "empty Ctrl K lists most used commands first, then job groups with safe commands first" {
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    defer {
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    const H = SEARCH_PALETTE_HEADER_OFFSET;
+    app_state.g_palette_usage[0] = .{ .key = 2004, .count = 9, .last_used = 10 };
+    app_state.g_palette_usage[1] = .{ .key = SEARCH_SOUND_OFFSET, .count = 5, .last_used = 30 };
+    app_state.g_palette_usage[2] = .{ .key = SEARCH_THEME_MENU_OFFSET, .count = 5, .last_used = 20 };
+    app_state.g_palette_usage[3] = .{ .key = SEARCH_CLOSEWIN_OFFSET, .count = 7, .last_used = 5 };
+    app_state.g_palette_usage_count = 4;
+    try expectGroupedPalette(
+        &.{ 2000, 2004, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_CLOSEWIN_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_SHELL_DIAG_OFFSET },
+        0,
+        &.{ H, 2004, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_CLOSEWIN_OFFSET, H + 1, 2000, H + 5, SEARCH_SHELL_DIAG_OFFSET, H + 8, SEARCH_CHAT_VIEW_OFFSET },
+    );
+    app_state.g_palette_usage_count = 0;
+    try expectGroupedPalette(
+        &.{ SEARCH_CLOSEWIN_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_CHANGELOG_OFFSET },
+        0,
+        &.{ H + 2, SEARCH_CREATEWS_OFFSET, SEARCH_CLOSEWIN_OFFSET, H + 4, SEARCH_CHANGELOG_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_UI_BIGGER_OFFSET },
+    );
+    try expectGroupedPalette(
+        &.{ 3, 7, 2000, SEARCH_SHELL_DIAG_OFFSET },
+        1,
+        &.{ 3, H + 1, 2000, 7, H + 5, SEARCH_SHELL_DIAG_OFFSET },
+    );
+}
+
+test "Ctrl K arrow keys step over group headers" {
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_sel = app_state.g_search_sel;
+    defer {
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_search_sel = old_sel;
+    }
+    const H = SEARCH_PALETTE_HEADER_OFFSET;
+    const rows = [_]usize{ H, 2004, H + 1, 2000 };
+    @memcpy(app_state.g_search_results[0..rows.len], &rows);
+    app_state.g_search_result_count = rows.len;
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(false, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    app_state.g_search_sel = 2;
+    stepOverPaletteHeaders(false, false);
+    try std.testing.expectEqual(@as(u32, 3), app_state.g_search_sel);
+    app_state.g_search_sel = 2;
+    stepOverPaletteHeaders(true, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(true, true);
+    try std.testing.expectEqual(@as(u32, 3), app_state.g_search_sel);
+    app_state.g_search_sel = 0;
+    stepOverPaletteHeaders(true, false);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+}
+
+fn appendPaletteRowsTrace(out: []u8) []const u8 {
+    var pos: usize = 0;
+    const head = std.fmt.bufPrint(out, "[palette] rows chars={d} count={d} ids=", .{ app_state.g_search_len, app_state.g_search_result_count }) catch return "[palette] rows overflow";
+    pos = head.len;
+    const shown = @min(app_state.g_search_result_count, 48);
+    for (app_state.g_search_results[0..shown], 0..) |target, i| {
+        const part = if (paletteHeaderIndex(target)) |header|
+            std.fmt.bufPrint(out[pos..], "{s}h{d}", .{ if (i == 0) "" else " ", header }) catch break
+        else
+            std.fmt.bufPrint(out[pos..], "{s}{d}", .{ if (i == 0) "" else " ", target }) catch break;
+        pos += part.len;
+    }
+    return out[0..pos];
 }
 
 fn pickRecentSessions(last_viewed: []const u64, eligible: []const bool, exclude: usize, first: ?usize, out: []usize) usize {
@@ -1373,12 +1632,16 @@ fn clampSearchSelectionAndScroll() void {
 pub fn keepSearchSelectionVisible() void {
     clampSearchSelectionAndScroll();
     if (app_state.g_search_result_count == 0) return;
+    stepOverPaletteHeaders(false, false);
 
     const visible_rows: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
     if (app_state.g_search_sel < app_state.g_search_scroll) {
         app_state.g_search_scroll = app_state.g_search_sel;
     } else if (app_state.g_search_sel >= app_state.g_search_scroll + visible_rows) {
         app_state.g_search_scroll = app_state.g_search_sel + 1 - visible_rows;
+    }
+    if (app_state.g_search_sel > 0 and app_state.g_search_sel == app_state.g_search_scroll and paletteRowIsHeader(app_state.g_search_results[app_state.g_search_sel - 1])) {
+        app_state.g_search_scroll = app_state.g_search_sel - 1;
     }
     clampSearchSelectionAndScroll();
 }
@@ -1480,6 +1743,8 @@ pub fn updateSearchResults() void {
         if (app_state.g_search_active) {
             var trace: [128]u8 = undefined;
             const target = if (app_state.g_search_sel < app_state.g_search_result_count) app_state.g_search_results[app_state.g_search_sel] else 0;
+            var rows_trace: [640]u8 = undefined;
+            @import("diagnostics.zig").debugLog(appendPaletteRowsTrace(&rows_trace));
             @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[palette] ready chars={d} count={d} target={d}", .{ app_state.g_search_len, app_state.g_search_result_count, target }) catch "[palette] trace overflow");
         }
     }
@@ -1591,7 +1856,7 @@ pub fn updateSearchResults() void {
         return;
     }
 
-    if (app_state.g_search_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and sessionOverviewCommandMatches(app_state.g_search_buf[0..app_state.g_search_len])) {
+    if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or sessionOverviewCommandMatches(app_state.g_search_buf[0..app_state.g_search_len]))) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
@@ -1632,6 +1897,9 @@ pub fn updateSearchResults() void {
                 "ctrl w sessions",
                 "attach workspace sessions",
                 "restore unattached sessions",
+                "restore disconnected workspace sessions",
+                "disconnected workspace sessions",
+                "unarchive unattached (ctrl+w) sessions",
             };
             for (unattached_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -1814,7 +2082,7 @@ pub fn updateSearchResults() void {
             if (k == .vps or k == .vps2 or k == .tmux) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
                     const ended = app_state.shells[ti].ssh_reconnect.phase == .ended;
-                    const label = if (ended) "Start new session" else "Reconnect";
+                    const label = if (ended) "Start new session" else "Reconnect Tab";
                     if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                         if (ended) {
                             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
@@ -1835,8 +2103,9 @@ pub fn updateSearchResults() void {
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
             const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
-            const mute_str: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
-            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(mute_str, app_state.g_search_buf[0..app_state.g_search_len])) {
+            const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
+            const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
                 app_state.g_search_result_count += 1;
             }
@@ -1866,8 +2135,8 @@ pub fn updateSearchResults() void {
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
             const tc_kaw = if (tc_idx) |ti| app_state.shells[ti].keep_awake else false;
-            const kaw_str: []const u8 = if (tc_kaw) "Let Browser Pane Hibernate" else "Keep Tab Awake";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            const kaw_str: []const u8 = if (tc_kaw) "Keep Tab Awake: On" else "Keep Tab Awake: Off";
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPAWAKE;
                 app_state.g_search_result_count += 1;
             }
@@ -1876,8 +2145,9 @@ pub fn updateSearchResults() void {
             const k = app_state.shells[ti].kind;
             if (k == .cmd or k == .pwsh) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    const ka_str: []const u8 = if (app_state.shells[ti].keep_alive) "Don't Keep Alive" else "Keep Alive on Exit";
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(ka_str, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    const ka_str: []const u8 = if (app_state.shells[ti].keep_alive) "Keep Alive: On" else "Keep Alive: Off";
+                    const ka_old: []const u8 = if (app_state.shells[ti].keep_alive) "Don't Keep Alive" else "Keep Alive on Exit";
+                    if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ ka_str, ka_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
                         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPALIVE;
                         app_state.g_search_result_count += 1;
                     }
@@ -1915,7 +2185,7 @@ pub fn updateSearchResults() void {
             }
         }
         if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len) {
-            const browser_labels = [_][]const u8{ "browser", "web", "pane", "show browser", "hide browser" };
+            const browser_labels = [_][]const u8{ "browser", "web", "pane", "show browser", "hide browser", "open browser pane", "close browser pane", "show browser pane", "hide browser pane" };
             var show_browser = (app_state.g_search_len == 0);
             if (!show_browser) {
                 for (browser_labels) |label| {
@@ -2056,7 +2326,7 @@ pub fn updateSearchResults() void {
                 }
             }
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move tab to new workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
                     app_state.g_search_result_count += 1;
                 }
@@ -2091,7 +2361,7 @@ pub fn updateSearchResults() void {
                 }
             }
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move tab to new workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
                     app_state.g_search_result_count += 1;
                 }
@@ -2220,7 +2490,7 @@ pub fn updateSearchResults() void {
         if (activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len) and app_state.g_search_result_count < app_state.g_search_results.len) {
             var show_codex_tmux = (app_state.g_search_len == 0);
             if (!show_codex_tmux) {
-                const codex_labels = [_][]const u8{ "new codex tmux session", "new codex session", "new codec session", "new codecs session", "codex", "codec", "codecs", "openai codex", "ai agent" };
+                const codex_labels = [_][]const u8{ "new codex tmux session", "new codex session", "new codec session", "new codecs session", "codex", "codec", "codecs", "openai codex", "ai agent", "new codex session in this folder" };
                 for (codex_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                         show_codex_tmux = true;
@@ -2285,22 +2555,10 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     } else {
-        const mob_label = "mobile";
-        const querym = app_state.g_search_buf[0..app_state.g_search_len];
-        if (querym.len <= mob_label.len) {
-            var okm = true;
-            for (0..querym.len) |j| {
-                const qcm = u16ToLower(querym[j]);
-                const lcm: u16 = mob_label[j];
-                if (qcm != lcm) {
-                    okm = false;
-                    break;
-                }
-            }
-            if (okm and app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MOBILE_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
+        const mob_labels = [_][]const u8{ "mobile", "mobile latency mode: off", "mobile latency mode: on", "mobile latency: off", "mobile latency: on" };
+        if (labelsStartWithQuery(&mob_labels, app_state.g_search_buf[0..app_state.g_search_len]) and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MOBILE_OFFSET;
+            app_state.g_search_result_count += 1;
         }
     }
 
@@ -2389,7 +2647,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_rename_workspace = (app_state.g_search_len == 0);
         if (!show_rename_workspace) {
-            const rename_workspace_labels = [_][]const u8{ "rename", "rename workspace", "rename current", "rename window", "current workspace", "window name" };
+            const rename_workspace_labels = [_][]const u8{ "rename", "rename workspace", "rename current", "rename window", "current workspace", "window name", "rename current workspace" };
             for (rename_workspace_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_rename_workspace = true;
@@ -2516,6 +2774,9 @@ pub fn updateSearchResults() void {
             "reconnect claude primary",
             "owner@example.com",
             "primary claude account",
+            "usage: sign in to primary claude account",
+            "reconnect claude: primary",
+            "reconnect claude primary telemetry",
         }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
@@ -2675,6 +2936,9 @@ pub fn updateSearchResults() void {
             "reconnect claude secondary",
             "secondary@example.com",
             "second claude account",
+            "usage: sign in to secondary claude account",
+            "reconnect claude: secondary",
+            "reconnect claude secondary telemetry",
         }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_USAGE_LOGIN_INNE_OFFSET;
@@ -3267,7 +3531,7 @@ pub fn updateSearchResults() void {
         var show_diag = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const diag_labels = [_][]const u8{ "copy shell diagnostics", "shell diagnostics", "diagnostic", "diagnostics", "shell status", "copy status", "debug shell", "session state" };
+            const diag_labels = [_][]const u8{ "copy shell diagnostics", "shell diagnostics", "diagnostic", "diagnostics", "shell status", "copy status", "debug shell", "session state", "copy session diagnostics", "session diagnostics" };
             for (diag_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_diag = true;
@@ -3283,7 +3547,7 @@ pub fn updateSearchResults() void {
         var show_sync_name = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const sync_labels = [_][]const u8{ "use agent tmux name", "adopt agent name", "sync tab tmux agent name", "sync name", "sync tab name", "sync tmux name", "sync agent name", "sync codex name", "sync claude name", "coding agent name", "tmux title" };
+            const sync_labels = [_][]const u8{ "use agent tmux name", "adopt agent name", "sync tab tmux agent name", "sync name", "sync tab name", "sync tmux name", "sync agent name", "sync codex name", "sync claude name", "coding agent name", "tmux title", "use agent or terminal session name", "use agent/tmux name" };
             for (sync_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_sync_name = true;
@@ -3679,7 +3943,7 @@ pub fn updateSearchResults() void {
         var show_browser_engine = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const engine_labels = [_][]const u8{ "browser engine", "browser profile", "dedicated edge", "dedicated chrome", "switch browser", "google chrome", "microsoft edge" };
+            const engine_labels = [_][]const u8{ "browser engine", "browser profile", "dedicated edge", "dedicated chrome", "switch browser", "google chrome", "microsoft edge", "browser: switch all panes to chrome", "browser: switch all panes to edge", "browser engine: switch every pane to dedicated chrome", "browser engine: switch every pane to dedicated edge" };
             for (engine_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_browser_engine = true;
@@ -3730,7 +3994,7 @@ pub fn updateSearchResults() void {
             var show_browser_focus_url = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const focus_url_labels = [_][]const u8{ "zigbrowser focus address bar", "browser address", "address bar", "focus address", "browser url bar", "edge address" };
+                const focus_url_labels = [_][]const u8{ "zigbrowser focus address bar", "browser address", "address bar", "focus address", "browser url bar", "edge address", "browser: focus address bar", "zigbrowser: focus address bar" };
                 for (focus_url_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_browser_focus_url = true;
@@ -3776,7 +4040,7 @@ pub fn updateSearchResults() void {
             var show_browser_focus_toggle = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const focus_toggle_labels = [_][]const u8{ "zigbrowser jump", "browser focus", "jump browser", "toggle browser focus", "shell browser", "alt f", "alt m", "ctrl shift m" };
+                const focus_toggle_labels = [_][]const u8{ "zigbrowser jump", "browser focus", "jump browser", "toggle browser focus", "shell browser", "alt f", "alt m", "ctrl shift m", "browser: switch focus between terminal and pane", "zigbrowser: jump to/from browser pane" };
                 for (focus_toggle_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_browser_focus_toggle = true;
@@ -3792,7 +4056,7 @@ pub fn updateSearchResults() void {
             var show_browser_mode = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const mode_labels = [_][]const u8{ "browser mode", "native chrome", "native edge", "custom url bar", "edge chrome", "omnibox", "tabs omnibox" };
+                const mode_labels = [_][]const u8{ "browser mode", "native chrome", "native edge", "custom url bar", "edge chrome", "omnibox", "tabs omnibox", "browser: use app address bar", "browser: use browser address bar and tabs", "zigbrowser: switch to custom url bar", "zigbrowser: switch to native browser chrome" };
                 for (mode_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_browser_mode = true;
@@ -3809,7 +4073,7 @@ pub fn updateSearchResults() void {
         var show_browser_instruct = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const instruct_labels = [_][]const u8{ "browser", "control", "pane", "instructions", "multiprompt-browser", "zsb", "bridge" };
+            const instruct_labels = [_][]const u8{ "browser", "control", "pane", "instructions", "multiprompt-browser", "zsb", "bridge", "browser: insert agent instructions", "insert agent instructions", "insert browser-control instructions" };
             for (instruct_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_browser_instruct = true;
@@ -3826,7 +4090,7 @@ pub fn updateSearchResults() void {
             var show_zsb_rebind = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const zsb_labels = [_][]const u8{ "multiprompt-browser", "zsb", "rebind", "bind", "browser bind", "pane bind", "force browser", "zsb rebind", "fix zsb" };
+                const zsb_labels = [_][]const u8{ "multiprompt-browser", "zsb", "rebind", "bind", "browser bind", "pane bind", "force browser", "zsb rebind", "fix zsb", "browser: repair agent connection", "repair agent connection", "multiprompt-browser: rebind active pane" };
                 for (zsb_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_zsb_rebind = true;
@@ -3845,7 +4109,7 @@ pub fn updateSearchResults() void {
         var show_browser_autosuspend = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const autosuspend_labels = [_][]const u8{ "zigbrowser auto suspend", "browser suspend", "auto suspend", "autosuspend", "idle browser", "save ram", "ram" };
+            const autosuspend_labels = [_][]const u8{ "zigbrowser auto suspend", "browser suspend", "auto suspend", "autosuspend", "idle browser", "save ram", "ram", "browser: auto-suspend idle panes", "zigbrowser: auto-suspend idle panes" };
             for (autosuspend_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_browser_autosuspend = true;
@@ -4152,10 +4416,12 @@ pub fn updateSearchResults() void {
         var recent: [RECENT_SESSION_ROWS]usize = undefined;
         const rn = pickRecentSessions(lv[0..app_state.shell_count], ok[0..app_state.shell_count], app_state.active_shell, prev_idx, &recent);
         var rj: usize = rn;
+        var lead: usize = 0;
         while (rj > 0) {
             rj -= 1;
-            _ = promoteSearchTargetToFront(app_state.g_search_results[0..app_state.g_search_result_count], recent[rj]);
+            if (promoteSearchTargetToFront(app_state.g_search_results[0..app_state.g_search_result_count], recent[rj])) lead += 1;
         }
+        groupEmptyPaletteResults(lead);
     }
 
     if (app_state.g_search_result_count > 0) {
@@ -4216,6 +4482,23 @@ pub fn reductionSearchChar(vk: u32, shift: bool) u16 {
         0xBF => if (shift) '?' else '/',
         else => 0,
     };
+}
+
+fn labelsStartWithQuery(labels: []const []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    for (labels) |label| {
+        if (query.len > label.len) continue;
+        var ok = true;
+        for (query, 0..) |qc, j| {
+            const lc: u16 = if (label[j] >= 'A' and label[j] <= 'Z') label[j] + 32 else label[j];
+            if (u16ToLower(qc) != lc) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) return true;
+    }
+    return false;
 }
 
 fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {

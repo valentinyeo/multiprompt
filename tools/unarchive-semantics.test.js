@@ -20,7 +20,7 @@ assert.doesNotMatch(source, /fn resurrectArchivedWorkspaceSessions\(/,
 
 for (const label of [
   "Unarchive Hidden (Alt+E) Sessions",
-  "Unarchive Unattached (Ctrl+W) Sessions",
+  "Restore Disconnected Workspace Sessions",
   "Unarchive Killed (Alt+X) Sessions",
 ]) {
   assert.match(source, new RegExp(label.replace(/[()+]/g, "\\$&")), `missing Ctrl+K action: ${label}`);
