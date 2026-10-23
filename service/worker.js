@@ -293,7 +293,13 @@ export default {
           if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;
           else delete layout.hosts;
         } else if (previousLayout?.hosts !== undefined || layout.hosts !== undefined) {
-          layout.hosts = [...new Map([...(previousLayout?.hosts || []), ...(layout.hosts || [])].map(host => [host.slot, host])).values()].sort((a, b) => a.slot - b.slot);
+          const hosts = new Map((previousLayout?.hosts || []).map(host => [host.slot, host]));
+          for (const host of layout.hosts || []) {
+            const previous = hosts.get(host.slot);
+            const keepName = previous?.hostname === host.hostname && host.name === ['Host 1', 'Host 2', 'Remote host 3'][host.slot] && previous.name !== host.name;
+            hosts.set(host.slot, keepName ? { ...host, name: previous.name } : host);
+          }
+          layout.hosts = [...hosts.values()].sort((a, b) => a.slot - b.slot);
         }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {
