@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { readChangelogEntry } = require('./changelog-entry');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -57,7 +58,7 @@ test('ISSUE-611 native behavior tests and actual toggle and tab-switch paths use
 
 test('ISSUE-611 both persistence writers save locks and the reader migrates old modes with scoped shell overrides', () => {
   for (const file of ['src/session.zig', 'src/workspaces.zig']) {
-    assert.match(read(file), /const lock = @import\("chat_view.zig"\).savedLock\(app_state.shells\[i\].chat_view_lock\);\s*@memcpy\(json_buf\[pos \.\. pos \+ lock.len\], lock\);/);
+    assert.match(read(file), /const saved_lock = @import\("chat_view.zig"\).savedLock\(app_state.shells\[i\].chat_view_lock\);\s*@memcpy\(json_buf\[pos \.\. pos \+ saved_lock.len\], saved_lock\);/);
     assert.doesNotMatch(read(file), /const cvm:|const cso =/);
   }
   const reader = read('src/json_reader.zig');
@@ -152,7 +153,7 @@ test('ISSUE-611 feature map, branch Windows tests, PR matrix, documentation and 
   assert.ok(read(skill + 'SKILL.md').includes(`](features/${feature}.md)`));
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-611 |'));
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /switches every unlocked session once/);
-  const fragment = read('changelog.d/IGSH-611-chat-view-everywhere-once.md');
+  const fragment = readChangelogEntry('IGSH-611');
   assert.match(fragment, /just once/);
   assert.match(fragment, /across restarts/);
   assert.doesNotMatch(fragment, /\.zig|JSON|chat_view_|ISSUE-/);

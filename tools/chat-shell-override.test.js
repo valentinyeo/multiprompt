@@ -18,7 +18,7 @@ function harness(text) {
   const kind = source.match(/const ShellKind = enum[^;]+;/)[0];
   const writers = ['src/session.zig', 'src/workspaces.zig'].map(file => {
     const code = fs.readFileSync(file, 'utf8');
-    const start = code.lastIndexOf('        if (pos < json_buf.len - 540) {', code.indexOf('const lock = @import("chat_view.zig").savedLock'));
+    const start = code.lastIndexOf('        if (pos < json_buf.len - 540) {', code.indexOf('const saved_lock = @import("chat_view.zig").savedLock'));
     assert.ok(start >= 0, file);
     return code.slice(start, code.indexOf('\n        }', start) + 10).replaceAll('app_state.', '');
   });

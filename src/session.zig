@@ -448,9 +448,9 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += cv.len;
         }
         if (pos < json_buf.len - 540) {
-            const lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
-            @memcpy(json_buf[pos .. pos + lock.len], lock);
-            pos += lock.len;
+            const saved_lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
+            @memcpy(json_buf[pos .. pos + saved_lock.len], saved_lock);
+            pos += saved_lock.len;
         }
         if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
             const fw = ",\"fw\":true";
