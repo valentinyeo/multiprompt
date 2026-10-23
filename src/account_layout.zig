@@ -579,6 +579,54 @@ test "favorite cache restore preserves legacy stars and applies explicit values"
     }
 }
 
+test "muted apply rebase and cache carry explicit values and keep unknown" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]bool{ false, true }) |muted| {
+        var local = one;
+        local.muted = muted;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{local} };
+        for ([_]?bool{ null, true, false }) |incoming| {
+            var remote = one;
+            remote.tmux_session = "ONE";
+            remote.muted = incoming;
+            const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+            const applied = try apply(a, base, &.{true}, server, 9, 256);
+            try std.testing.expectEqual(incoming orelse muted, applied.tabs[0].muted.?);
+            const held = try keepHeld(a, base, server, &.{});
+            try std.testing.expectEqual(incoming orelse muted, held.tabs[0].muted.?);
+            const rebased = try rebase(a, base, base, server);
+            try std.testing.expectEqual(incoming orelse muted, rebased.tabs[0].muted.?);
+        }
+        var edited = local;
+        edited.muted = !muted;
+        var remote = one;
+        remote.name = "Remote rename";
+        const rebased = try rebase(a, base, .{ .workspaces = &test_ws, .tabs = &.{edited} }, .{ .workspaces = &test_ws, .tabs = &.{remote} });
+        try std.testing.expectEqual(!muted, rebased.tabs[0].muted.?);
+        try std.testing.expectEqualStrings(remote.name, rebased.tabs[0].name);
+    }
+    var on = one;
+    on.muted = true;
+    var off = one;
+    off.muted = false;
+    const unknown = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
+    try std.testing.expect(equal(unknown, Layout{ .workspaces = &test_ws, .tabs = &.{off} }));
+    try std.testing.expect(!equal(Layout{ .workspaces = &test_ws, .tabs = &.{on} }, Layout{ .workspaces = &test_ws, .tabs = &.{off} }));
+    const cache = "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"kind\":\"tmux\",\"name\":\"One\",\"tmux_session\":\"ONE\",\"tmux_host\":0,\"workspace\":0,\"pid\":42,\"muted\":true}]}";
+    for ([_]?bool{ null, true, false }) |incoming| {
+        var remote = one;
+        remote.muted = incoming;
+        const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+        const prepared = try prepareCache(a, cache, server);
+        const parsed = try std.json.parseFromSlice(std.json.Value, a, prepared, .{});
+        defer parsed.deinit();
+        const field = parsed.value.object.get("tabs").?.array.items[0].object.get("muted");
+        try std.testing.expectEqual(incoming orelse true, field.?.bool);
+    }
+}
+
 test "favorite equality detects toggles without looping on canonical absent false" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -334,6 +334,32 @@ test "favorite encoding omits unknown and round trips explicit booleans" {
     try std.testing.expectEqual(@as(?bool, null), legacy.value.tabs[0].favorite);
 }
 
+test "muted merge preserves unknown and applies explicit true and false" {
+    var local = test_tab;
+    local.muted = true;
+    for ([_]?bool{ null, true, false }) |muted| {
+        var remote = test_tab;
+        remote.tmux_session = "SESSION-1";
+        remote.muted = muted;
+        const result = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+        defer freeMerge(std.testing.allocator, result);
+        try std.testing.expectEqual(muted orelse true, result.tabs[0].muted.?);
+    }
+}
+
+test "muted encoding omits unknown and round trips explicit booleans" {
+    for ([_]?bool{ null, true, false }) |muted| {
+        var tab = test_tab;
+        tab.muted = muted;
+        const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{tab} });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(muted != null, std.mem.indexOf(u8, json, "\"muted\"") != null);
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(muted, parsed.value.tabs[0].muted);
+    }
+}
+
 test "used merge never loses or lowers known time" {
     for ([_]?u64{ null, 0, 1000, 3000 }) |local_used| for ([_]?u64{ null, 0, 2000, 4000 }) |remote_used| {
         var local = test_tab;
