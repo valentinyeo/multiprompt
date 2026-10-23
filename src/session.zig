@@ -1154,6 +1154,60 @@ test "ISSUE-611 session locks survive session write parse and restore" {
     }
 }
 
+test "ISSUE-611 failed remote restore keeps Chat View, lock and browser state" {
+    var tab = std.mem.zeroes(SavedTab);
+    tab.kind = .tmux;
+    const tmux_session = "issue-611";
+    @memcpy(tab.tmux_session[0..tmux_session.len], tmux_session);
+    tab.tmux_session_len = tmux_session.len;
+    tab.last_active = 1;
+    tab.cv = true;
+    tab.chat_view_lock = .shell;
+    tab.kaw = true;
+    tab.fw = true;
+    tab.inbox_archived = true;
+    tab.inbox_excluded = true;
+    tab.archive_time = 123;
+    tab.archive_done = 456;
+    tab.bon = true;
+    tab.bnat = true;
+    tab.bsplit_permille = 420;
+    const url = "https://example.com/issue-611";
+    @memcpy(tab.burl[0..url.len], url);
+    tab.burl_len = url.len;
+    const saved_count = app_state.shell_count;
+    const saved_shells = app_state.shells[0..1].*;
+    const saved_next_id = app_state.next_shell_id;
+    const saved_bench_dir_len = app_state.g_chat_bench_dir_len;
+    defer {
+        app_state.shells[0..1].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.next_shell_id = saved_next_id;
+        app_state.g_chat_bench_dir_len = saved_bench_dir_len;
+    }
+    app_state.shell_count = 0;
+    app_state.shells[0] = empty_shell;
+    app_state.next_shell_id = 1;
+    app_state.g_chat_bench_dir_len = 1;
+    const idx = preserveFailedRemoteSavedTab(&tab) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u32, 0), idx);
+    try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
+    const shell = &app_state.shells[idx];
+    try std.testing.expectEqual(tab.kind, shell.kind);
+    try std.testing.expect(shell.chat_view_on);
+    try std.testing.expectEqual(@import("chat_view.zig").Lock.shell, shell.chat_view_lock);
+    try std.testing.expect(shell.keep_awake);
+    try std.testing.expect(shell.full_width);
+    try std.testing.expect(shell.inbox_archived);
+    try std.testing.expect(shell.inbox_excluded);
+    try std.testing.expectEqual(tab.archive_time, shell.archive_time);
+    try std.testing.expectEqual(tab.archive_done, shell.archive_done);
+    try std.testing.expect(shell.browser_enabled);
+    try std.testing.expect(shell.browser_native);
+    try std.testing.expectEqual(tab.bsplit_permille, shell.browser_split_permille);
+    try std.testing.expectEqualStrings(url, shell.browser_url[0..shell.browser_url_len]);
+}
+
 test "full width JSON flag is scoped to its own saved tab, defaults off and restores onto the shell" {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const json = "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"btop\",\"fw\":true},{\"kind\":\"cmd\",\"name\":\"Old\"},{\"kind\":\"cmd\",\"name\":\"Narrow\",\"fw\":false}]}";
