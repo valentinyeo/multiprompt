@@ -710,15 +710,17 @@ test('reset with lost emulation bypasses target lookup and background debugger a
   assert.equal(h.context.resetResponse.result.warning, undefined);
 });
 
-test('freeze retains its native debugger session and wake reuses it without focus emulation before releasing it', async () => {
+test('freeze disables emulated focus and wake retains visible rendering without changing OS focus', async () => {
   const h = harness();
   await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'frozen' } });
-  assert.deepEqual(h.calls.map(call => call.method), ['attach', 'Page.setWebLifecycleState']);
+  assert.deepEqual(h.calls.map(call => call.method), ['attach', 'Emulation.setFocusEmulationEnabled', 'Page.setWebLifecycleState']);
+  assert.deepEqual(h.calls[1].params, { enabled: false });
   assert.equal(h.attached.has(1), true);
   const start = h.calls.length;
   await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'active' } });
-  assert.deepEqual(h.calls.slice(start).map(call => call.method), ['Page.setWebLifecycleState', 'detach']);
-  assert.equal(h.attached.has(1), false);
+  assert.deepEqual(h.calls.slice(start).map(call => call.method), ['Page.setWebLifecycleState', 'Emulation.setFocusEmulationEnabled']);
+  assert.deepEqual(h.calls.at(-1).params, { enabled: true });
+  assert.equal(h.attached.has(1), true);
   await h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate', params: { expression: 'document.hasFocus()' } });
   assert.ok(h.calls.some(call => call.method === 'Emulation.setFocusEmulationEnabled'));
 });
@@ -733,7 +735,7 @@ test('failed wake keeps the frozen session for a real retry and reset releases i
   h.fail(undefined);
   await h.run({ method: 'reset' });
   assert.equal(h.attached.has(1), false);
-  assert.equal(vm.runInContext('frozenLifecycleTabs.size', h.context), 0);
+  assert.equal(vm.runInContext('lifecycleTabs.size', h.context), 0);
 });
 
 test('lifecycle freeze and wake preserve existing device emulation and close or external detach clears frozen ownership', async () => {
@@ -745,8 +747,36 @@ test('lifecycle freeze and wake preserve existing device emulation and close or 
   assert.equal(h.attached.has(1), true);
   await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'frozen' } });
   await h.detach(1);
-  assert.equal(vm.runInContext('frozenLifecycleTabs.size', h.context), 0);
+  assert.equal(vm.runInContext('lifecycleTabs.size', h.context), 0);
   await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'frozen' } });
   h.remove(1);
-  assert.equal(vm.runInContext('frozenLifecycleTabs.size', h.context), 0);
+  assert.equal(vm.runInContext('lifecycleTabs.size', h.context), 0);
+});
+
+test('awake lifecycle visibility survives ordinary CDP cleanup, unknown mutation reset and explicit reset', async () => {
+  const h = harness();
+  await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'active' } });
+  await h.run({ method: 'cdp', cdpMethod: 'Network.setBlockedURLs', params: { urls: ['*example*'] } });
+  assert.equal(h.commandState.get(1).has('Network.setBlockedURLs'), false);
+  assert.equal(h.attached.has(1), true);
+  const start = h.calls.length;
+  await h.run({ method: 'cdp', cdpMethod: 'Synthetic.enableUnknown' });
+  const calls = h.calls.slice(start).map(call => call.method);
+  assert.ok(calls.indexOf('detach') > calls.indexOf('Synthetic.enableUnknown'));
+  assert.ok(calls.lastIndexOf('Page.setWebLifecycleState') > calls.indexOf('detach'));
+  assert.equal(h.commandState.get(1).has('Synthetic.enableUnknown'), false);
+  assert.equal(vm.runInContext('lifecycleTabs.get(1)', h.context), 'active');
+  await h.run({ method: 'reset' });
+  assert.equal(h.attached.has(1), true);
+  assert.equal(vm.runInContext('lifecycleTabs.get(1)', h.context), 'active');
+  assert.deepEqual(h.calls.at(-1).params, { enabled: true });
+});
+
+test('an ordinary read of a frozen lifecycle session restores native hidden focus afterward', async () => {
+  const h = harness();
+  await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state: 'frozen' } });
+  await h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate', params: { expression: '1' } });
+  assert.deepEqual(h.calls.at(-1).params, { enabled: false });
+  assert.equal(vm.runInContext('lifecycleTabs.get(1)', h.context), 'frozen');
+  assert.equal(h.attached.has(1), true);
 });

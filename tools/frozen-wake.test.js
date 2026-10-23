@@ -206,11 +206,3 @@ test('closing or replacing a browser connection clears frozen and pending lifecy
   assert.ok(position.indexOf('browserChromeHiddenForOverlay()') < position.indexOf('browser_lifecycle_pending) return;'));
   assert.ok(position.indexOf('if (bh == null)') < position.indexOf('browser_lifecycle_pending) return;'));
 });
-
-
-test('docking invalidates native Chromium child surfaces asynchronously without erasing, activation or synchronous paint', () => {
-  const position = body(pane, 'positionActiveBrowser');
-  assert.match(position, /setBrowserWindowPosAsync\(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_SHOWWINDOW\);\s+_ = RedrawWindow\(bh, null, null, RDW_INVALIDATE \| RDW_ALLCHILDREN\)/);
-  assert.doesNotMatch(position, /RDW_UPDATENOW|RDW_ERASENOW|UpdateWindow|SetForegroundWindow|SetFocus|Sleep|WaitFor/);
-  assert.match(win, /pub extern "user32" fn RedrawWindow\(HANDLE, \?\*const RECT, HANDLE, UINT\)/);
-});

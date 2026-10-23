@@ -148,9 +148,6 @@ const BrowserEdgeMaskSide = enum { left, top, right, bottom, control_hit, contro
 const BROWSER_EDGE_MASKS = true;
 const SWP_NOACTIVATE = 4;
 const SWP_SHOWWINDOW = 8;
-const RDW_INVALIDATE = 1;
-const RDW_ALLCHILDREN = 128;
-fn RedrawWindow(_: HANDLE, _: ?*const RECT, _: HANDLE, _: u32) i32 { return 1; }
 var g_monitor_transition: struct { active: bool = false } = .{};
 var g_browser_onscreen: struct { fn mark(_: @This(), _: usize) void {} } = .{};
 var placed_browser: RECT = .{};
