@@ -194,3 +194,15 @@ test('Chat handoff parks inactive panes only after the target Chat surface has p
   const swap = body(read('src/chat_session.zig'), 'chatSwitchBrowserTick');
   assert.ok(swap.indexOf('parkInactiveBrowserPanes()') > swap.indexOf('g_chat_browser_swap.take('));
 });
+
+
+test('closing or replacing a browser connection clears frozen and pending lifecycle state before the new window can dock', () => {
+  for (const name of ['beginBrowserOpening', 'resetBrowserConnection']) {
+    const reset = body(pane, name);
+    for (const field of ['browser_frozen', 'browser_lifecycle_pending', 'browser_wake_requested']) assert.ok(reset.includes(`sh.${field} = false`));
+    assert.ok(reset.includes('sh.browser_parked_since = 0'));
+  }
+  const position = body(pane, 'positionActiveBrowser');
+  assert.ok(position.indexOf('browserChromeHiddenForOverlay()') < position.indexOf('browser_lifecycle_pending) return;'));
+  assert.ok(position.indexOf('if (bh == null)') < position.indexOf('browser_lifecycle_pending) return;'));
+});

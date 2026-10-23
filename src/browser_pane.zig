@@ -2829,7 +2829,6 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;
     const bh = app_state.shells[app_state.active_shell].browser_hwnd;
     if (bh == null) {
         hideBrowserFloatingChrome();
@@ -2847,6 +2846,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
+    if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;
     const layout = calcBrowserLayout() orelse {
         if (verboseLoggingEnabled()) debugLog("[browser] positionActiveBrowser: calcBrowserLayout returned null (no dock)");
         hideBrowserEdgeMasks();
@@ -3456,6 +3456,10 @@ pub fn hibernateAllParkedBrowserPanesNow() u32 {
 }
 
 fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
+    sh.browser_frozen = false;
+    sh.browser_lifecycle_pending = false;
+    sh.browser_wake_requested = false;
+    sh.browser_parked_since = 0;
     sh.browser_enabled = true;
     sh.browser_launch_tick = now;
     if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;
@@ -3464,6 +3468,8 @@ fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
 }
 
 fn resetBrowserConnection(sh: *Shell) void {
+    sh.browser_frozen = false;
+    sh.browser_parked_since = 0;
     sh.browser_lifecycle_pending = false;
     sh.browser_wake_requested = false;
     sh.browser_hwnd = null;
