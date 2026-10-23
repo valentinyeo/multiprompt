@@ -90,7 +90,6 @@ function production() {
   assert.ok(switchStart >= 0 && switchEnd > switchStart, 'real switch binding boundary');
   code += `
 fn switchToShell(idx: u32) void {
-    const defer_browser = false;
 ${switchBody.slice(switchStart, switchEnd)}
 }
 `;

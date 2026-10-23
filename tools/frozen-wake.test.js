@@ -189,8 +189,8 @@ test('shared native pipe transport targets each lifecycle window and isolates co
 });
 
 
-test('Chat handoff parks inactive panes only after the target Chat surface has painted', () => {
-  assert.match(body(consoleSource, 'switchToShell'), /if \(!defer_browser\) parkStrayBrowserPanes\(/);
+test('Chat handoff preserves immediate stray parking and the post-paint inactive-pane safety pass', () => {
+  assert.match(body(consoleSource, 'switchToShell'), /app_state.active_shell = idx;\s+parkStrayBrowserPanes\(/);
   const swap = body(read('src/chat_session.zig'), 'chatSwitchBrowserTick');
   assert.ok(swap.indexOf('parkInactiveBrowserPanes()') > swap.indexOf('g_chat_browser_swap.take('));
 });

@@ -98,7 +98,7 @@ function harness() {
     handler('WM_APP_FONT_SMALLER', 'WM_APP_FONT_RESET', 'zoomSmaller(hwnd: HANDLE) i32') + '\n' +
     handler('WM_APP_FONT_RESET', 'WM_APP_NEW_TAB_DEFAULT', 'zoomReset(hwnd: HANDLE) i32') + `
 fn switchToShell(idx: u32) void {
-    ${between(fn(consoleSource, 'switchToShell'), '    app_state.active_shell = idx;', '\n    if (!defer_browser) parkStrayBrowserPanes')}
+    ${between(fn(consoleSource, 'switchToShell'), '    app_state.active_shell = idx;', '\n    parkStrayBrowserPanes')}
     ${tab}
 }
 fn repositionActive() void {
