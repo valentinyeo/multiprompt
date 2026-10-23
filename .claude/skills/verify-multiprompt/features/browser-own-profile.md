@@ -27,7 +27,7 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 
 ## Gotchas
 
-- A released executable without this feature fails at step 4 with `Inne workspace has no own browser profile`, because its second pane opens in the shared profile.
+- A released executable without this feature is expected to fail at step 4 with `Inne workspace has no own browser profile`, because its second pane opens in the shared profile.
 - The opt-in file is read at pane launch, not at app start, so writing it while the app runs is a real user path. Changing it never moves an already open pane.
 - The own profile is a cold first run on every runner; waits for its pane and pipe are longer than the shared ones.
 - The journey never seeds session JSON and never touches the shared profile's contents; it only lists folder names.
