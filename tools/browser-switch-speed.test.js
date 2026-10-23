@@ -500,3 +500,9 @@ test('live PowerShell raw-reader chunks are joined before string offsets and len
   joinedLogReads(control);
   assert.throws(() => joinedLogReads(control.replace("(Get-Content $log -Raw) -join ''", 'Get-Content $log -Raw')));
 });
+
+test('failed samples retain read-only Chrome DOM and compositor evidence without altering the measurement result', () => {
+  const diagnostics = journey.slice(journey.indexOf("if ($gapCase.status -ne 'passed' -and $gapCase.phase -like '*sample-*')"));
+  for (const literal of ["method = 'Runtime.evaluate'", "method = 'Page.captureScreenshot'", "name = 'tabs'", 'document.visibilityState', 'getComputedStyle(document.body).backgroundColor', 'switch-failure-browser-diagnostics.json']) assert.ok(diagnostics.includes(literal), literal);
+  assert.doesNotMatch(diagnostics, /setWebLifecycleState|navigate|Page.bringToFront|\$gapCase.status =/);
+});

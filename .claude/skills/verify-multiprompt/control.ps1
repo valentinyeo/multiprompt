@@ -2476,6 +2476,33 @@ try {
                     }
                 }
                 Save-Json @($frozenSwitches.ToArray()) 'frozen-switches.json'
+                if ($gapCase.status -ne 'passed' -and $gapCase.phase -like '*sample-*') {
+                    try {
+                        $diagnosticPane = @((Read-Inbox).shells | Where-Object { $_.sid -eq $shellIds[$target] })[0]
+                        $expression = 'JSON.stringify({url:location.href,visibility:document.visibilityState,focused:document.hasFocus(),html:document.documentElement.outerHTML,rect:document.documentElement.getBoundingClientRect().toJSON(),bodyRect:document.body.getBoundingClientRect().toJSON(),htmlBg:getComputedStyle(document.documentElement).backgroundColor,bodyBg:getComputedStyle(document.body).backgroundColor})'
+                        $probes = @(
+                            @{ name = 'tabs'; method = $null; params = $null },
+                            @{ name = 'dom'; method = 'Runtime.evaluate'; params = @{ expression = $expression; returnByValue = $true } },
+                            @{ name = 'capture'; method = 'Page.captureScreenshot'; params = @{ format = 'png' } }
+                        )
+                        $probeResults = @()
+                        foreach ($probe in $probes) {
+                            $arguments = '--window ' + $diagnosticPane.browser_window_id
+                            if ($null -eq $probe.method) { $arguments += ' tabs' } else {
+                                $params = $probe.params | ConvertTo-Json -Compress
+                                $arguments += ' cdp ' + $probe.method + ' "' + $params.Replace('"', '\"') + '"'
+                            }
+                            $prefix = Join-Path $Evidence ('switch-failure-' + $probe.name)
+                            $probeProcess = $job.Start((Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'), $scratch, ($prefix + '.stdout.json'), ($prefix + '.stderr.log'), $arguments)
+                            try {
+                                $exited = $probeProcess.WaitForExit(30000)
+                                $probeResults += @{ name = $probe.name; exited = $exited; windowId = $diagnosticPane.browser_window_id }
+                                if (-not $exited) { break }
+                            } finally { $probeProcess.Dispose() }
+                        }
+                        Save-Json $probeResults 'switch-failure-browser-diagnostics.json'
+                    } catch { Save-Json @{ error = $_.Exception.Message } 'switch-failure-browser-diagnostics.json' }
+                }
                 $traceLines | Set-Content -Encoding UTF8 (Join-Path $Evidence 'switch-timing-debug.log')
             }
         }
