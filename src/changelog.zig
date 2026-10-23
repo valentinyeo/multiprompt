@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.838", .items = &.{
+        .{ .text = "Local connections now stay within your Windows account, screenshot links are checked, and CMD tabs use the Windows system shell.", .ticket = "IGSH-664" },
+    } },
     .{ .ver = "0.28.837", .items = &.{
         .{ .text = "Small reliability fixes for clipboard paste, chat text and background connections.", .ticket = "IGSH-654" },
     } },
