@@ -198,6 +198,24 @@ public static class VerifyNative {
         if (count > 1) throw new InvalidOperationException("Multiple onscreen owned browser panes");
         return pane;
     }
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll", SetLastError=true)] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, int operation);
+    public static int[] ReadSwitchScreenPatch(Rect dock, bool layered) {
+        using (var pixels = new System.Drawing.Bitmap(3, 3))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            IntPtr screen = GetDC(IntPtr.Zero);
+            IntPtr target = graphics.GetHdc();
+            try {
+                int x = dock.Left + (dock.Right - dock.Left) / 2;
+                int y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4;
+                if (!BitBlt(target, 0, 0, 3, 3, screen, x, y, 0x00CC0020 | (layered ? 0x40000000 : 0))) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            } finally { graphics.ReleaseHdc(target); ReleaseDC(IntPtr.Zero, screen); }
+            var colors = new int[9];
+            for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) colors[row * 3 + col] = pixels.GetPixel(col, row).ToArgb() & 0xFFFFFF;
+            return colors;
+        }
+    }
     public static System.Diagnostics.Stopwatch BeginSessionSwitch() {
         Input[] inputs = new Input[4];
         for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
@@ -2478,6 +2496,7 @@ try {
                 Save-Json @($frozenSwitches.ToArray()) 'frozen-switches.json'
                 if ($gapCase.status -ne 'passed' -and $gapCase.phase -like '*sample-*') {
                     try {
+                        Save-Json @{ expected = $rgb[$target]; normal = @([VerifyNative]::ReadSwitchScreenPatch($docks[$target], $false)); layered = @([VerifyNative]::ReadSwitchScreenPatch($docks[$target], $true)); dock = $docks[$target] } 'switch-failure-screen-patch.json'
                         $diagnosticPane = @((Read-Inbox).shells | Where-Object { $_.sid -eq $shellIds[$target] })[0]
                         $expression = 'JSON.stringify({url:location.href,visibility:document.visibilityState,focused:document.hasFocus(),html:document.documentElement.outerHTML,rect:document.documentElement.getBoundingClientRect().toJSON(),bodyRect:document.body.getBoundingClientRect().toJSON(),htmlBg:getComputedStyle(document.documentElement).backgroundColor,bodyBg:getComputedStyle(document.body).backgroundColor})'
                         $probes = @(

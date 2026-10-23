@@ -506,3 +506,13 @@ test('failed samples retain read-only Chrome DOM and compositor evidence without
   for (const literal of ["method = 'Runtime.evaluate'", "method = 'Page.captureScreenshot'", "name = 'tabs'", 'document.visibilityState', 'getComputedStyle(document.body).backgroundColor', 'switch-failure-browser-diagnostics.json']) assert.ok(diagnostics.includes(literal), literal);
   assert.doesNotMatch(diagnostics, /setWebLifecycleState|navigate|Page.bringToFront|\$gapCase.status =/);
 });
+
+test('failure-only pixel diagnostics compare the same visible patch with and without layered-window capture', () => {
+  const capture = control.slice(control.indexOf('public static int[] ReadSwitchScreenPatch'), control.indexOf('public static System.Diagnostics.Stopwatch BeginSessionSwitch'));
+  assert.match(capture, /0x00CC0020 \| \(layered \? 0x40000000 : 0\)/);
+  assert.match(capture, /dock.Left \+ \(dock.Right - dock.Left\) \/ 2/);
+  assert.match(capture, /dock.Top \+ \(dock.Bottom - dock.Top\) \* 3 \/ 4/);
+  assert.match(journey, /ReadSwitchScreenPatch\(\$docks\[\$target\], \$false\)/);
+  assert.match(journey, /ReadSwitchScreenPatch\(\$docks\[\$target\], \$true\)/);
+  assert.doesNotMatch(native, /ReadSwitchScreenPatch/);
+});
