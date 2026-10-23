@@ -516,7 +516,8 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(focus, /if \(\$initial.hide_pills\) \{\s*Focus-Palette 'workspace switcher' 6213\s*Press @\(0x0D\) 'Enter: show workspace switcher'/);
   assert.ok(focus.indexOf("'workspace switcher shown and saved'") < focus.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
   assert.match(focus, /Snapshot 'pills-ready'/);
-  assert.match(focus, /Focus-Palette 'per tab' 6345/);
+  assert.match(focus, /Focus-Palette 'clear always view for this session' 6466/);
+  assert.match(focus, /-not \$state\.PSObject\.Properties\['chat_view_mode'\] -and -not \$state\.tabs\[\$initialTab\]\.PSObject\.Properties\['chat_view_lock'\]/);
   for (const text of [pills, focus]) {
     assert.match(text, /PSObject.Properties\['hide_pills'\] -and -not \$state.hide_pills/);
     for (const field of ['hide_sidebar', 'sidebar_collapsed']) {
@@ -557,6 +558,8 @@ test('IGSH-522: hidden pills are shown through the palette and every focus trans
   assertsFocusJourneyReadiness(control);
   for (const [before, after] of [
     ["Focus-Palette 'workspace switcher' 6213", "Palette 'workspace switcher'"],
+    ["Focus-Palette 'clear always view for this session' 6466", "Focus-Palette 'per tab' 6345"],
+    ["-and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']", ''],
     ["$state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills", '$true'],
     ["Wait-WorkspaceSurface $second $secondTab $false", 'Start-Sleep -Milliseconds 250'],
     ["Wait-ConsoleText 'echo workspace-focus-shell-pill'", ''],

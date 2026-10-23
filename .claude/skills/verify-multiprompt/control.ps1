@@ -1222,6 +1222,15 @@ try {
             Press @(0x28) 'Down: UI Size: Reset'
             Press @(0x0D) 'Enter: persist initial session through UI Size: Reset'
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 } 'one initial saved CMD session'
+            Focus-Palette 'tab order' 6217
+            Press @(0x28) 'Down: Tab Order Manual'
+            Press @(0x0D) 'Enter: keep creation order for Ctrl+1/2/3'
+            Wait-Until {
+                $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+                if (-not (Test-Path $path)) { return $false }
+                $launch = Get-Content $path -Raw | ConvertFrom-Json
+                $launch.PSObject.Properties['sort_auto'] -and -not $launch.sort_auto
+            } 'manual tab order saved before creating sessions'
             for ($count = 2; $count -le 3; $count++) {
                 Focus-Palette 'new cmd' 2000
                 Snapshot ("new-session-$count-action")
@@ -1229,7 +1238,7 @@ try {
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count -and $state.active_tab -eq $count - 1 } "user-created CMD session $count"
             }
             Snapshot 'sessions-created'
-            Focus-Palette 'always shell view for this session' 6401
+            Focus-Palette 'always shell view for this session' 6465
             Snapshot 'lock-action'
             Press @(0x0D) 'Enter: Always shell view for this session on session 3'
             Wait-ChatViews @($false, $false, $false) 2 'locked-shell'
@@ -1601,12 +1610,12 @@ try {
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'per tab' 6345
-            Press @(0x0D) 'Enter: Chat View per tab'
+            Focus-Palette 'clear always view for this session' 6466
+            Press @(0x0D) 'Enter: clear Always view for the test session'
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and -not ($state.PSObject.Properties.Name -contains 'chat_view_mode')
-            } 'per-session Chat View mode saved'
+                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']
+            } 'unlocked per-session Chat View saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {

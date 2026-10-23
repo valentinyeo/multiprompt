@@ -95,6 +95,26 @@ test('every SEARCH offset has a unique numeric value', () => {
     /SEARCH_A_OFFSET, SEARCH_B_OFFSET/);
 });
 
+test('ISSUE-611 lock commands use fresh IDs outside workspace deletion rows', () => {
+  const deletion = values.get('SEARCH_WORKSPACE_DELETE_OFFSET');
+  const count = Number(state.match(/pub const MAX_WORKSPACES: usize = (\d+);/)[1]);
+  function checkLocks(entries) {
+    uniqueOffsets(entries);
+    assert.ok(![...entries.values()].includes(6345), 'Removed per-tab command ID must not be reused');
+    for (const suffix of ['CHAT', 'SHELL', 'CLEAR']) {
+      const value = entries.get(`SEARCH_CHAT_VIEW_LOCK_${suffix}_OFFSET`);
+      assert.ok(Number.isInteger(value));
+      assert.ok(value < deletion || value >= deletion + count, `${suffix} lock overlaps workspace deletion rows`);
+    }
+  }
+  checkLocks(values);
+  assert.deepEqual(['CHAT', 'SHELL', 'CLEAR'].map(suffix => values.get(`SEARCH_CHAT_VIEW_LOCK_${suffix}_OFFSET`)), [6464, 6465, 6466]);
+  for (const [suffix, old] of [['CHAT', 6345], ['SHELL', 6401], ['CLEAR', 6402]]) {
+    const broken = new Map(values).set(`SEARCH_CHAT_VIEW_LOCK_${suffix}_OFFSET`, old);
+    assert.throws(() => checkLocks(broken), /must not be reused|overlaps workspace deletion/);
+  }
+});
+
 test('every directly added Ctrl+K row is painted and confirmed', () => {
   checkRows(palette, sidebar, confirm, values);
 });

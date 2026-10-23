@@ -12,15 +12,15 @@
 
 - Ctrl+K, New CMD Shell, Enter opens a local session; repeat to have three sessions.
 - Alt+T is the actual new workspace tmux tab shortcut, not Ctrl+T. It requires a configured workspace folder; this offline local journey uses the palette's New CMD Shell instead.
-- Ctrl+1, Ctrl+2 and Ctrl+3 switch between the three sessions.
+- Set Tab Order: Manual through Ctrl+K before creating the extra sessions. Ctrl+1, Ctrl+2 and Ctrl+3 then select them in creation order.
 - Ctrl+K, Always shell view for this session, Enter locks session 3. Always Chat View for this session and Clear Always view for this session are the other choices; all three also appear in tab actions.
 - Ctrl+K, Chat View on everywhere or Chat View off everywhere, Enter changes unlocked sessions once. Alt+C still toggles an unlocked session afterwards.
 
 ## Driving it with control.ps1
 
 - Dispatch verify.yml with feature=chat-view-everywhere on the branch, or use its PR matrix entry. Download verify-chat-view-everywhere and inspect result.json and screenshots. A branch run executes native desktop tests, including ISSUE-611; a release run only verifies the selected executable.
-- Launch the normal isolated offline CMD instance. Persist the initial session through UI Size: Reset using real Ctrl+K input. Create two more CMD sessions through Ctrl+K New CMD Shell. Require exactly three saved tabs and the newly created tab selected each time.
-- Select Always shell view for this session through Ctrl+K on session 3. Require its app-written chat_view_lock to be shell and all three cv flags absent or false. Capture lock-action.png and locked-shell.png.
+- Launch the normal isolated offline CMD instance. Persist the initial session through UI Size: Reset using real Ctrl+K input. Select Tab Order: Manual while only that session exists and require the app-written launch snapshot to save sort_auto=false before creating sessions. Create two more CMD sessions through Ctrl+K New CMD Shell. Require exactly three saved tabs and the newly created tab selected each time.
+- Select Always shell view for this session (target 6465) through Ctrl+K on session 3. Require its app-written chat_view_lock to be shell and all three cv flags absent or false. Capture lock-action.png and locked-shell.png.
 - Run Chat View on everywhere through Ctrl+K. Require sessions 1 and 2 cv=true, session 3 shell and locked, and no chat_view_mode field. Capture action.png and on-everywhere.png.
 - Select session 1 through Ctrl+1 and require a visible native transcript. Alt+C returns it to shell. Ctrl+2 must still show Chat View; Ctrl+1 must stay shell. Capture session-1-toggled.png, session-2-chat.png and toggle-sticks.png with matching session JSON.
 - Run Chat View off everywhere through Ctrl+K. Require every session shell, with session 3 still locked. Capture off-action.png, off-everywhere.png and locked-after-off.png.
@@ -31,6 +31,8 @@
 ## Gotchas
 
 - Never seed or edit session JSON, change settings directly, send private app messages or replace missing prerequisites with a stand-in. All changes use genuine keyboard input.
+- Ctrl+digits follows displayed sidebar order, not saved tab-array order. Automatic order can put the newest active session first; switching to Manual after creating sessions materializes that reordered array. Establish Manual with one session, before creation, and retain it across restart.
+- Lock command targets are 6464 (Always Chat View), 6465 (Always shell view), and 6466 (Clear Always view); the removed per-tab target 6345 stays unused and workspace deletion reserves 6400–6463.
 - Saved shell preferences may omit cv entirely; only true means Chat View. The shell lock must explicitly remain shell.
 - Palette rows are custom-painted, not UI Automation buttons. Focus-Palette waits for the existing app-written query/selected-target trace before Enter; zero-result proof uses that same trace and a screenshot, with a known positive command as its control.
 - No live agent, SSH, account synchronization or remote workspace creation is claimed. The three local sessions prove view behavior only.

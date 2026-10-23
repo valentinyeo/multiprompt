@@ -103,7 +103,9 @@ test('ISSUE-611 commands are searchable, painted and handled for the active sess
 function journeyContract(source) {
   assert.ok(source.length > 0);
   const steps = [
-    "Focus-Palette 'new cmd' 2000", "Focus-Palette 'always shell view for this session' 6401",
+    "Focus-Palette 'tab order' 6217", "'Down: Tab Order Manual'", "'Enter: keep creation order for Ctrl+1/2/3'",
+    "'manual tab order saved before creating sessions'",
+    "Focus-Palette 'new cmd' 2000", "Focus-Palette 'always shell view for this session' 6465",
     "Wait-ChatViews @($false, $false, $false) 2 'locked-shell'",
     "Focus-Palette 'chat view on everywhere' 6346", "Wait-ChatViews @($true, $true, $false) 2 'on-everywhere'",
     "Wait-ChatViews @($true, $true, $false) 0 'session-1-chat'", "Press @(0x12, 0x43)",
@@ -126,14 +128,25 @@ function journeyContract(source) {
     assert.ok(at >= from, `missing or misordered ${step}`);
     from = at + step.length;
   }
+  assert.match(source, /Join-Path \$scratch 'roaming\/ZigShell\/session\.json\.launch\.json'/);
+  assert.match(source, /if \(-not \(Test-Path \$path\)\) \{ return \$false \}/);
+  assert.match(source, /\$launch = Get-Content \$path -Raw \| ConvertFrom-Json\s+\$launch\.PSObject\.Properties\['sort_auto'\] -and -not \$launch\.sort_auto/);
   assert.doesNotMatch(source, /Set-Content|WriteAllText|WriteAllBytes|PostMessage|SetEnvironmentVariable/);
 }
 
 test('ISSUE-611 Windows journey drives real input, asserts every saved view, restarts safely and proves the removed row absent', () => {
   journeyContract(journey);
   assert.throws(() => journeyContract(journey.replace("Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'", '')));
-  assert.throws(() => journeyContract(journey.replace('ready chars=17 count=0 target=0', 'ready chars=17 count=1 target=6345')));
+  assert.throws(() => journeyContract(journey.replace('ready chars=17 count=0 target=0', 'ready chars=17 count=1 target=6464')));
   assert.throws(() => journeyContract(journey.replace('$stopped.ActiveProcesses -ne 0', '$false')));
+  for (const before of ["Focus-Palette 'tab order' 6217", "'Down: Tab Order Manual'", "'manual tab order saved before creating sessions'", "-not $launch.sort_auto"]) {
+    assert.throws(() => journeyContract(journey.replace(before, '')));
+  }
+  const lateOrder = journey.replace("Focus-Palette 'tab order' 6217", '').replace("Focus-Palette 'always shell view for this session' 6465", "Focus-Palette 'tab order' 6217\nFocus-Palette 'always shell view for this session' 6465");
+  assert.throws(() => journeyContract(lateOrder));
+  assert.match(read('src/launch_cache.zig'), /sort_auto = state\.g_tab_sort_auto/);
+  assert.match(read('src/launch_cache.zig'), /state\.g_tab_sort_auto = s\.sort_auto/);
+
   const wait = driver.slice(driver.indexOf('function Wait-ChatViews('), driver.indexOf('function Read-BrowserPane'));
   for (const required of ['Read-Session', '@($state.tabs).Count -ne 3', '$state.active_tab -ne $Active', '$on -ne $Views[$i]', "$state.tabs[2].chat_view_lock -ceq 'shell'", "PSObject.Properties['chat_view_mode']", "ClassNameProperty, 'ZigShellChatTranscript'", '$visible -eq [int]$Views[$Active]', 'Save-Json (Read-Session)', 'Snapshot $Step']) assert.ok(wait.includes(required), required);
   assert.match(journey, /for \(\$count = 2; \$count -le 3; \$count\+\+\)/);
