@@ -10,6 +10,67 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+const ps51Rules = [
+  [/\[\s*(?:ushort|uint|ulong|short|sbyte|semver|bigint)\s*\]/i, '[ushort][char]::ToUpperInvariant($letter)'],
+  [/\?\?|\?\.|\?\[/, '$value ?? $fallback'],
+  [/\?(?![?.\[:])[^\r\n]*:/, '$ok ? 1 : 0'],
+  [/&&|\|\|/, 'Get-Item a && Get-Item b'],
+  [/(?:\bForEach-Object\b|\bforeach\b|%)[^\r\n]*-Parallel\b/i, 'ForEach-Object -Parallel { $_ }'],
+  [/\[[^\r\n]*\[\s*\]\s*\]\s*::new\s*\(/i, '[Collections.Generic.List[]]::new()'],
+  [/\bJoin-Path\b[^\r\n]*-AdditionalChildPath\b/i, 'Join-Path a b -AdditionalChildPath c'],
+  [/\bGet-Content\b[^\r\n]*-AsByteStream\b/i, 'Get-Content file -AsByteStream'],
+  [/\bConvertFrom-Json\b[^\r\n]*-(?:AsHashtable|Depth)\b/i, 'ConvertFrom-Json -AsHashtable'],
+  [/-Encoding\s+['"]?utf8NoBOM\b/i, 'Out-File file -Encoding utf8NoBOM'],
+];
+const pathArgument = /'(?:[^']|'')*'|"(?:[^"`]|`.)*"|\([^()\r\n]*(?:\([^()\r\n]*\)[^()\r\n]*)*\)|\$[\w:]+|[\w./\\-]+/.source;
+ps51Rules.push([new RegExp(String.raw`\bJoin-Path[ \t]+(?:-Path[ \t]+)?(?:${pathArgument})[ \t]+(?:-ChildPath[ \t]+)?(?:${pathArgument})[ \t]+(?:${pathArgument})`, 'i'), 'Join-Path a b c']);
+const cs5Rules = [
+  [/\$@?"|@\$"/, 'return $"value {value}";'],
+  [/\b[\w.<>\[\]]+\s+\w+\s*\([^;{}]*\)\s*=>|\b[\w.<>\[\]]+\s+\w+\s*=>|\b(?:get|set)\s*=>/, 'public int Value() => 1;'],
+  [/\bout\s+(?:var\s+\w+|_)\s*[,)]/, 'TryParse(text, out var value);'],
+  [/\bnameof\s*\(/, 'nameof(value)'],
+  [/\?\.|\?\[/, 'value?.ToString()'],
+  [/\(\s*\w+(?:\s+\w+)?\s*,\s*\w+(?:\s+\w+)?\s*\)\s+\w+\s*[({=;]|(?:\breturn\s*|=\s*)\(\s*\w+\s*,\s*\w+\s*\)/, 'public (int X, int Y) Point() { return (1, 2); }'],
+  [/\busing\s+static\b/, 'using static System.Math;'],
+  [/\{\s*get;\s*(?:set;\s*)?\}\s*=/, 'public int Value { get; } = 1;'],
+];
+function assertsPS51(source) {
+  for (const [pattern] of ps51Rules) assert.doesNotMatch(source.replace(/`\r?\n/g, ' '), pattern, `Windows PowerShell 5.1 compatibility: ${pattern}`);
+}
+function assertsCS5(source) {
+  for (const [pattern] of cs5Rules) assert.doesNotMatch(source, pattern, `Add-Type C# 5 compatibility: ${pattern}`);
+}
+
+test('chat-delivery sources retain Windows PowerShell 5.1 and Add-Type C# 5 compatibility', () => {
+  const directory = 'tools/verify-chat-delivery';
+  const visit = dir => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? visit(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]);
+  for (const file of visit(directory)) {
+    if (file.endsWith('.ps1')) assertsPS51(read(file));
+    if (file.endsWith('.cs')) assertsCS5(read(file));
+  }
+  const control = read(skill + 'control.ps1');
+  const end = control.indexOf("        'safe-updates' {");
+  const start = control.indexOf("        'chat-delivery' {");
+  assert.ok(start >= 0 && end > start);
+  assertsPS51(control.slice(0, end));
+  assert.match(drive, /\[uint16\]\[char\]::ToUpperInvariant\(\$letter\)/);
+});
+
+test('compatibility contracts reject old casts and each modern syntax control without rejecting valid 5.1/C#5 constructs', () => {
+  for (const [pattern, broken] of ps51Rules) {
+    assert.match(broken, pattern);
+    assert.throws(() => assertsPS51(broken), /Windows PowerShell 5.1 compatibility/);
+  }
+  for (const broken of ['[uint]1', '[ulong]1', '[short]1', '[semver]1', '${value}?.Name', '${value}?[0]', '$value ??= 1', 'a || b', '% -Parallel { $_ }', 'Get-Content file `\n -AsByteStream', 'ConvertFrom-Json -Depth 4', 'Join-Path "a" "b" "c"', 'Join-Path -Path $root -ChildPath (Get-Location) "c"']) assert.throws(() => assertsPS51(broken));
+  for (const [pattern, broken] of cs5Rules) {
+    assert.match(broken, pattern);
+    assert.throws(() => assertsCS5(broken), /Add-Type C# 5 compatibility/);
+  }
+  for (const broken of ['public int Value => 1;', 'get => value;', 'TryParse(text, out _);', 'return (left, right);', 'var pair = (1, 2);', 'public (int, int) Point() { return (1, 2); }', 'value?[0]']) assert.throws(() => assertsCS5(broken));
+  assertsPS51('[uint16][char]::ToUpperInvariant($letter)\n[Collections.Generic.List[object]]::new()\n[Text.UTF8Encoding]::new($false)\nJoin-Path $env:RUNNER_TEMP (\'chat-delivery-\' + [guid]::NewGuid().ToString(\'N\'))');
+  assertsCS5('public ushort Key; public int Value() { return 1; }\nEnumWindows((h,p) => { return true; }, IntPtr.Zero);\nint value; TryParse(text, out value);');
+});
+
 function gate(source) {
   const modern = source.match(/fn chatOutboxReadyToType\([^\n]+\) bool \{([\s\S]*?)\n\}/);
   let body = modern ? modern[1] : source.slice(source.indexOf('    const channel = chatTmuxSendEligible(shell_index);', source.indexOf('fn chatOutboxTrySendEntry(')), source.indexOf('    const echo_id =', source.indexOf('fn chatOutboxTrySendEntry(')));

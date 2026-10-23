@@ -114,7 +114,7 @@ foreach ($plan in $plans) {
         $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$plan.text})
         foreach ($letter in $plan.text.ToCharArray()) {
             Doctor $true
-            [ChatDeliveryDesktop]::Type([ushort][char]::ToUpperInvariant($letter))
+            [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
             Start-Sleep -Milliseconds 30
         }
         $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
