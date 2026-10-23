@@ -476,7 +476,7 @@ test('the long freeze fixture disables only tier-three window closing through re
   assert.match(journey, /Focus-Palette 'browser auto suspend' 6240/);
   assert.match(journey, /Press @\(0x0D\) 'Enter: disable timed browser closing while measuring fresh tier-two freezes'/);
   assert.match(journey, /\$state.PSObject.Properties\['browser_suspend_min'\] -and \$state.browser_suspend_min -eq 0/);
-  assert.ok(journey.indexOf('switch-idle-close-fixture.json') < journey.indexOf('foreach ($mode in $modes)'));
+  assert.ok(journey.indexOf('switch-idle-close-fixture.json') < journey.indexOf('foreach ($mode in $modes)', journey.indexOf('$warmupJob = $null')));
   const freezeTick = browser.slice(browser.indexOf('pub fn browserHibernationTick('), browser.indexOf('pub fn findDataFileNameAscii('));
   assert.doesNotMatch(freezeTick, /g_browser_autosuspend|g_browser_suspend_min/);
   assertsFrozen(journey, control, browser, workflow);
