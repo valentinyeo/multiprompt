@@ -104,6 +104,83 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE/);
 });
 
+function assertsConsoleLaunch(launcher) {
+  assert.match(launcher, /si.dwFlags = STARTF_USESTDHANDLES \| STARTF_USESHOWWINDOW;/);
+  assert.match(launcher, /si.wShowWindow = SW_SHOWNOACTIVATE;/);
+  assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, GetConsoleWindow\(\) == NULL \? CREATE_NO_WINDOW : 0,/);
+  for (const name of ['Input', 'Output', 'Error']) assert.match(launcher, new RegExp(`si.hStd${name} = GetStdHandle\\(STD_${name.toUpperCase()}_HANDLE\\)`));
+  assert.doesNotMatch(launcher, /AllocConsole|FreeConsole|DETACHED_PROCESS|GetFileType/);
+}
+
+test('console-less probes cannot create an activated Python console while attached screen consoles remain inherited', () => {
+  const launcher = read('tools/verify-chat-delivery/launcher.c');
+  assertsConsoleLaunch(launcher);
+  for (const [before, after] of [
+    ['GetConsoleWindow() == NULL', 'GetFileType(si.hStdOutput) == FILE_TYPE_PIPE'],
+    ['? CREATE_NO_WINDOW : 0', '? CREATE_NO_WINDOW : CREATE_NO_WINDOW'],
+    ['STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW', 'STARTF_USESTDHANDLES'],
+    ['SW_SHOWNOACTIVATE', 'SW_SHOW'],
+  ]) {
+    const broken = launcher.replace(before, after);
+    assert.notEqual(broken, launcher);
+    assert.throws(() => assertsConsoleLaunch(broken));
+  }
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(boundary, /handle = kernel.GetStdHandle\(-11\)/);
+  assert.match(boundary, /GetConsoleScreenBufferInfo\(handle/);
+  assert.match(boundary, /ReadConsoleOutputCharacterW\(handle/);
+});
+
+function assertsForeground(desktop, driver) {
+  const original = read(skill + 'control.ps1');
+  const routine = source => {
+    const start = source.indexOf('        Message message;', source.indexOf(' FocusOwnedWindow('));
+    const end = source.indexOf('\n        }\n', source.indexOf('        } finally {', start));
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end + 10).trim();
+  };
+  const expected = routine(original);
+  assert.ok(expected.startsWith('Message message;') && expected.endsWith('}'));
+  assert.equal(routine(desktop).replace('keybd_event(0x12, 0, 0, UIntPtr.Zero);', 'Key(0x12, 0, 0);').replace('keybd_event(0x12, 0, 2, UIntPtr.Zero);', 'Key(0x12, 0, 2);').replace('SetFocus(focus);', 'SetFocus(hwnd);'), expected);
+  assert.match(desktop, /SetFocus\(focus\);/);
+  assert.match(desktop, /actualPid != pid \|\| Class\(hwnd\) != "ZigShell"/);
+  assert.match(desktop, /Owner\(focus\) != pid \|\| \(focus != hwnd && !IsChild\(hwnd, focus\)\)/);
+  assert.match(desktop, /return GetForegroundWindow\(\) == hwnd && Focus\(hwnd\)\[1\] == focus.ToInt64\(\);/);
+  assert.match(driver, /Wait-For 'owned app foreground' \{ \[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app.Id, \$main\) \}/);
+  const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('foreach ($plan in $plans)'));
+  assert.match(press, /Doctor\s+if \(\[ChatDeliveryDesktop\]::GetForegroundWindow\(\) -ne \$main\) \{\s+\$target = if \(\$Chat\) \{ \$composer \} else \{ \$main \}\s+\[void\]\[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app.Id, \$target\)/);
+  assert.match(press, /if \(\$Chat\) \{ Doctor \$true \}\s+if \(\[ChatDeliveryDesktop\]::GetForegroundWindow\(\) -ne \$main\) \{ throw 'Refusing keyboard input: owned app is not foreground' \}[\s\S]*::Chord\(\$Keys\)/);
+  assert.doesNotMatch(driver, /::SetForegroundWindow/);
+}
+
+test('foreground uses the existing Alt and AttachThreadInput routine before keyboard input without weakening refusal', () => {
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  assertsForeground(desktop, drive);
+  for (const [before, after] of [
+    ['PeekMessage(out message, IntPtr.Zero, 0, 0, 0);', ''],
+    ['keybd_event(0x12, 0, 0, UIntPtr.Zero);', ''],
+    ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
+    ['AttachThreadInput(currentThread, targetThread, true)', 'false'],
+    ['AttachThreadInput(currentThread, targetThread, false)', 'AttachThreadInput(currentThread, targetThread, true)'],
+    ['SetFocus(focus);', 'SetFocus(hwnd);'],
+    ['actualPid != pid', 'false'],
+    ['!IsChild(hwnd, focus)', 'false'],
+  ]) {
+    const broken = desktop.replace(before, after);
+    assert.notEqual(broken, desktop);
+    assert.throws(() => assertsForeground(broken, drive));
+  }
+  for (const [before, after] of [
+    ['[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $target)', ''],
+    ["throw 'Refusing keyboard input: owned app is not foreground'", 'return'],
+    ['if ($Chat) { Doctor $true }', ''],
+  ]) {
+    const broken = drive.replaceAll(before, after);
+    assert.notEqual(broken, drive);
+    assert.throws(() => assertsForeground(desktop, broken));
+  }
+});
+
 test('keyboard journey isolates each case and retains Doctor, screenshots, raw evidence and owned-job cleanup', () => {
   for (const name of names) assert.ok(drive.includes(`name='${name}'`));
   assert.match(drive, /foreach \(\$plan in \$plans\) \{[\s\S]*try \{[\s\S]*catch \{[\s\S]*finally \{/);

@@ -19,11 +19,12 @@ static int run(void) {
     STARTUPINFOW si = {0};
     PROCESS_INFORMATION pi = {0};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWNOACTIVATE;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    if (!CreateProcessW(python, command, NULL, NULL, TRUE, GetFileType(si.hStdOutput) == FILE_TYPE_PIPE ? CREATE_NO_WINDOW : 0, NULL, NULL, &si, &pi)) { free(command); return 93; }
+    if (!CreateProcessW(python, command, NULL, NULL, TRUE, GetConsoleWindow() == NULL ? CREATE_NO_WINDOW : 0, NULL, NULL, &si, &pi)) { free(command); return 93; }
     free(command);
     CloseHandle(pi.hThread);
     WaitForSingleObject(pi.hProcess, INFINITE);

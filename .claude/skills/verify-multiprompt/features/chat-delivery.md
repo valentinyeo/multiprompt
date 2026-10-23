@@ -1,4 +1,5 @@
-# Chat delivery
+Chat delivery
+=============
 
 ## Sub-features
 
@@ -36,6 +37,7 @@ The expected regression comparison is 811 failing busy-send and idle-suggestion 
 
 - `agentBoundary` honestly records: stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. This proves that real Chat View input reaches the production tmux-channel system boundary, not that Claude consumes it, generates a response, or persists a real conversation.
 - No real SSH networking, authentication, server, Claude process, transcript discovery, transcript settlement or remote rendering is verified. No credentials, synthetic transcript files, account data or test-only app setters are supplied.
+- The launcher preserves an attached console for screen reads and uses `CREATE_NO_WINDOW` when no console is attached, including SSH probes with non-pipe stdout. Child startup uses `SW_SHOWNOACTIVATE`. Foreground acquisition uses the same Alt/thread-attachment routine as the other journeys; each Press retries it if foreground was lost, then still refuses keyboard input unless the owned app is foreground.
 - The app's screen read for 811's outbox gate is the attached console, not a reader `screen` opcode. The stand-in mirrors fake capture-pane characters into that console so the old busy and nonblank-input checks remain exercised. The production reader separately calls capture-pane while sending.
 - The known local direct-input gap is not covered: the local console route still rejects a prompt row holding a suggestion, even on master/821. This journey deliberately exercises remote tmux channel delivery, the route relevant to the reported remote Claude sessions.
 - Multiline paste-buffer, slash commands, real transcript confirmation, local console paste, permission prompts and other entry points remain outside these three cases. Branch/release runs have not passed merely because source contracts pass locally.

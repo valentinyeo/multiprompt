@@ -62,7 +62,13 @@ function Doctor([bool]$Chat = $false) {
     Save $identity "$caseDir/doctor.json"
 }
 function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
-    Doctor $Chat
+    Doctor
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) {
+        $target = if ($Chat) { $composer } else { $main }
+        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $target)
+    }
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing keyboard input: owned app is not foreground' }
+    if ($Chat) { Doctor $true }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing keyboard input: owned app is not foreground' }
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input=$Label; keys=$Keys})
     [ChatDeliveryDesktop]::Chord($Keys)
@@ -97,7 +103,7 @@ foreach ($plan in $plans) {
         $app = $job.Start($Exe, $profile, "$caseDir/stdout.log", "$caseDir/stderr.log", '--no-window-restore')
         $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
         [void](Wait-For 'stand-in console rendered and app published saved tmux tab' { (Test-Path "$state/ready.json") -and (Test-Path "$settings/inbox-default.json") })
-        [void](Wait-For 'owned app foreground' { [void][ChatDeliveryDesktop]::SetForegroundWindow($main); [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
+        [void](Wait-For 'owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
         Press @(0x11, 0x31) 'Ctrl+1: select saved tmux tab'
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }

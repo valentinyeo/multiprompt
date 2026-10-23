@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 public static class ChatDeliveryDesktop {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct Message { public IntPtr Hwnd; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; }
     [StructLayout(LayoutKind.Sequential)] public struct Gui { public uint Size, Flags; public IntPtr Active, Focus, Capture, Menu, Move, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
@@ -14,7 +16,15 @@ public static class ChatDeliveryDesktop {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern bool PeekMessage(out Message message, IntPtr hwnd, uint min, uint max, uint remove);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern IntPtr SetFocus(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsChild(IntPtr parent, IntPtr hwnd);
+    [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref Gui info);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
@@ -27,6 +37,36 @@ public static class ChatDeliveryDesktop {
     public static IntPtr Composer(IntPtr main) { IntPtr found = IntPtr.Zero; EnumChildWindows(main, (h,p) => { if (Class(h) == "Edit" && IsWindowVisible(h)) { found = h; return false; } return true; }, IntPtr.Zero); return found; }
     public static long[] Focus(IntPtr main) { uint pid; uint thread = GetWindowThreadProcessId(main, out pid); var info = new Gui(); info.Size = (uint)Marshal.SizeOf(typeof(Gui)); if (!GetGUIThreadInfo(thread, ref info)) throw new InvalidOperationException("GetGUIThreadInfo failed"); return new[] { GetForegroundWindow().ToInt64(), info.Focus.ToInt64() }; }
     public static string Text(IntPtr hwnd) { var text = new StringBuilder(32768); IntPtr result; if (SendMessageTimeout(hwnd, 0x000D, (IntPtr)text.Capacity, text, 2, 2000, out result) == IntPtr.Zero) throw new InvalidOperationException("WM_GETTEXT failed"); return text.ToString(); }
+    public static bool FocusOwnedWindow(IntPtr hwnd, uint pid, IntPtr focus) {
+        uint actualPid;
+        uint targetThread = GetWindowThreadProcessId(hwnd, out actualPid);
+        if (hwnd == IntPtr.Zero || pid == 0 || targetThread == 0 || actualPid != pid || Class(hwnd) != "ZigShell" ||
+            focus == IntPtr.Zero || Owner(focus) != pid || (focus != hwnd && !IsChild(hwnd, focus))) throw new InvalidOperationException("App focus ownership mismatch");
+        Message message;
+        PeekMessage(out message, IntPtr.Zero, 0, 0, 0);
+        uint currentThread = GetCurrentThreadId();
+        uint foregroundPid;
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
+        bool attachedForeground = false, attachedTarget = false;
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        try {
+            if (foregroundThread != 0 && foregroundThread != currentThread) {
+                attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+            }
+            if (targetThread != currentThread && targetThread != foregroundThread) {
+                attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+            }
+            AllowSetForegroundWindow(pid);
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+            SetFocus(focus);
+        } finally {
+            if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
+            keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        }
+        return GetForegroundWindow() == hwnd && Focus(hwnd)[1] == focus.ToInt64();
+    }
     public static void Chord(int[] keys) {
         var inputs = new Input[keys.Length * 2];
         for (int i = 0; i < keys.Length; i++) {
