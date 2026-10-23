@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.840", .items = &.{
+        .{ .text = "Ctrl+K now opens with your ten most used commands at the top.", .ticket = "IGSH-612" },
+        .{ .text = "The other commands are grouped under headers such as Sessions, Browser and Chat View.", .ticket = "IGSH-612" },
+        .{ .text = "Up and Down skip the headers.", .ticket = "IGSH-612" },
+        .{ .text = "Several commands have clearer names, and their old names still find them.", .ticket = "IGSH-612" },
+    } },
     .{ .ver = "0.28.839", .items = &.{
         .{ .text = "Multiprompt now reopens Favorites with the same selected session, even when it belongs to another workspace.", .ticket = "IGSH-569" },
     } },
