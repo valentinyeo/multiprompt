@@ -1516,6 +1516,12 @@ pub const AiPaceProvider = enum(u8) {
     unknown,
 };
 
+pub const AiPace = enum(u8) {
+    ahead,
+    on_pace,
+    behind,
+};
+
 pub const AiPaceGoal = struct {
     label: [128]u8 = std.mem.zeroes([128]u8),
     label_len: usize = 0,
@@ -1537,6 +1543,9 @@ pub const AiPaceGoal = struct {
     weekly_reset_filetime: u64 = 0,
     has_five_hour_reset: bool = false,
     five_hour_reset_filetime: u64 = 0,
+    has_bonus_reset: bool = false,
+    bonus_reset_filetime: u64 = 0,
+    pace: AiPace = .on_pace,
     status: AiPaceStatus = .unavailable,
     cluster: [64]u8 = std.mem.zeroes([64]u8),
     cluster_len: usize = 0,

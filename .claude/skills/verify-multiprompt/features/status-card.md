@@ -7,7 +7,7 @@ Measure the sidebar status card on all three pages after real Ctrl+Shift+G press
 - `one-line-overview`: page 1 (Overview) is a single line with a state dot, the active host's CPU load, each account's week used and the overall label.
 - `one-line-vps`: page 2 (VPS) is a single line with a state dot, host label, CPU load, RAM free and state label. Without a VPS workspace it shows the Overview line, as before.
 - `one-line-ai`: page 3 (AI) is a single line with the burn chip (CL or CX in the burned account's colour), week used per account (CL and CX) and the time to the next weekly reset.
-- `hover-details`: while the mouse is over the card, the full numbers of the current page appear in a card directly above it and hide when the mouse leaves.
+- `hover-details`: while the mouse is over the card, the full numbers of the current page appear in a card directly above it and hide when the mouse leaves. The AI page shows each account's weekly reset day and local time, countdown, pending bonus reset and pace.
 - `page-cycle`: Ctrl+Shift+G and a click still cycle the three pages; the app saves the page in `sidebar-status-card.txt`.
 
 ## How to get to it (user POV)

@@ -28,6 +28,8 @@ const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const GetLastError = @import("win32.zig").GetLastError;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const FileTimeToLocalFileTime = @import("win32.zig").FileTimeToLocalFileTime;
+const FileTimeToSystemTime = @import("win32.zig").FileTimeToSystemTime;
 const SystemTimeToFileTime = @import("win32.zig").SystemTimeToFileTime;
 const ShellExecuteW = @import("win32.zig").ShellExecuteW;
 const L = @import("startup.zig").L;
@@ -42,6 +44,7 @@ const sidebarVpsHost = @import("capacity.zig").sidebarVpsHost;
 const sidebarStickyCardRect = @import("capacity.zig").sidebarStickyCardRect;
 const SIDEBAR_STATUS_DETAIL_H = @import("app_state.zig").SIDEBAR_STATUS_DETAIL_H;
 const PostMessageW = @import("focus.zig").PostMessageW;
+const AiPace = @import("app_state.zig").AiPace;
 const AiPaceStatus = @import("app_state.zig").AiPaceStatus;
 const AiPaceProvider = @import("app_state.zig").AiPaceProvider;
 const AiPaceGoal = @import("app_state.zig").AiPaceGoal;
@@ -188,7 +191,30 @@ fn aiPaceIsoDigits(value: []const u8, start: usize, count: usize) ?u16 {
 }
 
 fn aiPaceIsoUtcFileTime(value: []const u8) ?u64 {
-    if (value.len < 20 or value[4] != '-' or value[7] != '-' or value[10] != 'T' or value[13] != ':' or value[16] != ':' or value[value.len - 1] != 'Z') return null;
+    if (value.len < 20 or value[4] != '-' or value[7] != '-' or value[10] != 'T' or value[13] != ':' or value[16] != ':') return null;
+    var fraction_ticks: u64 = 0;
+    var fraction_scale: u64 = 1_000_000;
+    var zone_start: usize = 19;
+    if (value[zone_start] == '.') {
+        zone_start += 1;
+        const fraction_start = zone_start;
+        while (zone_start < value.len and std.ascii.isDigit(value[zone_start])) : (zone_start += 1) {
+            fraction_ticks += @as(u64, value[zone_start] - '0') * fraction_scale;
+            fraction_scale /= 10;
+        }
+        if (zone_start == fraction_start) return null;
+    }
+    if (zone_start >= value.len) return null;
+    var offset_ticks: u64 = 0;
+    if (value[zone_start] == 'Z') {
+        if (zone_start + 1 != value.len) return null;
+    } else {
+        if ((value[zone_start] != '+' and value[zone_start] != '-') or zone_start + 6 != value.len or value[zone_start + 3] != ':') return null;
+        const hours = aiPaceIsoDigits(value, zone_start + 1, 2) orelse return null;
+        const minutes = aiPaceIsoDigits(value, zone_start + 4, 2) orelse return null;
+        if (hours > 23 or minutes > 59) return null;
+        offset_ticks = (@as(u64, hours) * 60 + minutes) * 60 * 10_000_000;
+    }
     var system_time = SYSTEMTIME{
         .year = aiPaceIsoDigits(value, 0, 4) orelse return null,
         .month = aiPaceIsoDigits(value, 5, 2) orelse return null,
@@ -201,7 +227,9 @@ fn aiPaceIsoUtcFileTime(value: []const u8) ?u64 {
     };
     var file_time = FILETIME{ .dwLowDateTime = 0, .dwHighDateTime = 0 };
     if (SystemTimeToFileTime(&system_time, &file_time) == 0) return null;
-    return (@as(u64, file_time.dwHighDateTime) << 32) | @as(u64, file_time.dwLowDateTime);
+    const ticks = ((@as(u64, file_time.dwHighDateTime) << 32) | @as(u64, file_time.dwLowDateTime)) + fraction_ticks;
+    if (value[zone_start] == '+') return std.math.sub(u64, ticks, offset_ticks) catch return null;
+    return std.math.add(u64, ticks, offset_ticks) catch return null;
 }
 
 fn aiPacePublicAccountLabel(id: []const u8, provider: []const u8, configured: []const u8) []const u8 {
@@ -356,7 +384,7 @@ fn fetchAiPaceSnapshot(out: []u8) ?usize {
 
 fn ladderUnixToFileTime(secs: f64) u64 {
     if (!std.math.isFinite(secs) or secs < 0 or secs > 4_000_000_000) return 0;
-    return (@as(u64, @intFromFloat(secs)) + 11_644_473_600) * 10_000_000;
+    return @as(u64, @intFromFloat(secs * 10_000_000)) + 116_444_736_000_000_000;
 }
 
 fn ladderModeCode(name: []const u8) u8 {
@@ -381,7 +409,7 @@ fn ladderWindowFields(win: ?std.json.Value, used: *u16, has_used: *bool, reset: 
     }
 }
 
-fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []const u8, default_provider: []const u8) void {
+fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []const u8, default_provider: []const u8, now_secs: f64) void {
     if (item != .object) return;
     if (next.goal_count >= next.goals.len) return;
     const o = item.object;
@@ -400,6 +428,21 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     }
     ladderWindowFields(o.get("week"), &goal.total_used_tenths, &goal.has_total_used, &goal.weekly_reset_filetime, &goal.has_weekly_reset);
     ladderWindowFields(o.get("five_hour"), &goal.five_hour_used_tenths, &goal.has_five_hour_used, &goal.five_hour_reset_filetime, &goal.has_five_hour_reset);
+    if (o.get("resets")) |resets| {
+        if (resets == .array) {
+            const now = ladderUnixToFileTime(now_secs);
+            for (resets.array.items) |reset| {
+                if (reset != .object) continue;
+                const expires = aiPaceJsonString(reset.object.get("expires")) orelse continue;
+                const reset_time = aiPaceIsoUtcFileTime(expires) orelse continue;
+                if (reset_time <= now) continue;
+                if (!goal.has_bonus_reset or reset_time < goal.bonus_reset_filetime) {
+                    goal.has_bonus_reset = true;
+                    goal.bonus_reset_filetime = reset_time;
+                }
+            }
+        }
+    }
     var flagged_stale = false;
     if (o.get("stale")) |st| flagged_stale = st == .bool and st.bool;
     if (o.get("error")) |err| flagged_stale = flagged_stale or err == .string;
@@ -409,15 +452,17 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     }
     goal.has_daily_goal = true;
     goal.progress_tenths = goal.total_used_tenths;
-    var behind = false;
+
     if (o.get("week")) |w| {
         if (w == .object) {
             if (aiPaceJsonNumber(w.object.get("time_gone"))) |gone| {
-                behind = gone - @as(f64, @floatFromInt(goal.total_used_tenths)) / 10.0 > 5.0;
+                const used = aiPaceJsonNumber(w.object.get("used")) orelse 0;
+                const difference = gone - used;
+                goal.pace = if (difference > 5.0) .behind else if (difference < -5.0) .ahead else .on_pace;
             }
         }
     }
-    goal.status = if (behind) .to_go else .done;
+    goal.status = if (goal.pace == .behind) .to_go else .done;
 }
 
 fn parseLadderStatus(json: []const u8, now_secs: f64) !AiPaceSnapshot {
@@ -443,10 +488,10 @@ fn parseLadderStatus(json: []const u8, now_secs: f64) !AiPaceSnapshot {
 
     if (root.get("accounts")) |accounts_value| {
         if (accounts_value != .array) return error.InvalidResponse;
-        for (accounts_value.array.items) |item| ladderAddGoal(&next, item, "", "");
+        for (accounts_value.array.items) |item| ladderAddGoal(&next, item, "", "", now_secs);
     } else {
-        ladderAddGoal(&next, root.get("claude") orelse .null, "Claude", "claude");
-        ladderAddGoal(&next, root.get("codex") orelse .null, "Codex", "codex");
+        ladderAddGoal(&next, root.get("claude") orelse .null, "Claude", "claude", now_secs);
+        ladderAddGoal(&next, root.get("codex") orelse .null, "Codex", "codex", now_secs);
     }
     if (next.goal_count == 0) return error.InvalidResponse;
     next.available = true;
@@ -623,6 +668,74 @@ test "Token Ladder status becomes the panel rows" {
     try std.testing.expectEqualStrings("Codex", old.goals[1].labelSlice());
 }
 
+test "Token Ladder account pace and pending bonus resets" {
+    const snap = try parseLadderStatus(
+        \\{"ts":1792497600,"mode":"claude","accounts":[
+        \\{"id":"behind","provider":"claude","week":{"used":66.0,"time_gone":72.1},"resets":[{"expires":"2026-10-22T22:30:00Z"},{"expires":"2026-10-19T23:59:00+02:00"},{"expires":"2026-10-22T23:59:00+02:00"},{"expires":"invalid"},{"expires":"2026-10-20T12:00:00Z"}]},
+        \\{"id":"on-pace","provider":"codex","week":{"used":50,"time_gone":55},"resets":[{"expires":"2026-10-19T23:59:00-04:00"}]},
+        \\{"id":"ahead","provider":"claude","week":{"used":61,"time_gone":55}}]}
+    , 1792497600);
+    try std.testing.expectEqual(@as(usize, 3), snap.goal_count);
+    try std.testing.expectEqual(AiPace.behind, snap.goals[0].pace);
+    try std.testing.expectEqual(AiPace.on_pace, snap.goals[1].pace);
+    try std.testing.expectEqual(AiPace.ahead, snap.goals[2].pace);
+    try std.testing.expectEqual(AiPaceStatus.to_go, snap.goals[0].status);
+    try std.testing.expectEqual(AiPaceStatus.done, snap.goals[1].status);
+    try std.testing.expectEqual(AiPaceStatus.done, snap.goals[2].status);
+    try std.testing.expect(snap.goals[0].has_bonus_reset);
+    try std.testing.expectEqual(ladderUnixToFileTime(1792706340), snap.goals[0].bonus_reset_filetime);
+    try std.testing.expect(!snap.goals[1].has_bonus_reset);
+    try std.testing.expectEqual(@as(u64, 0), snap.goals[1].bonus_reset_filetime);
+    try std.testing.expect(!snap.goals[2].has_bonus_reset);
+    try std.testing.expectEqual(@as(u64, 0), snap.goals[2].bonus_reset_filetime);
+    const boundary = try parseLadderStatus(
+        \\{"ts":1000,"mode":"claude","accounts":[{"id":"boundary","week":{"used":55,"time_gone":50}}]}
+    , 1000);
+    try std.testing.expectEqual(AiPace.on_pace, boundary.goals[0].pace);
+    try std.testing.expectEqual(AiPaceStatus.done, boundary.goals[0].status);
+}
+
+test "AI reset timestamps honor ISO offsets and fractions" {
+    const utc = aiPaceIsoUtcFileTime("2026-10-22T21:59:00Z").?;
+    try std.testing.expectEqual(utc, aiPaceIsoUtcFileTime("2026-10-22T23:59:00+02:00").?);
+    try std.testing.expectEqual(utc, aiPaceIsoUtcFileTime("2026-10-22T17:59:00-04:00").?);
+    try std.testing.expectEqual(utc + 2_500_000, aiPaceIsoUtcFileTime("2026-10-22T23:59:00.250+02:00").?);
+    try std.testing.expect(aiPaceIsoUtcFileTime("2026-10-22T23:59:00+24:00") == null);
+    try std.testing.expect(aiPaceIsoUtcFileTime("2026-10-22T23:59:00+02:60") == null);
+    try std.testing.expect(aiPaceIsoUtcFileTime("2026-10-22T23:59:00") == null);
+    try std.testing.expect(aiPaceIsoUtcFileTime("2026-10-22T23:59:00.Z") == null);
+}
+
+test "AI reset detail text uses fixed local time and countdown" {
+    var local = std.mem.zeroes(SYSTEMTIME);
+    local.month = 10;
+    local.day = 22;
+    local.hour = 19;
+    var buf: [96]u8 = undefined;
+    try std.testing.expectEqualStrings("RESETS SUN 19:00, IN 1D 23H", formatAiPaceResetDetail(&buf, local, "1D 23H"));
+    local.day_of_week = 6;
+    local.hour = 0;
+    local.minute = 5;
+    try std.testing.expectEqualStrings("RESETS SAT 00:05, IN 5M", formatAiPaceResetDetail(&buf, local, "5M"));
+    const weekdays = [_][]const u8{ "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+    for (weekdays, 0..) |weekday, index| {
+        local.day_of_week = @intCast(index);
+        const text = formatAiPaceResetDetail(&buf, local, "DUE");
+        try std.testing.expectEqualStrings(weekday, text[7..10]);
+        try std.testing.expect(std.mem.endsWith(u8, text, ", IN DUE"));
+    }
+    try std.testing.expectEqualStrings(" | BONUS 10-22", formatAiPaceBonusReset(&buf, local));
+    local.month = 1;
+    local.day = 2;
+    try std.testing.expectEqualStrings(" | BONUS 01-02", formatAiPaceBonusReset(&buf, local));
+}
+
+test "AI pace words distinguish ahead on pace and behind" {
+    try std.testing.expectEqualStrings("AHEAD", aiPaceWord(.ahead));
+    try std.testing.expectEqualStrings("ON PACE", aiPaceWord(.on_pace));
+    try std.testing.expectEqualStrings("BEHIND", aiPaceWord(.behind));
+}
+
 test "Ladder clusters, short labels and in_ladder" {
     const snap = try parseLadderStatus(
         \\{"ts":1000,"mode":"claude","override":"auto","accounts":[
@@ -750,6 +863,32 @@ fn formatAiPaceResetCountdown(buf: []u8, reset_filetime: u64) []const u8 {
     if (days > 0) return std.fmt.bufPrint(buf, "{d}D {d}H", .{ days, hours % 24 }) catch "?";
     if (hours > 0) return std.fmt.bufPrint(buf, "{d}H {d}M", .{ hours, minutes }) catch "?";
     return std.fmt.bufPrint(buf, "{d}M", .{minutes}) catch "?";
+}
+
+fn aiPaceWord(pace: AiPace) []const u8 {
+    return switch (pace) {
+        .ahead => "AHEAD",
+        .on_pace => "ON PACE",
+        .behind => "BEHIND",
+    };
+}
+
+fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
+    const ft = FILETIME{ .dwLowDateTime = @truncate(filetime), .dwHighDateTime = @truncate(filetime >> 32) };
+    var local_ft: FILETIME = undefined;
+    var local: SYSTEMTIME = undefined;
+    if (FileTimeToLocalFileTime(&ft, &local_ft) == 0 or FileTimeToSystemTime(&local_ft, &local) == 0) return null;
+    return local;
+}
+
+fn formatAiPaceResetDetail(buf: []u8, local: SYSTEMTIME, countdown: []const u8) []const u8 {
+    const weekdays = [_][]const u8{ "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+    const weekday = if (local.day_of_week < weekdays.len) weekdays[local.day_of_week] else "?";
+    return std.fmt.bufPrint(buf, "RESETS {s} {d:0>2}:{d:0>2}, IN {s}", .{ weekday, local.hour, local.minute, countdown }) catch "RESETS ?";
+}
+
+fn formatAiPaceBonusReset(buf: []u8, local: SYSTEMTIME) []const u8 {
+    return std.fmt.bufPrint(buf, " | BONUS {d:0>2}-{d:0>2}", .{ local.month, local.day }) catch "";
 }
 
 fn formatAiPaceWeeklyReset(buf: []u8, goal: AiPaceGoal) []const u8 {
@@ -971,7 +1110,12 @@ fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_su
             .right = inner_right - uiScaled(48),
             .bottom = row_top + uiScaled(25),
         };
-        drawAscii(hdc, if (app_state.g_ai_pace.from_ladder) "WEEK USED" else "TODAY", &today_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        var today_buf: [32]u8 = undefined;
+        const today_text = if (app_state.g_ai_pace.from_ladder)
+            std.fmt.bufPrint(&today_buf, "WEEK USED | {s}", .{aiPaceWord(goal.pace)}) catch "WEEK USED"
+        else
+            "TODAY";
+        drawAscii(hdc, today_text, &today_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
         var progress_buf: [20]u8 = undefined;
         const progress_text: []const u8 = if (goal.retrying)
@@ -1003,18 +1147,22 @@ fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_su
         const fable: []const u8 = if (goal.has_fable_used) formatAiPacePercent(&fable_buf, goal.fable_used_tenths) else "-";
         const weekly_reset = formatAiPaceWeeklyReset(&weekly_reset_buf, goal);
         const five_hour_reset = formatAiPaceFiveHourReset(&five_hour_reset_buf, goal);
-        const weekly_detail = if (weekly_reset.len > 0)
-            std.fmt.bufPrint(&weekly_detail_buf, "WEEK {s} | RESET {s}", .{ weekly, weekly_reset }) catch "WEEK -"
+        const weekly_local = if (goal.has_weekly_reset) aiPaceLocalTime(goal.weekly_reset_filetime) else null;
+        const weekly_detail = if (weekly_local) |local|
+            formatAiPaceResetDetail(&weekly_detail_buf, local, weekly_reset)
         else
             std.fmt.bufPrint(&weekly_detail_buf, "WEEK {s}", .{weekly}) catch "WEEK -";
+        var bonus_buf: [20]u8 = undefined;
+        const bonus_local = if (goal.has_bonus_reset and goal.bonus_reset_filetime > nowFileTime()) aiPaceLocalTime(goal.bonus_reset_filetime) else null;
+        const bonus = if (bonus_local) |local| formatAiPaceBonusReset(&bonus_buf, local) else "";
         const secondary_detail = if (goal.has_fable_used and five_hour_reset.len > 0)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | R {s} | FABLE {s}", .{ five_hour, five_hour_reset, fable }) catch "5H - | FABLE -"
+            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | R {s} | FABLE {s}{s}", .{ five_hour, five_hour_reset, fable, bonus }) catch "5H - | FABLE -"
         else if (goal.has_fable_used)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | FABLE {s}", .{ five_hour, fable }) catch "5H - | FABLE -"
+            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | FABLE {s}{s}", .{ five_hour, fable, bonus }) catch "5H - | FABLE -"
         else if (five_hour_reset.len > 0)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | RESET {s}", .{ five_hour, five_hour_reset }) catch "5H -"
+            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | RESET {s}{s}", .{ five_hour, five_hour_reset, bonus }) catch "5H -"
         else
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s}", .{five_hour}) catch "5H -";
+            std.fmt.bufPrint(&secondary_detail_buf, "5H {s}{s}", .{ five_hour, bonus }) catch "5H -";
         _ = SetTextColor(hdc, dim);
         const roomy_detail = row_h >= uiScaled(58);
         var compact_detail_buf: [96]u8 = undefined;
