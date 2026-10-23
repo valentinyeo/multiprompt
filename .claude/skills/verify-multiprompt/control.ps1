@@ -1621,7 +1621,8 @@ try {
         }
         'session-restore' {
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
-            Focus-Palette 'tab order manual' 6218
+            Focus-Palette 'tab order' 6217
+            Press @(0x28) 'Down: Tab Order Manual'
             Press @(0x0D) 'Enter: keep creation order before grouping restore sessions'
             $before = (Read-Session).workspace_count
             Press @(0x11, 0x4E) 'Ctrl+N: create a different workspace with its first CMD session'

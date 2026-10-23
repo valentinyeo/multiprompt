@@ -1160,7 +1160,7 @@ test('ISSUE-569 grouped restore journey splits a real home group before every ta
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
     let offset = -1;
     for (const step of [
-      "Focus-Palette 'tab order manual' 6218", "Press @(0x11, 0x4E) 'Ctrl+N:",
+      "Focus-Palette 'tab order' 6217", "Press @(0x11, 0x4E) 'Ctrl+N:",
       "@('Restore first', 'Restore middle', 'Restore last')", 'if ($i -lt 2)',
       "Focus-Palette 'move to group' 6301", "{ 'new group' } else { 'Restore group' }",
       '{ 6303 } else { 6320 }', 'Type-Text $groupQuery', "'group submenu query selects the existing UI action'",
@@ -1200,7 +1200,7 @@ test('ISSUE-569 grouped restore journey splits a real home group before every ta
   const map = read(skill + 'features/session-restore.md');
   contract(control, map);
   for (const required of [
-    "Focus-Palette 'tab order manual' 6218", "Focus-Palette 'move to group' 6301",
+    "Focus-Palette 'tab order' 6217", "Focus-Palette 'move to group' 6301",
     "{ 'new group' } else { 'Restore group' }", "'home group membership persisted through real palette input'",
     "'reorder companion favorite persisted'", "Press @(0x11, 0x10, 0x28) 'Ctrl+Shift+Down:",
     "$tabs[$middle - 1].name -ceq 'Restore last'", '$tabs[$middle - 2].group_id -eq $tabs[$middle].group_id',
