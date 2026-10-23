@@ -52,7 +52,7 @@ function lifecycleContract(source) {
   assert.match(worker, /PostMessageW\(job.owner, @import\("win32.zig"\).WM_APP_BROWSER_LIFECYCLE_DONE/);
   for (const direct of [wake, send]) assert.doesNotMatch(direct, /CreateProcessW|WaitFor|Sleep\(|ReadFile|zsbRunBridgeOnce|setBrowserFrozenMarkerForShell/);
   for (const check of ['findShellById(job.shell_id)', 'browserConnectionMatches(&app_state.shells[idx], job.connection_id)', 'browser_window_id != job.window_id', 'browser_frozen != job.frozen']) assert.ok(done.includes(check), check);
-  assert.match(done, /if \(job.confirmed\) \{[\s\S]*?setBrowserFrozenMarkerForShell\(idx, job.frozen\);\s+\} else \{\s+app_state.shells\[idx\].browser_frozen = !job.frozen;/);
+  assert.match(done, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\);\s+\} else \{\s+app_state.shells\[idx\].browser_frozen = !job.frozen;/);
   assert.match(done, /browser_lifecycle_pending = false/);
   assert.match(done, /if \(job.frozen and \(wake_requested or idx == app_state.active_shell or app_state.shells\[idx\].keep_awake\)\) wakeBrowserPaneFromFreeze\(idx\)/);
   assert.match(done, /if \(job.confirmed\) @as\(\[\]const u8, "confirmed"\) else "failed"/);
@@ -178,7 +178,7 @@ test('shared native pipe transport targets each lifecycle window and isolates co
   assert.match(request, /const until = deadline orelse \(GetTickCount64\(\) \+ 20_000\)/);
   assert.equal((request.match(/\.\{ pid, tick, sequence \}/g) || []).length, 2);
   const done = body(pane, 'handleBrowserLifecycleDone');
-  assert.match(done, /if \(!job.frozen and hwnd != null and IsWindowVisible\(hwnd\) != 0\) \{\s+showBrowserWindowAsync\(hwnd, SW_HIDE\);\s+showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\);/);
+  assert.match(done, /if \(job.confirmed and !job.frozen and hwnd != null and IsWindowVisible\(hwnd\) != 0\) \{\s+showBrowserWindowAsync\(hwnd, SW_HIDE\);\s+showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\);/);
   assert.ok(done.indexOf('showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE)') < done.indexOf('setBrowserFrozenMarkerForShell(idx, job.frozen)'));
   assert.doesNotMatch(done, /SetForegroundWindow|SetFocus|Sleep|WaitFor/);
   const build = read('build.zig');

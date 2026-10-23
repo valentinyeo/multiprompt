@@ -1882,12 +1882,12 @@ pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
     app_state.shells[idx].browser_lifecycle_pending = false;
     const wake_requested = app_state.shells[idx].browser_wake_requested;
     app_state.shells[idx].browser_wake_requested = false;
+    const hwnd = app_state.shells[idx].browser_hwnd;
+    if (job.confirmed and !job.frozen and hwnd != null and IsWindowVisible(hwnd) != 0) {
+        showBrowserWindowAsync(hwnd, SW_HIDE);
+        showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE);
+    }
     if (job.confirmed) {
-        const hwnd = app_state.shells[idx].browser_hwnd;
-        if (!job.frozen and hwnd != null and IsWindowVisible(hwnd) != 0) {
-            showBrowserWindowAsync(hwnd, SW_HIDE);
-            showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE);
-        }
         setBrowserFrozenMarkerForShell(idx, job.frozen);
     } else {
         app_state.shells[idx].browser_frozen = !job.frozen;
