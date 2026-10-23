@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.830", .items = &.{
+        .{ .text = "Session browsers no longer keep a blank first tab with a long data address.", .ticket = "IGSH-613" },
+    } },
     .{ .ver = "0.28.829", .items = &.{
         .{ .text = "Chat View now sends queued messages past gray Claude suggestions without overwriting your typed text.", .ticket = "IGSH-599" },
         .{ .text = "Chat View text is drawn like Chrome, with smooth edges.", .ticket = "IGSH-610" },
