@@ -1017,6 +1017,16 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
     return $pane
 }
 
+function Press-CloseBrowserPane([string]$Label) {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Press @(0x12, 0x41) $Label
+        try {
+            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'closed' } "Alt+A attempt $attempt closed the browser pane" 3
+            return
+        } catch { if ($attempt -eq 3) { throw } }
+    }
+}
+
 function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
     Wait-Until {
         $pane = Read-BrowserPane
@@ -3013,7 +3023,7 @@ try {
                             Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $false
                             $script:browserShellId = $shellIds[$tab]
-                            Press @(0x12, 0x41) 'Alt+A: close browser pane for Chat View baseline'
+                            Press-CloseBrowserPane 'Alt+A: close browser pane for Chat View baseline'
                             $null = Assert-BrowserPane 'closed' ('chat-baseline-' + $tab)
                             $browsers[$tab] = [IntPtr]::Zero
                             Press @(0x12, 0x43) 'Alt+C: enable Chat View for this session'
