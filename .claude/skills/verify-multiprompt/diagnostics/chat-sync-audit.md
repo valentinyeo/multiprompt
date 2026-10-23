@@ -4,6 +4,7 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 
 ## Sub-features
 
+- `codex-cloud-browser`: the `codex cloud` task browser is not a chat session and is not audited.
 - `progress-banner`: terminal build-progress banners are not treated as chat turns.
 - `task-notification`: helper notifications in queue records are not reported as missing conversation.
 - `real-message`: actual assistant messages remain auditable, even with the same wording as a notification.
