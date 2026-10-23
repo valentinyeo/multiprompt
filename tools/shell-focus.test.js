@@ -15,7 +15,7 @@ function body(source, name, next) {
 function audit(source) {
   const activate = body(source, 'activateConsoleForeground', 'pasteFocusLanded');
   const first = activate.indexOf('if (SetForegroundWindow(target) != 0) {');
-  assert.match(activate, /if \(SetForegroundWindow\(target\) != 0\) \{\s*const foreground = GetForegroundWindow\(\);\s*if \(foreground == null or foreground == target\) return 1;\s*\}/);
+  assert.match(activate, /if \(SetForegroundWindow\(target\) != 0\) \{\s*const now_fg = GetForegroundWindow\(\);\s*if \(now_fg == null or now_fg == target\) return 1;\s*\}/);
   const fallback = activate.indexOf('return SetForegroundWindow(GetAncestor(target, GA_ROOT));');
   assert.ok(first >= 0, 'the console window itself must be activated first');
   assert.ok(fallback > first, 'the app frame is only a fallback after the console refused');
@@ -31,7 +31,7 @@ test('leaving Chat View activates the console window so typing reaches the shell
   audit(app);
   const mutations = [
     ['_ = activateConsoleForeground(target_hwnd);', '_ = SetForegroundWindow(if (g_igsh354_paste_focus) GetAncestor(target_hwnd, GA_ROOT) else target_hwnd);'],
-    ['if (foreground == null or foreground == target) return 1;', 'if (foreground == target) return 1;'],
+    ['if (now_fg == null or now_fg == target) return 1;', 'if (now_fg == target) return 1;'],
     ['if (!g_igsh354_paste_focus) return 0;', ''],
     ['else activateConsoleForeground(target);', 'else SetForegroundWindow(GetAncestor(target, GA_ROOT));'],
   ];
@@ -73,7 +73,7 @@ function assertConsoleActivation(source) {
 
 test('IGSH-713 successful console activation with null foreground does not activate the frame', () => {
   assertConsoleActivation(app);
-  const fixed = 'if (SetForegroundWindow(target) != 0) {\n        const foreground = GetForegroundWindow();\n        if (foreground == null or foreground == target) return 1;\n    }';
+  const fixed = 'if (SetForegroundWindow(target) != 0) {\n        const now_fg = GetForegroundWindow();\n        if (now_fg == null or now_fg == target) return 1;\n    }';
   const old = 'if (SetForegroundWindow(target) != 0 and GetForegroundWindow() == target) return 1;';
   assert.ok(app.includes(fixed));
   assert.throws(() => assertConsoleActivation(app.replace(fixed, old)), /result=1, foreground=null/, 'the old line must fail the in-flight activation scenario');
