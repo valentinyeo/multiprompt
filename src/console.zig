@@ -2553,6 +2553,7 @@ pub fn switchToShell(idx: u32) void {
     var timing: switch_timing.Trace = .{};
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
+    if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -2616,7 +2617,6 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_voice_highlight = null;
     }
     if (!defer_browser) ecoqosReevaluateAll();
-    if (!defer_browser and idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
     if (!app_state.g_restoring and app_state.g_single_window and idx < app_state.shell_count) {
         app_state.g_active_workspace = app_state.shells[idx].workspace;
         updateMainWindowTitle();

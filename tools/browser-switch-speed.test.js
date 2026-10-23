@@ -338,8 +338,8 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /const prefix = "\\\\ZigShell\\\\panehib-"/);
   assert.match(app, /const prefix = "zss-"/);
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
-  assert.match(app, /app_state.shells\[idx\].browser_frozen = true;\s+setBrowserFrozenMarkerForShell\(idx, true\)/);
-  assert.match(app, /app_state.shells\[idx\].browser_frozen = false;\s+setBrowserFrozenMarkerForShell\(idx, false\)/);
+  assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
+  assert.match(app, /browser_frozen != job.frozen\) return;/);
   const timeout = yaml.match(/timeout-minutes: \$\{\{ matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;

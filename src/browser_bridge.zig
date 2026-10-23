@@ -1559,7 +1559,7 @@ fn zsbBuildBridgeCmd(window_id: i64, argv: []const []const u8, cmd_buf: []u8) ?[
     return cmd_buf[0..cp];
 }
 
-fn zsbRunBridgeOnce(cmd_slice: []const u8, out_buf: []u8) ?ZsbBridgeRun {
+pub fn zsbRunBridgeOnce(cmd_slice: []const u8, out_buf: []u8) ?ZsbBridgeRun {
     var result = ZsbBridgeRun{};
     var sa = SECURITY_ATTRIBUTES{
         .nLength = @sizeOf(SECURITY_ATTRIBUTES),

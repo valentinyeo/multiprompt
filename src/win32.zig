@@ -281,6 +281,7 @@ pub const WM_APP_UPDATE_CHANGED: u32 = WM_APP + 201;
 pub const WM_APP_CHAT_PERMISSION: u32 = WM_APP + 203;
 pub const WM_APP_CHAT_TAB_URL: u32 = WM_APP + 205;
 pub const WM_APP_BROWSER_DOCK_GUARD: u32 = WM_APP + 207;
+pub const WM_APP_BROWSER_LIFECYCLE_DONE: u32 = WM_APP + 208;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;

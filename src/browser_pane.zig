@@ -1793,24 +1793,111 @@ fn freezeBrowserPaneForShell(idx: u32) void {
     if (idx >= app_state.shell_count or app_state.shells[idx].browser_frozen) return;
     const window_id = app_state.shells[idx].browser_window_id;
     if (window_id == 0) return;
-    var cmd_buf: [320]u8 = undefined;
-    const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "frozen") orelse return;
-    spawnBrowserCliHidden(cmd);
+    if (!sendBrowserLifecycle(idx, true)) return;
     app_state.shells[idx].browser_frozen = true;
-    setBrowserFrozenMarkerForShell(idx, true);
+}
+
+const BrowserLifecycleJob = struct {
+    owner: HANDLE,
+    shell_id: u32,
+    connection_id: u64,
+    window_id: i64,
+    frozen: bool,
+    cmd: [320]u8,
+    cmd_len: usize,
+    confirmed: bool = false,
+};
+
+fn sendBrowserLifecycle(idx: u32, frozen: bool) bool {
+    if (app_state.shells[idx].browser_lifecycle_pending) return false;
+    const window_id = app_state.shells[idx].browser_window_id;
+    if (window_id == 0 or app_state.g_main_hwnd == null) return false;
+    const job = std.heap.page_allocator.create(BrowserLifecycleJob) catch return false;
+    const cmd = buildBrowserCdpLifecycleCmd(&job.cmd, window_id, if (frozen) "frozen" else "active") orelse {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    job.owner = app_state.g_main_hwnd;
+    job.shell_id = app_state.shells[idx].shell_id;
+    job.connection_id = app_state.shells[idx].browser_connection_id;
+    job.window_id = window_id;
+    job.frozen = frozen;
+    job.cmd_len = cmd.len;
+    job.confirmed = false;
+    const thread = std.Thread.spawn(.{}, browserLifecycleWorker, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    app_state.shells[idx].browser_lifecycle_pending = true;
+    app_state.shells[idx].browser_wake_requested = false;
+    return true;
 }
 
 pub fn wakeBrowserPaneFromFreeze(idx: u32) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_wake, timing_started);
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_frozen) return;
+    if (app_state.shells[idx].browser_lifecycle_pending) {
+        app_state.shells[idx].browser_wake_requested = true;
+        return;
+    }
+    if (!sendBrowserLifecycle(idx, false)) return;
     app_state.shells[idx].browser_frozen = false;
-    setBrowserFrozenMarkerForShell(idx, false);
-    const window_id = app_state.shells[idx].browser_window_id;
-    if (window_id == 0) return;
-    var cmd_buf: [320]u8 = undefined;
-    const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "active") orelse return;
-    spawnBrowserCliHidden(cmd);
+    var buf: [160]u8 = undefined;
+    if (std.fmt.bufPrint(&buf, "browser wake sent: shell={d} window={d} path=cli queued", .{ app_state.shells[idx].shell_id, app_state.shells[idx].browser_window_id })) |line| debugLog(line) else |_| {}
+}
+
+fn browserLifecycleReplySucceeded(proc_ok: bool, timed_out: bool, exit_code: u32, reply: []const u8) bool {
+    if (!proc_ok or timed_out or exit_code != 0) return false;
+    var parsed = json_reader.parse(std.heap.page_allocator, reply) catch return false;
+    defer parsed.deinit();
+    return json_reader.boolTrue(parsed.value, "ok");
+}
+
+test "IGSH-606 lifecycle confirmation requires successful process and CDP acknowledgment" {
+    const ok = "{\"ok\":true,\"result\":{}}";
+    try std.testing.expect(browserLifecycleReplySucceeded(true, false, 0, ok));
+    try std.testing.expect(!browserLifecycleReplySucceeded(false, false, 0, ok));
+    try std.testing.expect(!browserLifecycleReplySucceeded(true, true, 0, ok));
+    try std.testing.expect(!browserLifecycleReplySucceeded(true, false, 1, ok));
+    for ([_][]const u8{ "", "not json", "null", "{}", "{\"ok\":false}", "{\"ok\":\"true\"}" }) |reply| {
+        try std.testing.expect(!browserLifecycleReplySucceeded(true, false, 0, reply));
+    }
+}
+
+fn browserLifecycleWorker(job: *BrowserLifecycleJob) void {
+    crash_recorder.guardThread();
+    var reply: [4096]u8 = undefined;
+    if (@import("browser_bridge.zig").zsbRunBridgeOnce(job.cmd[0..job.cmd_len], &reply)) |run| {
+        job.confirmed = browserLifecycleReplySucceeded(run.proc_ok, run.timed_out, run.exit_code, reply[0..run.out_len]);
+    }
+    if (PostMessageW(job.owner, @import("win32.zig").WM_APP_BROWSER_LIFECYCLE_DONE, 0, @bitCast(@intFromPtr(job))) == 0)
+        std.heap.page_allocator.destroy(job);
+}
+
+pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
+    defer std.heap.page_allocator.destroy(job);
+    if (app_state.g_app_closing) return;
+    const idx = findShellById(job.shell_id) orelse return;
+    if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id) or
+        app_state.shells[idx].browser_window_id != job.window_id or app_state.shells[idx].browser_frozen != job.frozen) return;
+    app_state.shells[idx].browser_lifecycle_pending = false;
+    const wake_requested = app_state.shells[idx].browser_wake_requested;
+    app_state.shells[idx].browser_wake_requested = false;
+    if (job.confirmed) {
+        setBrowserFrozenMarkerForShell(idx, job.frozen);
+    } else {
+        app_state.shells[idx].browser_frozen = !job.frozen;
+    }
+    var buf: [160]u8 = undefined;
+    if (std.fmt.bufPrint(&buf, "browser {s} {s}: shell={d} window={d} path=cli", .{
+        if (job.frozen) @as([]const u8, "freeze") else "wake",
+        if (job.confirmed) @as([]const u8, "confirmed") else "failed",
+        job.shell_id,
+        job.window_id,
+    })) |line| debugLog(line) else |_| {}
+    if (job.frozen and (wake_requested or idx == app_state.active_shell or app_state.shells[idx].keep_awake)) wakeBrowserPaneFromFreeze(idx);
 }
 
 fn browserPaneSessionBusyPure(
@@ -3376,6 +3463,8 @@ fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
 }
 
 fn resetBrowserConnection(sh: *Shell) void {
+    sh.browser_lifecycle_pending = false;
+    sh.browser_wake_requested = false;
     sh.browser_hwnd = null;
     sh.browser_docking = false;
     sh.browser_launch_tick = 0;
