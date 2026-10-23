@@ -1629,7 +1629,6 @@ pub fn chatShellDraftPushDue() void {
         shell_draft.pushed(text, now);
     } else {
         shell_draft.pushFinished();
-        shell_draft.edit_pending = true;
     }
 }
 
