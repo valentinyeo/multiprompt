@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.850", .items = &.{
+        .{ .text = "Alt+Q now always brings typing back to the chat box, even when Find is open or the session has no browser pane.", .ticket = "IGSH-716" },
+    } },
     .{ .ver = "0.28.849", .items = &.{
         .{ .text = "Right-click a chat message for Reply and Copy with clear icons and colours that match your theme.", .ticket = "IGSH-718" },
         .{ .text = "Send and Stop buttons now use neutral grey instead of blue.", .ticket = "IGSH-718" },
