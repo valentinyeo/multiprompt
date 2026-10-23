@@ -97,7 +97,7 @@ test('unchanged good run and peak RSS at the memory cap remain PASS', async () =
 });
 
 test('slow captures cannot truncate the configured settling period and idle tail', async () => {
-  const { defaults } = await lib;
+  const { defaults, earlyCaptureDue, tornFrame, finalCaptureDue } = await lib;
   const source = fs.readFileSync(path.join(__dirname, 'chat-bench/run.mjs'), 'utf8');
   const measure = source.slice(source.indexOf('  async function measure(name) {'), source.indexOf('\n  try {', source.indexOf('  async function measure(name) {')));
   let now = 0, captures = 0;
@@ -108,7 +108,7 @@ test('slow captures cannot truncate the configured settling period and idle tail
     delay: async ms => { now += ms; },
     capture: async () => { now += 3000; captures++; },
     parseLog: () => ({ paints: [] }), atomic: () => {}, path,
-    seq: 0, lastAction: 0,
+    seq: 0, lastAction: 0, earlyCaptureDue, tornFrame, finalCaptureDue, geometryFor: () => null,
   });
   await require('node:vm').runInContext(`${measure}\nmeasure('cold')`, context);
   assert.equal(captures, 7, 'every tab must still be captured');

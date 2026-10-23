@@ -297,7 +297,7 @@ async function run({ requestedExe, config, out, installable }) {
         const until = Math.min(end, now + config.switchSeconds * 1000);
         const early = new Map(), acknowledged = new Map();
         const contentSeen = ([instance, commandSeq, localIndex]) => parseLog(instance.text).paints.some(p => p.seq === commandSeq && p.tab === localIndex && p.blocks > 0 && p.chars > 0 && (instance.tabs[localIndex].provider === 'shell' || p.file));
-        const finalDue = () => pending.every(item => finalCaptureDue({ now: performance.now(), until, end, file: item[0].tabs[item[2]].provider !== 'shell', contentSeen: contentSeen(item) }));
+        const finalDue = () => pending.every(item => finalCaptureDue({ now: performance.now(), until, end, file: !!item[0].tabs[item[2]].file, contentSeen: contentSeen(item) }));
         while (!finalDue()) {
           await pump();
           for (const item of pending) {
