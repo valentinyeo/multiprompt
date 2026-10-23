@@ -2821,6 +2821,7 @@ pub fn positionActiveBrowser() void {
         return;
     }
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_browser_console_switch_preparing) return;
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_docking) return;
     if (webView2OwnsActiveShell()) {
         hideAllBrowserChrome();
@@ -3137,6 +3138,7 @@ pub fn updateBrowserVisibility() void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_visible, timing_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_browser_console_switch_preparing) return;
     if (app_state.g_updating_browser_visibility) return;
     app_state.g_updating_browser_visibility = true;
     defer app_state.g_updating_browser_visibility = false;

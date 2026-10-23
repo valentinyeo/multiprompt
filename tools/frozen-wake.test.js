@@ -132,3 +132,16 @@ test('post-paint dispatch reuses the existing guarded PostMessageW binding exact
   assert.equal((chat.match(/^const PostMessageW =/gm) || []).length, 1);
   assert.match(chat, /const PostMessageW = @import\("focus.zig"\).PostMessageW;/);
 });
+
+test('native console switches show and focus the console before queuing browser geometry through the existing settle handler', () => {
+  const switching = body(consoleSource, 'switchToShell');
+  assert.match(switching, /browser_enabled and app_state.shells\[idx\].browser_native/);
+  assert.match(switching, /g_browser_console_switch_preparing = defer_console_browser/);
+  assert.match(switching, /defer app_state.g_browser_console_switch_preparing = browser_preparing_previous/);
+  const queued = switching.indexOf('PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER');
+  assert.ok(queued > switching.indexOf('showShellConsole(idx, SW_SHOW, "switchToShell")'));
+  assert.ok(queued > switching.indexOf('focusActiveShell();'));
+  assert.ok(switching.includes('@import("win32.zig").TIMER_BROWSER_SETTLE, 0)'));
+  for (const name of ['positionActiveBrowser', 'updateBrowserVisibility']) assert.match(body(pane, name), /if \(app_state.g_browser_console_switch_preparing\) return/);
+  assert.match(state, /g_browser_console_switch_preparing: bool = false/);
+});
