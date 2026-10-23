@@ -4226,8 +4226,8 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
         const radius = style.chatSurfaceRadius();
         const paint = browser_corners.Paint{ .radius = radius, .border = style.chatSurfaceBorderW(), .background = browserEdgeMaskColor(side), .arc_background = browserEdgeMaskFrameColor(), .border_color = style.chatSurfaceBorderColor(), .inset_x = w - radius, .inset_y = h - radius };
         const cached = browser_corner_paints[idx - 6];
-        const need_bitmap = cached == null or !std.meta.eql(cached.?, paint) or !app_state.g_browser_edge_mask_shown[idx];
-        if (same_rect and !need_bitmap) return;
+        const need_bitmap = cached == null or !std.meta.eql(cached.?, paint) or prev.right != w or prev.bottom != h;
+        if (same_rect and !need_bitmap and app_state.g_browser_edge_mask_shown[idx]) return;
         if (need_bitmap) {
             if (!updateBrowserCorner(hw, corner, paint, x, y, w, h)) {
                 _ = ShowWindow(hw, SW_HIDE);

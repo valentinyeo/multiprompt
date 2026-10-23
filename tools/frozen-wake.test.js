@@ -96,3 +96,16 @@ test('wake changes introduce no code comments', async () => {
   for (const file of ['src/browser_pane.zig', 'src/browser_bridge.zig', 'src/console.zig', 'src/main.zig', 'src/win32.zig', 'src/app_state.zig']) assert.equal(strip(read(file), 'zig').commentLines, 0, file);
   assert.equal(strip(read('tools/frozen-wake.test.js'), 'javascript').commentLines, 0);
 });
+
+function cornerCache(source) {
+  const move = body(source, 'moveBrowserEdgeMask');
+  assert.match(move, /const need_bitmap = cached == null or !std.meta.eql\(cached.\?, paint\) or prev.right != w or prev.bottom != h;/);
+  assert.match(move, /if \(same_rect and !need_bitmap and app_state.g_browser_edge_mask_shown\[idx\]\) return;/);
+  assert.match(move, /if \(need_bitmap\) \{\s+if \(!updateBrowserCorner/);
+  assert.match(move, /if \(!app_state.g_browser_edge_mask_shown\[idx\]\) _ = ShowWindow\(hw, SW_SHOWNOACTIVATE\)/);
+}
+
+test('unchanged corner bitmaps survive session hides while changed paint and size invalidate them', () => {
+  cornerCache(pane);
+  for (const before of ['or prev.right != w', 'or prev.bottom != h', 'and app_state.g_browser_edge_mask_shown[idx]', 'if (need_bitmap) {']) assert.throws(() => cornerCache(pane.replace(before, '')));
+});
