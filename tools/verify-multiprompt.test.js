@@ -254,7 +254,7 @@ test('IGSH-376 Chat View keeps desktop toggle evidence separate from native rece
   assert.doesNotMatch(chord, /\bKey\(/);
   assert.match(workflow, /git config --global core\.autocrlf false[\s\S]*?uses: actions\/checkout@/);
   assert.match(workflow, /MULTIPROMPT_CHAT_RENDER_PROOF: '1'/);
-  assert.match(workflow, /zig build test-main --summary all/);
+  assert.match(workflow, /zig build test-main -Drender-proof=true --summary all/);
   assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Native desktop rendering tests failed' \}/);
   assert.match(workflow, /evidence\/chat-markdown-render\.png/);
   assert.equal((chat.match(/Press @\(0x12, 0x43\)/g) || []).length, 3);
