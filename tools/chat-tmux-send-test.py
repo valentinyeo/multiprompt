@@ -135,7 +135,7 @@ class SendTest(unittest.TestCase):
         with patch.object(reader, "prompt_box_text", return_value=box), \
                 patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
             self.assertIn("\terror\tbox_not_clear\t", self.send())
-            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_count, 2)
 
     def test_enter_is_pressed_again_only_while_the_text_stays_in_the_box(self):
         for after, enters in (("", 1), ("please check the build", 2)):

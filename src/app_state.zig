@@ -3493,6 +3493,7 @@ pub const ChatTmuxSendJob = struct {
     retry: bool,
     written: bool = false,
     rejected: bool = false,
+    box_not_clear: bool = false,
     finished: std.atomic.Value(bool) = .init(false),
 };
 pub var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;

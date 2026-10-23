@@ -23,6 +23,7 @@ const Entry = struct {
     channel_sent_ms: i64 = 0,
     sent_tick_ms: i64 = 0,
     channel_retries: u8 = 0,
+    retryable: bool = false,
 };
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
@@ -45,7 +46,7 @@ var enter_ok = true;
 var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
-    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, written: bool = false, rejected: bool = false,
+    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
     finished: std.atomic.Value(bool) = .init(true),
 };
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
@@ -75,6 +76,14 @@ fn reset() void {
     starts = 0; pastes = 0; local_pastes = 0; enters = 0; verifies = 0;
     saves = 0; save_ok = true; spawn_ok = true; direct = true; paste_ok = true; enter_ok = true;
     g_chat_tmux_send_job = null;
+}
+fn finishBoxNotClear() void {
+    const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch unreachable;
+    job.* = .{ .text = std.heap.page_allocator.dupe(u16, &.{'x'}) catch unreachable, .written = true, .rejected = true, .box_not_clear = true };
+    g_chat_tmux_send_job = job;
+    storage[0].channel_pending = true;
+    storage[0].write_started = true;
+    chatTmuxSendFinish();
 }
 fn finishJob(written: bool, retry: bool, echo_id: u64) void {
     const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch unreachable;
@@ -127,6 +136,16 @@ test "ISSUE-460 late channel completion never revives or retries a failed delive
     try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
     try std.testing.expectEqual(@as(usize, 0), pastes + enters);
 }
+test "IGSH-608 a box that will not clear never pastes and leaves the message not sent" {
+    reset(); finishBoxNotClear();
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies + local_pastes);
+    try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
+    try std.testing.expect(!storage[0].write_started);
+    try std.testing.expect(storage[0].retryable);
+    try std.testing.expect(!storage[0].channel_sent);
+    try std.testing.expect(!storage[0].channel_pending);
+    try std.testing.expect(g_chat_tmux_send_job == null);
+}
 test "channel write failure falls back once but a written request or retry never pastes" {
     reset(); finishJob(false, false, 1);
     try std.testing.expectEqual(@as(usize, 1), pastes);
@@ -163,7 +182,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 5 tests passed/);
+  assert.match(result.stderr, /All 6 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);
