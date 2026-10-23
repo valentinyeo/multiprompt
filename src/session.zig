@@ -849,12 +849,7 @@ fn savedStarredView(json: std.json.Value, tabs: []const SavedTab) bool {
         }
     }
     if (!json_reader.boolTrue(json, "starred_view")) return false;
-    const id = json_reader.uint(json, "active_shell_id");
-    if (id == 0) return true;
-    for (tabs) |tab| {
-        if (tab.shell_id == id) return true;
-    }
-    return false;
+    return selectedSavedTab(json, tabs, 0) != null;
 }
 
 fn restoreStarredView(starred: bool) void {
@@ -1919,6 +1914,98 @@ test "ISSUE-569 legacy index fallback and startup user selection beat saved sele
     try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], 0));
     try parsed.value.object.put(parsed.arena.allocator(), "active_shell_id", .{ .integer = 41 });
     try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 999));
+}
+
+test "ISSUE-569 respawned selection falls back to saved index and tmux identity before group normalization" {
+    const saved = .{
+        .shells = app_state.shells[0..3].*,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .starred = app_state.g_starred_workspace,
+        .pending = @import("launch_cache.zig").pending,
+    };
+    defer {
+        app_state.shells[0..3].* = saved.shells;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_starred_workspace = saved.starred;
+        @import("launch_cache.zig").pending = saved.pending;
+    }
+    @import("launch_cache.zig").pending = false;
+    for ([_]u32{ 896, 999 }) |saved_id| {
+        var json_buf: [1024]u8 = undefined;
+        const bytes = try std.fmt.bufPrint(&json_buf, "{{\"active_shell_id\":{d},\"active_tab\":1,\"starred_view\":true,\"tabs\":[{{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":895}},{{\"kind\":\"tmux\",\"name\":\"Selected\",\"shell_id\":896,\"tmux_session\":\"restore-target\",\"lv\":1}},{{\"kind\":\"cmd\",\"name\":\"Middle\",\"shell_id\":897}},{{\"kind\":\"tmux\",\"name\":\"Winner\",\"shell_id\":898,\"tmux_session\":\"restore-target\",\"lv\":2}}]}}", .{saved_id});
+        var parsed = try json_reader.parse(std.testing.allocator, bytes);
+        defer parsed.deinit();
+        var tabs: [4]SavedTab = undefined;
+        const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+        const selected = selectedSavedTab(parsed.value, tabs[0..count], 0).?;
+        try std.testing.expectEqual(@as(u32, 3), selected);
+        try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+        const restored_shell_ids = [_]u32{ 913, 0, 914, 915 };
+        app_state.shell_count = 3;
+        app_state.g_starred_workspace = false;
+        for (0..3) |i| {
+            app_state.shells[i] = empty_shell;
+            app_state.shells[i].shell_id = @intCast(913 + i);
+            app_state.shells[i].console_inflight = true;
+            app_state.shells[i].group_id = if (i == 1) 0 else 7;
+        }
+        try std.testing.expect(findShellById(saved_id) == null);
+        app_state.active_shell = findShellById(restored_shell_ids[selected]).?;
+        normalizeGroupOrder();
+        try std.testing.expectEqual(@as(u32, 1), app_state.active_shell);
+        try std.testing.expectEqual(@as(u32, 915), app_state.shells[app_state.active_shell].shell_id);
+        try std.testing.expectEqual(@as(DWORD, 0), app_state.shells[app_state.active_shell].pid);
+    }
+}
+
+test "ISSUE-569 automatic Starred refresh after respawn keeps the restored session without input" {
+    const saved = .{
+        .shells = app_state.shells[0..3].*,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .starred = app_state.g_starred_workspace,
+        .last = app_state.g_starred_last_shell,
+        .single = app_state.g_single_window,
+        .snoozed = app_state.g_ws_snoozed,
+        .action = app_state.g_focus_user_action_tick,
+    };
+    defer {
+        app_state.shells[0..3].* = saved.shells;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_starred_workspace = saved.starred;
+        app_state.g_starred_last_shell = saved.last;
+        app_state.g_single_window = saved.single;
+        app_state.g_ws_snoozed = saved.snoozed;
+        app_state.g_focus_user_action_tick = saved.action;
+    }
+    app_state.shell_count = 3;
+    app_state.active_shell = 2;
+    app_state.g_single_window = true;
+    app_state.g_starred_workspace = false;
+    app_state.g_ws_snoozed = [_]bool{false} ** MAX_LWS;
+    app_state.g_focus_user_action_tick = 0;
+    for (0..3) |i| {
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].shell_id = @intCast(913 + i);
+        app_state.shells[i].workspace = if (i == 2) 1 else 0;
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].group_id = if (i == 1) 0 else 7;
+        app_state.shells[i].last_active = if (i == 1) 100 else 1;
+    }
+    normalizeGroupOrder();
+    app_state.g_starred_workspace = true;
+    app_state.g_starred_last_shell = 915;
+    for (0..3) |i| {
+        app_state.shells[i].pid = @intCast(100 + i);
+        @import("workspaces.zig").refreshStarredWorkspace();
+        try std.testing.expectEqual(@as(u32, 915), app_state.shells[app_state.active_shell].shell_id);
+        try std.testing.expectEqual(@as(u8, 1), app_state.shells[app_state.active_shell].workspace);
+        try std.testing.expect(app_state.g_starred_workspace);
+        try std.testing.expectEqual(@as(u64, 0), app_state.g_focus_user_action_tick);
+    }
 }
 
 test "ISSUE-569 saved view and selected session use the same source during startup" {

@@ -1431,8 +1431,7 @@ test('ISSUE-569 fast and deferred restore keep the authoritative view and sessio
     assert.match(view, /if \(@import\("launch_cache.zig"\).selected_live_shell_id != 0\) return @import\("launch_cache.zig"\).selected_starred;/);
     assert.match(view, /if \(tab.shell_id == @import\("launch_cache.zig"\).selected_shell_id\) return @import\("launch_cache.zig"\).selected_starred;/);
     assert.match(view, /if \(!json_reader.boolTrue\(json, "starred_view"\)\) return false;/);
-    assert.match(view, /const id = json_reader.uint\(json, "active_shell_id"\);/);
-    assert.match(view, /if \(tab.shell_id == id\) return true;/);
+    assert.match(view, /return selectedSavedTab\(json, tabs, 0\) != null;/);
     assert.doesNotMatch(view, /g_starred_workspace/);
     const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
     assert.match(restore, /const restore_starred = savedStarredView\(json, tabs\[0\.\.tab_count\]\);/);
@@ -1467,7 +1466,7 @@ test('ISSUE-569 fast and deferred restore keep the authoritative view and sessio
     [2, 'else if (!@import("launch_cache.zig").tabs_restored) return;', ''],
     [2, 'return @import("launch_cache.zig").selected_starred;', 'return app_state.g_starred_workspace;'],
     [2, 'if (tab.shell_id == @import("launch_cache.zig").selected_shell_id)', 'if (true)'],
-    [2, 'if (tab.shell_id == id) return true;', 'return true;'],
+    [2, 'return selectedSavedTab(json, tabs, 0) != null;', 'return true;'],
     [2, '    const restore_starred = savedStarredView(json, tabs[0..tab_count]);', ''],
     [3, '        saveSession();\n    }\n    if (idx < app_state.shell_count)', '        @import("launch_cache.zig").selected_shell_id = app_state.shells[idx].shell_id;\n        saveSession();\n    }\n    if (idx < app_state.shell_count)'],
   ]) {
@@ -1475,5 +1474,58 @@ test('ISSUE-569 fast and deferred restore keep the authoritative view and sessio
     broken[file] = broken[file].replace(before, after);
     assert.notEqual(broken[file], sources[file], before);
     assert.throws(() => contract(...broken), assert.AssertionError, before);
+  }
+});
+
+
+test('ISSUE-569 respawn selection survives PID-zero normalization and automatic refresh', () => {
+  function contract(sidebar, session) {
+    const consoleSource = read('src/console.zig');
+    const complete = consoleSource.slice(consoleSource.indexOf('pub fn finishStartupShell('));
+    assert.doesNotMatch(complete, /active_shell\s*=|switchToShell/);
+    const normalize = sidebar.slice(sidebar.indexOf('pub fn normalizeGroupOrder()'), sidebar.indexOf('pub fn applyPendingGroup()'));
+    assert.match(normalize, /const active_id = if \(app_state.active_shell < app_state.shell_count\) app_state.shells\[app_state.active_shell\].shell_id else 0;/);
+    assert.match(normalize, /if \(active_id != 0\)/);
+    assert.match(normalize, /if \(app_state.shells\[k\].shell_id == active_id\) \{\s*app_state.active_shell = k;/);
+    assert.doesNotMatch(normalize, /\.pid|active_pid/);
+    const savedView = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(savedView, /return selectedSavedTab\(json, tabs, 0\) != null;/);
+    const regression = session.slice(session.indexOf('test "ISSUE-569 respawned selection'), session.indexOf('test "ISSUE-569 saved view and selected session use'));
+    for (const name of ['First', 'Selected', 'Middle', 'Winner']) assert.ok(regression.includes(`\\"name\\":\\"${name}\\"`), name);
+    for (const observation of [
+      'ISSUE-569 respawned selection falls back to saved index and tmux identity before group normalization',
+      'for ([_]u32{ 896, 999 }) |saved_id|', 'const selected = selectedSavedTab(parsed.value, tabs[0..count], 0).?;',
+      'expectEqual(@as(u32, 3), selected)', 'expect(savedStarredView(parsed.value, tabs[0..count]))',
+      'const restored_shell_ids = [_]u32{ 913, 0, 914, 915 };', 'console_inflight = true;',
+      'expect(findShellById(saved_id) == null)', 'findShellById(restored_shell_ids[selected]).?',
+      'group_id = if (i == 1) 0 else 7;', 'normalizeGroupOrder();\n        try std.testing.expectEqual(@as(u32, 1)',
+      'expectEqual(@as(u32, 1), app_state.active_shell)',
+      'expectEqual(@as(DWORD, 0), app_state.shells[app_state.active_shell].pid)',
+      'ISSUE-569 automatic Starred refresh after respawn keeps the restored session without input',
+      'app_state.g_starred_last_shell = 915;', 'app_state.g_focus_user_action_tick = 0;',
+      '@import("workspaces.zig").refreshStarredWorkspace();',
+      'expectEqual(@as(u32, 915), app_state.shells[app_state.active_shell].shell_id)',
+      'expectEqual(@as(u8, 1), app_state.shells[app_state.active_shell].workspace)',
+      'expect(app_state.g_starred_workspace)',
+    ]) assert.ok(regression.includes(observation), observation);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('fn writeStartupLastgood('));
+    assert.ok(restore.indexOf('findShellById(restored_active_shell_id)') < restore.indexOf('normalizeGroupOrder();'));
+  }
+  const sidebar = read('src/sidebar.zig');
+  const session = read('src/session.zig');
+  contract(sidebar, session);
+  const before = read('tools/fixtures/igsh-569/normalize-before.zig');
+  assert.throws(() => contract(before, session), assert.AssertionError);
+  for (const [source, old, replacement] of [
+    [0, 'if (active_id != 0)', 'if (false)'],
+    [0, 'shells[k].shell_id == active_id', 'shells[k].pid == active_id'],
+    [1, 'return selectedSavedTab(json, tabs, 0) != null;', 'return false;'],
+    [1, 'normalizeGroupOrder();\n        try std.testing.expectEqual(@as(u32, 1)', 'try std.testing.expectEqual(@as(u32, 1)'],
+    [1, '@import("workspaces.zig").refreshStarredWorkspace();', ''],
+  ]) {
+    const broken = [sidebar, session];
+    broken[source] = broken[source].replace(old, replacement);
+    assert.notEqual(broken[source], [sidebar, session][source], old);
+    assert.throws(() => contract(...broken), assert.AssertionError, old);
   }
 });
