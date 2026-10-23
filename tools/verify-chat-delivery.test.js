@@ -106,8 +106,15 @@ test('811 rejects both channel scenarios while master and 821 admit them before 
   assert.match(reader, /\["tmux", "send-keys", "-t", target, "Enter"\]/);
 });
 
+const leftover = 'earlier long message about the weekly plan that keeps wrapping across rows';
+
 function fixture(name = 'busy-send') {
   const observation = { name, text: 'typed public message', composerText: 'typed public message', actionMs: 1000, endMs: 16001, error: null };
+  if (name === 'wrapped-leftover') {
+    const target = ['send-keys', '-t', '=verify-agent:'];
+    const rows = [[...target, 'C-u'], [...target, 'C-u'], [...target, 'C-u'], [...target, 'C-u'], [...target, '-l', '--', observation.text], [...target, 'Enter']];
+    return { observation, events: rows.map((argv, index) => ({ ms: 1100 + index, case: name, argv, submitted: index === 5 ? observation.text : null, box: index === 5 ? '' : 'box' })) };
+  }
   const args = [['send-keys', '-t', '=verify-agent:', '-l', '--', observation.text], ['send-keys', '-t', '=verify-agent:', 'Enter']];
   if (name === 'steer-chord') args.push(['send-keys', '-t', '=verify-agent:', 'C-x', 'C-s']);
   return { observation, events: args.map((argv, index) => ({ ms: 1100 + index, case: name, argv })) };
@@ -116,7 +123,7 @@ function fixture(name = 'busy-send') {
 test('buffer oracle accepts exactly typed text, Enter and the ordered steer chord', () => {
   for (const name of names) {
     const { observation, events } = fixture(name);
-    assert.equal(evaluateDelivery(observation, events).writes, name === 'steer-chord' ? 3 : 2);
+    assert.equal(evaluateDelivery(observation, events).writes, name === 'steer-chord' ? 3 : name === 'wrapped-leftover' ? 6 : 2);
   }
 });
 
@@ -142,6 +149,25 @@ test('buffer oracle rejects busy waiting, suggestions, duplicates, missing Enter
   }
 });
 
+test('wrapped-leftover oracle rejects the glued row, extra submissions, missing submission and late Enter', () => {
+  const control = fixture('wrapped-leftover');
+  evaluateDelivery(control.observation, control.events);
+  const mutations = [
+    f => { f.events[5].submitted = leftover.slice(0, 30) + f.observation.text; },
+    f => { f.events[5].submitted = null; },
+    f => { f.events[3].submitted = leftover.slice(0, 30); },
+    f => { f.events.push({ ...f.events[5], ms: 1200 }); },
+    f => { f.events[5].ms = 16001; },
+    f => { delete f.events[5].submitted; },
+    f => { f.events = []; },
+  ];
+  for (const mutate of mutations) {
+    const broken = fixture('wrapped-leftover');
+    mutate(broken);
+    assert.throws(() => evaluateDelivery(broken.observation, broken.events));
+  }
+});
+
 test('missing evidence evaluates every case and never produces a false green', () => {
   const result = evaluateEvidence(path.join(root, 'tools/verify-chat-delivery/nonexistent-evidence'));
   assert.equal(result.status, 'failed');
@@ -150,11 +176,41 @@ test('missing evidence evaluates every case and never produces a false green', (
   assert.equal(result.agentBoundary, agentBoundary);
 });
 
+function claudeBox(boundary, steps) {
+  const script = String.raw`
+import ast, json, pathlib, sys, tempfile
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tree = ast.parse(source)
+names = ("BOX_WIDTH", "box_rows", "ctrl_u", "ctrl_k")
+selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names[1:] or isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "BOX_WIDTH" for target in node.targets)]
+namespace = {}
+exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
+cases = json.load(sys.stdin)
+print(json.dumps([namespace["ctrl_u"](case) for case in cases] + [namespace["ctrl_k"](text, cursor) for text, cursor in [["a\nb", 1], ["abcdef", 1], ["x" * 70, 10], ["x" * 70, 30], ["abc", 3]]]))
+`;
+  return JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { input: JSON.stringify(steps), encoding: 'utf8', timeout: 60000 }));
+}
+
+test('fake Claude box applies Ctrl+U by wrapped screen row and by trailing line break', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const line = leftover;
+  assert.ok(line.length > 60 && line.length < 90);
+  assert.deepEqual(claudeBox(boundary, [line + '\n', line, line.slice(0, 60), line.slice(0, 30), 'a\nb', 'a\n', '']), [line, line.slice(0, 60), line.slice(0, 30), '', 'a\n', 'a', '', 'ab', 'a', 'x'.repeat(10) + 'x'.repeat(40), 'x'.repeat(30) + 'x'.repeat(10), 'abc']);
+  const boundarySource = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(boundarySource, /if "leftover" in state\(\):\s+return box_send\(\)/);
+  assert.match(boundarySource, /record\("agent-buffer.jsonl", argv=ARGS, submitted=submitted, box=buffer\)/);
+  assert.match(boundarySource, /submitted = buffer if buffer.strip\(\) else None\s+buffer = ""/);
+  assert.match(boundarySource, /if "leftover" in value:\s+rows = box_rows\(/);
+  assert.match(boundarySource, /"  " \+ row \+ "\\n"/);
+  assert.match(drive, /name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'/);
+  assert.match(drive, /if \(\$plan.ContainsKey\('leftover'\)\) \{ \$seed.leftover = \$plan.leftover/);
+});
+
 test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux writes without fabricating text', () => {
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
   assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
-  assert.match(boundary, /if ARGS\[:1\] == \["send-keys"\]:\s+record\("agent-buffer.jsonl", argv=ARGS\)/);
+  assert.match(boundary, /if ARGS\[:1\] == \["send-keys"\]:\s+if "leftover" in state\(\):\s+return box_send\(\)\s+record\("agent-buffer.jsonl", argv=ARGS\)/);
   assert.match(boundary, /if ARGS\[:1\] == \["capture-pane"\]/);
   assert.match(boundary, /esc to interrupt/);
   assert.match(boundary, /\\u276f/);
@@ -399,13 +455,16 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     const { observation, events } = fixture(name);
     observation.mode = name === 'idle-suggestion' ? 'idle' : 'busy';
     observation.suggestion = 'Try the next step';
+    const wrapped = name === 'wrapped-leftover';
+    if (wrapped) observation.leftover = leftover;
     put(`${name}/observation.json`, observation);
     log(`${name}/stand-in/agent-buffer.jsonl`, events);
-    put(`${name}/stand-in/state.json`, { name, mode: observation.mode, suggestion: observation.suggestion });
-    const shown = `Claude Code\n\n${observation.mode === 'busy' ? 'Working... (esc to interrupt)' : 'Ready'}\n\n❯ ${observation.mode === 'idle' ? observation.suggestion : ''}\n${'─'.repeat(50)}\n`;
+    put(`${name}/stand-in/state.json`, { name, mode: observation.mode, suggestion: observation.suggestion, ...(wrapped ? { leftover } : {}) });
+    const prompt = wrapped ? `${leftover.slice(0, 30)}\n  ${leftover.slice(30, 60)}\n  ${leftover.slice(60)}\n  ` : observation.mode === 'idle' ? observation.suggestion : '';
+    const shown = `Claude Code\n\n${observation.mode === 'busy' ? 'Working... (esc to interrupt)' : 'Ready'}\n\n❯ ${prompt}\n${'─'.repeat(50)}\n`;
     put(`${name}/stand-in/ready.json`, { screen: shown });
     log(`${name}/stand-in/console.jsonl`, [{ screen: shown, session: 'verify-agent', rows: shown.trimEnd().split('\n').map(line => line.trimEnd()), greySuggestion: observation.mode === 'idle', suggestionAttribute: observation.mode === 'idle' ? 8 : 7 }]);
-    log(`${name}/stand-in/capture.jsonl`, [{ case: name, screen: shown }]);
+    log(`${name}/stand-in/capture.jsonl`, [{ case: name, screen: shown }, ...(wrapped ? [{ case: name, screen: `Claude Code\n\nWorking... (esc to interrupt)\n\n❯ \n${'─'.repeat(50)}\n` }] : [])]);
     log(`${name}/stand-in/invocations.jsonl`, [
       { kind: 'attach', session: 'verify-agent' },
       { kind: 'reader', argv: ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))', '--serve'] },
@@ -439,6 +498,8 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     () => files.set(path.join(base, 'busy-send-after.png'), Buffer.alloc(15000)),
     () => put('actions.json', actions.filter(row => row.input !== 'Ctrl+S: steer send')),
     () => log('busy-send/stand-in/unsupported.jsonl', [{ operation: 'ignored' }]),
+    () => log('wrapped-leftover/stand-in/agent-buffer.jsonl', fixture('wrapped-leftover').events.map(event => ({ ...event, submitted: event.submitted && leftover.slice(0, 30) + event.submitted }))),
+    () => log('wrapped-leftover/stand-in/capture.jsonl', [{ case: 'wrapped-leftover', screen: '❯ unseeded' }]),
     () => log('idle-suggestion/stand-in/console.jsonl', [{ screen: '❯ without suggestion', session: 'verify-agent', greySuggestion: true }]),
   ];
   for (const mutate of mutations) {
@@ -448,7 +509,7 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     mutate();
     const result = evaluateEvidence(base);
     assert.equal(result.status, 'failed');
-    assert.equal(result.cases.length, 3);
+    assert.equal(result.cases.length, names.length);
     assert.equal(result.cases.filter(row => !row.passed).length, 1);
   }
 });

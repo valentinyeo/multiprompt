@@ -20,7 +20,8 @@ Add-Type -Path "$PSScriptRoot/job.cs"
 $plans = @(
     @{name='busy-send'; mode='busy'; text='busy delivery alpha'},
     @{name='idle-suggestion'; mode='idle'; text='idle delivery beta'},
-    @{name='steer-chord'; mode='busy'; text='steer delivery gamma'}
+    @{name='steer-chord'; mode='busy'; text='steer delivery gamma'},
+    @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
 )
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -94,7 +95,9 @@ foreach ($plan in $plans) {
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
-        Save @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion} "$state/state.json"
+        $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
+        if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
+        Save $seed "$state/state.json"
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"

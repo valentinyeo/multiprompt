@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const names = ['busy-send', 'idle-suggestion', 'steer-chord'];
+const names = ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover'];
 const agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server';
 
 function evaluateDelivery(observation, events) {
@@ -11,12 +11,20 @@ function evaluateDelivery(observation, events) {
   assert.equal(observation.composerText, observation.text, 'real composer text');
   assert.ok(Number.isSafeInteger(observation.actionMs) && observation.actionMs > 0);
   assert.ok(observation.endMs >= observation.actionMs + 15000, 'full observation window');
-  const expected = [
-    ['send-keys', '-t', '=verify-agent:', '-l', '--', observation.text],
-    ['send-keys', '-t', '=verify-agent:', 'Enter'],
-  ];
-  if (observation.name === 'steer-chord') expected.push(['send-keys', '-t', '=verify-agent:', 'C-x', 'C-s']);
-  assert.deepEqual(events.map(event => event.argv), expected, 'exact text, Enter and optional trailing native steer chord, with no extras');
+  const wrapped = observation.name === 'wrapped-leftover';
+  if (wrapped) {
+    assert.ok(events.length > 0, 'box keys reached fake tmux');
+    assert.ok(events.every(event => event.argv[0] === 'send-keys' && Object.hasOwn(event, 'submitted')), 'stateful box rows');
+    const submitted = events.filter(event => event.submitted !== null).map(event => event.submitted);
+    assert.deepEqual(submitted, [observation.text], 'exactly one submission equal to the typed composer text, no leftover glued in');
+  } else {
+    const expected = [
+      ['send-keys', '-t', '=verify-agent:', '-l', '--', observation.text],
+      ['send-keys', '-t', '=verify-agent:', 'Enter'],
+    ];
+    if (observation.name === 'steer-chord') expected.push(['send-keys', '-t', '=verify-agent:', 'C-x', 'C-s']);
+    assert.deepEqual(events.map(event => event.argv), expected, 'exact text, Enter and optional trailing native steer chord, with no extras');
+  }
   let previous = observation.actionMs;
   for (const event of events) {
     assert.equal(event.case, observation.name);
@@ -45,11 +53,17 @@ function evaluateEvidence(root) {
       assert.equal(state.name, name);
       assert.equal(state.mode, name === 'idle-suggestion' ? 'idle' : 'busy');
       assert.equal(state.suggestion, observation.suggestion);
+      assert.equal(state.leftover, name === 'wrapped-leftover' ? observation.leftover : undefined);
       const ready = json(`${name}/stand-in/ready.json`);
       const consoles = lines(`${name}/stand-in/console.jsonl`);
       assert.ok(consoles.length > 0);
       assert.ok(consoles.every(row => row.screen === ready.screen && row.session === 'verify-agent'));
       assert.ok(consoles.every(row => JSON.stringify(row.rows) === JSON.stringify(ready.screen.trimEnd().split('\n').map(line => line.trimEnd()))), 'actual console character readback');
+      if (name === 'wrapped-leftover') {
+        assert.ok(state.leftover.length > 60 && state.leftover.length < 90 && !state.leftover.includes('\n'), 'single long line wrapping into three rows');
+        const rows = [0, 30, 60].map(start => state.leftover.slice(start, start + 30));
+        assert.ok(ready.screen.includes(`\u276f ${rows[0]}\n  ${rows[1]}\n  ${rows[2]}\n  \n\u2500`), 'leftover wrapped into three rows plus trailing line break');
+      }
       if (state.mode === 'busy') assert.match(ready.screen, /esc to interrupt/);
       else {
         assert.ok(state.suggestion.length > 0 && !observation.text.includes(state.suggestion));
@@ -59,7 +73,10 @@ function evaluateEvidence(root) {
       }
       const captures = lines(`${name}/stand-in/capture.jsonl`);
       assert.ok(captures.length > 0, 'production reader inspected fake tmux screen');
-      assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
+      if (name === 'wrapped-leftover') {
+        assert.equal(captures[0].screen, ready.screen, 'first capture is the seeded leftover box');
+        assert.ok(captures.every(row => row.case === name && row.screen.startsWith('Claude Code\n\n') && /\n\u276f [^\n]*\n(?:  [^\n]*\n)*\u2500+\n$/.test(row.screen)), 'captures render the stateful box like Claude');
+      } else assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
       const invocations = lines(`${name}/stand-in/invocations.jsonl`);
       assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
       assert.ok(invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === "python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline())) --serve"), 'app-supplied persistent reader bootstrap');
