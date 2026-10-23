@@ -27,7 +27,7 @@ const SWP_SHOWWINDOW: u32 = 0x0040;
 const SWP_HIDEWINDOW: u32 = 0x0080;
 const MAX_LWS: u8 = 16;
 const BROWSER_SPLIT_DEFAULT_PERMILLE: u16 = 350;
-const Shell = struct { last_used: u64 = 0, input: u64 = 0, synced_input: u64 = 0, input_publish_pending: bool = false, visits: frequent.Visits = .{}, shell_id: u32 = 1, workspace: u8 = 0, inbox_excluded: bool = false };
+const Shell = struct { last_used: u64 = 0, input: u64 = 0, synced_input: u64 = 0, input_publish_pending: bool = false, visits: frequent.Visits = .{}, shell_id: u32 = 1, workspace: u8 = 0, inbox_excluded: bool = false, muted: bool = false };
 var active_shell: u32 = 0;
 var g_single_window = false;
 var g_active_workspace: u8 = 0;
