@@ -87,10 +87,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Publish plain versioned update notes
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
-          (cd dist && sha256sum *.exe *.zip > SHA256SUMS.txt)
+          (cd dist && sha256sum *.exe *.zip release-notes.json > SHA256SUMS.txt)
       - name: Sign checksum manifest
         env:
           MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}

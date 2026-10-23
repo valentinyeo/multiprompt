@@ -10,6 +10,25 @@ const versionLine = /^pub const APP_VERSION = "(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = 'pub const CHANGELOG = [_]ChangelogEntry{';
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
 
+export function plainChange(line) {
+  return !!line.trim() && !(/[A-Z]+-\d+|[\/\\`]|#\d+|\b(?:PR|pull request)\s*#?\s*\d+|\b[\w-]+\.[a-zA-Z][\w.-]*|[\x00-\x1f\x7f]/i.test(line));
+}
+
+export function fragmentLines(file, text) {
+  if (!/^changelog\.d\/[A-Z][A-Z0-9]*-\d+-[^/]+\.md$/.test(file)) throw new Error(`Bad fragment filename: ${file}`);
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
+  if (lines.some(line => !plainChange(line))) throw new Error(`${file}: write plain product lines without ticket ids, file names, paths or PR numbers`);
+  return lines;
+}
+
+export function checkFragments(base, head, changed) {
+  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) fragmentLines(file, head[file]);
+  if (changed.some(file => file.startsWith('src/')) && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');
+  }
+}
+
 export function stampTree(files) {
   const removed = Object.keys(files).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md').sort();
   if (!removed.length) return null;
@@ -22,8 +41,7 @@ export function stampTree(files) {
   for (const file of removed) {
     const match = /^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-([^/]+)\.md$/.exec(file);
     if (!match) throw new Error(`Bad fragment filename: ${file}`);
-    const lines = files[file].split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-    if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
+    const lines = fragmentLines(file, files[file]);
     if (!tickets.includes(match[1])) tickets.push(match[1]);
     bullets.push(...lines.map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
   }
@@ -72,6 +90,7 @@ function check(baseRev, headRev) {
     console.error(diff.split(/\r?\n/).filter(line => /^[+-](?![+-])/.test(line) && (/\bAPP_VERSION\s*=/.test(line) || /\.ver = /.test(line))).join('\n'));
     console.error(fixHint);
   }
+  if (kind === 'CODE') checkFragments(base, head, changed);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;

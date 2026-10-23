@@ -46,7 +46,7 @@ function Invoke-WebRequest {
 $Root = [IO.Path]::GetFullPath($Root)
 $Verifier = (Resolve-Path $Verifier).Path
 $original = @{}
-foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'IGSH_246', 'MULTIPROMPT_TEST_VERIFIER')) { $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'IGSH_246', 'MULTIPROMPT_TEST_VERIFIER', 'ZIGSHELL_DEBUG')) { $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 $target = Join-Path $Root 'app.exe'
 $dir = "$target.update"
 $checks = New-Object System.Collections.ArrayList
@@ -93,6 +93,61 @@ try {
             $event.Dispose()
         }
         Assert ($timer.Elapsed.TotalSeconds -lt 20) 'Sign-in launch was blocked'
+        if ($Evidence) {
+            $cardExe = Join-Path $Root 'card.exe'
+            Copy-Item -LiteralPath $Verifier -Destination $cardExe -Force
+            Select-Release 'v9.10.0'
+            Assert (Save-Update $cardExe '0.0.0' 'x64') 'Card notes fixture was not staged'
+            $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::Unicode.GetBytes($cardExe.ToLowerInvariant())))).Replace('-', '')
+            $cardMutex = New-Object Threading.Mutex($false, $mutexName)
+            $null = $cardMutex.WaitOne()
+            $cardEventName = 'Local\MultipromptCard-' + [guid]::NewGuid().ToString('N')
+            $cardEvent = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $cardEventName)
+            $cardProcess = $null
+            $log = Join-Path $env:APPDATA 'ZigShell/debug.log'
+            Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            $env:MULTIPROMPT_NO_LOGIN = '1'
+            $env:ZIGSHELL_DEBUG = '1'
+            try {
+                $cardProcess = Start-Process $cardExe -ArgumentList "--name Update --update-ready $cardEventName" -PassThru
+                Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
+                $deadline = [DateTime]::UtcNow.AddSeconds(30)
+                do {
+                    $cardLog = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
+                    if ($cardLog -match '\[update\] card remaining=\+2 more') { break }
+                    Assert (-not $cardProcess.HasExited) 'Card fixture exited before painting notes'
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not paint release notes' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                Assert ($cardLog -match '\[update\] card notes n=5 first=Typing feels faster\.') 'Card did not show five newest notes'
+                $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Tabs open sooner.', 'Middle change.', 'Another middle change.')
+                $observedNotes = @()
+                for ($i = 0; $i -lt $expectedNotes.Count; $i++) {
+                    $note = [regex]::Match($cardLog, '\[update\] card note ' + $i + '=([^\r\n]*)')
+                    Assert ($note.Success -and $note.Groups[1].Value -ceq $expectedNotes[$i]) 'Card note order or version range is wrong'
+                    $observedNotes += $note.Groups[1].Value
+                }
+                Assert ($cardLog -notmatch '\[update\] card note \d+=.*(IGSH-123|src/main|Not offered yet|Already installed)') 'Card leaked an internal or out-of-range note'
+                $cardProcess.Refresh()
+                $rectangle = New-Object UpdateProof+Rect
+                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
+                $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
+                Passed 'update card shows aggregated plain notes'
+            } finally {
+                if ($cardProcess -and -not $cardProcess.HasExited) { $cardProcess.Kill(); $cardProcess.WaitForExit() }
+                $cardEvent.Dispose()
+                $cardMutex.ReleaseMutex()
+                $cardMutex.Dispose()
+                $env:MULTIPROMPT_NO_LOGIN = ''
+                $env:ZIGSHELL_DEBUG = ''
+            }
+        }
+
         $env:IGSH_246 = '0'
         Select-Release 'v1.10.0'
         $cold = Join-Path $Root 'cold.exe'
@@ -127,6 +182,11 @@ try {
         Assert-Manifest $target $dir
         Assert (Save-Update $target '1.9.0' 'x64') 'Valid manifest signature did not stage an update'
         Passed 'valid signature accepted'
+        Assert (Test-Path "$dir/release-notes.json") 'Verified release notes were not staged'
+        [IO.File]::AppendAllText("$dir/release-notes.json", 'tampered')
+        Refuses { Assert-Update "$dir/release-notes.json" "$dir/SHA256SUMS.txt" 'release-notes.json' $target } 'Tampered notes accepted'
+        Assert (Save-Update $target '1.9.0' 'x64') 'Could not restage verified notes'
+        Passed 'release notes checksum verified'
         Copy-Item "$script:releaseFolder/wrong.sig" "$dir/SHA256SUMS.txt.sig" -Force
         Refuses { Assert-Manifest $target $dir } 'Wrong signing key accepted'
         $script:manifestFault = 'wrong'

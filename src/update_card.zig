@@ -112,16 +112,24 @@ pub fn updateCardVisible() bool {
     return !std.mem.eql(u8, cur, app_state.g_update_dismissed[0..app_state.g_update_dismissed_len]);
 }
 
+var card_notes: @import("update_notes.zig").Notes = .{};
+var card_notes_logged = false;
+
+fn updateCardHeight() i32 {
+    const rows = card_notes.count + @intFromBool(card_notes.total > card_notes.count);
+    return uiScaled(UPDATE_CARD_H) + @as(i32, @intCast(rows)) * uiScaled(18);
+}
+
 pub fn updateCardSpan() i32 {
     if (!updateCardVisible()) return 0;
-    return uiScaled(UPDATE_CARD_H) + @import("window_layout.zig").paneGap();
+    return updateCardHeight() + @import("window_layout.zig").paneGap();
 }
 
 pub fn updateCardRect() RECT {
     const sticky = sidebarStickyCardRect();
     return .{
         .left = sticky.left,
-        .top = sticky.top - @import("window_layout.zig").paneGap() - uiScaled(UPDATE_CARD_H),
+        .top = sticky.top - @import("window_layout.zig").paneGap() - updateCardHeight(),
         .right = sticky.right,
         .bottom = sticky.top - @import("window_layout.zig").paneGap(),
     };
@@ -153,6 +161,10 @@ var restart_after_download = false;
 
 pub fn updateCardPoll() void {
     if (update_release.poll()) |version| {
+        if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
+            card_notes = update_release.cardNotes(version);
+            card_notes_logged = false;
+        }
         release_ready = true;
         @memcpy(app_state.g_update_ver[0..version.len], version);
         app_state.g_update_ver_len = version.len;
@@ -186,6 +198,8 @@ pub fn updateCardPoll() void {
     };
     app_state.g_update_attempt_stamp = stamp;
     if (!update_check.versionDiffers(APP_VERSION, found)) return;
+    card_notes = update_release.cardNotes(found);
+    card_notes_logged = false;
     @memcpy(app_state.g_update_ver[0..found.len], found);
     app_state.g_update_ver_len = found.len;
     debugLog2("update-card: new version ready ", found);
@@ -269,6 +283,27 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     var close_rc = updateCardCloseRect(card);
     _ = SetTextColor(hdc, if (app_state.g_update_hover == 2) bright else dim);
     drawAscii(hdc, "x", &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+
+    _ = SetTextColor(hdc, dim);
+    for (0..card_notes.count) |i| {
+        var note_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46) + @as(i32, @intCast(i)) * uiScaled(18), .right = card.right - uiScaled(10), .bottom = card.top + uiScaled(46) + @as(i32, @intCast(i + 1)) * uiScaled(18) };
+        var wide: [512]u16 = undefined;
+        const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
+        _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(n), &note_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    if (card_notes.total > card_notes.count) {
+        var more_buf: [32]u8 = undefined;
+        var more_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46) + @as(i32, @intCast(card_notes.count)) * uiScaled(18), .right = card.right - uiScaled(10), .bottom = card.bottom - uiScaled(26) };
+        drawAscii(hdc, card_notes.more(&more_buf), &more_rc, DT_SINGLELINE | DT_NOPREFIX);
+    }
+    if (!card_notes_logged) {
+        card_notes_logged = true;
+        var log_buf: [640]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] card notes n={d} first={s}", .{ card_notes.count, if (card_notes.count > 0) card_notes.line(0) else "" }) catch "[update] card notes unavailable");
+        for (0..card_notes.count) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
+        var more_buf: [32]u8 = undefined;
+        debugLog2("[update] card remaining=", card_notes.more(&more_buf));
+    }
 
     const btn = updateCardButtonRect(card);
     const btn_color: DWORD = if (app_state.g_update_hover == 1) lightenColor(accent, 28) else accent;

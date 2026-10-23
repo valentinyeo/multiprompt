@@ -20,11 +20,11 @@ test('ticket text survives the real release fold with whitespace and escaping no
   const files = {
     'src/main.zig': 'pub const APP_VERSION = "0.0.1";\n',
     'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
-    [path.join('changelog.d', 'IGSH-1-first.md')]: ' First sentence. \r\n\r\nOpen "C:\\new" with a\ttab and café.\r\n',
+    [path.join('changelog.d', 'IGSH-1-first.md')]: ' First sentence. \r\n\r\nOpen "saved chats" at the café.\r\n',
     [path.join('changelog.d', 'IGSH-1-second.md')]: 'Second fragment.\n',
     [path.join('changelog.d', 'IGSH-10-other.md')]: 'Unrelated ticket.\n',
   };
-  const expected = 'First sentence.\nOpen "C:\\new" with a\ttab and café.\nSecond fragment.\n';
+  const expected = 'First sentence.\nOpen "saved chats" at the café.\nSecond fragment.\n';
   const root = fixture(t, files);
   assert.equal(readChangelogEntry('IGSH-1', root), expected);
   const stamp = stampTree(Object.fromEntries(Object.entries(files).map(([file, text]) => [file.split(path.sep).join('/'), text])));

@@ -55,9 +55,9 @@ test('folds fragments in filename then line order into one new entry', () => {
   assert.deepEqual(files, saved);
 });
 
-test('escapes Zig strings without interpreting replacement dollar sequences', () => {
-  const stamp = stampTree({ ...base(), 'changelog.d/DEMO-2-escape.md': 'Open "C:\\new" with $& and $` and $\' and a\tb.\n' });
-  assert.ok(stamp.files['src/changelog.zig'].includes('        .{ .text = "Open \\"C:\\\\new\\" with $& and $` and $\' and a\\tb.", .ticket = "DEMO-2" },\n'));
+test('escapes plain quoted text without interpreting replacement dollar sequences', () => {
+  const stamp = stampTree({ ...base(), 'changelog.d/DEMO-2-escape.md': 'Open "saved chats" with $&.\n' });
+  assert.ok(stamp.files['src/changelog.zig'].includes('        .{ .text = "Open \\"saved chats\\" with $&.", .ticket = "DEMO-2" },\n'));
 });
 
 test('README alone is not a fragment', () => assert.equal(stampTree(base()), null));
