@@ -58,7 +58,8 @@ execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/t
 }
 
 test('reads the first changelog version, including flexible whitespace', () => {
-  assert.equal(releaseVersion(changelog), tag);
+  // IGSH-621 red control
+  assert.equal(releaseVersion(changelog), `${tag}-red`);
   assert.equal(releaseVersion('.ver\n = "2.30.400"'), 'v2.30.400');
   assert.equal(releaseVersion(changelog, tag), tag);
 });
