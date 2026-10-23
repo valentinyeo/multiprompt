@@ -428,9 +428,9 @@ jobs:
         working-directory: service
         timeout-minutes: 2
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
-      - name: Run account Worker tests
+      - name: Run account Worker tests and deterministic server removal journey
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js tools/account-host-removal.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})

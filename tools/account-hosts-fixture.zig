@@ -7,7 +7,7 @@ const DWORD = u32;
 const SSH_TARGET_DE = "remote-1";
 const SSH_TARGET_UK = "remote-2";
 const SSH_TARGET_INNE = "remote-3";
-const AccountJob = struct { kind: enum { startup, login, pull, push }, base: ?[]u8 = null, edited: ?[]u8 = null };
+const AccountJob = struct { kind: enum { startup, login, pull, push, remove_host }, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null };
 const LayoutReply = struct { bytes: ?[]u8 = null, unauthorized: bool = false };
 const initial_host = account_hosts.Host{ .slot = 0, .name = "Host 1", .hostname = "old.example", .port = 22, .user = "owner" };
 const initial_config = "Host remote-1\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\n  IdentityFile ~/.ssh/local_key\r\n  ProxyCommand custom-proxy %h\r\n  ForwardAgent no\r\nHost other\r\n  HostName untouched.example\r\n";
@@ -29,6 +29,8 @@ const Laptop = struct {
 };
 var laptop_under_test: *Laptop = undefined;
 var server_host = initial_host;
+var server_removed: []const u8 = &.{};
+var ssh_appends: usize = 0;
 var revision: u64 = 1;
 var puts: usize = 0;
 var conflicts: usize = 0;
@@ -84,6 +86,7 @@ fn writeFileAtomicW(_: []const u8, bytes: []const u8) bool {
     return true;
 }
 fn accountAppendSshFile(_: []const u8, _: []const u8) !void {
+    ssh_appends += 1;
     return error.UnexpectedImport;
 }
 fn accountSshOutput(alloc: std.mem.Allocator, command: []const u8, _: u64) ![]const u8 {
@@ -125,6 +128,7 @@ const account_client = struct {
         status: u32,
         bytes: []u8,
         hosts_supported: bool = true,
+        removal_supported: bool = true,
         fn deinit(self: @This()) void {
             allocator.free(self.bytes);
         }
@@ -143,21 +147,26 @@ const account_client = struct {
             if (parsed.value.base_revision != revision) {
                 status = 409;
             } else {
-                const host = parsed.value.layout.hosts.?[0];
-                server_host = host;
-                server_host.name = try allocator.dupe(u8, host.name);
-                server_host.hostname = try allocator.dupe(u8, host.hostname);
-                server_host.user = try allocator.dupe(u8, host.user);
-                if (host.host_keys) |keys| {
-                    const owned_keys = try allocator.alloc([]const u8, keys.len);
-                    for (keys, owned_keys) |key, *owned| owned.* = try allocator.dupe(u8, key);
-                    server_host.host_keys = owned_keys;
+                server_removed = try account_hosts.mergeRemoved(allocator, server_removed, parsed.value.layout.removed_hosts orelse &.{});
+                if (parsed.value.layout.hosts) |hosts| {
+                    if (hosts.len > 0) {
+                        const host = hosts[0];
+                        server_host = host;
+                        server_host.name = try allocator.dupe(u8, host.name);
+                        server_host.hostname = try allocator.dupe(u8, host.hostname);
+                        server_host.user = try allocator.dupe(u8, host.user);
+                        if (host.host_keys) |keys| {
+                            const owned_keys = try allocator.alloc([]const u8, keys.len);
+                            for (keys, owned_keys) |key, *owned| owned.* = try allocator.dupe(u8, key);
+                            server_host.host_keys = owned_keys;
+                        }
+                    }
                 }
                 revision += 1;
                 puts += 1;
             }
         }
-        const layout = session_layout.Layout{ .revision = revision, .hosts = &.{server_host}, .workspaces = &.{}, .tabs = &.{} };
+        const layout = session_layout.Layout{ .revision = revision, .hosts = try account_hosts.withoutRemoved(allocator, &.{server_host}, server_removed), .removed_hosts = if (server_removed.len > 0) server_removed else null, .workspaces = &.{}, .tabs = &.{} };
         return .{ .status = status, .bytes = try std.json.Stringify.valueAlloc(allocator, .{ .layout = layout }, .{ .emit_null_optional_fields = false }) };
     }
 };
@@ -167,11 +176,13 @@ fn sync(laptop: *Laptop, kind: @FieldType(AccountJob, "kind")) !void {
     defer laptop.cache = g_account_hosts_cache;
     var reply: LayoutReply = .{};
     defer if (reply.bytes) |bytes| allocator.free(bytes);
-    try accountRequest(.{ .kind = kind }, &reply);
+    try accountRequest(.{ .kind = kind, .slot = if (kind == .remove_host) server_host.slot else null }, &reply);
 }
 fn reset() void {
     g_account_hosts_cache = .{};
     server_host = initial_host;
+    server_removed = &.{};
+    ssh_appends = 0;
     revision = 1;
     puts = 0;
     conflicts = 0;
@@ -299,16 +310,49 @@ test "ISSUE-252 conflict retry rebases latest remote fields and restart retains 
 pub fn main(init: std.process.Init) !void {
     const alloc = init.arena.allocator();
     const args = try init.minimal.args.toSlice(alloc);
-    const Input = struct { local: account_hosts.Host, base: ?[]const account_hosts.Host = null, remote: account_hosts.Host, config: []const u8, fail_resolve: bool = false };
+    const Input = struct { local: account_hosts.Host, base: ?[]const account_hosts.Host = null, remote: account_hosts.Host, config: []const u8, fail_resolve: bool = false, removed_hosts: ?[]const u8 = null, removal_journey: bool = false };
     const input = try std.json.parseFromSlice(Input, alloc, args[1], .{});
     var laptop: Laptop = .{ .config = input.value.config, .fail_resolve = input.value.fail_resolve };
     if (input.value.base) |base| laptop.base = try std.json.Stringify.valueAlloc(alloc, base, .{});
     reset();
     server_host = input.value.remote;
+    server_removed = input.value.removed_hosts orelse &.{};
+    if (input.value.removal_journey) {
+        var cache_arena = std.heap.ArenaAllocator.init(allocator);
+        laptop.cache = .{ .arena = cache_arena, .hosts = try cache_arena.allocator().dupe(account_hosts.Host, &.{input.value.local}), .refreshed_at = 1000 };
+        laptop.base = try std.json.Stringify.valueAlloc(alloc, &.{input.value.local}, .{});
+        try sync(&laptop, .pull);
+        try sync(&laptop, .pull);
+        if (laptop.cache.arena) |*old| old.deinit();
+        laptop.cache = .{};
+    }
     try sync(&laptop, .startup);
-    const result = try std.json.Stringify.valueAlloc(alloc, .{ .host = server_host, .config = laptop.config, .base = laptop.base, .backup = laptop.backup, .backup_path = laptop.backup_path, .conflicts = conflicts, .puts = puts }, .{ .emit_null_optional_fields = true });
+    const removed_slots = try alloc.alloc(u16, server_removed.len);
+    for (server_removed, removed_slots) |slot, *out| out.* = slot;
+    const result = try std.json.Stringify.valueAlloc(alloc, .{ .host = server_host, .cache = laptop.cache.hosts, .removed_hosts = removed_slots, .ssh_appends = ssh_appends, .config = laptop.config, .base = laptop.base, .backup = laptop.backup, .backup_path = laptop.backup_path, .conflicts = conflicts, .puts = puts }, .{ .emit_null_optional_fields = true });
     var buffer: [4096]u8 = undefined;
     var output = std.Io.File.stdout().writerStreaming(init.io, &buffer);
     try output.interface.writeAll(result);
     try output.interface.flush();
+}
+
+test "IGSH-600 remove job preserves local SSH config through sync twice and restart" {
+    reset();
+    server_host.slot = 2;
+    server_host.name = "Remote host 3";
+    var laptop: Laptop = .{ .config = "Host remote-3\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\nHost personal\r\n  HostName untouched.example\r\n" };
+    const original = laptop.config;
+    try sync(&laptop, .startup);
+    try sync(&laptop, .remove_host);
+    try std.testing.expectEqualSlices(u8, &.{2}, server_removed);
+    try sync(&laptop, .pull);
+    try sync(&laptop, .pull);
+    if (laptop.cache.arena) |*old| old.deinit();
+    laptop.cache = .{};
+    try sync(&laptop, .startup);
+    try std.testing.expectEqual(@as(usize, 0), laptop.cache.hosts.len);
+    try std.testing.expectEqualStrings("[]", laptop.base.?);
+    try std.testing.expectEqualStrings(original, laptop.config);
+    try std.testing.expectEqual(@as(usize, 0), ssh_appends);
+    try std.testing.expectEqual(@as(usize, 1), puts);
 }

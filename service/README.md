@@ -101,3 +101,5 @@ beta, alpha, gamma (bottom). `src/fixtures/issue-415-frequent.json` is identical
 
 Clients send the `hosts` feature token to share up to three server addresses, users, ports and public host keys, never private keys or identity files.
 Hosts are hidden from older clients, whose saves preserve them; host-aware saves replace only the server slots they send.
+
+Clients advertising `host_removal` may send optional `removed_hosts`, a unique array of slot integers 0 through 2 (at most three). These permanent slot tombstones are unioned with stored removals and saved in sorted order; empty arrays are omitted. Every save filters removed slots, including stale uploads from older clients. GET, PUT and conflict replies expose tombstones only to clients advertising `host_removal`; older saves cannot erase them. Removing an account server does not remove local SSH configuration or sessions.

@@ -28,6 +28,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [Account servers](account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
+
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.

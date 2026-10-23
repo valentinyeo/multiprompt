@@ -192,6 +192,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K | Open command palette; it opens with your last 5 sessions |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock multiprompt |
 | Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
+| Ctrl+K -&gt; Account: Remove server 1 | Remove server 1 from your account on every device after confirmation |
+| Ctrl+K -&gt; Account: Remove server 2 | Remove server 2 from your account on every device after confirmation |
+| Ctrl+K -&gt; Account: Remove server 3 | Remove server 3 from your account on every device after confirmation |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+K -&gt; Sync: Pull Now | Reconcile server workspaces and synchronized tmux tabs |
 | Ctrl+Shift+K | Open command palette from any multiprompt surface, including browser |
