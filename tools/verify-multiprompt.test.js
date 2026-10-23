@@ -13,6 +13,106 @@ const bridge = read('src/browser_bridge.zig');
 const journey = control.slice(control.indexOf("        'session-open' {"), control.indexOf("        'inbox' {"));
 const transport = control.slice(control.indexOf('function Invoke-Zsb('), control.indexOf('function Select-Theme('));
 
+function evaluateConcurrencyGroup(template, context) {
+  return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
+    const source = expression.trim();
+    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|==|&&|\|\||[(),])/gy;
+    const tokens = [];
+    while (lexer.lastIndex < source.length) {
+      const token = lexer.exec(source);
+      assert.ok(token, `unsupported concurrency expression: ${source}`);
+      tokens.push(token[1]);
+    }
+    let position = 0;
+    const take = token => tokens[position] === token && (++position > 0);
+    const expect = token => assert.ok(take(token), `expected ${token}`);
+    function primary() {
+      const token = tokens[position++];
+      if (token === '(') {
+        const value = or();
+        expect(')');
+        return value;
+      }
+      if (token === 'format') {
+        expect('(');
+        const pattern = or();
+        const args = [];
+        while (take(',')) args.push(or());
+        expect(')');
+        return () => pattern().replace(/\{(\d+)\}/g, (_, index) => {
+          assert.ok(args[index], `missing format argument ${index}`);
+          return args[index]();
+        });
+      }
+      assert.ok(token, 'missing concurrency operand');
+      if (token.startsWith("'")) return () => token.slice(1, -1).replace(/''/g, "'");
+      assert.match(token, /^(github\.(workflow|ref|event_name)|inputs\.[a-z_]+)$/);
+      const [object, key] = token.split('.');
+      return () => context[object]?.[key] ?? '';
+    }
+    function equality() {
+      let left = primary();
+      while (take('==')) {
+        const previous = left, right = primary();
+        left = () => String(previous()).toLowerCase() === String(right()).toLowerCase();
+      }
+      return left;
+    }
+    function and() {
+      let left = equality();
+      while (take('&&')) {
+        const previous = left, right = equality();
+        left = () => previous() && right();
+      }
+      return left;
+    }
+    function or() {
+      let left = and();
+      while (take('||')) {
+        const previous = left, right = and();
+        left = () => previous() || right();
+      }
+      return left;
+    }
+    const evaluate = or();
+    assert.equal(position, tokens.length, 'unconsumed concurrency tokens');
+    return evaluate();
+  });
+}
+
+test('concurrency evaluator respects precedence, short-circuiting, format and string literals', () => {
+  const evaluate = expression => evaluateConcurrencyGroup('${{ ' + expression + ' }}', {});
+  assert.equal(evaluate("'a' == 'A' && format('{0}-{1}', 'it''s', 'ok') || 'wrong'"), "it's-ok");
+  assert.equal(evaluate("'kept' || '' && 'wrong'"), 'kept');
+  assert.equal(evaluate("'kept' || format('{0}')"), 'kept');
+  assert.equal(evaluate("'' && format('{0}') || 'fallback'"), 'fallback');
+  assert.throws(() => evaluate('unknown'), assert.AssertionError);
+  assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
+});
+
+test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
+  const concurrency = workflow.match(/^concurrency:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m);
+  assert.ok(concurrency, 'workflow concurrency block exists');
+  const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
+  assert.ok(group, 'workflow concurrency group exists');
+  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m);
+  const context = (event, feature, tag = '') => ({
+    github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event },
+    inputs: { feature, tag },
+  });
+  const dispatch = (feature, tag) => evaluateConcurrencyGroup(group[1], context('workflow_dispatch', feature, tag));
+  assert.notEqual(dispatch('chat-delivery'), dispatch('chat-sync-audit'), 'different dispatch features need different concurrency groups');
+  assert.equal(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery', 'v0.28.823'));
+  assert.notEqual(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery'));
+  for (const event of ['pull_request', 'push']) {
+    for (const inputs of [undefined, { feature: 'chat-delivery', tag: 'v0.28.823' }]) {
+      const current = context(event);
+      current.inputs = inputs;
+      assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}`);
+    }
+  }
+});
+
 function allowsSessionOpen(text) {
   assert.match(text, /\$env:FEATURE -notin @\([^\n)]*'session-open'[^\n)]*\)/);
 }
