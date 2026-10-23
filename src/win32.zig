@@ -699,6 +699,7 @@ pub extern "kernel32" fn SetCurrentConsoleFontEx(HANDLE, BOOL, *CONSOLE_FONT_INF
 pub extern "kernel32" fn FillConsoleOutputAttribute(HANDLE, WORD, DWORD, COORD, *DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn WriteConsoleInputW(HANDLE, [*]const INPUT_RECORD, DWORD, *DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn GlobalLock(HANDLE) callconv(WINAPI) ?*anyopaque;
+pub extern "kernel32" fn GlobalSize(HANDLE) callconv(WINAPI) usize;
 pub extern "kernel32" fn GlobalUnlock(HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn GlobalFree(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn OpenClipboard(HANDLE) callconv(WINAPI) BOOL;

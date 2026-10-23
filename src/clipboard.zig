@@ -1403,3 +1403,37 @@ pub fn copySelectionOrSendCtrlC(shell_index: u32) void {
         .failed => debugLog("copy: copy failed; not sending Ctrl+C because selection state was not clean"),
     }
 }
+
+test "hardening clipboard reads reject unterminated allocations and preserve text" {
+    const size_api = struct {
+        extern "kernel32" fn GlobalSize(HANDLE) callconv(@import("win32.zig").WINAPI) usize;
+    };
+    const data = GlobalAlloc(GMEM_MOVEABLE, 32) orelse return error.OutOfMemory;
+    defer _ = GlobalFree(data);
+    const size = size_api.GlobalSize(data);
+    try std.testing.expect(size >= 32);
+    const ptr = GlobalLock(data) orelse return error.LockFailed;
+    const bytes: [*]u8 = @ptrCast(ptr);
+    @memset(bytes[0..size], 'A');
+    _ = GlobalUnlock(data);
+    const out = try std.testing.allocator.alloc(u16, size / 2 + 1);
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqual(@as(?usize, null), copyUnicodeClipboardTextMaybe(data, out));
+    for ([_]UINT{ CP_ACP, CP_OEMCP }) |page| {
+        try std.testing.expectEqual(@as(?usize, null), copyAnsiClipboardTextMaybe(data, out, page));
+    }
+    const wide: [*]u16 = @ptrCast(@alignCast(GlobalLock(data) orelse return error.LockFailed));
+    @memcpy(wide[0..4], std.unicode.utf8ToUtf16LeStringLiteral("A测试\t"));
+    wide[4] = 0;
+    _ = GlobalUnlock(data);
+    try std.testing.expectEqual(@as(?usize, 4), copyUnicodeClipboardTextMaybe(data, out));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A测试\t"), out[0..4]);
+    const narrow: [*]u8 = @ptrCast(GlobalLock(data) orelse return error.LockFailed);
+    @memcpy(narrow[0..6], "hello\x00");
+    _ = GlobalUnlock(data);
+    for ([_]UINT{ CP_ACP, CP_OEMCP }) |page| {
+        try std.testing.expectEqual(@as(?usize, 5), copyAnsiClipboardTextMaybe(data, out, page));
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello"), out[0..5]);
+        try std.testing.expectEqual(@as(u16, 0), out[5]);
+    }
+}

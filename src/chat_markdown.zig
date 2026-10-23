@@ -256,6 +256,17 @@ pub fn cells(text: []const u16, out: []Range) usize {
 
 const InlineAtom = struct { span: Span, end: usize };
 
+threadlocal var inline_scan_units: usize = 0;
+
+fn inlineClosing(text: []const u16, start: usize, comptime c: u16) ?usize {
+    var pos = start;
+    while (pos < text.len) : (pos += 1) {
+        if (@import("builtin").is_test) inline_scan_units += 1;
+        if (text[pos] == c) return pos;
+    }
+    return null;
+}
+
 fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
     if (text[pos] == '`') {
         var content = pos + 1;
@@ -273,9 +284,9 @@ fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
         }
     }
     if (text[pos] == '[') {
-        if (std.mem.indexOfScalarPos(u16, text, pos + 1, ']')) |label_end| {
+        if (inlineClosing(text, pos + 1, ']')) |label_end| {
             if (label_end + 1 < text.len and text[label_end + 1] == '(') {
-                if (std.mem.indexOfScalarPos(u16, text, label_end + 2, ')')) |url_end| {
+                if (inlineClosing(text, label_end + 2, ')')) |url_end| {
                     const url = text[label_end + 2 .. url_end];
                     const http = std.unicode.utf8ToUtf16LeStringLiteral("http://");
                     const https = std.unicode.utf8ToUtf16LeStringLiteral("https://");
@@ -287,7 +298,7 @@ fn inlineAtom(text: []const u16, pos: usize) ?InlineAtom {
         }
     }
     if (text[pos] == '<') {
-        if (std.mem.indexOfScalarPos(u16, text, pos + 1, '>')) |end| {
+        if (inlineClosing(text, pos + 1, '>')) |end| {
             const url = text[pos + 1 .. end];
             if (link_detect.scheme(url)) {
                 for (url) |c| if (!link_detect.isUrlChar(c)) return null;
@@ -1334,4 +1345,48 @@ test "IGSH-376 inactive received tables retain independent scroll across refresh
     try std.testing.expectEqual(@as(u32, 1), cache.entries.count());
     cache.refreshReceived(a, &.{after}, &.{}, prefixed, &.{}, &received, null);
     try std.testing.expectEqual(@as(u32, 0), cache.entries.count());
+}
+
+test "hardening unfinished inline links scan linearly without changing spans" {
+    const a = std.testing.allocator;
+    const count = 4096;
+    const text = try a.alloc(u16, count * 2);
+    defer a.free(text);
+    const out = try a.alloc(Span, text.len);
+    defer a.free(out);
+    for ([_]u16{ '[', '<' }) |opener| {
+        for (0..count) |i| {
+            text[i * 2] = opener;
+            text[i * 2 + 1] = ' ';
+        }
+        inline_scan_units = 0;
+        const n = inlineSpans(text, out);
+        try std.testing.expect(inline_scan_units > 0);
+        try std.testing.expect(inline_scan_units <= text.len * 3);
+        try std.testing.expectEqual(if (opener == '[') @as(usize, count) else 1, n);
+        for (out[0..n], 0..) |span, i| {
+            try std.testing.expectEqualDeep(Span{ .text = .{ .start = if (opener == '[') i * 2 else 0, .end = if (opener == '[') i * 2 + 2 else text.len } }, span);
+        }
+    }
+    const repeated = std.unicode.utf8ToUtf16LeStringLiteral("[x](https://example.test ");
+    const links = try a.alloc(u16, repeated.len * count);
+    defer a.free(links);
+    const spans = try a.alloc(Span, links.len);
+    defer a.free(spans);
+    for (0..count) |i| @memcpy(links[i * repeated.len ..][0..repeated.len], repeated);
+    inline_scan_units = 0;
+    const n = inlineSpans(links, spans);
+    try std.testing.expect(inline_scan_units <= links.len * 3);
+    try std.testing.expectEqual(@as(usize, count * 3), n);
+    for (spans[0..n], 0..) |span, i| {
+        const start = i / 3 * repeated.len;
+        const split = start + 4;
+        const end = start + repeated.len - 1;
+        const span_start = if (i % 3 == 0) start else if (i % 3 == 1) split else end;
+        const span_end = if (i % 3 == 0) split else if (i % 3 == 1) end else end + 1;
+        try std.testing.expectEqualDeep(Span{
+            .text = .{ .start = span_start, .end = span_end },
+            .target = if (i % 3 == 1) Range{ .start = split, .end = end } else null,
+        }, span);
+    }
 }

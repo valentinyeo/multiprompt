@@ -1405,3 +1405,68 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
     publishInboxState();
     saveSession();
 }
+
+fn hardeningNotifyPort() !u16 {
+    if (listener_status.load(.acquire) == .pending) {
+        const thread = try std.Thread.spawn(.{}, notifyListenerThread, .{});
+        thread.detach();
+    }
+    const deadline = GetTickCount64() + 3000;
+    while (listener_status.load(.acquire) == .pending and GetTickCount64() < deadline) Sleep(1);
+    try std.testing.expectEqual(ListenerStatus.ready, listener_status.load(.acquire));
+    return app_state.g_notify_bound_port;
+}
+
+fn hardeningConnect(port: u16) !SOCKET {
+    const client = socket(AF_INET, SOCK_STREAM, 0);
+    if (client == INVALID_SOCKET) return error.SocketFailed;
+    errdefer _ = closesocket(client);
+    const timeout: u32 = 7000;
+    const win32 = @import("win32.zig");
+    try std.testing.expectEqual(@as(i32, 0), win32.setsockopt(client, win32.SOL_SOCKET, 0x1006, @ptrCast(&timeout), @sizeOf(u32)));
+    var addr = SOCKADDR_IN{ .sin_family = AF_INET, .sin_port = htons(port), .sin_addr = 0x0100007F, .sin_zero = @splat(0) };
+    try std.testing.expectEqual(@as(i32, 0), connect(client, &addr, @sizeOf(SOCKADDR_IN)));
+    return client;
+}
+
+test "hardening notify TCP does not return shell diagnostics" {
+    const client = try hardeningConnect(try hardeningNotifyPort());
+    defer _ = closesocket(client);
+    const request = "DIAG:all\n";
+    try std.testing.expectEqual(@as(i32, request.len), send(client, request.ptr, request.len, 0));
+    var response: [256]u8 = undefined;
+    try std.testing.expectEqual(@as(i32, 0), recv(client, &response, response.len, 0));
+    var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
+    var len: u32 = 0;
+    const deadline = GetTickCount64() + 1000;
+    while (len == 0 and GetTickCount64() < deadline) {
+        len = dequeueNotification(&payload);
+        if (len == 0) Sleep(1);
+    }
+    try std.testing.expectEqualStrings("DIAG:all", payload[0..len]);
+}
+
+test "hardening listeners close idle clients and serve the next request" {
+    const notify_port = try hardeningNotifyPort();
+    @import("browser_bridge.zig").startTunnelInboundListener();
+    try std.testing.expect(app_state.g_tunnel_inbound_port != 0);
+    for ([_]u16{ notify_port, app_state.g_tunnel_inbound_port }) |port| {
+        const idle = try hardeningConnect(port);
+        defer _ = closesocket(idle);
+        var response: [256]u8 = undefined;
+        try std.testing.expectEqual(@as(i32, 0), recv(idle, &response, response.len, 0));
+        const next = try hardeningConnect(port);
+        defer _ = closesocket(next);
+        const request = "ACTIVE:deadline-check\n";
+        try std.testing.expectEqual(@as(i32, request.len), send(next, request.ptr, request.len, 0));
+        try std.testing.expectEqual(@as(i32, 0), recv(next, &response, response.len, 0));
+        var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
+        var len: u32 = 0;
+        const deadline = GetTickCount64() + 1000;
+        while (len == 0 and GetTickCount64() < deadline) {
+            len = dequeueNotification(&payload);
+            if (len == 0) Sleep(1);
+        }
+        try std.testing.expectEqualStrings("ACTIVE:deadline-check", payload[0..len]);
+    }
+}
