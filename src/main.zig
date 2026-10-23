@@ -1176,6 +1176,7 @@ const anyShellHasEta = @import("notifications.zig").anyShellHasEta;
 const loadEtaAccuracy = @import("notifications.zig").loadEtaAccuracy;
 const publishInboxState = @import("inbox.zig").publishInboxState;
 const toggleInboxExcluded = @import("inbox.zig").toggleInboxExcluded;
+const toggleMuted = @import("inbox.zig").toggleMuted;
 const publishInboxStateNow = @import("inbox.zig").publishInboxStateNow;
 const deleteInboxStateFile = @import("inbox.zig").deleteInboxStateFile;
 const loadInboxModel = @import("inbox.zig").loadInboxModel;
@@ -5142,16 +5143,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_MUTETAB_OFFSET) {
-                    if (app_state.active_shell < app_state.shell_count) {
-                        app_state.shells[app_state.active_shell].muted = !app_state.shells[app_state.active_shell].muted;
-                        if (app_state.shells[app_state.active_shell].muted) {
-                            app_state.shells[app_state.active_shell].activity = .idle;
-                            app_state.shells[app_state.active_shell].needs_attention = false;
-                        }
-                        invalidateSidebar();
-                        publishInboxState();
-                        if (!app_state.g_restoring) saveSession();
-                    }
+                    toggleMuted(app_state.active_shell);
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -6152,14 +6144,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         } else if (target == SEARCH_TABCTX_INBOX_EXCLUDE) {
                             toggleInboxExcluded(ti);
                         } else if (target == SEARCH_TABCTX_MUTE) {
-                            app_state.shells[ti].muted = !app_state.shells[ti].muted;
-                            if (app_state.shells[ti].muted) {
-                                app_state.shells[ti].activity = .idle;
-                                app_state.shells[ti].needs_attention = false;
-                            }
-                            invalidateSidebar();
-                            publishInboxState();
-                            if (!app_state.g_restoring) saveSession();
+                            toggleMuted(ti);
                         } else if (target == SEARCH_TABCTX_KEEPALIVE) {
                             app_state.shells[ti].keep_alive = !app_state.shells[ti].keep_alive;
                             invalidateSidebar();

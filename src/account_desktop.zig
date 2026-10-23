@@ -195,6 +195,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .name = name,
             .manual = shell.name_source == .manual,
             .favorite = shell.favorite,
+            .muted = shell.muted,
             .used = if (shell.last_used != 0) shell.last_used else null,
             .input = if (shell.input != 0) shell.input else null,
             .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
@@ -1101,6 +1102,13 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             if (tab.favorite) |favorite| shell.favorite = favorite;
+            if (tab.muted) |muted| {
+                shell.muted = muted;
+                if (muted) {
+                    shell.activity = .idle;
+                    shell.needs_attention = false;
+                }
+            }
             if (tab.used) |used| shell.last_used = @max(shell.last_used, used);
             if (tab.input) |input| shell.input = @max(shell.input, input);
             shell.visits = @import("frequent.zig").Visits.merge(shell.visits.optional(), tab.visits);

@@ -12,6 +12,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
+    if (!layoutFeature(request, 'muted')) delete visible.muted;
     if (!layoutFeature(request, 'used')) delete visible.used;
     if (!layoutFeature(request, 'visits')) delete visible.visits;
     if (!layoutFeature(request, 'input')) delete visible.input;
@@ -21,7 +22,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts,host_removal');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal');
   return response;
 }
 export function validateLayout(x) {
@@ -51,7 +52,7 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'used', 'visits', 'input'].filter(key => Object.hasOwn(t || {}, key));
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input'].filter(key => Object.hasOwn(t || {}, key));
     if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
@@ -316,6 +317,10 @@ export default {
           if (!layoutFeature(request, 'favorite')) {
             if (typeof previous?.favorite === 'boolean') tab.favorite = previous.favorite;
             else delete tab.favorite;
+          }
+          if (!layoutFeature(request, 'muted')) {
+            if (typeof previous?.muted === 'boolean') tab.muted = previous.muted;
+            else delete tab.muted;
           }
           if (!layoutFeature(request, 'used')) {
             if (previous?.used !== undefined) tab.used = previous.used;

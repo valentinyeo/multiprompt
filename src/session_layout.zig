@@ -10,6 +10,7 @@ pub const Tab = struct {
     name: []const u8,
     manual: bool = false,
     favorite: ?bool = null,
+    muted: ?bool = null,
     used: ?u64 = null,
     input: ?u64 = null,
     visits: ?[]const u64 = null,
@@ -146,11 +147,13 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
         var found = false;
         for (tabs.items) |*old| if (sameTab(old.*, tab)) {
             const favorite = old.favorite;
+            const muted = old.muted;
             const used = old.used;
             const input = old.input;
             const visits = old.visits;
             old.* = tab;
             if (tab.favorite == null) old.favorite = favorite;
+            if (tab.muted == null) old.muted = muted;
             old.used = maxUsed(used, tab.used);
             old.input = maxUsed(input, tab.input);
             old.visits = try mergeVisits(a, visits, tab.visits);

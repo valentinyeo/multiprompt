@@ -224,7 +224,20 @@ pub fn stampSessionUse(idx: u32, throttled: bool) void {
 }
 
 pub fn inboxPublishesShell(shell: *const Shell) bool {
-    return !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
+    return !shell.muted and !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
+}
+
+pub fn toggleMuted(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    app_state.shells[idx].muted = !app_state.shells[idx].muted;
+    if (app_state.shells[idx].muted) {
+        app_state.shells[idx].activity = .idle;
+        app_state.shells[idx].needs_attention = false;
+    }
+    if (!app_state.g_restoring) saveSession();
+    publishInboxStateNow();
+    loadInboxModel();
+    invalidateSidebar();
 }
 
 pub fn toggleInboxExcluded(idx: u32) void {
@@ -755,7 +768,7 @@ test "used JSON field supports old and formatted session and inbox records" {
 pub fn inboxRowVisible(r: *const InboxRow) bool {
     if (r.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[r.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
         const idx = findShellById(r.sid) orelse return false;
-        if (app_state.shells[idx].inbox_excluded) return false;
+        if (app_state.shells[idx].inbox_excluded or app_state.shells[idx].muted) return false;
     }
     if (app_state.g_unread_only and !r.att) return false;
     if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
