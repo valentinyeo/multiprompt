@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.826", .items = &.{
+        .{ .text = "Removing a server from your account now keeps it removed on every device.", .ticket = "IGSH-600" },
+    } },
     .{ .ver = "0.28.825", .items = &.{
         .{ .text = "The browser pane opens at its normal size after a relaunch on a two-monitor setup.", .ticket = "IGSH-601" },
     } },
