@@ -196,6 +196,29 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
                 self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
 
+    def test_igsh662_text_before_running_advisor_is_not_missing_chat(self):
+        reader = audit.load_reader()
+        text = 'The neutral change is ready for an advisor review before the next step.'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            capture = '● ' + text + '\n\n● Advising using Claude Fable 5.1\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else ''.join(
+                    json.dumps(dict(probe=index, present=False)) + '\n' for index in range(argv.count('--contains')))
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit.time, 'sleep') as sleep:
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+                capture = '● ' + text + '\n\n● Read(src/main.zig)\n  ⎿  Read 20 lines\n' + '\n' * 8
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual(findings[0]['text'], text)
+                self.assertEqual(findings[0]['transcript_lines'], [])
+
     def test_settle_pending_drops_text_appended_during_wait(self):
         reader = audit.load_reader()
         text = 'The neutral assistant message is still being written'
