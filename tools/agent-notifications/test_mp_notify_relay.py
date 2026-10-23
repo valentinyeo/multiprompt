@@ -5,11 +5,12 @@ import json
 import os
 from pathlib import Path
 import socket
+import sys
 import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, mock_open, patch
 
 spec = importlib.util.spec_from_file_location("relay", Path(__file__).with_name("mp_notify_relay.py"))
 relay = importlib.util.module_from_spec(spec)
@@ -73,18 +74,72 @@ class Relay(unittest.TestCase):
     def send(self, data, response=False):
         left, right = socket.socketpair()
         thread = threading.Thread(target=relay.handle, args=(right, self.directory))
-        thread.start()
-        left.sendall(data)
-        if response:
-            left.settimeout(2)
-            result = left.recv(65536)
-        else:
-            left.shutdown(socket.SHUT_WR)
-            result = None
-        thread.join(2)
-        self.assertFalse(thread.is_alive())
+        with patch.object(relay, "caller_uid", return_value=os.getuid()):
+            thread.start()
+            left.sendall(data)
+            if response:
+                left.settimeout(2)
+                result = left.recv(65536)
+            else:
+                left.shutdown(socket.SHUT_WR)
+                result = None
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
         left.close()
         return result
+
+    def test_foreign_or_unknown_caller_is_not_read_or_forwarded(self):
+        for uid in (os.getuid() + 1, None, os.getuid()):
+            with self.subTest(uid=uid), socket.socket(socket.AF_UNIX) as laptop:
+                laptop.bind(str(self.directory / "laptop.sock"))
+                laptop.listen()
+                laptop.settimeout(0.1)
+                left, right = socket.socketpair()
+                with left:
+                    left.sendall(b"DONE:tab\n")
+                    with patch.object(relay, "caller_uid", return_value=uid), patch.object(relay, "read_message", wraps=relay.read_message) as read:
+                        relay.handle(right, self.directory)
+                        self.assertEqual(read.call_count, int(uid == os.getuid()))
+                if uid == os.getuid():
+                    accepted, _ = laptop.accept()
+                    with accepted:
+                        self.assertEqual(accepted.recv(65536), b"DONE:tab\n")
+                else:
+                    with self.assertRaises(socket.timeout):
+                        laptop.accept()
+                (self.directory / "laptop.sock").unlink()
+
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux /proc/net/tcp")
+    def test_caller_uid_finds_current_uid_for_loopback_connection(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.bind(("127.0.0.1", 0))
+            server.listen()
+            with socket.create_connection(server.getsockname()) as client:
+                accepted, _ = server.accept()
+                with accepted:
+                    self.assertEqual(relay.caller_uid(accepted), os.getuid())
+
+    def test_caller_uid_matches_caller_endpoints_in_tcp_and_mapped_tcp6(self):
+        client = Mock()
+        client.getpeername.return_value = ("127.0.0.1", 12345)
+        client.getsockname.return_value = ("127.0.0.1", 19548)
+        for prefix, path in (("", "/proc/net/tcp"), ("0000000000000000FFFF0000", "/proc/net/tcp6")):
+            with self.subTest(path=path):
+                host = prefix + "0100007F"
+                table = (f"0: {host}:4C5C {host}:3039 01 0:0 0:0 0 999\n"
+                         f"1: {host}:3039 {host}:4C5C 01 0:0 0:0 0 1234\n")
+                opener = mock_open(read_data=table)
+                with patch("builtins.open", opener):
+                    self.assertEqual(relay.caller_uid(client), 1234)
+                self.assertEqual(opener.call_args.args[0], path)
+
+    def test_caller_uid_is_unknown_when_proc_is_unreadable_or_missing(self):
+        client = Mock()
+        client.getpeername.return_value = ("127.0.0.1", 12345)
+        client.getsockname.return_value = ("127.0.0.1", 19548)
+        for opener in (mock_open(read_data=""), Mock(side_effect=PermissionError("denied"))):
+            with self.subTest(opener=opener), patch("builtins.open", opener):
+                self.assertIsNone(relay.caller_uid(client))
 
     def test_fanout_to_two_laptops(self):
         first = self.laptop("one")

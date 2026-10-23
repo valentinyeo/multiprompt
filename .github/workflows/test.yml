@@ -296,6 +296,9 @@ jobs:
         if: steps.paths.outputs.heavy == 'true'
         with:
           python-version: '3.12'
+      - name: Test notification relay
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v
       - name: Test release version
         if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
         run: node --test tools/release-version.test.mjs
