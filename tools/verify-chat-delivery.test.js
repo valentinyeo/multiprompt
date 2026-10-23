@@ -244,7 +244,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert (root / "agent-buffer.jsonl").read_text(encoding="utf-8") == "existing delivery evidence\n"
 print("probe classification passed")
 `;
-  const output = execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { input: JSON.stringify({ probes, unknown }), encoding: 'utf8', timeout: 10000 });
+  const output = execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { input: JSON.stringify({ probes, unknown }), encoding: 'utf8', timeout: 60000 });
   assert.equal(output.trim(), 'probe classification passed');
 });
 

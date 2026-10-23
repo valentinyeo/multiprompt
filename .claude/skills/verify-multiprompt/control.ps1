@@ -687,8 +687,8 @@ function Prepare-ScratchEvidence([string]$Path) {
     }
 }
 
-function Remove-ScratchPath([string]$Path) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     while (Test-Path -LiteralPath $Path) {
         try { Remove-Item $Path -Recurse -Force } catch {
@@ -1409,7 +1409,20 @@ try {
             Snapshot 'normal-close-after'
             $result.checks += @{ name = 'normal-close-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
             $result.checks += @{ name = 'starred-view-selection'; session = 'Restore middle'; starred_view = (Read-Inbox).starred_view }
+            Wait-Until {
+                $trace = Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw
+                $launch = $trace.LastIndexOf('launch step=browser')
+                if ($launch -lt 0 -or $trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1') { return $false }
+                Doctor
+                [void][VerifyNative]::SetForegroundWindow($script:window)
+                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
+                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+            } 'normal-close owned frame foreground and focused before workspace input'
             Press @([byte]0x12, [byte](0x32 + $workspace)) 'Alt+workspace digit: return to the favorite home workspace'
+            Wait-Until {
+                $state = Read-Inbox
+                $null -ne $state -and $state.active_workspace -eq $workspace -and $state.starred_view -eq $false
+            } 'favorite home workspace active outside Starred before palette input'
             $tabs = @((Read-Session).tabs)
             $middleIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
@@ -1429,6 +1442,15 @@ try {
             $firstIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore first') { $firstIndex = $i } }
             if ($firstIndex -lt 0) { throw 'First session missing from saved tabs' }
+            Wait-Until {
+                $trace = Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw
+                $launch = $trace.LastIndexOf('launch step=browser')
+                if ($launch -lt 0 -or $trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1') { return $false }
+                Doctor
+                [void][VerifyNative]::SetForegroundWindow($script:window)
+                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
+                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+            } 'favorite-home-kill owned frame foreground and focused before palette input'
             Focus-Palette 'Restore first' $firstIndex
             Press @(0x0D) 'Enter: select a different named session before the kill'
             Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId

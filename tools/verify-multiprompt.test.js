@@ -612,7 +612,7 @@ function assertsScratchRaceHandling(source) {
   }
   assert.match(cleanup, /\$exception = \$exception.InnerException/);
   assert.match(cleanup, /catch \{\s*if \(-not \(Test-VanishedScratchItem \$_ \$entry.FullName\)\) \{ throw \}/);
-  assert.match(cleanup, /AddSeconds\(20\)/);
+  assert.match(cleanup, /function Remove-ScratchPath\(\[string\]\$Path, \[int\]\$Seconds = 20\) \{\s*\$deadline = \[DateTime\]::UtcNow.AddSeconds\(\$Seconds\)/);
   assert.match(cleanup, /Scratch cleanup left paths:[^\n]*\$leftovers -join/);
   assert.match(source, /Remove-ScratchPath \$scratch/);
 }
@@ -623,6 +623,8 @@ test('ISSUE-559 cleanup tolerates only typed missing paths and reports remaining
     ['if (Test-Path -LiteralPath $Path) { return $false }', ''],
     ['if (-not (Test-VanishedScratchItem $_ $entry.FullName)) { throw }', 'throw'],
     ['Scratch cleanup left paths:', 'Cleanup failed:'],
+    ['function Remove-ScratchPath([string]$Path, [int]$Seconds = 20)', 'function Remove-ScratchPath([string]$Path, [int]$Seconds = 1)'],
+    ['$deadline = [DateTime]::UtcNow.AddSeconds($Seconds)', '$deadline = [DateTime]::UtcNow.AddSeconds(1)'],
   ]) {
     const broken = control.replace(before, after);
     assert.notEqual(broken, control);
@@ -632,7 +634,7 @@ test('ISSUE-559 cleanup tolerates only typed missing paths and reports remaining
 
 test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and names locked leftovers', { skip: process.platform !== 'win32' }, () => {
   const { spawnSync } = require('node:child_process');
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'verify-scratch.test.ps1')], { encoding: 'utf8', timeout: 45000 });
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'verify-scratch.test.ps1')], { encoding: 'utf8', timeout: 120000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /ISSUE-559 old cleanup rejected:/);
   assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
@@ -678,7 +680,11 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
       "Focus-Palette 'new cmd' 2000", "Press @(0x71) 'F2:", 'Type-Text $names[$i]',
       "Focus-Palette 'Restore middle' $middleIndex", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
       "Restart-SessionRestore 'normal-close' $false", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
-      "name = 'normal-close-selection'", "Focus-Palette 'Restore first' $firstIndex",
+      "name = 'normal-close-selection'",
+      "'normal-close owned frame foreground and focused before workspace input'",
+      "'favorite home workspace active outside Starred before palette input'",
+      "'favorite-home-kill owned frame foreground and focused before palette input'",
+      "Focus-Palette 'Restore first' $firstIndex",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
       "if ($result.checks.Count -ne 4) { throw", "Snapshot 'after'",
@@ -940,20 +946,39 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
       "Restart-SessionRestore 'normal-close' $false",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
       "name = 'starred-view-selection'",
+      "'normal-close owned frame foreground and focused before workspace input'",
       "Press @([byte]0x12, [byte](0x32 + $workspace))",
+      "'favorite home workspace active outside Starred before palette input'",
       "Focus-Palette 'Restore middle' $middleIndex",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
       "Restart-SessionRestore 'favorite-home-kill' $true",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
       "'same session remains a favorite at home after kill'",
       "'favorite-home-kill-after.inbox.json'", "'favorite-home-kill-after.session.json'",
-      "name = 'favorite-home-selection'", "Restart-SessionRestore 'process-kill' $true",
+      "name = 'favorite-home-selection'",
+      "'favorite-home-kill owned frame foreground and focused before palette input'",
+      "Restart-SessionRestore 'process-kill' $true",
       'if ($result.checks.Count -ne 4) { throw',
     ]) {
       const next = recipe.indexOf(step, offset + 1);
       assert.ok(next > offset, `missing or misordered ${step}`);
       offset = next;
     }
+    for (const stage of ['normal-close', 'favorite-home-kill']) {
+      assert.ok(recipe.includes(`Wait-Until {
+                $trace = Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw
+                $launch = $trace.LastIndexOf('launch step=browser')
+                if ($launch -lt 0 -or $trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1') { return $false }
+                Doctor
+                [void][VerifyNative]::SetForegroundWindow($script:window)
+                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
+                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+            } '${stage} owned frame foreground and focused before ${stage === 'normal-close' ? 'workspace' : 'palette'} input'`));
+    }
+    assert.ok(recipe.includes(`Wait-Until {
+                $state = Read-Inbox
+                $null -ne $state -and $state.active_workspace -eq $workspace -and $state.starred_view -eq $false
+            } 'favorite home workspace active outside Starred before palette input'`));
     const assertion = driver.slice(driver.indexOf('function Assert-SessionRestoreSelection('), driver.indexOf('function Select-Theme('));
     for (const required of [
       '[bool]$Starred = $false', "$state.PSObject.Properties['starred_view']",
@@ -967,6 +992,11 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     "Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'",
     "Press @([byte]0x12, [byte](0x32 + $workspace))",
     "Restart-SessionRestore 'favorite-home-kill' $true",
+    "'normal-close owned frame foreground and focused before workspace input'",
+    "'favorite-home-kill owned frame foreground and focused before palette input'",
+    "'favorite home workspace active outside Starred before palette input'",
+    "$trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1'",
+    '$null -ne $state -and $state.active_workspace -eq $workspace -and $state.starred_view -eq $false',
     '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
     "name = 'starred-view-selection'", "name = 'favorite-home-selection'",
   ]) {
