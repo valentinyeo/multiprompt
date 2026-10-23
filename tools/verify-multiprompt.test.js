@@ -616,7 +616,8 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.match(activation, /GetWindowThreadProcessId\(GetForegroundWindow\(\), out pid\)/);
     assert.match(activation, /uint currentThread = GetCurrentThreadId\(\)/);
     assert.match(activation, /foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput\(currentThread, foregroundThread, true\)/);
-    assert.match(activation, /try \{ SetForegroundWindow\(hwnd\); \}\s*finally \{ if \(attached\) AttachThreadInput\(currentThread, foregroundThread, false\); \}/);
+    assert.match(activation, /targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread && AttachThreadInput\(currentThread, targetThread, true\)/);
+    assert.match(activation, /Key\(0x12, 0, 0\);\s*try \{\s*AllowSetForegroundWindow\(targetPid\);\s*BringWindowToTop\(hwnd\);\s*SetForegroundWindow\(hwnd\);\s*\} finally \{\s*Key\(0x12, 0, 2\);\s*if \(attachedTarget\) AttachThreadInput\(currentThread, targetThread, false\);\s*if \(attached\) AttachThreadInput\(currentThread, foregroundThread, false\);\s*\}/);
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
     assert.match(restart, /\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle/);
     assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
@@ -636,7 +637,9 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
   for (const [before, after] of [
     ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
     ['if (attached) AttachThreadInput(currentThread, foregroundThread, false);', ''],
-    ['try { SetForegroundWindow(hwnd); }', 'try { }'],
+    ['AllowSetForegroundWindow(targetPid);', ''],
+    ['Key(0x12, 0, 0);\n        try {', 'try {'],
+    ['            SetForegroundWindow(hwnd);\n        } finally {', '        } finally {'],
     ['[VerifyNative]::BringToForeground($script:window)\n        [VerifyNative]::GetAncestor', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        [VerifyNative]::GetAncestor'],
     ['} "$Stage relaunched window foreground before input"\n    Doctor', '} "$Stage relaunched window foreground before input"\n    Assert-Foreground\n    Doctor'],
     ["Snapshot 'failure'", "Snapshot 'ignored'"],

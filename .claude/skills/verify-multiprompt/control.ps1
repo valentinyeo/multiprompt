@@ -47,9 +47,20 @@ public static class VerifyNative {
         uint pid;
         uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
         uint currentThread = GetCurrentThreadId();
+        uint targetPid;
+        uint targetThread = GetWindowThreadProcessId(hwnd, out targetPid);
         bool attached = foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
-        try { SetForegroundWindow(hwnd); }
-        finally { if (attached) AttachThreadInput(currentThread, foregroundThread, false); }
+        bool attachedTarget = targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread && AttachThreadInput(currentThread, targetThread, true);
+        Key(0x12, 0, 0);
+        try {
+            AllowSetForegroundWindow(targetPid);
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        } finally {
+            Key(0x12, 0, 2);
+            if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            if (attached) AttachThreadInput(currentThread, foregroundThread, false);
+        }
     }
     [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
