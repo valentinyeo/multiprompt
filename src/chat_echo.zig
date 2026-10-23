@@ -708,6 +708,20 @@ test "delivery: normalized full text includes link text, unicode and trailing wh
     try std.testing.expect(out[0] == null);
 }
 
+test "ISSUE-608 a message with leftover box text glued in front still confirms" {
+    const text = w("so i hear there were also vulnerabilityes in the node js");
+    var prefix: [64]u16 = undefined;
+    var pending = [_]Pending{.{ .prefix = prefixOf("so i hear there were also vulnerabilityes in the node js", &prefix), .text = &text, .anchor = .{ .after_ms = 100 } }};
+    var out: [1]?usize = undefined;
+    assign(&pending, &.{ub("so i hear there were craso i hear there were also vulnerabilityes in the node js", 200)}, false, &.{}, &out);
+    try std.testing.expectEqual(@as(?usize, 0), out[0]);
+    assign(&pending, &.{ub("so i hear there were craso i hear there were also vulnerabilityes in the node js and more", 200)}, false, &.{}, &out);
+    try std.testing.expect(out[0] == null);
+    const short = w("yes");
+    try std.testing.expect(short.len < MIN_PARTIAL);
+    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }));
+}
+
 test "delivery: busy then idle and restart reserve one text write" {
     try std.testing.expect(!mayType(.queued, false, true, false));
     try std.testing.expect(!mayType(.queued, false, false, true));
