@@ -893,7 +893,10 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
 }
 
 pub fn activateConsoleForeground(target: HANDLE) BOOL {
-    if (SetForegroundWindow(target) != 0 and GetForegroundWindow() == target) return 1;
+    if (SetForegroundWindow(target) != 0) {
+        const foreground = GetForegroundWindow();
+        if (foreground == null or foreground == target) return 1;
+    }
     if (!app_state.g_igsh354_paste_focus) return 0;
     return SetForegroundWindow(GetAncestor(target, GA_ROOT));
 }
