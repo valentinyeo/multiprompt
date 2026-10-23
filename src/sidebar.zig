@@ -1620,8 +1620,7 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
 }
 
 fn groupRailRect(header_left: i32, header_y: i32, header_h: i32, last_bottom: i32, scroll: i32, width: i32) RECT {
-    _ = header_h;
-    return .{ .left = header_left, .top = header_y - scroll, .right = header_left + width, .bottom = last_bottom - scroll };
+    return .{ .left = header_left, .top = header_y + header_h - scroll, .right = header_left + width, .bottom = last_bottom - scroll };
 }
 
 fn splitGroupRail(rail: RECT, excluded_top: i32, excluded_bottom: i32) [2]RECT {
@@ -2137,7 +2136,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     bottom = member.y + tabRowH();
                 }
                 const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
-                var rail = groupRailRect(column.left + uiScaled(4), row.y, GROUP_HEADER_H, bottom, app_state.g_sidebar_scroll, uiScaled(7) - uiScaled(4));
+                var rail = groupRailRect(column.left, row.y, GROUP_HEADER_H, bottom, app_state.g_sidebar_scroll, uiScaled(7) - uiScaled(4));
                 for (rows_arr[ri + 1 .. row_count]) |member| {
                     if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
                     if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;
