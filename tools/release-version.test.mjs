@@ -175,7 +175,9 @@ test('lightweight workflows cancel superseded PRs but never master pushes or dis
   for (const file of ['gitleaks', 'no-comments', 'docs-site', 'verify']) {
     const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
     assert.match(text, /^  pull_request:/m, file);
-    assert.match(text, /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
+    assert.match(text, file === 'verify'
+      ? /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m
+      : /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
   }
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
