@@ -179,9 +179,10 @@ function launchJourneyContract(source) {
   for (const step of [
     'Doctor', "GetProp($browser, 'ZigShellPaneOwner') -ne $script:window",
     'MonitorFromWindow($script:window, 1)', 'GetMonitorInfoW($monitor, [ref]$info)',
-    "'ZigShell/ChromeUserData'", '[regex]::Escape($profile)',
-    `Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'"`,
-    "$_.CommandLine -match $profileArgument -and $_.CommandLine.Contains('--window-position=')",
+    "(Join-Path $env:LOCALAPPDATA 'ZigShell') -replace '\\\\', '/'", '[regex]::Escape($profile)',
+    `Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'"`,
+    "($_.CommandLine -replace '\\\\', '/') -match $profileArgument -and $_.CommandLine.Contains('--window-position=')",
+    '/(?:ChromeUserData|EdgeUserData)',
     '$x -ge $info.Monitor.Left -and $x -lt $info.Monitor.Right',
     '$y -ge $info.Monitor.Top -and $y -lt $info.Monitor.Bottom',
     'GetWindowThreadProcessId($browser, [ref]$browserPid)',
@@ -194,8 +195,12 @@ function launchJourneyContract(source) {
   const journey = source.slice(source.indexOf("        'browser-pane-locked' {"), source.indexOf("        'browser-pane-stuck' {"));
   let offset = -1;
   for (const step of [
+    'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
+    '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'",
     "Open-BrowserPane 'locked-open'", "Assert-BrowserLaunchOnOwnMonitor 'initial'",
     '$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$relaunchStopped = $job.Stop()',
+    'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
+    '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
     '$job.Dispose()', '$job = New-Object VerifyJob', '$process = $job.Start(',
     '$script:window = $process.MainWindowHandle', '[VerifyNative]::PaneVisible($script:window)',
     "'startup restored the owned browser pane without an open command' 60",
@@ -207,21 +212,31 @@ function launchJourneyContract(source) {
     offset = next;
   }
   assert.equal((journey.match(/Open-BrowserPane /g) || []).length, 1);
-  assert.match(source, /\$warmup.CloseMainWindow\(\)/);
-  assert.match(source, /\$warmup.WaitForExit\(10000\)/);
-  assert.match(source, /\$chromeSetupStopped = \$warmupJob.Stop\(\)/);
-  assert.match(source, /Palette 'browser engine'/);
-  assert.match(source, /'dedicated Chrome selected'/);
+  const setup = source.slice(source.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'))"), source.indexOf("    if ($Feature -eq 'appearance') {"));
+  assert.match(setup, /Microsoft\/Edge\/Application\/msedge.exe/);
+  assert.match(setup, /Join-Path \$env:LOCALAPPDATA 'ZigShell\/EdgeUserData'/);
+  assert.match(setup, /\$warmupJob.Start\(\$edge/);
+  assert.match(setup, /'isolated browser rendered setup page before the pane adoption deadline starts' 60/);
+  assert.match(setup, /ShowWindow\(\$warmup.MainWindowHandle, 0\)/);
+  assert.doesNotMatch(setup, /if \(\$Feature -eq 'browser-pane-locked'\)|Chrome|browser engine|browser-engine.txt|CloseMainWindow|\$warmupJob.Stop/);
+  const stop = source.slice(source.indexOf('    public Accounting Stop()'), source.indexOf('    public void Dispose()', source.indexOf('    public Accounting Stop()')));
+  assert.match(stop, /TerminateJobObject\(job, 1\)/);
+  assert.match(stop, /if \(info.ActiveProcesses == 0\) return info/);
   return proof;
 }
 
-test('journey proves first and restored Chrome launches use the owner monitor and matching DPI without vacuous success', () => {
+test('journey proves first and restored browser launches use the owner monitor and matching DPI without vacuous success', () => {
   const proof = launchJourneyContract(driver);
   for (const before of [
     "Assert-BrowserLaunchOnOwnMonitor 'initial'", "Assert-BrowserLaunchOnOwnMonitor 'restored'",
     '$process.CloseMainWindow()', '$launches.Count -eq 0',
     '$x -ge $info.Monitor.Left', '$y -lt $info.Monitor.Bottom',
-    '$paneDpi -ne $mainDpi', "Name = 'chrome.exe'",
+    '$paneDpi -ne $mainDpi', "Name = 'chrome.exe'", "Name = 'msedge.exe'",
+    '$browserPid -notin', '$_.pid -in @($initialLaunch.launches',
+    '$warmupStopped = $warmupJob.Stop()', 'ReadAccounting().ActiveProcesses -gt 0',
+    "Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'",
+    "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
+    'if (info.ActiveProcesses == 0) return info',
     "Write-Host 'browser-pane-locked launch-on-own-monitor PASS'",
   ]) {
     assert.ok(driver.includes(before), `negative control exists: ${before}`);
@@ -236,6 +251,57 @@ test('journey proves first and restored Chrome launches use the owner monitor an
     const match = new RegExp(pattern).exec(`chrome.exe --window-position=${argument} --window-size=400,400`);
     const actual = !!match && +match[1] >= rect.left && +match[1] < rect.right && +match[2] >= rect.top && +match[2] < rect.bottom;
     assert.equal(actual, inside, argument);
+  }
+});
+
+test('launch selection accepts both isolated engines and slash styles but excludes warmup and unrelated processes', () => {
+  const proof = launchJourneyContract(driver);
+  const profileSuffix = proof.match(/Join-Path \$env:LOCALAPPDATA '([^']+)'/)[1];
+  const normalization = proof.match(/\$profile = [^\n]+ -replace '([^']+)', '\/'/)[1];
+  const normalize = value => value.replace(new RegExp(normalization, 'g'), '/');
+  const local = 'C:\\Temp\\browser setup (1)';
+  const profile = normalize(path.win32.join(local, profileSuffix));
+  const escaped = profile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const argument = proof.match(/\$profileArgument = '([^']+)' \+ \[regex\]::Escape\(\$profile\) \+ '([^']+)'/);
+  const pattern = new RegExp(argument[1] + escaped + argument[2], 'i');
+  const filter = proof.match(/Get-CimInstance Win32_Process -Filter "([^"]+)"/)[1];
+  const names = [...filter.matchAll(/Name = '([^']+)'/g)].map(match => match[1]);
+  const selects = (name, commandLine) => names.includes(name.toLowerCase()) && pattern.test(normalize(commandLine)) && commandLine.includes('--window-position=');
+  for (const name of ['chrome.exe', 'msedge.exe']) {
+    for (const data of ['ChromeUserData', 'EdgeUserData']) {
+      for (const separator of ['/', '\\']) {
+        const directory = path.win32.join(local, 'ZigShell', data).replaceAll('\\', separator);
+        const command = `${name} --user-data-dir="${directory}"`;
+        assert.ok(selects(name, `${command} --window-position=0,40`), `${name} ${data} ${separator}`);
+        assert.ok(!selects(name, command), 'rendered warmup has no launch coordinates');
+        assert.ok(!selects(name, `${command.replace(data, data + '-other')} --window-position=0,40`), 'profile prefix is not enough');
+      }
+    }
+  }
+  const command = `msedge.exe --user-data-dir="${profile}/EdgeUserData" --window-position=0,40`;
+  assert.ok(selects('MSEDGE.EXE', command));
+  assert.ok(selects('msedge.exe', command.toUpperCase().replace('--WINDOW-POSITION=', '--window-position=')));
+  assert.ok(selects('msedge.exe', command.replace('/EdgeUserData', '\\EdgeUserData')));
+  assert.ok(!selects('other.exe', command));
+  assert.ok(!selects('msedge.exe', command.replace('C:', 'D:')));
+  assert.ok(!selects('msedge.exe', command.replace('--user-data-dir=', '--other-user-data-dir=')));
+  assert.ok(!selects('msedge.exe', command.replace('EdgeUserData', 'Default')));
+  assert.ok(!selects('msedge.exe', command.replace('EdgeUserData"', 'EdgeUserData"-other')));
+  assert.ok(!selects('msedge.exe', command.replace('--window-position=', '--window-size=')));
+});
+
+test('setup contract rejects Chrome overrides and palette switching', () => {
+  const setupStart = "    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked')) {";
+  for (const addition of [
+    "        if ($Feature -eq 'browser-pane-locked') {}",
+    "        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'",
+    "        Palette 'browser engine'",
+    "        Get-Content 'browser-engine.txt'",
+    '        $warmup.CloseMainWindow()',
+    '        $warmupJob.Stop()',
+  ]) {
+    assert.ok(driver.includes(setupStart));
+    assert.throws(() => launchJourneyContract(driver.replace(setupStart, `${setupStart}\n${addition}`)), addition);
   }
 });
 
@@ -333,7 +399,7 @@ test('changed code is comment-free and the user-facing fragment follows the chan
 
 test('launch-scale feature map and changelog describe first launch and restored startup verification', () => {
   for (const marker of ['normal scale', 'first launch', 'relaunch', 'GetDpiForWindow', 'rcMonitor', 'browser-pane-locked-launch-initial.json', 'browser-pane-locked-launch-restored.json']) assert.ok(map.includes(marker), marker);
-  const fragment = read('changelog.d/IGSH-601-browser-pane-scale.md').trim();
+  const fragment = readChangelogEntry('IGSH-601').trim();
   assert.equal(fragment, 'The browser pane opens at its normal size after a relaunch on a two-monitor setup.');
   assert.equal(fragment.split('\n').length, 1);
 });

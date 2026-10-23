@@ -691,10 +691,10 @@ function Assert-BrowserLaunchOnOwnMonitor([string]$Step) {
     $info = New-Object VerifyNative+MonitorInfo
     $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
     if (-not [VerifyNative]::GetMonitorInfoW($monitor, [ref]$info)) { throw 'Owner monitor rectangle unavailable' }
-    $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
-    $profileArgument = '--user-data-dir="?' + [regex]::Escape($profile) + '(?:"|\s|$)'
-    $launches = @(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object {
-        $_.CommandLine -match $profileArgument -and $_.CommandLine.Contains('--window-position=')
+    $profile = (Join-Path $env:LOCALAPPDATA 'ZigShell') -replace '\\', '/'
+    $profileArgument = '(?:^|\s)--user-data-dir="?' + [regex]::Escape($profile) + '/(?:ChromeUserData|EdgeUserData)"?(?=\s|$)'
+    $launches = @(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'" | Where-Object {
+        ($_.CommandLine -replace '\\', '/') -match $profileArgument -and $_.CommandLine.Contains('--window-position=')
     } | ForEach-Object {
         $point = [regex]::Match($_.CommandLine, '(?:^|\s)--window-position=(-?\d+),(-?\d+)(?:\s|$)')
         $x = $null; $y = $null; $inside = $false
@@ -711,8 +711,8 @@ function Assert-BrowserLaunchOnOwnMonitor([string]$Step) {
     $paneDpi = [VerifyNative]::GetDpiForWindow($browser)
     $proof = @{ step = $Step; launches = $launches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); paneHwnd = $browser.ToInt64(); panePid = $browserPid; mainDpi = $mainDpi; paneDpi = $paneDpi }
     Save-Json $proof ("browser-pane-locked-launch-$Step.json")
-    if ($launches.Count -eq 0 -or $browserPid -notin @($launches | ForEach-Object { $_.pid })) { throw 'No isolated Chrome launch command line for the owned pane' }
-    if (@($launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Chrome launch point is outside the owner monitor' }
+    if ($launches.Count -eq 0 -or $browserPid -notin @($launches | ForEach-Object { $_.pid })) { throw 'No isolated browser launch command line for the owned pane' }
+    if (@($launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor' }
     if ($mainDpi -eq 0 -or $paneDpi -ne $mainDpi) { throw "Pane DPI $paneDpi differs from owner DPI $mainDpi" }
     return $proof
 }
@@ -1001,11 +1001,6 @@ try {
         $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires installed Edge' }
         $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
-        if ($Feature -eq 'browser-pane-locked') {
-            $edge = Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'
-            if (-not (Test-Path -LiteralPath $edge)) { throw 'Launch scale journey requires installed Chrome' }
-            $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
-        }
         $warmupJob = New-Object VerifyJob
         $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
         $warmup = $warmupJob.Start($edge, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
@@ -1016,14 +1011,6 @@ try {
         } 'isolated browser rendered setup page before the pane adoption deadline starts' 60
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
-        if ($Feature -eq 'browser-pane-locked') {
-            if (-not $warmup.CloseMainWindow() -or -not $warmup.WaitForExit(10000)) { throw 'Chrome setup did not close normally' }
-            $chromeSetupStopped = $warmupJob.Stop()
-            Save-Json $chromeSetupStopped 'browser-chrome-setup-stopped.json'
-            Palette 'browser engine'
-            Press @(0x0D) 'Enter: switch dedicated browser engine to Chrome'
-            Wait-Until { (Get-Content (Join-Path $env:APPDATA 'ZigShell/browser-engine.txt') -Raw).Trim() -eq 'chrome' } 'dedicated Chrome selected'
-        }
     }
     if ($Feature -eq 'appearance') {
         Doctor
@@ -1566,6 +1553,10 @@ try {
         'browser-pane-locked' {
             Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             $script:browserShellId = (Read-Inbox).shells[0].sid
+            if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0) {
+                $warmupStopped = $warmupJob.Stop()
+                Save-Json $warmupStopped 'browser-pane-locked-warmup-initial-stopped.json'
+            }
             $pane = Open-BrowserPane 'locked-open'
             $initialLaunch = Assert-BrowserLaunchOnOwnMonitor 'initial'
             Doctor
@@ -1573,6 +1564,10 @@ try {
             if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Owned app did not close normally for relaunch' }
             $relaunchStopped = $job.Stop()
             Save-Json $relaunchStopped 'browser-pane-locked-relaunch-stopped.json'
+            if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0) {
+                $warmupStopped = $warmupJob.Stop()
+                Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'
+            }
             $job.Dispose()
             $job = New-Object VerifyJob
             $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
@@ -1585,7 +1580,7 @@ try {
             } 'startup restored the owned browser pane without an open command' 60
             $script:browserShellId = (Read-Inbox).shells[0].sid
             $restoredLaunch = Assert-BrowserLaunchOnOwnMonitor 'restored'
-            if (@($restoredLaunch.launches | Where-Object { $_.pid -in @($initialLaunch.launches | ForEach-Object { $_.pid }) }).Count -ne 0) { throw 'Relaunch reused an initial Chrome process instead of launching at startup' }
+            if (@($restoredLaunch.launches | Where-Object { $_.pid -in @($initialLaunch.launches | ForEach-Object { $_.pid }) }).Count -ne 0) { throw 'Relaunch reused an initial browser process instead of launching at startup' }
             $result.checks += @{ name = 'browser-pane-locked launch-on-own-monitor'; initial = $initialLaunch; restored = $restoredLaunch }
             Write-Host 'browser-pane-locked launch-on-own-monitor PASS'
             $browser = [VerifyNative]::PaneWindow($script:window)
