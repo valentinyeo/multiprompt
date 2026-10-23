@@ -1616,6 +1616,14 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
     return null;
 }
 
+fn splitGroupRail(rail: RECT, excluded_top: i32, excluded_bottom: i32) [2]RECT {
+    var before = rail;
+    before.bottom = std.math.clamp(excluded_top, rail.top, rail.bottom);
+    var after = rail;
+    after.top = std.math.clamp(excluded_bottom, before.bottom, rail.bottom);
+    return .{ before, after };
+}
+
 pub fn paintSidebar(hdc: HANDLE) void {
     var canvas = @import("smooth.zig").Canvas.init(hdc);
     defer canvas.deinit();
@@ -2122,7 +2130,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 }
                 const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
                 var rail = RECT{ .left = column.left + uiScaled(4), .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(7), .bottom = bottom - app_state.g_sidebar_scroll };
-                _ = FillRect(hdc, &rail, brush);
+                for (rows_arr[ri + 1 .. row_count]) |member| {
+                    if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
+                    if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;
+                    var segments = splitGroupRail(rail, member.y - app_state.g_sidebar_scroll, member.y + tabRowH() - app_state.g_sidebar_scroll);
+                    if (segments[0].top < segments[0].bottom) _ = FillRect(hdc, &segments[0], brush);
+                    rail = segments[1];
+                }
+                if (rail.top < rail.bottom) _ = FillRect(hdc, &rail, brush);
                 _ = DeleteObject(brush);
             }
         }
@@ -4663,4 +4678,31 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(removeTabOrSelectionFromGroup(1));
     try std.testing.expectEqual(other_home, app_state.shells[0].group_id);
     try std.testing.expectEqual(@as(u32, 0), app_state.shells[0].starred_group_id);
+}
+
+test "IGSH-591 group rail segments exclude whole highlighted rows without tails" {
+    for ([_]i32{ -120, 0, 75 }) |scroll| {
+        const rail = RECT{ .left = 12, .top = 8 - scroll, .right = 15, .bottom = 112 - scroll };
+        for ([_][2]i32{ .{ -20, 0 }, .{ 8, 36 }, .{ 36, 74 }, .{ 74, 112 }, .{ 8, 112 }, .{ 110, 130 }, .{ 120, 150 } }) |excluded| {
+            const top = excluded[0] - scroll;
+            const bottom = excluded[1] - scroll;
+            const segments = splitGroupRail(rail, top, bottom);
+            var visible_height: i32 = 0;
+            for (segments) |segment| {
+                try std.testing.expectEqual(rail.left, segment.left);
+                try std.testing.expectEqual(rail.right, segment.right);
+                try std.testing.expect(segment.top >= rail.top and segment.bottom <= rail.bottom);
+                try std.testing.expect(segment.top <= segment.bottom);
+                try std.testing.expect(segment.top == segment.bottom or segment.bottom <= top or segment.top >= bottom);
+                visible_height += segment.bottom - segment.top;
+            }
+            const excluded_height = @max(0, @min(rail.bottom, bottom) - @max(rail.top, top));
+            try std.testing.expectEqual(rail.bottom - rail.top - excluded_height, visible_height);
+        }
+        const first = splitGroupRail(rail, 36 - scroll, 74 - scroll);
+        const second = splitGroupRail(first[1], 74 - scroll, 112 - scroll);
+        try std.testing.expectEqual(36 - scroll, first[0].bottom);
+        try std.testing.expectEqual(second[0].top, second[0].bottom);
+        try std.testing.expectEqual(second[1].top, second[1].bottom);
+    }
 }
