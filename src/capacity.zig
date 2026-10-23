@@ -24,7 +24,6 @@ const RGB = @import("startup.zig").RGB;
 const Shell = @import("app_state.zig").Shell;
 const customColorOr = @import("themes.zig").customColorOr;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
-const SIDEBAR_VPS_CARD_H = @import("app_state.zig").SIDEBAR_VPS_CARD_H;
 const SIDEBAR_STICKY_CARD_H = @import("app_state.zig").SIDEBAR_STICKY_CARD_H;
 const SIDEBAR_STICKY_CARD_COLLAPSED_H = @import("app_state.zig").SIDEBAR_STICKY_CARD_COLLAPSED_H;
 const SIDEBAR_STICKY_CARD_GAP = @import("app_state.zig").SIDEBAR_STICKY_CARD_GAP;
@@ -60,6 +59,9 @@ const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const tmuxAgentFromPaneCommand = @import("vps.zig").tmuxAgentFromPaneCommand;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
 const drawAscii = @import("drawing.zig").drawAscii;
+const drawAsciiRun = @import("drawing.zig").drawAsciiRun;
+const asciiTextWidth = @import("drawing.zig").asciiTextWidth;
+const formatVpsLoad = @import("status_line.zig").formatVpsLoad;
 const uiScaled = @import("drawing.zig").uiScaled;
 const nowFileTime = @import("inbox.zig").nowFileTime;
 
@@ -245,6 +247,12 @@ pub fn sidebarStickyCardRect() RECT {
     var client: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &client);
     return @import("window_layout.zig").activePaneRects(client).burn;
+}
+
+pub fn sidebarStickyCardHoverTest(mx: i32, my: i32) bool {
+    if (app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) return false;
+    const rect = sidebarStickyCardRect();
+    return mx >= rect.left and mx < rect.right and my >= rect.top and my < rect.bottom;
 }
 
 pub fn sidebarStickyCardHitTest(my: i32) bool {
@@ -566,7 +574,7 @@ pub fn capacityStateColor(state: CapacityState, dim: DWORD) DWORD {
     };
 }
 
-fn capacityLoadPercent(metrics: HostCapacity) u32 {
+pub fn capacityLoadPercent(metrics: HostCapacity) u32 {
     if (!metrics.valid or metrics.cores == 0) return 0;
     const normalized_milli = metrics.load_milli / @as(u32, metrics.cores);
     return (normalized_milli + 5) / 10;
@@ -617,12 +625,39 @@ test "VPS card normalizes load and exposes understandable capacity percentages" 
     try std.testing.expect(std.mem.eql(u8, cause, "CAUSE: CPU WAIT 53% >=50%"));
 }
 
-pub fn paintSidebarVpsCard(hdc: HANDLE, host: u8, y: i32, font_title: HANDLE, font_subtitle: HANDLE) void {
-    if (host >= app_state.g_host_capacity.len or app_state.g_sidebar_collapsed or app_state.g_hide_sidebar) return;
-    const card_h = uiScaled(SIDEBAR_VPS_CARD_H);
-    const column = sidebarStickyCardRect();
-    const card_left = column.left;
-    const card_right = column.right;
+pub fn paintSidebarVpsCard(hdc: HANDLE, host: u8, rect: RECT, font_subtitle: HANDLE) void {
+    paintSidebarCardFrame(hdc, rect);
+    if (host >= app_state.g_host_capacity.len or rect.right <= rect.left + 40) return;
+    const metrics = app_state.g_host_capacity[host];
+    const state = effectiveCapacityState(host);
+    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
+    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
+    const state_color = capacityStateColor(state, dim);
+    const inner_left = rect.left + uiScaled(10);
+    const inner_right = rect.right - uiScaled(10);
+
+    drawAttentionDot(hdc, inner_left + uiScaled(4), @divTrunc(rect.top + rect.bottom, 2), uiScaled(3), state_color);
+    _ = SelectObject(hdc, font_subtitle);
+    const state_label = capacityStateLabel(state);
+    _ = SetTextColor(hdc, state_color);
+    var state_rc = RECT{ .left = @max(inner_left, inner_right - asciiTextWidth(hdc, state_label)), .top = rect.top, .right = inner_right, .bottom = rect.bottom };
+    drawAscii(hdc, state_label, &state_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+    const limit = state_rc.left - uiScaled(6);
+
+    _ = SetTextColor(hdc, bright);
+    const host_end = drawAsciiRun(hdc, capacityHostLabel(host), inner_left + uiScaled(12), rect.top, rect.bottom, limit);
+    var load_buf: [48]u8 = undefined;
+    const load = formatVpsLoad(&load_buf, metrics.valid and metrics.mem_total_kb > 0, capacityLoadPercent(metrics), capacityAvailableRamPercent(metrics));
+    _ = SetTextColor(hdc, dim);
+    _ = drawAsciiRun(hdc, load, host_end + uiScaled(8), rect.top, rect.bottom, limit);
+}
+
+pub fn paintSidebarVpsDetail(hdc: HANDLE, host: u8, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
+    if (host >= app_state.g_host_capacity.len) return;
+    const y = rect.top;
+    const card_h = rect.bottom - rect.top;
+    const card_left = rect.left;
+    const card_right = rect.right;
     if (card_right <= card_left + 40) return;
 
     const metrics = app_state.g_host_capacity[host];
@@ -630,18 +665,9 @@ pub fn paintSidebarVpsCard(hdc: HANDLE, host: u8, y: i32, font_title: HANDLE, fo
     const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
     const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
     const state_color = capacityStateColor(state, dim);
-    const card_bg: DWORD = customColorOr("header_bg", if (app_state.g_light_theme) RGB(242, 244, 247) else if (app_state.g_edge_gray_theme) RGB(52, 54, 58) else if (app_state.g_mid_theme) RGB(62, 64, 68) else RGB(24, 27, 32));
     const border: DWORD = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(210, 214, 220) else RGB(55, 61, 70));
 
-    const brush = CreateSolidBrush(card_bg);
-    const pen = CreatePen(0, 1, border);
-    const old_brush = SelectObject(hdc, brush);
-    const old_pen = SelectObject(hdc, pen);
-    _ = @import("smooth.zig").drawRoundRect(hdc, card_left, y, card_right, y + card_h, uiScaled(8), uiScaled(8));
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(brush);
-    _ = DeleteObject(pen);
+    paintSidebarCardFrame(hdc, rect);
 
     const inner_left = card_left + uiScaled(10);
     const inner_right = card_right - uiScaled(10);

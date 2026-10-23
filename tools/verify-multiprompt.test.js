@@ -1181,6 +1181,35 @@ test('IGSH-612 palette-order journey seeds only the usage fixture and fails rele
   assert.match(read(skill + 'SKILL.md'), /`palette-order`/);
 });
 
+test('IGSH-673 status-card journey measures all three pages by pixels and fails outside 20..30', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'status-card'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'status-card'/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"status-card", "palette-order"\]'\)/);
+  const journey = control.slice(control.indexOf("        'status-card' {"), control.indexOf("        'command-palette' {"));
+  assert.ok(journey.length > 0);
+  assert.match(journey, /foreach \(\$page in 0\.\.2\)/);
+  assert.match(journey, /Press @\(0x11, 0x10, 0x47\)/);
+  assert.match(journey, /roaming\/ZigShell\/sidebar-status-card\.txt/);
+  assert.match(journey, /Measure-StatusCard \$shot/);
+  assert.match(journey, /\$result\.statusCard = \[ordered\]@\{ heights = \$heights/);
+  assert.match(journey, /MoveMouseClient\(\$script:window, [^\n]*, \$true\)\s+Start-Sleep -Milliseconds 600\s+Snapshot 'hover'/);
+  assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
+  assert.ok(journey.indexOf('$result.statusCard =') < journey.indexOf("Snapshot 'hover'"));
+  assert.ok(journey.indexOf("Snapshot 'hover'") < journey.indexOf('if ($height -gt 30'));
+  assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
+  const measure = control.slice(control.indexOf('function Measure-StatusCard('), control.indexOf('function Sidebar-Luminance('));
+  assert.match(measure, /GetDpiForWindow\(\$script:window\)/);
+  assert.match(measure, /\$scale = \$dpi \/ 96\.0/);
+  assert.match(measure, /height = \[Math\]::Round\(\$pixels \/ \$scale, 1\)/);
+  assert.match(control, /public static void MoveMouseClient\(IntPtr hwnd, int x, int y, bool requireOwned\)/);
+  const map = read(skill + 'features/status-card.md');
+  for (const heading of ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']) assert.ok(map.includes(heading));
+  assert.match(map, /v0\.28\.839/);
+  assert.match(read(skill + 'features/README.md'), /\[Status card\]\(status-card.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`status-card`/);
+  assert.ok(read(skill + 'coverage.md').includes('| IGSH-673 |'));
+});
+
 test('ISSUE-569 grouped restore journey splits a real home group before every targeted restart', () => {
   function contract(driver, map) {
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));

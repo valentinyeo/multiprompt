@@ -478,6 +478,7 @@ const sidebarTierForDrop = @import("sidebar.zig").sidebarTierForDrop;
 const workspaceStripHitTest = @import("sidebar.zig").workspaceStripHitTest;
 const hitTestSidebar = @import("sidebar.zig").hitTestSidebar;
 const sidebarStickyCardHitTest = @import("capacity.zig").sidebarStickyCardHitTest;
+const sidebarStickyCardHoverTest = @import("capacity.zig").sidebarStickyCardHoverTest;
 const UPDATE_CHECK_MS = @import("app_state.zig").UPDATE_CHECK_MS;
 const update_release = @import("update_release.zig");
 const updateCardInit = @import("update_card.zig").updateCardInit;
@@ -1213,6 +1214,7 @@ comptime {
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
         _ = @import("capacity.zig");
+        _ = @import("status_line.zig");
         _ = @import("update_card.zig");
         _ = @import("focus.zig");
         _ = @import("shortcuts.zig");
@@ -2099,6 +2101,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
+            if (app_state.g_status_card_hover) {
+                app_state.g_status_card_hover = false;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2110,6 +2116,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            {
+                const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
+                if (card_hover != app_state.g_status_card_hover) {
+                    app_state.g_status_card_hover = card_hover;
+                    _ = InvalidateRect(hwnd, null, 0);
+                }
+                if (card_hover) {
+                    var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                    _ = TrackMouseEvent(&tracking);
+                }
+            }
             {
                 const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));
                 const upd_now: u8 = if (upd_hit == 1 or upd_hit == 2) upd_hit else 0;

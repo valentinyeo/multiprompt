@@ -72,14 +72,31 @@ test("daily goals remain uncapped and persist through the sanitized snapshot", (
   assert.match(telemetry, /canonicalDeadline/);
 });
 
-test("one equal-height sticky carousel owns combined, VPS, and AI cards", () => {
-  assert.match(source, /const SIDEBAR_VPS_CARD_H: i32 = 222/);
-  assert.match(source, /const SIDEBAR_STICKY_CARD_H: i32 = SIDEBAR_VPS_CARD_H/);
+test("one-line sticky carousel owns combined, VPS, and AI cards with full numbers on hover", () => {
+  assert.match(source, /const SIDEBAR_STICKY_CARD_H: i32 = 26;/);
+  assert.match(source, /const SIDEBAR_STATUS_DETAIL_H: i32 = 222;/);
+  assert.match(source, /const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;/);
   assert.match(source, /var g_sidebar_status_card: u8 = 0;/);
-  const carousel = functionBody(source, "paintSidebarStickyStatusCard", "paintSidebar");
-  assert.match(carousel, /paintSidebarCombinedCard/);
-  assert.match(carousel, /paintSidebarVpsCard/);
-  assert.match(carousel, /paintSidebarAiPaceCard/);
+  const carousel = functionBody(source, "paintSidebarStickyStatusCard", "sidebarStatusPopupRect");
+  assert.match(carousel, /paintSidebarCombinedCard\(hdc, rect, font_subtitle\)/);
+  assert.match(carousel, /paintSidebarVpsCard\(hdc, host, rect, font_subtitle\)/);
+  assert.match(carousel, /paintSidebarAiPaceCard\(hdc, rect, font_subtitle\)/);
+  const popupAt = source.indexOf("fn paintSidebarStatusCardPopup(");
+  assert.ok(popupAt >= 0);
+  const popup = source.slice(popupAt, source.indexOf("\n}\n", popupAt));
+  assert.match(popup, /if \(!g_status_card_hover/);
+  assert.match(popup, /paintSidebarCombinedDetail/);
+  assert.match(popup, /paintSidebarVpsDetail/);
+  assert.match(popup, /paintSidebarAiPaceDetail/);
+  assert.match(functionBody(source, "sidebarStatusPopupRect", "paintSidebarStatusCardPopup"), /uiScaled\(SIDEBAR_STATUS_DETAIL_H\)/);
+  const move = source.slice(source.indexOf("WM_MOUSEMOVE => {"), source.indexOf("const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));"));
+  assert.match(move, /sidebarStickyCardHoverTest\(GET_X\(lp\), GET_Y\(lp\)\)/);
+  assert.match(move, /TrackMouseEvent\(&tracking\)/);
+  assert.match(source, /0x02A3 => \{\s+if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
+  const line = functionBody(source, "paintSidebarAiPaceCard", "paintSidebarAiPaceDetail");
+  assert.match(line, /formatResetHours/);
+  assert.match(line, /paintAiPaceWeekRuns/);
+  assert.match(line, /"CX" else "CL"/);
 });
 
 test("the entire card cycles and has no dashboard deep-link target", () => {

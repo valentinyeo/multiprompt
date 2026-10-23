@@ -12,7 +12,7 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 ## Driving conventions
 
-Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, palette-order and browser-own-profile. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, status-card, palette-order and browser-own-profile. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
@@ -43,6 +43,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
+- [Status card](status-card.md): measure the one-line sidebar status card on all three pages after real Ctrl+Shift+G presses and capture its hover view; fail outside 20 to 30 px.
 - [Pane layout](pane-layout.md): keep the console focus border continuous, the pane gap clear and the gray group line separate from the first session icon.
 - [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser switch speed](browser-switch-speed.md) (on demand only): compare 20 Ctrl+Tab switches without panes against 20 with warm docked browsers and five freshly frozen returns in console and Chat View; fail above a 50 ms median gap.
