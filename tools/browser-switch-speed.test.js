@@ -185,7 +185,8 @@ test('four warm twenty-sample and two frozen five-sample sets enforce all matchi
 
 function assertsOptionalTrace(source) {
   assert.match(source, /\$timings.steps\[\$mode\] = \$null/);
-  assert.match(source, /\$steps = \$null\s+if \(\$traceMatches.Count -eq 1\) \{/);
+  assert.match(source, /if \(\$traceMatches.Count -ne 1 -or \[int\]\$traceMatches\[0\].Groups\[1\].Value -ne \$target\) \{ throw "Sample was not exactly one app switch to session \$target;[^\n]+\}\s+\$line = \$traceMatches\[0\].Value/);
+  assert.match(source, /\$pattern = 'switch-timing: to=\(\\d\+\) total_us=/);
   assert.match(source, /\$traces\[\$mode\] \+= \$steps/);
   assert.match(source, /\$traces\[\$mode\].Count -eq \$timings\[\$mode\].samples_ms.Count -and @\(\$traces\[\$mode\] \| Where-Object \{ \$null -eq \$_ \}\).Count -eq 0/);
   assert.match(source, /\$timings.steps\[\$mode\]\[\$step\] = Get-SwitchMedian \$values/);
@@ -194,13 +195,49 @@ function assertsOptionalTrace(source) {
   assert.doesNotMatch(source, /matching per-switch debug timing|Incomplete switch-timing|Expected exactly one switch-timing|Wait-Until[^\n]*switch-timing/);
 }
 
-test('older releases without timing traces still retain real samples and null steps, without waiting or failing', () => {
+test('every sample must be exactly one app switch to its target, with null steps kept only as failure evidence', () => {
   assertsOptionalTrace(journey);
   for (const [before, after] of [
-    ['$steps = $null', '$steps = @{}'], ['$timings.steps[$mode] = $null', '$timings.steps[$mode] = @{}'],
-    ['$traceMatches.Count -eq 1', '$traceMatches.Count -ne 1'],
+    ['$timings.steps[$mode] = $null', '$timings.steps[$mode] = @{}'],
+    ['$traceMatches.Count -ne 1 -or ', ''],
+    ['-ne $target) { throw "Sample was not exactly one app switch', '-ne $target) { Write-Host "Sample was not exactly one app switch'],
+    ['[int]$traceMatches[0].Groups[1].Value -ne $target', '$false'],
     ["$traces[$mode] += $steps", "throw 'Expected exactly one switch-timing'"],
-  ]) assert.throws(() => assertsOptionalTrace(journey.replace(before, after)));
+  ]) assert.throws(() => assertsOptionalTrace(journey.replace(before, after)), before);
+});
+
+function assertsSwitchStart(source, driver) {
+  const start = source.slice(source.indexOf('public static void RequireSwitchStart'), source.indexOf('static bool PaintMatches'));
+  for (const check of [
+    'sourceConsole == targetConsole', 'sourceBrowser == targetBrowser && sourceBrowser != IntPtr.Zero', 'sourceSuffix == targetSuffix', 'sourceDraft == targetDraft',
+    '!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)',
+    'if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw new InvalidOperationException("Target session is already visible before Ctrl+Tab',
+  ]) assert.ok(start.includes(check), check);
+  const sample = driver.slice(driver.indexOf('for ($sample = 0;'), driver.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
+  assert.match(sample, /\$source = 1 - \$target\s+\[VerifyNative\]::RequireSwitchStart\(\$script:window, \$composerHandle, \$consoles\[\$source\], \('ZigShell-' \+ \$shellIds\[\$source\]\), \$browsers\[\$source\], \$docks\[\$source\], \$drafts\[\$source\], \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$drafts\[\$target\]\)\s+Record \("Ctrl\+Tab timing/);
+  assert.ok(sample.indexOf('RequireSwitchStart(') < sample.indexOf('$measurement ='));
+  assert.ok(sample.indexOf('worker_finished_utc') < sample.indexOf('RequireSwitchStart('));
+  assert.match(sample, /if \(\$frozenText -notmatch \('\(\?s\)browser freeze confirmed: ' \+ \$idPattern \+ '\.\*hook: Ctrl\\\+Tab shift=0 -> NEXT_TAB\.\*browser wake sent: ' \+ \$idPattern \+ '\.\*switchToShell: ' \+ \(1 - \$target\) \+ ' -> ' \+ \$target \+ ' '\)\) \{ throw "Frozen target/);
+  assert.match(sample, /\$frozenText = \$debugAfter.Substring\(\$freeze.log_start\)/);
+}
+
+test('a sample whose target is already visible, whose source is not visible, or whose frozen target never woke fails the journey', () => {
+  assertsSwitchStart(native, journey);
+  for (const [before, after] of [
+    ['sourceConsole == targetConsole || ', ''], ['|| sourceSuffix == targetSuffix', ''], ['|| sourceDraft == targetDraft', ''],
+    ['if (!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)) throw', 'if (false) throw'],
+    ['if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw', 'if (false) throw'],
+  ]) assert.throws(() => assertsSwitchStart(native.replace(before, after), journey), before);
+  for (const [before, after] of [
+    ['[VerifyNative]::RequireSwitchStart(', '[VerifyNative]::Chord('], ['$frozenText -notmatch', '$frozenText -match'],
+    ['browser wake sent: ', 'browser wake: '], ['$source = 1 - $target', '$source = $target'],
+  ]) assert.throws(() => assertsSwitchStart(native, journey.replace(before, after)), before);
+  const wakeLog = id => ['browser freeze confirmed: shell=' + id + ' window=1 path=pipe', 'hook: Ctrl+Tab shift=0 -> NEXT_TAB', 'browser wake sent: shell=' + id + ' window=1 path=pipe queued', 'switchToShell: 1 -> 0 restoring=false'].join('\n');
+  const pattern = id => new RegExp('browser freeze confirmed: shell=' + id + ' .*hook: Ctrl\\+Tab shift=0 -> NEXT_TAB.*browser wake sent: shell=' + id + ' .*switchToShell: 1 -> 0 ', 's');
+  assert.equal(pattern(1).test(wakeLog(1)), true);
+  assert.equal(pattern(2).test(wakeLog(1)), false);
+  assert.equal(pattern(1).test(wakeLog(1).split('\n').slice(1).join('\n')), false);
+  assert.equal(pattern(1).test(wakeLog(1).split('\n').filter(line => !line.includes('wake sent')).join('\n')), false);
 });
 
 test('console ordering stays grouped-first and Chat View uses real Alt+C with target-specific unsent drafts', () => {
@@ -218,7 +255,10 @@ test('console ordering stays grouped-first and Chat View uses real Alt+C with ta
   for (const step of steps) { const next = journey.indexOf(step, offset + 1); assert.ok(next > offset, step); offset = next; }
   assert.match(journey, /Focus-Palette 'clear always view for this session' 6466/);
   assert.doesNotMatch(journey, /Focus-Palette 'per tab' 6345/);
-  assert.match(journey, /Press @\(0x12, 0x41\) 'Alt\+A: close browser pane for Chat View baseline'\s+\$null = Assert-BrowserPane 'closed' \('chat-baseline-' \+ \$tab\)/);
+  assert.match(journey, /Press-CloseBrowserPane 'Alt\+A: close browser pane for Chat View baseline'\s+\$null = Assert-BrowserPane 'closed' \('chat-baseline-' \+ \$tab\)/);
+  const closer = control.slice(control.indexOf('function Press-CloseBrowserPane'), control.indexOf('function Focus-BrowserPaneOwner'));
+  assert.match(closer, /for \(\$attempt = 1; \$attempt -le 3; \$attempt\+\+\) \{\s+Press @\(0x12, 0x41\) \$Label\s+try \{\s+Wait-Until \{ \$pane = Read-BrowserPane; \$null -ne \$pane -and \$pane.browser_state -eq 'closed' \} "Alt\+A attempt \$attempt closed the browser pane" 3\s+return\s+\} catch \{ if \(\$attempt -eq 3\) \{ throw \} \}/);
+  assert.throws(() => assert.match(closer.replace('-eq 3', '-eq 4'), /\$attempt -eq 3\) \{ throw/));
   assert.match(journey, /Press @\(0x12, 0x43\) 'Alt\+C:/);
   assert.match(journey, /Wait-Until \{ \(Read-Session\).tabs\[\$tab\].cv \}/);
   assert.match(journey, /Type-Text \$drafts\[\$tab\]/);

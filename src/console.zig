@@ -2614,6 +2614,7 @@ pub fn switchToShell(idx: u32) void {
     if (idx != prev) app_state.g_front_period.selected = null;
     app_state.active_shell = idx;
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
+    if (defer_browser and defer_native_browser) @import("browser_pane.zig").revealPaintedChatBrowser();
     chatDraftBindToActive();
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
         if (app_state.g_ws_last_shell[app_state.shells[idx].workspace] != app_state.shells[idx].shell_id)
