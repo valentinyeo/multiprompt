@@ -29,10 +29,11 @@ function assertsNative(source) {
     'GetAncestor(composer, 2) != owner', 'GetFocusedWindow(owner) != composer', 'EditText(composer) != draft',
   ]) assert.ok(source.includes(condition), condition);
   const measure = source.slice(source.indexOf('public static double[] MeasureSessionSwitch'));
-  assert.match(measure, /Bitmap\(3, 3\)[\s\S]*double visible = -1;\s+var timer = BeginSessionSwitch\(\);/);
+  assert.match(measure, /Bitmap\(3, 3\)[\s\S]*double visible = -1;[\s\S]*var timer = BeginSessionSwitch\(\);/);
   assert.match(measure, /if \(SwitchReady\(owner, console, suffix, browser, dock, composer, draft\)\)/);
   assert.match(measure, /if \(visible < 0\) visible = timer.Elapsed.TotalMilliseconds;/);
-  assert.match(measure, /if \(browser == IntPtr.Zero \|\| PaintMatches\(dock, rgb, pixels, graphics\)\) \{\s+timer.Stop\(\);\s+return new double\[\] \{ timer.Elapsed.TotalMilliseconds, visible \};/);
+  assert.match(measure, /if \(painted < 0 && \(browser == IntPtr.Zero \|\| PaintMatches\(dock, rgb, pixels, graphics\)\)\) painted = timer.Elapsed.TotalMilliseconds;/);
+  assert.match(measure, /if \(painted >= 0 && \(frozenMarker == null \|\| awake >= 0\)\) \{\s+timer.Stop\(\);\s+return new double\[\] \{ painted, visible, awake \};/);
   assert.match(measure, /Thread.Sleep\(1\);[\s\S]*timer.ElapsedMilliseconds < 20000/);
   assert.doesNotMatch(source, /AutomationElement|SetForegroundWindow|::Chord|SendMessage\(|PostMessage|DwmFlush/);
 }
@@ -43,7 +44,7 @@ test('timed input and native polling stay in one call without UIA or PowerShell 
     assert.throws(() => assertsNative(native.replaceAll(before, 'false')));
   }
   const sample = journey.slice(journey.indexOf('$measurement ='), journey.indexOf("$pattern = 'switch-timing"));
-  assert.match(sample, /MeasureSessionSwitch\(\$script:window, \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$composerHandle, \$drafts\[\$target\], \$rgb\[\$target\]\)/);
+  assert.match(sample, /MeasureSessionSwitch\(\$script:window, \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$composerHandle, \$drafts\[\$target\], \$rgb\[\$target\], \$frozenMarker\)/);
   assert.match(sample, /samples_ms\[\$sample\] = \$measurement\[0\]/);
   assert.match(sample, /window_visible_ms\[\$sample\] = \$measurement\[1\]/);
   assert.ok(sample.indexOf('Wait-WorkspaceSurface') > sample.indexOf('window_visible_ms'));
@@ -376,7 +377,7 @@ function assertsSwitchExtension(driver) {
     'Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force',
     'allowed_origins = @("chrome-extension://$extensionId/")',
     "path = (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe')",
-    'HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.zigshell.bridge',
+    'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.zigshell.bridge',
     "if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }",
     '$switchNativeRegistry = $registry', 'New-Item -Path $registry -Force', 'Set-Item -Path $registry -Value $nativeManifest',
   ]) assert.ok(setup.includes(step), step);
@@ -404,4 +405,51 @@ test('switch journey installs only the fixture extension and matching native hos
 test('new measurement code adds no removable code comments', async () => {
   const { strip } = await import('./strip-comments.mjs');
   for (const [source, language] of [[timing, 'zig'], [browser, 'zig'], [control, 'powershell'], [workflow, 'yaml'], [read('tools/browser-switch-speed.test.js'), 'javascript']]) assert.equal(strip(source, language).commentLines, 0);
+});
+
+function assertsRealBridge(driver, yaml) {
+  const setup = driver.slice(driver.indexOf("    if ($Feature -eq 'browser-switch-speed') {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  for (const step of [
+    'process.env.VERIFY_BROWSER_MODULE', '("puppeteer").executablePath()',
+    "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",
+    "HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.zigshell.bridge",
+    "'zigshell-bridge.exe'", 'chrome-extension://$extensionId/',
+  ]) assert.ok(setup.includes(step), step);
+  assert.match(yaml, /Copy-Item zig-out\/bin\/zigshell-bridge.exe verify-bin\/zigshell-bridge.exe/);
+  for (const name of ['actions/setup-node@', 'name: Install isolated Chrome for Testing driver', 'name: Verify real native browser journey']) {
+    const step = yaml.slice(yaml.indexOf(name), yaml.indexOf('\n      - ', yaml.indexOf(name) + name.length));
+    assert.match(step, /if: env.FEATURE == 'browser-emulation' \|\| env.FEATURE == 'browser-switch-speed'/);
+  }
+  assert.match(yaml, /puppeteer@24\.31\.0/);
+  const wait = driver.slice(driver.indexOf('function Wait-SwitchNativeHost'), driver.indexOf('function Read-BrowserFrozen'));
+  for (const step of ["'multiprompt-browser-isolated'", '$pipe.Connect(100)', '$pipe.IsConnected', '$pipe.Dispose()', "'native messaging host reconnect on extension keepalive' 90"]) assert.ok(wait.includes(step), step);
+  assert.match(driver, /\$pane = Open-BrowserPane \(\$mode \+ '-' \+ \$tab\)\s+Wait-SwitchNativeHost\s+Wait-Until/);
+  assert.match(driver, /\$edge = \$chrome\s+\$profile = Join-Path \$env:LOCALAPPDATA 'ZigShell\/ChromeUserData'/);
+}
+
+test('switch panes use pinned real Chrome via user configuration and wait for real host keepalive reconnect', () => {
+  assertsRealBridge(control, workflow);
+  for (const before of ['("puppeteer").executablePath()', "Join-Path $config 'chrome-exe.txt'", '$pipe.Connect(100)', '$pipe.IsConnected', 'Wait-SwitchNativeHost\n                            Wait-Until']) {
+    assert.throws(() => assertsRealBridge(control.replaceAll(before, 'false'), workflow), `reject missing real bridge step: ${before}`);
+  }
+  assert.throws(() => assertsRealBridge(control, workflow.replaceAll("|| env.FEATURE == 'browser-switch-speed'", '')));
+});
+
+function assertsWakeTiming(source, driver) {
+  const measure = source.slice(source.indexOf('public static double[] MeasureSessionSwitch'));
+  assert.match(measure, /File.ReadAllText\(frozenMarker\).Trim\(\) != "1"[\s\S]+var timer = BeginSessionSwitch\(\)/);
+  assert.match(measure, /if \(frozenMarker != null && awake < 0 && !System.IO.File.Exists\(frozenMarker\)\) awake = timer.Elapsed.TotalMilliseconds/);
+  assert.match(measure, /if \(painted >= 0 && \(frozenMarker == null \|\| awake >= 0\)\)/);
+  assert.match(measure, /return new double\[\] \{ painted, visible, awake \}/);
+  assert.match(driver, /\$frozenMarker = if \(\$frozen\) \{ Join-Path \$scratch \("roaming\/ZigShell\/panehib-zss-\$\(\$shellIds\[\$target\]\).flag"\) \} else \{ \$null \}/);
+  for (const [field, index] of [['window_visible_ms', 1], ['wake_flag_cleared_ms', 2], ['target_color_painted_ms', 0]]) {
+    assert.ok(driver.includes(`$freeze.${field} = $measurement[${index}]`));
+    assert.ok(driver.includes(`${field} = $null`));
+  }
+}
+
+test('each frozen sample records independent native-loop visible, marker-cleared and color-paint times', () => {
+  assertsWakeTiming(native, journey);
+  for (const before of ['File.ReadAllText(frozenMarker).Trim() != "1"', '!System.IO.File.Exists(frozenMarker)', 'awake >= 0', 'painted, visible, awake']) assert.throws(() => assertsWakeTiming(native.replaceAll(before, 'false'), journey));
+  for (const field of ['window_visible_ms', 'wake_flag_cleared_ms', 'target_color_painted_ms']) assert.throws(() => assertsWakeTiming(native, journey.replace(`$freeze.${field} = $measurement`, '$ignored = $measurement')));
 });

@@ -239,17 +239,22 @@ public static class VerifyNative {
         using (var pixels = new System.Drawing.Bitmap(3, 3))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) return PaintMatches(dock, rgb, pixels, graphics);
     }
-    public static double[] MeasureSessionSwitch(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft, int rgb) {
+    public static double[] MeasureSessionSwitch(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft, int rgb, string frozenMarker) {
         using (var pixels = new System.Drawing.Bitmap(3, 3))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             double visible = -1;
+            double painted = -1;
+            double awake = -1;
+            if (frozenMarker != null && (!System.IO.File.Exists(frozenMarker) || System.IO.File.ReadAllText(frozenMarker).Trim() != "1")) throw new InvalidOperationException("Target freeze marker missing before input");
             var timer = BeginSessionSwitch();
             do {
+                if (frozenMarker != null && awake < 0 && !System.IO.File.Exists(frozenMarker)) awake = timer.Elapsed.TotalMilliseconds;
                 if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
                     if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
-                    if (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics)) {
+                    if (painted < 0 && (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics))) painted = timer.Elapsed.TotalMilliseconds;
+                    if (painted >= 0 && (frozenMarker == null || awake >= 0)) {
                         timer.Stop();
-                        return new double[] { timer.Elapsed.TotalMilliseconds, visible };
+                        return new double[] { painted, visible, awake };
                     }
                 }
                 Thread.Sleep(1);
@@ -838,6 +843,13 @@ function Read-BrowserPane {
     return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
 }
 
+function Wait-SwitchNativeHost {
+    Wait-Until {
+        $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', 'multiprompt-browser-isolated', [IO.Pipes.PipeDirection]::Out)
+        try { $pipe.Connect(100); return $pipe.IsConnected } catch { return $false } finally { $pipe.Dispose() }
+    } 'native messaging host reconnect on extension keepalive' 90
+}
+
 function Read-BrowserFrozen([uint32]$ShellId) {
     $path = Join-Path $scratch ("roaming/ZigShell/panehib-zss-$ShellId.flag")
     if (Test-Path -LiteralPath $path -PathType Leaf) {
@@ -1286,12 +1298,18 @@ try {
         $extensionId = -join ($digest[0..15] | ForEach-Object { [char](97 + ($_ -shr 4)); [char](97 + ($_ -band 15)) })
         $nativeManifest = Join-Path $scratch 'native-host.json'
         @{ name = 'com.zigshell.bridge'; description = 'Synthetic switch timing bridge'; path = (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'); type = 'stdio'; allowed_origins = @("chrome-extension://$extensionId/") } | ConvertTo-Json | Set-Content -Encoding UTF8 $nativeManifest
-        $registry = 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.zigshell.bridge'
+        $registry = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.zigshell.bridge'
         if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }
         $switchNativeRegistry = $registry
         New-Item -Path $registry -Force | Out-Null
         Set-Item -Path $registry -Value $nativeManifest
-        Save-Json @{ extensionId = $extensionId; version = $manifest.version; installed = $true } 'switch-extension.json'
+        $chrome = & node -e 'const {createRequire}=require("node:module"); const path=require("node:path"); console.log(createRequire(path.join(process.env.VERIFY_BROWSER_MODULE,"package.json"))("puppeteer").executablePath())'
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
+        $config = Join-Path $env:APPDATA 'ZigShell'
+        New-Item -ItemType Directory -Force $config | Out-Null
+        [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $chrome)
+        [IO.File]::WriteAllText((Join-Path $config 'browser-engine.txt'), 'chrome')
+        Save-Json @{ extensionId = $extensionId; version = $manifest.version; installed = $true; executable = $chrome; configuration = 'chrome-exe.txt + browser-engine.txt' } 'switch-extension.json'
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -1310,16 +1328,22 @@ try {
     } 'owned main window and initialized CMD session' 60
     if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed')) {
         $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
-        if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires installed Edge' }
         $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
+        if ($Feature -eq 'browser-switch-speed') {
+            $edge = $chrome
+            $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
+        }
+        if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires the configured browser executable' }
         $warmupJob = New-Object VerifyJob
         $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
+        if ($Feature -eq 'browser-switch-speed') { $arguments += ' --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api' }
         $warmup = $warmupJob.Start($edge, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
         Wait-Until {
             $warmup.Refresh()
             if ($warmup.HasExited) { throw 'Browser setup process exited before readiness' }
             $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt verification browser ready'
         } 'isolated browser rendered setup page before the pane adoption deadline starts' 60
+        if ($Feature -eq 'browser-switch-speed') { Wait-SwitchNativeHost }
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
     }
@@ -2271,6 +2295,7 @@ try {
                             Wait-WorkspaceSurface $initial.active_workspace $tab $chat ($composerHandle.ToInt32())
                             $script:browserShellId = $shellIds[$tab]
                             $pane = Open-BrowserPane ($mode + '-' + $tab)
+                            Wait-SwitchNativeHost
                             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } 'connected timing browser with app-published CDP binding in its session' 30
                             $browser = [VerifyNative]::DockedPaneWindow($script:window)
                             $dock = New-Object VerifyNative+Rect
@@ -2347,7 +2372,7 @@ try {
                         Doctor
                         if ($frozen) {
                             $frozenLogStart = (Get-Content $log -Raw).Length
-                            $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $shellIds[$target]; marker = "panehib-zss-$($shellIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; log_start = $frozenLogStart; log_end = $null }
+                            $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $shellIds[$target]; marker = "panehib-zss-$($shellIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; window_visible_ms = $null; wake_flag_cleared_ms = $null; target_color_painted_ms = $null; log_start = $frozenLogStart; log_end = $null }
                             [void]$frozenSwitches.Add($freeze)
                             if ($false -ne (Read-BrowserFrozen $shellIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }
                             $parked = [Diagnostics.Stopwatch]::StartNew()
@@ -2364,9 +2389,15 @@ try {
                         }
                         Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
                         $logStart = (Get-Content $log -Raw).Length
-                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target])
+                        $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
+                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
+                        if ($frozen) {
+                            $freeze.window_visible_ms = $measurement[1]
+                            $freeze.wake_flag_cleared_ms = $measurement[2]
+                            $freeze.target_color_painted_ms = $measurement[0]
+                        }
                         Wait-WorkspaceSurface $initial.active_workspace $target $chat ($composerHandle.ToInt32())
                         $pattern = 'switch-timing: to=' + $target + ' total_us=\d+[^\r\n]*'
                         $traceMatches = [regex]::Matches((Get-Content $log -Raw).Substring($logStart), $pattern)

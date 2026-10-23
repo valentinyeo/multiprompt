@@ -113,7 +113,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation')) { throw 'Unknown feature map' }
-          if ($env:FEATURE -eq 'browser-emulation' -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
+          if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
@@ -217,26 +217,26 @@ jobs:
             if (-not (Test-Path "evidence/$file")) { throw "Missing rendering evidence: $file" }
           }
       - name: Launch Doctor Drive Evidence Cleanup
-        if: env.FEATURE != 'browser-emulation'
+        if: env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: env.FEATURE == 'browser-emulation'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed'
         with:
           node-version: 22
       - name: Install isolated Chrome for Testing driver
-        if: env.FEATURE == 'browser-emulation'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed'
         shell: pwsh
         run: |
           npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
           if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Verify real native browser emulation
-        if: env.FEATURE == 'browser-emulation'
+      - name: Verify real native browser journey
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed'
         shell: powershell
         run: |
-          & .claude/skills/verify-multiprompt/control.ps1 -Feature browser-emulation -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Retain pre-launch failure result
         if: always()
         shell: powershell
