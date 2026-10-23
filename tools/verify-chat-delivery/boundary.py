@@ -109,11 +109,62 @@ def tmux():
     return 95
 
 
+VPS_POLL_COMMAND = (
+    "printf '@capacity|'; "
+    "getconf _NPROCESSORS_ONLN 2>/dev/null | tr '\\n' '|'; "
+    "cut -d' ' -f1 /proc/loadavg 2>/dev/null | tr '\\n' '|'; "
+    "grep '^MemTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^MemAvailable:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^SwapTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "grep '^SwapFree:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
+    "printf '\\n'; "
+    "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null"
+)
+
+
+def declined_remote(argv):
+    pos = 0
+    forward = None
+    while pos < len(argv) and argv[pos].startswith("-"):
+        option = argv[pos]
+        if option in ("-o", "-R") and pos + 1 < len(argv):
+            if option == "-R":
+                forward = argv[pos + 1]
+            pos += 2
+        elif option in ("-T", "-N"):
+            pos += 1
+        else:
+            return None
+    if pos >= len(argv):
+        return None
+    remote = " ".join(argv[pos + 1:])
+    if not remote and "-N" in argv[:pos] and forward and re.fullmatch(r"19548:127\.0\.0\.1:[0-9]{1,5}", forward):
+        return "notification-forward", "", 255
+    if forward is not None:
+        return None
+    if remote == "cat ~/.local/state/token-ladder/status.json":
+        return "ladder-status", "", 1
+    if re.fullmatch(r"if test -f ~/\.local/state/multiprompt/relay-v1; then mkdir -p -m 700 /tmp/mp-notify-\$\(id -u\) && rm -f /tmp/mp-notify-\$\(id -u\)/[A-Za-z0-9_-]{1,32}-[0-9a-f]{16}\.sock && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi", remote):
+        return "notification-relay", "MP_RELAY_LEGACY\n", 0
+    if remote in (VPS_POLL_COMMAND, "while IFS= read -r _; do { " + VPS_POLL_COMMAND + "; } </dev/null; printf '@@ZS_END@@\\n'; done"):
+        return "capacity-poll", "", 1
+    return None
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
         return 0
     command = " ".join(ARGS)
+    declined = declined_remote(ARGS)
+    if declined:
+        kind, output, exit_code = declined
+        record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
+        sys.stdout.write(output)
+        return exit_code
     python = re.search(r"\bpython3\s", command)
     if python:
         remote = shlex.split(command[python.start():])
@@ -133,7 +184,7 @@ def ssh():
         record("invocations.jsonl", kind="attach", session=match[1])
         attach(match[1])
         return 0
-    record("unsupported.jsonl", operation="remote command", hasPython=bool(python))
+    record("unsupported.jsonl", operation="remote command", hasPython=bool(python), argv=ARGS, command=command)
     return 96
 
 

@@ -165,6 +165,89 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE/);
 });
 
+test('background host probes are explicitly declined and unknown remote commands remain diagnostic failures', () => {
+  const literals = source => [...source.matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0]));
+  const app = read('src/app_state.zig');
+  const constant = name => literals(app.match(new RegExp('pub const ' + name + ' =([\\s\\S]*?);\\n'))[1]).join('');
+  const poll = constant('VPS_PROBE_SCRIPT') + constant('VPS_TMUX_LIST_SCRIPT');
+  const literal = (source, needle) => JSON.parse([...source.matchAll(/"(?:\\.|[^"\\\r\n])*"/g)].find(match => match[0].includes(needle))[0]);
+  const vps = read('src/vps.zig');
+  const loopStart = literal(vps, 'while IFS= read -r _; do { ');
+  const loopEnd = literal(vps, '; } </dev/null; printf');
+  assert.ok(loopStart && loopEnd);
+  const relay = literal(read('src/console.zig'), 'if test -f ~/.local/state/multiprompt/relay-v1;');
+  const relayCommand = relay.slice(relay.indexOf('"') + 1, -1).replace('{s}', 'fixture-0123456789abcdef');
+  const ladder = literal(read('src/telemetry_panel.zig'), ' cat ~/.local/state/token-ladder/status.json').split(' {s} ')[1];
+  const probes = [];
+  for (const host of ['remote-1', 'remote-2', 'remote-3']) {
+    const options = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host];
+    for (const [remote, kind, output, code] of [
+      [poll, 'capacity-poll', '', 1],
+      [(loopStart + poll + loopEnd).slice(2, -1), 'capacity-poll', '', 1],
+      [relayCommand, 'notification-relay', 'MP_RELAY_LEGACY\n', 0],
+    ]) probes.push({ argv: [...options, remote], kind, output, code });
+    for (const name of ['SSH_TUNNEL_KEEPER_OPTS', 'SSH_TUNNEL_KEEPER_OPTS_BATTERY']) {
+      probes.push({ argv: [...constant(name).trim().split(' '), '-R', '19548:127.0.0.1:12345', host], kind: 'notification-forward', output: '', code: 255 });
+    }
+  }
+  probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
+  const unknown = [
+    ['-T', 'remote-1', 'uname -a'],
+    ['-T', 'remote-1', relayCommand + '; unexpected-operation'],
+    ['-T', 'remote-2', ladder + '.unknown'],
+    ['-N', '-R', '12345:127.0.0.1:12345', 'remote-1'],
+    ['-N', '-R', '19548:127.0.0.1:12345', 'remote-1', 'unexpected-operation'],
+  ];
+  const script = String.raw`
+import ast, contextlib, io, json, os, pathlib, re, shlex, sys, tempfile, time
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tree = ast.parse(source)
+selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ("state", "record", "declined_remote", "ssh") or isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "VPS_POLL_COMMAND" for target in node.targets)]
+namespace = dict(json=json, os=os, re=re, shlex=shlex, sys=sys, time=time)
+exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
+fixtures = json.load(sys.stdin)
+with tempfile.TemporaryDirectory() as directory:
+    root = pathlib.Path(directory)
+    namespace["ROOT"] = root
+    (root / "state.json").write_text(json.dumps(dict(name="busy-send")), encoding="utf-8")
+    (root / "agent-buffer.jsonl").write_text("existing delivery evidence\n", encoding="utf-8")
+    def rows(name):
+        file = root / name
+        return [json.loads(line) for line in file.read_text(encoding="utf-8").splitlines()] if file.exists() else []
+    for probe in fixtures["probes"]:
+        argv = probe["argv"]
+        namespace["ARGS"] = argv
+        assert namespace["declined_remote"](argv) == (probe["kind"], probe["output"], probe["code"]), argv
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert namespace["ssh"]() == probe["code"], argv
+        assert output.getvalue() == probe["output"], argv
+        row = rows("declined.jsonl")[-1]
+        assert row["argv"] == argv and row["command"] == " ".join(argv), row
+        assert row["kind"] == probe["kind"] and row["exitCode"] == probe["code"], row
+        assert row["case"] == "busy-send" and row["ms"] > 0 and row["pid"] > 0, row
+    assert len(rows("declined.jsonl")) == len(fixtures["probes"])
+    assert not rows("unsupported.jsonl")
+    for argv in fixtures["unknown"]:
+        namespace["ARGS"] = argv
+        assert namespace["declined_remote"](argv) is None, argv
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert namespace["ssh"]() == 96, argv
+        assert output.getvalue() == ""
+        row = rows("unsupported.jsonl")[-1]
+        assert row["argv"] == argv and row["command"] == " ".join(argv), row
+        assert row["operation"] == "remote command" and row["hasPython"] is False, row
+    assert len(rows("unsupported.jsonl")) == len(fixtures["unknown"])
+    assert len(rows("declined.jsonl")) == len(fixtures["probes"])
+    assert not rows("invocations.jsonl") and not rows("capture.jsonl")
+    assert (root / "agent-buffer.jsonl").read_text(encoding="utf-8") == "existing delivery evidence\n"
+print("probe classification passed")
+`;
+  const output = execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { input: JSON.stringify({ probes, unknown }), encoding: 'utf8', timeout: 10000 });
+  assert.equal(output.trim(), 'probe classification passed');
+});
+
 function assertsConsoleLaunch(launcher) {
   assert.match(launcher, /si.dwFlags = STARTF_USESTDHANDLES \| STARTF_USESHOWWINDOW;/);
   assert.match(launcher, /si.wShowWindow = SW_SHOWNOACTIVATE;/);

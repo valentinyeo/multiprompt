@@ -34,6 +34,7 @@ The expected regression comparison is 811 failing busy-send and idle-suggestion 
 
 ## Gotchas
 
+- Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
 - `agentBoundary` honestly records: stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server. This proves that real Chat View input reaches the production tmux-channel system boundary, not that Claude consumes it, generates a response, or persists a real conversation.
 - No real SSH networking, authentication, server, Claude process, transcript discovery, transcript settlement or remote rendering is verified. No credentials, synthetic transcript files, account data or test-only app setters are supplied.
 - The launcher preserves an attached console for screen reads and uses `CREATE_NO_WINDOW` when no console is attached, including SSH probes with non-pipe stdout. Child startup uses `SW_SHOWNOACTIVATE`. Foreground acquisition uses the same Alt/thread-attachment routine as the other journeys; each Press retries it if foreground was lost, then still refuses keyboard input unless the owned app is foreground.
