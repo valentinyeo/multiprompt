@@ -327,6 +327,31 @@ class Relay(unittest.TestCase):
         self.send(b"ACTIVE:tab")
         self.assertLess(time.monotonic() - started, 1)
 
+    def test_tcp_hook_that_closes_right_after_writing_is_forwarded(self):
+        received = self.laptop("one", requests=5)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        stop = threading.Event()
+        server = threading.Thread(target=relay.serve, args=(self.directory, port, stop))
+        server.start()
+        self.addCleanup(server.join, 2)
+        self.addCleanup(stop.set)
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                with socket.create_connection(("127.0.0.1", port), 0.2) as hook:
+                    hook.sendall(b"DONE:tab\n")
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
+        deadline = time.monotonic() + 2
+        while b"DONE:tab\n" not in received and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertIn(b"DONE:tab\n", received)
+
 
 if __name__ == "__main__":
     unittest.main()
