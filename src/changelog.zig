@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.846", .items = &.{
+        .{ .text = "Press Ctrl+H to snooze a session with Remind Me.", .ticket = "IGSH-702" },
+        .{ .text = "Remind Me now offers In 1, 2, 3, 6 and 12 hours and Tomorrow evening, and Tomorrow morning is now 9:00 AM.", .ticket = "IGSH-702" },
+    } },
     .{ .ver = "0.28.845", .items = &.{
         .{ .text = "In Chat View, Stop is now a small square button inside the message box while the agent works, and Send appears beside it as soon as you type.", .ticket = "IGSH-675" },
     } },
