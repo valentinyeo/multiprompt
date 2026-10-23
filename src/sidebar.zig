@@ -4646,6 +4646,64 @@ test "IGSH-457 Starred sidebar equals inbox split live without moving sessions" 
     try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
 }
 
+test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.groups;
+    const saved_group_count = app_state.group_count;
+    const saved_next = app_state.next_group_id;
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_workspace = app_state.g_active_workspace;
+    const saved_active = app_state.active_shell;
+    const saved_inbox_count = app_state.g_inbox_row_count;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    defer {
+        app_state.shells[0..4].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.groups = saved_groups;
+        app_state.group_count = saved_group_count;
+        app_state.next_group_id = saved_next;
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_workspace;
+        app_state.active_shell = saved_active;
+        app_state.g_inbox_row_count = saved_inbox_count;
+        app_state.g_ws_snoozed = saved_snoozed;
+    }
+    app_state.shell_count = 4;
+    app_state.group_count = 0;
+    app_state.next_group_id = 1;
+    app_state.g_single_window = true;
+    app_state.g_active_workspace = 0;
+    app_state.active_shell = 0;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.g_starred_workspace = true;
+    const hypertask = createDefaultGroup();
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(i + 1);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].starred_group_id = hypertask;
+    }
+    app_state.shells[1].muted = true;
+    app_state.shells[2].inbox_excluded = true;
+    app_state.shells[3].inbox_archived = true;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(hypertask, app_state.groups[rows[0].gidx].id);
+    for (0..3) |i| {
+        try std.testing.expectEqual(.tab, rows[i + 1].kind);
+        try std.testing.expectEqual(@as(u32, @intCast(i)), rows[i + 1].shell_idx);
+        try std.testing.expect(!isTabHidden(@intCast(i)));
+    }
+    try std.testing.expect(isTabHidden(3));
+    app_state.shells[3].needs_attention = true;
+    try std.testing.expectEqual(@as(u32, 5), layoutRows(&rows));
+}
+
 test "IGSH-556 Favorites and home grouping keep independent memberships and group rows" {
     const saved_shells = app_state.shells[0..2].*;
     const saved_count = app_state.shell_count;
