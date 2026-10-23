@@ -37,7 +37,7 @@ Dispatch `gh workflow run verify.yml -f feature=workspace-focus`; Windows select
 - Show the default-hidden workspace switcher through Ctrl+K before any pill click; wait for saved visibility, expanded sidebar and the default unsnoozed layout.
 - Follow the [complete workspace-focus step and bounded-readiness table](workspace-focus.md#driving-it-with-controlps1). It enumerates setup, keyboard and pill returns in both Chat View and the console, no-click text assertions, staged commands and cleanup.
 - Require all four `workspace-focus ... PASS` outcomes and a passed `result.json`. Every transition waits for the selected saved session, matching view and actual input surface, not just the active workspace index.
-- Inspect `pills-ready.png`, `action.png`, `chat-returned.png`, `after.png`, timestamped `actions.json`, saved state and debug logs. Readiness checks never click a composer or repair focus after switching.
+- Inspect `pills-ready.png`, `action.png`, `chat-returned.png`, `after.png`, timestamped `actions.json`, saved state and debug logs. Readiness readers and Type-Text never click a composer or set focus; Press still calls SetForegroundWindow before every chord, including workspace returns and Enter. This does not prove unassisted foreground restoration.
 
 This journey covers local CMD and Chat View typing focus, not account sync, agents, SSH or browser focus. The Zig workspace regression also covers persisted focus round trips; this desktop journey does not relaunch the app.
 
