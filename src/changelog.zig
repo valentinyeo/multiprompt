@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.823", .items = &.{
+        .{ .text = "After renaming a tab with F2, you can keep typing commands without clicking the console again.", .ticket = "IGSH-597" },
+    } },
     .{ .ver = "0.28.822", .items = &.{
         .{ .text = "Group lines no longer cross the selected session’s highlight or leave little line fragments beside it.", .ticket = "IGSH-591" },
     } },
