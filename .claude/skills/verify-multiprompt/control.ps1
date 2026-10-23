@@ -2403,7 +2403,10 @@ try {
                         }
                         Wait-WorkspaceSurface $initial.active_workspace $target $chat ($composerHandle.ToInt32())
                         $pattern = 'switch-timing: to=' + $target + ' total_us=\d+[^\r\n]*'
-                        $traceMatches = [regex]::Matches((Get-Content $log -Raw).Substring($logStart), $pattern)
+                        $debugAfter = Get-Content $log -Raw
+                        $traceMatches = @()
+                        if ($debugAfter.Length -ge $logStart) { $traceMatches = [regex]::Matches($debugAfter.Substring($logStart), $pattern) }
+                        Save-Json @{ mode = $mode; sample = $sample; start = $logStart; end = $debugAfter.Length; complete = $debugAfter.Length -ge $logStart } ("$mode-$sample-log-range.json")
                         $steps = $null
                         if ($traceMatches.Count -eq 1) {
                             $line = $traceMatches[0].Value
@@ -2454,7 +2457,7 @@ try {
                     $debug = Get-Content $log -Raw
                     foreach ($freeze in $frozenSwitches) {
                         $end = if ($null -eq $freeze.log_end) { $debug.Length } else { $freeze.log_end }
-                        $lines = $debug.Substring($freeze.log_start, $end - $freeze.log_start)
+                        $lines = if ($freeze.log_start -le $end -and $end -le $debug.Length) { $debug.Substring($freeze.log_start, $end - $freeze.log_start) } else { $debug }
                         $lines | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $freeze.mode, $freeze.sample))
                     }
                 }

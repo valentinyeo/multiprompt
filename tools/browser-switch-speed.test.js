@@ -465,3 +465,9 @@ test('timing log appends permit concurrent evidence readers without permitting a
   assert.match(append, sharedRead);
   for (const sharing of ['0', 'FILE_SHARE_READ | FILE_SHARE_WRITE']) assert.doesNotMatch(append.replace('GENERIC_WRITE, FILE_SHARE_READ,', `GENERIC_WRITE, ${sharing},`), sharedRead);
 });
+
+test('optional trace reads retain the real sample and a range record if the live log shrinks', () => {
+  assert.match(journey, /\$traceMatches = @\(\)\s+if \(\$debugAfter.Length -ge \$logStart\) \{ \$traceMatches = \[regex\]::Matches\(\$debugAfter.Substring\(\$logStart\), \$pattern\) \}/);
+  assert.match(journey, /complete = \$debugAfter.Length -ge \$logStart/);
+  assert.match(journey, /\$freeze.log_start -le \$end -and \$end -le \$debug.Length/);
+});
