@@ -33,7 +33,7 @@ function declaration(name) {
 function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
-    fn(read('drawing'), 'uiScaled'),
+    fn(read('drawing'), 'uiScaled'), fn(sidebar, 'groupRailRect'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
@@ -46,7 +46,7 @@ const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read
 const chat_history = struct { ${fn(read('chat_history'), 'column')} };
 const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
-${['BROWSER_SPLIT_DEFAULT_PERMILLE', 'CHAT_BUBBLE_RADIUS', 'DEV_TOP_PAD', 'DEV_SHELL_COLS', 'SIDEBAR_W_COLLAPSED', 'SIDEBAR_VPS_CARD_H', 'SIDEBAR_STICKY_CARD_H', 'SIDEBAR_STICKY_CARD_COLLAPSED_H', 'SIDEBAR_STICKY_CARD_GAP', 'THREAD_TITLE_H', 'BROWSER_SPLIT_W', 'BrowserLayout', 'ChatViewLayout'].map(n => n.endsWith('Layout') ? state.slice(state.indexOf('pub const ' + n + ' = struct'), state.indexOf('\n};', state.indexOf('pub const ' + n + ' = struct')) + 3) : declaration(n)).join('\n')}
+${['GROUP_HEADER_H', 'BROWSER_SPLIT_DEFAULT_PERMILLE', 'CHAT_BUBBLE_RADIUS', 'DEV_TOP_PAD', 'DEV_SHELL_COLS', 'SIDEBAR_W_COLLAPSED', 'SIDEBAR_VPS_CARD_H', 'SIDEBAR_STICKY_CARD_H', 'SIDEBAR_STICKY_CARD_COLLAPSED_H', 'SIDEBAR_STICKY_CARD_GAP', 'THREAD_TITLE_H', 'BROWSER_SPLIT_W', 'BrowserLayout', 'ChatViewLayout'].map(n => n.endsWith('Layout') ? state.slice(state.indexOf('pub const ' + n + ' = struct'), state.indexOf('\n};', state.indexOf('pub const ' + n + ' = struct')) + 3) : declaration(n)).join('\n')}
 const ConsoleColumn = struct { left: i32, width: i32 };
 ${shared ? layout.slice(layout.indexOf('pub const PaneRects'), layout.indexOf('\n};', layout.indexOf('pub const PaneRects')) + 3) : ''}
 const LOOK_UNIFIED = true;
@@ -308,7 +308,11 @@ test "IGSH-549 sidebar group rail has its own column before every row icon" {
         const column = activePaneRects(test_client).sidebar;
         const row = .{ .y = uiScaled(40) };
         const bottom = uiScaled(120);
-        ${statement(sidebar, 'var rail = RECT').replace('var rail', 'const rail')}
+        ${statement(sidebar, 'var rail = groupRailRect').replace('var rail', 'const rail')}
+        try std.testing.expectEqual(column.left, rail.left);
+        try std.testing.expectEqual(row.y + GROUP_HEADER_H - g_sidebar_scroll, rail.top);
+        try std.testing.expectEqual(bottom - g_sidebar_scroll, rail.bottom);
+        try std.testing.expectEqual(uiScaled(7) - uiScaled(4), rail.right - rail.left);
         const y = row.y + uiScaled(24);
         ${statement(sidebar, 'const fav_size: i32 =')}
         ${statement(sidebar, 'const left_pad: i32 =')}
@@ -323,7 +327,7 @@ test "IGSH-549 sidebar group rail has its own column before every row icon" {
             }
         }
         try std.testing.expect(!intersects(rail, favicon));
-        try std.testing.expect(rail.left > column.left and rail.right < favicon.left);
+        try std.testing.expect(rail.right < favicon.left);
     }
 }
 test "IGSH-549 Chat View content stays inside the focus border" {

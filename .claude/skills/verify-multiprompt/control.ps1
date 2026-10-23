@@ -246,47 +246,102 @@ public static class GroupRailProof {
     public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int selected) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
-            int left = origin.X - frame.Left + S(8, dpi, scale);
-            int railLeft = left + S(4, dpi, scale), railRight = left + S(7, dpi, scale);
+            int clientLeft = origin.X - frame.Left;
+            int left = clientLeft + S(8, dpi, scale);
+            int referenceX = clientLeft + S(220, dpi, scale) - S(44, dpi, scale);
+            int scanRight = left + S(10, dpi, scale);
+            int width = S(7, dpi, scale) - S(4, dpi, scale);
             var rail = System.Drawing.Color.FromArgb(145, 149, 157);
+            var header = System.Drawing.Color.FromArgb(63, 64, 66);
             int top = -1;
             int searchTop = origin.Y - frame.Top + S(8, dpi, scale);
             for (int y = searchTop; y < searchTop + S(180, dpi, scale); y++) {
-                if (Distance(image.GetPixel(railLeft, y), rail) <= 2) { top = y; break; }
+                if (Distance(image.GetPixel(referenceX, y), header) <= 2) { top = y; break; }
             }
-            if (top < 0) throw new InvalidOperationException("group-rail gray header rail not found");
-            int rowHeight = S(38, dpi, scale), firstRow = top + 28;
+            if (top < 0) throw new InvalidOperationException("group-rail gray header fill not found");
+            int headerHeight = 28, rowHeight = S(38, dpi, scale);
+            int firstRow = top + headerHeight;
+            int secondHeader = firstRow + 2 * rowHeight;
+            int secondRow = secondHeader + headerHeight;
+            int groupBottom = secondRow + 2 * rowHeight;
             int rowTop = firstRow + selected * rowHeight, rowBottom = rowTop + rowHeight;
-            int referenceX = origin.X - frame.Left + S(220, dpi, scale) - S(44, dpi, scale);
             var highlight = image.GetPixel(referenceX, (rowTop + rowBottom) / 2);
             if (highlight.B <= highlight.R + 10) throw new InvalidOperationException("group-rail expected a visible blue selected highlight");
-            int headerPixels = 0, unselectedPixels = 0, selectedMismatch = 0, selectedRail = 0, strayPixels = 0;
-            for (int x = railLeft; x < railRight; x++) {
-                for (int y = top; y < firstRow; y++) if (Distance(image.GetPixel(x, y), rail) <= 2) headerPixels++;
-                int otherTop = firstRow + (1 - selected) * rowHeight;
-                for (int y = otherTop; y < otherTop + rowHeight; y++) if (Distance(image.GetPixel(x, y), rail) <= 2) unselectedPixels++;
-                for (int y = rowTop + 3; y < rowBottom - 3; y++) {
-                    var actual = image.GetPixel(x, y);
-                    var expected = image.GetPixel(referenceX, y);
-                    if (Distance(actual, expected) > 3) selectedMismatch++;
-                    if (Distance(actual, rail) <= 2) selectedRail++;
+            int headerPixels = 0, headerMismatch = 0, unselectedPixels = 0, selectedMismatch = 0, selectedRail = 0, strayPixels = 0;
+            bool leftEdge = true, groupsSeparate = true;
+            var railXs = new List<int>();
+            var headerXs = new List<int>();
+            for (int group = 0; group < 2; group++) {
+                int headerTop = group == 0 ? top : secondHeader;
+                int memberTop = headerTop + headerHeight;
+                int headerLeft = -1;
+                for (int x = clientLeft; x < scanRight; x++) {
+                    if (Distance(image.GetPixel(x, headerTop + headerHeight / 2), header) <= 2) { headerLeft = x; break; }
                 }
-                for (int y = firstRow + 2 * rowHeight; y < firstRow + 3 * rowHeight; y++) {
+                if (headerLeft < 0 || Distance(image.GetPixel(referenceX, headerTop), header) > 2) throw new InvalidOperationException("group-rail adjacent header fill not found");
+                int unselectedTop = memberTop + (group == 0 ? 1 - selected : 0) * rowHeight;
+                int railLeft = -1, railRight = -1;
+                for (int x = clientLeft; x < scanRight; x++) {
+                    if (Distance(image.GetPixel(x, unselectedTop + rowHeight / 2), rail) <= 2) {
+                        if (railLeft < 0) railLeft = x;
+                        railRight = x + 1;
+                    }
+                }
+                if (railLeft < 0 || railRight - railLeft != width) throw new InvalidOperationException("group-rail missing full-width gray unselected rail");
+                leftEdge = leftEdge && railLeft == headerLeft;
+                railXs.Add(railLeft);
+                headerXs.Add(headerLeft);
+                for (int x = railLeft; x < railRight; x++) {
+                    for (int y = memberTop; y < memberTop + 2 * rowHeight; y++) {
+                        if (group == 0 && y >= rowTop && y < rowBottom) continue;
+                        if (Distance(image.GetPixel(x, y), rail) <= 2) unselectedPixels++;
+                        else throw new InvalidOperationException("group-rail missing continuous gray unselected rail");
+                    }
+                }
+                for (int x = clientLeft; x < scanRight; x++) {
+                    for (int y = headerTop; y < memberTop; y++) {
+                        var actual = image.GetPixel(x, y);
+                        var expected = image.GetPixel(referenceX, y);
+                        bool railPixel = Distance(actual, rail) <= 2 && Distance(actual, expected) > 3;
+                        if (railPixel) headerPixels++;
+                        if (x >= headerLeft && Distance(actual, expected) > 3) headerMismatch++;
+                        if (group == 1 && railPixel) groupsSeparate = false;
+                    }
+                }
+            }
+            for (int x = left + S(4, dpi, scale); x < left + S(7, dpi, scale); x++) {
+                for (int y = rowTop + 3; y < rowBottom - 3; y++) {
+                    if (Distance(image.GetPixel(x, y), image.GetPixel(referenceX, y)) > 3) selectedMismatch++;
+                }
+            }
+            for (int x = clientLeft; x < scanRight; x++) {
+                for (int y = rowTop; y < rowBottom; y++) {
+                    if (Distance(image.GetPixel(x, y), rail) <= 2) selectedRail++;
+                }
+                for (int y = groupBottom; y < groupBottom + 24 + 2 * rowHeight; y++) {
                     if (Distance(image.GetPixel(x, y), rail) <= 2) strayPixels++;
                 }
             }
-            int width = railRight - railLeft;
-            if (headerPixels != width * 28 || unselectedPixels != width * rowHeight) throw new InvalidOperationException("group-rail missing continuous gray header or unselected rail: " + headerPixels + "," + unselectedPixels);
+            for (int x = railXs[1]; x < railXs[1] + width; x++) {
+                if (Distance(image.GetPixel(x, secondRow - 1), header) > 3 || Distance(image.GetPixel(x, secondRow), rail) > 2) groupsSeparate = false;
+                if (Distance(image.GetPixel(x, groupBottom - 1), rail) > 2 || Distance(image.GetPixel(x, groupBottom), rail) <= 2) groupsSeparate = false;
+            }
+            proof["leftEdge"] = leftEdge;
+            proof["headerClear"] = headerPixels == 0 && headerMismatch == 0;
+            proof["groupsSeparate"] = groupsSeparate;
             proof["selectedClear"] = selectedMismatch == 0 && selectedRail == 0;
             proof["strayClear"] = strayPixels == 0;
             proof["selectedMismatch"] = selectedMismatch;
             proof["selectedRailPixels"] = selectedRail;
             proof["strayPixels"] = strayPixels;
             proof["headerPixels"] = headerPixels;
+            proof["headerMismatch"] = headerMismatch;
             proof["unselectedPixels"] = unselectedPixels;
-            proof["railX"] = new int[] { railLeft, railRight };
-            proof["selectedRect"] = new int[] { railLeft, rowTop + 3, railRight, rowBottom - 3 };
-            proof["belowGroupRect"] = new int[] { railLeft, firstRow + 2 * rowHeight, railRight, firstRow + 3 * rowHeight };
+            proof["railX"] = railXs.ToArray();
+            proof["headerX"] = headerXs.ToArray();
+            proof["headerTops"] = new int[] { top, secondHeader };
+            proof["selectedRect"] = new int[] { left, rowTop, scanRight, rowBottom };
+            proof["belowGroupRect"] = new int[] { left, groupBottom, scanRight, groupBottom + 24 + 2 * rowHeight };
             proof["highlightColor"] = new int[] { highlight.R, highlight.G, highlight.B };
         }
         return proof;
@@ -371,10 +426,10 @@ public static class PaneLayoutProof {
                     if (run > longestRail) { longestRail = run; railX = x; railBottom = y + 1; railTop = y + 1 - run; }
                 }
             }
-            Require(longestRail >= S(40, dpi, scale), "group-line-found", "longest vertical group-color run=" + longestRail);
+            Require(longestRail == S(38, dpi, scale) && railX == sidebarLeft, "group-line-found", "expected a left-aligned member-only rail, longest vertical group-color run=" + longestRail);
             int railRight = railX + 1;
             while (railRight < sidebarLeft + S(40, dpi, scale) && Distance(pixel(railRight, (railTop + railBottom) / 2), railColor) <= 2) railRight++;
-            int rowTop = railTop + S(28, dpi, scale), rowBottom = rowTop + S(38, dpi, scale);
+            int rowTop = railTop, rowBottom = railBottom;
             var rowBackground = pixel(sidebarRight - S(45, dpi, scale), (rowTop + rowBottom) / 2);
             var cardBackground = pixel(sidebarLeft + S(2, dpi, scale), (rowTop + rowBottom) / 2);
             var sidebarBackground = pixel(sidebarRight - S(45, dpi, scale), railBottom + S(2, dpi, scale));
@@ -1464,10 +1519,47 @@ try {
             Type-Text $group.name
             Press @(0x0D) 'Enter: move first session into same group'
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.tabs[0].group_id -eq $group.id -and $state.tabs[1].group_id -eq $group.id -and $state.active_tab -eq 0 } 'two real sessions saved in one group'
+            foreach ($index in @(2, 3, 4, 5)) {
+                Palette 'new cmd'
+                Press @(0x0D) ('Enter: create CMD session ' + ($index + 1))
+                Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($index + 1) -and $state.active_tab -eq $index } 'new CMD session saved and selected'
+                Press @(0x71) 'F2: rename session'
+                Press @(0x11, 0x41) 'Ctrl+A: replace session name'
+                $name = 'Rail ' + [char](65 + $index)
+                Type-Text $name
+                Press @(0x0D) 'Enter: save short session name'
+                Wait-Until { (Read-Session).tabs[$index].name -eq $name } 'short synthetic session name saved'
+            }
+            Press @(0x11, 0x33) 'Ctrl+3: select third session for second group'
+            Wait-Until { (Read-Session).active_tab -eq 2 } 'third session selected'
+            Focus-Palette 'move to group' 6301
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: create adjacent second group'
+            Wait-Until { $state = Read-Session; @($state.groups).Count -eq 2 -and $state.tabs[2].group_id -eq $state.groups[1].id } 'third session in second saved group'
+            Press @(0x1B) 'Esc: finish second default group name'
+            $secondGroup = (Read-Session).groups[1]
+            Press @(0x11, 0x34) 'Ctrl+4: select fourth session'
+            Wait-Until { (Read-Session).active_tab -eq 3 } 'fourth session selected'
+            Focus-Palette 'move to group' 6301
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text $secondGroup.name
+            Press @(0x0D) 'Enter: move fourth session into second group'
+            Wait-Until {
+                $state = Read-Session
+                @($state.tabs).Count -eq 6 -and @($state.groups).Count -eq 2 -and
+                    $state.tabs[0].group_id -eq $group.id -and $state.tabs[1].group_id -eq $group.id -and
+                    $state.tabs[2].group_id -eq $secondGroup.id -and $state.tabs[3].group_id -eq $secondGroup.id -and
+                    (-not $state.tabs[4].PSObject.Properties['group_id'] -or $state.tabs[4].group_id -eq 0) -and
+                    (-not $state.tabs[5].PSObject.Properties['group_id'] -or $state.tabs[5].group_id -eq 0)
+            } 'two adjacent two-member groups followed by two ungrouped sessions'
             $state = Read-Session
             $scale = 100
             if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
             $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            $leftEdge = $true
+            $headerClear = $true
+            $groupsSeparate = $true
             $selectedClear = $true
             $strayClear = $true
             foreach ($selected in @(0, 1)) {
@@ -1480,14 +1572,20 @@ try {
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'group-rail native geometry unavailable' }
                 $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $selected)
                 Save-Json @{ pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; session = Read-Session; tag = $env:RELEASE_TAG; version = $ExpectedVersion } ($shot + '.json')
+                $leftEdge = $leftEdge -and $proof['leftEdge']
+                $headerClear = $headerClear -and $proof['headerClear']
+                $groupsSeparate = $groupsSeparate -and $proof['groupsSeparate']
                 $selectedClear = $selectedClear -and $proof['selectedClear']
                 $strayClear = $strayClear -and $proof['strayClear']
                 $result.checks += @{ name = $shot; pixels = $proof }
             }
             Snapshot 'after'
+            if ($leftEdge) { Write-Host 'group-rail left-edge PASS' } else { Write-Host 'group-rail left-edge FAIL' }
+            if ($headerClear) { Write-Host 'group-rail header-clear PASS' } else { Write-Host 'group-rail header-clear FAIL' }
+            if ($groupsSeparate) { Write-Host 'group-rail groups-separate PASS' } else { Write-Host 'group-rail groups-separate FAIL' }
             if ($selectedClear) { Write-Host 'group-rail selected-clear PASS' } else { Write-Host 'group-rail selected-clear FAIL' }
             if ($strayClear) { Write-Host 'group-rail stray-clear PASS' } else { Write-Host 'group-rail stray-clear FAIL' }
-            if (-not $selectedClear -or -not $strayClear) { throw 'group-rail pixel assertions failed' }
+            if (-not $leftEdge -or -not $headerClear -or -not $groupsSeparate -or -not $selectedClear -or -not $strayClear) { throw 'group-rail pixel assertions failed' }
         }
         'pane-layout' {
             Select-Theme 'dark' 'pane-layout-dark'

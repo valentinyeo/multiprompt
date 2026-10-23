@@ -1619,6 +1619,11 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
     return null;
 }
 
+fn groupRailRect(header_left: i32, header_y: i32, header_h: i32, last_bottom: i32, scroll: i32, width: i32) RECT {
+    _ = header_h;
+    return .{ .left = header_left, .top = header_y - scroll, .right = header_left + width, .bottom = last_bottom - scroll };
+}
+
 fn splitGroupRail(rail: RECT, excluded_top: i32, excluded_bottom: i32) [2]RECT {
     var before = rail;
     before.bottom = std.math.clamp(excluded_top, rail.top, rail.bottom);
@@ -2132,7 +2137,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     bottom = member.y + tabRowH();
                 }
                 const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
-                var rail = RECT{ .left = column.left + uiScaled(4), .top = row.y - app_state.g_sidebar_scroll, .right = column.left + uiScaled(7), .bottom = bottom - app_state.g_sidebar_scroll };
+                var rail = groupRailRect(column.left + uiScaled(4), row.y, GROUP_HEADER_H, bottom, app_state.g_sidebar_scroll, uiScaled(7) - uiScaled(4));
                 for (rows_arr[ri + 1 .. row_count]) |member| {
                     if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
                     if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;
@@ -4708,5 +4713,26 @@ test "IGSH-591 group rail segments exclude whole highlighted rows without tails"
         try std.testing.expectEqual(36 - scroll, first[0].bottom);
         try std.testing.expectEqual(second[0].top, second[0].bottom);
         try std.testing.expectEqual(second[1].top, second[1].bottom);
+    }
+}
+
+test "IGSH-591 rail starts below the header at the header left edge" {
+    for ([_]i32{ -120, 0, 75 }) |scroll| {
+        for ([_]i32{ 0, 8, 27 }) |left| {
+            for ([_]i32{ 3, 4, 6 }) |width| {
+                const first = groupRailRect(left, 8, 28, 112, scroll, width);
+                try std.testing.expectEqual(left, first.left);
+                try std.testing.expectEqual(left + width, first.right);
+                try std.testing.expectEqual(@as(i32, 36) - scroll, first.top);
+                try std.testing.expectEqual(@as(i32, 112) - scroll, first.bottom);
+                const second = groupRailRect(left, 112, 28, 216, scroll, width);
+                try std.testing.expectEqual(left, second.left);
+                try std.testing.expectEqual(@as(i32, 140) - scroll, second.top);
+                try std.testing.expectEqual(@as(i32, 216) - scroll, second.bottom);
+                try std.testing.expect(first.bottom < second.top);
+                const empty = groupRailRect(left, 216, 28, 244, scroll, width);
+                try std.testing.expectEqual(empty.top, empty.bottom);
+            }
+        }
     }
 }
