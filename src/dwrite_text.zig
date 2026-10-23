@@ -206,6 +206,34 @@ fn prepare(hdc: w.HANDLE, face: *FontFace, text: []const u16, segment: *Segment)
     return previous == size.cx;
 }
 
+fn ellipsize(hdc: w.HANDLE, face: *FontFace, width: i32, segment: *Segment) ?usize {
+    const dot = [1]u32{'.'};
+    var glyph: [1]u16 = undefined;
+    if (face.v.getGlyphIndices(face, &dot, 1, &glyph) < 0 or glyph[0] == 0) return null;
+    var dot_size: w.SIZE = undefined;
+    if (w.GetTextExtentPoint32W(hdc, L("."), 1, &dot_size) == 0) return null;
+    const dots = 3;
+    var kept: usize = 0;
+    var used: i32 = 0;
+    while (kept < segment.count) : (kept += 1) {
+        const next = used + @as(i32, @intFromFloat(segment.advances[kept]));
+        if (next + dots * dot_size.cx > width) break;
+        used = next;
+    }
+    if (kept + dots > max_units) return null;
+    @memset(segment.indices[kept..][0..dots], glyph[0]);
+    @memset(segment.advances[kept..][0..dots], @floatFromInt(dot_size.cx));
+    segment.count = kept + dots;
+    segment.width = used + dots * dot_size.cx;
+    return kept;
+}
+
+pub fn emHeight(hdc: w.HANDLE) ?i32 {
+    var metric: TextMetric = undefined;
+    if (GetTextMetricsW(hdc, &metric) == 0) return null;
+    return metric.height - metric.internal_leading;
+}
+
 fn ensureTarget(hdc: w.HANDLE, width: u32, height: u32) bool {
     if (target == null) {
         if (interop.?.v.createBitmapRenderTarget(interop.?, hdc, width, height, &target) < 0) return false;
@@ -231,7 +259,7 @@ fn paint(hdc: w.HANDLE, text: []const u16, rect: w.RECT, flags: u32) ?i32 {
     const width = rect.right - rect.left;
     const height = rect.bottom - rect.top;
     if (width <= 0 or height <= 0) return 0;
-    if ((flags & w.DT_END_ELLIPSIS) != 0 and segment.width > width) return null;
+    if ((flags & w.DT_END_ELLIPSIS) != 0 and segment.width > width and ellipsize(hdc, face, width, &segment) == null) return null;
     if (!ensureTarget(hdc, @intCast(width), @intCast(height))) return null;
     const t = target.?;
     const memory = t.v.getMemoryDC(t);
@@ -376,4 +404,63 @@ test "IGSH-610 real glyph runs match GDI advances and missing glyphs use pixel-i
     try std.testing.expectEqualSlices(u8, actual, pixels);
     resetFonts();
     for (faces) |entry| try std.testing.expect(entry.face == null and entry.font == null);
+}
+
+test "IGSH-678 overflowing end-ellipsis code rows keep GDI truncation and draw through DirectWrite" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const width = 200;
+    const height = 24;
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.create(-11, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, fonts.CHAT_QUALITY, 0, L(fonts.MONO_FACE)) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    try std.testing.expect(initialize());
+    const face = fontFace(dc) orelse return error.TestUnexpectedResult;
+    const line = L("+<p>Decision, reviewer 2026-10-23 answering the question about the smaller views");
+    var segment: Segment = .{};
+    try std.testing.expect(prepare(dc, face, line, &segment));
+    try std.testing.expect(segment.width > width);
+    const kept = ellipsize(dc, face, width, &segment) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(kept > 0 and segment.width <= width);
+    var gdi: [line.len + 8]u16 = @splat(0);
+    @memcpy(gdi[0..line.len], line);
+    var gdi_rc = w.RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    _ = w.DrawTextW(dc, &gdi, @intCast(line.len), &gdi_rc, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_END_ELLIPSIS | 0x10000);
+    const dots = std.mem.indexOf(u16, &gdi, L("...")) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, line[0..segment.ends[kept - 1]], gdi[0..dots]);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    @memset(pixels, 0);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    var rc = w.RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const before_painted = painted_runs;
+    const before_fallback = fallback_runs;
+    _ = draw(dc, line, @intCast(line.len), &rc, w.DT_SINGLELINE | w.DT_END_ELLIPSIS | w.DT_NOPREFIX | w.DT_VCENTER);
+    _ = GdiFlush();
+    if (!enabled()) {
+        try std.testing.expectEqual(before_fallback + 1, fallback_runs);
+        return;
+    }
+    try std.testing.expectEqual(before_painted + 1, painted_runs);
+    try std.testing.expectEqual(before_fallback, fallback_runs);
+    var smoothed = false;
+    var last_inked: usize = 0;
+    var pixel: usize = 0;
+    while (pixel < pixels.len) : (pixel += 4) {
+        if (pixels[pixel] == 0) continue;
+        last_inked = @max(last_inked, (pixel / 4) % width);
+        smoothed = smoothed or pixels[pixel] < 255;
+    }
+    try std.testing.expect(smoothed and last_inked > 0 and @as(i32, @intCast(last_inked)) < segment.width);
 }

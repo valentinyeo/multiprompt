@@ -23,6 +23,8 @@ on:
       - tools/verify-chat-delivery.test.js
       - tools/verify-chat-delivery/**
       - tools/chat-local-agent.c
+      - tools/chat-code-font-proof.mjs
+      - tools/chat-code-font-proof.test.js
       - tools/start-maximized.test.js
       - tools/verify-scratch.test.ps1
       - tools/favorites-groups.test.js
@@ -105,7 +107,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js
+        run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
@@ -114,7 +116,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile')) { throw 'Unknown feature map' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
@@ -218,6 +220,25 @@ jobs:
           foreach ($file in @('chat-markdown-render.png', 'chat-markdown-render-gdi.png', 'chrome-reference.png', 'repaint-ms.json')) {
             if (-not (Test-Path "evidence/$file")) { throw "Missing rendering evidence: $file" }
           }
+      - name: Render Chat View code and diff rows with the real Windows painter
+        if: env.FEATURE == 'chat-code-font' && env.RELEASE_TAG == ''
+        shell: powershell
+        env:
+          MULTIPROMPT_CHAT_RENDER_PROOF: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($mode in @('1', '0')) {
+            $env:IGSH_610 = $mode
+            Remove-Item chat-code-proof.bmp, chat-code-proof.json -ErrorAction SilentlyContinue
+            zig build test-main -Drender-proof=true --summary all
+            if ($LASTEXITCODE -ne 0) { throw 'Native desktop rendering tests failed' }
+            $suffix = if ($mode -eq '1') { 'dwrite' } else { 'gdi' }
+            Copy-Item chat-code-proof.bmp "evidence/chat-code-proof-$suffix.bmp"
+            Copy-Item chat-code-proof.json "evidence/chat-code-proof-$suffix.json"
+          }
+          Remove-Item Env:IGSH_610
+          node tools/chat-code-font-proof.mjs evidence
+          if ($LASTEXITCODE -ne 0) { throw 'IGSH-678 painter proof evaluation crashed' }
       - name: Launch Doctor Drive Evidence Cleanup
         if: env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
         shell: powershell

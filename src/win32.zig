@@ -613,6 +613,7 @@ pub extern "gdi32" fn SetTextCharacterExtra(HANDLE, i32) callconv(WINAPI) i32;
 pub extern "gdi32" fn SelectObject(HANDLE, HANDLE) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn GetStockObject(i32) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn GetTextExtentPoint32W(HANDLE, [*]const u16, i32, *SIZE) callconv(WINAPI) BOOL;
+pub extern "gdi32" fn GetTextFaceW(HANDLE, i32, [*]u16) callconv(WINAPI) i32;
 pub extern "gdi32" fn GetTextExtentExPointW(HANDLE, [*]const u16, i32, i32, *i32, ?[*]i32, *SIZE) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn CreateFontW(i32, i32, i32, i32, i32, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, ?LPCWSTR) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn AddFontResourceExW(LPCWSTR, DWORD, ?*anyopaque) callconv(WINAPI) i32;
