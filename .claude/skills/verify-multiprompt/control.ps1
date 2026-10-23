@@ -2221,6 +2221,11 @@ try {
                 Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD for switch timing'
                 $initial = Read-Session
                 Wait-WorkspaceSurface $initial.active_workspace 0 $false
+                $gapCase.phase = 'idle-close-fixture'
+                Focus-Palette 'browser auto suspend' 6240
+                Press @(0x0D) 'Enter: disable timed browser closing while measuring fresh tier-two freezes'
+                Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled; automatic freezing remains enabled'
+                Save-Json (Read-Session) 'switch-idle-close-fixture.json'
                 $gapCase.phase = 'group-setup'
                 Focus-Palette 'move to group' 6301
                 Press @(0x0D) 'Enter: Move to Group submenu'
