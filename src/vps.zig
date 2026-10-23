@@ -130,65 +130,7 @@ pub fn startFaviconFetch(shell_idx: u32) void {
         cp += 1;
     }
 
-    var cwd_ok = shell.cached_cwd_len > 0;
-    for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| {
-        if (c == '\'') {
-            cwd_ok = false;
-            break;
-        }
-    }
-    var tmux_ok = shell.kind == .tmux and shell.tmux_session_len > 0;
-    for (shell.tmux_session[0..shell.tmux_session_len]) |c| {
-        if (c == '\'') {
-            tmux_ok = false;
-            break;
-        }
-    }
-
-    const pre = " \"r=\\\"";
-    for (pre) |c| {
-        if (cp >= cmd_buf.len - 1) return;
-        cmd_buf[cp] = @intCast(c);
-        cp += 1;
-    }
-    if (cwd_ok) {
-        for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| {
-            if (cp >= cmd_buf.len - 1) return;
-            cmd_buf[cp] = @intCast(c);
-            cp += 1;
-        }
-    } else if (tmux_ok) {
-        const t1 = "$(tmux display-message -p -t '";
-        for (t1) |c| {
-            if (cp >= cmd_buf.len - 1) return;
-            cmd_buf[cp] = @intCast(c);
-            cp += 1;
-        }
-        for (shell.tmux_session[0..shell.tmux_session_len]) |c| {
-            if (cp >= cmd_buf.len - 1) return;
-            cmd_buf[cp] = @intCast(c);
-            cp += 1;
-        }
-        const t2 = "' '#{pane_current_path}' 2>/dev/null || echo $HOME)";
-        for (t2) |c| {
-            if (cp >= cmd_buf.len - 1) return;
-            cmd_buf[cp] = @intCast(c);
-            cp += 1;
-        }
-    } else {
-        const h = "$HOME";
-        for (h) |c| {
-            if (cp >= cmd_buf.len - 1) return;
-            cmd_buf[cp] = @intCast(c);
-            cp += 1;
-        }
-    }
-    const post = "\\\"; f=$(find \\\"$r\\\" -maxdepth 4 -name favicon.ico -type f 2>/dev/null | head -1); [ -n \\\"$f\\\" ] && cat \\\"$f\\\"\"";
-    for (post) |c| {
-        if (cp >= cmd_buf.len - 1) return;
-        cmd_buf[cp] = @intCast(c);
-        cp += 1;
-    }
+    if (!appendFaviconRemoteCommand(shell, &cmd_buf, &cp)) return;
     cmd_buf[cp] = 0;
 
     var log_ascii: [512]u8 = undefined;
@@ -244,6 +186,69 @@ pub fn startFaviconFetch(shell_idx: u32) void {
         return;
     };
     fetch_thread.detach();
+}
+
+fn appendFaviconRemoteCommand(shell: *const Shell, buf: []u16, pos: *usize) bool {
+    var cwd_ok = shell.cached_cwd_len > 0;
+    for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| {
+        if (std.mem.indexOfScalar(u8, "\x00'\"\\$`\r\n", c) != null) {
+            cwd_ok = false;
+            break;
+        }
+    }
+    var tmux_ok = shell.kind == .tmux and shell.tmux_session_len > 0;
+    for (shell.tmux_session[0..shell.tmux_session_len]) |c| {
+        if (std.mem.indexOfScalar(u8, "\x00'\"\\$`\r\n", c) != null) {
+            tmux_ok = false;
+            break;
+        }
+    }
+
+    const pre = " \"r=\\\"";
+    for (pre) |c| {
+        if (pos.* >= buf.len - 1) return false;
+        buf[pos.*] = @intCast(c);
+        pos.* += 1;
+    }
+    if (cwd_ok) {
+        for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| {
+            if (pos.* >= buf.len - 1) return false;
+            buf[pos.*] = @intCast(c);
+            pos.* += 1;
+        }
+    } else if (tmux_ok) {
+        const t1 = "$(tmux display-message -p -t '";
+        for (t1) |c| {
+            if (pos.* >= buf.len - 1) return false;
+            buf[pos.*] = @intCast(c);
+            pos.* += 1;
+        }
+        for (shell.tmux_session[0..shell.tmux_session_len]) |c| {
+            if (pos.* >= buf.len - 1) return false;
+            buf[pos.*] = @intCast(c);
+            pos.* += 1;
+        }
+        const t2 = "' '#{pane_current_path}' 2>/dev/null || echo $HOME)";
+        for (t2) |c| {
+            if (pos.* >= buf.len - 1) return false;
+            buf[pos.*] = @intCast(c);
+            pos.* += 1;
+        }
+    } else {
+        const h = "$HOME";
+        for (h) |c| {
+            if (pos.* >= buf.len - 1) return false;
+            buf[pos.*] = @intCast(c);
+            pos.* += 1;
+        }
+    }
+    const post = "\\\"; f=$(find \\\"$r\\\" -maxdepth 4 -name favicon.ico -type f 2>/dev/null | head -1); [ -n \\\"$f\\\" ] && cat \\\"$f\\\"\"";
+    for (post) |c| {
+        if (pos.* >= buf.len - 1) return false;
+        buf[pos.*] = @intCast(c);
+        pos.* += 1;
+    }
+    return true;
 }
 
 fn faviconFetchThread() void {
@@ -1283,4 +1288,34 @@ pub fn countFolderSessions(host: u8, folder: []const u8) u32 {
         if (pathUnderFolder(e.path[0..e.path_len], folder)) n += 1;
     }
     return n;
+}
+
+test "hardening favicon lookup ignores shell characters in metadata" {
+    var shell = app_state.empty_shell;
+    shell.kind = .tmux;
+    var command: [1024]u16 = undefined;
+    const home = std.unicode.utf8ToUtf16LeStringLiteral(" \"r=\\\"$HOME\\\";");
+    for ("'\"\\$`\r\n") |c| {
+        const value = [_]u8{ 'a', c, 'b' };
+        @memcpy(shell.cached_cwd[0..value.len], &value);
+        shell.cached_cwd_len = value.len;
+        @memcpy(shell.tmux_session[0..value.len], &value);
+        shell.tmux_session_len = value.len;
+        var pos: usize = 0;
+        try std.testing.expect(appendFaviconRemoteCommand(&shell, &command, &pos));
+        try std.testing.expect(std.mem.startsWith(u16, command[0..pos], home));
+    }
+    const cwd = "/home/demo/project with spaces";
+    @memcpy(shell.cached_cwd[0..cwd.len], cwd);
+    shell.cached_cwd_len = cwd.len;
+    var pos: usize = 0;
+    try std.testing.expect(appendFaviconRemoteCommand(&shell, &command, &pos));
+    try std.testing.expect(std.mem.indexOf(u16, command[0..pos], std.unicode.utf8ToUtf16LeStringLiteral(cwd)) != null);
+    shell.cached_cwd_len = 0;
+    const session = "session-1";
+    @memcpy(shell.tmux_session[0..session.len], session);
+    shell.tmux_session_len = session.len;
+    pos = 0;
+    try std.testing.expect(appendFaviconRemoteCommand(&shell, &command, &pos));
+    try std.testing.expect(std.mem.indexOf(u16, command[0..pos], std.unicode.utf8ToUtf16LeStringLiteral("tmux display-message -p -t 'session-1'")) != null);
 }

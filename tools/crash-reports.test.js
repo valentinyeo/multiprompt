@@ -187,3 +187,18 @@ test('existing CI runs this test through the Linux test-vps build step', () => {
   assert.match(workflow, /zig build test-vps --summary all/);
   assert.match(workflow, /python-version: '3\.12'/);
 });
+
+test('hardening crash report output escapes controls and preserves readable Unicode', async t => {
+  const controls = Array.from({ length: 160 }, (_, c) => c).filter(c => c < 32 && c !== 9 && c !== 10 || c >= 127).map(c => String.fromCharCode(c)).join('');
+  const row = { ...rows[0], device_name: '测试' + controls, summary: controls + ' summary', stack_trace: '测试\n\tframe' + controls };
+  const api = await fakeApi(t, { rows: [row] });
+  const human = await reader([], api.env);
+  const json = await reader(['--json'], api.env);
+  for (const result of [human, json]) {
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /[\x00-\x08\x0b-\x1f\x7f-\x9f]/u);
+  }
+  assert.ok(human.stdout.includes('测试\n\tframe'));
+  for (const c of controls) assert.ok(human.stdout.includes('\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')));
+  assert.deepEqual(JSON.parse(json.stdout), [row]);
+});

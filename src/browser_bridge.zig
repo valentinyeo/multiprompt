@@ -1799,18 +1799,36 @@ fn tunnelInboundThread(srv_usize: usize) void {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
 
+        const send_timeout_ms: u32 = 5000;
+        if (setsockopt(client, SOL_SOCKET, 0x1005, @ptrCast(&send_timeout_ms), @sizeOf(u32)) != 0) {
+            _ = closesocket(client);
+            continue;
+        }
+        const deadline = GetTickCount64() + 5000;
         var buf: [ZSB_WIRE_CAP]u8 = undefined;
         var total: usize = 0;
+        var complete = false;
         while (total < buf.len) {
+            const remaining = deadline -| GetTickCount64();
+            if (remaining == 0) break;
+            const timeout_ms: u32 = @intCast(remaining);
+            if (setsockopt(client, SOL_SOCKET, 0x1006, @ptrCast(&timeout_ms), @sizeOf(u32)) != 0) break;
             const space: i32 = @intCast(buf.len - total);
             const n = recv(client, buf[total..].ptr, space, 0);
-            if (n <= 0) break;
+            if (n == 0) {
+                complete = true;
+                break;
+            }
+            if (n < 0) break;
             const nn: usize = @intCast(n);
             total += nn;
-            if (std.mem.indexOfScalar(u8, buf[total - nn .. total], '\n') != null) break;
+            if (std.mem.indexOfScalar(u8, buf[total - nn .. total], '\n') != null) {
+                complete = true;
+                break;
+            }
         }
 
-        if (total == 0) {
+        if (total == 0 or !complete) {
             _ = closesocket(client);
             continue;
         }

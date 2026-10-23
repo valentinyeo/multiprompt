@@ -274,9 +274,10 @@ export default {
       if (url.pathname === '/v1/crash-reports' && request.method === 'POST') {
         const b = validateCrashReport(await body(request, 32 * 1024, 'invalid_crash_report'));
         const result = await db.batch([
-          db.prepare('INSERT INTO crash_reports (device_id,report_id,account,received_at,captured_at,app_version,android_version,thread,summary,stack_trace) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,report_id) DO NOTHING').bind(device.id, b.id, device.account, now(), b.captured_at, b.app_version, b.android_version, b.thread, b.summary, b.stack_trace),
+          db.prepare('INSERT INTO crash_reports (device_id,report_id,account,received_at,captured_at,app_version,android_version,thread,summary,stack_trace) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) ON CONFLICT(device_id,report_id) DO NOTHING').bind(device.id, b.id, device.account, now(), b.captured_at, b.app_version, b.android_version, b.thread, b.summary, b.stack_trace, device.id, device.account),
           db.prepare('DELETE FROM crash_reports WHERE device_id=? AND rowid IN (SELECT rowid FROM crash_reports WHERE device_id=? ORDER BY received_at DESC,rowid DESC LIMIT -1 OFFSET 50)').bind(device.id, device.id)
         ]);
+        if (!result[0].meta.changes && !await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
         return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
       }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
@@ -332,8 +333,9 @@ export default {
           }
         }
         layout.revision = b.base_revision + 1;
-        const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=?').bind(JSON.stringify(layout), device.account, b.base_revision).run();
+        const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)').bind(JSON.stringify(layout), device.account, b.base_revision, device.id, device.account).run();
         if (!result.meta.changes) {
+          if (!await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
           const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
           return row ? reply({ revision: row.revision, layout: JSON.parse(row.layout) }, 409) : reply({ error: 'layout_not_seeded' }, 503);
         }

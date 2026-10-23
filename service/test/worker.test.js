@@ -1400,3 +1400,28 @@ test('IGSH-600 invalid removed_hosts are rejected without changing stored hosts'
   }
   assert.deepEqual(await db.prepare('SELECT revision,layout FROM layouts').first(), before);
 });
+
+test('hardening delayed layout and report writes stop after device revocation', async () => {
+  const { token: admin } = await enroll();
+  for (const path of ['/v1/layout', '/v1/crash-reports']) {
+    const { token: caller } = await enroll();
+    const initial = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(caller.account_id).first();
+    const payload = path === '/v1/layout' ? { base_revision: initial.revision, layout: { ...JSON.parse(initial.layout), tabs: [{ ...layout.tabs[0], name: 'Delayed' }] } } : crashReport;
+    const reading = Promise.withResolvers(), release = Promise.withResolvers();
+    const stream = new ReadableStream({ async pull(controller) {
+      reading.resolve();
+      await release.promise;
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+      controller.close();
+    } }, { highWaterMark: 0 });
+    const pending = worker.fetch(new Request(base + path, { method: path === '/v1/layout' ? 'PUT' : 'POST', headers: auth(caller), body: stream, duplex: 'half' }), { DB: db });
+    await reading.promise;
+    try { assert.equal((await request('/v1/devices/' + caller.device_id, { method: 'DELETE', headers: auth(admin) })).status, 200); }
+    finally { release.resolve(); }
+    const response = await pending;
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: 'device_required' });
+    assert.deepEqual(await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(caller.account_id).first(), initial);
+    assert.equal((await db.prepare('SELECT count(*) AS n FROM crash_reports WHERE device_id=?').bind(caller.device_id).first()).n, 0);
+  }
+});

@@ -25,6 +25,7 @@ const GetStdHandle = @import("win32.zig").GetStdHandle;
 const GetConsoleScreenBufferInfo = @import("win32.zig").GetConsoleScreenBufferInfo;
 const WriteConsoleInputW = @import("win32.zig").WriteConsoleInputW;
 const GlobalLock = @import("win32.zig").GlobalLock;
+const GlobalSize = @import("win32.zig").GlobalSize;
 const GlobalUnlock = @import("win32.zig").GlobalUnlock;
 const GlobalFree = @import("win32.zig").GlobalFree;
 const OpenClipboard = @import("win32.zig").OpenClipboard;
@@ -512,13 +513,16 @@ pub fn writeUnicodeCharsAsInput(handle: HANDLE, chars: []const u16, lf_to_cr: bo
 
 fn copyUnicodeClipboardTextMaybe(data: HANDLE, text_buf: []u16) ?usize {
     if (text_buf.len == 0) return null;
+    const source_units = GlobalSize(data) / @sizeOf(u16);
+    if (source_units == 0) return null;
     if (GlobalLock(data)) |ptr| {
         defer _ = GlobalUnlock(data);
         const src: [*]const u16 = @ptrCast(@alignCast(ptr));
         var text_len: usize = 0;
-        while (text_len < text_buf.len - 1 and src[text_len] != 0) : (text_len += 1) {
+        while (text_len < @min(text_buf.len - 1, source_units) and src[text_len] != 0) : (text_len += 1) {
             text_buf[text_len] = src[text_len];
         }
+        if (text_len == source_units) return null;
         text_buf[text_len] = 0;
         return text_len;
     }
@@ -534,10 +538,19 @@ fn copyAnsiClipboardTextMaybe(data: HANDLE, text_buf: []u16, code_page: UINT) ?u
     if (GlobalLock(data)) |ptr| {
         defer _ = GlobalUnlock(data);
         const src: [*]const u8 = @ptrCast(@alignCast(ptr));
-        const converted = MultiByteToWideChar(code_page, 0, src, -1, text_buf.ptr, @intCast(text_buf.len));
+        const source_len = GlobalSize(data);
+        const end = std.mem.indexOfScalar(u8, src[0..source_len], 0) orelse return null;
+        if (end > std.math.maxInt(i32)) return null;
+        if (end == 0) {
+            text_buf[0] = 0;
+            return 0;
+        }
+        if (text_buf.len == 1) return null;
+        const converted = MultiByteToWideChar(code_page, 0, src, @intCast(end), text_buf.ptr, @intCast(text_buf.len - 1));
         if (converted > 0) {
             const converted_len: usize = @intCast(converted);
-            if (converted_len > 0) return @min(converted_len - 1, text_buf.len - 1);
+            text_buf[converted_len] = 0;
+            return converted_len;
         }
         return null;
     }
@@ -1401,5 +1414,39 @@ pub fn copySelectionOrSendCtrlC(shell_index: u32) void {
         .copied => {},
         .no_selection => sendCtrlCToShell(shell_index),
         .failed => debugLog("copy: copy failed; not sending Ctrl+C because selection state was not clean"),
+    }
+}
+
+test "hardening clipboard reads reject unterminated allocations and preserve text" {
+    const size_api = struct {
+        extern "kernel32" fn GlobalSize(HANDLE) callconv(@import("win32.zig").WINAPI) usize;
+    };
+    const data = GlobalAlloc(GMEM_MOVEABLE, 32) orelse return error.OutOfMemory;
+    defer _ = GlobalFree(data);
+    const size = size_api.GlobalSize(data);
+    try std.testing.expect(size >= 32);
+    const ptr = GlobalLock(data) orelse return error.LockFailed;
+    const bytes: [*]u8 = @ptrCast(ptr);
+    @memset(bytes[0..size], 'A');
+    _ = GlobalUnlock(data);
+    const out = try std.testing.allocator.alloc(u16, size / 2 + 1);
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqual(@as(?usize, null), copyUnicodeClipboardTextMaybe(data, out));
+    for ([_]UINT{ CP_ACP, CP_OEMCP }) |page| {
+        try std.testing.expectEqual(@as(?usize, null), copyAnsiClipboardTextMaybe(data, out, page));
+    }
+    const wide: [*]u16 = @ptrCast(@alignCast(GlobalLock(data) orelse return error.LockFailed));
+    @memcpy(wide[0..4], std.unicode.utf8ToUtf16LeStringLiteral("A测试\t"));
+    wide[4] = 0;
+    _ = GlobalUnlock(data);
+    try std.testing.expectEqual(@as(?usize, 4), copyUnicodeClipboardTextMaybe(data, out));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A测试\t"), out[0..4]);
+    const narrow: [*]u8 = @ptrCast(GlobalLock(data) orelse return error.LockFailed);
+    @memcpy(narrow[0..6], "hello\x00");
+    _ = GlobalUnlock(data);
+    for ([_]UINT{ CP_ACP, CP_OEMCP }) |page| {
+        try std.testing.expectEqual(@as(?usize, 5), copyAnsiClipboardTextMaybe(data, out, page));
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello"), out[0..5]);
+        try std.testing.expectEqual(@as(u16, 0), out[5]);
     }
 }
