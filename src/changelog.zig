@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.837", .items = &.{
+        .{ .text = "Small reliability fixes for clipboard paste, chat text and background connections.", .ticket = "IGSH-654" },
+    } },
     .{ .ver = "0.28.836", .items = &.{
         .{ .text = "Browser session switching now has a dedicated speed check.", .ticket = "IGSH-606" },
         .{ .text = "Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.", .ticket = "IGSH-606" },
