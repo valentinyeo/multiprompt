@@ -2391,7 +2391,7 @@ pub const BROWSER_HUNG_MISS_LIMIT: u8 = 2;
 
 pub var g_browser_orphan_sweep_tick: u64 = 0;
 pub var g_updating_browser_visibility: bool = false;
-pub var g_browser_console_switch_preparing: bool = false;
+pub var g_browser_switch_preparing: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 

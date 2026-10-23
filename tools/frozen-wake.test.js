@@ -44,13 +44,15 @@ function lifecycleContract(source) {
   assert.match(send, /std.Thread.spawn\(.\{\}, browserLifecycleWorker, .\{job\}\)/);
   assert.match(send, /thread.detach\(\)/);
   assert.match(send, /if \(app_state.shells\[idx\].browser_lifecycle_pending\) return false/);
-  assert.match(send, /buildBrowserCdpLifecycleCmd\(&job.cmd, window_id, if \(frozen\) "frozen" else "active"\)/);
-  assert.match(worker, /zsbRunBridgeOnce\(job.cmd\[0..job.cmd_len\], &reply\)/);
-  assert.match(worker, /browserLifecycleReplySucceeded\(run.proc_ok, run.timed_out, run.exit_code, reply\[0..run.out_len\]\)/);
+  assert.match(worker, /requestBrowserForWindow\(allocator, job.window_id, profile\[0\.\.profile_len\], "cdp", fields, null\) catch break :lifecycle/);
+  assert.match(worker, /GetEnvironmentVariableA\("MULTIPROMPT_BROWSER_PROFILE"/);
+  assert.match(worker, /if \(job.frozen\) @as\(\[\]const u8, "frozen"\) else "active"/);
+  assert.match(worker, /job.confirmed = browserLifecycleReplySucceeded\(reply\)/);
+  assert.doesNotMatch(worker, /CreateProcessW|spawnBrowserCli|zsbRunBridgeOnce|buildBrowserCdpLifecycleCmd/);
   assert.match(worker, /PostMessageW\(job.owner, @import\("win32.zig"\).WM_APP_BROWSER_LIFECYCLE_DONE/);
   for (const direct of [wake, send]) assert.doesNotMatch(direct, /CreateProcessW|WaitFor|Sleep\(|ReadFile|zsbRunBridgeOnce|setBrowserFrozenMarkerForShell/);
   for (const check of ['findShellById(job.shell_id)', 'browserConnectionMatches(&app_state.shells[idx], job.connection_id)', 'browser_window_id != job.window_id', 'browser_frozen != job.frozen']) assert.ok(done.includes(check), check);
-  assert.match(done, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\);\s+\} else \{\s+app_state.shells\[idx\].browser_frozen = !job.frozen;/);
+  assert.match(done, /if \(job.confirmed\) \{[\s\S]*?setBrowserFrozenMarkerForShell\(idx, job.frozen\);\s+\} else \{\s+app_state.shells\[idx\].browser_frozen = !job.frozen;/);
   assert.match(done, /browser_lifecycle_pending = false/);
   assert.match(done, /if \(job.frozen and \(wake_requested or idx == app_state.active_shell or app_state.shells\[idx\].keep_awake\)\) wakeBrowserPaneFromFreeze\(idx\)/);
   assert.match(done, /if \(job.confirmed\) @as\(\[\]const u8, "confirmed"\) else "failed"/);
@@ -58,17 +60,17 @@ function lifecycleContract(source) {
 
 test('lifecycle dispatch is nonblocking, serializes an inflight freeze before wake and clears markers only on matching acknowledgment', () => {
   lifecycleContract(pane);
-  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'run.exit_code', 'browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
+  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'requestBrowserForWindow(allocator, job.window_id', 'browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
   assert.throws(() => lifecycleContract(pane.replace('    if (!sendBrowserLifecycle(idx, false)) return;', '    Sleep(1);\n    if (!sendBrowserLifecycle(idx, false)) return;')));
 });
 
 test('pure lifecycle acknowledgment helper has Zig positive and negative unit cases without running Zig here', () => {
   const helper = body(pane, 'browserLifecycleReplySucceeded');
-  assert.match(helper, /if \(!proc_ok or timed_out or exit_code != 0\) return false/);
   assert.match(helper, /json_reader.parse\(std.heap.page_allocator, reply\) catch return false/);
   assert.match(helper, /return json_reader.boolTrue\(parsed.value, "ok"\)/);
   const cases = pane.slice(pane.indexOf('test "IGSH-606 lifecycle confirmation'), pane.indexOf('fn browserLifecycleWorker'));
-  for (const call of ['true, false, 0, ok', 'false, false, 0, ok', 'true, true, 0, ok', 'true, false, 1, ok', 'true, false, 0, reply']) assert.ok(cases.includes(`browserLifecycleReplySucceeded(${call})`));
+  assert.ok(cases.includes('try std.testing.expect(browserLifecycleReplySucceeded("{\\"ok\\":true,\\"result\\":{}}"))'));
+  assert.ok(cases.includes('try std.testing.expect(!browserLifecycleReplySucceeded(reply))'));
   for (const literal of ['"not json"', '"null"', '"{}"', '"{\\"ok\\":false}"', '"{\\"ok\\":\\"true\\"}"']) assert.ok(cases.includes(literal));
 });
 
@@ -85,7 +87,7 @@ test('existing freeze deadlines, exemptions and UI-thread completion wiring rema
   assert.match(main, /if \(msg == @import\("win32.zig"\).WM_APP_BROWSER_LIFECYCLE_DONE\) \{\s+@import\("browser_pane.zig"\).handleBrowserLifecycleDone\(@ptrFromInt/);
   const id = win.match(/WM_APP_BROWSER_LIFECYCLE_DONE: u32 = WM_APP \+ (\d+)/)[1];
   assert.equal([...win.matchAll(new RegExp(`= WM_APP \\+ ${id};`, 'g'))].length, 1);
-  assert.match(bridge, /pub fn zsbRunBridgeOnce/);
+  assert.match(bridge, /fn zsbRunBridgeOnce/);
   assert.match(body(bridge, 'zsbRunBridgeOnce'), /CreateProcessW/);
   assert.match(workflow, /node --test [^\n]*tools\/frozen-wake.test.js/);
   assert.deepEqual(readChangelogEntry('IGSH-606').trim().split('\n'), ['Browser session switching now has a dedicated speed check.', 'Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.']);
@@ -136,22 +138,49 @@ test('post-paint dispatch reuses the existing guarded PostMessageW binding exact
 test('native console switches show and focus the console before queuing browser geometry through the existing settle handler', () => {
   const switching = body(consoleSource, 'switchToShell');
   assert.match(switching, /browser_enabled and app_state.shells\[idx\].browser_native/);
-  assert.match(switching, /g_browser_console_switch_preparing = defer_console_browser/);
-  assert.match(switching, /defer app_state.g_browser_console_switch_preparing = browser_preparing_previous/);
+  assert.match(switching, /g_browser_switch_preparing = defer_native_browser/);
+  assert.match(switching, /defer app_state.g_browser_switch_preparing = browser_preparing_previous/);
   const queued = switching.indexOf('PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER');
   assert.ok(queued > switching.indexOf('showShellConsole(idx, SW_SHOW, "switchToShell")'));
   assert.ok(queued > switching.indexOf('focusActiveShell();'));
   assert.ok(switching.includes('@import("win32.zig").TIMER_BROWSER_SETTLE, 0)'));
-  for (const name of ['positionActiveBrowser', 'updateBrowserVisibility']) assert.match(body(pane, name), /if \(app_state.g_browser_console_switch_preparing\) return/);
-  assert.match(state, /g_browser_console_switch_preparing: bool = false/);
+  for (const name of ['positionActiveBrowser', 'updateBrowserVisibility']) assert.match(body(pane, name), /if \(app_state.g_browser_switch_preparing\) return/);
+  assert.match(state, /g_browser_switch_preparing: bool = false/);
 });
 
 test('native console focus retains shared masks until queued geometry instead of hiding and repainting them synchronously', () => {
   const hide = body(pane, 'hideActiveBrowser');
-  assert.match(hide, /if \(!app_state.g_browser_console_switch_preparing\) hideBrowserEdgeMasks\(\)/);
+  assert.match(hide, /if \(!app_state.g_browser_switch_preparing\) hideBrowserEdgeMasks\(\)/);
   assert.match(hide, /parkBrowserWindow\(bh\)/);
   const place = body(pane, 'positionBrowserEdgeMasks');
-  const guard = place.indexOf('if (app_state.g_browser_console_switch_preparing) return;');
+  const guard = place.indexOf('if (app_state.g_browser_switch_preparing) return;');
   assert.ok(guard >= 0 && guard < place.indexOf('ensureBrowserEdgeMaskWindows()'));
   assert.ok(guard < place.indexOf('moveBrowserEdgeMask('));
+});
+
+
+test('after-paint Chat switches retain native edge masks throughout the old-to-new browser handoff', () => {
+  const switching = body(consoleSource, 'switchToShell');
+  const native = switching.slice(switching.indexOf('const defer_native_browser'), switching.indexOf('const browser_preparing_previous'));
+  assert.doesNotMatch(native, /!defer_browser/);
+  assert.match(body(pane, 'hideBrowserFloatingChrome'), /if \(!app_state.g_browser_switch_preparing\) hideBrowserEdgeMasks\(\)/);
+  assert.match(switching, /if \(!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0\)/);
+});
+
+
+test('shared native pipe transport targets each lifecycle window and isolates concurrent reply pipes without changing its deadlines', () => {
+  const native = read('src/bridge.zig');
+  assert.match(body(native, 'requestBrowser'), /return requestBrowserForWindow\(allocator, g_window_id, g_profile_token, method, fields_json, deadline\)/);
+  const request = body(native, 'requestBrowserForWindow');
+  assert.match(request, /request_sequence.fetchAdd\(1, \.monotonic\)/);
+  assert.match(request, /buildBrowserRequest\(allocator, id, method, reply_pipe_text, window_id, fields_json\)/);
+  assert.match(request, /isolatedPipeName\(&pipe_name_buf, profile_token\)/);
+  assert.match(request, /const until = deadline orelse \(GetTickCount64\(\) \+ 20_000\)/);
+  assert.equal((request.match(/\.\{ pid, tick, sequence \}/g) || []).length, 2);
+  const done = body(pane, 'handleBrowserLifecycleDone');
+  assert.match(done, /if \(!job.frozen and hwnd != null and IsWindowVisible\(hwnd\) != 0\) \{\s+showBrowserWindowAsync\(hwnd, SW_HIDE\);\s+showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\);/);
+  assert.ok(done.indexOf('showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE)') < done.indexOf('setBrowserFrozenMarkerForShell(idx, job.frozen)'));
+  assert.doesNotMatch(done, /SetForegroundWindow|SetFocus|Sleep|WaitFor/);
+  const build = read('build.zig');
+  for (const target of ['exe', 'dev_exe', 'bridge_exe']) assert.ok(build.includes(`${target}.root_module.addOptions("bridge_config", bridge_opts)`));
 });

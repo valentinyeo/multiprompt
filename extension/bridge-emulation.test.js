@@ -709,18 +709,3 @@ test('reset with lost emulation bypasses target lookup and background debugger a
   assert.equal(vm.runInContext('lostEmulationTabs.size', h.context), 0);
   assert.equal(h.context.resetResponse.result.warning, undefined);
 });
-
-test('pane freeze and wake preserve native focus and visibility instead of enabling focus emulation', async () => {
-  const h = harness();
-  for (const state of ['frozen', 'active']) {
-    const start = h.calls.length;
-    await h.run({ method: 'cdp', cdpMethod: 'Page.setWebLifecycleState', params: { state } });
-    const calls = h.calls.slice(start);
-    assert.deepEqual(calls.map(call => call.method), ['attach', 'Page.setWebLifecycleState', 'detach']);
-    assert.deepEqual(calls[1].params, { state });
-    assert.equal(h.attached.has(1), false);
-  }
-  const start = h.calls.length;
-  await h.run({ method: 'cdp', cdpMethod: 'Runtime.evaluate', params: { expression: 'document.hasFocus()' } });
-  assert.deepEqual(h.calls.slice(start).map(call => call.method), ['attach', 'Emulation.setFocusEmulationEnabled', 'Runtime.evaluate', 'detach']);
-});

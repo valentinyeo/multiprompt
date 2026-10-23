@@ -108,7 +108,7 @@ var g_webview2_active = false;
 var g_webview2_set_visible: ?*const fn (i32) void = null;
 var g_all_sessions_active = false;
 var g_chat_browser_swap: struct { shell_id: u32 = 0 } = .{};
-var g_browser_console_switch_preparing = false;
+var g_browser_switch_preparing = false;
 var g_font_gen: u32 = 0;
 var g_nudge_repaint = false;
 var reserved = false;

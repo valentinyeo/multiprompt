@@ -2564,12 +2564,12 @@ pub fn switchToShell(idx: u32) void {
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
-    const defer_console_browser = !defer_browser and !app_state.g_all_sessions_active and idx < app_state.shell_count and
+    const defer_native_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         app_state.shells[idx].browser_enabled and app_state.shells[idx].browser_native and
         app_state.shells[idx].browser_hwnd != null and @import("win32.zig").IsWindow(app_state.shells[idx].browser_hwnd) != 0;
-    const browser_preparing_previous = app_state.g_browser_console_switch_preparing;
-    app_state.g_browser_console_switch_preparing = defer_console_browser;
-    defer app_state.g_browser_console_switch_preparing = browser_preparing_previous;
+    const browser_preparing_previous = app_state.g_browser_switch_preparing;
+    app_state.g_browser_switch_preparing = defer_native_browser;
+    defer app_state.g_browser_switch_preparing = browser_preparing_previous;
     if (idx != app_state.active_shell) {
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
@@ -2716,8 +2716,8 @@ pub fn switchToShell(idx: u32) void {
         writePaneSessionFileForShell(idx);
     }
     syncMouseHookForUrlClicks();
-    if (defer_console_browser and app_state.g_browser_settle_ticks > 0) {
-        app_state.g_browser_console_switch_preparing = false;
+    if (!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0) {
+        app_state.g_browser_switch_preparing = false;
         _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER, @import("win32.zig").TIMER_BROWSER_SETTLE, 0);
     }
 }
