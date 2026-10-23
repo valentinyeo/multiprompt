@@ -1405,12 +1405,12 @@ test "IGSH-678 Chat View code is Nordwand Mono two points smaller and overflowin
         _ = SelectObject(dc, font);
         const face_len = GetTextFaceW(dc, face.len, &face);
         try std.testing.expect(face_len > 1);
-        try std.testing.expectEqualSlices(u16, L(@import("fonts.zig").MONO_FACE), face[0..@intCast(face_len - 1)]);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral(@import("fonts.zig").MONO_FACE), face[0..@intCast(face_len - 1)]);
         try std.testing.expectEqual(code_em, dwrite.emHeight(dc) orelse return error.TestUnexpectedResult);
     }
-    const summary = L("Wrote dec.html +2 -1");
-    const patch = L("+<p>Decision, reviewer 2026-10-23 ~14:15, answering the question about the three smaller views</p>\n-<p>Old paragraph removed because the wireframe moved to a single line card at the bottom</p>\n+<ul>");
-    const code = L("let answer = 42;\n\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}");
+    const summary = std.unicode.utf8ToUtf16LeStringLiteral("Wrote dec.html +2 -1");
+    const patch = std.unicode.utf8ToUtf16LeStringLiteral("+<p>Decision, reviewer 2026-10-23 ~14:15, answering the question about the three smaller views</p>\n-<p>Old paragraph removed because the wireframe moved to a single line card at the bottom</p>\n+<ul>");
+    const code = std.unicode.utf8ToUtf16LeStringLiteral("let answer = 42;\n\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}");
     var text: [summary.len + patch.len + code.len]u16 = undefined;
     @memcpy(text[0..summary.len], summary);
     @memcpy(text[summary.len..][0..patch.len], patch);
