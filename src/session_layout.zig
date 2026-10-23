@@ -10,6 +10,7 @@ pub const Tab = struct {
     name: []const u8,
     manual: bool = false,
     favorite: ?bool = null,
+    muted: ?bool = null,
     used: ?u64 = null,
     input: ?u64 = null,
     visits: ?[]const u64 = null,
@@ -146,11 +147,13 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
         var found = false;
         for (tabs.items) |*old| if (sameTab(old.*, tab)) {
             const favorite = old.favorite;
+            const muted = old.muted;
             const used = old.used;
             const input = old.input;
             const visits = old.visits;
             old.* = tab;
             if (tab.favorite == null) old.favorite = favorite;
+            if (tab.muted == null) old.muted = muted;
             old.used = maxUsed(used, tab.used);
             old.input = maxUsed(input, tab.input);
             old.visits = try mergeVisits(a, visits, tab.visits);
@@ -332,6 +335,32 @@ test "favorite encoding omits unknown and round trips explicit booleans" {
     const legacy = try parse(std.testing.allocator, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"One\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\"}]}");
     defer legacy.deinit();
     try std.testing.expectEqual(@as(?bool, null), legacy.value.tabs[0].favorite);
+}
+
+test "muted merge preserves unknown and applies explicit true and false" {
+    var local = test_tab;
+    local.muted = true;
+    for ([_]?bool{ null, true, false }) |muted| {
+        var remote = test_tab;
+        remote.tmux_session = "SESSION-1";
+        remote.muted = muted;
+        const result = try merge(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{local} }, .{ .workspaces = &test_ws, .tabs = &.{remote} }, 9, 256);
+        defer freeMerge(std.testing.allocator, result);
+        try std.testing.expectEqual(muted orelse true, result.tabs[0].muted.?);
+    }
+}
+
+test "muted encoding omits unknown and round trips explicit booleans" {
+    for ([_]?bool{ null, true, false }) |muted| {
+        var tab = test_tab;
+        tab.muted = muted;
+        const json = try encode(std.testing.allocator, .{ .workspaces = &test_ws, .tabs = &.{tab} });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(muted != null, std.mem.indexOf(u8, json, "\"muted\"") != null);
+        const parsed = try parse(std.testing.allocator, json);
+        defer parsed.deinit();
+        try std.testing.expectEqual(muted, parsed.value.tabs[0].muted);
+    }
 }
 
 test "used merge never loses or lowers known time" {

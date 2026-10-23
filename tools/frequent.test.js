@@ -27,7 +27,7 @@ const SWP_SHOWWINDOW: u32 = 0x0040;
 const SWP_HIDEWINDOW: u32 = 0x0080;
 const MAX_LWS: u8 = 16;
 const BROWSER_SPLIT_DEFAULT_PERMILLE: u16 = 350;
-const Shell = struct { last_used: u64 = 0, input: u64 = 0, synced_input: u64 = 0, input_publish_pending: bool = false, visits: frequent.Visits = .{}, shell_id: u32 = 1, workspace: u8 = 0, inbox_excluded: bool = false };
+const Shell = struct { last_used: u64 = 0, input: u64 = 0, synced_input: u64 = 0, input_publish_pending: bool = false, visits: frequent.Visits = .{}, shell_id: u32 = 1, workspace: u8 = 0, inbox_excluded: bool = false, muted: bool = false };
 var active_shell: u32 = 0;
 var g_single_window = false;
 var g_active_workspace: u8 = 0;
@@ -323,7 +323,7 @@ test('v2 input survives every persistence move restore and sync path', () => {
   for (const literal of ['shell.input = tab.input;', 'shells[idx].input = tabs[t].input;', '.input = saved_input,', 'transfer.input = shell.input;', 'new_shell.input = transfer.input;', 'new_shell.input = g_adopt_input;', 'g_inbox_rows[ri].input = json_reader.uint(o, "input");']) assert.ok(source.includes(literal), literal);
   assert.match(read('src/json_reader.zig'), /tab.input = uint\(obj, "input"\)/);
   assert.match(read('src/account_desktop.zig'), /shell.input = @max\(shell.input, input\)/);
-  assert.match(read('src/account_client.zig'), /X-Layout-Features: favorite,used,visits,input/);
+  assert.match(read('src/account_client.zig'), /X-Layout-Features: favorite,muted,used,visits,input/);
   assert.match(read('src/startup.zig'), /g_adopt_input = std.fmt.parseInt/);
   assert.match(read('src/workspaces.zig'), /writeNum\(&cmd_buf, &pos, shell.input\)/);
 });

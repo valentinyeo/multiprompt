@@ -224,7 +224,20 @@ pub fn stampSessionUse(idx: u32, throttled: bool) void {
 }
 
 pub fn inboxPublishesShell(shell: *const Shell) bool {
-    return !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
+    return !shell.muted and !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
+}
+
+pub fn toggleMuted(idx: u32) void {
+    if (idx >= app_state.shell_count) return;
+    app_state.shells[idx].muted = !app_state.shells[idx].muted;
+    if (app_state.shells[idx].muted) {
+        app_state.shells[idx].activity = .idle;
+        app_state.shells[idx].needs_attention = false;
+    }
+    if (!app_state.g_restoring) saveSession();
+    publishInboxStateNow();
+    loadInboxModel();
+    invalidateSidebar();
 }
 
 pub fn toggleInboxExcluded(idx: u32) void {
@@ -756,6 +769,7 @@ pub fn inboxRowVisible(r: *const InboxRow) bool {
     if (r.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[r.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
         const idx = findShellById(r.sid) orelse return false;
         if (app_state.shells[idx].inbox_excluded) return false;
+        if (app_state.shells[idx].muted) return false;
     }
     if (app_state.g_unread_only and !r.att) return false;
     if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
@@ -796,6 +810,49 @@ test "cached inbox navigation skips excluded local rows" {
     app_state.shells[0].inbox_excluded = true;
     try std.testing.expect(!inboxRowVisible(&row));
     app_state.shells[0].inbox_excluded = false;
+    try std.testing.expect(inboxRowVisible(&row));
+}
+
+test "muted sessions never show in the inbox" {
+    const prior_hwnd = app_state.g_main_hwnd;
+    const prior_count = app_state.shell_count;
+    const prior_shell = app_state.shells[0];
+    const prior_ws_count = app_state.g_inbox_ws_count;
+    const prior_ws = app_state.g_inbox_ws[0];
+    const prior_unread = app_state.g_unread_only;
+    const prior_tab = app_state.g_inbox_tab;
+    const prior_filter = app_state.g_inbox_filter_active;
+    defer {
+        app_state.g_main_hwnd = prior_hwnd;
+        app_state.shell_count = prior_count;
+        app_state.shells[0] = prior_shell;
+        app_state.g_inbox_ws_count = prior_ws_count;
+        app_state.g_inbox_ws[0] = prior_ws;
+        app_state.g_unread_only = prior_unread;
+        app_state.g_inbox_tab = prior_tab;
+        app_state.g_inbox_filter_active = prior_filter;
+    }
+    app_state.g_main_hwnd = @ptrFromInt(1);
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 43;
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0] = .{ .hwnd = 1 };
+    app_state.g_unread_only = false;
+    app_state.g_inbox_tab = frequent.all_split;
+    app_state.g_inbox_filter_active = false;
+    const row = InboxRow{ .ws = 0, .sid = 43 };
+    app_state.shells[0].needs_attention = true;
+    try std.testing.expect(inboxPublishesShell(&app_state.shells[0]));
+    try std.testing.expect(inboxRowVisible(&row));
+    app_state.shells[0].muted = true;
+    try std.testing.expect(!inboxPublishesShell(&app_state.shells[0]));
+    try std.testing.expect(!inboxRowVisible(&row));
+    app_state.shells[0].needs_attention = false;
+    app_state.shells[0].activity = .active;
+    try std.testing.expect(!inboxPublishesShell(&app_state.shells[0]));
+    try std.testing.expect(!inboxRowVisible(&row));
+    app_state.shells[0].muted = false;
     try std.testing.expect(inboxRowVisible(&row));
 }
 

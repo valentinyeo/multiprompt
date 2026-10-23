@@ -37,7 +37,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
-    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -51,6 +51,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     for (tabs.items) |*tab| {
         if (find(local.tabs, tab.*)) |i| {
             if (tab.favorite == null) tab.favorite = local.tabs[i].favorite;
+            if (tab.muted == null) tab.muted = local.tabs[i].muted;
             tab.used = layout.maxUsed(tab.used, local.tabs[i].used);
             tab.input = layout.maxUsed(tab.input, local.tabs[i].input);
             tab.visits = try layout.mergeVisits(a, tab.visits, local.tabs[i].visits);
@@ -71,6 +72,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
     for (tabs.items) |*tab| {
         if (find(base.tabs, tab.*)) |i| {
             if (tab.favorite == null) tab.favorite = base.tabs[i].favorite;
+            if (tab.muted == null) tab.muted = base.tabs[i].muted;
             tab.used = layout.maxUsed(tab.used, base.tabs[i].used);
             tab.input = layout.maxUsed(tab.input, base.tabs[i].input);
             tab.visits = try layout.mergeVisits(a, tab.visits, base.tabs[i].visits);
@@ -110,6 +112,9 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         if (t.favorite == null) {
             if (find(edited.tabs, r)) |ei| t.favorite = edited.tabs[ei].favorite;
         }
+        if (t.muted == null) {
+            if (find(edited.tabs, r)) |ei| t.muted = edited.tabs[ei].muted;
+        }
         if (find(base.tabs, r)) |bi| {
             const ei = find(edited.tabs, r) orelse continue;
             t.used = layout.maxUsed(t.used, base.tabs[bi].used);
@@ -118,6 +123,10 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             if (r.favorite == null and t.favorite == null) t.favorite = base.tabs[bi].favorite;
             if (edited.tabs[ei].favorite) |favorite| {
                 if (favorite != (base.tabs[bi].favorite orelse false)) t.favorite = favorite;
+            }
+            if (r.muted == null and t.muted == null) t.muted = base.tabs[bi].muted;
+            if (edited.tabs[ei].muted) |muted| {
+                if (muted != (base.tabs[bi].muted orelse false)) t.muted = muted;
             }
             if (!eq(u8, edited.tabs[ei].name, base.tabs[bi].name) or edited.tabs[ei].manual != base.tabs[bi].manual) {
                 t.name = edited.tabs[ei].name;
@@ -211,6 +220,7 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         try normalized.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, t.workspace).?) });
         try normalized.object.put(a, "manual", .{ .bool = t.manual });
         if (t.favorite) |favorite| try normalized.object.put(a, "favorite", .{ .bool = favorite });
+        if (t.muted) |muted| try normalized.object.put(a, "muted", .{ .bool = muted });
         const cached_used = record.object.get("used");
         const used = layout.maxUsed(t.used, if (cached_used != null and cached_used.? == .integer and cached_used.?.integer >= 0) @import("json_reader.zig").uint(record, "used") else null);
         if (used) |value| {
@@ -576,6 +586,54 @@ test "favorite cache restore preserves legacy stars and applies explicit values"
         if (favorite) |value| {
             try std.testing.expectEqual(value, field.?.bool);
         } else try std.testing.expect(field == null);
+    }
+}
+
+test "muted apply rebase and cache carry explicit values and keep unknown" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]bool{ false, true }) |muted| {
+        var local = one;
+        local.muted = muted;
+        const base = Layout{ .workspaces = &test_ws, .tabs = &.{local} };
+        for ([_]?bool{ null, true, false }) |incoming| {
+            var remote = one;
+            remote.tmux_session = "ONE";
+            remote.muted = incoming;
+            const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+            const applied = try apply(a, base, &.{true}, server, 9, 256);
+            try std.testing.expectEqual(incoming orelse muted, applied.tabs[0].muted.?);
+            const held = try keepHeld(a, base, server, &.{});
+            try std.testing.expectEqual(incoming orelse muted, held.tabs[0].muted.?);
+            const rebased = try rebase(a, base, base, server);
+            try std.testing.expectEqual(incoming orelse muted, rebased.tabs[0].muted.?);
+        }
+        var edited = local;
+        edited.muted = !muted;
+        var remote = one;
+        remote.name = "Remote rename";
+        const rebased = try rebase(a, base, .{ .workspaces = &test_ws, .tabs = &.{edited} }, .{ .workspaces = &test_ws, .tabs = &.{remote} });
+        try std.testing.expectEqual(!muted, rebased.tabs[0].muted.?);
+        try std.testing.expectEqualStrings(remote.name, rebased.tabs[0].name);
+    }
+    var on = one;
+    on.muted = true;
+    var off = one;
+    off.muted = false;
+    const unknown = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
+    try std.testing.expect(equal(unknown, Layout{ .workspaces = &test_ws, .tabs = &.{off} }));
+    try std.testing.expect(!equal(Layout{ .workspaces = &test_ws, .tabs = &.{on} }, Layout{ .workspaces = &test_ws, .tabs = &.{off} }));
+    const cache = "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"kind\":\"tmux\",\"name\":\"One\",\"tmux_session\":\"ONE\",\"tmux_host\":0,\"workspace\":0,\"pid\":42,\"muted\":true}]}";
+    for ([_]?bool{ null, true, false }) |incoming| {
+        var remote = one;
+        remote.muted = incoming;
+        const server = Layout{ .workspaces = &test_ws, .tabs = &.{remote} };
+        const prepared = try prepareCache(a, cache, server);
+        const parsed = try std.json.parseFromSlice(std.json.Value, a, prepared, .{});
+        defer parsed.deinit();
+        const field = parsed.value.object.get("tabs").?.array.items[0].object.get("muted");
+        try std.testing.expectEqual(incoming orelse true, field.?.bool);
     }
 }
 

@@ -32,5 +32,6 @@ Preconditions:
 
 - An empty or filtered-out list cannot exercise a read/unread toggle. Treat that as a failed precondition, not success opening an empty overlay.
 - Unread-only is a global transient filter; it is not the same thing as one session's blue dot.
+- A muted session never appears in Inbox whatever it does (new output, done, waiting), on every device; it stays in its workspace tab, and the mute is saved and synced through the account layout.
 - `u` must reach Inbox, not a CMD prompt or search field.
 - This baseline proves a local session and window-state transition, not cross-process aggregation, every split, archive/undo or remote-session discovery.

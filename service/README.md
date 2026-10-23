@@ -60,6 +60,8 @@ Callbacks accept only exact Android companion callback schemes or `http://127.0.
 
 Star-aware clients send `X-Layout-Features: favorite` on every layout GET/PUT. All layout responses advertise that header; only declaring clients receive `favorite` fields, including in 409 winner bodies. Storage preserves explicit `true` and `false`; absence means unknown, not false. Legacy PUTs preserve stored values by case-insensitive host/session identity and discard client-supplied favorites otherwise. Declaring PUTs store exactly the sent boolean or absence; send `false` to unstar across clients.
 
+The `muted` tab flag follows the same rules under the `muted` feature token: optional boolean, hidden from clients that do not declare it, preserved by legacy PUTs, and stored exactly as sent by declaring PUTs. Muted sessions are hidden from the Inbox on every device.
+
 Clients syncing usage send `X-Layout-Features: favorite,used,visits,input`. Layout replies advertise all four features and negotiate them independently with trimmed comma-list tokens. Replies, including 409 winners, hide `used` from clients without that token. Legacy saves copy stored usage by case-insensitive host/session identity and discard unmatched incoming usage. Declaring saves keep the maximum of stored and incoming times; absence keeps stored time. Usage-only desktop publishes require a stamp more than ten minutes newer than the last sent or received time. Local caches mark Unix timestamps with `used_unix` to distinguish older Windows-epoch stamps.
 
 Optional `visits` is an ascending, unique array of at most eight non-negative safe
