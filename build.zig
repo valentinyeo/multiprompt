@@ -309,7 +309,7 @@ pub fn build(b: *std.Build) void {
     const run_browser_onscreen_tests = b.addRunArtifact(browser_onscreen_tests);
     test_step.dependOn(&run_browser_onscreen_tests.step);
     vps_test_step.dependOn(&run_browser_onscreen_tests.step);
-    const browser_onscreen_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-onscreen.test.js" });
+    const browser_onscreen_source = b.addSystemCommand(&.{ "node", "--test", "tools/browser-onscreen.test.js", "tools/browser-pane-dpi.test.js" });
     test_step.dependOn(&browser_onscreen_source.step);
     vps_test_step.dependOn(&browser_onscreen_source.step);
     const account_layout_tests = b.addTest(.{ .root_module = b.createModule(.{

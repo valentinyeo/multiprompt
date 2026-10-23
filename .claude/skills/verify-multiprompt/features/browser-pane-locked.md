@@ -26,6 +26,8 @@ Dispatch `gh workflow run verify.yml -f feature=browser-pane-locked` against the
 7. Focus the browser again, revalidate the same empty strip and send a real mouse double-click there. Apply the same bounded exact-rectangle and IsZoomed-false assertions. Print `browser-pane-locked maximize-blocked PASS`.
 8. Inspect before/action/drag-blocked/after screenshots, UIA/focus snapshots, actions.json, the per-step browser-pane-locked JSON records, result.json, build.json and owned-job cleanup. The journey prints `browser-pane-locked verified release tag=... version=...` before opening the pane. Branch builds have an empty release tag and still log the version.
 
+The initial and restored launch proofs also require the pane to remain on the owner monitor and compare GetDpiForWindow with that monitor's effective GetDpiForMonitor DPI under a temporary per-monitor-aware thread context. Evidence records both monitor DPI axes. Inactive panes stay natively visible but move outside every monitor. Before dismissing the restored Shortcuts overlay, enumerate all owned panes and require a parked pane; each parked pane must have MonitorFromWindow equal to the main window monitor. Every visible pane must have GetDpiForWindow equal to its own monitor DPI. Save per-pane rectangles, monitor handles and DPI in browser-pane-locked-monitors records.
+
 ## Gotchas
 
 - The rendered Edge setup remains unchanged for the other browser journeys, which keep their setup job until cleanup. This journey stops it only after rendering, outside setup, so both pane launches have persistent observable command lines rather than depending on catching short-lived forwarding processes.
