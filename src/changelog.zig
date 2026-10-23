@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.835", .items = &.{
+        .{ .text = "Remote browser commands now keep desktop file operations in the local command-line tool.", .ticket = "IGSH-636" },
+        .{ .text = "Sign-in and device keys are handled more strictly.", .ticket = "IGSH-636" },
+    } },
     .{ .ver = "0.28.834", .items = &.{
         .{ .text = "Chat View no longer opens empty right after an agent reads a large screenshot.", .ticket = "IGSH-631" },
     } },
