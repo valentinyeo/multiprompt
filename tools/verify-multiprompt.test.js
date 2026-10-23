@@ -1583,3 +1583,25 @@ test('ISSUE-569 respawn selection survives PID-zero normalization and automatic 
     assert.throws(() => contract(...broken), assert.AssertionError, old);
   }
 });
+
+test('IGSH-678 chat code font journey measures real console code and names every check', () => {
+  const code = control.slice(control.indexOf("        'chat-code-font' {"), control.indexOf("        'sessions' {"));
+  assert.match(control, /ValidateSet\([^\n)]*'chat-code-font'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-code-font'/);
+  assert.match(workflow, /if: env\.FEATURE == 'chat-code-font' && env\.RELEASE_TAG == ''/);
+  assert.match(workflow, /node tools\/chat-code-font-proof\.mjs evidence/);
+  for (const name of ['IGSH-678 code cell size', 'IGSH-678 code font face and size', 'IGSH-678 code edges', 'IGSH-678 diff rows smooth on green and red']) assert.ok(code.includes(`name = '${name}'`), name);
+  assert.match(code, /Press @\(0x12, 0x43\) 'Alt\+C: open Chat View on the code block'/);
+  assert.match(code, /\[CodeFontProof\]::Bar\(/);
+  assert.ok(code.includes('\\[chatcode\\] face='));
+  assert.match(code, /Max\(8, \$chatPt - 3\)/);
+  for (const shot of ['action', 'after']) assert.ok(code.includes(`Snapshot '${shot}'`));
+  assert.ok(code.indexOf("'code-crop-4x.png'") < code.indexOf("throw ('IGSH-678 code size: '"), 'crop is retained before the size assertion fails');
+  assert.doesNotMatch(code, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
+  const map = read(skill + 'features/chat-code-font.md');
+  assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), [
+    'Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas',
+  ]);
+  assert.match(read(skill + 'features/README.md'), /\[Chat code font\]\(chat-code-font.md\)/);
+  assert.match(read(skill + 'coverage.md'), /\| IGSH-678 \|[^\n]*\| chat-code-font \|/);
+});

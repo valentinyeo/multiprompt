@@ -85,6 +85,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-587 | Startup and relaunch open maximized. | appearance | partial | First startup passes on v0.28.821. Restore the frame, Restart and create another workspace window, then require new windows maximized before input; update/rollback/crash relaunch geometry also needs checks. |
 | IGSH-600 | Removing an account server stays removed across devices and restarts. | account-hosts (Test workflow) | partial | Deterministic Miniflare and production-sync fixtures plus Zig host filters; native confirmation and real sign-in remain unverified. |
 | IGSH-591 | Group lines stay clear of the selected session row. | group-rail | covered | — |
+| IGSH-678 | Chat View code uses Nordwand Mono SemiBold, 2 pt smaller, with smooth edges on diff rows. | chat-code-font | partial | Live code size and face come from a real console code block; diff rows come from the branch painter with a synthetic tool block. A live diff preview needs an agent transcript on the runner. |
 
 ## Live results on this pass
 

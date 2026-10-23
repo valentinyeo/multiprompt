@@ -84,6 +84,7 @@ const GetTextColor = @import("win32.zig").GetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
 const GetStockObject = @import("win32.zig").GetStockObject;
 const GetTextExtentPoint32W = @import("win32.zig").GetTextExtentPoint32W;
+const GetTextFaceW = @import("win32.zig").GetTextFaceW;
 const GetTextExtentExPointW = @import("win32.zig").GetTextExtentExPointW;
 const CreateFontW = @import("fonts.zig").create;
 const CHAT_QUALITY = @import("fonts.zig").CHAT_QUALITY;
@@ -169,6 +170,7 @@ const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
 const win32MakeDir = @import("file_io.zig").win32MakeDir;
 const debugLog = @import("diagnostics.zig").debugLog;
+const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const altqPtr = @import("diagnostics.zig").altqPtr;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const keybd_event = @import("win32.zig").keybd_event;
@@ -245,18 +247,42 @@ const SetTimer = @import("win32.zig").SetTimer;
 const KillTimer = @import("win32.zig").KillTimer;
 const findShellById = @import("inbox.zig").findShellById;
 
+fn chatCodeFontPx() i32 {
+    return uiScaled(@max(8, app_state.g_chat_font_pt - 3));
+}
+
 fn ensureChatCodeFont() HANDLE {
     if (app_state.g_chat_code_font == null) {
-        const pt = @max(8, app_state.g_chat_font_pt - 1);
-        app_state.g_chat_code_font = CreateFontW(-uiScaled(pt), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
+        app_state.g_chat_code_font = CreateFontW(-chatCodeFontPx(), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
+        logChatCodeFont(app_state.g_chat_code_font);
     }
     return app_state.g_chat_code_font;
+}
+
+fn logChatCodeFont(font: HANDLE) void {
+    if (font == null or !verboseLoggingEnabled()) return;
+    const dc = CreateCompatibleDC(null) orelse return;
+    defer _ = DeleteDC(dc);
+    const old_font = SelectObject(dc, ensureChatFont());
+    defer _ = SelectObject(dc, old_font);
+    const body_em = @import("dwrite_text.zig").emHeight(dc) orelse return;
+    _ = SelectObject(dc, font);
+    var face: [32]u16 = undefined;
+    const face_len = GetTextFaceW(dc, face.len, &face);
+    if (face_len <= 1) return;
+    var face_utf8: [96]u8 = undefined;
+    const face_bytes = std.unicode.utf16LeToUtf8(&face_utf8, face[0..@intCast(face_len - 1)]) catch return;
+    const code_em = @import("dwrite_text.zig").emHeight(dc) orelse return;
+    var cell: SIZE = undefined;
+    if (GetTextExtentPoint32W(dc, L("\u{2588}"), 1, &cell) == 0) return;
+    var line: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&line, "[chatcode] face={s} em={d} advance={d} body_em={d} pt={d}", .{ face_utf8[0..face_bytes], code_em, cell.cx, body_em, app_state.g_chat_font_pt }) catch return);
 }
 
 fn chatLinkFont(code: bool) HANDLE {
     const slot = if (code) &app_state.g_chat_code_link_font else &app_state.g_chat_link_font;
     if (slot.* == null) {
-        slot.* = if (code) CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 500, 0, 1, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE)) else @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt), false, false, true, .{});
+        slot.* = if (code) CreateFontW(-chatCodeFontPx(), 0, 0, 0, 500, 0, 1, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE)) else @import("fonts.zig").chat(-uiScaled(app_state.g_chat_font_pt), false, false, true, .{});
     }
     return slot.*;
 }
@@ -462,7 +488,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
 fn chatRichFont(style: chat_markdown.Style, level: u3) HANDLE {
     if (style.code) {
         if (!style.bold) return ensureChatCodeFont();
-        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-uiScaled(@max(8, app_state.g_chat_font_pt - 1)), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
+        if (app_state.g_chat_rich_fonts[11] == null) app_state.g_chat_rich_fonts[11] = CreateFontW(-chatCodeFontPx(), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, CHAT_QUALITY, 0, L(@import("fonts.zig").MONO_FACE));
         return app_state.g_chat_rich_fonts[11];
     }
     const index: usize = if (level > 0) 4 + @as(usize, level) - 1 else @as(usize, @intFromBool(style.bold)) + 2 * @as(usize, @intFromBool(style.italic));
@@ -1337,7 +1363,7 @@ test "IGSH-376 received Markdown keeps blue sender layout selection and copied t
             .height = height,
             .font_px = uiScaled(app_state.g_chat_font_pt),
             .heading_px = uiScaled(app_state.g_chat_font_pt + 8),
-            .code_px = uiScaled(@max(8, app_state.g_chat_font_pt - 1)),
+            .code_px = chatCodeFontPx(),
             .foreground = customColorOr("text", themeConsoleFg()),
             .background = themeConsoleBg(),
             .bubble_background = chatInjectedBubbleColor(),
@@ -1350,6 +1376,121 @@ test "IGSH-376 received Markdown keeps blue sender layout selection and copied t
         }, .{ .whitespace = .indent_2 });
         defer std.testing.allocator.free(metadata);
         try Proof.save(L("chat-markdown-proof.json"), metadata);
+    }
+}
+
+test "IGSH-678 Chat View code is Nordwand Mono two points smaller and overflowing diff rows stay on DirectWrite" {
+    try std.testing.expect(@import("fonts.zig").register());
+    defer @import("fonts.zig").unregister();
+    defer @import("drawing.zig").resetFontCache();
+    const w = @import("win32.zig");
+    const dwrite = @import("dwrite_text.zig");
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 640;
+    const height = 420;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    const old_font = SelectObject(dc, ensureChatFont());
+    defer _ = SelectObject(dc, old_font);
+    const body_em = dwrite.emHeight(dc) orelse return error.TestUnexpectedResult;
+    const code_em = uiScaled(@max(8, app_state.g_chat_font_pt - 3));
+    try std.testing.expect(code_em < body_em);
+    var face: [32]u16 = undefined;
+    for ([_]HANDLE{ ensureChatCodeFont(), chatLinkFont(true), chatRichFont(.{ .code = true }, 0), chatRichFont(.{ .code = true, .bold = true }, 0) }) |font| {
+        _ = SelectObject(dc, font);
+        const face_len = GetTextFaceW(dc, face.len, &face);
+        try std.testing.expect(face_len > 1);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral(@import("fonts.zig").MONO_FACE), face[0..@intCast(face_len - 1)]);
+        try std.testing.expectEqual(code_em, dwrite.emHeight(dc) orelse return error.TestUnexpectedResult);
+    }
+    const summary = std.unicode.utf8ToUtf16LeStringLiteral("Wrote dec.html +2 -1");
+    const patch = std.unicode.utf8ToUtf16LeStringLiteral("+<p>Decision, reviewer 2026-10-23 ~14:15, answering the question about the three smaller views</p>\n-<p>Old paragraph removed because the wireframe moved to a single line card at the bottom</p>\n+<ul>");
+    const code = std.unicode.utf8ToUtf16LeStringLiteral("let answer = 42;\n\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}");
+    var text: [summary.len + patch.len + code.len]u16 = undefined;
+    @memcpy(text[0..summary.len], summary);
+    @memcpy(text[summary.len..][0..patch.len], patch);
+    @memcpy(text[summary.len + patch.len ..], code);
+    const tool = ChatBlock{ .start = 0, .len = summary.len, .role = .tool, .tool_status = .ok, .diff_start = summary.len, .diff_len = patch.len };
+    const code_block = ChatBlock{ .start = summary.len + patch.len, .len = code.len, .role = .code };
+    var background = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const brush = CreateSolidBrush(themeConsoleBg());
+    defer _ = DeleteObject(brush);
+    _ = FillRect(dc, &background, brush);
+    var tool_rc = chatMeasureBlockRect(dc, &text, tool, .single, width - 48, 24, null);
+    tool_rc.left += 24;
+    tool_rc.right += 24;
+    var code_rc = chatMeasureBlockRect(dc, &text, code_block, .single, width - 48, tool_rc.bottom + 16, null);
+    code_rc.left += 24;
+    code_rc.right += 24;
+    try std.testing.expect(code_rc.bottom < height);
+    const before_painted = dwrite.painted_runs;
+    const before_fallback = dwrite.fallback_runs;
+    chatPaintBlock(dc, &text, tool, .single, tool_rc);
+    const diff_painted = dwrite.painted_runs - before_painted;
+    const diff_fallback = dwrite.fallback_runs - before_fallback;
+    chatPaintBlock(dc, &text, code_block, .single, code_rc);
+    const code_painted = dwrite.painted_runs - before_painted - diff_painted;
+    const code_fallback = dwrite.fallback_runs - before_fallback - diff_fallback;
+    if (dwrite.enabled()) {
+        try std.testing.expectEqual(@as(u64, 0), diff_fallback);
+        try std.testing.expect(diff_painted >= 5);
+        try std.testing.expectEqual(@as(u64, 0), code_fallback);
+        try std.testing.expect(code_painted > 0);
+    } else {
+        try std.testing.expectEqual(@as(u64, 0), diff_painted + code_painted);
+    }
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+        const Proof = struct {
+            extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+
+            fn save(path: LPCWSTR, bytes: []const u8) !void {
+                const file = w.CreateFileW(path, 0x40000000, 0, null, 2, 0x80, null);
+                try std.testing.expect(file != null and file != @as(HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+                defer _ = w.CloseHandle(file);
+                var written: u32 = 0;
+                try std.testing.expect(w.WriteFile(file, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len);
+            }
+        };
+        _ = Proof.GdiFlush();
+        const pixels = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
+        const bmp = try std.testing.allocator.alloc(u8, 54 + pixels.len);
+        defer std.testing.allocator.free(bmp);
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], pixels);
+        try Proof.save(L("chat-code-proof.bmp"), bmp);
+        const row_top = tool_rc.top + uiScaled(28);
+        const metadata = try std.json.Stringify.valueAlloc(std.testing.allocator, .{
+            .ticket = "IGSH-678",
+            .dwrite_enabled = dwrite.enabled(),
+            .width = width,
+            .height = height,
+            .face = @import("fonts.zig").MONO_FACE,
+            .code_em = code_em,
+            .previous_code_em = uiScaled(@max(8, app_state.g_chat_font_pt - 1)),
+            .body_em = body_em,
+            .diff_glyph_runs = diff_painted,
+            .diff_fallback_runs = diff_fallback,
+            .code_glyph_runs = code_painted,
+            .code_fallback_runs = code_fallback,
+            .diff_rows = .{ .left = tool_rc.left, .top = row_top, .right = tool_rc.right, .bottom = row_top + 3 * uiScaled(chat_diff.row_height) },
+            .code = code_rc,
+            .added_background = chat_diff.added_dark,
+            .removed_background = chat_diff.removed_dark,
+        }, .{ .whitespace = .indent_2 });
+        defer std.testing.allocator.free(metadata);
+        try Proof.save(L("chat-code-proof.json"), metadata);
     }
 }
 

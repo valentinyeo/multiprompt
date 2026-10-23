@@ -230,7 +230,7 @@
   ["chat_session.zig", "fn chatHistoryChannelClose"],
   ["app_state.zig", "var g_chat_switch_loading"],
   ["chat_session.zig", "fn chatRefreshAfterFontChange"],
-  ["chat_render.zig", "fn ensureChatCodeFont"],
+  ["chat_render.zig", "fn chatCodeFontPx"],
   ["app_state.zig", "const ChatHit"],
   ["chat_render.zig", "fn chatSelRange"],
   ["app_state.zig", "const CHAT_BUBBLE_PAD"],
