@@ -25,6 +25,29 @@ pub const Layout = struct {
     workspaces: []const Workspace,
     tabs: []const Tab,
     hosts: ?[]const Host = null,
+    removed_hosts: ?[]const u8 = null,
+
+    pub fn jsonStringify(self: Layout, json: anytype) !void {
+        try json.beginObject();
+        inline for (std.meta.fields(Layout)) |field| {
+            const value = @field(self, field.name);
+            if (comptime std.mem.eql(u8, field.name, "removed_hosts")) {
+                if (value) |slots| {
+                    try json.objectField(field.name);
+                    try json.beginArray();
+                    for (slots) |slot| try json.write(slot);
+                    try json.endArray();
+                }
+            } else {
+                const emit = if (@typeInfo(field.type) == .optional) value != null or json.options.emit_null_optional_fields else true;
+                if (emit) {
+                    try json.objectField(field.name);
+                    try json.write(value);
+                }
+            }
+        }
+        try json.endObject();
+    }
 };
 
 pub fn sameTab(a: Tab, b: Tab) bool {
@@ -52,6 +75,7 @@ fn validText(text: []const u8, max_units: usize) bool {
 
 pub fn validate(layout: Layout) !void {
     if (layout.schema != 1 or layout.workspaces.len > 64 or layout.tabs.len > 4096) return error.InvalidLayout;
+    if (layout.removed_hosts) |removed| try @import("account_hosts.zig").validateRemoved(removed);
     if (layout.hosts) |hosts| try @import("account_hosts.zig").validate(hosts);
     for (layout.workspaces, 0..) |ws, i| {
         if (ws.name.len > 32 or !validText(ws.name, 32)) return error.InvalidLayout;
@@ -83,10 +107,11 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
     const parsed = try std.json.parseFromSlice(Layout, a, json, .{ .allocate = .alloc_always });
     errdefer parsed.deinit();
     try validate(parsed.value);
-    if (parsed.value.settings == null) {
-        const value = try std.json.parseFromSlice(std.json.Value, a, json, .{});
-        defer value.deinit();
-        if (value.value.object.contains("settings")) return error.InvalidLayout;
+    const value = try std.json.parseFromSlice(std.json.Value, a, json, .{});
+    defer value.deinit();
+    if (parsed.value.settings == null and value.value.object.contains("settings")) return error.InvalidLayout;
+    if (value.value.object.get("removed_hosts")) |removed| {
+        if (removed != .array) return error.InvalidHosts;
     }
     return parsed;
 }
@@ -137,7 +162,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     if (workspaces.items.len > max_workspaces or tabs.items.len > max_tabs) return error.LayoutCapacity;
     const ws = try workspaces.toOwnedSlice(a);
     errdefer a.free(ws);
-    return .{ .settings = server.settings, .revision = server.revision, .hosts = server.hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = server.settings, .revision = server.revision, .hosts = server.hosts, .removed_hosts = server.removed_hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
 }
 
 fn freeMerge(a: Allocator, layout: Layout) void {
@@ -503,5 +528,22 @@ test "ISSUE-423 settings reject unknown keys and every nonboolean value through 
                 return error.ExpectedRejection;
             } else |_| {}
         }
+    }
+}
+
+test "IGSH-600 removed hosts round trip as an optional validated array" {
+    const a = std.testing.allocator;
+    const bytes = try encode(a, .{ .workspaces = &.{}, .tabs = &.{}, .removed_hosts = &.{2} });
+    defer a.free(bytes);
+    const parsed = try parse(a, bytes);
+    defer parsed.deinit();
+    try std.testing.expectEqualSlices(u8, &.{2}, parsed.value.removed_hosts.?);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"removed_hosts\":[2]") != null);
+    const absent = try encode(a, .{ .workspaces = &.{}, .tabs = &.{} });
+    defer a.free(absent);
+    try std.testing.expect(std.mem.indexOf(u8, absent, "removed_hosts") == null);
+    try std.testing.expectError(error.InvalidHosts, parse(a, "{\"workspaces\":[],\"tabs\":[],\"removed_hosts\":null}"));
+    for ([_][]const u8{ &.{3}, &.{ 2, 2 }, &.{ 0, 1, 2, 0 } }) |bad| {
+        try std.testing.expectError(error.InvalidHosts, encode(a, .{ .workspaces = &.{}, .tabs = &.{}, .removed_hosts = bad }));
     }
 }

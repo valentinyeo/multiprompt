@@ -128,6 +128,9 @@ const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
 const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
+const SEARCH_REMOVE_SERVER_1_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_1_OFFSET;
+const SEARCH_REMOVE_SERVER_2_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_2_OFFSET;
+const SEARCH_REMOVE_SERVER_3_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_3_OFFSET;
 const SEARCH_SKILLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SKILLS_MENU_OFFSET;
 const SEARCH_SKILLS_BACK_OFFSET = @import("app_state.zig").SEARCH_SKILLS_BACK_OFFSET;
 const SEARCH_KEEPAWAKE_OFFSET = @import("app_state.zig").SEARCH_KEEPAWAKE_OFFSET;
@@ -738,6 +741,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
         SEARCH_APPROVE_DEVICES_OFFSET => "account: approve devices",
+        SEARCH_REMOVE_SERVER_1_OFFSET => "account: remove server 1",
+        SEARCH_REMOVE_SERVER_2_OFFSET => "account: remove server 2",
+        SEARCH_REMOVE_SERVER_3_OFFSET => "account: remove server 3",
         SEARCH_LAYOUT_PULL_OFFSET => "sync: pull now",
         SEARCH_SKILLS_MENU_OFFSET => "skills",
         SEARCH_CHAT_REPLY_OFFSET => "Chat View: Reply to latest agent message",
@@ -2531,6 +2537,27 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ "account: approve devices", "approve device", "server access", "device keys" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_APPROVE_DEVICES_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "account: remove server 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_1_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "account: remove server 2" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_2_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "account: remove server 3" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_3_OFFSET;
         app_state.g_search_result_count += 1;
     }
 

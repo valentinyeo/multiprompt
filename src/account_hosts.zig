@@ -11,6 +11,40 @@ pub const Host = struct {
 };
 pub const Resolved = struct { hostname: []const u8, port: u16, user: []const u8 };
 
+pub fn validateRemoved(removed: []const u8) !void {
+    if (removed.len > 3) return error.InvalidHosts;
+    for (removed, 0..) |slot, i| {
+        if (slot > 2 or isRemoved(removed[0..i], slot)) return error.InvalidHosts;
+    }
+}
+
+pub fn isRemoved(removed: []const u8, slot: u8) bool {
+    return std.mem.indexOfScalar(u8, removed, slot) != null;
+}
+
+pub fn withoutRemoved(a: Allocator, hosts: []const Host, removed: []const u8) ![]Host {
+    var kept: std.ArrayList(Host) = .empty;
+    errdefer kept.deinit(a);
+    for (hosts) |host| if (!isRemoved(removed, host.slot)) try kept.append(a, host);
+    return kept.toOwnedSlice(a);
+}
+
+pub fn mergeRemoved(a: Allocator, left: []const u8, right: []const u8) ![]const u8 {
+    try validateRemoved(left);
+    try validateRemoved(right);
+    var slots: std.ArrayList(u8) = .empty;
+    errdefer slots.deinit(a);
+    for (0..3) |i| {
+        const slot: u8 = @intCast(i);
+        if (isRemoved(left, slot) or isRemoved(right, slot)) try slots.append(a, slot);
+    }
+    return slots.toOwnedSlice(a);
+}
+
+pub fn addRemoved(a: Allocator, removed: []const u8, slot: u8) ![]const u8 {
+    return mergeRemoved(a, removed, &.{slot});
+}
+
 pub fn validHostname(value: []const u8) bool {
     if (value.len == 0 or value.len > 253) return false;
     var dns = true;
@@ -399,4 +433,31 @@ test "ISSUE-252 exact first host rewrites only changed address directives preser
     const result = try rewriteConfig(arena.allocator(), config, "remote-1", fixture, changed);
     try std.testing.expectEqualStrings("Host remote-1\r\n  Port 2222\r\n\tHostName=203.0.113.5\r\n\tUser owner\r\n\tIdentityFile=~/.ssh/key\r\nMatch all\r\n  ForwardAgent no", result);
     try std.testing.expectEqualStrings(config, try rewriteConfig(arena.allocator(), config, "remote-1", fixture, fixture));
+}
+
+test "IGSH-600 removed slots never return from cache discovery merge or restart" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const hosts = [_]Host{
+        .{ .slot = 0, .name = "One", .hostname = "one.example", .port = 22, .user = "owner" },
+        .{ .slot = 1, .name = "Two", .hostname = "two.example", .port = 22, .user = "owner" },
+        .{ .slot = 2, .name = "Three", .hostname = "three.example", .port = 22, .user = "owner" },
+    };
+    const removed = try addRemoved(a, &.{}, 2);
+    try std.testing.expect(isRemoved(removed, 2));
+    try std.testing.expect(!isRemoved(removed, 0));
+    try std.testing.expectEqualSlices(u8, &.{2}, try addRemoved(a, removed, 2));
+    try std.testing.expectEqualSlices(u8, &.{ 0, 2 }, try addRemoved(a, removed, 0));
+    var cache: []const Host = &hosts;
+    for (0..3) |_| {
+        cache = try withoutRemoved(a, cache, removed);
+        try std.testing.expectEqualDeep(hosts[0..2], cache);
+        try std.testing.expectEqualDeep(hosts[0..2], try withoutRemoved(a, &hosts, removed));
+    }
+    try std.testing.expectEqualDeep(&hosts, try withoutRemoved(a, &hosts, &.{}));
+    try std.testing.expectEqual(@as(usize, 0), (try withoutRemoved(a, &hosts, &.{ 0, 1, 2 })).len);
+    for ([_][]const u8{ &.{3}, &.{ 2, 2 }, &.{ 0, 1, 2, 0 } }) |bad| {
+        try std.testing.expectError(error.InvalidHosts, validateRemoved(bad));
+    }
 }

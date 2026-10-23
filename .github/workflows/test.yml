@@ -136,7 +136,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: steps.paths.outputs.heavy == 'true'
         with:

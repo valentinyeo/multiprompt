@@ -38,19 +38,26 @@ pub const Response = struct {
     status: u32,
     bytes: []u8,
     hosts_supported: bool = false,
+    removal_supported: bool = false,
     pub fn deinit(self: Response) void {
         std.crypto.secureZero(u8, self.bytes);
         a.free(self.bytes);
     }
 };
 pub fn layoutSupportsHosts(headers: []const u8) bool {
+    return layoutSupports(headers, "hosts");
+}
+pub fn layoutSupportsRemoval(headers: []const u8) bool {
+    return layoutSupports(headers, "host_removal");
+}
+fn layoutSupports(headers: []const u8, feature: []const u8) bool {
     var lines = std.mem.splitSequence(u8, headers, "\r\n");
     while (lines.next()) |line| {
         const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
         if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, line[0..colon], " \t"), "X-Layout-Features")) continue;
         var tokens = std.mem.splitScalar(u8, line[colon + 1 ..], ',');
         while (tokens.next()) |token| {
-            if (std.mem.eql(u8, std.mem.trim(u8, token, " \t"), "hosts")) return true;
+            if (std.mem.eql(u8, std.mem.trim(u8, token, " \t"), feature)) return true;
         }
     }
     return false;
@@ -69,7 +76,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,used,visits,input,settings,hosts\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,used,visits,input,settings,hosts,host_removal\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);
@@ -78,12 +85,14 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     var size: u32 = @sizeOf(u32);
     if (WinHttpQueryHeaders(req, 19 | 0x20000000, null, &status, &size, null) == 0) return error.Network;
     var hosts_supported = false;
+    var removal_supported = false;
     var header_buf: [8192]u16 = @splat(0);
     size = @sizeOf(@TypeOf(header_buf));
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
         const raw = try std.unicode.utf16LeToUtf8Alloc(a, std.mem.trim(u16, header_buf[0 .. size / 2], &.{0}));
         defer a.free(raw);
         hosts_supported = layoutSupportsHosts(raw);
+        removal_supported = layoutSupportsRemoval(raw);
     }
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -92,7 +101,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }
@@ -222,4 +231,12 @@ test "layout hosts capability trims spaces and ignores header name case" {
     try std.testing.expect(layoutSupportsHosts("X-Layout-Features: hosts"));
     try std.testing.expect(layoutSupportsHosts("X-Layout-Features: used\r\nX-Layout-Features: hosts\r\n"));
     try std.testing.expect(!layoutSupportsHosts("X-Layout-Features-Other: hosts\r\n"));
+}
+
+test "IGSH-600 removal support requires the exact advertised token" {
+    try std.testing.expect(layoutSupportsRemoval("x-layout-features: hosts, host_removal \r\n"));
+    try std.testing.expect(!layoutSupportsRemoval("X-Layout-Features: hosts,host_removal-extra\r\n"));
+    try std.testing.expect(!layoutSupportsRemoval("X-Other: host_removal\r\n"));
+    try std.testing.expect(!layoutSupportsRemoval("X-Layout-Features: hosts\r\n"));
+    try std.testing.expect(!layoutSupportsRemoval(""));
 }

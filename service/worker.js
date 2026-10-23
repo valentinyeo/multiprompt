@@ -19,16 +19,18 @@ function layoutResponse(request, value, status = 200) {
   }) } };
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
+  if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts');
+  response.headers.set('X-Layout-Features', 'favorite,used,visits,input,settings,hosts,host_removal');
   return response;
 }
 export function validateLayout(x) {
   const keys = (v, expected) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected.sort().join(',');
   const text = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && !/[\x00-\x1f\x7f]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v);
-  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
+  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts', 'removed_hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
       !Array.isArray(x.workspaces) || x.workspaces.length > 9 || !Array.isArray(x.tabs) || x.tabs.length > 256) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'settings') && (!x.settings || typeof x.settings !== 'object' || Array.isArray(x.settings) || Object.entries(x.settings).some(([key, value]) => !['frequent', 'favorites', 'all', 'frequent_first'].includes(key) || typeof value !== 'boolean'))) fail(400, 'invalid_layout');
+  if (Object.hasOwn(x, 'removed_hosts') && (!Array.isArray(x.removed_hosts) || x.removed_hosts.length > 3 || new Set(x.removed_hosts).size !== x.removed_hosts.length || x.removed_hosts.some(slot => !Number.isInteger(slot) || slot < 0 || slot > 2))) fail(400, 'invalid_hosts');
   if (Object.hasOwn(x, 'hosts')) {
     const slots = new Set();
     if (!Array.isArray(x.hosts) || x.hosts.length > 3 || JSON.stringify(x.hosts).includes('PRIVATE KEY')) fail(400, 'invalid_hosts');
@@ -301,6 +303,10 @@ export default {
           }
           layout.hosts = [...hosts.values()].sort((a, b) => a.slot - b.slot);
         }
+        const removed = [...new Set([...(previousLayout?.removed_hosts || []), ...(layoutFeature(request, 'host_removal') ? layout.removed_hosts || [] : [])])].sort((a, b) => a - b);
+        if (removed.length) layout.removed_hosts = removed;
+        else delete layout.removed_hosts;
+        if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
