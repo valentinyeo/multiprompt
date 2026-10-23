@@ -1,6 +1,6 @@
 # Chat View
 
-Keep the real desktop entry journey separate from the deterministic received-message renderer proof.
+Keep the real desktop entry journey separate from the deterministic received-message renderer proof and the [Chat delivery](chat-delivery.md) tmux-channel journey.
 
 ## Sub-features
 
@@ -30,7 +30,8 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 
 ## Gotchas
 
-- No signed-in agent exists on the fresh offline runner. Live cross-session delivery and transcript discovery are not verified by this journey; `agentBoundary` records that boundary rather than skipping a failed delivery action.
+- For live composer-to-channel delivery, use [Chat delivery](chat-delivery.md). Its production ssh-path override runs the app-supplied reader against fake tmux and a scripted busy or suggested-input screen. It proves that typed text, Enter and steering reach the tmux system boundary, not real Claude consumption, networking, transcript discovery or agent responses.
+- No signed-in agent exists on the fresh offline runner. This toggle journey itself still does not verify delivery; `agentBoundary` records that boundary rather than skipping a failed delivery action.
 - The native painter test uses only synthetic public text and does not write session JSON, agent transcripts, settings or a test-only app setter.
 - Release-tag runs exercise the desktop toggle only; the supplemental painter image is generated only for branch builds.
 - Palette entry, theme variants, long-message scrolling and actual browser navigation are outside this selected journey. Link hit coordinates, nested-table scrolling, full-layout find positions, parse reuse and a body longer than a fixed block buffer are covered by regression tests.
