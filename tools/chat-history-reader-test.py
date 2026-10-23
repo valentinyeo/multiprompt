@@ -1718,6 +1718,68 @@ class SharedQueueDraftTest(unittest.TestCase):
         status = [row for row in rows if row['role'] == 'status']
         return status[0] if status else None
 
+    def test_IGSH_722_delivered_fixture_leaves_queue(self):
+        fixture = ROOT / 'tools/fixtures/IGSH-722/queue-ops.jsonl'
+        events = [json.loads(line) for line in fixture.read_text(encoding='utf-8').splitlines()]
+        delivered = next(i for i, event in enumerate(events)
+                         if event.get('operation') == 'remove' and 'RUNNER 8' in event.get('content', ''))
+        self.write(*events[:delivered + 1])
+        with self.path.open('rb') as source:
+            queue, sent = reader.queue_replay(source, self.path.stat().st_size)
+            self.assertEqual(queue, [])
+            self.assertTrue(any('from-name="RUNNER 8"' in text for text in sent))
+            with patch.object(reader, 'box_draft', return_value=None):
+                fields = reader.live_fields(source, self.path.stat().st_size, 'term-1')
+            self.assertEqual(fields['queue'], [])
+            self.assertNotIn('<cross-session-message', json.dumps(fields['queue']))
+            self.assertIn(dict(text='RUNNER 8: status update body for the test.', sender='RUNNER 8', injected=True), fields['sent'])
+        with fixture.open('rb') as source, patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(reader.queue_replay(source, fixture.stat().st_size)[0], [])
+            fields = reader.live_fields(source, fixture.stat().st_size, 'term-1')
+            self.assertEqual(fields['queue'], [])
+            self.assertNotIn('<cross-session-message', json.dumps(fields['queue']))
+
+    def test_IGSH_722_remove_matches_envelope_without_hop_chain(self):
+        queued = '<cross-session-message from="hidden" hop-chain="relay" from-name="RUNNER 8" from-mode="bypass">\nReady &amp; waiting\n</cross-session-message>'
+        removed = '<cross-session-message from-name="RUNNER 8">Ready & waiting</cross-session-message>'
+        for operation in ('remove', 'dequeue'):
+            with self.subTest(operation=operation):
+                state = ([], [])
+                reader.queue_apply(state, self.op('enqueue', queued))
+                reader.queue_apply(state, self.op(operation, removed, reason='absorbed_mid_turn'))
+                self.assertEqual(state, ([], [queued]))
+
+    def test_IGSH_722_remove_keeps_plain_text_exact_and_contentless_dequeue(self):
+        state = ([], [])
+        for text in ('hello ', 'hello', 'other'):
+            reader.queue_apply(state, self.op('enqueue', text))
+        reader.queue_apply(state, self.op('remove', ' hello'))
+        self.assertEqual(state, (['hello ', 'hello', 'other'], []))
+        reader.queue_apply(state, self.op('remove', 'hello'))
+        self.assertEqual(state, (['hello ', 'other'], ['hello']))
+        reader.queue_apply(state, self.op('dequeue'))
+        self.assertEqual(state, (['other'], ['hello', 'hello ']))
+
+    def test_IGSH_722_envelope_key_preserves_sender_and_full_body(self):
+        for kind in ('cross-session-message', 'task-notification'):
+            with self.subTest(kind=kind):
+                prefix = 'x' * (reader.QUEUE_TEXT + 1)
+                queued = f'<{kind} from-name="RUNNER &amp; 8" hop-chain="relay">{prefix} &amp; ready</{kind}>'
+                state = ([], [])
+                reader.queue_apply(state, self.op('enqueue', queued))
+                reader.queue_apply(state, self.op('remove', f'<{kind} from-name="other">{prefix} &amp; ready</{kind}>'))
+                reader.queue_apply(state, self.op('remove', f'<{kind} from-name="RUNNER &amp; 8">{prefix} different</{kind}>'))
+                reader.queue_apply(state, self.op('remove', prefix + ' & ready'))
+                self.assertEqual(state, ([queued], []))
+                reader.queue_apply(state, self.op('remove', f'<{kind} from-name="RUNNER &#38; 8"> \n{prefix} & ready\n </{kind}>'))
+                self.assertEqual(state, ([], [queued]))
+        queued = '<cross-session-message>hello</cross-session-message>'
+        state = ([queued], [])
+        reader.queue_apply(state, self.op('remove', '<cross-session-message from-name="another session">hello</cross-session-message>'))
+        self.assertEqual(state, ([queued], []))
+        reader.queue_apply(state, self.op('remove', queued))
+        self.assertEqual(state, ([], [queued]))
+
     def test_IGSH_722_queued_envelopes_are_unwrapped_before_clipping(self):
         body = 'RUNNER 5: 7686 update &amp; <summary>ready</summary> ' + 'x' * 700
         envelope = '<cross-session-message from="uds:/run/user/1000/cc-socks/92156.sock" hop-chain="relay" from-name="RUNNER 5" from-mode="bypass">' + body + '</cross-session-message>'
