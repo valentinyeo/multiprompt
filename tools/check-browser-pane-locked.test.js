@@ -202,7 +202,19 @@ function launchJourneyContract(source) {
     'if ($null -ne $warmupJob -and $warmupJob.ReadAccounting().ActiveProcesses -gt 0)',
     '$warmupStopped = $warmupJob.Stop()', "Save-Json $warmupStopped 'browser-pane-locked-warmup-restored-stopped.json'",
     '$job.Dispose()', '$job = New-Object VerifyJob', '$process = $job.Start(',
-    '$script:window = $process.MainWindowHandle', '[VerifyNative]::PaneVisible($script:window)',
+    '$script:window = $process.MainWindowHandle', "'relaunch main window ready for Shortcuts' 60 20",
+    '[VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)',
+    '$overlayPostedAt = [DateTime]::UtcNow',
+    'MonitorFromWindow($script:window, 1)', 'GetMonitorInfoW($monitor, [ref]$info)',
+    '$script:overlayLaunches = @(Get-CimInstance Win32_Process', '$script:overlayLaunches.Count -gt 0',
+    "'positioned isolated browser launched while Shortcuts is open' 60",
+    '$launchObservedAt = [DateTime]::UtcNow',
+    'overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt',
+    "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
+    'if (-not $overlayLaunch.overlayAtLaunch)',
+    'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
+    "Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'",
+    '[VerifyNative]::PaneVisible($script:window)',
     "'startup restored the owned browser pane without an open command' 60",
     "Assert-BrowserLaunchOnOwnMonitor 'restored'", '$_.pid -in @($initialLaunch.launches',
     "Write-Host 'browser-pane-locked launch-on-own-monitor PASS'",
@@ -211,6 +223,24 @@ function launchJourneyContract(source) {
     assert.ok(next > offset, `missing or misordered ${step}`);
     offset = next;
   }
+  assert.match(source, /\[DllImport\("user32.dll", SetLastError=true\)\] public static extern bool PostMessage\(IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam\);/);
+  assert.match(source, /function Wait-Until\([^\n]+\[int\]\$PollMilliseconds = 200\)/);
+  const wait = source.slice(source.indexOf('function Wait-Until('), source.indexOf('function Read-Session'));
+  assert.match(wait, /Start-Sleep -Milliseconds \$PollMilliseconds/);
+  const early = journey.slice(journey.indexOf('$process = $job.Start('), journey.indexOf('$overlayPostedAt ='));
+  assert.doesNotMatch(early, /PaneVisible|Read-Inbox|Doctor|Press /);
+  assert.match(early, /if \(-not \[VerifyNative\]::PostMessage\([^\n]+\)\) \{ throw /);
+  const overlay = journey.slice(journey.indexOf('$monitor ='), journey.indexOf('            Press @(0x1B)'));
+  const normalizeIndent = value => value.trim().split('\n').map(line => line.trim()).join('\n');
+  const collection = proof.slice(proof.indexOf('    $monitor ='), proof.indexOf('    [uint32]$browserPid'));
+  const [monitor, launches] = collection.split('    $launches = @(');
+  assert.ok(normalizeIndent(overlay).includes(normalizeIndent(monitor)));
+  assert.ok(normalizeIndent(overlay).includes(normalizeIndent('$script:overlayLaunches = @(' + launches)));
+  for (const field of ['launches = $script:overlayLaunches', 'monitor = $info.Monitor', 'mainHwnd = $script:window.ToInt64()', 'overlayPostedAt = $overlayPostedAt', 'launchObservedAt = $launchObservedAt']) assert.ok(overlay.includes(field), field);
+  assert.ok(journey.includes('restoredOverlay = $overlayLaunch'));
+  const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
+  assert.ok(press.indexOf('Assert-Foreground') >= 0);
+  assert.ok(press.indexOf('[VerifyNative]::Chord($Keys)') > press.indexOf('Assert-Foreground'));
   assert.equal((journey.match(/Open-BrowserPane /g) || []).length, 1);
   const setup = source.slice(source.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'))"), source.indexOf("    if ($Feature -eq 'appearance') {"));
   assert.match(setup, /Microsoft\/Edge\/Application\/msedge.exe/);
@@ -251,6 +281,48 @@ test('journey proves first and restored browser launches use the owner monitor a
     const match = new RegExp(pattern).exec(`chrome.exe --window-position=${argument} --window-size=400,400`);
     const actual = !!match && +match[1] >= rect.left && +match[1] < rect.right && +match[2] >= rect.top && +match[2] < rect.bottom;
     assert.equal(actual, inside, argument);
+  }
+});
+
+test('restored launch contract rejects the old visible-pane wait and overlay bypasses', () => {
+  const oldStart = driver.indexOf('            $script:window = [IntPtr]::Zero', driver.indexOf("        'browser-pane-locked' {"));
+  const oldEnd = driver.indexOf("            $script:browserShellId = (Read-Inbox).shells[0].sid", oldStart);
+  const previousStartup = `            $script:window = [IntPtr]::Zero
+            Wait-Until {
+                $process.Refresh()
+                $script:window = $process.MainWindowHandle
+                $script:window -ne [IntPtr]::Zero -and [VerifyNative]::PaneVisible($script:window) -and
+                    $null -ne (Read-Inbox) -and @((Read-Inbox).shells).Count -gt 0
+            } 'startup restored the owned browser pane without an open command' 60
+`;
+  assert.throws(() => launchJourneyContract(driver.slice(0, oldStart) + previousStartup + driver.slice(oldEnd)));
+  const oldVisibleWait = driver.replace("'relaunch main window ready for Shortcuts' 60 20", "'relaunch main window ready for Shortcuts' 60");
+  assert.throws(() => launchJourneyContract(oldVisibleWait));
+  for (const before of [
+    'public static extern bool PostMessage', 'Start-Sleep -Milliseconds $PollMilliseconds',
+    '[VerifyNative]::PostMessage($script:window, 0x8035, [UIntPtr]::Zero, [IntPtr]::Zero)',
+    '$overlayPostedAt = [DateTime]::UtcNow', '$script:overlayLaunches.Count -gt 0',
+    'overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt',
+    "Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'",
+    'if (-not $overlayLaunch.overlayAtLaunch)',
+    'if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0)',
+    "Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'",
+    'restoredOverlay = $overlayLaunch',
+  ]) {
+    assert.ok(driver.includes(before), before);
+    assert.throws(() => launchJourneyContract(driver.replaceAll(before, '')), `reject ${before}`);
+  }
+  const escape = "            Press @(0x1B) 'Escape: close Shortcuts after the restored browser launch'\n";
+  assert.throws(() => launchJourneyContract(driver.replace(escape, '').replace('            $launchObservedAt =', escape + '            $launchObservedAt =')));
+  assert.throws(() => launchJourneyContract(driver.replace("} 'relaunch main window ready for Shortcuts'", "    [VerifyNative]::PaneVisible($script:window)\n            } 'relaunch main window ready for Shortcuts'")));
+  const start = driver.indexOf('            $script:overlayLaunches =');
+  for (const [before, after] of [
+    ['$x -ge $info.Monitor.Left', '$true'],
+    ["Name = 'msedge.exe'", "Name = 'other.exe'"],
+    ['--window-position=', '--window-size='],
+  ]) {
+    const changed = driver.slice(0, start) + driver.slice(start).replace(before, after);
+    assert.throws(() => launchJourneyContract(changed), `reject overlay-only ${before}`);
   }
 });
 
@@ -321,7 +393,8 @@ function journeyContract(source) {
     "Assert-LockedBrowserRect $browser $dockRect 'maximize-blocked'",
     "Snapshot 'after'",
   ]) assert.ok(journey.includes(step), step);
-  assert.doesNotMatch(journey, /Press @|MoveWindow|PostMessage|SendMessage/);
+  const lockedInput = journey.slice(journey.indexOf("Write-Host 'browser-pane-locked launch-on-own-monitor PASS'"));
+  assert.doesNotMatch(lockedInput, /Press @|MoveWindow|PostMessage|SendMessage/);
   const mouse = source.slice(source.indexOf('    static void MouseAt('), source.indexOf('    public static void ClickClient('));
   assert.match(mouse, /SendInput\(1,/);
   assert.match(mouse, /flags = flags \| 0xC001/);
@@ -398,7 +471,7 @@ test('changed code is comment-free and the user-facing fragment follows the chan
 });
 
 test('launch-scale feature map and changelog describe first launch and restored startup verification', () => {
-  for (const marker of ['normal scale', 'first launch', 'relaunch', 'GetDpiForWindow', 'rcMonitor', 'browser-pane-locked-launch-initial.json', 'browser-pane-locked-launch-restored.json']) assert.ok(map.includes(marker), marker);
+  for (const marker of ['normal scale', 'first launch', 'relaunch', 'GetDpiForWindow', 'rcMonitor', 'browser-pane-locked-launch-initial.json', 'browser-pane-locked-launch-restored.json', 'Shortcuts', '20 ms', '0x8035', 'overlayAtLaunch', 'browser-pane-locked-launch-restored-overlay.json', 'single-monitor', 'fallback cannot change DPI']) assert.ok(map.includes(marker), marker);
   const fragment = readChangelogEntry('IGSH-601').trim();
   assert.equal(fragment, 'The browser pane opens at its normal size after a relaunch on a two-monitor setup.');
   assert.equal(fragment.split('\n').length, 1);
