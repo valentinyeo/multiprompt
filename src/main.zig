@@ -2114,6 +2114,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_inbox_button_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_chat_stop_hover) {
+                app_state.g_chat_stop_hover = false;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             return 0;
         },
         WM_MOUSEMOVE => {
@@ -2155,6 +2159,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (hovered) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
+            const stop_hover = app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(GET_X(lp), GET_Y(lp)) == 5;
+            if (stop_hover != app_state.g_chat_stop_hover) {
+                app_state.g_chat_stop_hover = stop_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (stop_hover) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             }
@@ -7003,6 +7016,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == @import("win32.zig").TIMER_CHAT_WORKING) {
                 @import("window_layout.zig").chatWorkingBarTick();
+                @import("chat_composer.zig").chatStopSlotSync();
                 return 0;
             }
             if (wp == app_state.TIMER_CHAT_FIND) {
@@ -7022,6 +7036,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         }
                     }
                     if (app_state.g_chat_active) chatWorkingIndicatorSync();
+                    @import("chat_composer.zig").chatStopSlotSync();
                     if (app_state.g_voice_mic_start_pending and !app_state.g_dictation_capturing.load(.acquire) and app_state.g_voice_mode_active and app_state.g_voice_always_listen) voiceMicStart();
                     voiceCheckScreenFallback();
                     if (app_state.g_voice_mode_active and app_state.g_voice_always_listen) {

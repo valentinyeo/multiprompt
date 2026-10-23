@@ -227,12 +227,8 @@ pub fn chatViewLayout() ChatViewLayout {
     };
     const send_size = uiScaled(32);
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
-    const send_btn = RECT{
-        .left = composer_card.right - send_margin - send_size,
-        .top = composer_card.bottom - send_margin - send_size,
-        .right = composer_card.right - send_margin,
-        .bottom = composer_card.bottom - send_margin,
-    };
+    const slots = chatSendSlots(composer_card, send_size, send_margin, uiScaled(6), @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
+    const send_btn = slots.send;
     const attach_btn = RECT{
         .left = composer_card.left + send_margin,
         .top = send_btn.top,
@@ -252,18 +248,67 @@ pub fn chatViewLayout() ChatViewLayout {
         .composer = .{
             .left = attach_btn.right + uiScaled(10),
             .top = composer_card.top + chatReplyBarH() + uiScaled(12),
-            .right = send_btn.left - uiScaled(12),
+            .right = slots.left - uiScaled(12),
             .bottom = composer_card.bottom - uiScaled(10),
         },
         .send_btn = send_btn,
         .attach_btn = attach_btn,
-        .stop_btn = .{
-            .left = right - uiScaled(64),
-            .right = right,
-            .top = transcript_bottom + uiScaled(2),
-            .bottom = composer_card.top - uiScaled(2),
-        },
+        .stop_btn = slots.stop,
+        .send_shown = slots.send_shown,
+        .stop_shown = slots.stop_shown,
     };
+}
+
+pub fn chatSendSlots(card: RECT, size: i32, margin: i32, gap: i32, working: bool, has_text: bool) struct { send: RECT, stop: RECT, send_shown: bool, stop_shown: bool, left: i32 } {
+    const slot = RECT{ .left = card.right - margin - size, .top = card.bottom - margin - size, .right = card.right - margin, .bottom = card.bottom - margin };
+    if (!working) return .{ .send = slot, .stop = slot, .send_shown = true, .stop_shown = false, .left = slot.left };
+    if (!has_text) return .{ .send = slot, .stop = slot, .send_shown = false, .stop_shown = true, .left = slot.left };
+    const send = RECT{ .left = slot.left - gap - size, .top = slot.top, .right = slot.left - gap, .bottom = slot.bottom };
+    return .{ .send = send, .stop = slot, .send_shown = true, .stop_shown = true, .left = send.left };
+}
+
+test "ISSUE-675 Stop takes the send slot while working and Send moves left of it once text is typed" {
+    const card = RECT{ .left = 100, .top = 500, .right = 900, .bottom = 560 };
+    const idle = chatSendSlots(card, 32, 14, 6, false, true);
+    try std.testing.expect(idle.send_shown and !idle.stop_shown);
+    try std.testing.expectEqual(RECT{ .left = 854, .top = 514, .right = 886, .bottom = 546 }, idle.send);
+    try std.testing.expectEqual(idle.send.left, idle.left);
+    try std.testing.expectEqual(idle.send, chatSendSlots(card, 32, 14, 6, false, false).send);
+    const empty = chatSendSlots(card, 32, 14, 6, true, false);
+    try std.testing.expect(!empty.send_shown and empty.stop_shown);
+    try std.testing.expectEqual(idle.send, empty.stop);
+    try std.testing.expectEqual(@as(i32, 32), empty.stop.right - empty.stop.left);
+    try std.testing.expectEqual(@as(i32, 32), empty.stop.bottom - empty.stop.top);
+    try std.testing.expectEqual(empty.stop.left, empty.left);
+    const typed = chatSendSlots(card, 32, 14, 6, true, true);
+    try std.testing.expect(typed.send_shown and typed.stop_shown);
+    try std.testing.expectEqual(idle.send, typed.stop);
+    try std.testing.expectEqual(RECT{ .left = 816, .top = 514, .right = 848, .bottom = 546 }, typed.send);
+    try std.testing.expect(typed.send.right <= typed.stop.left);
+    try std.testing.expectEqual(typed.send.left, typed.left);
+    for ([_]RECT{ idle.send, empty.stop, typed.send, typed.stop }) |rc| {
+        try std.testing.expect(rc.left >= card.left and rc.top >= card.top and rc.right <= card.right and rc.bottom <= card.bottom);
+    }
+}
+
+pub fn chatComposerHasText() bool {
+    return app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
+}
+
+fn chatComposerButtonsRefresh() void {
+    if (!app_state.g_chat_active or app_state.g_main_hwnd == null) return;
+    layoutChatControls();
+    const layout = chatViewLayout();
+    var rc = RECT{ .left = layout.composer_card.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
+    _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+}
+
+pub fn chatStopSlotSync() void {
+    const shown = app_state.g_chat_active and @import("window_layout.zig").chatStopVisible();
+    if (shown == app_state.g_chat_stop_shown) return;
+    app_state.g_chat_stop_shown = shown;
+    if (!shown) app_state.g_chat_stop_hover = false;
+    chatComposerButtonsRefresh();
 }
 
 pub fn chatReplyBarH() i32 {
@@ -370,7 +415,8 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (!app_state.g_chat_active) return 0;
     const layout = chatViewLayout();
     if (app_state.g_chat_reply_len > 0 and pointInRect(chatReplyCancelRect(), x, y)) return 9;
-    if (pointInRect(layout.send_btn, x, y)) return 3;
+    if (layout.stop_shown and pointInRect(layout.stop_btn, x, y)) return 5;
+    if (layout.send_shown and pointInRect(layout.send_btn, x, y)) return 3;
     if (pointInRect(layout.attach_btn, x, y)) return 4;
     if (@import("window_layout.zig").chatPermissionVisible()) {
         for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
@@ -378,7 +424,7 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
                 if (pointInRect(rc, x, y)) return @intCast(6 + i);
             }
         }
-    } else if (@import("window_layout.zig").chatWorkingBarVisible() and pointInRect(layout.stop_btn, x, y)) return 5;
+    }
     return 0;
 }
 
@@ -1068,7 +1114,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     const was_empty = can_edit and GetWindowTextLengthW(hwnd) == 0;
     const result = chatComposerSubclassCore(hwnd, msg, wp, lp);
     if (can_edit) {
-        if (was_empty != (GetWindowTextLengthW(hwnd) == 0)) _ = InvalidateRect(hwnd, null, 1);
+        if (was_empty != (GetWindowTextLengthW(hwnd) == 0)) {
+            _ = InvalidateRect(hwnd, null, 1);
+            if (hwnd == app_state.g_chat_composer_hwnd and @import("window_layout.zig").chatStopVisible()) chatComposerButtonsRefresh();
+        }
         chatComposerAutoGrow();
         chatDraftNoteEdit();
         if (!chat_draft_loading and !shell_applying) shell_draft.onComposerEdit(GetTickCount64());

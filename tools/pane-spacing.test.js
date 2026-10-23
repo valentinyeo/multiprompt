@@ -35,7 +35,7 @@ function harness() {
   const functions = [
     fn(read('drawing'), 'uiScaled'), fn(sidebar, 'groupRailRect'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
-    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
+    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
@@ -119,6 +119,10 @@ ${fn(browser, 'browserSplitPermilleForActiveShell')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
 fn chatWorkingIndicatorH() i32 { return uiScaled(18); }
+var test_stop_visible = false;
+var test_composer_text = false;
+fn chatStopVisible() bool { return test_stop_visible; }
+fn chatComposerHasText() bool { return test_composer_text; }
 fn consoleCellW() i32 { return uiScaled(10); }
 fn GetClientRect(_: HANDLE, rc: *RECT) i32 { rc.* = test_client; return 1; }
 fn IsIconic(_: HANDLE) i32 { return 0; }
@@ -342,7 +346,10 @@ test "IGSH-549 Chat View content stays inside the focus border" {
             reserved = docked;
             for ([_]bool{false, true}) |full_width| {
                 shells[0].full_width = full_width;
-                for ([_]usize{0, 1}) |reply_len| {
+                for ([_]usize{0, 1, 2, 3, 4, 5}) |variant| {
+                    const reply_len = variant % 2;
+                    test_stop_visible = variant >= 2;
+                    test_composer_text = variant >= 4;
                     g_chat_reply_len = reply_len;
                     g_chat_composer_extra_h = if (reply_len > 0) uiScaled(80) else 0;
                     const primary = activePaneRects(test_client).primary;
@@ -357,6 +364,8 @@ test "IGSH-549 Chat View content stays inside the focus border" {
                         try std.testing.expect(rect.bottom <= inner.bottom);
                         try std.testing.expect(rect.right >= rect.left and rect.bottom >= rect.top);
                     }
+                    try std.testing.expect(!intersects(c.composer, c.stop_btn) or !c.stop_shown);
+                    try std.testing.expect(!intersects(c.composer, c.send_btn) or !c.send_shown);
                 }
             }
         }
@@ -364,6 +373,8 @@ test "IGSH-549 Chat View content stays inside the focus border" {
     g_chat_reply_len = 0;
     g_chat_composer_extra_h = 0;
     g_chat_active = false;
+    test_stop_visible = false;
+    test_composer_text = false;
     reserved = false;
     shells[0].full_width = false;
 }
