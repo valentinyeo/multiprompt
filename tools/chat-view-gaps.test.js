@@ -560,6 +560,7 @@ fn customColorOr(_: []const u8, n: u32) u32 { return n; }
 fn themeConsoleFg() u32 { return 0; }
 fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
+const chatDrawText = DrawTextW;
 fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }
 ${body('chatReceivedBlocks')}
 ${body('chatFlowBlock')}

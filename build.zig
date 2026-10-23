@@ -45,6 +45,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("wininet", .{});
     exe.root_module.linkSystemLibrary("comdlg32", .{});
     exe.root_module.linkSystemLibrary("shell32", .{});
+    exe.root_module.linkSystemLibrary("dwrite", .{});
     const stable_opts = b.addOptions();
     stable_opts.addOption(bool, "is_dev", false);
     exe.root_module.addOptions("build_config", stable_opts);
@@ -86,6 +87,7 @@ pub fn build(b: *std.Build) void {
     dev_exe.root_module.linkSystemLibrary("wininet", .{});
     dev_exe.root_module.linkSystemLibrary("comdlg32", .{});
     dev_exe.root_module.linkSystemLibrary("shell32", .{});
+    dev_exe.root_module.linkSystemLibrary("dwrite", .{});
     const dev_opts = b.addOptions();
     dev_opts.addOption(bool, "is_dev", true);
     dev_exe.root_module.addOptions("build_config", dev_opts);
@@ -145,6 +147,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
+    run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
     const main_test_step = b.step("test-main", "Run desktop module tests");
     main_test_step.dependOn(&run_exe_tests.step);
 

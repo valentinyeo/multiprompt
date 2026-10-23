@@ -194,11 +194,25 @@ jobs:
         env:
           MULTIPROMPT_CHAT_RENDER_PROOF: '1'
         run: |
-          zig build test-main --summary all
-          if ($LASTEXITCODE -ne 0) { throw 'Native desktop rendering tests failed' }
+          $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.Drawing
-          $image = [Drawing.Bitmap]::FromFile("$pwd/chat-markdown-proof.bmp")
-          try { $image.Save("$pwd/evidence/chat-markdown-render.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          foreach ($mode in @('1', '0')) {
+            $env:IGSH_610 = $mode
+            Remove-Item chat-markdown-proof.bmp, chat-markdown-proof.json -ErrorAction SilentlyContinue
+            zig build test-main -Drender-proof=true --summary all
+            if ($LASTEXITCODE -ne 0) { throw 'Native desktop rendering tests failed' }
+            $imagePath = if ($mode -eq '1') { "$pwd/evidence/chat-markdown-render.png" } else { "$pwd/evidence/chat-markdown-render-gdi.png" }
+            $metadataPath = if ($mode -eq '1') { 'evidence/chat-render-dwrite.json' } else { 'evidence/chat-render-gdi.json' }
+            $image = [Drawing.Bitmap]::FromFile("$pwd/chat-markdown-proof.bmp")
+            try { $image.Save($imagePath, [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+            Copy-Item chat-markdown-proof.json $metadataPath
+          }
+          Remove-Item Env:IGSH_610
+          node tools/chat-render-reference.mjs evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Chrome reference or repaint evidence failed' }
+          foreach ($file in @('chat-markdown-render.png', 'chat-markdown-render-gdi.png', 'chrome-reference.png', 'repaint-ms.json')) {
+            if (-not (Test-Path "evidence/$file")) { throw "Missing rendering evidence: $file" }
+          }
       - name: Launch Doctor Drive Evidence Cleanup
         if: env.FEATURE != 'browser-emulation'
         shell: powershell

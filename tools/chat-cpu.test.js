@@ -267,6 +267,7 @@ fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeSt
 fn ensureChatCodeFont() HANDLE { return 1; }
 fn ensureChatFont() HANDLE { return 1; }
 fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return 1; }
+const chatDrawText = DrawTextW;
 fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }
 fn chatLineIndentPx(_: HANDLE, _: []const u16, _: usize) i32 { return 0; }
 fn chatTextWidth(_: HANDLE, text: []const u16) i32 { if (text.len == 1) character_widths += 1; return @intCast(text.len * 8); }

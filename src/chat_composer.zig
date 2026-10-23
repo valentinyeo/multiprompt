@@ -80,6 +80,7 @@ const SB_VERT = @import("win32.zig").SB_VERT;
 const EM_SCROLLCARET = @import("win32.zig").EM_SCROLLCARET;
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
+const chatDrawText = @import("dwrite_text.zig").draw;
 const GetWindowTextW = @import("win32.zig").GetWindowTextW;
 const GetWindowTextLengthW = @import("win32.zig").GetWindowTextLengthW;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
@@ -645,7 +646,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
         _ = SetTextColor(dc, customColorOr("text", if (app_state.g_light_theme) RGB(30, 35, 44) else RGB(232, 235, 243)));
         var wide_name: [257]u16 = undefined;
         const name_len = std.unicode.utf8ToUtf16Le(&wide_name, title) catch 0;
-        _ = DrawTextW(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         const tag: []const u8 = if (std.mem.eql(u8, entry.hint, "opens in terminal")) "opens in terminal" else switch (entry.kind) {
             'S', 'K' => "skill",
             'P' => "plugin",
@@ -663,7 +664,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
             entry.desc;
         var wide_hint: [512]u16 = undefined;
         const hint_len = std.unicode.utf8ToUtf16Le(&wide_hint, hint) catch 0;
-        _ = DrawTextW(dc, &wide_hint, @intCast(hint_len), &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = chatDrawText(dc, &wide_hint, @intCast(hint_len), &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         var tag_rc = RECT{ .left = rc.right - tag_width, .top = top, .right = rc.right - uiScaled(12), .bottom = top + row_h };
         drawAscii(dc, tag, &tag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
     }
@@ -1108,7 +1109,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
                 _ = SetBkMode(dc, TRANSPARENT);
                 _ = SelectObject(dc, ensureChatFont());
                 _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
-                _ = DrawTextW(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+                _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
                 _ = ReleaseDC(hwnd, dc);
             }
         }

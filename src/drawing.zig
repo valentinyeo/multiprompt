@@ -180,6 +180,7 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 }
 
 pub fn resetFontCache() void {
+    @import("dwrite_text.zig").resetFonts();
     @import("chat_render.zig").resetTableMetrics();
     app_state.g_chat_tables.clear(std.heap.page_allocator);
     for (app_state.g_chat_histories.items) |entry| entry.tables.clear(std.heap.page_allocator);
