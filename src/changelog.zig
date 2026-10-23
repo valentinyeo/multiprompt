@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.841", .items = &.{
+        .{ .text = "Chat View no longer glues the start of an earlier unsent message in front of your new one.", .ticket = "IGSH-608" },
+    } },
     .{ .ver = "0.28.840", .items = &.{
         .{ .text = "Ctrl+K now opens with your ten most used commands at the top.", .ticket = "IGSH-612" },
         .{ .text = "The other commands are grouped under headers such as Sessions, Browser and Chat View.", .ticket = "IGSH-612" },
