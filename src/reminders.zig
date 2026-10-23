@@ -44,7 +44,13 @@ const createGroup = @import("sidebar.zig").createGroup;
 const MAX_TMUX_SESSIONS = @import("app_state.zig").MAX_TMUX_SESSIONS;
 const TmuxSessionEntry = @import("app_state.zig").TmuxSessionEntry;
 const ShowWindow = @import("focus.zig").ShowWindow;
+const REMIND_PRESET_HOURS_1 = @import("app_state.zig").REMIND_PRESET_HOURS_1;
+const REMIND_PRESET_HOURS_2 = @import("app_state.zig").REMIND_PRESET_HOURS_2;
+const REMIND_PRESET_HOURS_3 = @import("app_state.zig").REMIND_PRESET_HOURS_3;
+const REMIND_PRESET_HOURS_6 = @import("app_state.zig").REMIND_PRESET_HOURS_6;
+const REMIND_PRESET_HOURS_12 = @import("app_state.zig").REMIND_PRESET_HOURS_12;
 const REMIND_PRESET_EVENING = @import("app_state.zig").REMIND_PRESET_EVENING;
+const REMIND_PRESET_TOMORROW_EVENING = @import("app_state.zig").REMIND_PRESET_TOMORROW_EVENING;
 const REMIND_PRESET_TOMORROW = @import("app_state.zig").REMIND_PRESET_TOMORROW;
 const REMIND_PRESET_3DAYS = @import("app_state.zig").REMIND_PRESET_3DAYS;
 const REMIND_PRESET_WEEKEND = @import("app_state.zig").REMIND_PRESET_WEEKEND;
@@ -1467,20 +1473,46 @@ fn localSystemTimeToFileTime(st: *const SYSTEMTIME) ?u64 {
 }
 
 fn remindPresetLocalTime(preset_index: usize) ?SYSTEMTIME {
-    var st: SYSTEMTIME = undefined;
-    GetLocalTime(&st);
+    var now: SYSTEMTIME = undefined;
+    GetLocalTime(&now);
+    return remindPresetLocalTimeFrom(now, preset_index);
+}
+
+fn remindPresetHours(preset_index: usize) u32 {
+    return switch (preset_index) {
+        REMIND_PRESET_HOURS_1 => 1,
+        REMIND_PRESET_HOURS_2 => 2,
+        REMIND_PRESET_HOURS_3 => 3,
+        REMIND_PRESET_HOURS_6 => 6,
+        REMIND_PRESET_HOURS_12 => 12,
+        else => 0,
+    };
+}
+
+fn remindPresetLocalTimeFrom(now: SYSTEMTIME, preset_index: usize) ?SYSTEMTIME {
+    var st = now;
     const start_dow: u32 = st.day_of_week;
     st.second = 0;
     st.milliseconds = 0;
     var days_ahead: u32 = 0;
-    switch (preset_index) {
+    const hours = remindPresetHours(preset_index);
+    if (hours > 0) {
+        const total: u32 = @as(u32, st.hour) + hours;
+        st.hour = @intCast(total % 24);
+        days_ahead = total / 24;
+    } else switch (preset_index) {
         REMIND_PRESET_EVENING => {
             st.hour = 18;
             st.minute = 0;
         },
         REMIND_PRESET_TOMORROW => {
             days_ahead = 1;
-            st.hour = 8;
+            st.hour = 9;
+            st.minute = 0;
+        },
+        REMIND_PRESET_TOMORROW_EVENING => {
+            days_ahead = 1;
+            st.hour = 18;
             st.minute = 0;
         },
         REMIND_PRESET_3DAYS => {
@@ -1523,6 +1555,12 @@ pub fn remindPresetDue(preset_index: usize) ?u64 {
 
 pub fn remindPresetLabel(preset_index: usize) []const u8 {
     return switch (preset_index) {
+        REMIND_PRESET_HOURS_1 => "In 1 hour",
+        REMIND_PRESET_HOURS_2 => "In 2 hours",
+        REMIND_PRESET_HOURS_3 => "In 3 hours",
+        REMIND_PRESET_HOURS_6 => "In 6 hours",
+        REMIND_PRESET_HOURS_12 => "In 12 hours",
+        REMIND_PRESET_TOMORROW_EVENING => "Tomorrow evening",
         REMIND_PRESET_EVENING => "This evening",
         REMIND_PRESET_TOMORROW => "Tomorrow morning",
         REMIND_PRESET_3DAYS => "In 3 days",
@@ -1632,4 +1670,55 @@ pub fn reminderMatchesSearch(e: *const ReminderEntry, query: []const u16) bool {
     var ws_w: [64]u16 = undefined;
     for (e.workspace_name[0..e.workspace_name_len], 0..) |c, i| ws_w[i] = @intCast(c);
     return u16ContainsInsensitive(ws_w[0..e.workspace_name_len], query);
+}
+
+fn testNow(year: u16, month: u16, day: u16, dow: u16, hour: u16, minute: u16) SYSTEMTIME {
+    return .{ .year = year, .month = month, .day_of_week = dow, .day = day, .hour = hour, .minute = minute, .second = 37, .milliseconds = 512 };
+}
+
+test "IGSH-702 In 1 hour resolves to the same day one hour later" {
+    const st = remindPresetLocalTimeFrom(testNow(2026, 10, 23, 5, 10, 15), REMIND_PRESET_HOURS_1).?;
+    try std.testing.expectEqual(@as(u16, 23), st.day);
+    try std.testing.expectEqual(@as(u16, 5), st.day_of_week);
+    try std.testing.expectEqual(@as(u16, 11), st.hour);
+    try std.testing.expectEqual(@as(u16, 15), st.minute);
+    try std.testing.expectEqual(@as(u16, 0), st.second);
+}
+
+test "IGSH-702 In 12 hours crosses midnight and advances the weekday" {
+    const st = remindPresetLocalTimeFrom(testNow(2026, 10, 23, 5, 20, 30), REMIND_PRESET_HOURS_12).?;
+    try std.testing.expectEqual(@as(u16, 24), st.day);
+    try std.testing.expectEqual(@as(u16, 6), st.day_of_week);
+    try std.testing.expectEqual(@as(u16, 8), st.hour);
+    try std.testing.expectEqual(@as(u16, 30), st.minute);
+}
+
+test "IGSH-702 Tomorrow morning is 9:00 the next day" {
+    const st = remindPresetLocalTimeFrom(testNow(2026, 10, 23, 5, 14, 5), REMIND_PRESET_TOMORROW).?;
+    try std.testing.expectEqual(@as(u16, 24), st.day);
+    try std.testing.expectEqual(@as(u16, 6), st.day_of_week);
+    try std.testing.expectEqual(@as(u16, 9), st.hour);
+    try std.testing.expectEqual(@as(u16, 0), st.minute);
+}
+
+test "IGSH-702 Tomorrow evening is 18:00 the next day" {
+    const st = remindPresetLocalTimeFrom(testNow(2026, 10, 23, 5, 14, 5), REMIND_PRESET_TOMORROW_EVENING).?;
+    try std.testing.expectEqual(@as(u16, 24), st.day);
+    try std.testing.expectEqual(@as(u16, 6), st.day_of_week);
+    try std.testing.expectEqual(@as(u16, 18), st.hour);
+    try std.testing.expectEqual(@as(u16, 0), st.minute);
+}
+
+test "IGSH-702 In 1 hour rolls over month and year" {
+    const st = remindPresetLocalTimeFrom(testNow(2026, 12, 31, 4, 23, 30), REMIND_PRESET_HOURS_1).?;
+    try std.testing.expectEqual(@as(u16, 2027), st.year);
+    try std.testing.expectEqual(@as(u16, 1), st.month);
+    try std.testing.expectEqual(@as(u16, 1), st.day);
+    try std.testing.expectEqual(@as(u16, 5), st.day_of_week);
+    try std.testing.expectEqual(@as(u16, 0), st.hour);
+    try std.testing.expectEqual(@as(u16, 30), st.minute);
+}
+
+test "IGSH-702 Custom and unknown presets have no fixed time" {
+    try std.testing.expect(remindPresetLocalTimeFrom(testNow(2026, 10, 23, 5, 10, 0), REMIND_PRESET_CUSTOM) == null);
 }

@@ -322,6 +322,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+G", .b = "Cycle Combined, VPS, and Today's AI telemetry cards", .header = false },
     .{ .a = "Alt+T", .b = "New workspace tmux tab (optional configured program)", .header = false },
     .{ .a = "Ctrl+K Remind Me", .b = "Snooze active tmux/Claude tab via quick presets (or type a time)", .header = false },
+    .{ .a = "Ctrl+H", .b = "Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more", .header = false },
     .{ .a = "Alt+H", .b = "Remind Me: hide local tab, keep tmux running, return when due", .header = false },
     .{ .a = "Ctrl+K Reminders", .b = "View / restore snoozed sessions", .header = false },
     .{ .a = "Ctrl+V (in Ctrl+K)", .b = "Paste into the palette search", .header = false },
@@ -1507,7 +1508,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 6, 0);
                     return 1;
                 }
-                if (ctrl and shift and kb.vkCode == 0x48 and (kb.flags & 0x20) == 0) {
+                if (ctrl and kb.vkCode == 0x48 and (kb.flags & 0x20) == 0) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 26, 0);
                     return 1;
                 }
@@ -1705,7 +1706,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_RECONNECT, 0, 0);
                     return 1;
                 }
-                if (kb.vkCode == 0x48 and shift and (kb.flags & 0x20) == 0) {
+                if (kb.vkCode == 0x48 and (kb.flags & 0x20) == 0) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
                     return 1;
                 }
