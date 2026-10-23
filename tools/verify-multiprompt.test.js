@@ -210,7 +210,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
 
 test('maintained verification code contains no removable code comments', async () => {
   const { strip } = await import('./strip-comments.mjs');
-  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript'], [read('tools/verify-scratch.test.ps1'), 'powershell']]) {
+  for (const [source, language] of [[control, 'powershell'], [workflow, 'yaml'], [read('tools/verify-multiprompt.test.js'), 'javascript'], [read('tools/verify-scratch.test.ps1'), 'powershell'], ...['console', 'inbox', 'launch_cache', 'main', 'session'].map(file => [read(`src/${file}.zig`), 'zig'])]) {
     assert.equal(strip(source, language).commentLines, 0);
   }
 });
@@ -346,7 +346,7 @@ test('IGSH-522: workspace return grants a bounded owned-input handoff, never bac
   const switching = read('src/workspaces.zig');
   assertsWorkspaceFocusHandoff(switching);
   for (const [before, after] of [
-    ['!app_state.g_restoring and ', ''],
+    ['if (!app_state.g_restoring and !app_state.g_account_applying and', 'if (!app_state.g_account_applying and'],
     ['!app_state.g_account_applying and ', ''],
     ['@import("focus.zig").foregroundIsOurs()', 'true'],
     ['app_state.g_chat_composer_hwnd else app_state.shells[idx].hwnd', 'app_state.shells[idx].browser_hwnd'],
@@ -549,6 +549,371 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
   assert.match(workflow, /run: node --test tools\/verify-multiprompt.test.js/);
   assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
+});
+
+test('ISSUE-569 restore registry, real close/kill and persistent private relaunches cannot be skipped', () => {
+  function contract(driver, workflowText) {
+    assert.match(driver, /ValidateSet\([^\n)]*'session-restore'/);
+    assert.match(workflowText, /\$env:FEATURE -notin @\([^\n)]*'session-restore'/);
+    const launch = driver.slice(driver.indexOf("    if ($Feature -eq 'session-restore') {"), driver.indexOf("    if ($Feature -in @('browser-pane-stuck'"));
+    assert.match(launch, /\$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.match(restart, /Doctor\s+if \(\$process.MainWindowHandle -ne \$script:window\) \{ throw/);
+    assert.match(restart, /if \(\$Crash\) \{[\s\S]*?Stop-Process -Id \$process.Id -Force[\s\S]*?\} else \{[\s\S]*?\$process.CloseMainWindow\(\)/);
+    assert.match(restart, /if \(-not \$process.WaitForExit\(20000\)\) \{ throw/);
+    assert.match(restart, /\$stopped = \$job.Stop\(\)/);
+    assert.ok(restart.indexOf('$job.Stop()') < restart.indexOf('$script:job = New-Object VerifyJob'));
+    assert.match(restart, /\$script:process = \$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
+    assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
+    assert.match(restart, /Substring\(\$logStart\)/);
+    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.doesNotMatch(restart, /no-window-restore|Remove-Item|Set-Content|WriteAll|Stop-Process -Name|New-Item/);
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    let offset = -1;
+    for (const step of [
+      "Press @(0x11, 0x4E) 'Ctrl+N:", "@('Restore first', 'Restore middle', 'Restore last')",
+      "Focus-Palette 'new cmd' 2000", "Press @(0x71) 'F2:", 'Type-Text $names[$i]',
+      "Focus-Palette 'Restore middle' $middleIndex", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
+      "Restart-SessionRestore 'normal-close' $false", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
+      "name = 'normal-close-selection'", "Focus-Palette 'Restore first' $firstIndex",
+      "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
+      "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
+      "if ($result.checks.Count -ne 4) { throw", "Snapshot 'after'",
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.doesNotMatch(recipe, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage|Remove-Item/);
+    for (const shot of ['action', 'normal-close-after', 'kill-action', 'after']) assert.ok(recipe.includes(`Snapshot '${shot}'`));
+    assert.ok(driver.indexOf("'process-kill-after.inbox.json'") < driver.indexOf("    $result.status = 'passed'"));
+    assert.match(driver, /feature = \$Feature; status = 'failed'/);
+  }
+  contract(control, workflow);
+  for (const required of [
+    "'session-restore', ", 'Stop-Process -Id $process.Id -Force', '$process.CloseMainWindow()',
+    '$state.hwnd -eq $script:window.ToInt64().ToString()', "$trace -match 'launch step=browser'",
+    "Restart-SessionRestore 'normal-close' $false", "Restart-SessionRestore 'process-kill' $true",
+    "name = 'normal-close-selection'", "name = 'process-kill-selection'",
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken, workflow));
+  }
+  assert.throws(() => contract(control, workflow.replace("'session-restore', ", '')));
+  assert.throws(() => contract(control.replace("'--single-window')", "'--single-window --no-window-restore')"), workflow));
+  const map = read(skill + 'features/session-restore.md');
+  assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), [
+    'Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas',
+  ]);
+  assert.match(read(skill + 'features/README.md'), /\[Session restore\]\(session-restore.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`session-restore`/);
+});
+
+test('ISSUE-569 relaunch activation recovers foreground only as an input precondition and preserves failure captures', () => {
+  function contract(driver) {
+    const activation = driver.slice(driver.indexOf('    public static void BringToForeground('), driver.indexOf('    [DllImport("user32.dll", SetLastError=true)] static extern bool GetGUIThreadInfo'));
+    assert.match(activation, /GetWindowThreadProcessId\(GetForegroundWindow\(\), out pid\)/);
+    assert.match(activation, /uint currentThread = GetCurrentThreadId\(\)/);
+    assert.match(activation, /foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput\(currentThread, foregroundThread, true\)/);
+    assert.match(activation, /targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread && AttachThreadInput\(currentThread, targetThread, true\)/);
+    assert.match(activation, /Key\(0x12, 0, 0\);\s*try \{\s*AllowSetForegroundWindow\(targetPid\);\s*BringWindowToTop\(hwnd\);\s*SetForegroundWindow\(hwnd\);\s*\} finally \{\s*Key\(0x12, 0, 2\);\s*if \(attachedTarget\) AttachThreadInput\(currentThread, targetThread, false\);\s*if \(attached\) AttachThreadInput\(currentThread, foregroundThread, false\);\s*\}/);
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.match(restart, /\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle/);
+    assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
+    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
+    assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
+    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Doctor/);
+    assert.doesNotMatch(restart, /Assert-Foreground/);
+    const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
+    assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+    assert.match(driver, /SetForegroundWindow\(\$script:window\)\s+Wait-Until[^\n]+ 'foreground main window'/);
+    assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
+    assert.match(driver, /Save-Json \$focus \(\$Name \+ '.focus.json'\)/);
+    assert.match(driver, /\$bitmap.Save\(\(Join-Path \$Evidence \(\$Name \+ '.png'\)\)/);
+  }
+  contract(control);
+  for (const [before, after] of [
+    ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
+    ['if (attached) AttachThreadInput(currentThread, foregroundThread, false);', ''],
+    ['AllowSetForegroundWindow(targetPid);', ''],
+    ['Key(0x12, 0, 0);\n        try {', 'try {'],
+    ['            SetForegroundWindow(hwnd);\n        } finally {', '        } finally {'],
+    ['[VerifyNative]::BringToForeground($script:window)\n        [VerifyNative]::GetAncestor', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        [VerifyNative]::GetAncestor'],
+    ['} "$Stage relaunched window foreground before input"\n    Doctor', '} "$Stage relaunched window foreground before input"\n    Assert-Foreground\n    Doctor'],
+    ["Snapshot 'failure'", "Snapshot 'ignored'"],
+    ["($Name + '.focus.json')", "($Name + '.ignored.json')"],
+    ["$bitmap.Save((Join-Path $Evidence ($Name + '.png'))", "$bitmap.Save((Join-Path $Evidence ($Name + '.ignored'))"],
+  ]) {
+    const broken = control.replace(before, after);
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken));
+  }
+});
+
+test('ISSUE-569 snapshots identify foreign foreground windows and preserve pre-close desktop ancestry', () => {
+  function contract(driver) {
+    const identity = driver.slice(driver.indexOf('    public static Dictionary<string, object> WindowIdentity('), driver.indexOf('    public static bool PaneVisible('));
+    for (const required of [
+      'uint ownerThread = GetWindowThreadProcessId(hwnd, out ownerPid);',
+      '{ "handle", hwnd.ToInt64() }', '{ "pid", ownerPid }', '{ "thread", ownerThread }',
+      '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
+      '{ "root", GetAncestor(hwnd, 2).ToInt64() }',
+      '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
+      '{ "visible", IsWindowVisible(hwnd) }',
+      'public static List<Dictionary<string, object>> DesktopWindows()',
+      'windows.Add(WindowIdentity(hwnd));', 'return true;', 'return windows;',
+    ]) assert.ok(identity.includes(required), required);
+    assert.doesNotMatch(identity, /SetForegroundWindow|SetFocus|ShowWindow|SendInput|Thread\.Sleep|if\s*\(/);
+    const snapshot = driver.slice(driver.indexOf('function Snapshot('), driver.indexOf('function Assert-Foreground'));
+    for (const required of [
+      '$foreground = [VerifyNative]::GetForegroundWindow()',
+      'foreground = $foreground.ToInt64()', 'capturedAt = [DateTime]::UtcNow.ToString(\'o\')',
+      '$focus.foregroundWindow = [VerifyNative]::WindowIdentity($foreground)',
+      '$focus.foregroundRoot = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 2))',
+      '$focus.foregroundRootOwner = [VerifyNative]::WindowIdentity([VerifyNative]::GetAncestor($foreground, 3))',
+      '$focus.desktopWindows = @([VerifyNative]::DesktopWindows())',
+      '$focus.processes = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, CreationDate | Select-Object ProcessId, ParentProcessId, Name, CreationDate)',
+      '$focus.foregroundError = $_.Exception.Message', '$focus.desktopError = $_.Exception.Message',
+      '$focus.processError = $_.Exception.Message',
+      "Save-Json $focus ($Name + '.focus.json')",
+    ]) assert.ok(snapshot.includes(required), required);
+    assert.ok(snapshot.indexOf('$focus.processes') < snapshot.indexOf('Save-Json $focus'));
+    assert.ok(snapshot.indexOf('Save-Json $focus') < snapshot.indexOf('$element.FindAll'));
+    assert.doesNotMatch(snapshot, /SetForegroundWindow|SetFocus|ShowWindow|Start-Process|Wait-Until|Start-Sleep|CommandLine|ExecutablePath/);
+    assert.match(driver, /Snapshot 'before'/);
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    assert.match(recipe, /Snapshot 'action'\s+Restart-SessionRestore 'normal-close' \$false/);
+    assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
+  }
+  contract(control);
+  for (const required of [
+    '{ "pid", ownerPid }', '{ "class", Class(hwnd) }', '{ "title", Title(hwnd) }',
+    '{ "root", GetAncestor(hwnd, 2).ToInt64() }', '{ "rootOwner", GetAncestor(hwnd, 3).ToInt64() }',
+    'windows.Add(WindowIdentity(hwnd));', '$focus.foregroundWindow =', '$focus.foregroundRoot =',
+    '$focus.foregroundRootOwner =', '$focus.desktopWindows =', '$focus.processes =',
+    'Select-Object ProcessId, ParentProcessId, Name, CreationDate',
+    '$focus.foregroundError =', '$focus.desktopError =', '$focus.processError =',
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => contract(broken), assert.AssertionError);
+  }
+});
+
+test('ISSUE-569 selection assertions resolve published active identity and require the original workspace', () => {
+  const assertion = control.slice(control.indexOf('function Assert-SessionRestoreSelection('), control.indexOf('function Select-Theme('));
+  function contract(source) {
+    for (const required of [
+      '$state = Read-Inbox', '$saved = Read-Session', '$_.sid -eq $state.active_shell_id',
+      '$selected.Count -eq 1', '$selected[0].name -ceq $Name', '$selected[0].ws -eq $Workspace',
+      '$state.active_workspace -eq $Workspace', '$saved.active_workspace -eq $Workspace',
+      "$state.PSObject.Properties['starred_view']", "$saved.PSObject.Properties['starred_view']",
+      '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
+      '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId',
+      '$saved.tabs[$saved.active_tab].name -ceq $Name', ").Count -eq 3",
+    ]) assert.ok(source.includes(required), required);
+    assert.doesNotMatch(source, /Set-Content|WriteAll|SetEnvironmentVariable|PostMessage|GetForegroundWindow|Assert-Foreground|\$saved\.active_shell_id\s*-eq\s*\$state\.active_shell_id/);
+  }
+  contract(assertion);
+  assert.throws(() => contract(assertion.replace('$saved.tabs[$saved.active_tab].name -ceq $Name', '$saved.active_shell_id -eq $state.active_shell_id')));
+  for (const required of ['$_.sid -eq $state.active_shell_id', '$selected[0].name -ceq $Name', '$state.active_workspace -eq $Workspace', '$saved.workspaces[$Workspace].wid -ceq $WorkspaceId']) {
+    assert.throws(() => contract(assertion.replace(required, '$true')));
+  }
+  const publisher = read('src/inbox.zig');
+  assert.match(publisher, /active_shell_id\\":\{d\},\\"active_workspace\\":\{d\}/);
+  assert.match(publisher, /if \(app_state.active_shell < app_state.shell_count\) app_state.shells\[app_state.active_shell\].shell_id else 0/);
+});
+
+test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
+  function contract(session, console, cache, main) {
+    const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
+    assert.doesNotMatch(save, /defer_browser/);
+    assert.match(save, /selected_shell_id = app_state.shells\[idx\].shell_id/);
+    assert.match(save, /saveSession\(\)/);
+    const deferred = cache.slice(cache.indexOf('pub fn deferred('), cache.indexOf('pub fn closedDuringStartup('));
+    assert.doesNotMatch(deferred, /selected_shell_id = state.shells\[state.active_shell\].shell_id/);
+    assert.match(deferred, /shell.shell_id == selected_shell_id/);
+    const persistence = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.doesNotMatch(persistence, /if \(@import\("launch_cache.zig"\).pending\) return;/);
+    assert.match(session, /active_shell_id\\":\{d\}/);
+    assert.match(session, /selectedSavedTab\(json, tabs\[0\.\.tab_count\]/);
+    assert.match(session, /app_state.g_active_workspace = if \(restored_active_shell_id != 0 and app_state.active_shell < app_state.shell_count\)\s+app_state.shells\[app_state.active_shell\].workspace/);
+    assert.match(session, /const live_shell_count = app_state.shell_count/);
+    assert.match(session, /if \(idx < live_shell_count\)/);
+    const close = main.slice(main.lastIndexOf('        WM_CLOSE =>'), main.lastIndexOf('        WM_DESTROY =>'));
+    assert.match(close, /saveSession\(\);\s+launch_cache.finish\(\);[\s\S]*DestroyWindow\(hwnd\)/);
+    assert.doesNotMatch(close, /app_state.active_shell\s*=|app_state.shell_count\s*=/);
+    assert.match(close, /g_current_workspace_restore = app_state.g_quit_all_in_progress/);
+  }
+  const sources = [read('src/session.zig'), read('src/console.zig'), read('src/launch_cache.zig'), read('src/main.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [1, 'if (!app_state.g_restoring and (idx != prev or unarchived_on_open or', 'if (!defer_browser and !app_state.g_restoring and (idx != prev or unarchived_on_open or'],
+    [0, '    logSessionAudit("saveSession:before-write");', '    if (@import("launch_cache.zig").pending) return;\n    logSessionAudit("saveSession:before-write");'],
+    [2, '    if (cached) {\n', '    if (cached) {\n        selected_shell_id = state.shells[state.active_shell].shell_id;\n'],
+    [0, 'if (idx < live_shell_count)', 'if (idx < app_state.shell_count)'],
+    [3, '            saveSession();\n            launch_cache.finish();', '            app_state.active_shell = 0;\n            saveSession();\n            launch_cache.finish();'],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file]);
+    assert.throws(() => contract(...broken));
+  }
+});
+
+
+test('ISSUE-569 Starred restore persists the view and reuses the real workspace entry path', () => {
+  function contract(session, inbox, workspaces) {
+    const save = session.slice(session.indexOf('pub fn saveSessionTo('), session.indexOf('fn mergeStartupSelection('));
+    assert.match(save, /!app_state.g_single_window or app_state.g_starred_workspace or app_state.shells\[i\].workspace == app_state.g_active_workspace/);
+    assert.ok(save.includes('\\"starred_view\\":{}'));
+    assert.match(save, /app_state.shells\[app_state.active_shell\].shell_id, app_state.g_starred_workspace/);
+    const merge = session.slice(session.indexOf('fn mergeStartupSelection('), session.indexOf('fn selectedSavedTab('));
+    assert.match(merge, /"starred_view", \.\{ \.bool = json_reader.boolTrue\(live.value, "starred_view"\) \}/);
+    const view = session.slice(session.indexOf('fn restoreStarredView('), session.indexOf('pub fn saveSession()'));
+    assert.match(view, /app_state.g_starred_workspace = false;/);
+    assert.match(view, /if \(!starred or !app_state.g_single_window or app_state.active_shell >= app_state.shell_count\) return;/);
+    assert.match(view, /if \(!@import\("workspaces.zig"\).starredShellVisible\(app_state.active_shell\)\) return;/);
+    assert.match(view, /app_state.g_starred_last_shell = app_state.shells\[app_state.active_shell\].shell_id;/);
+    assert.match(view, /@import\("workspaces.zig"\).switchToWorkspace\(@import\("workspace_view.zig"\).starred\);/);
+    assert.doesNotMatch(view, /g_starred_workspace = true|SetTimer|focusActiveShell|loadInboxModel/);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
+    assert.match(restore, /const restore_starred = if \(@import\("launch_cache.zig"\).pending and @import\("launch_cache.zig"\).selected_shell_id != 0\)\s+app_state.g_starred_workspace\s+else\s+json_reader.boolTrue\(json, "starred_view"\);/);
+    assert.ok(restore.indexOf('restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));') > restore.indexOf('seedActiveWorkspaceLastShell('));
+    assert.match(inbox, /active_workspace\\":\{d\},\\"starred_view\\":\{\}/);
+    assert.match(inbox, /app_state.g_active_workspace,\s+app_state.g_starred_workspace,/);
+    const entry = workspaces.slice(workspaces.indexOf('if (ws_in == @import("workspace_view.zig").starred)'), workspaces.indexOf('if (ws_in >= app_state.g_lws_count'));
+    assert.match(entry, /if \(!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0\) saveSession\(\);/);
+    for (const name of [
+      'ISSUE-569 saved Starred view restores the same favorite session',
+      'ISSUE-569 same favorite saved at home restores home instead of Starred',
+      'ISSUE-569 saved Starred view falls back home when session is unfavorited',
+    ]) assert.ok(session.includes(`test "${name}"`), name);
+    const fixture = session.slice(session.indexOf('fn testStarredSelectionRoundTrip('), session.indexOf('test "ISSUE-569 filtered save'));
+    for (const required of [
+      'saveSessionTo(path, null)', 'selectedSavedTab(parsed.value, tabs[0..count], 0)',
+      'json_reader.boolean(json_reader.field(parsed.value, "starred_view"), !saved_starred)',
+      'restoreStarredView(json_reader.boolTrue(parsed.value, "starred_view"))',
+      'saved_starred and favorite_on_restore, app_state.g_starred_workspace',
+      '@as(u32, 42), app_state.shells[app_state.active_shell].shell_id',
+      '@as(u8, 1), app_state.g_active_workspace',
+      'testStarredSelectionRoundTrip(true, true)', 'testStarredSelectionRoundTrip(false, true)',
+      'testStarredSelectionRoundTrip(true, false)',
+    ]) assert.ok(fixture.includes(required), required);
+    assert.match(session, /expect\(json_reader.boolTrue\(parsed.value, "starred_view"\)\)/);
+    assert.match(session, /expect\(!json_reader.boolTrue\(new_parsed.value, "starred_view"\)\)/);
+  }
+  const sources = [read('src/session.zig'), read('src/inbox.zig'), read('src/workspaces.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, 'or app_state.g_starred_workspace or', 'or'],
+    [0, ',\\"starred_view\\":{}', ''],
+    [0, '.bool = json_reader.boolTrue(live.value, "starred_view")', '.bool = false'],
+    [0, 'if (!@import("workspaces.zig").starredShellVisible(app_state.active_shell)) return;', ''],
+    [0, 'app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;', ''],
+    [0, 'restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));', ''],
+    [1, ',\\"starred_view\\":{}', ''],
+    [2, '        if (!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0) saveSession();', ''],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken));
+  }
+});
+
+test('ISSUE-569 journey restores the same favorite in Starred and at home with real keys', () => {
+  function contract(driver) {
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    let offset = -1;
+    for (const step of [
+      "Press @(0x12, 0x53) 'Alt+S:", "'middle favorite persisted'",
+      "Press @(0x12, 0x31) 'Alt+1:", "Focus-Palette 'Restore middle' $middleIndex",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "Restart-SessionRestore 'normal-close' $false",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "name = 'starred-view-selection'",
+      "Press @([byte]0x12, [byte](0x32 + $workspace))",
+      "Focus-Palette 'Restore middle' $middleIndex",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
+      "Restart-SessionRestore 'favorite-home-kill' $true",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false",
+      "'same session remains a favorite at home after kill'",
+      "'favorite-home-kill-after.inbox.json'", "'favorite-home-kill-after.session.json'",
+      "name = 'favorite-home-selection'", "Restart-SessionRestore 'process-kill' $true",
+      'if ($result.checks.Count -ne 4) { throw',
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    const assertion = driver.slice(driver.indexOf('function Assert-SessionRestoreSelection('), driver.indexOf('function Select-Theme('));
+    for (const required of [
+      '[bool]$Starred = $false', "$state.PSObject.Properties['starred_view']",
+      "$saved.PSObject.Properties['starred_view']", '$state.starred_view -eq $Starred',
+      '$saved.starred_view -eq $Starred',
+    ]) assert.ok(assertion.includes(required), required);
+  }
+  contract(control);
+  for (const required of [
+    "Press @(0x12, 0x53) 'Alt+S: favorite the middle restore session'",
+    "Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'",
+    "Press @([byte]0x12, [byte](0x32 + $workspace))",
+    "Restart-SessionRestore 'favorite-home-kill' $true",
+    '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
+    "name = 'starred-view-selection'", "name = 'favorite-home-selection'",
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control);
+    assert.throws(() => contract(broken));
+  }
+  const map = read(skill + 'features/session-restore.md');
+  for (const required of ['starred-view-selection', 'favorite-home-selection', 'Alt+S', 'Alt+1', 'starred_view', 'favorite-home-kill-after']) {
+    assert.ok(map.includes(required), required);
+  }
+});
+
+test('ISSUE-569 Starred restore never queues a hide for its already selected console', () => {
+  function contract(workspaces, session) {
+    const start = workspaces.indexOf('    if (ws_in == @import("workspace_view.zig").starred)');
+    const entry = workspaces.slice(start, workspaces.indexOf('    if (ws_in >= app_state.g_lws_count', start));
+    assert.ok(start >= 0 && entry.length > 0);
+    assert.match(entry, /if \(starredShellVisible\(i\) and app_state\.shells\[i\]\.shell_id == app_state\.g_starred_last_shell\) \{\s*if \(i != app_state\.active_shell\) switchToShell\(@intCast\(i\)\);\s*break;/);
+    assert.match(entry, /refreshStarredWorkspace\(\);\s*if \(app_state\.active_shell < app_state\.shell_count\) \{\s*app_state\.g_starred_last_shell = app_state\.shells\[app_state\.active_shell\]\.shell_id;\s*focusActiveShell\(\);/);
+    assert.match(entry, /parkMainWindowBeforeActiveShellRemoval\(app_state\.active_shell\)/);
+    assert.ok(entry.indexOf('parkMainWindowBeforeActiveShellRemoval(') < entry.indexOf('switchToShell('));
+    const restore = session.slice(session.indexOf('fn restoreStarredView('), session.indexOf('pub fn saveSession()'));
+    assert.match(restore, /app_state\.g_starred_last_shell = app_state\.shells\[app_state\.active_shell\]\.shell_id;\s*@import\("workspaces.zig"\)\.switchToWorkspace\(@import\("workspace_view.zig"\)\.starred\);/);
+    const unit = workspaces.slice(workspaces.indexOf('test "ISSUE-569 Starred entry keeps the selected session surface without a shell switch"'), workspaces.indexOf('pub fn copyBlueDotHookInstructions('));
+    for (const observation of [
+      'app_state.g_main_hwnd = null;', 'app_state.g_restoring = true;', 'for (0..2) |i|',
+      'app_state.g_chat_browser_swap.request(app_state.shells[i].shell_id, 123);',
+      'switchToWorkspace(@import("workspace_view.zig").starred);',
+      'expectEqual(app_state.shells[i].shell_id, app_state.g_chat_browser_swap.shell_id)',
+      'expectEqual(@as(u64, 123), app_state.g_chat_browser_swap.requested_at)',
+    ]) assert.ok(unit.includes(observation), observation);
+  }
+  const sources = [read('src/workspaces.zig'), read('src/session.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, 'if (i != app_state.active_shell) switchToShell(@intCast(i));', 'switchToShell(@intCast(i));'],
+    [0, 'if (i != app_state.active_shell)', 'if (i == app_state.active_shell)'],
+    [0, '            focusActiveShell();', ''],
+    [0, 'expectEqual(app_state.shells[i].shell_id, app_state.g_chat_browser_swap.shell_id)', 'expect(true)'],
+    [1, 'app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;', ''],
+  ]) {
+    const broken = [...sources];
+    if (file === 0 && before.trim() === 'focusActiveShell();') {
+      const start = broken[0].indexOf('    if (ws_in == @import("workspace_view.zig").starred)');
+      broken[0] = broken[0].slice(0, start) + broken[0].slice(start).replace(before, after);
+    } else broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken), assert.AssertionError, before);
+  }
 });
 
 test('chat-delivery is an explicit saved-tmux boundary journey, not a live-delivery claim by the toggle journey', () => {

@@ -132,13 +132,17 @@ test('ISSUE-543 late console completions bind by stable identity and discard clo
   assert.match(complete, /discardStartupShell\(job\)/);
   assert.match(complete, /idx == app_state\.active_shell/);
   const session = body(read('src/session.zig'), 'restoreSession');
-  assert.match(session, /tab\.shell_id != selected_shell/);
+  assert.match(session, /const restored_active_tab = selectedSavedTab\(json, tabs\[0\.\.tab_count\], if \(@import\("launch_cache.zig"\)\.pending\) @import\("launch_cache.zig"\)\.selected_shell_id else 0\)/);
+  const selected = body(read('src/session.zig'), 'selectedSavedTab');
+  assert.match(selected, /for \(\[_\]u64\{ selected, json_reader\.uint\(json, "active_shell_id"\) \}\)/);
+  assert.match(selected, /if \(tab\.shell_id == id\) return @intCast\(tmux_identity\.restoreWinner\(tabs, i\)\)/);
 });
 
 test('ISSUE-543 cached clicks survive restoration without consuming a new title range on every launch', () => {
   const cache = read('src/launch_cache.zig');
   const deferred = body(cache, 'deferred');
-  assert.match(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
+  assert.doesNotMatch(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
+  assert.match(body(read('src/console.zig'), 'switchToShell'), /if \(@import\("launch_cache.zig"\)\.pending and idx < app_state\.shell_count\) \{\s*@import\("launch_cache.zig"\)\.selected_shell_id = app_state\.shells\[idx\]\.shell_id/);
   assert.match(deferred, /closed_shells\[closed_count\] = id/);
   assert.doesNotMatch(deferred, /state\.next_shell_id = 1/);
   assert.match(body(read('src/console.zig'), 'spawnShellWithSession'), /allocateConsoleTitleId\(\)/);
@@ -195,14 +199,16 @@ const reviewCases = [
   ['cached zero-chat tab close and selection use saved shell identity', read => {
     const source = read('src/launch_cache.zig');
     const deferred = body(source, 'deferred');
-    assert.match(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
     assert.match(deferred, /if \(!present\) \{\s*closed_shells\[closed_count\] = id/);
+    assert.doesNotMatch(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
+    assert.match(body(read('src/console.zig'), 'switchToShell'), /if \(@import\("launch_cache.zig"\)\.pending and idx < app_state\.shell_count\) \{\s*@import\("launch_cache.zig"\)\.selected_shell_id = app_state\.shells\[idx\]\.shell_id/);
     assert.doesNotMatch(body(source, 'closedDuringStartup'), /chat/);
     const restore = body(read('src/session.zig'), 'restoreSession');
     assert.match(restore, /closedDuringStartup\(tabs\[t\]\.shell_id\)/);
-    assert.match(restore, /tab\.shell_id != selected_shell/);
+    assert.match(restore, /const restored_active_tab = selectedSavedTab\(json, tabs\[0\.\.tab_count\], if \(@import\("launch_cache.zig"\)\.pending\) @import\("launch_cache.zig"\)\.selected_shell_id else 0\)/);
+    assert.match(body(read('src/session.zig'), 'selectedSavedTab'), /if \(tab\.shell_id == id\) return @intCast\(tmux_identity\.restoreWinner\(tabs, i\)\)/);
     assert.match(restore, /restored_shell_ids\[tmux_identity\.restoreWinner\(tabs\[0\.\.tab_count\], t\)\]/);
-    assert.match(restore, /findShellById\(restored_id\)/);
+    assert.match(restore, /findShellById\(restored_active_shell_id\)/);
   }],
   ['signed-out startup timer stops and sign-in resumes the saved phase', read => {
     const account = read('src/account_desktop.zig');

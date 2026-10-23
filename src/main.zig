@@ -8250,6 +8250,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
         },
         .chat => {
+            launch_cache.tabs_restored = true;
             launch_cache.bindRestoredChat();
             if (app_state.active_shell < app_state.shell_count and
                 chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_view_restore_on, true))

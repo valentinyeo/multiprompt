@@ -11,6 +11,7 @@ pub const TIMER_SAVE = 0x502;
 pub const TIMER_STARTUP = 0x543;
 pub var queue: plan.Queue = .{};
 pub var pending = false;
+pub var tabs_restored = false;
 pub var cached = false;
 var started: i64 = 0;
 var frequency: i64 = 1;
@@ -146,8 +147,6 @@ pub fn deferred() void {
     var buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "launch deferred-start ms={d}", .{elapsed()}) catch return);
     if (cached) {
-        const selected_id = if (state.active_shell < state.shell_count) state.shells[state.active_shell].shell_id else 0;
-        if (state.active_shell < state.shell_count) selected_shell_id = state.shells[state.active_shell].shell_id;
         for (cached_ids[0..cached_count]) |id| {
             var present = false;
             for (state.shells[0..state.shell_count]) |shell| {
@@ -166,7 +165,7 @@ pub fn deferred() void {
             const shell = state.shells[i];
             if (std.mem.indexOfScalar(u32, cached_ids[0..cached_count], shell.shell_id) != null) continue;
             state.shells[kept] = shell;
-            if (shell.shell_id == selected_id) selected_live_shell_id = shell.shell_id;
+            if (selected_shell_id != 0 and shell.shell_id == selected_shell_id) selected_live_shell_id = shell.shell_id;
             if (state.next_shell_id != 0 and shell.shell_id >= state.next_shell_id) state.next_shell_id = shell.shell_id +% 1;
             kept += 1;
         }
@@ -174,6 +173,10 @@ pub fn deferred() void {
         state.active_shell = 0;
         state.group_count = 0;
     }
+}
+
+pub fn cachedShell(shell_id: u32) bool {
+    return cached and std.mem.indexOfScalar(u32, cached_ids[0..cached_count], shell_id) != null;
 }
 
 pub fn closedDuringStartup(shell_id: u32) bool {
@@ -311,4 +314,55 @@ pub fn save() void {
         return;
     };
     thread.detach();
+}
+
+test "ISSUE-569 stale launch snapshot does not become a startup user selection" {
+    const saved_cached = cached;
+    const saved_count = cached_count;
+    const saved_cached_id = cached_ids[0];
+    const saved_selected = selected_shell_id;
+    const saved_live = selected_live_shell_id;
+    const saved_shell_count = state.shell_count;
+    const saved_active = state.active_shell;
+    const saved_group_count = state.group_count;
+    const saved_next_id = state.next_shell_id;
+    const saved_shells = state.shells[0..2].*;
+    defer {
+        cached = saved_cached;
+        cached_count = saved_count;
+        cached_ids[0] = saved_cached_id;
+        selected_shell_id = saved_selected;
+        selected_live_shell_id = saved_live;
+        state.shell_count = saved_shell_count;
+        state.active_shell = saved_active;
+        state.group_count = saved_group_count;
+        state.next_shell_id = saved_next_id;
+        state.shells[0..2].* = saved_shells;
+    }
+    cached = true;
+    cached_ids[0] = 41;
+    for (0..2) |count| {
+        cached_count = count;
+        selected_shell_id = 0;
+        selected_live_shell_id = 0;
+        state.shell_count = 1;
+        state.active_shell = 0;
+        state.shells[0] = state.empty_shell;
+        state.shells[0].shell_id = 41;
+        deferred();
+        try std.testing.expectEqual(@as(u32, 0), selected_shell_id);
+        try std.testing.expectEqual(@as(u32, 0), selected_live_shell_id);
+    }
+    cached_count = 1;
+    state.shell_count = 2;
+    state.active_shell = 1;
+    state.shells[0] = state.empty_shell;
+    state.shells[0].shell_id = 41;
+    state.shells[1] = state.empty_shell;
+    state.shells[1].shell_id = 42;
+    selected_shell_id = 42;
+    deferred();
+    try std.testing.expectEqual(@as(u32, 42), selected_shell_id);
+    try std.testing.expectEqual(@as(u32, 42), selected_live_shell_id);
+    try std.testing.expectEqual(@as(u32, 1), state.shell_count);
 }
