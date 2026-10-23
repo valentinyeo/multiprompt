@@ -1763,6 +1763,7 @@ pub fn chatScrollBy(delta_px: i32) void {
             if (!entry.pending and entry.history.start > 0) {
                 entry.before = entry.history.start;
                 app_state.g_chat_scrolled_up = true;
+                app_state.g_chat_scroll_bottom_pending = false;
                 entry.next = 0;
                 chatFileRequest(chatFileIdentity());
             }
@@ -1771,6 +1772,7 @@ pub fn chatScrollBy(delta_px: i32) void {
     if (new_y == app_state.g_chat_scroll_y) return;
     app_state.g_chat_scroll_y = new_y;
     app_state.g_chat_scrolled_up = new_y < max_scroll - uiScaled(4);
+    if (app_state.g_chat_scrolled_up) app_state.g_chat_scroll_bottom_pending = false;
     app_state.g_chat_hover_copy = null;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }

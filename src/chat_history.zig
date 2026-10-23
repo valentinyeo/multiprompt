@@ -464,6 +464,10 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
+pub fn followBottom(scrolled_up: bool) bool {
+    return !scrolled_up;
+}
+
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
     const bottom = content_h - viewport_h;
     if (follow_bottom) return bottom;
@@ -1223,4 +1227,20 @@ test "ISSUE-402 identical split text keeps find identity through suffix clone an
             }
         }
     }
+}
+
+test "IGSH-720 scrolled up plus new messages keeps the view still" {
+    try std.testing.expectEqual(@as(i32, 120), scrollAfterLayout(1400, 800, 120, followBottom(true), 100, 20));
+    try std.testing.expect(!followBottom(true));
+}
+
+test "IGSH-720 bottom follows new messages only until the reader scrolls up" {
+    try std.testing.expectEqual(@as(i32, 600), scrollAfterLayout(1400, 800, 400, followBottom(false), null, 0));
+    try std.testing.expectEqual(@as(i32, 120), scrollAfterLayout(1600, 800, 120, followBottom(true), null, 0));
+}
+
+test "IGSH-720 sending then scrolling up prevents a reply from pulling the reader down" {
+    try std.testing.expect(followBottom(false));
+    try std.testing.expect(!followBottom(true));
+    try std.testing.expectEqual(@as(i32, 200), scrollAfterLayout(1800, 800, 200, followBottom(true), 160, 40));
 }
