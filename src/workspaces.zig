@@ -2585,7 +2585,7 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
 pub fn starredShellVisible(idx: usize) bool {
     const shell = &app_state.shells[idx];
     return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
-        @import("inbox.zig").inboxPublishesShell(shell) and
+        (!shell.inbox_archived or shell.needs_attention) and
         (!app_state.g_single_window or !app_state.g_ws_snoozed[shell.workspace]);
 }
 
