@@ -66,6 +66,7 @@ const GetDC = @import("win32.zig").GetDC;
 const ReleaseDC = @import("win32.zig").ReleaseDC;
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
+const chatDrawText = @import("dwrite_text.zig").draw;
 const SetCapture = @import("win32.zig").SetCapture;
 const ReleaseCapture = @import("win32.zig").ReleaseCapture;
 const GetWindowTextW = @import("win32.zig").GetWindowTextW;
@@ -441,7 +442,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
                     } else chatPaintSelectionRun(hdc, segment, offset + pos, rect.left, rect.top, line_h);
                 }
                 var draw = rect;
-                _ = DrawTextW(hdc, segment.ptr, @intCast(segment.len), &draw, DT_SINGLELINE | DT_NOPREFIX);
+                _ = chatDrawText(hdc, segment.ptr, @intCast(segment.len), &draw, DT_SINGLELINE | DT_NOPREFIX);
                 _ = SelectObject(hdc, base);
             }
             pos += count;
@@ -558,7 +559,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     @import("chat_find_ui.zig").paintRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     chatPaintSelectionRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else customColorOr("text", themeConsoleFg()));
-                    _ = DrawTextW(hdc, segment.ptr, @intCast(segment.len), &rc, DT_SINGLELINE | DT_NOPREFIX);
+                    _ = chatDrawText(hdc, segment.ptr, @intCast(segment.len), &rc, DT_SINGLELINE | DT_NOPREFIX);
                 }
                 x += w;
                 pos += count;
@@ -812,7 +813,7 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
             var marker = area;
             marker.left += indent;
             marker.right = body.left - uiScaled(6);
-            if (block.prefix == 2) _ = DrawTextW(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX) else _ = DrawTextW(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX);
+            if (block.prefix == 2) _ = chatDrawText(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX) else _ = chatDrawText(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX);
         }
         return chatRichText(hdc, text[block.prefix..], body, 0, paint, hit, offset + block.prefix, height, false);
     }
@@ -1210,10 +1211,10 @@ test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
     try std.testing.expect(chatTableMouseMove(hwnd, left + bar.view_w));
     try std.testing.expectEqual(scrolled, moved.layout.scroll);
     try std.testing.expect(!app_state.g_chat_tables.entries.contains(parts[1].start));
-
 }
 
 test "IGSH-376 received Markdown keeps blue sender layout selection and copied text" {
+    try std.testing.expect(@import("fonts.zig").register());
     defer app_state.g_chat_tables.clear(std.heap.page_allocator);
     const w = @import("win32.zig");
     const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
@@ -1263,34 +1264,88 @@ test "IGSH-376 received Markdown keeps blue sender layout selection and copied t
     const selected = try chatCopyBlockText(&copied, blocks[0], ready, ready + 5);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Ready"), copied[0..selected]);
     var short_y = rc.bottom + 12;
-    for ([_][]const u16{
+    const shorts = [_][]const u16{
         std.unicode.utf8ToUtf16LeStringLiteral("- Done"),
         std.unicode.utf8ToUtf16LeStringLiteral("# Ready"),
         std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test/a/very/long/address)"),
-    }) |short| {
+    };
+    var short_rects: [shorts.len]RECT = undefined;
+    for (shorts, &short_rects) |short, *short_rect| {
         var received = blocks[0];
         received.len = short.len;
         const short_rc = chatMeasureBlockRect(dc, short, received, .single, width - 24, short_y, null);
+        short_rect.* = short_rc;
         chatPaintBlock(dc, short, received, .single, short_rc);
         try std.testing.expect(short_rc.bottom < height - 12);
         short_y = short_rc.bottom + 12;
     }
     var enabled: [8]u8 = undefined;
     if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
-        const Gdi = struct { extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL; };
-        _ = Gdi.GdiFlush();
+        const Proof = struct {
+            extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+
+            fn save(path: LPCWSTR, bytes: []const u8) !void {
+                const file = w.CreateFileW(path, 0x40000000, 0, null, 2, 0x80, null);
+                try std.testing.expect(file != null and file != @as(HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+                defer _ = w.CloseHandle(file);
+                var written: u32 = 0;
+                try std.testing.expect(w.WriteFile(file, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len);
+            }
+        };
+        _ = Proof.GdiFlush();
         const pixels = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
-        var header: [54]u8 = @splat(0);
-        @memcpy(header[0..2], "BM");
-        std.mem.writeInt(u32, header[2..6], 54 + width * height * 4, .little);
-        std.mem.writeInt(u32, header[10..14], 54, .little);
-        @memcpy(header[14..54], std.mem.asBytes(&info.header));
-        const file = w.CreateFileW(L("chat-markdown-proof.bmp"), 0x40000000, 0, null, 2, 0x80, null);
-        try std.testing.expect(file != null and file != @as(HANDLE, @ptrFromInt(std.math.maxInt(usize))));
-        defer _ = w.CloseHandle(file);
-        var written: u32 = 0;
-        try std.testing.expect(w.WriteFile(file, &header, header.len, &written, null) != 0 and written == header.len);
-        try std.testing.expect(w.WriteFile(file, pixels.ptr, @intCast(pixels.len), &written, null) != 0 and written == pixels.len);
+        const bmp = try std.testing.allocator.alloc(u8, 54 + pixels.len);
+        defer std.testing.allocator.free(bmp);
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], pixels);
+        try Proof.save(L("chat-markdown-proof.bmp"), bmp);
+        const dwrite = @import("dwrite_text.zig");
+        const before_runs = dwrite.painted_runs;
+        const repaint_count = 200;
+        var frequency: i64 = 0;
+        var start: i64 = 0;
+        var end: i64 = 0;
+        try std.testing.expect(w.QueryPerformanceFrequency(&frequency) != 0 and frequency > 0);
+        try std.testing.expect(w.QueryPerformanceCounter(&start) != 0);
+        for (0..repaint_count) |_| {
+            _ = FillRect(dc, &background, brush);
+            chatPaintBlock(dc, text, blocks[0], .single, rc);
+            for (shorts, short_rects) |short, short_rc| {
+                var received = blocks[0];
+                received.len = short.len;
+                chatPaintBlock(dc, short, received, .single, short_rc);
+            }
+        }
+        _ = Proof.GdiFlush();
+        try std.testing.expect(w.QueryPerformanceCounter(&end) != 0 and end > start);
+        const runs = dwrite.painted_runs - before_runs;
+        if (dwrite.enabled()) try std.testing.expect(runs > repaint_count) else try std.testing.expectEqual(@as(u64, 0), runs);
+        const metadata = try std.json.Stringify.valueAlloc(std.testing.allocator, .{
+            .n = repaint_count,
+            .repaint_ms = @as(f64, @floatFromInt(end - start)) * 1000 / @as(f64, @floatFromInt(frequency)),
+            .dwrite_enabled = dwrite.enabled(),
+            .glyph_runs = runs,
+            .width = width,
+            .height = height,
+            .font_px = uiScaled(app_state.g_chat_font_pt),
+            .heading_px = uiScaled(app_state.g_chat_font_pt + 8),
+            .code_px = uiScaled(@max(8, app_state.g_chat_font_pt - 1)),
+            .foreground = customColorOr("text", themeConsoleFg()),
+            .background = themeConsoleBg(),
+            .bubble_background = chatInjectedBubbleColor(),
+            .code_background = chatCodePanelColor(),
+            .link_color = customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)),
+            .bubble = rc,
+            .padding = uiScaled(CHAT_BUBBLE_PAD),
+            .radius = uiScaled(CHAT_BUBBLE_RADIUS),
+            .paragraph = "Ready with inline code and docs.",
+        }, .{ .whitespace = .indent_2 });
+        defer std.testing.allocator.free(metadata);
+        try Proof.save(L("chat-markdown-proof.json"), metadata);
     }
 }
 
@@ -2494,7 +2549,7 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
     }
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
     var rc = area;
-    _ = DrawTextW(hdc, &label, @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | (if (right) @as(UINT, DT_RIGHT) else 0));
+    _ = chatDrawText(hdc, &label, @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | (if (right) @as(UINT, DT_RIGHT) else 0));
 }
 
 fn chatPaintAgentHeader(hdc: HANDLE, block: ChatBlock, rc: RECT) void {
@@ -2505,7 +2560,7 @@ fn chatPaintAgentHeader(hdc: HANDLE, block: ChatBlock, rc: RECT) void {
     const left = rc.left + uiScaled(CHAT_AGENT_PAD_X);
     var name_rc = RECT{ .left = left, .top = rc.top, .right = @min(rc.right, left + uiScaled(56)), .bottom = row_bottom };
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
-    _ = DrawTextW(hdc, if (agent == 1) L("Claude") else if (agent == 2) L("Codex") else L("Agent"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = chatDrawText(hdc, if (agent == 1) L("Claude") else if (agent == 2) L("Codex") else L("Agent"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     chatPaintTime(hdc, block, .{ .left = name_rc.right + uiScaled(6), .top = rc.top, .right = rc.right, .bottom = row_bottom }, false, false);
 }
 
@@ -2553,14 +2608,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
                 .@"error" => customColorOr("error", RGB(235, 105, 105)),
                 .running => customColorOr("accent", RGB(110, 175, 245)),
             });
-            _ = DrawTextW(hdc, switch (block.tool_status) {
+            _ = chatDrawText(hdc, switch (block.tool_status) {
                 .ok => L("✓"),
                 .@"error" => L("✗"),
                 .running => L("…"),
             }, -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             var summary_rc = RECT{ .left = mark_rc.right, .top = rc.top, .right = rc.right, .bottom = mark_rc.bottom };
             _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
-            _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &summary_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = chatDrawText(hdc, text.ptr, @intCast(text.len), &summary_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             const patch = buf[block.diff_start..][0..block.diff_len];
             const diff_rows = chat_diff.rowCount(patch, block.tool_open);
             const row_h = uiScaled(chat_diff.row_height);
@@ -2582,7 +2637,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
                 var line_rc = row;
                 line_rc.left += uiScaled(CHAT_CODE_PAD);
                 line_rc.right -= uiScaled(CHAT_CODE_PAD);
-                _ = DrawTextW(hdc, line.ptr, @intCast(line.len), &line_rc, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | DT_VCENTER);
+                _ = chatDrawText(hdc, line.ptr, @intCast(line.len), &line_rc, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | DT_VCENTER);
             }
             if (block.tool_open and block.detail_len > 0) {
                 const panel = RECT{ .left = rc.left, .top = mark_rc.bottom + @as(i32, @intCast(diff_rows)) * row_h, .right = rc.right, .bottom = rc.bottom };
@@ -2621,7 +2676,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
             var button = chatEchoActionRect(rc, remove);
             fillRoundRectAA(hdc, button, uiScaled(5), chatCodePanelColor());
             _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-            _ = DrawTextW(hdc, if (remove) L("Remove") else L("Send again"), -1, &button, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            _ = chatDrawText(hdc, if (remove) L("Remove") else L("Send again"), -1, &button, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
         }
     }
 }
@@ -2657,7 +2712,7 @@ fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
         .not_sent => if (e.write_started) L("Delivery unconfirmed") else L("Not sent"),
     };
     var rc = area;
-    _ = DrawTextW(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = chatDrawText(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn chatCodeTokenColor(kind: chat_code.Kind) DWORD {
@@ -2684,10 +2739,10 @@ fn chatPaintCodeHeader(hdc: HANDLE, rc: RECT, block: ChatBlock) void {
     _ = DeleteObject(brush);
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     var label = button;
-    _ = DrawTextW(hdc, L("Copy"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = chatDrawText(hdc, L("Copy"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     var title = RECT{ .left = rc.left + uiScaled(CHAT_CODE_PAD), .top = button.top, .right = button.left - uiScaled(6), .bottom = button.bottom };
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(103, 115, 125) else RGB(150, 160, 172)));
-    _ = DrawTextW(hdc, L("Code"), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = chatDrawText(hdc, L("Code"), -1, &title, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn chatTranscriptCopyAt(x: i32, y: i32) ?usize {
@@ -3520,7 +3575,7 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     const top = head_h + @as(i32, @intCast(i)) * row_h - app_state.shells[app_state.active_shell].chat_todo_scroll;
                     if (top + row_h <= head_h or top >= rc.bottom) continue;
                     var item_rc = RECT{ .left = uiScaled(28), .top = top, .right = rc.right - uiScaled(8), .bottom = top + row_h };
-                    _ = DrawTextW(hdc, &todo.text, @intCast(todo.len), &item_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    _ = chatDrawText(hdc, &todo.text, @intCast(todo.len), &item_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     var mark_rc = item_rc;
                     mark_rc.left = uiScaled(8);
                     mark_rc.right = uiScaled(26);
@@ -3529,7 +3584,7 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                         .in_progress => L("\u{25B8}"),
                         .pending => L("\u{25CB}"),
                     };
-                    _ = DrawTextW(hdc, mark, -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    _ = chatDrawText(hdc, mark, -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                 }
             }
             var header_rc = RECT{ .left = 0, .top = 0, .right = rc.right, .bottom = head_h };
@@ -3538,11 +3593,11 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             header_rc.right -= uiScaled(24);
             var label: [256]u16 = undefined;
             const len = status.label(&label);
-            _ = DrawTextW(hdc, &label, @intCast(len), &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = chatDrawText(hdc, &label, @intCast(len), &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             if (status.total > 0) {
                 header_rc.left = header_rc.right;
                 header_rc.right = rc.right;
-                _ = DrawTextW(hdc, if (app_state.shells[app_state.active_shell].chat_todo_open) L("\u{25BE}") else L("\u{25B8}"), -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                _ = chatDrawText(hdc, if (app_state.shells[app_state.active_shell].chat_todo_open) L("\u{25BE}") else L("\u{25B8}"), -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             }
             return 0;
         },
@@ -3737,7 +3792,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                         (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
                     else
                         L("No conversation yet");
-                    _ = DrawTextW(mem_dc, message, -1, &load_rc, DT_SINGLELINE | DT_NOPREFIX);
+                    _ = chatDrawText(mem_dc, message, -1, &load_rc, DT_SINGLELINE | DT_NOPREFIX);
                     _ = SelectObject(mem_dc, old_font);
                 }
             }

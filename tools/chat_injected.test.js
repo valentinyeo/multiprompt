@@ -82,6 +82,7 @@ fn ensureChatCodeFont() HANDLE { return 0; }
 fn chatMetadataFont() HANDLE { return 0; }
 fn SetTextColor(_: HANDLE, _: DWORD) DWORD { return 0; }
 fn SetBkMode(_: HANDLE, _: i32) i32 { return 0; }
+const chatDrawText = DrawTextW;
 fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, flags: UINT) i32 {
     if ((flags & DT_CALCRECT) != 0) { rc.right = @min(rc.right, len * 8); return 20; }
     metadata_len = if (len < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(len);
