@@ -688,7 +688,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
       "Focus-Palette 'Restore first' $firstIndex",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
-      "if ($result.checks.Count -ne 4) { throw", "Snapshot 'after'",
+      "if ($result.checks.Count -ne $requiredChecks.Count) { throw", "Snapshot 'after'",
     ]) {
       const next = recipe.indexOf(step, offset + 1);
       assert.ok(next > offset, `missing or misordered ${step}`);
@@ -751,7 +751,7 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
   const publicationStart = control.indexOf('    Wait-Until {', control.indexOf('function Restart-SessionRestore('));
   const activationStart = control.indexOf('    [void][VerifyNative]::ShowWindow', publicationStart);
   const readinessStart = control.indexOf('    Wait-Until {', control.indexOf('    } "$Stage relaunched window foreground before input"', activationStart));
-  const doctor = control.indexOf('    Doctor\n}', readinessStart);
+  const doctor = control.indexOf('    Doctor\n    } finally {', readinessStart);
   const racy = control.slice(0, publicationStart) + control.slice(readinessStart, doctor) + control.slice(activationStart, readinessStart) + control.slice(doctor);
   assert.throws(() => contract(racy), assert.AssertionError);
   for (const [before, after] of [
@@ -854,7 +854,12 @@ test('ISSUE-569 selection persistence is independent of deferred browser startup
     const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
-    assert.match(save, /selected_shell_id = app_state.shells\[idx\].shell_id/);
+    assert.doesNotMatch(save, /selected_shell_id\s*=/);
+    const selectionSave = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.match(selectionSave, /if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
+    assert.match(selectionSave, /selected_shell_id = shell_id/);
+    assert.match(selectionSave, /selected_starred = app_state.g_starred_workspace/);
+    assert.match(selectionSave, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
     assert.match(save, /saveSession\(\)/);
     const deferred = cache.slice(cache.indexOf('pub fn deferred('), cache.indexOf('pub fn closedDuringStartup('));
     assert.doesNotMatch(deferred, /selected_shell_id = state.shells\[state.active_shell\].shell_id/);
@@ -904,7 +909,13 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
     assert.match(view, /@import\("workspaces.zig"\).switchToWorkspace\(@import\("workspace_view.zig"\).starred\);/);
     assert.doesNotMatch(view, /g_starred_workspace = true|SetTimer|focusActiveShell|loadInboxModel/);
     const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
-    assert.match(restore, /const restore_starred = if \(@import\("launch_cache.zig"\).pending and @import\("launch_cache.zig"\).selected_shell_id != 0\)\s+app_state.g_starred_workspace\s+else\s+json_reader.boolTrue\(json, "starred_view"\);/);
+    assert.match(restore, /const restore_starred = savedStarredView\(json, tabs\[0\.\.tab_count\]\);/);
+    assert.ok(restore.indexOf('const restore_starred =') < restore.indexOf('spawnSavedTab('));
+    const source = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(source, /selected_shell_id != 0/);
+    assert.match(source, /selected_starred/);
+    assert.match(source, /if \(!json_reader.boolTrue\(json, "starred_view"\)\) return false;/);
+    assert.doesNotMatch(source, /g_starred_workspace/);
     assert.ok(restore.indexOf('restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));') > restore.indexOf('seedActiveWorkspaceLastShell('));
     assert.match(inbox, /active_workspace\\":\{d\},\\"starred_view\\":\{\}/);
     assert.match(inbox, /app_state.g_active_workspace,\s+app_state.g_starred_workspace,/);
@@ -919,12 +930,12 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
     for (const required of [
       'saveSessionTo(path, null)', 'selectedSavedTab(parsed.value, tabs[0..count], 0)',
       'json_reader.boolean(json_reader.field(parsed.value, "starred_view"), !saved_starred)',
-      'restoreStarredView(json_reader.boolTrue(parsed.value, "starred_view"))',
+      'restoreStarredView(savedStarredView(parsed.value, tabs[0..count]))',
       'saved_starred and favorite_on_restore, app_state.g_starred_workspace',
       '@as(u32, 42), app_state.shells[app_state.active_shell].shell_id',
       '@as(u8, 1), app_state.g_active_workspace',
-      'testStarredSelectionRoundTrip(true, true)', 'testStarredSelectionRoundTrip(false, true)',
-      'testStarredSelectionRoundTrip(true, false)',
+      'testStarredSelectionRoundTrip(true, true, false)', 'testStarredSelectionRoundTrip(false, true, false)',
+      'testStarredSelectionRoundTrip(true, false, false)',
     ]) assert.ok(fixture.includes(required), required);
     assert.match(session, /expect\(json_reader.boolTrue\(parsed.value, "starred_view"\)\)/);
     assert.match(session, /expect\(!json_reader.boolTrue\(new_parsed.value, "starred_view"\)\)/);
@@ -957,8 +968,8 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     assert.doesNotMatch(recipe, /SetForegroundWindow|GetFocusedWindow|Start-Sleep/);
     let offset = -1;
     for (const step of [
-      "Press @(0x12, 0x53) 'Alt+S:", "'middle favorite persisted'",
-      "Press @(0x12, 0x31) 'Alt+1:", "Focus-Palette 'Restore middle' $middleIndex",
+      "Press @(0x12, 0x53) 'Alt+S: favorite the middle restore session'", "'middle favorite persisted'",
+      "Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'", "Focus-Palette 'Restore middle' $middleIndex",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
       "Restart-SessionRestore 'normal-close' $false",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
@@ -975,7 +986,7 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
       "name = 'favorite-home-selection'",
       "'favorite-home-kill hook-ready owned foreground before palette input'",
       "Restart-SessionRestore 'process-kill' $true",
-      'if ($result.checks.Count -ne 4) { throw',
+      'if ($result.checks.Count -ne $requiredChecks.Count) { throw',
     ]) {
       const next = recipe.indexOf(step, offset + 1);
       assert.ok(next > offset, `missing or misordered ${step}`);
@@ -1012,7 +1023,7 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
     "name = 'starred-view-selection'", "name = 'favorite-home-selection'",
   ]) {
-    const broken = control.replace(required, '');
+    const broken = control.replaceAll(required, '');
     assert.notEqual(broken, control);
     assert.throws(() => contract(broken));
   }
@@ -1141,4 +1152,379 @@ test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four 
     'blank row still idle',
   ]);
   assert.match(read('tools/chat-local-agent.c'), /WriteConsoleW\(output, clear,[^\n]+\n\s*CONSOLE_SCREEN_BUFFER_INFO info;\s*if \(!GetConsoleScreenBufferInfo\(output, &info\)\) return 4;\s*COORD origin = \{0, info.srWindow.Bottom\}/);
+});
+
+
+test('ISSUE-569 grouped restore journey splits a real home group before every targeted restart', () => {
+  function contract(driver, map) {
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    let offset = -1;
+    for (const step of [
+      "Focus-Palette 'tab order' 6217", "Press @(0x11, 0x4E) 'Ctrl+N:",
+      "@('Restore first', 'Restore middle', 'Restore last')", 'if ($i -lt 2)',
+      "Focus-Palette 'move to group' 6301", "{ 'new group' } else { 'Group 1' }",
+      '{ 6303 } else { 6320 }', 'Type-Text $groupQuery', "'group submenu query selects the existing UI action'",
+      "'home group membership persisted through real palette input'", 'if ($i -ne 1)',
+      "'reorder companion favorite persisted'", "'middle favorite persisted'",
+      "Prepare-SessionRestoreGroupOrder 'update-restart'", "Restart-SessionRestore 'update-restart' $false $true",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "Prepare-SessionRestoreGroupOrder 'normal-close'", "Restart-SessionRestore 'normal-close' $false",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "foreach ($stage in @('favorite-cross-workspace-close', 'favorite-cross-workspace-kill'))",
+      'Prepare-SessionRestoreGroupOrder $stage', "Restart-SessionRestore $stage ($stage -eq 'favorite-cross-workspace-kill')",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    const prepare = driver.slice(driver.indexOf('function Prepare-SessionRestoreGroupOrder('), driver.indexOf('function Restart-SessionRestore('));
+    for (const required of [
+      "if (-not $saved.starred_view -or $tabs[$middle].name -cne 'Restore middle') { throw",
+      "$tabs[$first].group_id -eq 0 -or $tabs[$first].group_id -ne $tabs[$middle].group_id",
+      "$tabs[$last].PSObject.Properties['group_id']", "$tabs[$middle].PSObject.Properties['starred_group_id']",
+      "$tabs[$last].PSObject.Properties['starred_group_id']", 'if ($middle + 1 -eq $last)',
+      "Press @(0x11, 0x10, 0x28) 'Ctrl+Shift+Down:", 'elseif ($last + 1 -ne $middle)',
+      "$tabs[$middle].name -ceq 'Restore middle'", "$tabs[$middle - 1].name -ceq 'Restore last'",
+      "$tabs[$middle - 2].name -ceq 'Restore first'", '$tabs[$middle - 2].group_id -eq $tabs[$middle].group_id',
+      "-not $tabs[$middle - 1].PSObject.Properties['group_id']", "$selected[0].name -ceq 'Restore middle'",
+      'savedIndex = $middle; normalizedIndex = ($middle - 1)', "($Stage + '-group-order.json')",
+    ]) assert.ok(prepare.includes(required), required);
+    assert.doesNotMatch(prepare + recipe, /Set-Content|WriteAll|PostMessage|Start-Sleep|session\.json\.launch\.json|keep_alive\s*=/);
+    const setup = recipe.slice(0, recipe.indexOf('            $tabs = @((Read-Session).tabs)'));
+    assert.match(setup, /\$saved.PSObject.Properties\['groups'\]/);
+    assert.match(setup, /\$_.PSObject.Properties\['group_id'\] -and \$_.group_id -eq \$saved.groups\[0\].id/);
+    for (const word of ['Ctrl+Shift+Down', 'group_id', 'saved index minus one', 'PID zero', 'skip normalization', 'both app commits']) assert.ok(map.includes(word), word);
+  }
+  const map = read(skill + 'features/session-restore.md');
+  contract(control, map);
+  for (const required of [
+    "Focus-Palette 'tab order' 6217", "Focus-Palette 'move to group' 6301",
+    "{ 'new group' } else { 'Group 1' }", "'home group membership persisted through real palette input'",
+    "'reorder companion favorite persisted'", "Press @(0x11, 0x10, 0x28) 'Ctrl+Shift+Down:",
+    "$tabs[$middle - 1].name -ceq 'Restore last'", '$tabs[$middle - 2].group_id -eq $tabs[$middle].group_id',
+    "Prepare-SessionRestoreGroupOrder 'update-restart'", "Prepare-SessionRestoreGroupOrder 'normal-close'",
+    'Prepare-SessionRestoreGroupOrder $stage', "$tabs[$last].PSObject.Properties['starred_group_id']",
+  ]) {
+    const broken = control.replaceAll(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => contract(broken, map), assert.AssertionError, required);
+  }
+});
+
+test('ISSUE-569 local CMD restore has PID zero until UI completion, and split-group normalization changes the selected index', () => {
+  function timing(consoleSource, session, main, cache) {
+    const spawn = consoleSource.slice(consoleSource.indexOf('pub fn spawnShellWithSession('), consoleSource.indexOf('pub fn respawnShellInPlace('));
+    assert.match(spawn, /var pi = std.mem.zeroes\(PROCESS_INFORMATION\);/);
+    assert.match(spawn, /const asynchronous = @import\("launch_cache.zig"\).pending or app_state.g_account_applying;/);
+    assert.match(spawn, /if \(!asynchronous and CreateProcessW\([^;]+&pi\)/);
+    assert.match(spawn, /\.console_inflight = asynchronous,[\s\S]*?\.pid = pi.dwProcessId,/);
+    const worker = consoleSource.slice(consoleSource.indexOf('fn startupShellWorker('), consoleSource.indexOf('fn discardStartupShell('));
+    assert.match(worker, /job.pid = pi.dwProcessId;/);
+    assert.match(worker, /PostMessageW\(job.owner, WM_STARTUP_SHELL_READY/);
+    assert.doesNotMatch(worker, /app_state.shells\[[^\]]+\]\.pid\s*=/);
+    const finish = consoleSource.slice(consoleSource.indexOf('pub fn finishStartupShell('));
+    assert.match(finish, /app_state.shells\[idx\].console_inflight = false;/);
+    assert.match(finish, /app_state.shells\[idx\].pid = job.pid;/);
+    assert.match(main, /if \(msg == WM_TIMER and wp == @import\("console.zig"\).TIMER_STARTUP_SHELL\)/);
+    assert.match(main, /launch_cache.deferred\(\);[\s\S]*?const restored = restoreSession\(\);/);
+    assert.match(cache, /pub fn begin\(\) void \{\s*pending = true;/);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('fn writeStartupLastgood('));
+    let offset = -1;
+    for (const step of ['for (0..tab_count) |t|', 'spawnSavedTab(&tabs[t]', 'findShellById(restored_active_shell_id)', 'normalizeGroupOrder();']) {
+      const next = restore.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.doesNotMatch(restore, /DispatchMessage|PeekMessage|GetMessage|finishStartupShell/);
+  }
+  const sources = ['src/console.zig', 'src/session.zig', 'src/main.zig', 'src/launch_cache.zig'].map(read);
+  timing(...sources);
+  for (const [index, required] of [
+    [0, 'var pi = std.mem.zeroes(PROCESS_INFORMATION);'],
+    [0, 'const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying;'],
+    [0, 'app_state.shells[idx].pid = job.pid;'], [1, 'normalizeGroupOrder();'],
+  ]) {
+    const broken = [...sources];
+    broken[index] = broken[index].replaceAll(required, '');
+    assert.notEqual(broken[index], sources[index], required);
+    assert.throws(() => timing(...broken), assert.AssertionError, required);
+  }
+  const sidebar = read('src/sidebar.zig');
+  const normalize = sidebar.slice(sidebar.indexOf('pub fn normalizeGroupOrder()'), sidebar.indexOf('pub fn applyPendingGroup()'));
+  assert.match(normalize, /if \(app_state.g_starred_workspace\) return;/);
+  assert.match(normalize, /tmp\[written\] = app_state.shells\[i\];[\s\S]*?const gid = app_state.shells\[i\].group_id;[\s\S]*?if \(gid == 0\) continue;/);
+  assert.match(normalize, /if \(app_state.shells\[j\].group_id == gid\) \{\s*tmp\[written\] = app_state.shells\[j\];/);
+  const rows = [
+    { name: 'A', group: 0 }, { name: 'Restore first', group: 7 },
+    { name: 'Restore last', group: 0 }, { name: 'Restore middle', group: 7 },
+  ].map((row, i) => ({ ...row, pid: 0, shell_id: i + 101, console_inflight: true }));
+  function normalized(input) {
+    const result = [];
+    for (const row of input) {
+      if (result.includes(row)) continue;
+      result.push(row);
+      if (row.group) for (const member of input) if (member.group === row.group && !result.includes(member)) result.push(member);
+    }
+    return result;
+  }
+  const ordered = normalized(rows);
+  const selected = rows[3];
+  assert.deepEqual(ordered.map(row => row.name), ['A', 'Restore first', 'Restore middle', 'Restore last']);
+  assert.equal(ordered.indexOf(selected), 2);
+  assert.equal(ordered[3].name, 'Restore last');
+  assert.equal(selected.pid, 0);
+  assert.equal(ordered.findIndex(row => row.shell_id === selected.shell_id), 2);
+  assert.deepEqual(normalized(rows.map(row => ({ ...row, group: 0 }))).map(row => row.name), rows.map(row => row.name));
+});
+
+test('ISSUE-569 cross-workspace favorite journey requires the saved pair on close and kill', () => {
+  function contract(driver, map) {
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    const cross = recipe.slice(recipe.indexOf("            foreach ($stage in @('favorite-cross-workspace-close'"));
+    let offset = -1;
+    for (const step of [
+      "foreach ($stage in @('favorite-cross-workspace-close', 'favorite-cross-workspace-kill'))",
+      'Doctor', "Press @(0x12, 0x32) 'Alt+2:",
+      '$state.active_workspace -eq 0', '$saved.active_workspace -eq 0',
+      '$state.starred_view -eq $false -and $saved.starred_view -eq $false',
+      "Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A'",
+      "Focus-Palette 'Restore middle' $middleIndex",
+      "Press @(0x0D) 'Enter: select the workspace B favorite by name in Starred'",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "Restart-SessionRestore $stage ($stage -eq 'favorite-cross-workspace-kill')",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      '$_.workspace -eq $workspace -and $_.favorite -eq $true',
+      "($stage + '-after.inbox.json')", "($stage + '-after.session.json')", "Snapshot ($stage + '-after')",
+      "name = 'favorite-cross-workspace-selection'",
+      "$requiredChecks = @('normal-close-selection', 'starred-view-selection', 'favorite-home-selection', 'process-kill-selection', 'favorite-cross-workspace-selection', 'update-restart-selection')",
+      'foreach ($check in $requiredChecks)',
+      'if (@($result.checks | Where-Object { $_.name -ceq $check }).Count -ne 1) { throw',
+      'if ($result.checks.Count -ne $requiredChecks.Count) { throw',
+    ]) {
+      const next = cross.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.match(recipe, /if \(\$workspace -eq 0 -or \[string\]::IsNullOrWhiteSpace\(\$workspaceId\)\) \{ throw/);
+    assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|Start-Sleep/);
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.doesNotMatch(restart, /session\.json\.launch\.json|\$launch\.starred|\$launch\.active/);
+    assert.ok(driver.indexOf("name = 'favorite-cross-workspace-selection'") < driver.indexOf("    $result.status = 'passed'"));
+    for (const word of ['favorite-cross-workspace-selection', 'workspace A', 'workspace B', 'starred_view', 'launch snapshot', 'all six checks']) assert.ok(map.includes(word), word);
+  }
+  const map = read(skill + 'features/session-restore.md');
+  contract(control, map);
+  for (const required of [
+    "'favorite-cross-workspace-close', 'favorite-cross-workspace-kill'",
+    "Press @(0x12, 0x32) 'Alt+2: open workspace A, not the favorite home workspace B'",
+    "Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A'",
+    "Press @(0x0D) 'Enter: select the workspace B favorite by name in Starred'",
+    "Restart-SessionRestore $stage ($stage -eq 'favorite-cross-workspace-kill')",
+    '$_.workspace -eq $workspace -and $_.favorite -eq $true',
+    "name = 'favorite-cross-workspace-selection'",
+    'if (@($result.checks | Where-Object { $_.name -ceq $check }).Count -ne 1) { throw',
+  ]) {
+    const broken = control.replaceAll(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => contract(broken, map));
+  }
+  assert.throws(() => contract(control, map.replaceAll('favorite-cross-workspace-selection', '')));
+});
+
+
+test('ISSUE-569 updater restart uses the real helper and judges only the restored view and session', () => {
+  function contract(driver, map) {
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    let offset = -1;
+    for (const step of [
+      '[bool]$Updater = $false', '$oldPid = $process.Id', 'if ($Updater) {',
+      '$nextJob = New-Object VerifyJob',
+      "$helper = $nextJob.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), ('--relaunch-after ' + $oldPid))",
+      '$process.CloseMainWindow()', '$process.WaitForExit(20000)', '$job.Stop()',
+      '$candidateWindow = [IntPtr]([long]$state.hwnd)',
+      '[VerifyNative]::GetWindowThreadProcessId($candidateWindow, [ref]$owner)',
+      '$owner -eq $oldPid -or $owner -eq $helper.Id',
+      '$candidate = Get-Process -Id $owner',
+      '$nextJob.Contains($candidate) -or $candidate.Path -ne $Exe',
+      '$script:process = $candidate', '$helper.WaitForExit(20000)',
+      '$script:job = $nextJob', '$nextJob = $null',
+      "$trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'",
+      'if ($null -ne $nextJob)', '$nextJob.Stop()', '$nextJob.Dispose()',
+    ]) {
+      const next = restart.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.match(driver, /Check\(IsProcessInJob\(process.Handle, job, out result\)\);\s*return result;/);
+    const updater = restart.slice(restart.indexOf('    if ($Updater) {', restart.indexOf('$script:window = [IntPtr]::Zero')), restart.indexOf('    } else {', restart.indexOf('$script:window = [IntPtr]::Zero')));
+    assert.doesNotMatch(updater, /\.Start\(|Stop-Process/);
+    assert.doesNotMatch(restart, /session\.json\.launch\.json|\$launch\.starred|\$launch\.active/);
+    const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    offset = -1;
+    for (const step of [
+      "Press @(0x12, 0x32) 'Alt+2: open workspace A before updater restart'",
+      '$state.active_workspace -eq 0', '$saved.active_workspace -eq 0',
+      "Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A before updater restart'",
+      "Focus-Palette 'Restore middle' $middleIndex",
+      "Press @(0x0D) 'Enter: select the workspace B favorite by name before updater restart'",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "Restart-SessionRestore 'update-restart' $false $true",
+      "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
+      "'updater favorite retains its original home and favorite flag'",
+      "'update-restart-after.inbox.json'", "'update-restart-after.session.json'", "Snapshot 'update-restart-after'",
+      "name = 'update-restart-selection'", "Restart-SessionRestore 'normal-close' $false",
+    ]) {
+      const next = recipe.indexOf(step, offset + 1);
+      assert.ok(next > offset, `missing or misordered ${step}`);
+      offset = next;
+    }
+    assert.match(recipe, /\$requiredChecks = @\([^\n]*'update-restart-selection'\)/);
+    const selection = driver.slice(driver.indexOf('function Assert-SessionRestoreSelection('), driver.indexOf('function Select-Theme('));
+    for (const observation of [
+      '$_.sid -eq $state.active_shell_id', '$selected[0].name -ceq $Name',
+      '$saved.tabs[$saved.active_tab].name -ceq $Name',
+      '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
+    ]) assert.ok(selection.includes(observation), observation);
+    for (const word of ['update-restart-selection', '--relaunch-after', 'WM_CLOSE', 'No launch-snapshot schema assertion', 'all six checks']) assert.ok(map.includes(word), word);
+  }
+  const map = read(skill + 'features/session-restore.md');
+  contract(control, map);
+  for (const required of [
+    "('--relaunch-after ' + $oldPid)", '$nextJob.Contains($candidate)',
+    '$candidate.Path -ne $Exe', '$script:process = $candidate',
+    "Restart-SessionRestore 'update-restart' $false $true", "name = 'update-restart-selection'",
+    '$saved.tabs[$saved.active_tab].name -ceq $Name', '$state.starred_view -eq $Starred',
+    '$saved.starred_view -eq $Starred', 'Check(IsProcessInJob(process.Handle, job, out result));',
+  ]) {
+    const broken = control.replace(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => contract(broken, map), assert.AssertionError, required);
+  }
+  const coupled = control.replace('    $oldPid = $process.Id', "    $launch = Get-Content 'session.json.launch.json'\n    $oldPid = $process.Id");
+  assert.throws(() => contract(coupled, map), assert.AssertionError);
+  assert.throws(() => contract(control, map.replaceAll('update-restart-selection', '')), assert.AssertionError);
+});
+
+
+test('ISSUE-569 fast and deferred restore keep the authoritative view and session paired', () => {
+  function contract(snapshot, cache, session, console) {
+    const schema = snapshot.slice(snapshot.indexOf('pub const Snapshot = struct'), snapshot.indexOf('pub fn encode('));
+    assert.match(schema, /starred: bool = false,/);
+    const restoreCache = cache.slice(cache.indexOf('pub fn restore()'), cache.indexOf('pub fn painted('));
+    assert.match(restoreCache, /state.g_starred_workspace = s.starred;/);
+    assert.doesNotMatch(restoreCache, /selected_shell_id\s*=/);
+    const saveCache = cache.slice(cache.indexOf('pub fn save()'), cache.indexOf('test "'));
+    assert.match(saveCache, /\.starred = state.g_starred_workspace,/);
+    assert.match(saveCache, /\.active = state.shells\[state.active_shell\].shell_id,/);
+    const save = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.match(save, /if \(@import\("launch_cache.zig"\).pending\) \{\s*if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
+    assert.match(save, /selected_shell_id = shell_id;\s*@import\("launch_cache.zig"\).selected_starred = app_state.g_starred_workspace;/);
+    assert.match(save, /selected_live_shell_id = if \(@import\("launch_cache.zig"\).tabs_restored or !@import\("launch_cache.zig"\).cachedShell\(shell_id\)\) shell_id else 0;/);
+    assert.match(save, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
+    assert.ok(save.indexOf('else if (!@import("launch_cache.zig").tabs_restored) return;') < save.indexOf('saveSessionTo('));
+    const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
+    assert.doesNotMatch(switching, /selected_shell_id\s*=/);
+    const view = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(view, /pending and @import\("launch_cache.zig"\).selected_shell_id != 0/);
+    assert.match(view, /if \(@import\("launch_cache.zig"\).selected_live_shell_id != 0\) return @import\("launch_cache.zig"\).selected_starred;/);
+    assert.match(view, /if \(tab.shell_id == @import\("launch_cache.zig"\).selected_shell_id\) return @import\("launch_cache.zig"\).selected_starred;/);
+    assert.match(view, /if \(!json_reader.boolTrue\(json, "starred_view"\)\) return false;/);
+    assert.match(view, /return selectedSavedTab\(json, tabs, 0\) != null;/);
+    assert.doesNotMatch(view, /g_starred_workspace/);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
+    assert.match(restore, /const restore_starred = savedStarredView\(json, tabs\[0\.\.tab_count\]\);/);
+    assert.ok(restore.indexOf('const restore_starred =') < restore.indexOf('spawnSavedTab('));
+    assert.match(restore, /restoreStarredView\(restore_starred and \(restored_active_shell_id != 0 or selected_live != 0\)\);/);
+    for (const name of [
+      'ISSUE-569 launch snapshot round trips the Starred selection pair',
+      'ISSUE-569 legacy launch snapshot without Starred decodes as false',
+    ]) assert.ok(snapshot.includes(`test "${name}"`), name);
+    assert.match(snapshot, /for \(\[_\]bool\{ false, true \}\) \|starred\|/);
+    assert.match(snapshot, /expectEqual\(starred, parsed.value.starred\)/);
+    assert.match(snapshot, /expect\(!parsed.value.starred\)/);
+    for (const name of [
+      'ISSUE-569 Starred saved with the favorite in a non-active workspace restores Starred',
+      'ISSUE-569 saved view and selected session use the same source during startup',
+    ]) assert.ok(session.includes(`test "${name}"`), name);
+    assert.ok(session.includes('@as(u64, if (saved_starred) 0 else 1), json_reader.uint(parsed.value, "active_workspace")'));
+    assert.ok(session.includes('@as(u8, 1), tabs[selected].workspace'));
+    assert.ok(session.includes('try testStarredSelectionRoundTrip(true, true, true);'));
+    assert.ok(session.includes('selected_shell_id = if (startup_user_selection) tabs[selected].shell_id else 0;'));
+    assert.ok(session.includes('restoreStarredView(savedStarredView(parsed.value, tabs[0..count]))'));
+  }
+  const sources = [read('src/launch_snapshot.zig'), read('src/launch_cache.zig'), read('src/session.zig'), read('src/console.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, '    starred: bool = false,', ''],
+    [1, '    state.g_starred_workspace = s.starred;', ''],
+    [1, '        .starred = state.g_starred_workspace,', ''],
+    [1, '    const s = parsed.value;', '    const s = parsed.value;\n    selected_shell_id = s.active;'],
+    [2, 'app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count', 'app_state.active_shell < app_state.shell_count'],
+    [2, 'selected_starred = app_state.g_starred_workspace;', 'selected_starred = false;'],
+    [2, 'else if (!@import("launch_cache.zig").tabs_restored) return;', ''],
+    [2, 'return @import("launch_cache.zig").selected_starred;', 'return app_state.g_starred_workspace;'],
+    [2, 'if (tab.shell_id == @import("launch_cache.zig").selected_shell_id)', 'if (true)'],
+    [2, 'return selectedSavedTab(json, tabs, 0) != null;', 'return true;'],
+    [2, '    const restore_starred = savedStarredView(json, tabs[0..tab_count]);', ''],
+    [3, '        saveSession();\n    }\n    if (idx < app_state.shell_count)', '        @import("launch_cache.zig").selected_shell_id = app_state.shells[idx].shell_id;\n        saveSession();\n    }\n    if (idx < app_state.shell_count)'],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken), assert.AssertionError, before);
+  }
+});
+
+
+test('ISSUE-569 respawn selection survives PID-zero normalization and automatic refresh', () => {
+  function contract(sidebar, session) {
+    const consoleSource = read('src/console.zig');
+    const complete = consoleSource.slice(consoleSource.indexOf('pub fn finishStartupShell('));
+    assert.doesNotMatch(complete, /active_shell\s*=|switchToShell/);
+    const normalize = sidebar.slice(sidebar.indexOf('pub fn normalizeGroupOrder()'), sidebar.indexOf('pub fn applyPendingGroup()'));
+    assert.match(normalize, /const active_id = if \(app_state.active_shell < app_state.shell_count\) app_state.shells\[app_state.active_shell\].shell_id else 0;/);
+    assert.match(normalize, /if \(active_id != 0\)/);
+    assert.match(normalize, /if \(app_state.shells\[k\].shell_id == active_id\) \{\s*app_state.active_shell = k;/);
+    assert.doesNotMatch(normalize, /\.pid|active_pid/);
+    const savedView = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(savedView, /return selectedSavedTab\(json, tabs, 0\) != null;/);
+    const regression = session.slice(session.indexOf('test "ISSUE-569 respawned selection'), session.indexOf('test "ISSUE-569 saved view and selected session use'));
+    for (const name of ['First', 'Selected', 'Middle', 'Winner']) assert.ok(regression.includes(`\\"name\\":\\"${name}\\"`), name);
+    for (const observation of [
+      'ISSUE-569 respawned selection falls back to saved index and tmux identity before group normalization',
+      'for ([_]u32{ 896, 999 }) |saved_id|', 'const selected = selectedSavedTab(parsed.value, tabs[0..count], 0).?;',
+      'expectEqual(@as(u32, 3), selected)', 'expect(savedStarredView(parsed.value, tabs[0..count]))',
+      'const restored_shell_ids = [_]u32{ 913, 0, 914, 915 };', 'console_inflight = true;',
+      'expect(findShellById(saved_id) == null)', 'findShellById(restored_shell_ids[selected]).?',
+      'group_id = if (i == 1) 0 else 7;', 'normalizeGroupOrder();\n        try std.testing.expectEqual(@as(u32, 1)',
+      'expectEqual(@as(u32, 1), app_state.active_shell)',
+      'expectEqual(@as(DWORD, 0), app_state.shells[app_state.active_shell].pid)',
+      'ISSUE-569 automatic Starred refresh after respawn keeps the restored session without input',
+      'app_state.g_starred_last_shell = 915;', 'app_state.g_focus_user_action_tick = 0;',
+      '@import("workspaces.zig").refreshStarredWorkspace();',
+      'expectEqual(@as(u32, 915), app_state.shells[app_state.active_shell].shell_id)',
+      'expectEqual(@as(u8, 1), app_state.shells[app_state.active_shell].workspace)',
+      'expect(app_state.g_starred_workspace)',
+    ]) assert.ok(regression.includes(observation), observation);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('fn writeStartupLastgood('));
+    assert.ok(restore.indexOf('findShellById(restored_active_shell_id)') < restore.indexOf('normalizeGroupOrder();'));
+  }
+  const sidebar = read('src/sidebar.zig');
+  const session = read('src/session.zig');
+  contract(sidebar, session);
+  const before = read('tools/fixtures/igsh-569/normalize-before.zig');
+  assert.throws(() => contract(before, session), assert.AssertionError);
+  for (const [source, old, replacement] of [
+    [0, 'if (active_id != 0)', 'if (false)'],
+    [0, 'shells[k].shell_id == active_id', 'shells[k].pid == active_id'],
+    [1, 'return selectedSavedTab(json, tabs, 0) != null;', 'return false;'],
+    [1, 'normalizeGroupOrder();\n        try std.testing.expectEqual(@as(u32, 1)', 'try std.testing.expectEqual(@as(u32, 1)'],
+    [1, '@import("workspaces.zig").refreshStarredWorkspace();', ''],
+  ]) {
+    const broken = [sidebar, session];
+    broken[source] = broken[source].replace(old, replacement);
+    assert.notEqual(broken[source], [sidebar, session][source], old);
+    assert.throws(() => contract(...broken), assert.AssertionError, old);
+  }
 });

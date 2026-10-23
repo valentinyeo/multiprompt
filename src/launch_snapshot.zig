@@ -23,6 +23,7 @@ pub const Snapshot = struct {
     version: u32 = 1,
     active: u32,
     workspace: u8 = 0,
+    starred: bool = false,
     workspaces: []const []const u8 = &.{},
     groups: []const Group = &.{},
     rows: []const Row,
@@ -126,4 +127,26 @@ test "IGSH-556 launch snapshot preserves both memberships with legacy defaults" 
     const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[67],\"group_id\":17}]}")).?;
     defer legacy.deinit();
     try std.testing.expectEqual(@as(u32, 0), legacy.value.rows[0].starred_group_id);
+}
+
+test "ISSUE-569 launch snapshot round trips the Starred selection pair" {
+    const a = std.testing.allocator;
+    for ([_]bool{ false, true }) |starred| {
+        const bytes = try encode(a, .{ .active = 42, .workspace = 0, .starred = starred, .rows = &.{.{ .id = 42, .workspace = 1, .favorite = true, .name = &.{ 'B' } }} });
+        defer a.free(bytes);
+        const parsed = (try decode(a, bytes)).?;
+        defer parsed.deinit();
+        try std.testing.expectEqual(starred, parsed.value.starred);
+        try std.testing.expectEqual(@as(u32, 42), parsed.value.active);
+        try std.testing.expectEqual(@as(u8, 0), parsed.value.workspace);
+        try std.testing.expectEqual(@as(u8, 1), parsed.value.rows[0].workspace);
+    }
+}
+
+test "ISSUE-569 legacy launch snapshot without Starred decodes as false" {
+    const parsed = (try decode(std.testing.allocator, "{\"active\":42,\"workspace\":0,\"rows\":[{\"id\":42,\"workspace\":1,\"favorite\":true,\"name\":[66]}]}")).?;
+    defer parsed.deinit();
+    try std.testing.expect(!parsed.value.starred);
+    try std.testing.expectEqual(@as(u32, 42), parsed.value.active);
+    try std.testing.expect(parsed.value.rows[0].favorite);
 }

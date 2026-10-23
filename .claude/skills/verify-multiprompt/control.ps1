@@ -617,6 +617,7 @@ public sealed class VerifyJob : IDisposable {
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits limits, int size);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, out Accounting info, int size, IntPtr returned);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job, uint code);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcess(string app, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInfo process);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFile(string path, uint access, uint share, ref SecurityAttributes attributes, uint disposition, uint flags, IntPtr template);
@@ -680,6 +681,11 @@ public sealed class VerifyJob : IDisposable {
             if (output != IntPtr.Zero) CloseHandle(output);
             if (error != IntPtr.Zero) CloseHandle(error);
         }
+    }
+    public bool Contains(System.Diagnostics.Process process) {
+        bool result;
+        Check(IsProcessInJob(process.Handle, job, out result));
+        return result;
     }
     public Accounting ReadAccounting() {
         Accounting info;
@@ -812,7 +818,7 @@ function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     do {
-        if ($process.HasExited) { throw "App exited while waiting for $Description" }
+        if ($null -ne $process -and $process.HasExited) { throw "App exited while waiting for $Description" }
         try { if (& $Condition) { return } } catch { $lastError = $_.Exception.Message }
         if ($Tight) { [Threading.Thread]::Sleep(1) } else { Start-Sleep -Milliseconds $PollMilliseconds }
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -1196,11 +1202,63 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
     } finally { $reply.Dispose(); $client.Dispose() }
 }
 
-function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
+function Prepare-SessionRestoreGroupOrder([string]$Stage) {
+    $saved = Read-Session
+    $tabs = @($saved.tabs)
+    $middle = [int]$saved.active_tab
+    if (-not $saved.starred_view -or $tabs[$middle].name -cne 'Restore middle') { throw 'Group reorder requires the selected middle favorite in Starred' }
+    $first = -1
+    $last = -1
+    for ($i = 0; $i -lt $tabs.Count; $i++) {
+        if ($tabs[$i].name -ceq 'Restore first') { $first = $i }
+        if ($tabs[$i].name -ceq 'Restore last') { $last = $i }
+    }
+    if ($first -lt 0 -or $last -lt 0 -or $first -ge $middle -or $first -ge $last -or
+        -not $tabs[$first].PSObject.Properties['group_id'] -or -not $tabs[$middle].PSObject.Properties['group_id'] -or
+        $tabs[$first].group_id -eq 0 -or $tabs[$first].group_id -ne $tabs[$middle].group_id -or
+        $tabs[$last].PSObject.Properties['group_id'] -or $tabs[$middle].PSObject.Properties['starred_group_id'] -or
+        $tabs[$last].PSObject.Properties['starred_group_id']) { throw 'Expected one home group and an ungrouped Starred neighbor' }
+    if ($middle + 1 -eq $last) {
+        Press @(0x11, 0x10, 0x28) 'Ctrl+Shift+Down: split the home group by moving its selected favorite below the ungrouped favorite in Starred'
+    } elseif ($last + 1 -ne $middle) {
+        throw 'Expected adjacent middle and last sessions before the Starred reorder'
+    }
+    Wait-Until {
+        $saved = Read-Session
+        $tabs = @($saved.tabs)
+        $middle = [int]$saved.active_tab
+        $state = Read-Inbox
+        $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+        $middle -ge 2 -and $saved.starred_view -and $state.starred_view -and
+            $tabs[$middle].name -ceq 'Restore middle' -and $tabs[$middle - 1].name -ceq 'Restore last' -and
+            $tabs[$middle - 2].name -ceq 'Restore first' -and [int]$tabs[$middle].group_id -ne 0 -and
+            $tabs[$middle - 2].group_id -eq $tabs[$middle].group_id -and -not $tabs[$middle - 1].PSObject.Properties['group_id'] -and
+            $selected.Count -eq 1 -and $selected[0].name -ceq 'Restore middle'
+    } "$Stage saved selected index moves left when the split home group is normalized"
+    $saved = Read-Session
+    $middle = [int]$saved.active_tab
+    Save-Json @{ savedIndex = $middle; normalizedIndex = ($middle - 1); selected = 'Restore middle'; wrongAtSavedIndex = 'Restore last'; session = $saved } ($Stage + '-group-order.json')
+}
+
+function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $false) {
     Doctor
     if ($process.MainWindowHandle -ne $script:window) { throw 'Refusing to close a different window' }
     Save-Json (Read-Inbox) ($Stage + '-before.inbox.json')
     Save-Json (Read-Session) ($Stage + '-before.session.json')
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $logStart = ((Get-Content $log -Raw) -join '').Length
+    $oldPid = $process.Id
+    $nextJob = $null
+    $helper = $null
+    try {
+    if ($Updater) {
+        if ($Crash) { throw 'Updater restart requires WM_CLOSE' }
+        $nextJob = New-Object VerifyJob
+        Record 'Start the real updater relaunch helper before WM_CLOSE'
+        $helper = $nextJob.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), ('--relaunch-after ' + $oldPid))
+        if ($helper.HasExited) { throw 'Updater helper exited before the old app closed' }
+        Save-Json @{ oldPid = $oldPid; helperPid = $helper.Id; arguments = ('--relaunch-after ' + $oldPid) } ($Stage + '-helper.json')
+    }
     if ($Crash) {
         Record 'Kill only the verified owned app PID after selection persistence'
         Stop-Process -Id $process.Id -Force
@@ -1216,10 +1274,31 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
     $script:process = $null
     $script:job = $null
     $script:window = [IntPtr]::Zero
-    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $logStart = ((Get-Content $log -Raw) -join '').Length
-    $script:job = New-Object VerifyJob
-    $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), '--single-window')
+    if ($Updater) {
+        Wait-Until {
+            $state = Read-Inbox
+            if ($null -eq $state -or -not $state.hwnd) { return $false }
+            $candidateWindow = [IntPtr]([long]$state.hwnd)
+            [uint32]$owner = 0
+            [void][VerifyNative]::GetWindowThreadProcessId($candidateWindow, [ref]$owner)
+            if ($owner -eq 0 -or $owner -eq $oldPid -or $owner -eq $helper.Id) { return $false }
+            $candidate = Get-Process -Id $owner -ErrorAction SilentlyContinue
+            if ($null -eq $candidate) { return $false }
+            if (-not $nextJob.Contains($candidate) -or $candidate.Path -ne $Exe) {
+                $candidate.Dispose()
+                throw 'Updater relaunched window is not owned by the helper job'
+            }
+            $script:process = $candidate
+            $script:window = $candidateWindow
+            return $true
+        } "$Stage updater helper publishes its new owned app" 60
+        if (-not $helper.WaitForExit(20000) -or $helper.ExitCode -ne 0) { throw 'Updater helper did not exit successfully' }
+        $script:job = $nextJob
+        $nextJob = $null
+    } else {
+        $script:job = New-Object VerifyJob
+        $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), '--single-window')
+    }
     Wait-Until {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
@@ -1245,6 +1324,12 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
             $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
     } "$Stage relaunch owns its published state after session restore" 60
     Doctor
+    } finally {
+        if ($null -ne $helper) { $helper.Dispose() }
+        if ($null -ne $nextJob) {
+            try { $null = $nextJob.Stop() } finally { $nextJob.Dispose() }
+        }
+    }
 }
 
 function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]$WorkspaceId, [bool]$Starred = $false) {
@@ -1536,6 +1621,9 @@ try {
         }
         'session-restore' {
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
+            Focus-Palette 'tab order' 6217
+            Press @(0x28) 'Down: Tab Order Manual'
+            Press @(0x0D) 'Enter: keep creation order before grouping restore sessions'
             $before = (Read-Session).workspace_count
             Press @(0x11, 0x4E) 'Ctrl+N: create a different workspace with its first CMD session'
             Wait-Until { $script:createdSession = Read-Session; $null -ne $script:createdSession -and $script:createdSession.workspace_count -eq $before + 1 } 'new workspace persisted'
@@ -1555,6 +1643,24 @@ try {
                 Type-Text $names[$i]
                 Press @(0x0D) 'Enter: save restore session name'
                 Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq $names[$i] -and $_.kind -ceq 'cmd' }).Count -eq 1 } 'unique local CMD name persisted'
+                if ($i -lt 2) {
+                    Focus-Palette 'move to group' 6301
+                    Press @(0x0D) 'Enter: Move to Group submenu for the active restore session'
+                    $groupQuery = if ($i -eq 0) { 'new group' } else { 'Group 1' }
+                    $groupTarget = if ($i -eq 0) { 6303 } else { 6320 }
+                    Type-Text $groupQuery
+                    Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match ('\[palette\] ready chars=' + $groupQuery.Length + ' count=[1-9]\d* target=' + $groupTarget + '(?:\r?\n|$)') } 'group submenu query selects the existing UI action'
+                    Press @(0x0D) 'Enter: assign the active restore session to its home sidebar group'
+                    Wait-Until {
+                        $saved = Read-Session
+                        $saved.PSObject.Properties['groups'] -and @($saved.groups).Count -eq 1 -and $saved.groups[0].name -ceq 'Group 1' -and
+                            @($saved.tabs | Where-Object { $_.name -ceq $names[$i] -and $_.PSObject.Properties['group_id'] -and $_.group_id -eq $saved.groups[0].id }).Count -eq 1
+                    } 'home group membership persisted through real palette input'
+                }
+                if ($i -ne 1) {
+                    Press @(0x12, 0x53) 'Alt+S: favorite the reorder companion session'
+                    Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq $names[$i] -and $_.favorite -eq $true }).Count -eq 1 } 'reorder companion favorite persisted'
+                }
             }
             $tabs = @((Read-Session).tabs)
             $middleIndex = -1
@@ -1569,6 +1675,28 @@ try {
             Focus-Palette 'Restore middle' $middleIndex
             Press @(0x0D) 'Enter: select the favorite in Starred'
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+            Snapshot 'action'
+            Press @(0x12, 0x32) 'Alt+2: open workspace A before updater restart'
+            Wait-Until {
+                $state = Read-Inbox
+                $saved = Read-Session
+                $null -ne $state -and $null -ne $saved -and $state.active_workspace -eq 0 -and
+                    $saved.active_workspace -eq 0 -and $state.starred_view -eq $false -and $saved.starred_view -eq $false
+            } 'workspace A active before updater Starred selection'
+            Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A before updater restart'
+            Focus-Palette 'Restore middle' $middleIndex
+            Press @(0x0D) 'Enter: select the workspace B favorite by name before updater restart'
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+            Prepare-SessionRestoreGroupOrder 'update-restart'
+            Snapshot 'update-restart-action'
+            Restart-SessionRestore 'update-restart' $false $true
+            Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+            Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.workspace -eq $workspace -and $_.favorite -eq $true }).Count -eq 1 } 'updater favorite retains its original home and favorite flag'
+            Save-Json (Read-Inbox) 'update-restart-after.inbox.json'
+            Save-Json (Read-Session) 'update-restart-after.session.json'
+            Snapshot 'update-restart-after'
+            $result.checks += @{ name = 'update-restart-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; starred_view = (Read-Inbox).starred_view; shellId = (Read-Inbox).active_shell_id }
+            Prepare-SessionRestoreGroupOrder 'normal-close'
             Snapshot 'action'
             Restart-SessionRestore 'normal-close' $false
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
@@ -1619,7 +1747,40 @@ try {
             Save-Json (Read-Inbox) 'process-kill-after.inbox.json'
             Save-Json (Read-Session) 'process-kill-after.session.json'
             $result.checks += @{ name = 'process-kill-selection'; session = 'Restore first'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
-            if ($result.checks.Count -ne 4) { throw 'All selection and workspace-view restore checks are required' }
+            foreach ($stage in @('favorite-cross-workspace-close', 'favorite-cross-workspace-kill')) {
+                Wait-Until {
+                    Doctor
+                    [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+                } "$stage hook-ready owned foreground before workspace input"
+                Press @(0x12, 0x32) 'Alt+2: open workspace A, not the favorite home workspace B'
+                Wait-Until {
+                    $state = Read-Inbox
+                    $saved = Read-Session
+                    $null -ne $state -and $null -ne $saved -and $state.active_workspace -eq 0 -and
+                        $saved.active_workspace -eq 0 -and $state.starred_view -eq $false -and $saved.starred_view -eq $false
+                } 'workspace A active before opening Starred from outside the favorite home'
+                Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A'
+                $tabs = @((Read-Session).tabs)
+                $middleIndex = -1
+                for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
+                if ($middleIndex -lt 0) { throw 'Cross-workspace favorite missing from saved tabs' }
+                Focus-Palette 'Restore middle' $middleIndex
+                Press @(0x0D) 'Enter: select the workspace B favorite by name in Starred'
+                Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+                Prepare-SessionRestoreGroupOrder $stage
+                Restart-SessionRestore $stage ($stage -eq 'favorite-cross-workspace-kill')
+                Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
+                Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.workspace -eq $workspace -and $_.favorite -eq $true }).Count -eq 1 } 'cross-workspace favorite retains its original home and favorite flag'
+                Save-Json (Read-Inbox) ($stage + '-after.inbox.json')
+                Save-Json (Read-Session) ($stage + '-after.session.json')
+                Snapshot ($stage + '-after')
+            }
+            $result.checks += @{ name = 'favorite-cross-workspace-selection'; session = 'Restore middle'; openedFromWorkspace = 0; workspace = $workspace; workspaceId = $workspaceId; starred_view = (Read-Inbox).starred_view }
+            $requiredChecks = @('normal-close-selection', 'starred-view-selection', 'favorite-home-selection', 'process-kill-selection', 'favorite-cross-workspace-selection', 'update-restart-selection')
+            foreach ($check in $requiredChecks) {
+                if (@($result.checks | Where-Object { $_.name -ceq $check }).Count -ne 1) { throw "Required session restore check missing or duplicated: $check" }
+            }
+            if ($result.checks.Count -ne $requiredChecks.Count) { throw 'All selection and workspace-view restore checks are required' }
             Snapshot 'after'
         }
         'workspaces' {
