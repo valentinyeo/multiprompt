@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.839", .items = &.{
+        .{ .text = "Multiprompt now reopens Favorites with the same selected session, even when it belongs to another workspace.", .ticket = "IGSH-569" },
+    } },
     .{ .ver = "0.28.838", .items = &.{
         .{ .text = "Local connections now stay within your Windows account, screenshot links are checked, and CMD tabs use the Windows system shell.", .ticket = "IGSH-664" },
     } },
