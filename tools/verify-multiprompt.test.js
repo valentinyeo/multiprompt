@@ -1626,3 +1626,46 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
   assert.match(read(skill + 'features/README.md'), /\[Remind Me\]\(remind-me.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`remind-me`/);
 });
+
+test('IGSH-706 inbox journey proves mute hides the published session without closing its tab and unmute restores it', () => {
+  const inbox = control.slice(control.indexOf("        'inbox' {"), control.indexOf("        'remind-me' {"));
+  const steps = [
+    /Snapshot 'returned'\s+\$sid = \(Read-Inbox\)\.shells\[0\]\.sid/,
+    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 1 \}/,
+    /Wait-Until \{ \$state = Read-Session; \$null -ne \$state -and \$state\.active_tab -ge 0 -and \$state\.tabs\[\$state\.active_tab\]\.shell_id -eq \$sid \}/,
+    /\$baseline = Read-Session\s+Palette 'mute tab'\s+Press @\(0x0D\) 'Enter: mute the current tab'/,
+    /Wait-Until \{\s+\$state = Read-Session\s+\$null -ne \$state -and \$state\.active_tab -eq \$baseline\.active_tab -and\s+\$state\.tabs\[\$state\.active_tab\]\.shell_id -eq \$sid -and\s+\$state\.tabs\[\$state\.active_tab\]\.PSObject\.Properties\['muted'\] -and \$state\.tabs\[\$state\.active_tab\]\.muted -eq \$true\s+\}/,
+    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 0 \}/,
+    /Press @\(0x11, 0x10, 0x49\) 'Ctrl\+Shift\+I: open Inbox with the session muted'/,
+    /Wait-Until \{ \[VerifyNative\]::Title\(\$script:window\)\.StartsWith\('Inbox - '\) \}/,
+    /Press @\(0x12, 0x49\) 'Alt\+I: select All split with the session muted'\s+Snapshot 'muted'/,
+    /\$result\.checks \+= @\{ name = 'inbox-muted-hidden'; sid = \$sid; listed = \$false; title = \[VerifyNative\]::Title\(\$script:window\) \}/,
+    /Press @\(0x1B\) 'Esc: return from Inbox with the session muted'\s+Wait-Until \{ -not \[VerifyNative\]::Title\(\$script:window\)\.StartsWith\('Inbox - '\) \}/,
+    /Wait-Until \{\s+\$state = Read-Session\s+\$null -ne \$state -and @\(\$state\.tabs\)\.Count -eq @\(\$baseline\.tabs\)\.Count -and\s+@\(\$state\.tabs \| Where-Object \{ \$_\.shell_id -eq \$sid \}\)\.Count -eq 1\s+\}/,
+    /Snapshot 'muted-returned'\s+Palette 'unmute tab'\s+Press @\(0x0D\) 'Enter: unmute the current tab'/,
+    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 1 \}/,
+    /\$result\.checks \+= @\{ name = 'inbox-unmuted-listed'; sid = \$sid; listed = \$true \}/,
+  ];
+  function contract(source) {
+    let remaining = source;
+    for (const step of steps) {
+      const match = remaining.match(step);
+      assert.ok(match, `missing or misordered ${step}`);
+      remaining = remaining.slice(match.index + match[0].length);
+    }
+    assert.doesNotMatch(source, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
+  }
+  const mute = inbox.slice(inbox.indexOf("Snapshot 'returned'"));
+  contract(mute);
+  for (const step of steps) {
+    const broken = mute.replace(step, '');
+    assert.notEqual(broken, mute);
+    assert.throws(() => contract(broken), assert.AssertionError);
+  }
+  const map = read(skill + 'features/inbox.md');
+  for (const item of ['`inbox-mute`', '`shells[0].sid`', '`mute tab`', '`muted: true`', '`inbox-muted-hidden`', '`listed=false`', '`unmute tab`', '`inbox-unmuted-listed`', '`listed=true`']) assert.ok(map.includes(item), item);
+  for (const shot of ['action', 'after', 'returned', 'muted', 'muted-returned']) {
+    assert.ok(inbox.includes(`Snapshot '${shot}'`));
+    assert.ok(map.includes(`\`${shot}.png\``));
+  }
+});
