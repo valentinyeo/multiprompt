@@ -671,7 +671,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
     assert.match(restart, /\$script:process = \$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
     assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
     assert.match(restart, /Substring\(\$logStart\)/);
-    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     assert.doesNotMatch(restart, /no-window-restore|Remove-Item|Set-Content|WriteAll|Stop-Process -Name|New-Item/);
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
     let offset = -1;
@@ -681,9 +681,9 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
       "Focus-Palette 'Restore middle' $middleIndex", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
       "Restart-SessionRestore 'normal-close' $false", "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId",
       "name = 'normal-close-selection'",
-      "'normal-close owned frame foreground and focused before workspace input'",
+      "'normal-close hook-ready owned foreground before workspace input'",
       "'favorite home workspace active outside Starred before palette input'",
-      "'favorite-home-kill owned frame foreground and focused before palette input'",
+      "'favorite-home-kill hook-ready owned foreground before palette input'",
       "Focus-Palette 'Restore first' $firstIndex",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "Restart-SessionRestore 'process-kill' $true",
       "Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId", "name = 'process-kill-selection'",
@@ -702,6 +702,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
   for (const required of [
     "'session-restore', ", 'Stop-Process -Id $process.Id -Force', '$process.CloseMainWindow()',
     '$state.hwnd -eq $script:window.ToInt64().ToString()', "$trace -match 'launch step=browser'",
+    "$trace -match 'installHook: KEYBOARD_LL installed'",
     "Restart-SessionRestore 'normal-close' $false", "Restart-SessionRestore 'process-kill' $true",
     "name = 'normal-close-selection'", "name = 'process-kill-selection'",
   ]) {
@@ -730,7 +731,7 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
     assert.match(restart, /\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle/);
     assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
-    assert.match(restart, /\$trace -match 'launch step=browser'/);
+    assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
     assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
     assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Doctor/);
@@ -937,7 +938,11 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
 
 test('ISSUE-569 journey restores the same favorite in Starred and at home with real keys', () => {
   function contract(driver) {
+    const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
+    assert.match(restart, /\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)/);
+    assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
+    assert.doesNotMatch(recipe, /SetForegroundWindow|GetFocusedWindow|Start-Sleep/);
     let offset = -1;
     for (const step of [
       "Press @(0x12, 0x53) 'Alt+S:", "'middle favorite persisted'",
@@ -946,7 +951,7 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
       "Restart-SessionRestore 'normal-close' $false",
       "Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true",
       "name = 'starred-view-selection'",
-      "'normal-close owned frame foreground and focused before workspace input'",
+      "'normal-close hook-ready owned foreground before workspace input'",
       "Press @([byte]0x12, [byte](0x32 + $workspace))",
       "'favorite home workspace active outside Starred before palette input'",
       "Focus-Palette 'Restore middle' $middleIndex",
@@ -956,7 +961,7 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
       "'same session remains a favorite at home after kill'",
       "'favorite-home-kill-after.inbox.json'", "'favorite-home-kill-after.session.json'",
       "name = 'favorite-home-selection'",
-      "'favorite-home-kill owned frame foreground and focused before palette input'",
+      "'favorite-home-kill hook-ready owned foreground before palette input'",
       "Restart-SessionRestore 'process-kill' $true",
       'if ($result.checks.Count -ne 4) { throw',
     ]) {
@@ -966,14 +971,9 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     }
     for (const stage of ['normal-close', 'favorite-home-kill']) {
       assert.ok(recipe.includes(`Wait-Until {
-                $trace = Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw
-                $launch = $trace.LastIndexOf('launch step=browser')
-                if ($launch -lt 0 -or $trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1') { return $false }
                 Doctor
-                [void][VerifyNative]::SetForegroundWindow($script:window)
-                [VerifyNative]::GetForegroundWindow() -eq $script:window -and
-                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-            } '${stage} owned frame foreground and focused before ${stage === 'normal-close' ? 'workspace' : 'palette'} input'`));
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } '${stage} hook-ready owned foreground before ${stage === 'normal-close' ? 'workspace' : 'palette'} input'`));
     }
     assert.ok(recipe.includes(`Wait-Until {
                 $state = Read-Inbox
@@ -992,10 +992,10 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     "Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'",
     "Press @([byte]0x12, [byte](0x32 + $workspace))",
     "Restart-SessionRestore 'favorite-home-kill' $true",
-    "'normal-close owned frame foreground and focused before workspace input'",
-    "'favorite-home-kill owned frame foreground and focused before palette input'",
+    "'normal-close hook-ready owned foreground before workspace input'",
+    "'favorite-home-kill hook-ready owned foreground before palette input'",
     "'favorite home workspace active outside Starred before palette input'",
-    "$trace.Substring($launch) -notmatch 'refocus tick kind=0 landed=1'",
+    "$trace -match 'installHook: KEYBOARD_LL installed'",
     '$null -ne $state -and $state.active_workspace -eq $workspace -and $state.starred_view -eq $false',
     '$state.starred_view -eq $Starred', '$saved.starred_view -eq $Starred',
     "name = 'starred-view-selection'", "name = 'favorite-home-selection'",
