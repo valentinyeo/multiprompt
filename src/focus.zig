@@ -417,13 +417,29 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     _ = hook;
     _ = eventThread;
     _ = eventTime;
-    if (event != EVENT_SYSTEM_FOREGROUND) return;
-    if (idObject != OBJID_WINDOW or idChild != 0) return;
+    if (event != EVENT_SYSTEM_FOREGROUND) {
+        var skip_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=foreground-other-event event={} object={} child={} hwnd={X}", .{ event, idObject, idChild, altqPtr(hwnd) }) catch "[refocus-skip] reason=foreground-other-event");
+        return;
+    }
+    if (idObject != OBJID_WINDOW or idChild != 0) {
+        var skip_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=foreground-other-object event={} object={} child={} hwnd={X}", .{ event, idObject, idChild, altqPtr(hwnd) }) catch "[refocus-skip] reason=foreground-other-object");
+        return;
+    }
     @import("main.zig").sessionFrontChanged();
-    if (focusGuardReturnFromPane(hwnd)) return;
+    if (focusGuardReturnFromPane(hwnd)) {
+        var skip_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=foreground-returned-from-pane event={} object={} child={} hwnd={X}", .{ event, idObject, idChild, altqPtr(hwnd) }) catch "[refocus-skip] reason=foreground-returned-from-pane");
+        return;
+    }
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
     clearSelectedTabDotOnReturn();
-    if (app_state.g_main_hwnd == null) return;
+    if (app_state.g_main_hwnd == null) {
+        var skip_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=foreground-no-frame event={} object={} child={} hwnd={X}", .{ event, idObject, idChild, altqPtr(hwnd) }) catch "[refocus-skip] reason=foreground-no-frame");
+        return;
+    }
     if (foregroundHwndIsOurs(hwnd)) {
         const browser_popup_active = activeBrowserTransientPopupHasForegroundFocus();
         if (browser_popup_active) {
@@ -754,14 +770,31 @@ fn focusActiveShellSoft() void {
 
 fn focusActiveShellInner(use_alt_trick: bool) void {
     const focus_target = if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
-    if (!focusGuard(focus_target)) return;
-    if (app_state.g_inbox_active) return;
-    if (app_state.g_all_sessions_active) return;
+    if (!focusGuard(focus_target)) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-authority target={X} active={} count={} action={} input={} return={X} authorized={X} until={} activation={} restoring={} pending={} starred={} shown={}", .{ altqPtr(focus_target), app_state.active_shell, app_state.shell_count, app_state.g_focus_user_action_tick, app_state.g_focus_input_tick, altqPtr(app_state.g_focus_return_hwnd), altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, app_state.g_focus_activation_until, app_state.g_restoring, @import("launch_cache.zig").pending, app_state.g_starred_workspace, focus_target != null and IsWindowVisible(focus_target) != 0 }) catch "[refocus-skip] reason=inner-authority");
+        return;
+    }
+    if (app_state.g_inbox_active) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-inbox active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-inbox");
+        return;
+    }
+    if (app_state.g_all_sessions_active) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-all-sessions active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-all-sessions");
+        return;
+    }
     if (app_state.g_chat_active) {
         altqLog("shell_back enter chat_owns={} composer={X} fg_ours={} fg={X} main={X} alt_trick={} mode={} pending={}", .{ chatViewOwnsInput(), altqPtr(app_state.g_chat_composer_hwnd), foregroundIsOurs(), altqPtr(GetForegroundWindow()), altqPtr(app_state.g_main_hwnd), use_alt_trick, app_state.g_browser_focus_mode, app_state.g_native_browser_focus_pending_shell_id });
-        if (!(chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and foregroundIsOurs())) return;
+        if (!(chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and foregroundIsOurs())) {
+            var skip_buf: [512]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-chat-not-owned active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-chat-not-owned");
+            return;
+        }
         if (app_state.g_browser_focus_mode and activeBrowserHasForegroundFocus()) {
             altqLog("shell_back skip pane_owns_focus", .{});
+            debugLog("[refocus-skip] reason=inner-chat-browser");
             return;
         }
         if (GetForegroundWindow() != app_state.g_main_hwnd) {
@@ -778,11 +811,25 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
         }
         _ = SetFocus(app_state.g_chat_composer_hwnd);
         altqLog("shell_back result fg={X} main_fg={} focus={X} composer={X} retries={}", .{ altqPtr(GetForegroundWindow()), app_state.g_main_hwnd != null and GetForegroundWindow() == app_state.g_main_hwnd, altqPtr(GetFocus()), altqPtr(app_state.g_chat_composer_hwnd), app_state.g_chat_foreground_retries });
+        var routed_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&routed_buf, "[refocus-skip] reason=inner-chat-routed composer={X} retries={}", .{ altqPtr(app_state.g_chat_composer_hwnd), app_state.g_chat_foreground_retries }) catch "[refocus-skip] reason=inner-chat-routed");
         return;
     }
-    if (app_state.active_shell >= app_state.shell_count) return;
-    if (app_state.shells[app_state.active_shell].hwnd == null) return;
-    if (!foregroundIsOurs()) return;
+    if (app_state.active_shell >= app_state.shell_count) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-no-active-shell active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-no-active-shell");
+        return;
+    }
+    if (app_state.shells[app_state.active_shell].hwnd == null) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-null-console active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-null-console");
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=inner-foreign-foreground active={} count={} chat={} composer={X} foreground={X}", .{ app_state.active_shell, app_state.shell_count, app_state.g_chat_active, altqPtr(app_state.g_chat_composer_hwnd), altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=inner-foreign-foreground");
+        return;
+    }
 
     if (use_alt_trick) {
         const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
@@ -793,6 +840,7 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
             app_state.g_ws_switch_focus_grace = GetTickCount64() + 2000;
             app_state.g_refocus_waiting_for_alt_release = true;
             requestShellRefocus(80, 40);
+            debugLog("[refocus-skip] reason=inner-alt-deferred");
             return;
         }
         if (isCtrlDown()) {
@@ -811,6 +859,7 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
             app_state.g_ws_switch_focus_grace = GetTickCount64() + 2000;
             app_state.g_refocus_waiting_for_alt_release = true;
             requestShellRefocus(80, 40);
+            debugLog("[refocus-skip] reason=inner-ctrl-deferred");
             return;
         }
     }
@@ -940,21 +989,56 @@ pub fn requestNativeBrowserFocus() void {
 }
 
 pub fn requestShellRefocus(delay_ms: UINT, extra_retries: u32) void {
-    if (!focusGuard(activeShellHwndForFocusGuard())) return;
-    if (app_state.g_main_hwnd == null or app_state.shell_count == 0) return;
-    if (app_state.g_inbox_active) return;
-    if (app_state.g_all_sessions_active) return;
-    if (app_state.g_chat_active) return;
+    if (!focusGuard(activeShellHwndForFocusGuard())) {
+        var skip_buf: [768]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=request-authority now={} frame={X} foreground={X} target={X} active={} count={} action={} input={} return={X} authorized={X} until={} activation={} restoring={} pending={} selected={} live={} starred={} shown={} inflight={} favorite={} workspace={}", .{ GetTickCount64(), altqPtr(app_state.g_main_hwnd), altqPtr(GetForegroundWindow()), altqPtr(activeShellHwndForFocusGuard()), app_state.active_shell, app_state.shell_count, app_state.g_focus_user_action_tick, app_state.g_focus_input_tick, altqPtr(app_state.g_focus_return_hwnd), altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, app_state.g_focus_activation_until, app_state.g_restoring, @import("launch_cache.zig").pending, @import("launch_cache.zig").selected_shell_id, @import("launch_cache.zig").selected_live_shell_id, app_state.g_starred_workspace, activeShellHwndForFocusGuard() != null and IsWindowVisible(activeShellHwndForFocusGuard()) != 0, app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].console_inflight, app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].favorite, app_state.g_active_workspace }) catch "[refocus-skip] reason=request-authority");
+        return;
+    }
+    if (app_state.g_main_hwnd == null or app_state.shell_count == 0) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=request-no-frame-or-shell frame={X} count={}", .{ altqPtr(app_state.g_main_hwnd), app_state.shell_count }) catch "[refocus-skip] reason=request-no-frame-or-shell");
+        return;
+    }
+    if (app_state.g_inbox_active) {
+        debugLog("[refocus-skip] reason=request-inbox");
+        return;
+    }
+    if (app_state.g_all_sessions_active) {
+        debugLog("[refocus-skip] reason=request-all-sessions");
+        return;
+    }
+    if (app_state.g_chat_active) {
+        debugLog("[refocus-skip] reason=request-chat");
+        return;
+    }
     const inbox_force = GetTickCount64() < app_state.g_inbox_shell_focus_until;
-    if (!inbox_force and (app_state.g_browser_focus_mode or activeBrowserHasForegroundFocus())) return;
-    if (app_state.g_popup_menu_active or app_state.g_move_size_active) return;
-    if (!foregroundIsOurs()) return;
+    if (!inbox_force and (app_state.g_browser_focus_mode or activeBrowserHasForegroundFocus())) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=request-browser mode={} foreground={X} inbox_force={}", .{ app_state.g_browser_focus_mode, altqPtr(GetForegroundWindow()), inbox_force }) catch "[refocus-skip] reason=request-browser");
+        return;
+    }
+    if (app_state.g_popup_menu_active or app_state.g_move_size_active) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=request-menu-or-move popup={} move={}", .{ app_state.g_popup_menu_active, app_state.g_move_size_active }) catch "[refocus-skip] reason=request-menu-or-move");
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        var skip_buf: [512]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&skip_buf, "[refocus-skip] reason=request-foreign-foreground foreground={X}", .{ altqPtr(GetForegroundWindow()) }) catch "[refocus-skip] reason=request-foreign-foreground");
+        return;
+    }
     app_state.g_shell_focused = true;
     if (extra_retries > app_state.g_refocus_remaining) app_state.g_refocus_remaining = extra_retries;
     _ = SetTimer(app_state.g_main_hwnd, TIMER_REFOCUS, delay_ms, null);
+    var scheduled_buf: [384]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&scheduled_buf, "[refocus-scheduled] delay={} rem={} active={} count={} target={X} shown={} restoring={} pending={} selected={} live={} starred={}", .{ delay_ms, app_state.g_refocus_remaining, app_state.active_shell, app_state.shell_count, altqPtr(activeShellHwndForFocusGuard()), activeShellHwndForFocusGuard() != null and IsWindowVisible(activeShellHwndForFocusGuard()) != 0, app_state.g_restoring, @import("launch_cache.zig").pending, @import("launch_cache.zig").selected_shell_id, @import("launch_cache.zig").selected_live_shell_id, app_state.g_starred_workspace }) catch "[refocus-scheduled]");
 }
 
 pub fn cancelShellRefocus(hwnd: HANDLE) void {
+    if (app_state.g_refocus_remaining != 0 or app_state.g_refocus_waiting_for_alt_release) {
+        var cancel_buf: [192]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&cancel_buf, "[refocus-skip] reason=cancel rem={} wait_alt={} foreground={X} caller=0x{x}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, altqPtr(GetForegroundWindow()), @returnAddress() }) catch "[refocus-skip] reason=cancel");
+    }
     app_state.g_refocus_remaining = 0;
     app_state.g_refocus_waiting_for_alt_release = false;
     app_state.g_ws_switch_focus_grace = 0;
