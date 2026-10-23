@@ -1918,7 +1918,7 @@ try {
             $sizeCheck.bodyEm = $bodyEm
             $sizeCheck.expectedAdvance = $expectedAdvance
             $sizeCheck.previousAdvance = $previousAdvance
-            $command = 'powershell -nop -c "''Body text for the code size check'';([string][char]96)*3;([string][char]0x2588)*' + $cells + ';''let answer = 42;'';([string][char]96)*3"'
+            $command = 'powershell -nop -c "''Body text for the code size check'';([string][char]96)*3;''a''+([string][char]0x2588)*' + $cells + ';''let answer = 42;'';([string][char]96)*3"'
             $command += ' && echo code-ready>"' + (Join-Path $scratch 'code-ready.txt') + '"'
             Type-Text $command
             Press @(0x0D) 'Enter: print a fenced code block in the real CMD'
