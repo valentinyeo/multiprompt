@@ -1630,7 +1630,8 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
 test('IGSH-706 inbox journey proves mute hides the published session without closing its tab and unmute restores it', () => {
   const inbox = control.slice(control.indexOf("        'inbox' {"), control.indexOf("        'remind-me' {"));
   const steps = [
-    /Snapshot 'returned'\s+\$sid = \(Read-Inbox\)\.shells\[0\]\.sid/,
+    /Snapshot 'returned'\s+Palette 'new cmd'\s+Press @\(0x0D\) 'Enter: create a second CMD session to mute'/,
+    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells\)\.Count -eq 2 \} 'both sessions published to the Inbox'\s+\$sid = \(Read-Session\)\.tabs\[1\]\.shell_id/,
     /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 1 \}/,
     /Wait-Until \{ \$state = Read-Session; \$null -ne \$state -and \$state\.active_tab -ge 0 -and \$state\.tabs\[\$state\.active_tab\]\.shell_id -eq \$sid \}/,
     /\$baseline = Read-Session\s+Palette 'mute tab'\s+Press @\(0x0D\) 'Enter: mute the current tab'/,
@@ -1663,7 +1664,7 @@ test('IGSH-706 inbox journey proves mute hides the published session without clo
     assert.throws(() => contract(broken), assert.AssertionError);
   }
   const map = read(skill + 'features/inbox.md');
-  for (const item of ['`inbox-mute`', '`shells[0].sid`', '`mute tab`', '`muted: true`', '`inbox-muted-hidden`', '`listed=false`', '`unmute tab`', '`inbox-unmuted-listed`', '`listed=true`']) assert.ok(map.includes(item), item);
+  for (const item of ['`inbox-mute`', '`new cmd`', '`shell_id`', '`mute tab`', '`muted: true`', '`inbox-muted-hidden`', '`listed=false`', '`unmute tab`', '`inbox-unmuted-listed`', '`listed=true`']) assert.ok(map.includes(item), item);
   for (const shot of ['action', 'after', 'returned', 'muted', 'muted-returned']) {
     assert.ok(inbox.includes(`Snapshot '${shot}'`));
     assert.ok(map.includes(`\`${shot}.png\``));

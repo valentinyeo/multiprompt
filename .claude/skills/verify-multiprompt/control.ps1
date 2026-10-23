@@ -2718,7 +2718,11 @@ try {
             Press @(0x1B) 'Esc: return from Inbox'
             Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
             Snapshot 'returned'
-            $sid = (Read-Inbox).shells[0].sid
+            Palette 'new cmd'
+            Press @(0x0D) 'Enter: create a second CMD session to mute'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD session saved and selected'
+            Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells).Count -eq 2 } 'both sessions published to the Inbox'
+            $sid = (Read-Session).tabs[1].shell_id
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 1 } 'current session listed before muting'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.active_tab -ge 0 -and $state.tabs[$state.active_tab].shell_id -eq $sid } 'published session is the active saved tab'
             $baseline = Read-Session
