@@ -392,14 +392,14 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(usize, 3), g_chat_block_count);
 }
 `;
-function runHarness(deferSource, oldImage, cases = acceptance, refresh = fn('refreshChatTranscript')) {
+function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy')) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh301-'));
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + functions.map(n => n === 'refreshChatTranscript' ? refresh : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases);
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases);
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -408,7 +408,7 @@ test('executed production switch/refresh/completion/layout code keeps cached ful
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
-test('IGSH-720 pending send, new messages and forced refresh never override scrolling up', () => {
+test('IGSH-720 upward scrolling cancels stale send jumps but fresh sends and forced refreshes follow', () => {
   const cases = `
 test "cache-first switch-back IGSH-720 follows only while at the bottom" {
     const a = std.heap.page_allocator;
@@ -426,36 +426,60 @@ test "cache-first switch-back IGSH-720 follows only while at the bottom" {
     g_chat_scroll_bottom_pending = true;
     chatScrollBy(120);
     try std.testing.expect(g_chat_scrolled_up);
-    try std.testing.expect(!g_chat_scroll_bottom_pending);
+    const pending_after_scroll = g_chat_scroll_bottom_pending;
     const reading_y = g_chat_scroll_y;
     try one.history.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t100\\t200\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"reply\\"}\\n@@MP_END@@\\n", 2, one.key);
     refreshChatTranscript(false);
     try std.testing.expectEqual(reading_y, g_chat_scroll_y);
-    g_chat_scroll_bottom_pending = true;
-    refreshChatTranscript(false);
-    try std.testing.expect(!g_chat_scroll_bottom_pending);
-    g_chat_scroll_bottom_pending = true;
-    refreshChatTranscript(true);
-    try std.testing.expectEqual(reading_y, g_chat_scroll_y);
+    try std.testing.expect(!pending_after_scroll);
     try std.testing.expect(g_chat_scrolled_up);
     chatRelayoutPreservingScroll(900, fake_viewport_h);
     try std.testing.expectEqual(reading_y, g_chat_scroll_y);
-    chatScrollBy(-100000);
-    try std.testing.expect(!g_chat_scrolled_up);
-    try one.history.apply(a, "@mp\\t3\\thistory\\tok\\tsid\\t200\\t300\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"newest\\"}\\n@@MP_END@@\\n", 3, one.key);
+    g_chat_scroll_bottom_pending = true;
     refreshChatTranscript(false);
+    try std.testing.expect(g_chat_scroll_bottom_pending);
+    try std.testing.expectEqual(reading_y, g_chat_scroll_y);
+    try one.history.apply(a, "@mp\\t3\\thistory\\tok\\tsid\\t200\\t300\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"user\\",\\"text\\":\\"fresh send\\"}\\n@@MP_END@@\\n", 3, one.key);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
+    try std.testing.expect(!g_chat_scroll_bottom_pending);
+    try std.testing.expect(!g_chat_scrolled_up);
+    try one.history.apply(a, "@mp\\t4\\thistory\\tok\\tsid\\t300\\t400\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"newest\\"}\\n@@MP_END@@\\n", 4, one.key);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
+    chatScrollBy(120);
+    try std.testing.expect(g_chat_scrolled_up);
+    try std.testing.expect(!g_chat_scroll_bottom_pending);
+    refreshChatTranscript(true);
     try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, g_chat_scroll_y);
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
-  const oldRefresh = fn('refreshChatTranscript')
-    .replace('chat_history.followBottom(g_chat_scrolled_up)', 'force or g_chat_scroll_bottom_pending or !g_chat_scrolled_up')
-    .replace('    g_chat_scroll_bottom_pending = false;\n    if (!refreshed) return;', '    if (!refreshed) return;\n    if (g_chat_scroll_bottom_pending) g_chat_scrolled_up = false;\n    g_chat_scroll_bottom_pending = false;');
-  const old = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases, oldRefresh);
+  const preFixScroll = `fn chatScrollBy(delta_px: i32) void {
+    if (g_chat_transcript_hwnd == null) return;
+    const max_scroll = chatMaxScroll();
+    const new_y = std.math.clamp(g_chat_scroll_y - delta_px, chatMinScroll(), max_scroll);
+    if (delta_px > 0 and new_y <= uiScaled(80)) {
+        if (chatHistoryEntry(chatFileIdentity())) |entry| {
+            if (!entry.pending and entry.history.start > 0) {
+                entry.before = entry.history.start;
+                g_chat_scrolled_up = true;
+                entry.next = 0;
+                chatFileRequest(chatFileIdentity());
+            }
+        }
+    }
+    if (new_y == g_chat_scroll_y) return;
+    g_chat_scroll_y = new_y;
+    g_chat_scrolled_up = new_y < max_scroll - uiScaled(4);
+    g_chat_hover_copy = null;
+    _ = InvalidateRect(g_chat_transcript_hwnd, null, 0);
+}`;
+  const old = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases, preFixScroll);
   assert.notEqual(old.status, 0);
-  assert.match(old.stderr, /TestUnexpectedResult/);
+  assert.match(old.stderr, /expected 200, found 360/);
   assert.match(fn('layoutChatControls'), /chatRelayoutPreservingScroll/);
 });
 test('acceptance oracle rejects a blanking defer (positive control)', () => {

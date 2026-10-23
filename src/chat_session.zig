@@ -1219,12 +1219,13 @@ pub fn refreshChatTranscript(force: bool) void {
     const viewport_h = client_rc.bottom - client_rc.top;
     const old_scroll_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
-    const follow_bottom = chat_history.followBottom(app_state.g_chat_scrolled_up);
+    const follow_bottom = chat_history.followBottom(force, app_state.g_chat_scroll_bottom_pending, app_state.g_chat_scrolled_up);
     const anchor = if (follow_bottom) null else chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y);
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
-    app_state.g_chat_scroll_bottom_pending = false;
     if (!refreshed) return;
+    if (app_state.g_chat_scroll_bottom_pending) app_state.g_chat_scrolled_up = false;
+    app_state.g_chat_scroll_bottom_pending = false;
     chatRelayout(client_rc.right - client_rc.left);
     const anchor_top = if (app_state.g_chat_prepend_pending) old_scroll_y + app_state.g_chat_content_h - old_content_h else if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     const anchor_offset = if (app_state.g_chat_prepend_pending) 0 else if (anchor) |p| p.offset else 0;
@@ -1238,7 +1239,7 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     const anchor = if (app_state.g_chat_scrolled_up) chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_y) else null;
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
-    app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
+    app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
 }
 
 pub fn chatLatestAgentReply(out: []u16) usize {
