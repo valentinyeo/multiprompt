@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.848", .items = &.{
+        .{ .text = "Switching chat sessions with the browser open now shows the browser page faster.", .ticket = "IGSH-606" },
+    } },
     .{ .ver = "0.28.847", .items = &.{
         .{ .text = "The AI status card’s hover details now show each account’s weekly reset day and local time, countdown, pending bonus reset and usage pace.", .ticket = "IGSH-703" },
         .{ .text = "Muted sessions no longer show in the Inbox, and mute now stays in sync across your devices.", .ticket = "IGSH-706" },
