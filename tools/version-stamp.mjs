@@ -87,8 +87,9 @@ async function release() {
   };
   const runGit = (args, cwd = root) => git(args, cwd, remaining());
   const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  const pollMs = Number(process.env.VERSION_STAMP_POLL_MS || 20000);
   const wait = async () => {
-    await new Promise(resolve => setTimeout(resolve, Math.min(20000, remaining())));
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, remaining())));
     remaining();
   };
   while (true) {
@@ -97,12 +98,21 @@ async function release() {
     if (open.length) {
       const pr = open[0];
       console.log(pr.url);
+      let greenNames;
+      let mergeRequested = false;
       while (true) {
         const { state, statusCheckRollup } = JSON.parse(gh(['pr', 'view', String(pr.number), '--json', 'state,statusCheckRollup']));
         if (state === 'MERGED') break;
         if (state === 'CLOSED') throw new Error(`Release PR closed without merging: ${pr.url}`);
         const failed = (statusCheckRollup || []).filter(c => ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR'].includes(c.conclusion || c.state));
         if (failed.length) throw new Error(`Release PR check failed (${failed.map(c => c.name || c.context).join(', ')}): ${pr.url}`);
+        const checks = statusCheckRollup || [];
+        const names = state === 'OPEN' && checks.length && checks.every(c => c.__typename === 'CheckRun' ? c.status === 'COMPLETED' && ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(c.conclusion) : c.__typename === 'StatusContext' && c.state === 'SUCCESS') ? JSON.stringify([...new Set(checks.map(c => c.name || c.context))].sort()) : null;
+        if (names && names === greenNames && !mergeRequested) {
+          gh(['pr', 'merge', String(pr.number), '--squash', '--delete-branch']);
+          mergeRequested = true;
+        }
+        greenNames = names;
         await wait();
       }
       continue;
@@ -133,7 +143,12 @@ async function release() {
       }
       const url = gh(['pr', 'create', '--base', 'master', '--head', branch, '--title', title, '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
       console.log(url);
-      gh(['pr', 'merge', url, '--squash', '--auto', '--delete-branch']);
+      try {
+        execFileSync('gh', ['pr', 'merge', url, '--squash', '--auto', '--delete-branch'], { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (error) {
+        if (error.stderr) process.stderr.write(error.stderr);
+        if (!/auto.?merge is not allowed|not allowed for this repository|enablePullRequestAutoMerge/i.test(`${error.stderr || ''}\n${error.message}`)) throw error;
+      }
     } finally {
       try {
         if (fs.existsSync(tree)) git(['worktree', 'remove', '--force', tree], root, 60000);
