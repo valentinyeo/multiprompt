@@ -38,8 +38,13 @@ def normalize(text):
 def pane_candidates(capture):
     candidates = []
     lines = capture.splitlines()
+    prompt, pending = 0, (0, 0)
     for line_no, line in enumerate(lines[:-8], 1):
         line = ANSI.sub('', line).strip()
+        if line.startswith('● '):
+            pending = (prompt, line_no) if re.fullmatch(r'● Advising using .+ \d+(?:\.\d+)+', line) else (0, 0)
+        elif re.match(r'^[❯›>] ', line):
+            prompt = line_no
         if line.startswith('● ') and not re.match(r'^● [A-Za-z_]+\(', line):
             if ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
                 continue
@@ -74,7 +79,7 @@ def pane_candidates(capture):
         text = normalize(text)
         if len(text) >= 20:
             candidates.append(dict(text=text[:80], probe=text[:60], pane_line=line_no))
-    return candidates
+    return [candidate for candidate in candidates if not pending[0] < candidate['pane_line'] < pending[1]]
 
 
 def transcript_evidence(reader, path, wire, finding):
