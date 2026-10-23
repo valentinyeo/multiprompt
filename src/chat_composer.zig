@@ -6,6 +6,8 @@ const chat_complete = @import("chat_complete.zig");
 const chat_reply = @import("chat_reply.zig");
 const chat_history = @import("chat_history.zig");
 const chat_style = @import("chat_style.zig");
+const chat_shell_sync = @import("chat_shell_sync.zig");
+const chat_transcript = @import("chat_transcript.zig");
 const WINAPI = @import("win32.zig").WINAPI;
 const BOOL = @import("win32.zig").BOOL;
 const DWORD = @import("win32.zig").DWORD;
@@ -1069,6 +1071,7 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (was_empty != (GetWindowTextLengthW(hwnd) == 0)) _ = InvalidateRect(hwnd, null, 1);
         chatComposerAutoGrow();
         chatDraftNoteEdit();
+        if (!chat_draft_loading and !shell_applying) shell_draft.onComposerEdit(GetTickCount64());
         if (msg == 0x0102 and wp >= 32 and !isCtrlDown()) app_state.g_chat_ac.browse = false;
         if (!(msg == WM_KEYDOWN and (wp == 0x0D or wp == 0x09 or wp == 0x26 or wp == 0x28 or wp == 0x21 or wp == 0x22 or
             wp == 0x10 or wp == 0x11 or wp == 0x12 or wp == 0xA0 or wp == 0xA1 or wp == 0xA2 or wp == 0xA3 or wp == 0xA4 or wp == 0xA5)))
@@ -1185,6 +1188,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
                     if (chatAcAccept()) return 0;
                     chatAcClose();
                 }
+                chatShellDraftNoteSend();
                 _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_SEND, 0, 0);
                 return 0;
             }
@@ -1523,6 +1527,57 @@ pub fn chatDraftFlush() void {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
         if (app_state.g_chat_draft_dirty) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
     }
+}
+
+var shell_draft: chat_shell_sync.Draft = .{};
+var shell_applying = false;
+
+fn composerText(buf: *[16400]u16) []const u16 {
+    if (app_state.g_chat_composer_hwnd == null) return buf[0..0];
+    const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, buf, @intCast(buf.len));
+    const n: usize = if (n_i > 0) @intCast(n_i) else 0;
+    return buf[0..n];
+}
+
+pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) void {
+    if (!status.draft_known or app_state.g_chat_composer_hwnd == null or app_state.g_chat_draft_owner_len == 0) return;
+    if (@import("chat_session.zig").chatDeliveryPending(shell_id)) return;
+    var composer: [16400]u16 = undefined;
+    const text = composerText(&composer);
+    const shell = status.draft[0..status.draft_len];
+    if (shell_draft.onShell(shell_id, shell, text, GetFocus() == app_state.g_chat_composer_hwnd, GetTickCount64()) != .apply) return;
+    var out: [1100]u16 = undefined;
+    const n = chat_shell_sync.toComposer(out[0 .. out.len - 1], shell);
+    out[n] = 0;
+    shell_applying = true;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&out));
+    chat_draft_loading = false;
+    shell_applying = false;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, n, @intCast(n));
+    chatComposerAutoGrow();
+    shell_draft.applied(shell);
+    chatDraftNoteEdit();
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 1);
+}
+
+pub fn chatShellDraftNoteSend() void {
+    shell_draft.onSend(GetTickCount64());
+}
+
+pub fn chatShellDraftPushDue() void {
+    if (!shell_draft.edit_pending) return;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.g_chat_composer_hwnd == null or
+        GetFocus() != app_state.g_chat_composer_hwnd or !shell_draft.known or shell_draft.shell_id != app_state.shells[app_state.active_shell].shell_id)
+    {
+        shell_draft.edit_pending = false;
+        return;
+    }
+    var composer: [16400]u16 = undefined;
+    const text = composerText(&composer);
+    const now = GetTickCount64();
+    if (!shell_draft.pushDue(text, now)) return;
+    if (@import("chat_send.zig").chatShellOp(app_state.active_shell, "draft", text)) shell_draft.pushed(text, now);
 }
 
 fn chatDraftNoteEdit() void {

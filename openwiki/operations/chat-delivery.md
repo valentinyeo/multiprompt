@@ -115,3 +115,11 @@ When console verification runs out while the session is busy and input is absent
 or unknown, it hands the message to the delivery watch rather than declaring it
 not sent. Transcript evidence and the existing fresh-history idle grace decide
 settlement. A visibly held prompt retains the bounded Enter retry behavior.
+
+## Shared queue and draft (IGSH-682)
+
+Claude Code is the single source of truth for a tmux Claude tab. The history reader replays the transcript's `queue-operation` events in order (enqueue adds, dequeue takes the front, remove takes the named message, popAll clears) and returns the shell queue plus the messages Claude just took as `queue` and `sent` on the status row, only when the app asks with `live`. It also reads the prompt box with `tmux capture-pane -p -e -J` and drops dim or grey runs so Claude's suggestion is never treated as a draft.
+
+Chat View lists the shell queue in order after the transcript and merges its own outbox entries into it: an outbox message whose text matches a shell queue item is that item, never a second row. Every change of that list writes one `CHAT_QUEUE items=[{"text":...,"state":"queued"|"sent"}]` line to the debug log.
+
+The draft follows the focused side. Edits in the Chat View box are pushed 500 ms after the last keystroke with the reader's `draft` op (clear the box, type the text, no Enter), never while a send is in flight. When the Chat View box is not the side being edited, the shell box text fills it, and unsent text is not erased by a shell clear. Ctrl+K "Chat View: Edit Queued Messages" sends Claude's Up key through the `edit_queued` op so Claude moves its queue into the box, and the draft sync shows it. The chat-delivery verify journey case `queue-draft-sync` proves all of this.

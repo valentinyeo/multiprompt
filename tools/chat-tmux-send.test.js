@@ -200,7 +200,8 @@ test('IGSH-564 force send routes tmux through the existing key worker and presse
   const reader = fs.readFileSync(path.join(__dirname, '../src/chat_history_reader.py'), 'utf8');
   assert.match(reader, /keys = \["C-x", "C-s"\] if op == "send_queued"/);
   assert.match(reader, /subprocess\.run\(\["tmux", "send-keys", "-t", "=" \+ name \+ ":", \*keys\]/);
-  assert.match(reader, /query\.get\("op"\) in \("stop", "permission", "send_queued"\)/);
+  assert.match(reader, /query\.get\("op"\) in \("stop", "permission", "send_queued", "edit_queued"\)/);
+  assert.match(reader, /keys = \["C-x", "C-s"\] if op == "send_queued" else \["Up"\] if op == "edit_queued" else \[key\]/);
 });
 test('worker uses existing persistent reader and background settlement uses pure transcript policy', () => {
   assert.match(source, /const ISSUE_349_TMUX_SEND = true;/);

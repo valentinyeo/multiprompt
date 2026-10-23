@@ -31,6 +31,13 @@ SCAN_BYTES = 512 * 1024
 TAIL_BYTES = 512 * 1024
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
 STATUS_CACHE = {}
+QUEUE_CACHE = {}
+QUEUE_SCAN_BYTES = 4 * 1024 * 1024
+QUEUE_SHOWN = 8
+QUEUE_TEXT = 500
+DRAFT_TEXT = 4000
+SGR = re.compile(r"\x1b\[([0-9;:]*)m")
+ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
 SETTLE_SUFFIX_MIN = 24
 ISSUE_345_STALE_JUMPS_TO_TAIL = True
 ISSUE_349_QUEUED_STAMP_FROM_QUEUE = True
@@ -876,6 +883,163 @@ def status_header(source, size, agent, captured=()):
     return result if len(result) > 1 else None
 
 
+def queue_apply(state, event):
+    queue, sent = state
+    operation = event.get("operation")
+    content = event.get("content")
+    if operation == "enqueue" and isinstance(content, str):
+        if content.lstrip().startswith("<task-notification>"):
+            return
+        if not queue:
+            sent.clear()
+        queue.append(content)
+    elif operation in ("dequeue", "remove") and queue:
+        if isinstance(content, str) and content:
+            if content not in queue:
+                return
+            index = queue.index(content)
+        else:
+            index = 0
+        sent.append(queue.pop(index))
+        del sent[:-QUEUE_SHOWN]
+    elif operation == "popAll":
+        queue.clear()
+        sent.clear()
+
+
+def queue_replay(source, size):
+    key = (str(Path(source.name).resolve()), os.fstat(source.fileno()).st_ino)
+    previous = QUEUE_CACHE.get(key)
+    start, state = 0, ([], [])
+    resumed = False
+    if previous is not None and previous[0] <= size:
+        source.seek(max(0, previous[0] - 64))
+        if hashlib.sha256(source.read(min(previous[0], 64))).hexdigest() == previous[2]:
+            start, state, resumed = previous[0], (list(previous[1][0]), list(previous[1][1])), True
+    trim = not resumed and size > QUEUE_SCAN_BYTES
+    if trim:
+        start = size - QUEUE_SCAN_BYTES
+    source.seek(start)
+    data = source.read(size - start)
+    if trim:
+        data = data[data.find(b"\n") + 1:] if b"\n" in data else b""
+        start = size - len(data)
+    end = data.rfind(b"\n") + 1
+    for raw in data[:end].splitlines():
+        if b'"queue-operation"' not in raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if isinstance(event, dict) and event.get("type") == "queue-operation" and not event.get("isSidechain"):
+            queue_apply(state, event)
+    scanned = start + end
+    source.seek(max(0, scanned - 64))
+    probe = hashlib.sha256(source.read(min(scanned, 64))).hexdigest()
+    QUEUE_CACHE[key] = (scanned, state, probe)
+    if len(QUEUE_CACHE) > 256:
+        del QUEUE_CACHE[next(iter(QUEUE_CACHE))]
+    return state
+
+
+def grey_code(params):
+    values = [int(part) if part.isdigit() else 0 for part in params.replace(":", ";").split(";")] if params else [0]
+    index = 0
+    dim = inverse = None
+    grey = None
+    while index < len(values):
+        value = values[index]
+        if value == 0:
+            dim, inverse, grey = False, False, False
+        elif value == 2:
+            dim = True
+        elif value == 22:
+            dim = False
+        elif value == 7:
+            inverse = True
+        elif value == 27:
+            inverse = False
+        elif value == 39 or 30 <= value <= 37 or 91 <= value <= 97:
+            grey = False
+        elif value == 90:
+            grey = True
+        elif value == 38 and index + 2 < len(values) and values[index + 1] == 5:
+            grey = values[index + 2] == 8 or 238 <= values[index + 2] <= 250
+            index += 2
+        elif value == 38 and index + 4 < len(values) and values[index + 1] == 2:
+            red, green, blue = values[index + 2:index + 5]
+            grey = max(red, green, blue) - min(red, green, blue) <= 8 and 60 <= red <= 190
+            index += 4
+        index += 1
+    return dim, inverse, grey
+
+
+def styled_chars(line):
+    dim = inverse = grey = False
+    result = []
+    position = 0
+    for match in ANSI.finditer(line):
+        for char in line[position:match.start()]:
+            result.append((char, dim or grey, inverse))
+        position = match.end()
+        sgr = SGR.fullmatch(match.group(0))
+        if sgr:
+            new_dim, new_inverse, new_grey = grey_code(sgr.group(1))
+            dim = dim if new_dim is None else new_dim
+            inverse = inverse if new_inverse is None else new_inverse
+            grey = grey if new_grey is None else new_grey
+    for char in line[position:]:
+        result.append((char, dim or grey, inverse))
+    return result
+
+
+def box_draft_text(shown):
+    lines = [styled_chars(line) for line in shown.splitlines()]
+    plain = ["".join(char for char, _dim, _inverse in line) for line in lines]
+    starts = [i for i, line in enumerate(plain) if line.startswith("❯")]
+    if not starts:
+        return None
+    rows = []
+    for number, i in enumerate(range(starts[-1], len(lines))):
+        if plain[i].startswith("─"):
+            break
+        rows.append(lines[i][1:] if number == 0 else lines[i])
+    kept = []
+    dimmed = False
+    for number, row in enumerate(rows):
+        if number == 0 and row and row[0][0] == " ":
+            row = row[1:]
+        elif number:
+            lead = 0
+            while lead < min(2, len(row)) and row[lead][0] == " ":
+                lead += 1
+            row = row[lead:]
+        dimmed = dimmed or any(dim for _char, dim, _inverse in row)
+        kept.append([item for item in row if not item[1]])
+    visible = [item for row in kept for item in row]
+    if dimmed and len("".join(char for char, _dim, _inverse in visible).strip()) <= 1 and all(inverse for _char, _dim, inverse in visible):
+        return ""
+    return "\n".join("".join(char for char, _dim, _inverse in row).rstrip() for row in kept).rstrip()
+
+
+def box_draft(target):
+    try:
+        shown = subprocess.run(["tmux", "capture-pane", "-p", "-e", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return None
+    return box_draft_text(shown) if isinstance(shown, str) else None
+
+
+def live_fields(source, size, tmux):
+    queue, sent = queue_replay(source, size)
+    fields = dict(queue=[text[:QUEUE_TEXT] for text in queue[:QUEUE_SHOWN]], sent=[text[:QUEUE_TEXT] for text in sent[-QUEUE_SHOWN:]])
+    draft = box_draft("=" + tmux + ":")
+    if draft is not None:
+        fields["draft"] = draft[:DRAFT_TEXT]
+    return fields
+
+
 def resolve_response_path(q, source=None, as_owner=False):
     rid, agent = q["id"], "codex" if q["codex"] else "claude"
     sid, tmux, cwd = q["sid"], q["tmux"], q["cwd"]
@@ -1213,6 +1377,8 @@ def response(q, source=None, as_owner=False):
         if jumped and not rows:
             return response(dict(q, no_jump=True), source, as_owner)
         status = status_header(source, info.st_size, agent, captured)
+        if q.get("live") is True and agent == "claude" and tmux and mode != "older":
+            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux))
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1222,22 +1388,13 @@ def response(q, source=None, as_owner=False):
 
 def prompt_box_text(target):
     try:
-        shown = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
+        shown = subprocess.run(["tmux", "capture-pane", "-p", "-e", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return ""
-    if not isinstance(shown, str):
+    draft = box_draft_text(shown) if isinstance(shown, str) else None
+    if not draft:
         return ""
-    lines = shown.splitlines()
-    starts = [i for i, line in enumerate(lines) if line.startswith("\u276f")]
-    if not starts:
-        return ""
-    box = []
-    for line in lines[starts[-1]:]:
-        if line.startswith("\u2500"):
-            break
-        box.append(line)
-    box[0] = box[0][1:]
-    return "\n".join(" ".join(line.split()) for line in box).strip()
+    return "\n".join(" ".join(line.split()) for line in draft.split("\n")).strip()
 
 
 def stop_response(q):
@@ -1253,7 +1410,7 @@ def stop_response(q):
         reason = "invalid_tmux_name"
     else:
         try:
-            keys = ["C-x", "C-s"] if op == "send_queued" else [key]
+            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
             subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"
@@ -1321,6 +1478,45 @@ def send_response(q):
             reason = "tmux_send_failed"
     status = "error" if reason else "ok"
     return f"@mp\t{rid}\tsend\t{status}\t{reason or '-'}\t0\n{END}\n"
+
+
+def type_into_box(target, text, rid):
+    if "\n" in text or "\r" in text:
+        buffer = "mp-draft-" + str(os.getpid()) + "-" + str(rid)
+        subprocess.run(["tmux", "load-buffer", "-b", buffer, "-"], input=text.encode("utf-8"), check=True, capture_output=True, timeout=5)
+        try:
+            pasted = subprocess.run(["tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", target], capture_output=True, timeout=5)
+            if pasted.returncode:
+                subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
+        finally:
+            subprocess.run(["tmux", "delete-buffer", "-b", buffer], capture_output=True, timeout=5)
+    else:
+        subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
+
+
+def draft_response(q):
+    rid = q.get("id", 0)
+    name = q.get("tmux")
+    text = q.get("text")
+    reason = None
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+        reason = "invalid_tmux_name"
+    elif not isinstance(text, str) or "\x00" in text or len(text) > DRAFT_TEXT:
+        reason = "invalid_text"
+    else:
+        try:
+            target = "=" + name + ":"
+            box = box_draft(target)
+            if box is None or box.strip() != text.strip():
+                if box:
+                    for i in range(len(box.splitlines())):
+                        subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
+                if text:
+                    type_into_box(target, text, rid)
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            reason = "tmux_draft_failed"
+    status = "error" if reason else "ok"
+    return f"@mp\t{rid}\tdraft\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
 def settle_unchained(target):
@@ -1409,7 +1605,9 @@ def serve(source):
                 raise ValueError("invalid request id")
             if query.get("op") == "send":
                 wire = send_response(query)
-            elif query.get("op") in ("stop", "permission", "send_queued"):
+            elif query.get("op") == "draft":
+                wire = draft_response(query)
+            elif query.get("op") in ("stop", "permission", "send_queued", "edit_queued"):
                 wire = stop_response(query)
             elif query.get("op") == "settle":
                 wire = settle_response(query, source)

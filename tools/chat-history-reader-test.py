@@ -1699,5 +1699,130 @@ class IGSH412ResumedSessionTest(unittest.TestCase):
                         self.assertEqual(reader.resolve_tmux_agent('claude', session), expected)
 
 
+class SharedQueueDraftTest(unittest.TestCase):
+    setUp = HistoryReaderTest.setUp
+    event = HistoryReaderTest.event
+    write = HistoryReaderTest.write
+    read = HistoryReaderTest.read
+
+    def op(self, operation, content=None, **extra):
+        row = dict(type='queue-operation', operation=operation, timestamp='2026-10-23T10:00:00.000Z', sessionId='sid')
+        if content is not None:
+            row['content'] = content
+        row.update(extra)
+        return row
+
+    def live(self):
+        self.query.update(live=True)
+        _fields, rows = self.read()
+        status = [row for row in rows if row['role'] == 'status']
+        return status[0] if status else None
+
+    def test_IGSH_682_queue_is_replayed_in_file_order(self):
+        self.write(self.event('hi'), self.op('enqueue', 'first'), self.op('enqueue', 'second'), self.op('enqueue', 'third'))
+        with patch.object(reader, 'box_draft', return_value=''):
+            self.assertEqual(self.live()['queue'], ['first', 'second', 'third'])
+            self.write(self.event('hi'), self.op('enqueue', 'first'), self.op('enqueue', 'second'), self.op('enqueue', 'third'),
+                       self.op('dequeue'), self.op('remove', 'third', reason='absorbed_mid_turn'))
+            self.query.update(cached_sid='', inode=0, offset=0)
+            status = self.live()
+            self.assertEqual(status['queue'], ['second'])
+            self.assertEqual(status['sent'], ['first', 'third'])
+
+    def test_IGSH_682_pop_all_clears_queue_and_sent_and_new_batch_resets_sent(self):
+        self.write(self.op('enqueue', 'a'), self.op('enqueue', 'b'), self.op('popAll', 'a\nb'))
+        with patch.object(reader, 'box_draft', return_value=''):
+            status = self.live()
+            self.assertEqual((status['queue'], status['sent']), ([], []))
+            self.write(self.op('enqueue', 'a'), self.op('dequeue'), self.op('enqueue', 'b'))
+            self.query.update(cached_sid='', inode=0, offset=0)
+            status = self.live()
+            self.assertEqual((status['queue'], status['sent']), (['b'], []))
+
+    def test_IGSH_682_queue_is_incremental_and_ignores_sidechains_and_notifications(self):
+        self.write(self.op('enqueue', 'a'))
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], ['a'])
+            with self.path.open('a') as output:
+                output.write(json.dumps(self.op('enqueue', 'side', isSidechain=True)) + '\n')
+                output.write(json.dumps(self.op('enqueue', '<task-notification>done</task-notification>')) + '\n')
+                output.write(json.dumps(self.op('enqueue', 'b')) + '\n')
+            status = self.live()
+            self.assertEqual(status['queue'], ['a', 'b'])
+            self.assertNotIn('draft', status)
+
+    def test_IGSH_682_live_rows_are_opt_in_and_never_appear_for_older_pages(self):
+        self.write(self.event('hi'), self.op('enqueue', 'a'))
+        with patch.object(reader, 'box_draft', return_value='typed'):
+            _fields, rows = self.read()
+            self.assertFalse([row for row in rows if row['role'] == 'status'])
+            self.query.update(live=True, cached_sid='', inode=0, offset=0)
+            status = self.live()
+            self.assertEqual((status['queue'], status['draft']), (['a'], 'typed'))
+
+    def test_IGSH_682_dim_suggestion_is_never_draft_text(self):
+        dim = '\x1b[2m'
+        reset = '\x1b[0m'
+        rule = '─' * 20
+        cases = [
+            (f'❯ {dim}Try asking about the next step{reset}\n{rule}\n', ''),
+            (f'❯ \x1b[7mT{reset}{dim}ry asking{reset}\n{rule}\n', ''),
+            (f'❯ \x1b[7mT\x1b[27m\x1b[90mry asking\x1b[39m\n{rule}\n', ''),
+            (f'❯ \x1b[38;5;244mgrey words{reset}\n{rule}\n', ''),
+            (f'❯ \x1b[38;2;153;153;153mgrey words{reset}\n{rule}\n', ''),
+            (f'❯ real draft\x1b[7m {reset}\n{rule}\n', 'real draft'),
+            ('❯ real draft\n' + rule + '\n', 'real draft'),
+            (f'❯ first line\n  second line{dim} hint{reset}\n{rule}\n', 'first line\nsecond line'),
+            (f'old output\n❯ {dim}old{reset}\n{rule}\n❯ typed now\n{rule}\n', 'typed now'),
+            (f'❯ \x1b[1mbold\x1b[22m {dim}ghost{reset}\n{rule}\n', 'bold'),
+            (f'❯ \n{rule}\n', ''),
+        ]
+        for shown, expected in cases:
+            self.assertEqual(reader.box_draft_text(shown), expected, repr(shown))
+        self.assertIsNone(reader.box_draft_text('no prompt here\n'))
+
+    def test_IGSH_682_box_draft_asks_tmux_for_escapes_without_wrapping(self):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, '❯ hello\n' + '─' * 5 + '\n', '')
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(reader.box_draft('=term-1:'), 'hello')
+        self.assertEqual(calls, [['tmux', 'capture-pane', '-p', '-e', '-J', '-t', '=term-1:']])
+
+    def test_IGSH_682_draft_op_clears_then_types_without_enter(self):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+        with patch.object(reader, 'box_draft', return_value='old text'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.draft_response(dict(op='draft', id=4, tmux='term-1', text='new text'))
+        self.assertTrue(wire.startswith('@mp\t4\tdraft\tok\t-\t0\n'))
+        self.assertEqual(calls, [['tmux', 'send-keys', '-t', '=term-1:', 'C-u'], ['tmux', 'send-keys', '-t', '=term-1:', '-l', '--', 'new text']])
+        calls.clear()
+        with patch.object(reader, 'box_draft', return_value='same'), patch.object(reader.subprocess, 'run', side_effect=run):
+            reader.draft_response(dict(op='draft', id=4, tmux='term-1', text='same'))
+        self.assertEqual(calls, [])
+        with patch.object(reader, 'box_draft', return_value='gone'), patch.object(reader.subprocess, 'run', side_effect=run):
+            reader.draft_response(dict(op='draft', id=4, tmux='term-1', text=''))
+        self.assertEqual(calls, [['tmux', 'send-keys', '-t', '=term-1:', 'C-u']])
+        for name, text in (('bad name', 'x'), ('term-1', 'x\x00')):
+            self.assertIn('\terror\t', reader.draft_response(dict(op='draft', id=4, tmux=name, text=text)))
+
+    def test_IGSH_682_edit_queued_presses_only_up(self):
+        calls = []
+        with patch.object(reader.subprocess, 'run', side_effect=lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0, b'', b'')):
+            wire = reader.stop_response(dict(op='edit_queued', id=5, tmux='term-1'))
+        self.assertTrue(wire.startswith('@mp\t5\tedit_queued\tok\t-\t0\n'))
+        self.assertEqual(calls, [['tmux', 'send-keys', '-t', '=term-1:', 'Up']])
+
+    def test_IGSH_682_serve_routes_draft_and_edit_queued(self):
+        source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
+        self.assertIn('query.get("op") == "draft"', source)
+        self.assertIn('"send_queued", "edit_queued"', source)
+
+
 if __name__ == '__main__':
     unittest.main()

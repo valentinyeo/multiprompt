@@ -5,6 +5,8 @@ const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_history = @import("chat_history.zig");
 const chat_echo = @import("chat_echo.zig");
+const chat_shell_sync = @import("chat_shell_sync.zig");
+const chat_transcript = @import("chat_transcript.zig");
 const chat_style = @import("chat_style.zig");
 const chat_drop = @import("chat_drop.zig");
 const DragQueryFileW = @import("win32.zig").DragQueryFileW;
@@ -1454,6 +1456,71 @@ pub fn chatFindY(index: usize, position: ?usize) i32 {
     return rect.top + height + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + (if (detail) uiScaled(28) else @as(i32, 0));
 }
 
+var g_shell_view: chat_shell_sync.View = .{};
+var g_shell_tracker: chat_shell_sync.Tracker = .{};
+var g_shell_rect: [chat_shell_sync.MAX_ROWS]RECT = undefined;
+var g_shell_rect_row: [chat_shell_sync.MAX_ROWS]usize = @splat(0);
+var g_shell_rect_count: usize = 0;
+const SHELL_ROW_SELECTION_OFFSET: usize = 0x40000000;
+const empty_status: chat_transcript.Status = .{};
+
+fn chatShellSyncBuild() void {
+    var pending: [app_state.CHAT_OUTBOX_MAX_PER_KEY]chat_shell_sync.Pending = undefined;
+    var pending_count: usize = 0;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = if (app_state.active_shell < app_state.shell_count) chatOutboxKeyForShell(app_state.active_shell, &key_buf) else key_buf[0..0];
+    if (key.len > 0) {
+        for (app_state.g_chat_outbox.items) |e| {
+            if (pending_count >= pending.len) break;
+            if (e.state == .not_sent or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+            pending[pending_count] = .{ .id = e.id, .text = e.text };
+            pending_count += 1;
+        }
+    }
+    const status: *const chat_transcript.Status = if (chatHistoryEntry(chatFileIdentity())) |entry| &entry.history.status else &empty_status;
+    chat_shell_sync.build(&g_shell_view, status, pending[0..pending_count]);
+    if (!status.live_known) return;
+    const shell_id: u32 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    @import("chat_composer.zig").chatShellDraftPull(shell_id, status);
+    if (!g_shell_tracker.changed(shell_id, &g_shell_view)) return;
+    var line = chat_shell_sync.logLine(std.heap.page_allocator, &g_shell_view) catch return;
+    defer line.deinit(std.heap.page_allocator);
+    debugLog(line.items);
+}
+
+fn chatPaintShellRow(hdc: HANDLE, text: []const u16, rc: RECT) void {
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) };
+    fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
+    const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
+    _ = SelectObject(hdc, ensureChatFont());
+    _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
+    _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null);
+    const old = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, old);
+    _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
+    var area = chatStatusRowRect(bubble);
+    _ = chatDrawText(hdc, L("\u{25F7} Queued in Claude"), -1, &area, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
+    var y = start_y;
+    chatShellSyncBuild();
+    g_shell_rect_count = 0;
+    for (g_shell_view.rows[0..g_shell_view.count], 0..) |*row, row_index| {
+        if (row.local or row.sent or g_shell_rect_count >= g_shell_rect.len) continue;
+        y += chatBlockGapBefore(true, .user, true, .single);
+        var rc = chatMeasureEchoRect(hdc, row.slice(), width, y);
+        rc.left += app_state.g_chat_content_left;
+        rc.right += app_state.g_chat_content_left;
+        g_shell_rect[g_shell_rect_count] = rc;
+        g_shell_rect_row[g_shell_rect_count] = row_index;
+        g_shell_rect_count += 1;
+        y = rc.bottom;
+    }
+    return y;
+}
+
 pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
@@ -1525,6 +1592,7 @@ pub fn chatRelayout(client_width: i32) void {
             }
         }
     }
+    y = chatShellRowsLayout(hdc, width, y);
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
@@ -3779,6 +3847,14 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
                     const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
                     chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+                }
+                for (0..g_shell_rect_count) |i| {
+                    var rc = g_shell_rect[i];
+                    rc.top -= app_state.g_chat_scroll_y;
+                    rc.bottom -= app_state.g_chat_scroll_y;
+                    if (rc.bottom < 0 or rc.top > h) continue;
+                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
+                    chatPaintShellRow(mem_dc, g_shell_view.rows[g_shell_rect_row[i]].slice(), rc);
                 }
                 if (app_state.g_chat_block_count == 0) {
                     _ = SetBkMode(mem_dc, TRANSPARENT);

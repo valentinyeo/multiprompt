@@ -173,6 +173,14 @@ class SendTest(unittest.TestCase):
         with patch.object(reader.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="$ plain shell\n")):
             self.assertEqual(REAL_PROMPT_BOX_TEXT("=term-1:"), "")
 
+    def test_IGSH_682_dim_suggestion_is_not_box_text_so_send_never_clears_it(self):
+        screen = "❯ \x1b[2mTry asking about the next step\x1b[0m\n───\n"
+        with patch.object(reader.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=screen)):
+            self.assertEqual(REAL_PROMPT_BOX_TEXT("=term-1:"), "")
+        with patch.object(reader, "prompt_box_text", return_value=""), patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
+            self.send()
+        self.assertNotIn(["tmux", "send-keys", "-t", "=term-1:", "C-u"], [call.args[0] for call in run.call_args_list])
+
     def test_failures_do_not_send_enter(self):
         for error in (OSError("missing"), subprocess.CalledProcessError(1, "tmux"), subprocess.TimeoutExpired("tmux", 5)):
             with patch.object(reader.subprocess, "run", side_effect=error) as run:

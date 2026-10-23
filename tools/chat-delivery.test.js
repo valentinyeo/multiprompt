@@ -277,6 +277,7 @@ var g_chat_content_left: i32 = 0;
 var g_chat_content_h: i32 = 0;
 fn chatBlockGapBefore(_: bool, _: enum { user }, _: bool, _: enum { single }) i32 { return 1; }
 fn chatMeasureEchoRect(_: u8, _: []const u16, _: i32, y: i32) RECT { return .{ .bottom = y + 10 }; }
+fn chatShellRowsLayout(_: u8, _: i32, y: i32) i32 { return y; }
 fn uiScaled(n: i32) i32 { return n; }
 fn layoutPending() void {
     const hdc: u8 = 0;

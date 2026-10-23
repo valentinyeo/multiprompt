@@ -687,6 +687,7 @@ const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEU
 const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
 const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
 const SEARCH_CHAT_PUSH_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_PUSH_QUEUED_OFFSET;
+const SEARCH_CHAT_EDIT_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_EDIT_QUEUED_OFFSET;
 const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_OFFSET;
 const REMIND_PRESET_CUSTOM = @import("app_state.zig").REMIND_PRESET_CUSTOM;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
@@ -5333,6 +5334,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_CHAT_EDIT_QUEUED_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = @import("chat_send.zig").chatShellEditQueued();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_DISCARD_UNSENT_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = false;
@@ -7063,6 +7073,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_DRAFT) {
+                @import("chat_composer.zig").chatShellDraftPushDue();
                 chatDraftFlush();
                 return 0;
             }

@@ -22,7 +22,9 @@ $plans = @(
     @{name='idle-suggestion'; mode='idle'; text='idle delivery beta'},
     @{name='steer-chord'; mode='busy'; text='steer delivery gamma'},
     @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
+    @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'}
 )
+$queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
 $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
@@ -75,6 +77,59 @@ function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
     [ChatDeliveryDesktop]::Chord($Keys)
     Start-Sleep -Milliseconds 100
 }
+function Read-Shared([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        $reader = [IO.StreamReader]::new($stream)
+        try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+}
+function Step([string]$Name, [scriptblock]$Check, [int]$Seconds = 20) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $ok = $false
+    do {
+        try { $ok = [bool](& $Check) } catch { $ok = $false }
+        if ($ok) { break }
+        Start-Sleep -Milliseconds 200
+    } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
+    $steps.Add(@{name=$Name; ok=$ok; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); waitedMs=[int]$timer.ElapsedMilliseconds})
+    $ok
+}
+function Shell-Run([string[]]$Arguments) {
+    & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell @Arguments
+    if ($LASTEXITCODE -ne 0) { throw ('Fake shell operation failed: ' + ($Arguments -join ' ')) }
+}
+function Shell-Input([string]$Kind, [string]$Value = '') {
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='shell input'; kind=$Kind; value=$Value})
+    if ($Value) { Shell-Run @($Kind, $Value) } else { Shell-Run @($Kind) }
+}
+function Fake-State {
+    $text = & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell show
+    if ($LASTEXITCODE -ne 0) { throw 'Fake shell state read failed' }
+    ($text -join "`n") | ConvertFrom-Json
+}
+function Queue-View {
+    $views = [regex]::Matches((Read-Shared "$settings/debug.log"), 'CHAT_QUEUE items=(\[[^\r\n]*\])')
+    if ($views.Count -eq 0) { return $null }
+    $parsed = ConvertFrom-Json $views[$views.Count - 1].Groups[1].Value
+    $labels = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $parsed) { $labels.Add([string]$item.state + ':' + [string]$item.text) }
+    $labels -join '|'
+}
+function Type-Composer([string]$Text) {
+    [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$Text})
+    foreach ($letter in $Text.ToCharArray()) {
+        Doctor $true
+        [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
+        Start-Sleep -Milliseconds 30
+    }
+}
+function Clear-Composer {
+    $length = ([ChatDeliveryDesktop]::Text($composer)).Length
+    for ($i = 0; $i -lt $length; $i++) { Press @(0x08) 'Backspace: clear composer' $true }
+}
 foreach ($plan in $plans) {
     $caseDir = "$Evidence/$($plan.name)"
     New-Item -ItemType Directory -Force $caseDir | Out-Null
@@ -85,6 +140,10 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isQueue = $plan.name -eq 'queue-draft-sync'
+    $steps = [Collections.Generic.List[object]]::new()
+    $procDir = $null
+    $transcript = $null
     $observation = @{name=$plan.name; text=$plan.text; mode=$plan.mode; suggestion='Try asking about the next step'; actionMs=0; endMs=0; error=$null}
     $cleanup = @{remaining_owned_processes=-1; evidence_preserved=$false; scratch_removed=$false}
     try {
@@ -97,7 +156,24 @@ foreach ($plan in $plans) {
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
-        Save $seed "$state/state.json"
+        $standIn = $seed
+        if ($isQueue) {
+            $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
+            $cwd = 'C:/verify/work'
+            $procDir = [IO.Path]::GetPathRoot($profile) + 'proc\4242'
+            $transcript = "$profile/home/.claude/projects/" + ($cwd -replace '[^A-Za-z0-9]', '-') + "/$sid.jsonl"
+            $standIn.fake = $true
+            $standIn.sid = $sid
+            $standIn.cwd = $cwd
+            $standIn.panePid = 4242
+            $standIn.transcript = $transcript
+            $standIn.meta = "$profile/home/.claude/sessions/4242.json"
+            $standIn.procDir = $procDir
+            $observation.texts = $queueTexts
+            $observation.steps = $steps
+        }
+        Save $standIn "$state/state.json"
+        if ($isQueue) { Shell-Run @('init') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
@@ -114,23 +190,59 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$plan.text})
-        foreach ($letter in $plan.text.ToCharArray()) {
-            Doctor $true
-            [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
-            Start-Sleep -Milliseconds 30
+        if ($isQueue) {
+            $t = $queueTexts
+            [void](Step 'chat-view-read-transcript' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
+            Shell-Input 'text' $t.a
+            Shell-Input 'key' 'Enter'
+            [void](Step 'chat-lists-shell-queued' { (Queue-View) -ceq ('queued:' + $t.a) })
+            Type-Composer $t.b
+            Shot "$($plan.name)-action"
+            $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Press @(0x0D) 'Enter: send composer' $true
+            [void](Step 'chat-lists-both-in-order' { (Queue-View) -ceq ('queued:' + $t.a + '|queued:' + $t.b) })
+            [void](Step 'shell-lists-both-in-order' { (@((Fake-State).queue) -join '|') -ceq ($t.a + '|' + $t.b) })
+            Shell-Input 'key' 'Up'
+            [void](Step 'queue-pulled-into-box' { $f = Fake-State; (@($f.queue).Count -eq 0) -and ($f.box -ceq ($t.a + "`n" + $t.b)) } 5)
+            Shell-Input 'key' 'C-u'
+            Shell-Input 'text' $t.a2
+            Shell-Input 'key' 'Enter'
+            Shell-Input 'text' $t.b
+            Shell-Input 'key' 'Enter'
+            [void](Step 'chat-lists-edited-in-order' { (Queue-View) -ceq ('queued:' + $t.a2 + '|queued:' + $t.b) })
+            [void](Step 'shell-lists-edited-in-order' { (@((Fake-State).queue) -join '|') -ceq ($t.a2 + '|' + $t.b) })
+            Shell-Input 'idle'
+            [void](Step 'chat-marks-both-sent' { (Queue-View) -ceq ('sent:' + $t.a2 + '|sent:' + $t.b) })
+            [void](Step 'shell-took-both' { $f = Fake-State; ($f.mode -ceq 'idle') -and (@($f.queue).Count -eq 0) -and ($f.box -ceq '') } 5)
+            Start-Sleep -Seconds 6
+            [void](Step 'suggestion-not-draft' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 5)
+            Shell-Input 'text' $t.shellDraft
+            [void](Step 'composer-shows-shell-draft' { ([ChatDeliveryDesktop]::Text($composer)) -ceq $t.shellDraft })
+            Shell-Input 'key' 'C-u'
+            [void](Step 'composer-clears-with-shell' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 10)
+            Clear-Composer
+            Type-Composer $t.chatDraft
+            [void](Step 'shell-box-shows-chat-draft' { (Fake-State).box -ceq $t.chatDraft })
+            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } else {
+            $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$plan.text})
+            foreach ($letter in $plan.text.ToCharArray()) {
+                Doctor $true
+                [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
+                Start-Sleep -Milliseconds 30
+            }
+            $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
+            if ($observation.composerText -cne $plan.text) { throw 'Real keyboard composer text mismatch' }
+            Shot "$($plan.name)-action"
+            $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            if ($plan.name -eq 'steer-chord') {
+                Press @(0x11, 0x58) 'Ctrl+X: steer prefix' $true
+                Press @(0x11, 0x53) 'Ctrl+S: steer send' $true
+            } else { Press @(0x0D) 'Enter: send composer' $true }
+            $deadline = $observation.actionMs + 15000
+            while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline) { Start-Sleep -Milliseconds 100 }
+            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         }
-        $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
-        if ($observation.composerText -cne $plan.text) { throw 'Real keyboard composer text mismatch' }
-        Shot "$($plan.name)-action"
-        $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        if ($plan.name -eq 'steer-chord') {
-            Press @(0x11, 0x58) 'Ctrl+X: steer prefix' $true
-            Press @(0x11, 0x53) 'Ctrl+S: steer send' $true
-        } else { Press @(0x0D) 'Enter: send composer' $true }
-        $deadline = $observation.actionMs + 15000
-        while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline) { Start-Sleep -Milliseconds 100 }
-        $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         Doctor $true
         Copy-Item "$settings/session.json" "$caseDir/session-chat.json"
         Shot "$($plan.name)-after"
@@ -151,7 +263,13 @@ foreach ($plan in $plans) {
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
             }
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
+            if ($isQueue -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
+            if ($isQueue -and $procDir) {
+                Remove-Item -LiteralPath $procDir -Recurse -Force -ErrorAction SilentlyContinue
+                $procRoot = Split-Path $procDir
+                if ((Test-Path -LiteralPath $procRoot) -and -not (Get-ChildItem -LiteralPath $procRoot -Force)) { Remove-Item -LiteralPath $procRoot -Force }
+            }
             Remove-Item -LiteralPath $profile -Recurse -Force
             $cleanup.scratch_removed = -not (Test-Path -LiteralPath $profile)
         } catch { $observation.error = "Evidence/cleanup: $_" }

@@ -619,6 +619,7 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
         .cwd = std.mem.sliceTo(&key.cwd, 0),
         .settlement = true,
         .source_offsets = true,
+        .live = true,
         .cached_sid = std.mem.sliceTo(&history.sid, 0),
         .inode = history.inode,
         .offset = history.offset,
@@ -1281,7 +1282,7 @@ test "chatLatestAgentReply returns only the reply after the last prompt" {
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second answer"), out[0..n]);
 }
 
-fn chatDeliveryPending(shell_id: u32) bool {
+pub fn chatDeliveryPending(shell_id: u32) bool {
     for (app_state.g_chat_outbox.items) |entry| {
         if (!entry.channel_sent or entry.state == .not_sent) continue;
         const idx = @import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;

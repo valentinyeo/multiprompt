@@ -2624,6 +2624,50 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
     debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ op, key.shell_id }) catch "");
 }
 
+pub fn chatShellEditQueued() bool {
+    if (!app_state.g_chat_active) return false;
+    return chatShellOp(app_state.active_shell, "edit_queued", null);
+}
+
+pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[shell_index];
+    if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
+    const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
+    if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+    const a = std.heap.page_allocator;
+    const store = if (text) |t| (std.unicode.utf16LeToUtf8Alloc(a, t) catch return false) else (a.alloc(u8, 0) catch return false);
+    var kept: usize = 0;
+    for (store) |c| {
+        if (c == '\r') continue;
+        store[kept] = c;
+        kept += 1;
+    }
+    const thread = std.Thread.spawn(.{}, chatShellOpThread, .{ key, op, store, kept }) catch {
+        a.free(store);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u8, store: []u8, kept: usize) void {
+    const a = std.heap.page_allocator;
+    defer a.free(store);
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = op, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = store[0..kept] }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    var needle: [48]u8 = undefined;
+    const want = std.fmt.bufPrint(&needle, "\t{s}\tok\t", .{op}) catch return;
+    var log: [96]u8 = undefined;
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, want) == null) {
+        debugLog(std.fmt.bufPrint(&log, "[chat] {s} failed via=tmux", .{op}) catch "");
+        return;
+    }
+    debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ op, key.shell_id }) catch "");
+}
+
 test "IGSH-442 removed outbox entry is absent after JSON save and reload" {
     const allocator = std.testing.allocator;
     var list: std.ArrayList(ChatOutboxEntry) = .empty;
