@@ -219,7 +219,8 @@ test('ISSUE-154 transport uses a deadline without blocking the host on unread re
 
 test('issue: source preserves token-only lifetime mutex and shared pipe resolver', () => {
   assert.match(source, /fn isolatedPipeName\(buf: \[\]u8, token: \[\]const u8\) !\[:0\]const u8/);
-  assert.equal((source.match(/try isolatedPipeName\(&pipe_name_buf, g_profile_token\)/g) || []).length, 1);
+  assert.equal((source.match(/try isolatedPipeName\(&pipe_name_buf, profile_token\)/g) || []).length, 1);
+  assert.match(source, /requestBrowserForWindow\(allocator, g_window_id, g_profile_token, method, fields_json, deadline\)/);
   assert.match(source, /const profile_pipe_name = isolatedPipeName\(&pipe_name_buf, g_profile_token\)/);
   assert.match(source, /const profile_mutex = if \(g_profile_token\.len > 0\)[\s\S]*?CreateMutexA\(null, 0, name\.ptr\)[\s\S]*?WaitForSingleObject\(mutex, 0xFFFFFFFF\)[\s\S]*?wait != 0 and wait != 0x80/);
   assert.ok(source.indexOf('defer if (profile_mutex)') < source.indexOf('std.Thread.spawn(.{}, runPipeServer'));

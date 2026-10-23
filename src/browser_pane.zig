@@ -1,3 +1,4 @@
+const switch_timing = @import("switch_timing.zig");
 const app_state = @import("app_state.zig");
 const Shell = @import("app_state.zig").Shell;
 const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
@@ -618,6 +619,8 @@ pub fn threadTitleTop() i32 {
 }
 
 pub fn armBrowserVisibilitySettle(ticks: i32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.arm_settle, timing_started);
     if (app_state.g_main_hwnd == null or ticks <= 0) return;
     if (webView2OwnsActiveShell()) {
         cancelBrowserVisibilitySettle();
@@ -1039,6 +1042,8 @@ fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: 
 }
 
 pub fn spawnBrowserCliHidden(cmd: []const u8) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_launch, timing_started);
     const owned = std.heap.page_allocator.dupe(u8, cmd) catch return;
     const thread = std.Thread.spawn(.{}, spawnBrowserCliWorker, .{owned}) catch {
         std.heap.page_allocator.free(owned);
@@ -1754,11 +1759,9 @@ fn setBrowserFrozenMarkerForShell(idx: u32, frozen: bool) void {
         const sess = app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len];
         if (frozen) writeBrowserFrozenMarkerKey(sess) else removeBrowserFrozenMarkerKey(sess);
     }
-    if (isRemoteShellKind(app_state.shells[idx].kind)) {
-        var key_buf: [64]u8 = undefined;
-        const key = shellZsbSessionKey(app_state.shells[idx].shell_id, &key_buf);
-        if (frozen) writeBrowserFrozenMarkerKey(key) else removeBrowserFrozenMarkerKey(key);
-    }
+    var key_buf: [64]u8 = undefined;
+    const key = shellZsbSessionKey(app_state.shells[idx].shell_id, &key_buf);
+    if (frozen) writeBrowserFrozenMarkerKey(key) else removeBrowserFrozenMarkerKey(key);
 }
 
 pub fn buildBrowserCdpLifecycleCmd(buf: []u8, window_id: i64, state: []const u8) ?[]const u8 {
@@ -1790,22 +1793,109 @@ fn freezeBrowserPaneForShell(idx: u32) void {
     if (idx >= app_state.shell_count or app_state.shells[idx].browser_frozen) return;
     const window_id = app_state.shells[idx].browser_window_id;
     if (window_id == 0) return;
-    var cmd_buf: [320]u8 = undefined;
-    const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "frozen") orelse return;
-    spawnBrowserCliHidden(cmd);
+    if (!sendBrowserLifecycle(idx, true)) return;
     app_state.shells[idx].browser_frozen = true;
-    setBrowserFrozenMarkerForShell(idx, true);
+}
+
+const BrowserLifecycleJob = struct {
+    owner: HANDLE,
+    shell_id: u32,
+    connection_id: u64,
+    window_id: i64,
+    frozen: bool,
+    confirmed: bool = false,
+};
+
+fn sendBrowserLifecycle(idx: u32, frozen: bool) bool {
+    if (app_state.shells[idx].browser_lifecycle_pending) return false;
+    const window_id = app_state.shells[idx].browser_window_id;
+    if (window_id == 0 or app_state.g_main_hwnd == null) return false;
+    const job = std.heap.page_allocator.create(BrowserLifecycleJob) catch return false;
+    job.owner = app_state.g_main_hwnd;
+    job.shell_id = app_state.shells[idx].shell_id;
+    job.connection_id = app_state.shells[idx].browser_connection_id;
+    job.window_id = window_id;
+    job.frozen = frozen;
+    job.confirmed = false;
+    const thread = std.Thread.spawn(.{}, browserLifecycleWorker, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    app_state.shells[idx].browser_lifecycle_pending = true;
+    app_state.shells[idx].browser_wake_requested = false;
+    return true;
 }
 
 pub fn wakeBrowserPaneFromFreeze(idx: u32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_wake, timing_started);
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_frozen) return;
+    if (app_state.shells[idx].browser_lifecycle_pending) {
+        app_state.shells[idx].browser_wake_requested = true;
+        return;
+    }
+    if (!sendBrowserLifecycle(idx, false)) return;
     app_state.shells[idx].browser_frozen = false;
-    setBrowserFrozenMarkerForShell(idx, false);
-    const window_id = app_state.shells[idx].browser_window_id;
-    if (window_id == 0) return;
-    var cmd_buf: [320]u8 = undefined;
-    const cmd = buildBrowserCdpLifecycleCmd(&cmd_buf, window_id, "active") orelse return;
-    spawnBrowserCliHidden(cmd);
+    var buf: [160]u8 = undefined;
+    if (std.fmt.bufPrint(&buf, "browser wake sent: shell={d} window={d} path=pipe queued", .{ app_state.shells[idx].shell_id, app_state.shells[idx].browser_window_id })) |line| debugLog(line) else |_| {}
+}
+
+fn browserLifecycleReplySucceeded(reply: []const u8) bool {
+    var parsed = json_reader.parse(std.heap.page_allocator, reply) catch return false;
+    defer parsed.deinit();
+    return json_reader.boolTrue(parsed.value, "ok");
+}
+
+test "IGSH-606 lifecycle confirmation requires a CDP acknowledgment" {
+    try std.testing.expect(browserLifecycleReplySucceeded("{\"ok\":true,\"result\":{}}"));
+    for ([_][]const u8{ "", "not json", "null", "{}", "{\"ok\":false}", "{\"ok\":\"true\"}" }) |reply| {
+        try std.testing.expect(!browserLifecycleReplySucceeded(reply));
+    }
+}
+
+fn browserLifecycleWorker(job: *BrowserLifecycleJob) void {
+    crash_recorder.guardThread();
+    const allocator = std.heap.page_allocator;
+    lifecycle: {
+        const profile_size = GetEnvironmentVariableA("MULTIPROMPT_BROWSER_PROFILE", null, 0);
+        const profile = allocator.alloc(u8, profile_size) catch break :lifecycle;
+        defer allocator.free(profile);
+        const profile_len = if (profile_size == 0) 0 else GetEnvironmentVariableA("MULTIPROMPT_BROWSER_PROFILE", profile.ptr, profile_size);
+        if (profile_size != 0 and profile_len >= profile_size) break :lifecycle;
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"cdpMethod\":\"Page.setWebLifecycleState\",\"params\":{{\"state\":\"{s}\"}}", .{if (job.frozen) @as([]const u8, "frozen") else "active"}) catch break :lifecycle;
+        const reply = @import("bridge.zig").requestBrowserForWindow(allocator, job.window_id, profile[0..profile_len], "cdp", fields, null) catch break :lifecycle;
+        defer allocator.free(reply);
+        job.confirmed = browserLifecycleReplySucceeded(reply);
+    }
+    if (PostMessageW(job.owner, @import("win32.zig").WM_APP_BROWSER_LIFECYCLE_DONE, 0, @bitCast(@intFromPtr(job))) == 0)
+        std.heap.page_allocator.destroy(job);
+}
+
+pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
+    defer std.heap.page_allocator.destroy(job);
+    if (app_state.g_app_closing) return;
+    const idx = findShellById(job.shell_id) orelse return;
+    if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id) or
+        app_state.shells[idx].browser_window_id != job.window_id or app_state.shells[idx].browser_frozen != job.frozen) return;
+    app_state.shells[idx].browser_lifecycle_pending = false;
+    const wake_requested = app_state.shells[idx].browser_wake_requested;
+    app_state.shells[idx].browser_wake_requested = false;
+    if (job.confirmed) {
+        setBrowserFrozenMarkerForShell(idx, job.frozen);
+    } else {
+        app_state.shells[idx].browser_frozen = !job.frozen;
+    }
+    var buf: [160]u8 = undefined;
+    if (std.fmt.bufPrint(&buf, "browser {s} {s}: shell={d} window={d} path=pipe", .{
+        if (job.frozen) @as([]const u8, "freeze") else "wake",
+        if (job.confirmed) @as([]const u8, "confirmed") else "failed",
+        job.shell_id,
+        job.window_id,
+    })) |line| debugLog(line) else |_| {}
+    if (job.confirmed and !job.frozen and idx == app_state.active_shell) updateBrowserVisibility();
+    if (job.frozen and (wake_requested or idx == app_state.active_shell or app_state.shells[idx].keep_awake)) wakeBrowserPaneFromFreeze(idx);
 }
 
 fn browserPaneSessionBusyPure(
@@ -1853,6 +1943,18 @@ test "browserZsbQuietWindowMin floors the zsb quiet window at 10 minutes" {
 }
 
 pub fn browserHibernationTick() void {
+    if (verboseLoggingEnabled()) {
+        for (0..app_state.shell_count) |i| {
+            if (!app_state.shells[i].browser_enabled) continue;
+            var buf: [256]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&buf, "browser-freeze-state: now={d} active={d} swap={d} shell={d} window={d} frozen={} parked={d} activity={s} last_event={d} busy={}", .{
+                GetTickCount64(), app_state.active_shell, app_state.g_chat_browser_swap.shell_id,
+                app_state.shells[i].shell_id, app_state.shells[i].browser_window_id, app_state.shells[i].browser_frozen,
+                app_state.shells[i].browser_parked_since, @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
+                browserPaneSessionBusy(i, if (browserPowerSaving()) BROWSER_FREEZE_PARK_MS_SAVING else BROWSER_FREEZE_PARK_MS_AC),
+            }) catch "browser-freeze-state: unavailable");
+        }
+    }
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_app_closing or app_state.shell_count == 0) return;
     const now_tick = GetTickCount64();
@@ -2173,11 +2275,15 @@ fn focusBrowserThenConsole(idx: u32) void {
 }
 
 fn showBrowserWindowAsync(hwnd: HANDLE, cmd: i32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_show, timing_started);
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = ShowWindowAsync(hwnd, if (cmd == SW_HIDE) cmd else SW_SHOWNOACTIVATE);
 }
 
 fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32, h: i32, flags: UINT) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_swp, timing_started);
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = SetWindowPos(hwnd, after, x, y, w, h, flags | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
     if (browser_onscreen.moveLeavesOnScreen(x, BROWSER_PARK_X, flags & SWP_NOMOVE != 0, flags & SWP_HIDEWINDOW != 0)) |on_screen| {
@@ -2186,6 +2292,8 @@ fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32,
 }
 
 pub fn parkStrayBrowserPanes(keep: HANDLE) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.park, timing_started);
     if (!browser_onscreen.enabled_igsh357) return;
     var out: [browser_onscreen.capacity]usize = undefined;
     for (app_state.g_browser_onscreen.takeAllExcept(@intFromPtr(keep), &out)) |stray| {
@@ -2513,6 +2621,8 @@ fn unlockForegroundAfterRequestLaunch() void {
 }
 
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_launch, timing_started);
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     const launch_now = GetTickCount64();
@@ -2702,11 +2812,14 @@ fn cancelBrowserAdoptionForShell(idx: u32) void {
 }
 
 pub fn positionActiveBrowser() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.position, timing_started);
     if (app_state.g_monitor_transition.active and !app_state.g_monitor_transition.positioning) {
         hideBrowserEdgeMasks();
         return;
     }
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_browser_switch_preparing) return;
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_docking) return;
     if (webView2OwnsActiveShell()) {
         hideAllBrowserChrome();
@@ -2733,6 +2846,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
+    if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;
     const layout = calcBrowserLayout() orelse {
         if (verboseLoggingEnabled()) debugLog("[browser] positionActiveBrowser: calcBrowserLayout returned null (no dock)");
         hideBrowserEdgeMasks();
@@ -2854,7 +2968,7 @@ pub fn hideBrowserFloatingChrome() void {
     if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
         if (IsWindowVisible(app_state.g_urlbar_hwnd) != 0) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
     }
-    hideBrowserEdgeMasks();
+    if (!app_state.g_browser_switch_preparing) hideBrowserEdgeMasks();
 }
 
 pub fn parkBrowserWindow(hwnd: HANDLE) void {
@@ -3020,7 +3134,10 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_visible, timing_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_browser_switch_preparing) return;
     if (app_state.g_updating_browser_visibility) return;
     app_state.g_updating_browser_visibility = true;
     defer app_state.g_updating_browser_visibility = false;
@@ -3116,9 +3233,11 @@ pub fn relaunchActiveRestoredBrowserPane() void {
 }
 
 pub fn hideActiveBrowser() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.hide_prev_browser, timing_started);
     browserTrace("hideActiveBrowser");
     cancelBrowserVisibilitySettle();
-    hideBrowserEdgeMasks();
+    if (!app_state.g_browser_switch_preparing) hideBrowserEdgeMasks();
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         parkBrowserWindow(bh);
@@ -3337,6 +3456,10 @@ pub fn hibernateAllParkedBrowserPanesNow() u32 {
 }
 
 fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
+    sh.browser_frozen = false;
+    sh.browser_lifecycle_pending = false;
+    sh.browser_wake_requested = false;
+    sh.browser_parked_since = 0;
     sh.browser_enabled = true;
     sh.browser_launch_tick = now;
     if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;
@@ -3345,6 +3468,10 @@ fn beginBrowserOpening(sh: *Shell, now: u64, connection_id: u64) void {
 }
 
 fn resetBrowserConnection(sh: *Shell) void {
+    sh.browser_frozen = false;
+    sh.browser_parked_since = 0;
+    sh.browser_lifecycle_pending = false;
+    sh.browser_wake_requested = false;
     sh.browser_hwnd = null;
     sh.browser_docking = false;
     sh.browser_launch_tick = 0;
@@ -4091,11 +4218,6 @@ pub fn armBrowserEdgeMaskRaise() void {
 
 fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32) void {
     if (w <= 0 or h <= 0) return;
-    if (activeBrowserTransientPopupHasForegroundFocus()) return;
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
-        hideBrowserEdgeMasks();
-        return;
-    }
     const idx: usize = @intFromEnum(side);
     const hw = app_state.g_browser_edge_mask_hwnds[idx];
     if (hw == null or IsWindow(hw) == 0) return;
@@ -4106,8 +4228,8 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
         const radius = style.chatSurfaceRadius();
         const paint = browser_corners.Paint{ .radius = radius, .border = style.chatSurfaceBorderW(), .background = browserEdgeMaskColor(side), .arc_background = browserEdgeMaskFrameColor(), .border_color = style.chatSurfaceBorderColor(), .inset_x = w - radius, .inset_y = h - radius };
         const cached = browser_corner_paints[idx - 6];
-        const need_bitmap = cached == null or !std.meta.eql(cached.?, paint) or !app_state.g_browser_edge_mask_shown[idx];
-        if (same_rect and !need_bitmap) return;
+        const need_bitmap = cached == null or !std.meta.eql(cached.?, paint) or prev.right != w or prev.bottom != h;
+        if (same_rect and !need_bitmap and app_state.g_browser_edge_mask_shown[idx]) return;
         if (need_bitmap) {
             if (!updateBrowserCorner(hw, corner, paint, x, y, w, h)) {
                 _ = ShowWindow(hw, SW_HIDE);
@@ -4137,6 +4259,7 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
 
 fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
     if (!BROWSER_EDGE_MASKS) return;
+    if (app_state.g_browser_switch_preparing) return;
     if (app_state.g_monitor_transition.active) {
         hideBrowserEdgeMasks();
         return;

@@ -403,7 +403,7 @@ test('browser emulation map drives the real native CLI and extension only on Git
   const driver = read(skill + 'browser-emulation.mjs');
   const map = read(skill + 'features/browser-emulation.md');
   assert.match(workflow, /FEATURE -notin @\([^\n)]*'browser-emulation'/);
-  assert.match(workflow, /control\.ps1 -Feature browser-emulation/);
+  assert.match(workflow, /control\.ps1 -Feature \$env:FEATURE/);
   assert.match(control, /browserJob\.Start\(\$node/);
   assert.match(control, /activeAfterStop = \$stopped\.ActiveProcesses/);
   assert.match(driver, /assert\.equal\(process\.env\.GITHUB_ACTIONS, 'true'/);
@@ -529,7 +529,7 @@ function assertsFocusJourneyReadiness(source) {
   assert.ok(pills.includes("-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100"));
   assert.ok(pills.indexOf('Wait-Until {') < pills.indexOf('[VerifyNative]::ClickClient'));
   assert.match(pills, /8 \+ \(\$Workspace \+ 1\) \* 29 \+ 12\), 17/);
-  assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length/);
+  assert.match(palette, /\$start = \(\(Get-Content \$log -Raw\) -join ''\).Length/);
   assert.match(palette, /Substring\(\$start\)/);
   assert.match(palette, /GetFocusedWindow\(\$script:window\) -eq \$script:window/);
   assert.match(palette, /\$Query.Length/);
@@ -645,7 +645,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.equal((palette.match(/Press @\(0x11, 0x4B\)/g) || []).length, 1);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
@@ -736,9 +736,9 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
     assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
     const publication = restart.slice(restart.indexOf('    Wait-Until {'), restart.indexOf('    [void][VerifyNative]::ShowWindow'));
-    assert.match(publication, /Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser'\s+\} "\$Stage relaunch publishes its owned window and restored shells before activation" 60/);
+    assert.match(publication, /Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(\(Get-Content \$log -Raw\) -join ''\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser'\s+\} "\$Stage relaunch publishes its owned window and restored shells before activation" 60/);
     assert.doesNotMatch(publication, /installHook|BringToForeground|Start-Sleep/);
-    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'\s+\} "\$Stage relaunch owns its published state after session restore" 60\s+Doctor/);
+    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(\(Get-Content \$log -Raw\) -join ''\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'\s+\} "\$Stage relaunch owns its published state after session restore" 60\s+Doctor/);
     assert.doesNotMatch(restart, /Assert-Foreground/);
     const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
     assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
@@ -951,7 +951,7 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
 test('ISSUE-569 journey restores the same favorite in Starred and at home with real keys', () => {
   function contract(driver) {
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
-    assert.match(restart, /\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)/);
+    assert.match(restart, /\$trace = \(\(Get-Content \$log -Raw\) -join ''\).Substring\(\$logStart\)/);
     assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
     assert.doesNotMatch(recipe, /SetForegroundWindow|GetFocusedWindow|Start-Sleep/);

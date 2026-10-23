@@ -339,6 +339,8 @@ pub const Shell = struct {
     browser_parked_since: u64 = 0,
     browser_docking: bool = false,
     browser_frozen: bool = false,
+    browser_lifecycle_pending: bool = false,
+    browser_wake_requested: bool = false,
     voice_last_reply_hash: u64 = 0,
     eta_total_ms: u64 = 0,
     eta_deadline_tick: u64 = 0,
@@ -2389,6 +2391,7 @@ pub const BROWSER_HUNG_MISS_LIMIT: u8 = 2;
 
 pub var g_browser_orphan_sweep_tick: u64 = 0;
 pub var g_updating_browser_visibility: bool = false;
+pub var g_browser_switch_preparing: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 

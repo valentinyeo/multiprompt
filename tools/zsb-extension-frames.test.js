@@ -47,6 +47,7 @@ function harness(frames, {
     cdpSessionCancels: new Map(),
     debuggedTabs: new Set(),
     emulatedTabs: new Map(),
+    lifecycleTabs: new Map(),
     lostEmulationTabs: new Map(),
     screenshotCdpDetachTimers: new Map(),
     screenshotCdpDetachInFlight: new Map(),
@@ -117,7 +118,7 @@ function harness(frames, {
     "isExtensionTab", "isBrowserInternalTab", "isExtensionFrameAccessError", "isPaneBeaconTab", "paneContentTab", "paneWindowNotFoundMessage", "getTargetTab",
     "ensureBackgroundTabFocusEmulation", "runInFrame", "runInAllFrames", "textAction", "getSnapshot",
     "errorText", "isPageScriptingError", "pageErrorResult", "compactTab", "numberOr", "getVisibleText", "getCompactSnapshot",
-    "runInDataTab", "withCdpSession", "withTimeout", "clearScreenshotCdpDetachTimer",
+    "runInDataTab", "withCdpSession", "setPageLifecycle", "withTimeout", "clearScreenshotCdpDetachTimer",
     "tryAcceptPendingDialog", "acceptPendingDialog", "captureScreenshotViaCdp", "captureScreenshotResult",
   ];
   vm.runInContext(names.map(bridgeFunction).join("\n"), context);

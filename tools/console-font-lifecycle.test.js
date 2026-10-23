@@ -82,7 +82,8 @@ function harness() {
     'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView']
     .map(name => fn(chat, name)).join('\n');
   const bundled = between(consoleSource, 'pub const BundledConsoleFonts = struct {', '\npub fn registerBundledConsoleFonts');
-  const tab = between(fn(consoleSource, 'switchToShell'), '                _ = showShellConsole(idx, SW_SHOW, "switchToShell");', '\n            }');
+  const tabBranch = '            } else if (app_state.shells[idx].hwnd != null) {';
+  const tab = between(fn(consoleSource, 'switchToShell'), tabBranch, '\n            }').slice(tabBranch.length);
   const layoutSync = between(read('window_layout.zig'), '    if (fontGenStale(', '\n    const nudge');
   const poll = between(read('shell_poll.zig'), '        if (i == app_state.active_shell', '\n\n        if (local_cmd_shell)');
   const production = (core + visibility + bundled + '\n' +
@@ -126,6 +127,10 @@ fn pollFonts() void {
 const prelude = String.raw`
 const std = @import("std");
 const app_state = @This();
+const switch_timing = struct {
+    fn start() u64 { return 0; }
+    fn record(comptime _: enum { console_shown, reposition, focus }, _: u64) void {}
+};
 const win32 = @This();
 fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }
 const HANDLE = ?usize;

@@ -50,7 +50,7 @@ test("console Edge and masks cannot race the frame transition", () => {
   assert.match(transition, /finishMonitorTransition\(hwnd, false, "timeout"\)/);
   assert.match(source, /monitor-move-audit\.tsv/);
 
-  assert.match(source, /fn positionActiveBrowser\(\) void \{\s*if \(g_monitor_transition\.active and !g_monitor_transition\.positioning\)/);
+  assert.match(source, /fn positionActiveBrowser\(\) void \{\s*const timing_started = switch_timing.start\(\);\s*defer switch_timing.record\(\.position, timing_started\);\s*if \(g_monitor_transition\.active and !g_monitor_transition\.positioning\)/);
   assert.match(source, /fn updateBrowserVisibility\(\) void \{[\s\S]*?if \(g_monitor_transition\.active\) \{\s*parkBrowserForMonitorTransition\(\)/);
   assert.match(source, /fn positionBrowserEdgeMasks\(layout: BrowserLayout\) void \{[\s\S]*?if \(g_monitor_transition\.active\)/);
 });

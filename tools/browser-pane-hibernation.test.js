@@ -62,14 +62,15 @@ test("freeze/unfreeze are idempotent, mirror the wake marker, and never block th
   const freeze = functionBody("freezeBrowserPaneForShell");
   assert.match(freeze, /shells\[idx\]\.browser_frozen\) return;/, "no-op when already frozen");
   assert.match(freeze, /window_id == 0\) return;/, "no-op until the windowId has resolved");
-  assert.match(freeze, /spawnBrowserCliHidden\(cmd\);/, "fire-and-forget: never CreateProcess-and-wait on the UI thread");
+  assert.match(freeze, /sendBrowserLifecycle\(idx, true\)/, "dispatch to worker: never CreateProcess-and-wait on the UI thread");
   assert.match(freeze, /shells\[idx\]\.browser_frozen = true;/);
-  assert.match(freeze, /setBrowserFrozenMarkerForShell\(idx, true\);/);
+  assert.doesNotMatch(freeze, /setBrowserFrozenMarkerForShell/);
 
   const wake = functionBody("wakeBrowserPaneFromFreeze");
   assert.match(wake, /!shells\[idx\]\.browser_frozen\) return;/);
   assert.match(wake, /shells\[idx\]\.browser_frozen = false;/);
-  assert.match(wake, /setBrowserFrozenMarkerForShell\(idx, false\);/);
+  assert.doesNotMatch(wake, /setBrowserFrozenMarkerForShell/);
+  assert.match(functionBody("handleBrowserLifecycleDone"), /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\);/);
 });
 
 test("the tier 2 tick exempts the active tab, keep_awake, and a busy working session", () => {
@@ -113,7 +114,7 @@ test("switching to a frozen tab unfreezes it before the pane is shown", () => {
   const activeAssign = fn.indexOf("active_shell = idx;");
   const wake = fn.indexOf("wakeBrowserPaneFromFreeze(idx);");
   const show = fn.search(/updateBrowserVisibility\(\)|ShowWindow\(shells\[idx\]\.hwnd, SW_SHOW\)/);
-  assert.ok(activeAssign >= 0 && wake > activeAssign, "unfreeze must happen after active_shell flips to the new tab");
+  assert.ok(activeAssign > wake && wake >= 0, "wake targets idx before active_shell changes or chat paint begins");
   assert.ok(show === -1 || wake < show, "unfreeze must be dispatched before the pane/console is shown");
 });
 

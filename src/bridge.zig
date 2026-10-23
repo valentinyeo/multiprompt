@@ -13,6 +13,7 @@ const browser_request_attempts = 4;
 
 var g_window_id: ?i64 = null;
 var g_profile_token: []const u8 = "";
+var request_sequence = std.atomic.Value(u64).init(0);
 
 const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
@@ -1923,14 +1924,19 @@ test "issue: CLI requests advertise the bridge version and preserve request fiel
 }
 
 fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
+    return requestBrowserForWindow(allocator, g_window_id, g_profile_token, method, fields_json, deadline);
+}
+
+pub fn requestBrowserForWindow(allocator: std.mem.Allocator, window_id: ?i64, profile_token: []const u8, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
     const until = deadline orelse (GetTickCount64() + 20_000);
     const pid = GetCurrentProcessId();
     const tick = GetTickCount64();
+    const sequence = request_sequence.fetchAdd(1, .monotonic);
 
-    const id = try std.fmt.allocPrint(allocator, "cli-{d}-{d}", .{ pid, tick });
+    const id = try std.fmt.allocPrint(allocator, "cli-{d}-{d}-{d}", .{ pid, tick, sequence });
     defer allocator.free(id);
 
-    const reply_pipe_text = try std.fmt.allocPrint(allocator, "\\\\.\\pipe\\zigshell-bridge-reply-{d}-{d}", .{ pid, tick });
+    const reply_pipe_text = try std.fmt.allocPrint(allocator, "\\\\.\\pipe\\zigshell-bridge-reply-{d}-{d}-{d}", .{ pid, tick, sequence });
     defer allocator.free(reply_pipe_text);
     const reply_pipe_name = try allocator.dupeZ(u8, reply_pipe_text);
     defer allocator.free(reply_pipe_name);
@@ -1950,11 +1956,11 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
     }
     defer _ = CloseHandle(reply_pipe);
 
-    const request = try buildBrowserRequest(allocator, id, method, reply_pipe_text, g_window_id, fields_json);
+    const request = try buildBrowserRequest(allocator, id, method, reply_pipe_text, window_id, fields_json);
     defer allocator.free(request);
 
     var pipe_name_buf: [128]u8 = undefined;
-    const command_pipe_name = try isolatedPipeName(&pipe_name_buf, g_profile_token);
+    const command_pipe_name = try isolatedPipeName(&pipe_name_buf, profile_token);
     const command_pipe = blk: {
         const connect_until = @min(until, GetTickCount64() + 1500);
         while (true) {

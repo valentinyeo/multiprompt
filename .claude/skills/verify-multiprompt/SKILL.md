@@ -22,7 +22,7 @@ gh run watch <id> --interval 60
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, `chat-view-everywhere`, and `browser-emulation`. [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-switch-speed`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, `chat-view-everywhere`, and `browser-emulation`. [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
@@ -67,6 +67,8 @@ The harness uses .NET System.Windows.Automation for window identity and accessib
 The `pane-layout` journey keeps the real CMD console visible, groups it through Move to Group, docks a browser, maximizes through Win+Up and checks `pane-layout.png` against owned HWND/UIA rectangles. See [pane layout](features/pane-layout.md) for pixel detection and evidence limits.
 
 The `browser-pane-locked` journey uses real mouse dragging, browser-focused Win+Up and a strip double-click, requiring the exact dock rectangle and no maximization. It logs the verified release tag/version. See [browser pane locked](features/browser-pane-locked.md).
+
+The on-demand-only `browser-switch-speed` journey (`workflow_dispatch`, not the PR journey matrix) measures 20 real Ctrl+Tab switches per browser-off/warm-on set and five freshly frozen browser returns in both console view and Chat View. Frozen sets wait at most 150 seconds per app-published `panehib-zss-<shell_id>.flag`, never force freeze, and require marker removal on wake. The disposable profile includes the bridge extension needed for CDP. Browser-on samples require the target page color on screen, with separate window-visible timings. Artifact `verify-browser-switch-speed` includes `switch-timings.json`, optional debug traces and native window identities; either view’s warm or frozen browser-on median gap above 50 ms or an unreachable end state fails. Older releases without debug timing traces remain measurable. See [browser switch speed](features/browser-switch-speed.md).
 
 The `browser-pane-stuck` journey reads the app-published `browser_state`, `browser_connection_id` and `browser_window_id` fields in `inbox-default.json`; it never writes them or publishes pane URLs. A docked pane does not need an extension window ID. Run `node tools/check-browser-pane-stuck.mjs` for its static map/workflow/driver contract check (no app execution).
 

@@ -114,6 +114,8 @@ pub fn build(b: *std.Build) void {
     const bridge_opts = b.addOptions();
     bridge_opts.addOption([]const u8, "extension_version", manifest.value.version);
     bridge_exe.root_module.addOptions("bridge_config", bridge_opts);
+    exe.root_module.addOptions("bridge_config", bridge_opts);
+    dev_exe.root_module.addOptions("bridge_config", bridge_opts);
     bridge_exe.root_module.linkSystemLibrary("gdiplus", .{});
     bridge_exe.root_module.linkSystemLibrary("ole32", .{});
     bridge_exe.subsystem = .Console;

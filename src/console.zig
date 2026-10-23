@@ -1,3 +1,4 @@
+const switch_timing = @import("switch_timing.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const IS_DEV = @import("main.zig").IS_DEV;
@@ -2549,6 +2550,10 @@ pub fn switchToShellByUser(idx: u32) void {
 }
 
 pub fn switchToShell(idx: u32) void {
+    var timing: switch_timing.Trace = .{};
+    const timing_previous = switch_timing.begin(&timing);
+    defer switch_timing.finish(&timing, timing_previous, idx);
+    if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -2559,6 +2564,12 @@ pub fn switchToShell(idx: u32) void {
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
+    const defer_native_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
+        app_state.shells[idx].browser_enabled and app_state.shells[idx].browser_native and
+        app_state.shells[idx].browser_hwnd != null and @import("win32.zig").IsWindow(app_state.shells[idx].browser_hwnd) != 0;
+    const browser_preparing_previous = app_state.g_browser_switch_preparing;
+    app_state.g_browser_switch_preparing = defer_native_browser;
+    defer app_state.g_browser_switch_preparing = browser_preparing_previous;
     if (idx != app_state.active_shell) {
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
@@ -2612,7 +2623,6 @@ pub fn switchToShell(idx: u32) void {
         app_state.g_voice_highlight = null;
     }
     if (!defer_browser) ecoqosReevaluateAll();
-    if (!defer_browser and idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
     if (!app_state.g_restoring and app_state.g_single_window and idx < app_state.shell_count) {
         app_state.g_active_workspace = app_state.shells[idx].workspace;
         updateMainWindowTitle();
@@ -2655,13 +2665,25 @@ pub fn switchToShell(idx: u32) void {
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);
                 if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
             } else if (app_state.shells[idx].hwnd != null) {
-                _ = showShellConsole(idx, SW_SHOW, "switchToShell");
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.console_shown, timing_started);
+                    _ = showShellConsole(idx, SW_SHOW, "switchToShell");
+                }
                 app_state.g_nudge_repaint = true;
-                repositionActive();
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.reposition, timing_started);
+                    repositionActive();
+                }
                 armConsoleGeometrySettle(app_state.g_main_hwnd);
                 updateBrowserVisibility();
                 if (browserPaneActive()) armBrowserVisibilitySettle(12);
-                focusActiveShell();
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.focus, timing_started);
+                    focusActiveShell();
+                }
             }
         }
     }
@@ -2694,6 +2716,10 @@ pub fn switchToShell(idx: u32) void {
         writePaneSessionFileForShell(idx);
     }
     syncMouseHookForUrlClicks();
+    if (!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0) {
+        app_state.g_browser_switch_preparing = false;
+        _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER, @import("win32.zig").TIMER_BROWSER_SETTLE, 0);
+    }
 }
 
 pub fn nthVisibleShell(n: u32) ?u32 {

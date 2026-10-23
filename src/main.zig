@@ -1378,6 +1378,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         handleLayoutReply(lp);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_BROWSER_LIFECYCLE_DONE) {
+        @import("browser_pane.zig").handleBrowserLifecycleDone(@ptrFromInt(@as(usize, @bitCast(lp))));
+        return 0;
+    }
     if (msg == WM_APP_BROWSER_RESOLVED) {
         handleBrowserWindowResolved(@ptrFromInt(@as(usize, @bitCast(lp))));
         return 0;
