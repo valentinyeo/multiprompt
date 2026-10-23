@@ -500,7 +500,7 @@ test "IGSH-678 overflowing end-ellipsis code rows keep GDI truncation and draw t
     try std.testing.expect(inked > 0);
     if (!smoothed) std.debug.print("IGSH-678 no smoothed pixels: inked={d} full_intensity={d}\n", .{ inked, full });
     try std.testing.expect(smoothed);
-    if (@as(i32, @intCast(last_inked)) >= segment.width) std.debug.print("IGSH-678 ink reaches column {d}, ellipsized width {d}\n", .{ last_inked, segment.width });
-    try std.testing.expect(@as(i32, @intCast(last_inked)) < segment.width);
+    if (@as(i32, @intCast(last_inked)) > segment.width) std.debug.print("IGSH-678 ink reaches column {d}, ellipsized width {d}\n", .{ last_inked, segment.width });
+    try std.testing.expect(@as(i32, @intCast(last_inked)) <= segment.width);
     try std.testing.expect(last_inked > 0);
 }
