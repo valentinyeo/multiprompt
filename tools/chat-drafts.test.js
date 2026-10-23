@@ -54,6 +54,10 @@ var files = std.StringHashMap([]u8).init(std.heap.page_allocator);
 var saved_chat_ids: [2]u64 = @splat(0);
 fn saveSession() void { for (0..shell_count) |i| saved_chat_ids[i] = shells[i].chat_id; }
 fn L(comptime value: []const u8) *const [value.len:0]u16 { return std.unicode.utf8ToUtf16LeStringLiteral(value); }
+const defer_browser = true;
+const defer_native_browser = true;
+var revealed_shell: u32 = 0;
+fn revealPaintedChatBrowser() void { revealed_shell = shells[active_shell].shell_id; }
 fn parkStrayBrowserPanes(_: ?usize) void {}
 fn GetWindowTextW(_: ?usize, out: [*]u16, cap: i32) i32 { const n = @min(std.mem.indexOfScalar(u16, &composer_text, 0).?, @as(usize, @intCast(cap - 1))); @memcpy(out[0..n], composer_text[0..n]); out[n] = 0; return @intCast(n); }
 fn SetWindowTextW(_: ?usize, value: [*:0]const u16) bool { const s = std.mem.span(value); @memcpy(composer_text[0..s.len], s); composer_text[s.len] = 0; return true; }
@@ -90,7 +94,8 @@ function production() {
   assert.ok(switchStart >= 0 && switchEnd > switchStart, 'real switch binding boundary');
   code += `
 fn switchToShell(idx: u32) void {
-${switchBody.slice(switchStart, switchEnd)}
+${switchBody.slice(switchStart, switchEnd).replaceAll('@import("browser_pane.zig").', '')}
+    std.debug.assert(revealed_shell == shells[idx].shell_id);
 }
 `;
   return code;

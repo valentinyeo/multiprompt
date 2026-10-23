@@ -2905,6 +2905,25 @@ fn cancelBrowserAdoptionForShell(idx: u32) void {
     if (idx < app_state.shell_count) app_state.shells[idx].browser_launch_tick = 0;
 }
 
+pub fn revealPaintedChatBrowser() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.position, timing_started);
+    if (!app_state.g_chat_active or !app_state.g_chat_switch_preparing or app_state.active_shell >= app_state.shell_count or
+        app_state.g_chat_browser_swap.shell_id != app_state.shells[app_state.active_shell].shell_id or
+        app_state.g_monitor_transition.active or app_state.g_app_closing or !foregroundIsOurs() or browserChromeHiddenForOverlay() or
+        webView2OwnsActiveShell()) return;
+    const sh = &app_state.shells[app_state.active_shell];
+    if (!sh.browser_enabled or !sh.browser_native or sh.browser_docking or sh.browser_frozen or sh.browser_lifecycle_pending) return;
+    const bh = sh.browser_hwnd orelse return;
+    if (IsWindow(bh) == 0 or IsWindowVisible(bh) == 0) return;
+    const layout = calcBrowserLayout() orelse return;
+    const target = browserDockTarget(layout, true) orelse return;
+    var actual: RECT = undefined;
+    if (GetWindowRect(bh, &actual) == 0 or actual.right - actual.left != target.right - target.left or
+        actual.bottom - actual.top != target.bottom - target.top) return;
+    setBrowserWindowPosAsync(bh, null, target.left, target.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+}
+
 pub fn positionActiveBrowser() void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.position, timing_started);

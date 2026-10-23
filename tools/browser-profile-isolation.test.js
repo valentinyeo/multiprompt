@@ -35,6 +35,29 @@ test("each isolated full-browser profile retains extension support without becom
     "profile isolation must keep the full Edge backend rather than switching to WebView2");
 });
 
+test("same-sized painted chat browsers are uncovered before draft binding without focus, resize or visibility changes", () => {
+  const pane = fs.readFileSync(path.join(__dirname, '..', 'src', 'browser_pane.zig'), 'utf8');
+  const switching = fs.readFileSync(path.join(__dirname, '..', 'src', 'console.zig'), 'utf8');
+  const reveal = pane.slice(pane.indexOf('pub fn revealPaintedChatBrowser('), pane.indexOf('pub fn positionActiveBrowser('));
+  for (const guard of ['!app_state.g_chat_active', '!app_state.g_chat_switch_preparing', 'app_state.active_shell >= app_state.shell_count', 'app_state.g_chat_browser_swap.shell_id != app_state.shells[app_state.active_shell].shell_id', 'app_state.g_monitor_transition.active', 'app_state.g_app_closing', '!foregroundIsOurs()', 'browserChromeHiddenForOverlay()', 'webView2OwnsActiveShell()', '!sh.browser_enabled', '!sh.browser_native', 'sh.browser_docking', 'sh.browser_frozen', 'sh.browser_lifecycle_pending', 'IsWindow(bh) == 0', 'IsWindowVisible(bh) == 0', 'GetWindowRect(bh, &actual) == 0', 'actual.right - actual.left != target.right - target.left', 'actual.bottom - actual.top != target.bottom - target.top']) {
+    assert.ok(reveal.includes(guard), guard);
+    assert.ok(reveal.indexOf(guard) < reveal.indexOf('setBrowserWindowPosAsync('), guard);
+  }
+  assert.match(reveal, /setBrowserWindowPosAsync\(bh, null, target.left, target.top, 0, 0, SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW\)/);
+  assert.match(reveal, /defer switch_timing.record\(\.position, timing_started\)/);
+  assert.doesNotMatch(reveal, /ShowWindow|SWP_SHOWWINDOW|SetFocus|SetForegroundWindow|SetTimer|Sleep|WaitFor|launchBrowser|navigateBrowser/);
+  const order = /app_state.active_shell = idx;\s+parkStrayBrowserPanes\([^;]+;\s+if \(defer_browser and defer_native_browser\) @import\("browser_pane.zig"\).revealPaintedChatBrowser\(\);\s+chatDraftBindToActive\(\);/;
+  assert.match(switching, order);
+  assert.doesNotMatch(switching.replace('.revealPaintedChatBrowser();', '.positionActiveBrowser();'), order);
+  const park = pane.slice(pane.indexOf('pub fn parkBrowserWindow('), pane.indexOf('fn hideBrowserWindowHard('));
+  assert.match(park, /BROWSER_PARK_X, BROWSER_PARK_Y, 0, 0, SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE/);
+  assert.match(park, /showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\)/);
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension', 'bridge.js'), 'utf8');
+  assert.match(extension, /async function setPageLifecycle\(debuggee, state\) \{[^]*Page\.setWebLifecycleState", \{ state \}/);
+  assert.match(pane, /pub fn browserHibernationTick\(/);
+  assert.match(pane, /pub fn wakeBrowserPaneFromFreeze\(/);
+});
+
 test("selected isolated Chromium and ordinary Edge cannot share the native command channel", () => {
   assert.match(source, /\\Documents\\\\GitHub\\\\zigshell\\\\extension/,
     "the isolated Edge process must load the repository extension copy");
