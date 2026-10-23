@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.829", .items = &.{
+        .{ .text = "Chat View now sends queued messages past gray Claude suggestions without overwriting your typed text.", .ticket = "IGSH-599" },
+        .{ .text = "Chat View text is drawn like Chrome, with smooth edges.", .ticket = "IGSH-610" },
+    } },
     .{ .ver = "0.28.828", .items = &.{
         .{ .text = "Group lines now sit at the far left edge of the sidebar.", .ticket = "IGSH-591" },
         .{ .text = "A group's line no longer runs through group headers.", .ticket = "IGSH-591" },
