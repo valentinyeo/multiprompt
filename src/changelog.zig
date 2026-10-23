@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.849", .items = &.{
+        .{ .text = "Right-click a chat message for Reply and Copy with clear icons and colours that match your theme.", .ticket = "IGSH-718" },
+        .{ .text = "Send and Stop buttons now use neutral grey instead of blue.", .ticket = "IGSH-718" },
+    } },
     .{ .ver = "0.28.848", .items = &.{
         .{ .text = "Switching chat sessions with the browser open now shows the browser page faster.", .ticket = "IGSH-606" },
     } },
