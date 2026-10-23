@@ -47,6 +47,8 @@ pub const SWP_SHOWWINDOW: u32 = 0x0040;
 pub const SWP_HIDEWINDOW: u32 = 0x0080;
 pub const SWP_NOREDRAW: u32 = 0x0008;
 pub const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
+pub const RDW_INVALIDATE: u32 = 0x0001;
+pub const RDW_ALLCHILDREN: u32 = 0x0080;
 pub const WS_EX_APPWINDOW: u32 = 0x00040000;
 pub const WS_EX_TOOLWINDOW: u32 = 0x00000080;
 pub const WS_EX_TOPMOST: u32 = 0x00000008;
@@ -566,6 +568,7 @@ pub extern "user32" fn LoadImageW(HANDLE, ?*anyopaque, UINT, i32, i32, UINT) cal
 pub const IMAGE_ICON: UINT = 1;
 pub const LR_DEFAULTCOLOR: UINT = 0;
 pub extern "user32" fn InvalidateRect(HANDLE, ?*const RECT, BOOL) callconv(WINAPI) BOOL;
+pub extern "user32" fn RedrawWindow(HANDLE, ?*const RECT, HANDLE, UINT) callconv(WINAPI) BOOL;
 pub extern "user32" fn BeginPaint(HANDLE, *PAINTSTRUCT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn EndPaint(HANDLE, *const PAINTSTRUCT) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDC(HANDLE) callconv(WINAPI) HANDLE;

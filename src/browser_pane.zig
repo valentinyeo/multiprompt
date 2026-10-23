@@ -12,6 +12,9 @@ const WINAPI = @import("win32.zig").WINAPI;
 const BOOL = @import("win32.zig").BOOL;
 const DWORD = @import("win32.zig").DWORD;
 const UINT = @import("win32.zig").UINT;
+const RedrawWindow = @import("win32.zig").RedrawWindow;
+const RDW_INVALIDATE = @import("win32.zig").RDW_INVALIDATE;
+const RDW_ALLCHILDREN = @import("win32.zig").RDW_ALLCHILDREN;
 const LONG_PTR = @import("win32.zig").LONG_PTR;
 const WPARAM = @import("win32.zig").WPARAM;
 const LPARAM = @import("win32.zig").LPARAM;
@@ -2862,6 +2865,7 @@ pub fn positionActiveBrowser() void {
         browserTraceN("posBrowser SWP native x=", target_x);
         if (browserWindowNeedsPosition(bh, target_x, target_y, target_w, target_h)) {
             setBrowserWindowPosAsync(bh, null, target_x, target_y, target_w, target_h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            _ = RedrawWindow(bh, null, null, RDW_INVALIDATE | RDW_ALLCHILDREN);
             browserTrace("posBrowser moved");
         } else {
             app_state.g_browser_onscreen.mark(@intFromPtr(bh));
