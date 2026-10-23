@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.844", .items = &.{
+        .{ .text = "Code in Chat View now uses Nordwand Mono SemiBold and is 2 points smaller.", .ticket = "IGSH-678" },
+        .{ .text = "Long lines in file edit previews now have smooth edges on their green and red rows.", .ticket = "IGSH-678" },
+    } },
     .{ .ver = "0.28.843", .items = &.{
         .{ .text = "The sidebar status card is now one line on every page, with the full numbers when you hover it.", .ticket = "IGSH-673" },
         .{ .text = "Messages queued in Claude from the shell now show in Chat View in order, and both views mark them as sent together.", .ticket = "IGSH-682" },
