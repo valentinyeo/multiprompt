@@ -778,11 +778,11 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
     return $pane
 }
 
-function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
+function Focus-BrowserPaneOwner([string]$Step, [uint32]$ShellId) {
     Wait-Until {
         $pane = Read-BrowserPane
         $null -ne $pane -and $pane.browser_state -eq 'connected' -and
-            $pane.browser_connection_id -eq $ConnectionId -and [VerifyNative]::PaneVisible($script:window)
+            $pane.browser_connection_id -eq $ShellId -and [VerifyNative]::PaneVisible($script:window)
     } "browser-pane-stuck ${Step}: docked pane ready for main-window activation" 25
     Doctor
     Record "Activate main window after browser-pane-stuck ${Step} docking"
