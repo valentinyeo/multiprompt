@@ -873,3 +873,42 @@ test('ISSUE-569 journey restores the same favorite in Starred and at home with r
     assert.ok(map.includes(required), required);
   }
 });
+
+test('ISSUE-569 Starred restore never queues a hide for its already selected console', () => {
+  function contract(workspaces, session) {
+    const start = workspaces.indexOf('    if (ws_in == @import("workspace_view.zig").starred)');
+    const entry = workspaces.slice(start, workspaces.indexOf('    if (ws_in >= app_state.g_lws_count', start));
+    assert.ok(start >= 0 && entry.length > 0);
+    assert.match(entry, /if \(starredShellVisible\(i\) and app_state\.shells\[i\]\.shell_id == app_state\.g_starred_last_shell\) \{\s*if \(i != app_state\.active_shell\) switchToShell\(@intCast\(i\)\);\s*break;/);
+    assert.match(entry, /refreshStarredWorkspace\(\);\s*if \(app_state\.active_shell < app_state\.shell_count\) \{\s*app_state\.g_starred_last_shell = app_state\.shells\[app_state\.active_shell\]\.shell_id;\s*focusActiveShell\(\);/);
+    assert.match(entry, /parkMainWindowBeforeActiveShellRemoval\(app_state\.active_shell\)/);
+    assert.ok(entry.indexOf('parkMainWindowBeforeActiveShellRemoval(') < entry.indexOf('switchToShell('));
+    const restore = session.slice(session.indexOf('fn restoreStarredView('), session.indexOf('pub fn saveSession()'));
+    assert.match(restore, /app_state\.g_starred_last_shell = app_state\.shells\[app_state\.active_shell\]\.shell_id;\s*@import\("workspaces.zig"\)\.switchToWorkspace\(@import\("workspace_view.zig"\)\.starred\);/);
+    const unit = workspaces.slice(workspaces.indexOf('test "ISSUE-569 Starred entry keeps the selected session surface without a shell switch"'), workspaces.indexOf('pub fn copyBlueDotHookInstructions('));
+    for (const observation of [
+      'app_state.g_main_hwnd = null;', 'app_state.g_restoring = true;', 'for (0..2) |i|',
+      'app_state.g_chat_browser_swap.request(app_state.shells[i].shell_id, 123);',
+      'switchToWorkspace(@import("workspace_view.zig").starred);',
+      'expectEqual(app_state.shells[i].shell_id, app_state.g_chat_browser_swap.shell_id)',
+      'expectEqual(@as(u64, 123), app_state.g_chat_browser_swap.requested_at)',
+    ]) assert.ok(unit.includes(observation), observation);
+  }
+  const sources = [read('src/workspaces.zig'), read('src/session.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, 'if (i != app_state.active_shell) switchToShell(@intCast(i));', 'switchToShell(@intCast(i));'],
+    [0, 'if (i != app_state.active_shell)', 'if (i == app_state.active_shell)'],
+    [0, '            focusActiveShell();', ''],
+    [0, 'expectEqual(app_state.shells[i].shell_id, app_state.g_chat_browser_swap.shell_id)', 'expect(true)'],
+    [1, 'app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;', ''],
+  ]) {
+    const broken = [...sources];
+    if (file === 0 && before.trim() === 'focusActiveShell();') {
+      const start = broken[0].indexOf('    if (ws_in == @import("workspace_view.zig").starred)');
+      broken[0] = broken[0].slice(0, start) + broken[0].slice(start).replace(before, after);
+    } else broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken), assert.AssertionError, before);
+  }
+});

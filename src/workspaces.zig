@@ -2721,7 +2721,7 @@ pub fn switchToWorkspace(ws_in: u32) void {
         app_state.g_sidebar_scroll = 0;
         for (0..app_state.shell_count) |i| {
             if (starredShellVisible(i) and app_state.shells[i].shell_id == app_state.g_starred_last_shell) {
-                switchToShell(@intCast(i));
+                if (i != app_state.active_shell) switchToShell(@intCast(i));
                 break;
             }
         }
@@ -2772,6 +2772,68 @@ pub fn switchToWorkspace(ws_in: u32) void {
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     if (!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0) saveSession();
+}
+
+test "ISSUE-569 Starred entry keeps the selected session surface without a shell switch" {
+    const saved = .{
+        .shells = app_state.shells[0..2].*,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .main = app_state.g_main_hwnd,
+        .single = app_state.g_single_window,
+        .restoring = app_state.g_restoring,
+        .starred = app_state.g_starred_workspace,
+        .last = app_state.g_starred_last_shell,
+        .snoozed = app_state.g_ws_snoozed,
+        .browser_focus = app_state.g_browser_focus_mode,
+        .step_context = app_state.g_inbox_step_context_active,
+        .scroll = app_state.g_sidebar_scroll,
+        .inbox_workspaces = app_state.g_inbox_ws_count,
+        .inbox_rows = app_state.g_inbox_row_count,
+        .chat = app_state.g_chat_active,
+        .swap = app_state.g_chat_browser_swap,
+    };
+    defer {
+        app_state.shells[0..2].* = saved.shells;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_single_window = saved.single;
+        app_state.g_restoring = saved.restoring;
+        app_state.g_starred_workspace = saved.starred;
+        app_state.g_starred_last_shell = saved.last;
+        app_state.g_ws_snoozed = saved.snoozed;
+        app_state.g_browser_focus_mode = saved.browser_focus;
+        app_state.g_inbox_step_context_active = saved.step_context;
+        app_state.g_sidebar_scroll = saved.scroll;
+        app_state.g_inbox_ws_count = saved.inbox_workspaces;
+        app_state.g_inbox_row_count = saved.inbox_rows;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_chat_browser_swap = saved.swap;
+    }
+    app_state.shell_count = 2;
+    app_state.g_main_hwnd = null;
+    app_state.g_chat_active = false;
+    app_state.g_single_window = true;
+    app_state.g_restoring = true;
+    app_state.g_ws_snoozed = [_]bool{false} ** MAX_LWS;
+    for (0..2) |i| {
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].shell_id = @intCast(41 + i);
+        app_state.shells[i].workspace = @intCast(i);
+        app_state.shells[i].favorite = true;
+    }
+    for (0..2) |i| {
+        app_state.active_shell = @intCast(i);
+        app_state.g_starred_workspace = false;
+        app_state.g_starred_last_shell = app_state.shells[i].shell_id;
+        app_state.g_chat_browser_swap.request(app_state.shells[i].shell_id, 123);
+        switchToWorkspace(@import("workspace_view.zig").starred);
+        try std.testing.expect(app_state.g_starred_workspace);
+        try std.testing.expectEqual(@as(u32, @intCast(i)), app_state.active_shell);
+        try std.testing.expectEqual(app_state.shells[i].shell_id, app_state.g_chat_browser_swap.shell_id);
+        try std.testing.expectEqual(@as(u64, 123), app_state.g_chat_browser_swap.requested_at);
+    }
 }
 
 pub fn copyBlueDotHookInstructions() void {
