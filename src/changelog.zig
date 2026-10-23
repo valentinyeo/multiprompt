@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.853", .items = &.{
+        .{ .text = "Ctrl+Tab to a terminal session no longer sometimes waits a quarter second before you can type.", .ticket = "IGSH-713" },
+    } },
     .{ .ver = "0.28.852", .items = &.{
         .{ .text = "Fixed drafts duplicating or reverting when new chat messages arrive.", .ticket = "IGSH-720" },
         .{ .text = "Chat now keeps your place when you scroll up instead of jumping to new messages.", .ticket = "IGSH-720" },
