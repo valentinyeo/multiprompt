@@ -764,6 +764,6 @@ test('queue-draft-sync is wired into the journey, the workflow fallback and the 
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
   for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text), text);
   assert.match(drive, /CHAT_QUEUE items=/);
-  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'queue-draft-sync'\)/);
+  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync'\)/);
   assert.match(read(skill + 'features/chat-delivery.md'), /`queue-draft-sync`[\s\S]*CHAT_QUEUE items=/);
 });
