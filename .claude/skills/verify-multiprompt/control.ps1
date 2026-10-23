@@ -1094,10 +1094,10 @@ function Click-WorkspacePill([int]$Workspace) {
 
 function Focus-Palette([string]$Query, [int]$Target) {
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $start = (Get-Content $log -Raw).Length
+    $start = ((Get-Content $log -Raw) -join '').Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Wait-Until {
-        $trace = (Get-Content $log -Raw).Substring($start)
+        $trace = ((Get-Content $log -Raw) -join '').Substring($start)
         if ($trace -notmatch '\[palette\] ready chars=0 count=\d+ target=\d+') { return $false }
         Doctor
         Assert-Foreground
@@ -1106,7 +1106,7 @@ function Focus-Palette([string]$Query, [int]$Target) {
     } 'command palette initialized and owned frame focused' 20
     Type-Text $Query
     Wait-Until {
-        (Get-Content $log -Raw).Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
+        ((Get-Content $log -Raw) -join '').Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
     } "palette query consumed and expected command $Target selected"
 }
 
@@ -1199,14 +1199,14 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
     $script:job = $null
     $script:window = [IntPtr]::Zero
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $logStart = (Get-Content $log -Raw).Length
+    $logStart = ((Get-Content $log -Raw) -join '').Length
     $script:job = New-Object VerifyJob
     $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence ($Stage + '-stdout.log')), (Join-Path $Evidence ($Stage + '-stderr.log')), '--single-window')
     Wait-Until {
         $process.Refresh()
         $script:window = $process.MainWindowHandle
         $state = Read-Inbox
-        $trace = (Get-Content $log -Raw).Substring($logStart)
+        $trace = ((Get-Content $log -Raw) -join '').Substring($logStart)
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
             $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
             $trace -match 'launch step=browser'
@@ -1444,15 +1444,15 @@ try {
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             Focus-Palette 'chat view on everywhere' 6346
             Press @(0x1B) 'Esc: close known positive palette query'
-            $start = (Get-Content $log -Raw).Length
+            $start = ((Get-Content $log -Raw) -join '').Length
             Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
             Wait-Until {
-                (Get-Content $log -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
+                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
                 [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
             } 'empty palette ready for removed-command query'
             Type-Text 'chat view per tab'
             Wait-Until {
-                (Get-Content $log -Raw).Substring($start) -match '\[palette\] ready chars=17 count=0 target=0(?:\r?\n|$)'
+                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=17 count=0 target=0(?:\r?\n|$)'
             } 'removed per-tab command has zero palette rows'
             Snapshot 'per-tab-absent'
             Press @(0x1B) 'Esc: close empty palette'
@@ -1479,22 +1479,22 @@ try {
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_tab -ge 0 -and $state.active_tab -lt @($state.tabs).Count } 'saved initial table tab'
             $tableTab = (Read-Session).active_tab
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Wait-Until { (Test-Path $log) -and (Get-Content $log -Raw) -match 'CHAT_TABLE rows=1 columns=2 .*source=box' } 'formatted table built from real console output'
+            Wait-Until { (Test-Path $log) -and ((Get-Content $log -Raw) -join '') -match 'CHAT_TABLE rows=1 columns=2 .*source=box' } 'formatted table built from real console output'
             Wait-Until { (Read-Session).tabs[$tableTab].cv } 'Chat View preference persisted for table tab'
             Snapshot 'before'
-            $buildsBefore = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            $buildsBefore = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
             $tabsBefore = @((Read-Session).tabs).Count
             Palette 'new cmd'
             Snapshot 'action'
             Press @(0x0D) 'Enter: create another real CMD tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 -and (Read-Session).active_tab -ne $tableTab } 'new CMD tab active and saved'
             Snapshot 'away'
-            $awayLogLength = (Get-Content $log -Raw).Length
+            $awayLogLength = ((Get-Content $log -Raw) -join '').Length
             Press @(0x11, 0x10, 0x09) 'Ctrl+Shift+Tab: return to table Chat View'
             Wait-Until { (Read-Session).active_tab -eq $tableTab -and (Read-Session).tabs[$tableTab].cv } 'original Chat View tab active again'
-            Wait-Until { $text = Get-Content $log -Raw; $text.Length -gt $awayLogLength -and $text.Substring($awayLogLength) -match '\[switch\] chat painted in' } 'returned Chat View painted'
+            Wait-Until { $text = (Get-Content $log -Raw) -join ''; $text.Length -gt $awayLogLength -and $text.Substring($awayLogLength) -match '\[switch\] chat painted in' } 'returned Chat View painted'
             Snapshot 'after'
-            $buildsAfter = @([regex]::Matches((Get-Content $log -Raw), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
+            $buildsAfter = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
             if ($buildsAfter -ne $buildsBefore) { throw "Unchanged table rebuilt across tab switch: $buildsBefore -> $buildsAfter" }
             $result.checks += @{ name = 'console-table-switch-return'; tableTab = $tableTab; buildsBefore = $buildsBefore; buildsAfter = $buildsAfter; marker = (Get-Content (Join-Path $scratch 'table-ready.txt') -Raw).Trim(); chatViewSaved = $true }
         }
@@ -1703,7 +1703,7 @@ try {
             $script:zsbPort = 0
             Wait-Until {
                 if (-not (Test-Path $log)) { return $false }
-                $listener = [regex]::Match((Get-Content $log -Raw), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+                $listener = [regex]::Match(((Get-Content $log -Raw) -join ''), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
                 if (-not $listener.Success) { return $false }
                 $script:zsbPort = [int]$listener.Groups[1].Value
                 @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
@@ -1744,7 +1744,7 @@ try {
             Save-Json $script:sessionOpenSaved 'session-repeated.json'
             $script:sshFailure = $null
             Wait-Until {
-                $failure = [regex]::Match((Get-Content $log -Raw), ('ssh-reconnect disconnect id=' + $created.tab + ' reason=(process-exit-event|process-exit-poll|startup-console-missing) exit_code=(\d+) known=true'))
+                $failure = [regex]::Match(((Get-Content $log -Raw) -join ''), ('ssh-reconnect disconnect id=' + $created.tab + ' reason=(process-exit-event|process-exit-poll|startup-console-missing) exit_code=(\d+) known=true'))
                 if (-not $failure.Success -or [uint64]$failure.Groups[2].Value -in @(0, 259)) { return $false }
                 $script:sshFailure = @{ reason = $failure.Groups[1].Value; exitCode = [uint64]$failure.Groups[2].Value; logLine = $failure.Value }
                 return $true
@@ -2379,7 +2379,7 @@ try {
                         $target = ($sample + 1) % 2
                         Doctor
                         if ($frozen) {
-                            $frozenLogStart = (Get-Content $log -Raw).Length
+                            $frozenLogStart = ((Get-Content $log -Raw) -join '').Length
                             $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $shellIds[$target]; marker = "panehib-zss-$($shellIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; window_visible_ms = $null; wake_flag_cleared_ms = $null; target_color_painted_ms = $null; log_start = $frozenLogStart; log_end = $null }
                             [void]$frozenSwitches.Add($freeze)
                             if ($false -ne (Read-BrowserFrozen $shellIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }
@@ -2405,7 +2405,7 @@ try {
                             Assert-Foreground
                         }
                         Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
-                        $logStart = (Get-Content $log -Raw).Length
+                        $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
                         $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
@@ -2417,7 +2417,7 @@ try {
                         }
                         Wait-WorkspaceSurface $initial.active_workspace $target $chat ($composerHandle.ToInt32())
                         $pattern = 'switch-timing: to=' + $target + ' total_us=\d+[^\r\n]*'
-                        $debugAfter = Get-Content $log -Raw
+                        $debugAfter = (Get-Content $log -Raw) -join ''
                         $traceMatches = @()
                         if ($debugAfter.Length -ge $logStart) { $traceMatches = [regex]::Matches($debugAfter.Substring($logStart), $pattern) }
                         Save-Json @{ mode = $mode; sample = $sample; start = $logStart; end = $debugAfter.Length; complete = $debugAfter.Length -ge $logStart } ("$mode-$sample-log-range.json")
@@ -2433,7 +2433,7 @@ try {
                             Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$target]) } 'target freeze marker removed by app wake'
                             $freeze.marker_cleared = $true
                             $freeze.status = 'painted-and-awake'
-                            $freeze.log_end = (Get-Content $log -Raw).Length
+                            $freeze.log_end = ((Get-Content $log -Raw) -join '').Length
                         }
                     }
                 }
@@ -2468,7 +2468,7 @@ try {
                 Save-Json $timings 'switch-timings.json'
                 Save-Json $traces 'switch-traces.json'
                 if ($null -ne $frozenLogStart -and (Test-Path $log)) {
-                    $debug = Get-Content $log -Raw
+                    $debug = (Get-Content $log -Raw) -join ''
                     foreach ($freeze in $frozenSwitches) {
                         $end = if ($null -eq $freeze.log_end) { $debug.Length } else { $freeze.log_end }
                         $lines = if ($freeze.log_start -le $end -and $end -le $debug.Length) { $debug.Substring($freeze.log_start, $end - $freeze.log_start) } else { $debug }

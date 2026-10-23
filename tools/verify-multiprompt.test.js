@@ -529,7 +529,7 @@ function assertsFocusJourneyReadiness(source) {
   assert.ok(pills.includes("-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100"));
   assert.ok(pills.indexOf('Wait-Until {') < pills.indexOf('[VerifyNative]::ClickClient'));
   assert.match(pills, /8 \+ \(\$Workspace \+ 1\) \* 29 \+ 12\), 17/);
-  assert.match(palette, /\$start = \(Get-Content \$log -Raw\).Length/);
+  assert.match(palette, /\$start = \(\(Get-Content \$log -Raw\) -join ''\).Length/);
   assert.match(palette, /Substring\(\$start\)/);
   assert.match(palette, /GetFocusedWindow\(\$script:window\) -eq \$script:window/);
   assert.match(palette, /\$Query.Length/);

@@ -301,7 +301,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(source, /\$pane.browser_state -eq 'connected' -and \$pane.browser_window_id -gt 0 -and/);
   const sample = source.slice(source.indexOf('for ($sample = 0;'), source.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
   const steps = [
-    'Doctor', 'if ($frozen) {', '$frozenLogStart = (Get-Content $log -Raw).Length',
+    'Doctor', 'if ($frozen) {', "$frozenLogStart = ((Get-Content $log -Raw) -join '').Length",
     '[void]$frozenSwitches.Add($freeze)',
     "if ($false -ne (Read-BrowserFrozen $shellIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }",
     '$parked = [Diagnostics.Stopwatch]::StartNew()',
@@ -326,7 +326,7 @@ function assertsFrozen(source, driver, app, yaml) {
   }
   assert.equal((sample.match(/MeasureSessionSwitch\(/g) || []).length, 1);
   assert.doesNotMatch(marker + source, /(?:Set-Content|New-Item|Remove-Item)[^\n]*panehib|cdp Page|hibernate.*now/i);
-  assert.match(source, /finally \{[\s\S]*\$debug = Get-Content \$log -Raw[\s\S]*foreach \(\$freeze in \$frozenSwitches\)/);
+  assert.match(source, /finally \{[\s\S]*\$debug = \(Get-Content \$log -Raw\) -join ''[\s\S]*foreach \(\$freeze in \$frozenSwitches\)/);
   assert.match(source, /if \(\$null -eq \$freeze.log_end\) \{ \$debug.Length \} else \{ \$freeze.log_end \}/);
   assert.match(source, /\$debug.Substring\(\$freeze.log_start, \$end - \$freeze.log_start\)/);
   assert.match(source, /"\{0\}-\{1\}-debug.log" -f \$freeze.mode, \$freeze.sample/);
@@ -488,4 +488,15 @@ test('fresh freeze setup waits for the exact fixture lifecycle helper to exit be
   assert.match(barrier, /Get-CimInstance Win32_Process -Filter "Name = 'zigshell-bridge.exe'"/);
   for (const check of ['ExecutablePath -ceq $bridgePath', '$freezeWindow', 'Page\\.setWebLifecycleState', "CommandLine.Contains('frozen')", '$workers.Count -eq 0', '$freeze.worker_finished_utc']) assert.ok(barrier.includes(check), check);
   assert.ok(sample.indexOf('worker_finished_utc') < sample.indexOf('$measurement ='));
+});
+
+function joinedLogReads(source) {
+  const reads = [...source.matchAll(/Get-Content \$log -Raw/g)];
+  assert.ok(reads.length > 0);
+  for (const read of reads) assert.ok(source.slice(read.index + read[0].length).startsWith(") -join ''"));
+}
+
+test('live PowerShell raw-reader chunks are joined before string offsets and lengths are used', () => {
+  joinedLogReads(control);
+  assert.throws(() => joinedLogReads(control.replace("(Get-Content $log -Raw) -join ''", 'Get-Content $log -Raw')));
 });
