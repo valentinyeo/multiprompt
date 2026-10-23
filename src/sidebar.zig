@@ -1104,7 +1104,7 @@ pub fn pruneEmptyGroups() void {
 pub fn normalizeGroupOrder() void {
     if (app_state.g_starred_workspace) return;
     if (app_state.shell_count < 2) return;
-    const active_pid: DWORD = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].pid else 0;
+    const active_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
 
     var tmp: [MAX_SHELLS]Shell = undefined;
     var written: u32 = 0;
@@ -1132,10 +1132,10 @@ pub fn normalizeGroupOrder() void {
     var k: u32 = 0;
     while (k < written) : (k += 1) app_state.shells[k] = tmp[k];
 
-    if (active_pid != 0) {
+    if (active_id != 0) {
         k = 0;
         while (k < app_state.shell_count) : (k += 1) {
-            if (app_state.shells[k].pid == active_pid) {
+            if (app_state.shells[k].shell_id == active_id) {
                 app_state.active_shell = k;
                 break;
             }

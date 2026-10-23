@@ -142,7 +142,7 @@ test('ISSUE-543 cached clicks survive restoration without consuming a new title 
   const cache = read('src/launch_cache.zig');
   const deferred = body(cache, 'deferred');
   assert.doesNotMatch(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
-  assert.match(body(read('src/console.zig'), 'switchToShell'), /if \(@import\("launch_cache.zig"\)\.pending and idx < app_state\.shell_count\) \{\s*@import\("launch_cache.zig"\)\.selected_shell_id = app_state\.shells\[idx\]\.shell_id/);
+  assert.match(body(read('src/session.zig'), 'saveSession'), /if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{\s*const shell_id = app_state.shells\[app_state.active_shell\].shell_id;\s*@import\("launch_cache.zig"\).selected_shell_id = shell_id/);
   assert.match(deferred, /closed_shells\[closed_count\] = id/);
   assert.doesNotMatch(deferred, /state\.next_shell_id = 1/);
   assert.match(body(read('src/console.zig'), 'spawnShellWithSession'), /allocateConsoleTitleId\(\)/);
@@ -201,7 +201,7 @@ const reviewCases = [
     const deferred = body(source, 'deferred');
     assert.match(deferred, /if \(!present\) \{\s*closed_shells\[closed_count\] = id/);
     assert.doesNotMatch(deferred, /selected_shell_id = state\.shells\[state\.active_shell\]\.shell_id/);
-    assert.match(body(read('src/console.zig'), 'switchToShell'), /if \(@import\("launch_cache.zig"\)\.pending and idx < app_state\.shell_count\) \{\s*@import\("launch_cache.zig"\)\.selected_shell_id = app_state\.shells\[idx\]\.shell_id/);
+    assert.match(body(read('src/session.zig'), 'saveSession'), /if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{\s*const shell_id = app_state.shells\[app_state.active_shell\].shell_id;\s*@import\("launch_cache.zig"\).selected_shell_id = shell_id/);
     assert.doesNotMatch(body(source, 'closedDuringStartup'), /chat/);
     const restore = body(read('src/session.zig'), 'restoreSession');
     assert.match(restore, /closedDuringStartup\(tabs\[t\]\.shell_id\)/);
