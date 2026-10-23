@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import readline from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate } from './lib.mjs';
+import { parseArgs, atomic, hash, winPath, generate, records, parseLog, procSnapshot, cpuDelta, imageInk, geometryInside as containsLayout, capacity, isOutsideKill, evaluate, earlyCaptureDue, tornFrame, finalCaptureDue } from './lib.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);
@@ -241,8 +241,10 @@ async function run({ requestedExe, config, out, installable }) {
     const geometry = geometryFor(instance, requestSeq);
     const file = path.join(screenshots, `${phase}-${String(requestSeq).padStart(4, '0')}-early-tab-${instance.tabs[localIndex].index}.png`);
     await execute('import', ['-window', instance.window, file], { timeout: 5000 });
+    imageCache = undefined;
     const ink = geometry ? await screenshotInk(file, { left: geometry.pane_left + 26, right: geometry.pane_right - 26, top: geometry.layout.transcript.top + 12, bottom: geometry.layout.transcript.top + 44 }, geometry) : { inkPixels: 0 };
-    return { earlyScreenshot: file, earlyGeometry: geometry, earlyContent: (geometry?.blocks || 0) > 0, loadingInk: !!geometry?.loading && ink.inkPixels >= 15 };
+    const composer = geometry ? await screenshotInk(file, geometry.composer) : { inkPixels: 0 };
+    return { earlyScreenshot: file, earlyGeometry: geometry, earlyContent: (geometry?.blocks || 0) > 0, loadingInk: !!geometry?.loading && ink.inkPixels >= 15, composerInk: composer.inkPixels >= 15 };
   }
   async function countForeignBrowsersOnScreen(instance) {
     const ids = (await execute('xdotool', ['search', '--onlyvisible', '--name', `^chat-bench-browser-${instance.index}-`]).catch(() => ({ stdout: '' }))).stdout.trim().split(/\s+/).filter(Boolean);
@@ -294,12 +296,16 @@ async function run({ requestedExe, config, out, installable }) {
         lastAction = now;
         const until = Math.min(end, now + config.switchSeconds * 1000);
         const early = new Map(), acknowledged = new Map();
-        while (performance.now() < until) {
+        const contentSeen = ([instance, commandSeq, localIndex]) => parseLog(instance.text).paints.some(p => p.seq === commandSeq && p.tab === localIndex && p.blocks > 0 && p.chars > 0 && (instance.tabs[localIndex].provider === 'shell' || p.file));
+        const finalDue = () => pending.every(item => finalCaptureDue({ now: performance.now(), until, end, file: item[0].tabs[item[2]].provider !== 'shell', contentSeen: contentSeen(item) }));
+        while (!finalDue()) {
           await pump();
           for (const item of pending) {
             const [instance, commandSeq, localIndex] = item;
             if (!acknowledged.has(commandSeq) && parseLog(instance.text).paints.some(p => p.seq === commandSeq)) acknowledged.set(commandSeq, performance.now());
-            if (!early.has(commandSeq) && performance.now() - acknowledged.get(commandSeq) >= (phase === 'warm' ? 800 : 200)) early.set(commandSeq, await captureEarly(instance, commandSeq, localIndex));
+            const seen = early.get(commandSeq);
+            if (seen && !(tornFrame({ geometry: seen.earlyGeometry, composerInk: seen.composerInk }) && performance.now() < until)) continue;
+            if (earlyCaptureDue({ phase, sinceAckMs: performance.now() - acknowledged.get(commandSeq), geometry: geometryFor(instance, commandSeq), seq: commandSeq })) early.set(commandSeq, await captureEarly(instance, commandSeq, localIndex));
           }
           await delay(50);
         }

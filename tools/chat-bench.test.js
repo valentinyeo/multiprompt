@@ -381,3 +381,30 @@ test('documented smoke receipts are rejected even with default config and a clea
     if (installable === false) assert.deepEqual(result.reasons, ['smoke run is NOT INSTALLABLE; install-laptop1.sh only accepts default-config receipts']);
   }
 });
+
+test('IGSH-684 early capture waits for the seq-stamped geometry', async () => {
+  const { earlyCaptureDue } = await lib;
+  assert.equal(earlyCaptureDue({ phase: 'cold', sinceAckMs: 300, geometry: null, seq: 1 }), false);
+  assert.equal(earlyCaptureDue({ phase: 'cold', sinceAckMs: 300, geometry: { seq: 0 }, seq: 1 }), false);
+  assert.equal(earlyCaptureDue({ phase: 'cold', sinceAckMs: 300, geometry: { seq: 1 }, seq: 1 }), true);
+  assert.equal(earlyCaptureDue({ phase: 'cold', sinceAckMs: 100, geometry: { seq: 1 }, seq: 1 }), false);
+  assert.equal(earlyCaptureDue({ phase: 'warm', sinceAckMs: 500, geometry: { seq: 1 }, seq: 1 }), false);
+  assert.equal(earlyCaptureDue({ phase: 'warm', sinceAckMs: 900, geometry: { seq: 1 }, seq: 1 }), true);
+  assert.equal(earlyCaptureDue({ phase: 'cold', sinceAckMs: NaN, geometry: { seq: 1 }, seq: 1 }), false);
+});
+
+test('IGSH-684 a frame without composer ink is torn', async () => {
+  const { tornFrame } = await lib;
+  assert.equal(tornFrame({ geometry: { seq: 1 }, composerInk: false }), true);
+  assert.equal(tornFrame({ geometry: { seq: 1 }, composerInk: true }), false);
+  assert.equal(tornFrame({ geometry: null, composerInk: false }), false);
+});
+
+test('IGSH-684 final capture waits for content but never past the phase end', async () => {
+  const { finalCaptureDue } = await lib;
+  assert.equal(finalCaptureDue({ now: 7000, until: 7000, end: 9000, file: true, contentSeen: false }), false);
+  assert.equal(finalCaptureDue({ now: 7000, until: 7000, end: 9000, file: true, contentSeen: true }), true);
+  assert.equal(finalCaptureDue({ now: 9000, until: 7000, end: 9000, file: true, contentSeen: false }), true);
+  assert.equal(finalCaptureDue({ now: 7000, until: 7000, end: 9000, file: false, contentSeen: false }), true);
+  assert.equal(finalCaptureDue({ now: 6999, until: 7000, end: 9000, file: false, contentSeen: true }), false);
+});

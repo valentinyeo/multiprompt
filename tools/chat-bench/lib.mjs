@@ -230,3 +230,7 @@ export function evaluate(run, config) {
   }
   return { pass: failures.length === 0, status: failures.length === 0 ? 'PASS' : !memoryExceeded && infra.length ? 'INFRA' : 'FAIL', failures: [...new Set(failures)], metrics };
 }
+
+export const earlyCaptureDue = ({ phase, sinceAckMs, geometry, seq }) => Number.isFinite(sinceAckMs) && sinceAckMs >= (phase === 'warm' ? 800 : 200);
+export const tornFrame = ({ geometry, composerInk }) => false;
+export const finalCaptureDue = ({ now, until, end, file, contentSeen }) => now >= until;
