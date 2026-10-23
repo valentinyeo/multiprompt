@@ -1219,7 +1219,8 @@ def prompt_box_text(target):
         if line.startswith("\u2500"):
             break
         box.append(line)
-    return " ".join(" ".join(box)[1:].split())
+    box[0] = box[0][1:]
+    return "\n".join(" ".join(line.split()) for line in box).strip()
 
 
 def stop_response(q):
@@ -1256,23 +1257,31 @@ def send_response(q):
         try:
             target = "=" + name + ":"
             wanted = " ".join(text.split())
-            if wanted and wanted in prompt_box_text(target):
+            box = prompt_box_text(target)
+            if wanted and wanted == " ".join(box.split()):
                 pass
-            elif "\n" in text or "\r" in text:
-                buffer = "mp-send-" + str(os.getpid()) + "-" + str(rid)
-                subprocess.run(["tmux", "load-buffer", "-b", buffer, "-"], input=text.encode("utf-8"), check=True, capture_output=True, timeout=5)
-                try:
-                    pasted = subprocess.run(["tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", target], capture_output=True, timeout=5)
-                    if pasted.returncode:
-                        subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
-                finally:
-                    subprocess.run(["tmux", "delete-buffer", "-b", buffer], capture_output=True, timeout=5)
             else:
-                subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
+                if box:
+                    lines = len(box.splitlines())
+                    for i in range(lines):
+                        subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
+                        if i + 1 == lines or box[:12] not in prompt_box_text(target):
+                            break
+                if "\n" in text or "\r" in text:
+                    buffer = "mp-send-" + str(os.getpid()) + "-" + str(rid)
+                    subprocess.run(["tmux", "load-buffer", "-b", buffer, "-"], input=text.encode("utf-8"), check=True, capture_output=True, timeout=5)
+                    try:
+                        pasted = subprocess.run(["tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", target], capture_output=True, timeout=5)
+                        if pasted.returncode:
+                            subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
+                    finally:
+                        subprocess.run(["tmux", "delete-buffer", "-b", buffer], capture_output=True, timeout=5)
+                else:
+                    subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
             time.sleep(0.15)
             subprocess.run(["tmux", "send-keys", "-t", target, "Enter"], check=True, capture_output=True, timeout=5)
             time.sleep(0.4)
-            if wanted and wanted in prompt_box_text(target):
+            if wanted and wanted in " ".join(prompt_box_text(target).split()):
                 subprocess.run(["tmux", "send-keys", "-t", target, "Enter"], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_send_failed"

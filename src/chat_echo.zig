@@ -352,6 +352,7 @@ fn messageMatches(block: []const u16, p: Pending) bool {
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
     if (norm.len == 0 or body.len <= norm.len) return false;
     if (norm.len < MIN_PARTIAL) return body[body.len - norm.len - 1] == ' ' and std.mem.endsWith(u16, body, norm);
+    if (std.mem.endsWith(u16, body, norm)) return true;
     const at = std.mem.indexOf(u16, body, norm) orelse return false;
     return (at == 0 or body[at - 1] == ' ') and (at + norm.len == body.len or body[at + norm.len] == ' ');
 }
@@ -706,6 +707,20 @@ test "delivery: normalized full text includes link text, unicode and trailing wh
     var out: [1]?usize = undefined;
     assign(&pending, &.{.{ .text = &long_b, .stamp_ms = 200 }}, false, &.{}, &out);
     try std.testing.expect(out[0] == null);
+}
+
+test "ISSUE-608 a message with leftover box text glued in front still confirms" {
+    const text = w("so i hear there were also vulnerabilityes in the node js");
+    var prefix: [64]u16 = undefined;
+    var pending = [_]Pending{.{ .prefix = prefixOf("so i hear there were also vulnerabilityes in the node js", &prefix), .text = &text, .anchor = .{ .after_ms = 100 } }};
+    var out: [1]?usize = undefined;
+    assign(&pending, &.{ub("so i hear there were craso i hear there were also vulnerabilityes in the node js", 200)}, false, &.{}, &out);
+    try std.testing.expectEqual(@as(?usize, 0), out[0]);
+    assign(&pending, &.{ub("so i hear there were craso i hear there were also vulnerabilityes in the node js and more", 200)}, false, &.{}, &out);
+    try std.testing.expect(out[0] == null);
+    const short = w("yes");
+    try std.testing.expect(short.len < MIN_PARTIAL);
+    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }));
 }
 
 test "delivery: busy then idle and restart reserve one text write" {

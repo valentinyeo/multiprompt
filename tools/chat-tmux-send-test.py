@@ -103,6 +103,36 @@ class SendTest(unittest.TestCase):
             self.assertFalse(any("-l" in call.args[0] for call in run.call_args_list))
             self.assertTrue(all(call.args[0][-1] == "Enter" for call in run.call_args_list))
 
+    def test_IGSH_608_leftover_box_text_is_cleared_before_literal_send(self):
+        for box in ("so i hear there were cra", "old text please check the build", "please check the build extra text"):
+            with self.subTest(box=box), patch.object(reader, "prompt_box_text", side_effect=[box, ""]), \
+                    patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
+                self.assertIn("\tsend\tok\t", self.send())
+                self.assertEqual([call.args[0] for call in run.call_args_list], [
+                    ["tmux", "send-keys", "-t", "=term-1:", "C-u"],
+                    ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "please check the build"],
+                    ["tmux", "send-keys", "-t", "=term-1:", "Enter"],
+                ])
+
+    def test_IGSH_608_exact_box_text_is_not_cleared_or_retyped(self):
+        with patch.object(reader, "prompt_box_text", side_effect=[" please  check\n the build ", ""]), \
+                patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
+            self.assertIn("\tsend\tok\t", self.send())
+            self.assertEqual([call.args[0] for call in run.call_args_list], [
+                ["tmux", "send-keys", "-t", "=term-1:", "Enter"],
+            ])
+
+    def test_IGSH_608_multiline_leftover_clearing_is_bounded(self):
+        box = "leftover first line\nleftover second line\nleftover third line"
+        for after, clears in ((box, 3), ('Try "how do I log an error?"', 1), ("", 1)):
+            with self.subTest(after=after), patch.object(reader, "prompt_box_text", side_effect=[box, after, after, ""]), \
+                    patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
+                self.assertIn("\tsend\tok\t", self.send())
+                calls = [call.args[0] for call in run.call_args_list]
+                self.assertEqual(calls[:clears], [["tmux", "send-keys", "-t", "=term-1:", "C-u"]] * clears)
+                self.assertEqual(calls[clears], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "please check the build"])
+                self.assertEqual(len(calls), clears + 2)
+
     def test_enter_is_pressed_again_only_while_the_text_stays_in_the_box(self):
         for after, enters in (("", 1), ("please check the build", 2)):
             with self.subTest(after=after), patch.object(reader, "prompt_box_text", side_effect=["", after]), \
@@ -113,7 +143,7 @@ class SendTest(unittest.TestCase):
     def test_prompt_box_text_reads_only_the_input_box(self):
         screen = "\u25cf earlier answer mentions please check the build\n\u2500\u2500\u2500\n\u276f please check\n  the build\n\u2500\u2500\u2500\n  Opus 5.5 status\n"
         with patch.object(reader.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=screen)):
-            self.assertEqual(REAL_PROMPT_BOX_TEXT("=term-1:"), "please check the build")
+            self.assertEqual(REAL_PROMPT_BOX_TEXT("=term-1:"), "please check\nthe build")
         with patch.object(reader.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="$ plain shell\n")):
             self.assertEqual(REAL_PROMPT_BOX_TEXT("=term-1:"), "")
 
@@ -133,6 +163,73 @@ class SendTest(unittest.TestCase):
 
 
 class DetachedSendTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed; detached delivery cannot run")
+    def test_IGSH_608_leftover_box_text_is_cleared_before_sending(self):
+        name = "mp-test-" + uuid.uuid4().hex
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        tmp = temp.name
+        output = Path(tmp) / "received"
+        prompt = Path(tmp) / "prompt.py"
+        prompt.write_text("""import subprocess
+import sys
+import termios
+import tty
+
+saved = termios.tcgetattr(sys.stdin)
+try:
+    tty.setraw(sys.stdin)
+    buffer = "so i hear there were cra"
+    def redraw():
+        sys.stdout.write("\\x1b[H\\x1b[2J❯ " + buffer + "\\r\\n─\\r\\n")
+        sys.stdout.flush()
+    redraw()
+    subprocess.run(["tmux", "wait-for", "-S", sys.argv[2]], check=True)
+    while True:
+        char = sys.stdin.read(1)
+        if not char:
+            break
+        if char == "\\x15":
+            buffer = ""
+        elif char == "\\x7f":
+            buffer = buffer[:-1]
+        elif char in "\\r\\n":
+            with open(sys.argv[1], "a", encoding="utf-8") as received:
+                received.write(buffer + "\\n")
+            buffer = ""
+        elif char.isprintable():
+            buffer += char
+        redraw()
+finally:
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+""", encoding="utf-8")
+        env = dict(os.environ, TMUX_TMPDIR=tmp)
+        env.pop("TMUX", None)
+        ready = name + "-ready"
+        command = shlex.join([sys.executable, str(prompt), str(output), ready])
+        subprocess.run(["tmux", "new-session", "-d", "-s", name, command], check=True, capture_output=True, timeout=5, env=env)
+        def kill_session():
+            subprocess.run(["tmux", "kill-session", "-t", "=" + name], check=True, capture_output=True, timeout=5, env=env)
+        self.addCleanup(kill_session)
+        subprocess.run(["tmux", "wait-for", ready], check=True, capture_output=True, timeout=5, env=env)
+        process = subprocess.Popen([sys.executable, str(ROOT / "src/chat_history_reader.py"), "--serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        def close_reader():
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+        self.addCleanup(close_reader)
+        text = "so i hear there were also vulnerabilities"
+        process.stdin.write(json.dumps(dict(op="send", id=1, tmux=name, text=text)) + "\n")
+        process.stdin.flush()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(10), "reader send response timed out")
+        self.assertEqual(json.loads(process.stdout.readline()), dict(id=1, wire="@mp\t1\tsend\tok\t-\t0\n@@MP_END@@\n"))
+        self.assertEqual(output.read_text(), "so i hear there were also vulnerabilities\n")
+        attached = subprocess.run(["tmux", "display-message", "-p", "-t", "=" + name + ":", "#{session_attached}"], check=True, capture_output=True, text=True, timeout=5, env=env)
+        self.assertEqual(attached.stdout.strip(), "0")
+        print("IGSH-608 detached leftover clearing PASS", flush=True)
+
     @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed; detached delivery cannot run")
     def test_detached_serve_literal_and_multiline_exactly_once(self):
         name = "mp-test-" + uuid.uuid4().hex
