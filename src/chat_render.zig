@@ -134,7 +134,7 @@ const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
 const CreatePopupMenu = @import("win32.zig").CreatePopupMenu;
 const AppendMenuW = @import("win32.zig").AppendMenuW;
-const TrackPopupMenu = @import("fonts.zig").trackPopupMenu;
+const TrackPopupMenu = @import("fonts.zig").trackMessagePopupMenu;
 const DestroyMenu = @import("win32.zig").DestroyMenu;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
@@ -4172,20 +4172,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             else
                 null;
             defer if (link_text) |text| std.heap.page_allocator.free(text);
-            if (link_text != null) _ = AppendMenuW(menu, MF_STRING, 7, L("Copy link"));
             const echo_id = chatEchoAt(GET_X(lp), GET_Y(lp));
-            if (echo_id) |id| {
-                if (chatOutboxIndexById(id)) |ei| {
-                    if (chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again) {
-                        _ = AppendMenuW(menu, MF_STRING, 5, L("Send again"));
-                        _ = AppendMenuW(menu, MF_STRING, 6, L("Remove"));
-                    }
-                }
-            }
-            _ = AppendMenuW(menu, MF_STRING, 1, L("Copy"));
-            _ = AppendMenuW(menu, MF_STRING, 2, L("Select All"));
+            const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
+            const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
             const block_at = chatTranscriptBlockAtPoint(GET_Y(lp));
-            const copy_target = chatContextCopyTarget(chatSelRange() != null, block_at != null);
             const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
                 showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
                 return 0;
@@ -4194,9 +4184,11 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, app_state.g_chat_blocks[idx]) catch {
                 showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
                 return 0;
+            } else if (echo_index) |ei| std.heap.page_allocator.dupe(u16, app_state.g_chat_outbox.items[ei].text) catch {
+                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+                return 0;
             } else &.{};
             defer std.heap.page_allocator.free(message_text);
-            if (block_at != null) _ = AppendMenuW(menu, MF_STRING, 3, L("Copy Message"));
             var reply_text: ?[]u16 = null;
             if (block_at) |idx| {
                 const block = app_state.g_chat_blocks[idx];
@@ -4206,17 +4198,24 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     reply_text = std.heap.page_allocator.dupe(u16, buf[disp.start .. disp.start + disp.len]) catch null;
                 }
             }
+            if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
             defer if (reply_text) |text| std.heap.page_allocator.free(text);
-            if (reply_text != null) _ = AppendMenuW(menu, MF_STRING, 4, L("Reply"));
+            const items = chatContextMenuItems(chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
+            var menu_log: [128]u8 = undefined;
+            var menu_log_len: usize = 0;
+            for (items.items[0..items.len], 0..) |item, i| {
+                _ = AppendMenuW(menu, MF_STRING, @intFromEnum(item), item.text());
+                const label = std.fmt.bufPrint(menu_log[menu_log_len..], "{s}{s}", .{ if (i == 0) @as([]const u8, "[chat] message menu items=") else ",", item.label() }) catch unreachable;
+                menu_log_len += label.len;
+            }
+            debugLog(menu_log[0..menu_log_len]);
             var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
             _ = ClientToScreen(hwnd, &pt);
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
             switch (cmd) {
                 7 => if (link_text) |text| chatCopyTextToClipboard(text),
-                1 => chatCopyTextToClipboard(if (copy_target == .selection) selection_text else message_text),
-                2 => chatSelectAll(),
-                3 => chatCopyTextToClipboard(message_text),
+                1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
                 5 => if (echo_id) |id| chatEchoSendAgain(id),
                 6 => if (echo_id) |id| chatEchoRemove(id),
                 4 => if (reply_text) |text| {
@@ -4376,8 +4375,55 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
     try std.testing.expect(app_state.shells[1].chat_todo_open);
 }
 
-fn chatContextCopyTarget(selected: bool, message: bool) enum { selection, message, nothing } {
+const ChatContextCopyTarget = enum { selection, message, nothing };
+const ChatContextMenu = struct {
+    items: [5]@import("fonts.zig").MessageMenuItem = undefined,
+    len: usize = 0,
+    copy_target: ChatContextCopyTarget,
+};
+
+fn chatContextMenuItems(selected: bool, message: bool, reply: bool, link: bool, unsent: bool) ChatContextMenu {
+    var result = ChatContextMenu{ .copy_target = chatContextCopyTarget(selected, message) };
+    const Item = @import("fonts.zig").MessageMenuItem;
+    const actions = [_]?Item{ if (reply) .reply else null, .copy, if (link) .copy_link else null, if (unsent) .send_again else null, if (unsent) .remove else null };
+    for (actions) |action| {
+        if (action) |item| {
+            result.items[result.len] = item;
+            result.len += 1;
+        }
+    }
+    return result;
+}
+
+fn chatContextCopyTarget(selected: bool, message: bool) ChatContextCopyTarget {
     return if (selected) .selection else if (message) .message else .nothing;
+}
+
+test "IGSH-718 message menu contains exactly Reply then Copy" {
+    const Item = @import("fonts.zig").MessageMenuItem;
+    const menu = chatContextMenuItems(false, true, true, false, false);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, menu.items[0..menu.len]);
+    try std.testing.expectEqual(.message, menu.copy_target);
+}
+
+test "IGSH-718 tool menu contains Copy only and selection wins" {
+    const Item = @import("fonts.zig").MessageMenuItem;
+    const tool = chatContextMenuItems(false, true, false, false, false);
+    try std.testing.expectEqualSlices(Item, &.{.copy}, tool.items[0..tool.len]);
+    const selected = chatContextMenuItems(true, true, true, false, false);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, selected.items[0..selected.len]);
+    try std.testing.expectEqual(.selection, selected.copy_target);
+    try std.testing.expectEqual(.selection, chatContextMenuItems(true, false, false, false, false).copy_target);
+}
+
+test "IGSH-718 link and unsent actions follow Reply and Copy" {
+    const Item = @import("fonts.zig").MessageMenuItem;
+    const link = chatContextMenuItems(false, true, true, true, false);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link }, link.items[0..link.len]);
+    const unsent = chatContextMenuItems(false, true, true, false, true);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .send_again, .remove }, unsent.items[0..unsent.len]);
+    const both = chatContextMenuItems(false, true, true, true, true);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link, .send_again, .remove }, both.items[0..both.len]);
 }
 
 test "ISSUE-438 nearest caret covers spaces line tails and below the last line" {
@@ -4552,6 +4598,7 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
                 chatSelectionClear();
                 app_state.g_chat_block_count = 0;
                 @memset(app_state.g_chat_capture[0..app_state.g_chat_last_len], 'x');
+                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
                 _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
                 _ = @This().PostMessageW(target, WM_KEYDOWN, 0x0D, 0);
             } else _ = EndMenu();

@@ -162,6 +162,91 @@ pub fn editMessage(hwnd: w.HANDLE, owner: w.HANDLE, msg: w.UINT, lp: w.LPARAM) ?
     return 0;
 }
 
+pub const MessageMenuItem = enum(u32) {
+    reply = 4,
+    copy = 1,
+    copy_link = 7,
+    send_again = 5,
+    remove = 6,
+
+    pub fn label(self: MessageMenuItem) []const u8 {
+        return switch (self) {
+            .reply => "Reply",
+            .copy => "Copy",
+            .copy_link => "Copy link",
+            .send_again => "Send again",
+            .remove => "Remove",
+        };
+    }
+
+    pub fn text(self: MessageMenuItem) w.LPCWSTR {
+        return switch (self) {
+            .reply => L("&Reply"),
+            .copy => L("&Copy"),
+            .copy_link => L("Copy &link"),
+            .send_again => L("&Send again"),
+            .remove => L("Re&move"),
+        };
+    }
+
+    fn glyph(self: MessageMenuItem) u16 {
+        return switch (self) {
+            .reply => 0xE97A,
+            .copy => 0xE8C8,
+            .copy_link => 0xE71B,
+            .send_again => 0xE724,
+            .remove => 0xE74D,
+        };
+    }
+};
+
+const MenuInfo = extern struct {
+    size: u32 = @sizeOf(MenuInfo),
+    mask: u32 = 2,
+    style: u32 = 0,
+    max_height: u32 = 0,
+    background: w.HANDLE,
+    help_id: u32 = 0,
+    data: usize = 0,
+};
+extern "user32" fn SetMenuInfo(w.HANDLE, *const MenuInfo) callconv(w.WINAPI) w.BOOL;
+
+const MessageMenuStyle = struct {
+    background: w.HANDLE,
+    hover: w.HANDLE,
+    ink: w.DWORD,
+    icons: w.HANDLE,
+};
+var message_menu_style: ?MessageMenuStyle = null;
+
+pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
+    const themes = @import("themes.zig");
+    const style = @import("chat_style.zig");
+    const bg = themes.themeSidebarBg();
+    const background = w.CreateSolidBrush(bg);
+    defer _ = w.DeleteObject(background);
+    const hover = w.CreateSolidBrush(style.shift(bg, if (style.isDark(bg)) 20 else -12));
+    defer _ = w.DeleteObject(hover);
+    const icons = messageMenuIconFont();
+    defer _ = w.DeleteObject(icons);
+    const info = MenuInfo{ .background = background };
+    _ = SetMenuInfo(menu, &info);
+    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = hover, .ink = themes.themeConsoleFg(), .icons = icons });
+}
+
+fn messageMenuIconFont() w.HANDLE {
+    const font = w.CreateFontW(-16, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe Fluent Icons"));
+    const dc = w.GetDC(null);
+    defer _ = w.ReleaseDC(null, dc);
+    const old = w.SelectObject(dc, font);
+    var face: [64]u16 = @splat(0);
+    const len = w.GetTextFaceW(dc, face.len, &face);
+    _ = w.SelectObject(dc, old);
+    if (len > 0 and std.mem.eql(u16, std.mem.sliceTo(&face, 0), L("Segoe Fluent Icons"))) return font;
+    _ = w.DeleteObject(font);
+    return w.CreateFontW(-16, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe MDL2 Assets"));
+}
+
 const MenuLabel = struct {
     text: [512:0]u16 = @splat(0),
     len: i32 = 0,
@@ -190,6 +275,13 @@ const DrawItem = extern struct {
 var menu_labels: []MenuLabel = &.{};
 
 pub fn trackPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
+    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, null);
+}
+
+fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, style: ?MessageMenuStyle) w.BOOL {
+    const previous_style = message_menu_style;
+    message_menu_style = style;
+    defer message_menu_style = previous_style;
     var labels: [256]MenuLabel = @splat(.{});
     const count: usize = @intCast(@max(0, @min(w.GetMenuItemCount(menu), labels.len)));
     const previous = menu_labels;
@@ -254,17 +346,28 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         const label = menuLabel(item.data) orelse return null;
         const selected = item.state & 1 != 0;
         const disabled = item.state & 6 != 0;
-        _ = w.FillRect(item.dc, &item.rect, @ptrFromInt(@as(usize, if (selected) 14 else 5) + 1));
+        const style = message_menu_style;
+        _ = w.FillRect(item.dc, &item.rect, if (style) |theme| (if (selected) theme.hover else theme.background) else @ptrFromInt(@as(usize, if (selected) 14 else 5) + 1));
         const old = w.SelectObject(item.dc, controlFont());
         defer _ = w.SelectObject(item.dc, old);
         const old_mode = w.SetBkMode(item.dc, 1);
         defer _ = w.SetBkMode(item.dc, old_mode);
-        const old_color = w.SetTextColor(item.dc, w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
+        const old_color = w.SetTextColor(item.dc, if (style) |theme| theme.ink else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
         defer _ = w.SetTextColor(item.dc, old_color);
         var text_rect = item.rect;
-        text_rect.left += 28;
+        text_rect.left += if (style != null) @as(i32, 36) else 28;
         _ = w.DrawTextW(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
-        if (label.state & 8 != 0) {
+        if (style) |theme| {
+            if (std.enums.fromInt(MessageMenuItem, label.id)) |action| {
+                const old_icon = w.SelectObject(item.dc, theme.icons);
+                defer _ = w.SelectObject(item.dc, old_icon);
+                var icon_rect = item.rect;
+                icon_rect.left += 10;
+                icon_rect.right = icon_rect.left + 16;
+                const icon = [_]u16{action.glyph()};
+                _ = w.DrawTextW(item.dc, &icon, 1, &icon_rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
+            }
+        } else if (label.state & 8 != 0) {
             var check_rect = item.rect;
             check_rect.left += 8;
             _ = w.DrawTextW(item.dc, L("✓"), 1, &check_rect, w.DT_SINGLELINE | w.DT_VCENTER);
@@ -420,4 +523,14 @@ test "chat probe options and shipped defaults select the same authentic embedded
     try std.testing.expectEqual(@as(i32, 400), (ChatFontOptions{}).body_weight);
     try std.testing.expectEqual(@as(i32, 700), (ChatFontOptions{}).bold_weight);
     try std.testing.expectEqual(CHAT_QUALITY, (ChatFontOptions{}).quality);
+}
+test "IGSH-718 message menu labels have native mnemonics and Fluent glyphs" {
+    const items = [_]MessageMenuItem{ .reply, .copy, .copy_link, .send_again, .remove };
+    const labels = [_][]const u8{ "Reply", "Copy", "Copy link", "Send again", "Remove" };
+    const glyphs = [_]u16{ 0xE97A, 0xE8C8, 0xE71B, 0xE724, 0xE74D };
+    for (items, labels, glyphs) |item, label, glyph| {
+        try std.testing.expectEqualStrings(label, item.label());
+        try std.testing.expectEqual(glyph, item.glyph());
+        try std.testing.expect(std.mem.indexOfScalar(u16, std.mem.span(item.text()), '&') != null);
+    }
 }
