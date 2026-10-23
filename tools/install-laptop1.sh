@@ -135,7 +135,7 @@ if [ "$only_ext" = 0 ]; then
     \$v='v$installed_version';
     Rename-Item \"\$b\\multiprompt.exe\" \"multiprompt-stable-\$v-\$t.exe\"; Copy-Item \"\$s\\multiprompt-x64.exe\" \"\$b\\multiprompt.exe\";
     Rename-Item \"\$b\\zigshell-bridge.exe\" \"zigshell-bridge-old-\$t.exe\" -ErrorAction SilentlyContinue; Copy-Item \"\$s\\zigshell-bridge-x64.exe\" \"\$b\\zigshell-bridge.exe\" -Force;
-    Get-ChildItem \"\$b\\multiprompt-stable-v*.exe\" | Sort LastWriteTime -Descending | Select -Skip 5 | Remove-Item;
+    Get-ChildItem \"\$b\\multiprompt-stable-v*.exe\" | Sort LastWriteTime -Descending | Select -Skip 5 | ForEach-Object { \$backup=\$_; try { Remove-Item \$backup.FullName } catch { Write-Output \"skipped locked backup \$(\$backup.Name)\" } };
     Get-ChildItem \"\$b\\zigshell-bridge-old-*.exe\" | Remove-Item -ErrorAction SilentlyContinue; 'app installed, backup of ' + \$v" --timeout 60
 fi
 lh shell "\$ErrorActionPreference='Stop'; Expand-Archive '$upload_pc\\multiprompt-extension.zip' '$upload_pc\\extension' -Force;
