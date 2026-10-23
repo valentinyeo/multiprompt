@@ -1,0 +1,113 @@
+# Recent changes coverage, 2026-10-16 to 2026-10-23
+
+One row per user-facing ticket, combining its changes in this period. CI, test, benchmark, documentation and release-only rows are skipped. Coverage describes existing actions and assertions, not a live pass; the second table records supplied GitHub results separately. `partial` includes supplemental native checks, never a claim of real agent delivery. All proposed journeys run on isolated GitHub runners, not locally.
+
+| Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
+| --- | --- | --- | --- | --- |
+| IGSH-127 | Mobile page previews survive navigation and reload. | browser-emulation | covered | — |
+| IGSH-154 | Browser commands finish instead of hanging; Slack opens in the pane. | browser-emulation, browser-pane-stuck | partial | Force a never-ending page command, require bounded failure and a successful next call; open Slack in a real pane. Signed-in Slack needs an account. |
+| IGSH-212 | Browser typing inserts line breaks without submitting. | none | not covered | In real Chrome, type two lines into a local form; require no submit by default, submit with raw Enter, and check key-mode typing. |
+| IGSH-221 | Several browser actions run in one held connection. | none | not covered | Run a real multi-step command: set header, navigate local page, screenshot, reset; assert ordered results and stop at the first failing step. |
+| IGSH-224 | Per-workspace browser profiles: removed, nothing to verify. | none | not covered | Removed by IGSH-565; do not revive the old isolation expectation. |
+| IGSH-228 | Browser typing targets the requested tab without typing option flags. | none | not covered | Use two editable Chrome tabs; target the inactive one, vary flag positions and require exact text plus invalid-argument errors. |
+| IGSH-232 | Browser command help works without a connection. | browser-emulation | partial | Help is checked only after connection. Before starting Chrome, run native and Bash command help with an unreachable transport; require quick success without a host launch. |
+| IGSH-240 | Browser commands recover on internal browser pages. | none | not covered | Visit chrome://version, check tab/address commands and explicit text-access failure, then return to HTTP. Full screenshots need a real app-bound extension and pane. |
+| IGSH-246 | Verified updates install safely and roll back if needed. | safe-updates, command-palette | covered | Signed local fixture releases, not production downloads or account behavior. |
+| IGSH-252 | Server address changes appear on other laptops. | none | not covered | Needs sign-in and two authenticated device states; edit an address on one and assert reconciliation on the other. |
+| IGSH-272 | Saving a screenshot creates missing destination folders. | none | not covered | Run the real Bash screenshot command with a nonexistent nested output path and a working app browser connection; require PNG bytes there. |
+| IGSH-278 | Browser commands obey a total timeout. | none | not covered | Run the Bash command against a deliberately silent local transport; assert timeout error, nonzero exit and elapsed bound, then recovery. |
+| IGSH-305 | Click and read content inside a cross-origin frame. | none | not covered | Serve two local origins; click a child button through the real extension, require a trusted event and frame-specific versus top-page values. |
+| IGSH-376 | Messages from other agents appear formatted in blue bubbles. | chat-view | partial | The branch painter uses a synthetic message; automatic arrival needs a real agent conversation and transcript discovery. The tag run proves only the view toggle. |
+| IGSH-393 | Dropped or pasted files reach the session server. | none | not covered | Needs a server upload receiver and destination session; the SSH stand-in has no upload protocol. A picker-only check cannot prove transfer. |
+| IGSH-394 | Fast browser replies are not lost during connection setup. | browser-emulation | partial | Force cold-start immediate requests and repeated fast replies through the real host; ordinary round trips do not force the pipe race. |
+| IGSH-401 | Replies saying Ready, Searching or Editing remain visible. | none | not covered | Print those reply lines and tool-progress lookalikes in CMD; open Chat View and copy text to prove replies remain while progress is excluded. |
+| IGSH-402 | Text stays after the tool step it followed. | none | not covered | Needs agent-produced text/tool/text history reaching the desktop reader; a synthetic painter or audit fixture alone cannot prove discovery and order. |
+| IGSH-403 | Links with non-English letters open the right address. | none | not covered | Print a Unicode local URL in CMD, open Chat View, click it and assert the exact encoded request, including a non-BMP character. |
+| IGSH-404 | Long selections copy completely. | none | not covered | Select and copy numbered local output; the old over-262k truncation boundary additionally needs file-backed history beyond screen capture, not just visible CMD text. |
+| IGSH-405 | Inline code preserves Windows path backslashes. | chat-view | partial | The branch painter checks a fenced path, not inline code. Print an inline path in CMD, select/copy it in Chat View and require exact backslashes. |
+| IGSH-407 | Find accepts symbols and accented letters. | none | not covered | Print a known local line, Ctrl+F, enter symbols and accented/non-Latin text, assert query and match, then Esc and type in the composer. |
+| IGSH-412 | Audits find the history of resumed conversations. | none | not covered | Needs a resumed real Claude conversation in tmux and its transcript identity; the current stand-in only attaches and lists sessions. |
+| IGSH-422 | Server slots follow account settings across devices. | none | not covered | Needs sign-in and multiple authenticated device states; local server aliases do not prove propagation. |
+| IGSH-423 | Inbox section settings survive account-setting updates. | none | not covered | Toggle a section through Ctrl+K and verify saved/visible order; cross-device reconciliation additionally needs authenticated device states. |
+| IGSH-436 | Switching tabs reuses an unchanged chat table. | chat-tables | covered | Console table reuse only, not remote history or font/scale invalidation. |
+| IGSH-437 | Internal reminder blocks do not appear as conversation. | none | not covered | Feed real agent history through the production transcript reader; console output and post-reader painter text exercise different paths. |
+| IGSH-438 | Mouse selection and right-click Copy copy the intended chat text. | chat-view | partial | Branch native checks are supplemental. Drag both directions over local output, then use Ctrl+C and context Copy; compare exact clipboard text and whole-message Copy. |
+| IGSH-439 | Returning to a workspace restores its remembered session. | workspace-focus | partial | Create two tabs per workspace, select the older one, return by keys and pills and assert identity/input, then relaunch. Current journey has only one tab per workspace. |
+| IGSH-440 | Chat View stays visible in full-width mode. | none | not covered | Toggle full-width on/off in Chat View, type unsent markers, require transcript/composer visibility, then return to shell and execute a marker. |
+| IGSH-441 | The shell has a bundled monospace font. | sessions, chat-tables | partial | The original font was superseded. Read current console font metadata and check box glyphs across tab/theme switches and relaunch; the sessions journey is currently failing. |
+| IGSH-442 | Unconfirmed messages offer Send again and Remove. | none | not covered | Needs real agent delivery or a richer send-boundary fixture: hold delivery unavailable, enqueue, remove one, restore transport and retry another exactly once. |
+| IGSH-443 | UI and shell fonts have clear text and seamless terminal glyphs. | sessions, appearance, chat-tables, chat-view | partial | Assert current font registration/family and glyph seam pixels before/after theme, tab switch and relaunch; screenshots alone do not check them. |
+| IGSH-444 | Rounded controls have smooth edges without slower repainting. | appearance, pane-layout, chat-view | partial | Check Inbox and nonempty Send-button edge pixels; drive fixed tab/theme inputs and measure repaint cost against a declared budget or same-run release comparison. |
+| IGSH-445 | Chat text is bolder and smoothly rendered. | chat-view, workspace-focus | partial | At fixed theme/scale, measure regular/bold/code glyph density and smoothing in transcript and composer; current typing and painter scenes have no weight oracle. |
+| IGSH-446 | The public app gains the imported desktop and chat features. | appearance, sessions, inbox, command-palette, chat-tables, chat-view, session-open | partial | Add local Find, quote reply, attach-error and visit-count journeys. Tool folding, permissions, Stop, working/todo display, retry and transcript settlement need agent/history producers; account reconciliation needs sign-in. |
+| IGSH-448 | Approve a new device with one tap. | none | not covered | Needs sign-in, another pending device key and server authorization; the offline bypass cannot approve a device. |
+| IGSH-450 | Leaving full-width Chat View shows the shell again. | chat-view, workspace-focus | partial | Enter Chat View, toggle full-width twice, leave, assert console visibility/geometry and execute a marker. Existing return paths omit full-width. |
+| IGSH-451 | The Chat View typing box keeps focus. | workspace-focus, ssh-tab-reconnect | partial | Add idle typing and external-window switch-away/return checks; account/browser guard paths need their real prerequisites. Press foregrounds the frame before chords. |
+| IGSH-453 | Lighter body text makes bold text stand out, including the IGSH-452 changes. | chat-view, workspace-focus | partial | Compare regular/bold/italic glyph density at fixed theme/scale in transcript and composer; current scenes do not assert contrast or weight. |
+| IGSH-455 | Uploads time out only when progress stops. | none | not covered | Needs a controllable upload receiver: maintain slow progress beyond the idle timeout, then stall and require timeout. The current SSH stand-in cannot receive uploads. |
+| IGSH-456 | The shell keeps its intended font. | sessions, appearance, chat-tables | partial | Check current font metadata and box glyphs through tab/theme switches and relaunch; historical Hack expectations were superseded by the current bundled font. |
+| IGSH-457 | Starred workspace shows the same starred sessions as Inbox. | favorites-groups | partial | Star one of two local tabs in different workspaces, compare identities in Alt+1 and Inbox Starred, then unstar. Cross-window aggregation needs another owned window. |
+| IGSH-458 | Wide chat tables scroll horizontally. | chat-view | partial | Branch native checks cover table drag only. Print a wide console table, drag its scrollbar and Shift-wheel, require rightmost cell, retained selection and vertical position. |
+| IGSH-459 | Page reads survive an inaccessible extension frame. | none | not covered | Add a second public fixture extension frame to a local Chrome page; require real text, links, snapshot and find commands still return top-page content. |
+| IGSH-460 | Queued messages arrive in order or offer retry. | none | not covered | Sending changed again in IGSH-564. Two local echo commands can prove basic order; exact busy-agent acceptance and confirmation need real Claude/tmux or a richer send boundary. |
+| IGSH-493 | A shortcut inserts the browser address at the chat caret. | none | not covered | Needs app pane plus real extension: Ctrl+Shift+X between two text markers must insert the current URL without sending; close pane and check last-address fallback. |
+| IGSH-496 | Panes and groups have tidy spacing, menus and rounded corners. | pane-layout, favorites-groups | partial | Add group rename/collapse/color actions and corner-pixel checks; cover Chat View and browser-free layouts, not just the current console/browser scene. |
+| IGSH-498 | Drafts stay with their sessions and show a DRAFT badge. | workspace-focus | partial | Give two local Chat View tabs different drafts; verify exact texts/badges through selection, rename, close isolation and relaunch. Current proof has one surviving draft. |
+| IGSH-501 | Dropped connections retry with backoff and resume queued input. | ssh-tab-reconnect, saved-remote-workspace | partial | Force clean exit during attach and repeated failures, assert stable tab identity and attempt timing. Queued delivery needs accepted-input logging or real tmux/agent semantics. |
+| IGSH-502 | Cached state appears promptly on a second launch. | none | not covered | Create local tabs/views through UI, close normally, relaunch the same isolated profile; require first cached paint and accepted input before deferred completion, then live shell readiness. |
+| IGSH-503 | Close all browser panes in one action. | browser-pane-stuck | partial | Open panes on two local tabs, Close All, require both connections closed and saved addresses retained, then reopen both. Current case has one pane. |
+| IGSH-508 | Browser-free shell view has its intended maximum width. | none | not covered | Maximize a no-browser console, measure its centered scaled width cap, shrink the frame to check clamping, then switch tab/theme. |
+| IGSH-509 | The screenshot shortcut no longer opens the system menu. | none | not covered | Needs app-bound extension and screenshot upload endpoint for full link insertion; press Ctrl+Shift+S, assert no native system menu and retained caret/input. |
+| IGSH-511 | Background reconnects stay quiet and ended sessions stop retrying. | ssh-tab-reconnect, ended-remote-session, saved-remote-workspace | partial | Add explicit Start new session after case B, active-visible reconnect geometry and many simultaneous attaches; the stand-in already supports session creation. |
+| IGSH-512 | Only a lasting disconnection shows a warning. | none | not covered | Hold transport unavailable past ten seconds, assert notice text, recover and require disappearance; a short outage must show none. |
+| IGSH-513 | Idle tabs avoid unnecessary CPU use and wakeups. | ssh-tab-reconnect | partial | Measure foreground/background CPU and wakeups, healthy/recovery intervals and ended-tab silence; check idle restored-tab visits versus explicit selection. Synthetic-tab exclusion needs the dedicated chat benchmark mode, absent here. |
+| IGSH-514 | Remote activity indicators use events without status-bar redraws. | none | not covered | Needs actual tmux activity/silence/title/attach hooks, relay and an attached client; current SSH stand-in cannot exercise hook scheduling or status rendering. |
+| IGSH-521 | Other browser windows no longer make the app flicker. | ssh-tab-reconnect | partial | Open/switch an independent owned browser window with Alt+Tab; monitor focus events, layout and frames for unsolicited activation or repaint churn. Reconnect checks a different trigger. |
+| IGSH-522 | Workspace returns restore keyboard input. | workspace-focus | covered | Exact composer text and shell markers pass with Press foregrounding the frame before chords; not proof of unassisted foreground restoration. |
+| IGSH-523 | Close and reopen a pane stuck opening. | browser-pane-stuck | partial | Force a genuinely undockable browser launch, observe Failed, close it, restore availability through user settings and exercise Retry button/palette. |
+| IGSH-535 | Open a named server-session tab in a chosen group. | session-open | covered | Local request, saved metadata and repeat no-op only; not Bash CLI parsing or successful remote attachment. |
+| IGSH-537 | Underscores survive in links and inline code. | chat-view | partial | Native checks are branch-only supplements. Print an underscore URL/code in CMD, click both sides of the underscore and copy code; assert exact request/text. |
+| IGSH-540 | Voice input reads the saved user key, not a stale process value. | none | not covered | In disposable Windows user settings, save a fake key, launch with a conflicting process value and assert only the logged key source; remove it and check missing-key behavior. Speech needs a real service key. |
+| IGSH-543 | Startup responds promptly and saves its initial tabs. | appearance, sessions, safe-updates, workspace-focus | partial | Send Ctrl+K immediately after first frame and prove accepted input precedes deferred completion; separately close/relaunch an untouched launch to assert startup-tab persistence. |
+| IGSH-549 | Console, composer and group lines fit inside their borders. | pane-layout, workspace-focus, browser-pane-stuck | partial | Console ring/gap/group geometry is covered at default scale. Add composer bounds with/without browser at default, 125% and 150% scale. |
+| IGSH-556 | Favorites and home workspace keep separate groups. | favorites-groups | covered | — |
+| IGSH-564 | Messages reach a busy Claude prompt immediately; Ctrl+X then Ctrl+S steers them. | none | not covered | Needs busy Claude in tmux, prompt buffering and the real steering chord. Current attach/list stand-in and painter cannot prove agent acceptance. |
+| IGSH-565 | Per-workspace browser profiles: removed, nothing to verify. | none | not covered | Reverts IGSH-224; keep the removed feature out of verification expectations. |
+| IGSH-566 | Docked browser panes cannot be dragged or maximized. | browser-pane-locked | covered | Empty-strip drag, browser-focused Win+Up and double-click; no separate maximize-button click. |
+| IGSH-567 | Pending chat messages can be selected and copied. | chat-view | partial | Branch native checks are supplemental. Hold real messages queued before dragging/copying and refresh; if local CMD cannot keep them pending, a richer send boundary or real busy agent is required. |
+| IGSH-568 | Saved remote tabs start directly on launch. | saved-remote-workspace, ssh-tab-reconnect | partial | Restore four or five held attaches and require direct initial starts before recovery ticks; current two-tab fixture preflight-reconnects before readiness. |
+| IGSH-573 | Links use the desktop browser when the pane is off. | none | not covered | Click a local Chat View URL with pane off/on and the external-links preference toggled; assert request/window ownership and pane state. Check console Ctrl+C with/without selection separately. |
+| IGSH-574 | Right-click a chat link to copy its address. | chat-view | partial | Native URL extraction is supplemental; right-click a local URL with trailing punctuation, choose Copy link and compare clipboard. Nonlinks must omit the item. |
+| IGSH-587 | Startup and relaunch open maximized. | appearance | partial | First startup passes on v0.28.821. Restore the frame, Restart and create another workspace window, then require new windows maximized before input; update/rollback/crash relaunch geometry also needs checks. |
+| IGSH-591 | Group lines stay clear of the selected session row. | group-rail | covered | — |
+
+## Live results on this pass
+
+These are the supplied real GitHub runs on this branch, not new executions by this documentation edit. Run links use `https://github.com/valentinyeo/multiprompt/actions/runs/<id>`. A tag `chat-view` run does not run the branch-only native painter/tests cited above. The three reconnect stems share one driver run; chat-sync-audit is a Linux diagnostic, not a desktop journey.
+
+| Stem | Last run on this pass | Result |
+| --- | --- | --- |
+| appearance | 39871210688, v0.28.821 | passed |
+| workspaces | 39871210688, v0.28.821 | passed |
+| workspace-focus | 39871210688, v0.28.821 | passed |
+| inbox | 39871210688, v0.28.821 | passed |
+| command-palette | 39871210688, v0.28.821 | passed |
+| session-open | 39871210688, v0.28.821 | passed |
+| favorites-groups | 39871210688, v0.28.821 | passed |
+| browser-pane-stuck | 39871210688, v0.28.821 | passed |
+| browser-pane-locked | 39871210688, v0.28.821 | passed |
+| group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
+| pane-layout | 39871210688, v0.28.821 | passed |
+| chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
+| chat-tables | 39871210688, v0.28.821 | passed |
+| sessions | 39871210688, v0.28.821 | failed: focus stays on frame after rename; `real console command wrote file` |
+| safe-updates | 39871584220, branch build | passed; tags refused by design |
+| browser-emulation | 39871584220, branch build | passed; tags refused by design |
+| ssh-tab-reconnect | 39870853585, exe_source=v0.28.820 | passed |
+| ended-remote-session | 39870853585, exe_source=v0.28.820 | passed |
+| saved-remote-workspace | 39870853585, exe_source=v0.28.820 | passed |
+| chat-sync-audit | 39870850652 | passed |
+
+Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684784) fails earlier at `renamed tab persisted`. There is no earlier verify.yml sessions run. Keep this product gap separate from harness fixes and do not weaken the journey. Appearance on v0.28.820 failed `IGSH-587: main window did not start maximized` because that release predates the asserted change; use a release containing every change the harness asserts.
+
+A change that alters a mapped feature updates its map and this table in the same PR.

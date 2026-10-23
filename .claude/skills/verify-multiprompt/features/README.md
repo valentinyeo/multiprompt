@@ -1,6 +1,6 @@
 # Multiprompt desktop verification map
 
-Read the matching feature before dispatching. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. Baseline file stems are `verify.yml`'s `feature` input; the SSH maps below use the separate reconnect workflow.
+Read the matching feature before dispatching. [Recent changes coverage](../coverage.md) lists ticket gaps and this pass's run results. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. Baseline file stems are `verify.yml`'s `feature` input; the SSH maps below use the separate reconnect workflow.
 
 ## Baseline preconditions
 
@@ -12,9 +12,9 @@ Read the matching feature before dispatching. Each file uses four sections: sub-
 
 ## Driving conventions
 
-Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; a new workflow can first run through the PR trigger, defaulting to appearance. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail and pane-layout. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
-Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. The browser-pane-locked journey alone targets an ownership-checked empty browser strip with real mouse input.
+Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
 ## Proof and failure reporting
 
@@ -60,10 +60,10 @@ These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconn
 
 - Primary surface, normal build and offline mode: `README.md`, `CONTRIBUTING.md`.
 - Keyboard routing and shortcut labels: `src/shortcuts.zig`, `openwiki/operations/keyboard-shortcuts.md`, `src/focus.zig`.
-- Startup flags and versioned title: `src/startup.zig:108`, `src/startup.zig:310`; initial shell and readiness: `src/main.zig:8017`.
-- Palette query matching and actions: `src/command_palette.zig:1672`, `src/command_palette.zig:2071`, `src/command_palette.zig:3788`; displayed labels: `src/sidebar.zig:3563`, `src/sidebar.zig:3895`.
-- Theme persistence and user action: `src/themes.zig:232`, `src/main.zig:6301`.
-- Session persistence and workspace actions: `src/session.zig:96`, `src/session.zig:659`, `src/workspaces.zig:3041`, `src/rename.zig`.
-- Inbox window state, saved published attention and user toggle: `src/inbox.zig:240`, `src/inbox.zig:1358`, `src/inbox.zig:1670`.
+- Startup flags: `parseNoWindowRestoreFlag` at `src/startup.zig:108`, `parseSingleWindowFlag` at `src/startup.zig:146`; title: `buildWindowTitle` at `src/startup.zig:308`. Initial CMD fallback: `spawnShell` at `src/main.zig:8234`; deferred readiness: `WM_DEFERRED` at `src/main.zig:1349`.
+- Palette queries: `updateSearchResults` at `src/command_palette.zig:1462`, UI-size keywords: `ui_labels` at `src/command_palette.zig:3859`, theme filtering: `g_search_theme_mode` at `src/command_palette.zig:1700`; actions: `WM_APP_SEARCH_CONFIRM` at `src/main.zig:4328`, UI size: `SEARCH_UI_BIGGER_OFFSET` at `src/main.zig:4966`. Displayed labels: `UI Size: Increase` at `src/sidebar.zig:3658`, `New CMD Shell` at `src/sidebar.zig:4056`.
+- Theme persistence: `saveGlobalTheme` at `src/themes.zig:232`; menu: `SEARCH_THEME_MENU_OFFSET` at `src/main.zig:6438`; apply: `SEARCH_THEME_SYSTEM_OFFSET` at `src/main.zig:6450`.
+- Session persistence: `getSessionPath` at `src/session.zig:95`, `saveSessionTo` at `src/session.zig:155`, `saveSession` at `src/session.zig:797`; saved scale: `g_ui_scale` at `src/session.zig:645`; workspace data: `active_workspace` at `src/session.zig:671`. Workspace actions: `switchToWorkspace` at `src/workspaces.zig:2711`, `newWorkspace` at `src/workspaces.zig:3245`; rename: `src/rename.zig`.
+- Inbox publication: `publishInboxStateNow` at `src/inbox.zig:240`; visibility: `openInbox` at `src/inbox.zig:1374`, `closeInbox` at `src/inbox.zig:1409`; unread toggle: `inboxToggleReadRow` at `src/inbox.zig:1687`, keyboard dispatch: `handleInboxKey` at `src/inbox.zig:1717`.
 
 Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.

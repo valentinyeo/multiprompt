@@ -15,7 +15,7 @@ Use Ctrl+K `workspace switcher` to show workspace pills, Ctrl+K `per tab` for pe
 
 ## Driving it with control.ps1
 
-Run `gh workflow run verify.yml -f feature=workspace-focus` against the proposed revision. Require all four `workspace-focus ... PASS` lines and a passed `result.json`. The harness never seeds saved state, writes shell markers, clicks the typing box or repairs focus after switching.
+Run `gh workflow run verify.yml -f feature=workspace-focus` against the proposed revision. Require all four `workspace-focus ... PASS` lines and a passed `result.json`. The harness never seeds saved state, writes shell markers itself or clicks the typing box after switching. Readiness readers and Type-Text do not set focus, but Press calls SetForegroundWindow before every chord, including workspace returns and Enter; this is not proof of wholly unassisted foreground restoration.
 
 Every input requires Doctor's executable/window ownership check and the owned app's foreground ancestry. Console readiness also matches the native console title to the saved tab's shell ID, so an outgoing console cannot satisfy an incoming workspace's wait. The following is the complete journey, including each observable readiness condition. Waits poll every 200 ms and expire after 20 seconds unless stated otherwise; failure stops the journey and retains evidence, rather than sending input to an unready surface.
 
@@ -26,7 +26,7 @@ Every input requires Doctor's executable/window ownership check and the owned ap
 | 3 | Show switcher if hidden | Ctrl+K: new debug-log suffix reports initialized empty palette and native GUI-thread focus is exactly the owned frame within 20 s. Type `workspace switcher`: processed query length and selected target 6213 within 20 s before Enter. Saved explicit `hide_pills:false`, visible expanded sidebar within 20 s. Capture `pills-ready.png`. |
 | 4 | Select per-session Chat View | Ctrl+K and query readiness as above, target 6345 for `per tab`; Enter; saved per-session mode and restored CMD console within 20 s. |
 | 5 | Enable Chat View if off | Saved session `cv:true` within 20 s; visible owned native Edit child within 30 s. |
-| 6 | Foreground initial Chat View frame | Setup only: restore/foreground frame; exact frame foreground and original owned Edit HWND focused within 20 s each. No subsequent foreground or focus setters. |
+| 6 | Foreground initial Chat View frame | Setup only: restore/foreground frame; exact frame foreground and original owned Edit HWND focused within 20 s each. Later Press calls still foreground the frame before each chord; readiness readers and Type-Text do not set focus. |
 | 7 | Type `before-` | Original Edit focused from step 6; exact original Edit text within 20 s, with a 1 s timeout per WM_GETTEXT; capture `action.png`. |
 | 8 | Ctrl+N | Existing Chat View ready; new workspace count, active index and distinct saved CMD tab within 20 s; new owned console foreground within 20 s. Remember both tab indices. |
 | 9 | Alt+2 | Second console ready; original workspace/tab, saved `cv:true`, visible original Edit and exact Edit focus within 20 s. |
@@ -56,4 +56,4 @@ The source contracts check switcher setup, pill visibility/layout guards, readin
 - Per-session Chat View omits `chat_view_mode` from saved state; an off session can omit `cv`. A saved active index alone does not prove the console or typing box is input-ready.
 - The custom-drawn palette has no native Edit or custom UIA focus provider. Its readiness requires both foreground HWND and GetGUIThreadInfo hwndFocus to equal the owned frame, not the UIA proxy's NativeWindowHandle. Snapshots retain both native and UIA observations in `*.focus.json`; the check never moves focus.
 - Console staging uses its native Document TextPattern, not the unsupported Edit ValuePattern. Chat View continues to use the original Edit HWND's bounded WM_GETTEXT.
-- This is local CMD/Chat View coverage, not an account, agent, browser, SSH, sync or relaunch journey. Readiness waits observe restoration; they never repair it. CI must still confirm the changed journey on Windows.
+- This is local CMD/Chat View coverage, not an account, agent, browser, SSH, sync or relaunch journey. Readiness waits only observe restoration; Press still foregrounds the frame before chords. Require the Windows result, not a stronger no-setter claim.
