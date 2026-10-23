@@ -1882,11 +1882,6 @@ pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
     app_state.shells[idx].browser_lifecycle_pending = false;
     const wake_requested = app_state.shells[idx].browser_wake_requested;
     app_state.shells[idx].browser_wake_requested = false;
-    const hwnd = app_state.shells[idx].browser_hwnd;
-    if (job.confirmed and !job.frozen and hwnd != null and IsWindowVisible(hwnd) != 0) {
-        showBrowserWindowAsync(hwnd, SW_HIDE);
-        showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE);
-    }
     if (job.confirmed) {
         setBrowserFrozenMarkerForShell(idx, job.frozen);
     } else {
@@ -1899,6 +1894,7 @@ pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
         job.shell_id,
         job.window_id,
     })) |line| debugLog(line) else |_| {}
+    if (job.confirmed and !job.frozen and idx == app_state.active_shell) updateBrowserVisibility();
     if (job.frozen and (wake_requested or idx == app_state.active_shell or app_state.shells[idx].keep_awake)) wakeBrowserPaneFromFreeze(idx);
 }
 
@@ -2833,6 +2829,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
+    if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;
     const bh = app_state.shells[app_state.active_shell].browser_hwnd;
     if (bh == null) {
         hideBrowserFloatingChrome();

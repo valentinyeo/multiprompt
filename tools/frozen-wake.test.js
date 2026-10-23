@@ -178,9 +178,19 @@ test('shared native pipe transport targets each lifecycle window and isolates co
   assert.match(request, /const until = deadline orelse \(GetTickCount64\(\) \+ 20_000\)/);
   assert.equal((request.match(/\.\{ pid, tick, sequence \}/g) || []).length, 2);
   const done = body(pane, 'handleBrowserLifecycleDone');
-  assert.match(done, /if \(job.confirmed and !job.frozen and hwnd != null and IsWindowVisible\(hwnd\) != 0\) \{\s+showBrowserWindowAsync\(hwnd, SW_HIDE\);\s+showBrowserWindowAsync\(hwnd, SW_SHOWNOACTIVATE\);/);
-  assert.ok(done.indexOf('showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE)') < done.indexOf('setBrowserFrozenMarkerForShell(idx, job.frozen)'));
+  assert.match(done, /if \(job.confirmed and !job.frozen and idx == app_state.active_shell\) updateBrowserVisibility\(\)/);
+  const position = body(pane, 'positionActiveBrowser');
+  const wake = position.indexOf('if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;');
+  assert.ok(wake >= 0 && wake < position.indexOf('setBrowserWindowPosAsync('));
+  assert.doesNotMatch(done, /showBrowserWindowAsync/);
   assert.doesNotMatch(done, /SetForegroundWindow|SetFocus|Sleep|WaitFor/);
   const build = read('build.zig');
   for (const target of ['exe', 'dev_exe', 'bridge_exe']) assert.ok(build.includes(`${target}.root_module.addOptions("bridge_config", bridge_opts)`));
+});
+
+
+test('Chat handoff parks inactive panes only after the target Chat surface has painted', () => {
+  assert.match(body(consoleSource, 'switchToShell'), /if \(!defer_browser\) parkStrayBrowserPanes\(/);
+  const swap = body(read('src/chat_session.zig'), 'chatSwitchBrowserTick');
+  assert.ok(swap.indexOf('parkInactiveBrowserPanes()') > swap.indexOf('g_chat_browser_swap.take('));
 });
