@@ -1609,6 +1609,42 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIn('stdin history', p.stdout)
         self.assertTrue(p.stdout.endswith('@@MP_END@@\n'))
 
+    def test_corrupt_line_keeps_other_messages(self):
+        corrupt = b'{"type":"assistant","message":{"ro\n'
+
+        def texts(rows):
+            return [row['text'] for row in rows if row['role'] in ('user', 'assistant')]
+
+        self.write(self.event('before'))
+        with self.path.open('ab') as output:
+            output.write(corrupt)
+            output.write((json.dumps(self.event('after')) + '\n').encode())
+        fields, rows = self.read()
+        self.assertEqual(texts(rows), ['before', 'after'])
+        self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
+        self.write(self.event('first'))
+        self.read()
+        with self.path.open('ab') as output:
+            output.write(corrupt)
+            output.write((json.dumps(self.event('second')) + '\n').encode())
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(texts(rows), ['second'])
+        self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
+        question = dict(type='user', message=dict(role='user', content='QUESTION-690'))
+        with self.path.open('wb') as output:
+            output.write((json.dumps(question) + '\n').encode())
+            output.write(corrupt)
+            for index in range(6):
+                output.write((json.dumps(self.event('answer-%d' % index)) + '\n').encode())
+        self.query.update(cached_sid='', inode=0, offset=0)
+        with patch.object(reader, 'TAIL_BYTES', 300):
+            fields, rows = self.read()
+        self.assertIn('QUESTION-690', texts(rows))
+        self.assertIn('answer-5', texts(rows))
+
 
 class IGSH412ResumedSessionTest(unittest.TestCase):
     def test_igsh412_resumed_process_shapes(self):
