@@ -104,6 +104,18 @@ class ChatSyncAuditTest(unittest.TestCase):
                          ['This real assistant reply ends with a middle dot ·'])
         self.assertEqual([item['pane_line'] for item in candidates], [4])
 
+    def test_igsh633_status_summary_wrapped_over_rows_is_not_a_chat_turn(self):
+        capture = ['● Skipping Valentin-blocked Multiprompt tickets; checking next ones',
+                   '  · 38s…',
+                   '● Scanning board; Multiprompt tickets blocked on Valentin, checking',
+                   '  next ones · 1m 4s…',
+                   '● This neutral reply wraps onto a second row and is real chat',
+                   '  because it keeps going here.'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['text'] for item in candidates],
+                         ['This neutral reply wraps onto a second row and is real chat'])
+        self.assertEqual([item['pane_line'] for item in candidates], [5])
+
     def test_igsh380_build_progress_banner_is_not_a_chat_turn(self):
         capture = ['● Build in progress (~7 min); preparing preview images',
                    '● Build in progress: the compiler found a real error',
