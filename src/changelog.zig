@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.851", .items = &.{
+        .{ .text = "Switching back to a sleeping browser pane now shows its page sooner.", .ticket = "IGSH-712" },
+        .{ .text = "A starred session now always shows in Favorites, even when it is muted or left out of the Inbox.", .ticket = "IGSH-719" },
+    } },
     .{ .ver = "0.28.850", .items = &.{
         .{ .text = "Alt+Q now always brings typing back to the chat box, even when Find is open or the session has no browser pane.", .ticket = "IGSH-716" },
     } },
