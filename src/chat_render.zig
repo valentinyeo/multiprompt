@@ -3139,10 +3139,6 @@ fn chatEchoRetryAt(x: i32, y: i32) bool {
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
-    if (entry.state == .delivered and !entry.channel_sent) {
-        chatEchoPushQueuedNow();
-        return true;
-    }
     if (!chat_echo.pendingActions(entry.state).send_again) return false;
     for (0..app_state.g_chat_echo_layout_count) |i| {
         if (app_state.g_chat_echo_layout_ids[i] != id) continue;
@@ -4180,6 +4176,18 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 app_state.g_chat_sel_dragging = false;
                 _ = ReleaseCapture();
                 _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+                const selected = chatSelRange();
+                var log: [64]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&log, "[chat] selection chars={d}", .{if (selected) |sel| sel.end - sel.start else 0}) catch "");
+                if (selected == null and app_state.g_chat_sel_click_count == 1) {
+                    if (chatEchoAt(GET_X(lp), GET_Y(lp))) |id| {
+                        if (chatOutboxIndexById(id)) |ei| {
+                            const entry = app_state.g_chat_outbox.items[ei];
+                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNow();
+                        }
+                    }
+                }
+                _ = InvalidateRect(hwnd, null, 0);
             }
             if (!app_state.g_chat_sel_active) {
                 app_state.g_chat_sel_transcript_focus = false;

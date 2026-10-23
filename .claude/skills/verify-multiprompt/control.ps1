@@ -431,6 +431,26 @@ public static class VerifyNative {
         } finally { MouseAt(end.X, end.Y, 4); }
         return new Point[] { start, end };
     }
+    public static int TranscriptSelectionPixels(IntPtr hwnd, Point[] points) {
+        if (points.Length != 2 || points[1].X <= points[0].X || points[0].Y != points[1].Y ||
+            WindowFromPoint(points[0]) != hwnd || WindowFromPoint(points[1]) != hwnd)
+            throw new InvalidOperationException("Selection evidence is not inside the owned transcript");
+        int pad = Math.Max(8, (int)GetDpiForWindow(hwnd) / 6);
+        using (var pixels = new System.Drawing.Bitmap(points[1].X - points[0].X, pad * 2 + 1))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            DwmFlush();
+            graphics.CopyFromScreen(points[0].X, points[0].Y - pad, 0, 0, pixels.Size);
+            int count = 0;
+            for (int y = 0; y < pixels.Height; y++) {
+                for (int x = 0; x < pixels.Width; x++) {
+                    var c = pixels.GetPixel(x, y);
+                    if ((c.R == 56 && c.G == 78 && c.B == 112) || (c.R == 183 && c.G == 206 && c.B == 240) ||
+                        (c.R == 52 && c.G == 68 && c.B == 96)) count++;
+                }
+            }
+            return count;
+        }
+    }
     public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {
         Rect frame;
         Point origin = new Point();
@@ -2851,6 +2871,10 @@ try {
                             Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
                             $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
                             Snapshot 'selection-enter-reply-selected'
+                            Wait-Until {
+                                $selectionCheck.selectionPixels = [VerifyNative]::TranscriptSelectionPixels($transcript, $selectionCheck.points)
+                                $selectionCheck.selectionPixels -ge ($selectionCheck.points[1].X - $selectionCheck.points[0].X)
+                            } 'IGSH-717 drag paints a visible transcript selection before Enter'
                             Press @(0x0D) 'IGSH-717: Enter quotes the transcript selection instead of sending'
                             Wait-Until {
                                 @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count -gt $quoteLinesBefore
