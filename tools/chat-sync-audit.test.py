@@ -219,6 +219,53 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual(findings[0]['text'], text)
                 self.assertEqual(findings[0]['transcript_lines'], [])
 
+    def test_igsh686_text_around_finished_advisor_waits_for_message_write(self):
+        reader = audit.load_reader()
+        texts = ['Calling the advisor before committing to the fix plan.',
+                 'Advisor timed out; proceeding. Checking which GitHub check runs the send tests, so the proof gate can read it.']
+        pending = '● ' + texts[0] + '\n\n● Advising using Claude Fable 5.1\n\n● ' + texts[1] + '\n\n'
+        tool = '● Bash(grep -rn "chat-tmux-send" .github/workflows/)\n'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            capture = pending + tool + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else ''.join(
+                    json.dumps(dict(probe=index, present=False)) + '\n' for index in range(argv.count('--contains')))
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit.time, 'sleep') as sleep:
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+                sleep.assert_called_once_with(audit.SETTLE_SECONDS)
+                candidates = audit.pane_candidates(capture)
+                self.assertEqual([item['text'] for item in candidates], [text[:80] for text in texts])
+                self.assertTrue(all(item['advising'] for item in candidates))
+                prompt = 'A new neutral prompt starts the next turn'
+                capture = '❯ ' + prompt + '\n\n' + pending + tool + '\n' * 8
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+                for ending, expected in ((tool + '  ⎿  3 lines\n', texts), ('❯ ' + prompt + '\n', texts + [prompt])):
+                    capture = pending + ending + '\n' * 8
+                    findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                    self.assertEqual([item['kind'] for item in findings], ['pane_missing'] * len(expected))
+                    self.assertEqual([item['text'] for item in findings], [text[:80] for text in expected])
+                    self.assertTrue(all(item['transcript_lines'] == [] for item in findings))
+                capture = pending + tool + '\n' * 8
+                event = dict(type='assistant', message=dict(role='assistant', content='\n\n'.join(texts)))
+                path.write_text(json.dumps(event) + '\n')
+                wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+                reader.response.return_value = wire
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'] * 2)
+                self.assertEqual([item['text'] for item in findings], [text[:80] for text in texts])
+                self.assertEqual([item['transcript_lines'] for item in findings],
+                                 [[dict(line=1, timestamp='', location='in_window', record='conversation')]] * 2)
+                evidence = findings[0]['transcript_lines']
+                with patch.object(audit, 'transcript_evidence', side_effect=[[], [], evidence, evidence]):
+                    self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), findings)
+
     def test_settle_pending_drops_text_appended_during_wait(self):
         reader = audit.load_reader()
         text = 'The neutral assistant message is still being written'
@@ -360,6 +407,14 @@ class ChatSyncAuditTest(unittest.TestCase):
     def test_markdown_and_terminal_quotes_do_not_create_pane_drift(self):
         rows = [dict(role='assistant', text="It’s a **neutral build** with `neutral output`.")]
         self.assertEqual(self.run_audit(rows, '--contains', "It's a neutral build with neutral output."),
+                         [dict(probe=0, present=True)])
+
+    def test_igsh686_user_prompt_markdown_does_not_create_pane_drift(self):
+        rows = [dict(role='user', text='> - **One question:** should high-risk flags (money, login/access, data deletion, customer email) also skip your review?\n\nyes',
+                     timestamp='2026-10-23T13:38:13.100Z')]
+        self.assertEqual(self.run_audit(rows, '--contains', '> - One question: should high-risk flags (money, login/acc'),
+                         [dict(probe=0, present=True)])
+        self.assertEqual(self.run_audit(rows, '--contains', '> - **One question:** should high-risk'),
                          [dict(probe=0, present=True)])
 
     def test_protocol_queue_deliveries_are_not_desktop_pending_messages(self):

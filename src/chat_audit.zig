@@ -33,7 +33,7 @@ fn normalized(a: std.mem.Allocator, text: []const u16) ![]const u16 {
     return echo.normalize(text, try a.alloc(u16, text.len));
 }
 
-fn visible(a: std.mem.Allocator, h: history.History, user: ?bool, plain: bool) ![]const u16 {
+fn visible(a: std.mem.Allocator, h: history.History, user: ?bool, plain: bool, plain_users: bool) ![]const u16 {
     var text: std.ArrayList(u16) = .empty;
     for (h.blocks.items) |block| {
         if (block.role == .tool) continue;
@@ -41,7 +41,7 @@ fn visible(a: std.mem.Allocator, h: history.History, user: ?bool, plain: bool) !
             if (is_user != (block.role == .user or block.role == .injected)) continue;
         }
         const content = h.text.items[block.start..][0..block.len];
-        if (plain and block.role != .code and block.role != .user) {
+        if (plain and block.role != .code and (plain_users or block.role != .user)) {
             const spans = try a.alloc(md.Span, content.len + 1);
             const count = md.inlineSpans(content, spans);
             for (spans[0..count]) |span| try text.appendSlice(a, content[span.text.start..span.text.end]);
@@ -87,9 +87,10 @@ pub fn main(init: std.process.Init) !void {
         transcript.Identity.initTmux(1, 0, std.mem.eql(u8, header[9], "codex"), header[10], "");
     var h: history.History = .{};
     try h.apply(a, wire, id, key);
-    const rendered = try visible(a, h, null, true);
-    const rendered_users = try visible(a, h, true, false);
-    const rendered_assistants = try visible(a, h, false, false);
+    const rendered = try visible(a, h, null, true, false);
+    const rendered_plain = try visible(a, h, null, true, true);
+    const rendered_users = try visible(a, h, true, false, false);
+    const rendered_assistants = try visible(a, h, false, false, false);
     var rows: std.ArrayList(Row) = .empty;
     var row_lines = std.mem.splitScalar(u8, h.rows.items, '\n');
     while (row_lines.next()) |line| {
@@ -171,7 +172,7 @@ pub fn main(init: std.process.Init) !void {
             else => c.*,
         };
         const norm = try normalized(a, wide);
-        try emit(a, out, .{ .probe = probe, .present = norm.len > 0 and std.mem.indexOf(u16, rendered, norm) != null });
+        try emit(a, out, .{ .probe = probe, .present = norm.len > 0 and (std.mem.indexOf(u16, rendered, norm) != null or std.mem.indexOf(u16, rendered_plain, norm) != null) });
         probe += 1;
     }
 }
