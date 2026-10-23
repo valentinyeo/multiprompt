@@ -93,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-view-everywhere", "palette-order", "browser-own-profile"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-view-everywhere", "browser-own-profile", "palette-order"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
     env:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
