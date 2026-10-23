@@ -184,7 +184,8 @@ test('ISSUE-611 feature map, branch Windows tests, PR matrix, documentation and 
   assert.ok(read(skill + 'SKILL.md').includes(`](features/${feature}.md)`));
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-611 |'));
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /switches every unlocked session once/);
-  const fragment = readChangelogEntry('IGSH-611');
+  const released = [...read('src/changelog.zig').matchAll(/\.text = ("(?:\\.|[^"\\])*"),\s*\.ticket = "IGSH-611"/g)].map(match => JSON.parse(match[1]));
+  const fragment = [readChangelogEntry('IGSH-611'), ...released].join('\n');
   assert.match(fragment, /just once/);
   assert.match(fragment, /across restarts/);
   assert.doesNotMatch(fragment, /\.zig|JSON|chat_view_|ISSUE-/);
