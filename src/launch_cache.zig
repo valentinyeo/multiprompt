@@ -17,6 +17,7 @@ var started: i64 = 0;
 var frequency: i64 = 1;
 var chat_id: u64 = 0;
 pub var selected_shell_id: u32 = 0;
+pub var selected_starred = false;
 pub var selected_live_shell_id: u32 = 0;
 var cached_ids: [state.MAX_SHELLS]u32 = @splat(0);
 var cached_count: usize = 0;
@@ -78,6 +79,7 @@ pub fn restore() void {
     state.g_sidebar_collapsed = s.sidebar_collapsed;
     state.g_sidebar_scroll = s.sidebar_scroll;
     state.g_active_workspace = s.workspace;
+    state.g_starred_workspace = s.starred;
     state.g_lws_count = @intCast(@max(s.workspaces.len, @as(usize, s.workspace) + 1));
     for (s.workspaces, 0..) |name, i| {
         @memcpy(state.g_ws_names[i][0..name.len], name);
@@ -276,6 +278,7 @@ pub fn save() void {
     const bytes = snapshot.encode(std.heap.page_allocator, .{
         .active = state.shells[state.active_shell].shell_id,
         .workspace = state.g_active_workspace,
+        .starred = state.g_starred_workspace,
         .workspaces = workspaces[0..state.g_lws_count],
         .groups = groups[0..state.group_count],
         .rows = rows[0..state.shell_count],

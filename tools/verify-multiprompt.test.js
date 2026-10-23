@@ -854,7 +854,12 @@ test('ISSUE-569 selection persistence is independent of deferred browser startup
     const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
-    assert.match(save, /selected_shell_id = app_state.shells\[idx\].shell_id/);
+    assert.doesNotMatch(save, /selected_shell_id\s*=/);
+    const selectionSave = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.match(selectionSave, /if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
+    assert.match(selectionSave, /selected_shell_id = shell_id/);
+    assert.match(selectionSave, /selected_starred = app_state.g_starred_workspace/);
+    assert.match(selectionSave, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
     assert.match(save, /saveSession\(\)/);
     const deferred = cache.slice(cache.indexOf('pub fn deferred('), cache.indexOf('pub fn closedDuringStartup('));
     assert.doesNotMatch(deferred, /selected_shell_id = state.shells\[state.active_shell\].shell_id/);
@@ -904,7 +909,13 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
     assert.match(view, /@import\("workspaces.zig"\).switchToWorkspace\(@import\("workspace_view.zig"\).starred\);/);
     assert.doesNotMatch(view, /g_starred_workspace = true|SetTimer|focusActiveShell|loadInboxModel/);
     const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
-    assert.match(restore, /const restore_starred = if \(@import\("launch_cache.zig"\).pending and @import\("launch_cache.zig"\).selected_shell_id != 0\)\s+app_state.g_starred_workspace\s+else\s+json_reader.boolTrue\(json, "starred_view"\);/);
+    assert.match(restore, /const restore_starred = savedStarredView\(json, tabs\[0\.\.tab_count\]\);/);
+    assert.ok(restore.indexOf('const restore_starred =') < restore.indexOf('spawnSavedTab('));
+    const source = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(source, /selected_shell_id != 0/);
+    assert.match(source, /selected_starred/);
+    assert.match(source, /if \(!json_reader.boolTrue\(json, "starred_view"\)\) return false;/);
+    assert.doesNotMatch(source, /g_starred_workspace/);
     assert.ok(restore.indexOf('restoreStarredView(restore_starred and (restored_active_shell_id != 0 or selected_live != 0));') > restore.indexOf('seedActiveWorkspaceLastShell('));
     assert.match(inbox, /active_workspace\\":\{d\},\\"starred_view\\":\{\}/);
     assert.match(inbox, /app_state.g_active_workspace,\s+app_state.g_starred_workspace,/);
@@ -919,12 +930,12 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
     for (const required of [
       'saveSessionTo(path, null)', 'selectedSavedTab(parsed.value, tabs[0..count], 0)',
       'json_reader.boolean(json_reader.field(parsed.value, "starred_view"), !saved_starred)',
-      'restoreStarredView(json_reader.boolTrue(parsed.value, "starred_view"))',
+      'restoreStarredView(savedStarredView(parsed.value, tabs[0..count]))',
       'saved_starred and favorite_on_restore, app_state.g_starred_workspace',
       '@as(u32, 42), app_state.shells[app_state.active_shell].shell_id',
       '@as(u8, 1), app_state.g_active_workspace',
-      'testStarredSelectionRoundTrip(true, true)', 'testStarredSelectionRoundTrip(false, true)',
-      'testStarredSelectionRoundTrip(true, false)',
+      'testStarredSelectionRoundTrip(true, true, false)', 'testStarredSelectionRoundTrip(false, true, false)',
+      'testStarredSelectionRoundTrip(true, false, false)',
     ]) assert.ok(fixture.includes(required), required);
     assert.match(session, /expect\(json_reader.boolTrue\(parsed.value, "starred_view"\)\)/);
     assert.match(session, /expect\(!json_reader.boolTrue\(new_parsed.value, "starred_view"\)\)/);
@@ -1394,4 +1405,75 @@ test('ISSUE-569 updater restart uses the real helper and judges only the restore
   const coupled = control.replace('    $oldPid = $process.Id', "    $launch = Get-Content 'session.json.launch.json'\n    $oldPid = $process.Id");
   assert.throws(() => contract(coupled, map), assert.AssertionError);
   assert.throws(() => contract(control, map.replaceAll('update-restart-selection', '')), assert.AssertionError);
+});
+
+
+test('ISSUE-569 fast and deferred restore keep the authoritative view and session paired', () => {
+  function contract(snapshot, cache, session, console) {
+    const schema = snapshot.slice(snapshot.indexOf('pub const Snapshot = struct'), snapshot.indexOf('pub fn encode('));
+    assert.match(schema, /starred: bool = false,/);
+    const restoreCache = cache.slice(cache.indexOf('pub fn restore()'), cache.indexOf('pub fn painted('));
+    assert.match(restoreCache, /state.g_starred_workspace = s.starred;/);
+    assert.doesNotMatch(restoreCache, /selected_shell_id\s*=/);
+    const saveCache = cache.slice(cache.indexOf('pub fn save()'), cache.indexOf('test "'));
+    assert.match(saveCache, /\.starred = state.g_starred_workspace,/);
+    assert.match(saveCache, /\.active = state.shells\[state.active_shell\].shell_id,/);
+    const save = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    assert.match(save, /if \(@import\("launch_cache.zig"\).pending\) \{\s*if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
+    assert.match(save, /selected_shell_id = shell_id;\s*@import\("launch_cache.zig"\).selected_starred = app_state.g_starred_workspace;/);
+    assert.match(save, /selected_live_shell_id = if \(@import\("launch_cache.zig"\).tabs_restored or !@import\("launch_cache.zig"\).cachedShell\(shell_id\)\) shell_id else 0;/);
+    assert.match(save, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
+    assert.ok(save.indexOf('else if (!@import("launch_cache.zig").tabs_restored) return;') < save.indexOf('saveSessionTo('));
+    const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
+    assert.doesNotMatch(switching, /selected_shell_id\s*=/);
+    const view = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
+    assert.match(view, /pending and @import\("launch_cache.zig"\).selected_shell_id != 0/);
+    assert.match(view, /if \(@import\("launch_cache.zig"\).selected_live_shell_id != 0\) return @import\("launch_cache.zig"\).selected_starred;/);
+    assert.match(view, /if \(tab.shell_id == @import\("launch_cache.zig"\).selected_shell_id\) return @import\("launch_cache.zig"\).selected_starred;/);
+    assert.match(view, /if \(!json_reader.boolTrue\(json, "starred_view"\)\) return false;/);
+    assert.match(view, /const id = json_reader.uint\(json, "active_shell_id"\);/);
+    assert.match(view, /if \(tab.shell_id == id\) return true;/);
+    assert.doesNotMatch(view, /g_starred_workspace/);
+    const restore = session.slice(session.indexOf('pub fn restoreSession()'), session.indexOf('test "', session.indexOf('pub fn restoreSession()')));
+    assert.match(restore, /const restore_starred = savedStarredView\(json, tabs\[0\.\.tab_count\]\);/);
+    assert.ok(restore.indexOf('const restore_starred =') < restore.indexOf('spawnSavedTab('));
+    assert.match(restore, /restoreStarredView\(restore_starred and \(restored_active_shell_id != 0 or selected_live != 0\)\);/);
+    for (const name of [
+      'ISSUE-569 launch snapshot round trips the Starred selection pair',
+      'ISSUE-569 legacy launch snapshot without Starred decodes as false',
+    ]) assert.ok(snapshot.includes(`test "${name}"`), name);
+    assert.match(snapshot, /for \(\[_\]bool\{ false, true \}\) \|starred\|/);
+    assert.match(snapshot, /expectEqual\(starred, parsed.value.starred\)/);
+    assert.match(snapshot, /expect\(!parsed.value.starred\)/);
+    for (const name of [
+      'ISSUE-569 Starred saved with the favorite in a non-active workspace restores Starred',
+      'ISSUE-569 saved view and selected session use the same source during startup',
+    ]) assert.ok(session.includes(`test "${name}"`), name);
+    assert.ok(session.includes('@as(u64, if (saved_starred) 0 else 1), json_reader.uint(parsed.value, "active_workspace")'));
+    assert.ok(session.includes('@as(u8, 1), tabs[selected].workspace'));
+    assert.ok(session.includes('try testStarredSelectionRoundTrip(true, true, true);'));
+    assert.ok(session.includes('selected_shell_id = if (startup_user_selection) tabs[selected].shell_id else 0;'));
+    assert.ok(session.includes('restoreStarredView(savedStarredView(parsed.value, tabs[0..count]))'));
+  }
+  const sources = [read('src/launch_snapshot.zig'), read('src/launch_cache.zig'), read('src/session.zig'), read('src/console.zig')];
+  contract(...sources);
+  for (const [file, before, after] of [
+    [0, '    starred: bool = false,', ''],
+    [1, '    state.g_starred_workspace = s.starred;', ''],
+    [1, '        .starred = state.g_starred_workspace,', ''],
+    [1, '    const s = parsed.value;', '    const s = parsed.value;\n    selected_shell_id = s.active;'],
+    [2, 'app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count', 'app_state.active_shell < app_state.shell_count'],
+    [2, 'selected_starred = app_state.g_starred_workspace;', 'selected_starred = false;'],
+    [2, 'else if (!@import("launch_cache.zig").tabs_restored) return;', ''],
+    [2, 'return @import("launch_cache.zig").selected_starred;', 'return app_state.g_starred_workspace;'],
+    [2, 'if (tab.shell_id == @import("launch_cache.zig").selected_shell_id)', 'if (true)'],
+    [2, 'if (tab.shell_id == id) return true;', 'return true;'],
+    [2, '    const restore_starred = savedStarredView(json, tabs[0..tab_count]);', ''],
+    [3, '        saveSession();\n    }\n    if (idx < app_state.shell_count)', '        @import("launch_cache.zig").selected_shell_id = app_state.shells[idx].shell_id;\n        saveSession();\n    }\n    if (idx < app_state.shell_count)'],
+  ]) {
+    const broken = [...sources];
+    broken[file] = broken[file].replace(before, after);
+    assert.notEqual(broken[file], sources[file], before);
+    assert.throws(() => contract(...broken), assert.AssertionError, before);
+  }
 });

@@ -841,6 +841,22 @@ fn selectedSavedTab(json: std.json.Value, tabs: []const SavedTab, selected: u32)
     return if (active < tabs.len) @intCast(tmux_identity.restoreWinner(tabs, @intCast(active))) else null;
 }
 
+fn savedStarredView(json: std.json.Value, tabs: []const SavedTab) bool {
+    if (@import("launch_cache.zig").pending and @import("launch_cache.zig").selected_shell_id != 0) {
+        if (@import("launch_cache.zig").selected_live_shell_id != 0) return @import("launch_cache.zig").selected_starred;
+        for (tabs) |tab| {
+            if (tab.shell_id == @import("launch_cache.zig").selected_shell_id) return @import("launch_cache.zig").selected_starred;
+        }
+    }
+    if (!json_reader.boolTrue(json, "starred_view")) return false;
+    const id = json_reader.uint(json, "active_shell_id");
+    if (id == 0) return true;
+    for (tabs) |tab| {
+        if (tab.shell_id == id) return true;
+    }
+    return false;
+}
+
 fn restoreStarredView(starred: bool) void {
     app_state.g_starred_workspace = false;
     if (!starred or !app_state.g_single_window or app_state.active_shell >= app_state.shell_count) return;
@@ -852,7 +868,14 @@ fn restoreStarredView(starred: bool) void {
 pub fn saveSession() void {
     @import("launch_cache.zig").changed();
     if (app_state.g_account_locked or app_state.g_restoring) return;
-    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored and @import("launch_cache.zig").selected_shell_id == 0) return;
+    if (@import("launch_cache.zig").pending) {
+        if (app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count) {
+            const shell_id = app_state.shells[app_state.active_shell].shell_id;
+            @import("launch_cache.zig").selected_shell_id = shell_id;
+            @import("launch_cache.zig").selected_starred = app_state.g_starred_workspace;
+            @import("launch_cache.zig").selected_live_shell_id = if (@import("launch_cache.zig").tabs_restored or !@import("launch_cache.zig").cachedShell(shell_id)) shell_id else 0;
+        } else if (!@import("launch_cache.zig").tabs_restored) return;
+    }
     logSessionAudit("saveSession:before-write");
     var path_buf: [512]u8 = undefined;
     const path = getSessionPath(&path_buf) orelse return;
@@ -1563,6 +1586,7 @@ pub fn restoreSession() u32 {
     const tab_count = json_reader.sessionTabs(json, tabs[0..], MAX_LWS);
     app_state.g_restored_valid_session = true;
     const restored_active_tab = selectedSavedTab(json, tabs[0..tab_count], if (@import("launch_cache.zig").pending) @import("launch_cache.zig").selected_shell_id else 0);
+    const restore_starred = savedStarredView(json, tabs[0..tab_count]);
     if (json_reader.boolTrue(json, "sound_enabled")) app_state.g_sound_enabled = true;
     if (!prepared) {
         loadGlobalTheme();
@@ -1776,10 +1800,6 @@ pub fn restoreSession() u32 {
         }
     }
 
-    const restore_starred = if (@import("launch_cache.zig").pending and @import("launch_cache.zig").selected_shell_id != 0)
-        app_state.g_starred_workspace
-    else
-        json_reader.boolTrue(json, "starred_view");
     const selected_live = @import("launch_cache.zig").selected_live_shell_id;
     if (@import("launch_cache.zig").pending and selected_live != 0) {
         if (findShellById(selected_live)) |idx| {
@@ -1901,6 +1921,55 @@ test "ISSUE-569 legacy index fallback and startup user selection beat saved sele
     try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 999));
 }
 
+test "ISSUE-569 saved view and selected session use the same source during startup" {
+    const cache = @import("launch_cache.zig");
+    const prior_pending = cache.pending;
+    const prior_selected = cache.selected_shell_id;
+    const prior_starred = cache.selected_starred;
+    const prior_live = cache.selected_live_shell_id;
+    const prior_view = app_state.g_starred_workspace;
+    defer {
+        cache.pending = prior_pending;
+        cache.selected_shell_id = prior_selected;
+        cache.selected_starred = prior_starred;
+        cache.selected_live_shell_id = prior_live;
+        app_state.g_starred_workspace = prior_view;
+    }
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":1,\"active_workspace\":0,\"starred_view\":true,\"tabs\":[{\"kind\":\"tmux\",\"name\":\"A\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"B\",\"shell_id\":42,\"workspace\":1,\"favorite\":true}]}");
+    defer parsed.deinit();
+    var tabs: [2]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    cache.selected_shell_id = 0;
+    cache.selected_live_shell_id = 0;
+    cache.selected_starred = false;
+    app_state.g_starred_workspace = false;
+    for ([_]bool{ false, true }) |pending| {
+        cache.pending = pending;
+        try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], cache.selected_shell_id));
+        try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+    }
+    cache.selected_shell_id = 41;
+    try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], cache.selected_shell_id));
+    try std.testing.expect(!savedStarredView(parsed.value, tabs[0..count]));
+    cache.selected_starred = true;
+    try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+    cache.selected_shell_id = 99;
+    cache.selected_starred = false;
+    try std.testing.expectEqual(@as(?u32, 1), selectedSavedTab(parsed.value, tabs[0..count], cache.selected_shell_id));
+    try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+    cache.selected_live_shell_id = 99;
+    try std.testing.expect(!savedStarredView(parsed.value, tabs[0..count]));
+    cache.selected_shell_id = 0;
+    cache.selected_live_shell_id = 0;
+    try std.testing.expect(!savedStarredView(parsed.value, tabs[0..1]));
+    try parsed.value.object.put(parsed.arena.allocator(), "starred_view", .{ .bool = false });
+    cache.selected_shell_id = 42;
+    cache.selected_starred = true;
+    try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+    cache.pending = false;
+    try std.testing.expect(!savedStarredView(parsed.value, tabs[0..count]));
+}
+
 test "ISSUE-569 startup selection save preserves full tabs and newly created sessions" {
     const a = std.testing.allocator;
     const previous = "{\"active_shell_id\":41,\"active_tab\":0,\"single_window\":true,\"workspace_count\":2,\"tabs\":[{\"kind\":\"cmd\",\"name\":\"First\",\"shell_id\":41,\"cwd\":\"saved-directory\"},{\"kind\":\"cmd\",\"name\":\"Middle\",\"shell_id\":42,\"workspace\":1,\"bon\":true},{\"kind\":\"cmd\",\"name\":\"Last\",\"shell_id\":43}]}";
@@ -1929,7 +1998,7 @@ test "ISSUE-569 startup selection save preserves full tabs and newly created ses
     try std.testing.expect(!json_reader.boolTrue(new_parsed.value, "starred_view"));
 }
 
-fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool) !void {
+fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool, startup_user_selection: bool) !void {
     const saved_shells = app_state.shells[0..2].*;
     const saved_count = app_state.shell_count;
     const saved_active = app_state.active_shell;
@@ -1939,6 +2008,9 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
     const saved_last = app_state.g_starred_last_shell;
     const saved_restoring = app_state.g_restoring;
     const saved_pending = @import("launch_cache.zig").pending;
+    const saved_selected = @import("launch_cache.zig").selected_shell_id;
+    const saved_selected_starred = @import("launch_cache.zig").selected_starred;
+    const saved_live = @import("launch_cache.zig").selected_live_shell_id;
     const saved_snoozed = app_state.g_ws_snoozed;
     const saved_last_shell = app_state.g_ws_last_shell;
     const saved_focus = app_state.g_ws_focus;
@@ -1955,6 +2027,9 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
         app_state.g_starred_last_shell = saved_last;
         app_state.g_restoring = saved_restoring;
         @import("launch_cache.zig").pending = saved_pending;
+        @import("launch_cache.zig").selected_shell_id = saved_selected;
+        @import("launch_cache.zig").selected_starred = saved_selected_starred;
+        @import("launch_cache.zig").selected_live_shell_id = saved_live;
         app_state.g_ws_snoozed = saved_snoozed;
         app_state.g_ws_last_shell = saved_last_shell;
         app_state.g_ws_focus = saved_focus;
@@ -2004,11 +2079,17 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
     const selected = selectedSavedTab(parsed.value, tabs[0..count], 0).?;
     try std.testing.expectEqual(@as(u32, 42), tabs[selected].shell_id);
     try std.testing.expect(tabs[selected].favorite);
+    try std.testing.expectEqual(@as(u64, if (saved_starred) 0 else 1), json_reader.uint(parsed.value, "active_workspace"));
+    try std.testing.expectEqual(@as(u8, 1), tabs[selected].workspace);
     app_state.active_shell = findShellById(tabs[selected].shell_id).?;
     app_state.g_active_workspace = tabs[selected].workspace;
     app_state.shells[app_state.active_shell].favorite = favorite_on_restore;
     app_state.g_starred_workspace = false;
-    restoreStarredView(json_reader.boolTrue(parsed.value, "starred_view"));
+    @import("launch_cache.zig").pending = true;
+    @import("launch_cache.zig").selected_shell_id = if (startup_user_selection) tabs[selected].shell_id else 0;
+    @import("launch_cache.zig").selected_starred = saved_starred;
+    @import("launch_cache.zig").selected_live_shell_id = 0;
+    restoreStarredView(savedStarredView(parsed.value, tabs[0..count]));
     try std.testing.expectEqual(saved_starred and favorite_on_restore, app_state.g_starred_workspace);
     try std.testing.expectEqual(@as(u32, 42), app_state.shells[app_state.active_shell].shell_id);
     try std.testing.expectEqual(@as(u8, 1), app_state.g_active_workspace);
@@ -2019,16 +2100,20 @@ fn testStarredSelectionRoundTrip(saved_starred: bool, favorite_on_restore: bool)
     try std.testing.expectEqual(@as(u32, 42), app_state.shells[app_state.active_shell].shell_id);
 }
 
+test "ISSUE-569 Starred saved with the favorite in a non-active workspace restores Starred" {
+    try testStarredSelectionRoundTrip(true, true, true);
+}
+
 test "ISSUE-569 saved Starred view restores the same favorite session" {
-    try testStarredSelectionRoundTrip(true, true);
+    try testStarredSelectionRoundTrip(true, true, false);
 }
 
 test "ISSUE-569 same favorite saved at home restores home instead of Starred" {
-    try testStarredSelectionRoundTrip(false, true);
+    try testStarredSelectionRoundTrip(false, true, false);
 }
 
 test "ISSUE-569 saved Starred view falls back home when session is unfavorited" {
-    try testStarredSelectionRoundTrip(true, false);
+    try testStarredSelectionRoundTrip(true, false, false);
 }
 
 test "ISSUE-569 filtered save records stable selection and filtered index" {
