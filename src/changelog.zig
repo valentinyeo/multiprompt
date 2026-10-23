@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.834", .items = &.{
+        .{ .text = "Chat View no longer opens empty right after an agent reads a large screenshot.", .ticket = "IGSH-631" },
+    } },
     .{ .ver = "0.28.833", .items = &.{
         .{ .text = "Sessions that could not reconnect at startup now keep their Chat View and browser settings.", .ticket = "IGSH-611" },
     } },
