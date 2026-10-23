@@ -1289,12 +1289,47 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         zsbSendError(client, "multiprompt-browser: no verb\n");
         return;
     }
+    argc = zsbStripAgentActivation(argv[0..], argc);
+    const remote_verbs = [_][]const u8{
+        "activate",         "active-tab",     "back",          "browser-drop-gesture",
+        "cdp",              "click",          "close-tab",     "console",
+        "cursor",           "doctor",         "emulate",       "eval",
+        "extension-reload", "find",           "forward",       "frames",
+        "get-text",         "insert",         "key",           "links",
+        "navigate",         "open",           "pane-info",     "reload",
+        "reset",            "resolve-window", "routing-audit", "screenshot",
+        "script",           "session-open",   "shoturl",       "sidebar",
+        "snapshot",         "status",         "tab",           "tabs",
+        "text",             "type",           "url",           "version",
+        "workspace-list",
+    };
+    var remote_allowed = false;
+    for (remote_verbs) |remote_verb| {
+        if (std.mem.eql(u8, argv[0], remote_verb)) {
+            remote_allowed = true;
+            break;
+        }
+    }
+    if (!remote_allowed or std.mem.startsWith(u8, argv[0], "-")) {
+        zsbSendJsonError(client, "bad_args", "command requires the local CLI", session, null);
+        return;
+    }
+    for (argv[0..argc]) |arg| {
+        if (std.mem.indexOfScalar(u8, arg, 0) != null or
+            (std.mem.eql(u8, argv[0], "cdp") and
+                (std.mem.eql(u8, arg, "--script") or std.mem.eql(u8, arg, "--out"))) or
+            (std.mem.eql(u8, argv[0], "screenshot") and
+                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output=")))) {
+            zsbSendJsonError(client, "bad_args", "command requires the local CLI", session, null);
+            return;
+        }
+    }
+
     if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open")) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
     zsbTouchSession(session);
-    argc = zsbStripAgentActivation(argv[0..], argc);
 
     if (std.mem.eql(u8, argv[0], "pane-info")) {
         if (argc != 1) {
