@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { readChangelogEntry } = require('./changelog-entry');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -236,7 +237,7 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-focus.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('WM_GETTEXTLENGTH/WM_GETTEXT'));
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
-  const changelog = read('changelog.d/IGSH-716-alt-q-focus.md').trim();
+  const changelog = readChangelogEntry('IGSH-716').trim();
   assert.equal(changelog.split('\n').length, 1);
   assert.match(changelog, /Alt\+Q.*Find.*no browser pane/);
   assert.doesNotMatch(changelog, /\.zig|WM_APP|ISSUE-|JSON/);
