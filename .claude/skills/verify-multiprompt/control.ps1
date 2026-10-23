@@ -1102,14 +1102,23 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
         $trace = (Get-Content $log -Raw).Substring($logStart)
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
             $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
-            $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
-    } "$Stage relaunch owns its published state after session restore" 60
+            $trace -match 'launch step=browser'
+    } "$Stage relaunch publishes its owned window and restored shells before activation" 60
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
     Wait-Until {
         [VerifyNative]::BringToForeground($script:window)
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
     } "$Stage relaunched window foreground before input"
+    Wait-Until {
+        $process.Refresh()
+        $script:window = $process.MainWindowHandle
+        $state = Read-Inbox
+        $trace = (Get-Content $log -Raw).Substring($logStart)
+        $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
+            $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
+            $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
+    } "$Stage relaunch owns its published state after session restore" 60
     Doctor
 }
 
