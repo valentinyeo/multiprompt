@@ -1858,6 +1858,18 @@ test "browserZsbQuietWindowMin floors the zsb quiet window at 10 minutes" {
 }
 
 pub fn browserHibernationTick() void {
+    if (verboseLoggingEnabled()) {
+        for (0..app_state.shell_count) |i| {
+            if (!app_state.shells[i].browser_enabled) continue;
+            var buf: [256]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&buf, "browser-freeze-state: now={d} active={d} swap={d} shell={d} window={d} frozen={} parked={d} activity={s} last_event={d} busy={}", .{
+                GetTickCount64(), app_state.active_shell, app_state.g_chat_browser_swap.shell_id,
+                app_state.shells[i].shell_id, app_state.shells[i].browser_window_id, app_state.shells[i].browser_frozen,
+                app_state.shells[i].browser_parked_since, @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
+                browserPaneSessionBusy(i, if (browserPowerSaving()) BROWSER_FREEZE_PARK_MS_SAVING else BROWSER_FREEZE_PARK_MS_AC),
+            }) catch "browser-freeze-state: unavailable");
+        }
+    }
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_app_closing or app_state.shell_count == 0) return;
     const now_tick = GetTickCount64();

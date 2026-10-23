@@ -260,7 +260,7 @@ public static class VerifyNative {
                 }
                 Thread.Sleep(1);
             } while (timer.ElapsedMilliseconds < 20000);
-            throw new TimeoutException("Target session surface and browser paint did not become ready within 20 seconds");
+            throw new TimeoutException("Target session surface and browser paint did not become ready within 20 seconds; visible=" + visible + "; painted=" + painted + "; awake=" + awake + "; foreground=" + GetForegroundWindow());
         }
     }
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
@@ -2446,6 +2446,8 @@ try {
                         }
                     }
                 }
+                Save-Json (Read-Inbox) 'switch-final-inbox.json'
+                Save-Json (Read-Session) 'switch-final-session.json'
                 Save-Json $timings 'switch-timings.json'
                 Save-Json $traces 'switch-traces.json'
                 if ($null -ne $frozenLogStart -and (Test-Path $log)) {
