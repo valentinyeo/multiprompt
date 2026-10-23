@@ -1639,12 +1639,12 @@ function Wait-ChatFocus([string]$Class, [string]$Step) {
 function Assert-ChatTyping([string]$Text, [string]$Step) {
     Wait-ChatFocus 'Edit' ($Step + '-focused')
     $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
-    $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    if ($value.Current.Value -cne '') { throw 'Expected an empty composer before typing proof' }
+    $textPattern = $composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+    if ($textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n") -cne '') { throw 'Expected an empty composer before typing proof' }
     Type-Text $Text
-    Wait-Until { $value.Current.Value -ceq $Text } ("UIA ValuePattern typing landed: $Step")
+    Wait-Until { $textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n") -ceq $Text } ("UIA TextPattern typing landed: $Step")
     Wait-ChatFocus 'Edit' $Step
-    Save-Json @{ text = $value.Current.Value; handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.value.json')
+    Save-Json @{ textPattern = $textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n"); handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')
 }
 
 try {

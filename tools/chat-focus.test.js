@@ -124,7 +124,28 @@ function journeyContract(source) {
   assert.doesNotMatch(source, /PostMessage|SendMessage|Set-Content|WriteAll|Copy-Item|SetEnvironmentVariable|Start-Sleep|Thread.Sleep|\.SetFocus\(|\.SetValue\(/);
 }
 
-test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal restart and independent focused-element/value proof', () => {
+function typingContract(source) {
+  const readText = '$textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n")';
+  const steps = [
+    "Wait-ChatFocus 'Edit' ($Step + '-focused')",
+    '$composer = [System.Windows.Automation.AutomationElement]::FocusedElement',
+    '$textPattern = $composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)',
+    `if (${readText} -cne '') { throw 'Expected an empty composer before typing proof' }`,
+    'Type-Text $Text',
+    `Wait-Until { ${readText} -ceq $Text } ("UIA TextPattern typing landed: $Step")`,
+    "Wait-ChatFocus 'Edit' $Step",
+    `Save-Json @{ textPattern = ${readText}; handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')`,
+  ];
+  let from = 0;
+  for (const step of steps) {
+    const at = source.indexOf(step, from);
+    assert.ok(at >= from, `missing or misordered ${step}`);
+    from = at + step.length;
+  }
+  assert.doesNotMatch(source, /ValuePattern|\.Current\.Value|\.value\.json/);
+}
+
+test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal restart and independent focused-element/TextPattern proof', () => {
   journeyContract(recipe);
   for (const step of ['Restart-ChatView 1', "Wait-ChatFocus 'ZigShellChatTranscript' 'find-open'", "Assert-ChatTyping 'abc' 'restart-typing'", 'GetAncestor($handle, 2) -ne $script:window', 'Doctor\n            Assert-Foreground']) {
     assert.throws(() => journeyContract(recipe.replace(step, '')));
@@ -133,7 +154,18 @@ test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal
   for (const required of ['Doctor', '$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$job.Stop()', '$stopped.ActiveProcesses -ne 0', '$script:process = $job.Start($Exe, $scratch,', '@($state.shells).Count -eq $ShellCount', '[VerifyNative]::BringToForeground($script:window)']) assert.ok(restart.includes(required), required);
   assert.match(driver, /'chat-view-everywhere' \{[\s\S]*?Restart-ChatView 3/);
   const waits = driver.slice(driver.indexOf('function Wait-ChatFocus('), driver.indexOf('\ntry {\n', driver.indexOf('function Wait-ChatFocus(')));
-  for (const required of ['::FocusedElement', '$focused.Current.ProcessId -eq $process.Id', '$focused.Current.ClassName -ceq $Class', 'GetAncestor([IntPtr]$focused.Current.NativeWindowHandle, 2) -eq $script:window', 'Snapshot $Step', "Wait-ChatFocus 'Edit' ($Step + '-focused')", 'GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)', "$value.Current.Value -cne ''", 'Type-Text $Text', '$value.Current.Value -ceq $Text', "'.value.json'"]) assert.ok(waits.includes(required), required);
+  for (const required of ['::FocusedElement', '$focused.Current.ProcessId -eq $process.Id', '$focused.Current.ClassName -ceq $Class', 'GetAncestor([IntPtr]$focused.Current.NativeWindowHandle, 2) -eq $script:window', 'Snapshot $Step']) assert.ok(waits.includes(required), required);
+  const typing = waits.slice(waits.indexOf('function Assert-ChatTyping('));
+  typingContract(typing);
+  for (const [before, after] of [
+    ['TextPattern]::Pattern', 'ValuePattern]::Pattern'],
+    ['.TrimEnd([char[]]"`r`n")', '.Trim()'],
+    ["-cne ''", "-cne 'abc'"],
+    ['-ceq $Text', '-eq $Text'],
+    ["Wait-ChatFocus 'Edit' $Step", ''],
+    ['textPattern =', 'valuePattern ='],
+    ["'.text.json'", "'.value.json'"],
+  ]) assert.throws(() => typingContract(typing.replace(before, after)));
   const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Click-WorkspacePill('));
   assert.match(press, /function Press\([^\n]*\) \{\s*Doctor/);
   assert.match(press, /function Type-Text\([^\n]*\) \{\s*Doctor/);
@@ -150,7 +182,7 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus.test.js/);
   const map = read(skill + 'features/chat-focus.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
-  for (const required of ['v0.28.848', 'ValuePattern', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
+  for (const required of ['v0.28.848', 'TextPattern.DocumentRange.GetText(-1)', 'trimming only trailing CR/LF', 'textPattern JSON key', 'restart-typing.text.json', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
   assert.ok(read(skill + 'features/README.md').includes('](chat-focus.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-focus.md)'));
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
