@@ -93,6 +93,17 @@ class ChatSyncAuditTest(unittest.TestCase):
                          ['The neutral summary is ready', 'This neutral paragraph follows a blank line',
                           'This neutral paragraph has continuation text'])
 
+    def test_igsh620_wrapped_running_tool_status_is_not_a_chat_turn(self):
+        capture = ['● Filed IGSH-619 for flaky contract tests; waiting on release run ·',
+                   '  5m 12s…',
+                   '● Waiting up to 9 minutes for verify run · 59s',
+                   '● This real assistant reply ends with a middle dot ·',
+                   '  and keeps going on the next line.'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['text'] for item in candidates],
+                         ['This real assistant reply ends with a middle dot ·'])
+        self.assertEqual([item['pane_line'] for item in candidates], [4])
+
     def test_igsh380_build_progress_banner_is_not_a_chat_turn(self):
         capture = ['● Build in progress (~7 min); preparing preview images',
                    '● Build in progress: the compiler found a real error',

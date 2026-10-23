@@ -9,6 +9,7 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 - `task-notification`: helper notifications in queue records are not reported as missing conversation.
 - `real-message`: actual assistant messages remain auditable, even with the same wording as a notification.
 - `running-tool`: running-tool rows are not mistaken for conversation.
+- `wrapped-tool-status` (IGSH-620): elapsed-time status lines are excluded even when hard-wrapped; real replies ending in a middle dot remain auditable.
 - `system-notice`: transcript system notices explain terminal-only text rather than missing messages.
 - `unsettled-line`: recheck unmatched lines after a short settling wait before reporting them.
 - `background-task-status`: Claude background-command, idle-compaction, monitor and still-running status lines are excluded.
