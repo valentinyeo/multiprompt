@@ -1047,12 +1047,30 @@ class HistoryReaderTest(unittest.TestCase):
         size = self.path.stat().st_size
         wire = reader.response(dict(self.query))
         fields = wire.splitlines()[0].split('\t')
-        self.assertGreaterEqual(int(fields[5]), size - reader.TAIL_BYTES)
+        costs = [len(row.encode('utf-8')) + 1 for row in wire.splitlines()[1:-1]]
+        self.assertLessEqual(sum(costs), reader.TAIL_BYTES + max(costs))
+        self.assertIn('t' * 4000, wire)
         self.assertNotIn('QUESTION-358', wire)
         self.assertIn('ANSWER-358', wire)
         with patch.object(reader, 'ISSUE_358_TAIL_STARTS_AT_QUESTION', False):
             self.write(question, hidden, self.event('ANSWER-358'))
             self.assertNotIn('QUESTION-358', reader.response(dict(self.query)))
+
+    def test_igsh631_first_page_keeps_replies_before_a_record_bigger_than_the_tail(self):
+        question = dict(type='user', message=dict(role='user', content='QUESTION-631 far back'))
+        talk = [self.event('t' * 4000) for _ in range(reader.TAIL_BYTES // 4000 + 10)]
+        hidden = self.tool_result('s' * (reader.TAIL_BYTES + 800000))
+        for after in ((), (self.event('AFTER-631'),)):
+            with self.subTest(after=bool(after)):
+                self.write(question, *talk, self.event('REPLY-631-a'), self.event('REPLY-631-b'), hidden, *after)
+                wire = reader.response(dict(self.query))
+                self.assertIn('REPLY-631-b', wire)
+                self.assertIn('REPLY-631-a', wire)
+                self.assertEqual(wire.splitlines()[0].split('\t')[13], 'tail')
+                costs = [len(row.encode('utf-8')) + 1 for row in wire.splitlines()[1:-1]]
+                self.assertLessEqual(sum(costs), reader.TAIL_BYTES + max(costs))
+                with patch.object(reader, 'ISSUE_631_TAIL_FILLS_SHOWN_BUDGET', False):
+                    self.assertNotIn('REPLY-631-b', reader.response(dict(self.query)))
 
     def test_shrunken_source_during_scroll_resets_to_tail_instead_of_retrying_stale_page_forever(self):
         self.write(self.event('x' * (reader.TAIL_BYTES + 100)), self.event('old latest'))
