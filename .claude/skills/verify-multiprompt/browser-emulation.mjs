@@ -185,6 +185,42 @@ try {
   result.checks.push('resize-sensitive mobile menu survives click screenshot and console', 'iphone viewport/UA/client hints/touch', 'ordinary CDP screenshot retains emulation', 'real link navigation and request UA', 'reload persistence', 'pixel preset', 'custom mobile and desktop sizes', 'off restores desktop through reload', 'local native help');
   result.browser = await cdp('Browser.getVersion');
   result.extensionId = extensionId;
+  const paneWindows = [];
+  const nonce = Date.now();
+  for (const shellId of [1, 2, 3]) {
+    const match = `ZSPANE${shellId}-${nonce}`;
+    const beaconUrl = `data:text/html,<title>${match}</title><style>body{background:%23000;margin:0}</style>`;
+    const created = JSON.parse(await cli(['create-pane-window', beaconUrl], false));
+    assert.equal(created.ok, true);
+    paneWindows.push({ shellId, match, windowId: created.result.windowId, url: `${url}igsh-613/session-${shellId}` });
+  }
+  assert.equal(new Set(paneWindows.map(pane => pane.windowId)).size, paneWindows.length);
+  for (const pane of paneWindows) {
+    const resolved = JSON.parse(await cli(['resolve-window', '--shell-id', String(pane.shellId), '--match', pane.match], false));
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.result.windowId, pane.windowId, 'exact nonce resolves the correct session window');
+    const navigated = JSON.parse(await cli(['--window', String(pane.windowId), 'navigate', pane.url], false));
+    assert.equal(navigated.ok, true);
+    assert.equal(navigated.result.tab.windowId, pane.windowId);
+  }
+  const paneTabs = [];
+  for (const pane of paneWindows) {
+    const listed = JSON.parse(await cli(['--window', String(pane.windowId), 'tabs'], false));
+    assert.equal(listed.ok, true);
+    paneTabs.push({ ...pane, tabs: listed.result.tabs });
+  }
+  await fs.writeFile(path.join(evidence, 'igsh-613-tabs.json'), JSON.stringify(paneTabs, null, 2));
+  for (const pane of paneTabs) {
+    assert.equal(pane.tabs.length, 1, 'pane launch tag is reused, not retained beside the page');
+    for (const tab of pane.tabs) {
+      assert.doesNotMatch(tab.url, /ZSPANE/);
+      assert.ok(!tab.url.startsWith('data:text/html'));
+      assert.equal(tab.windowId, pane.windowId);
+      assert.equal(tab.url, pane.url, 'each session keeps its own synthetic page');
+    }
+  }
+  result.checks.push('IGSH-613 three native pane launches resolve to their own single page without tag tabs');
+  result.blankPaneCheck = 'Skipped: resolve-window only resolves identity; no CLI path invokes the app post-bind blank-pane handler without navigate.';
   result.status = 'passed';
 } catch (error) {
   result.error = error.stack;

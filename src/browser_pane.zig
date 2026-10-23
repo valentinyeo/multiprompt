@@ -2120,7 +2120,9 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         @memcpy(url_buf[0..len], app_state.shells[idx].browser_pending_url[0..len]);
         const activate = app_state.g_browser_pending_activate_sid == shell_id;
         app_state.g_browser_pending_activate_sid = 0;
-        if (!std.mem.eql(u8, url_buf[0..len], "about:blank")) navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
+        navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
+    } else {
+        navigateBrowserPaneWithActivation(idx, "about:blank", false);
     }
     if (idx == app_state.active_shell) {
         repositionActive();

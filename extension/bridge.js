@@ -115,11 +115,13 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onStartup.addListener(() => {
   connect();
   if (!isEdgeBrowser()) reloadCurrentBrowserTheme().catch(() => {});
+  return cleanupPaneBeaconTabs().catch(() => {});
 });
 chrome.runtime.onInstalled.addListener(() => {
   connect();
   if (!isEdgeBrowser()) reloadCurrentBrowserTheme().catch(() => {});
   installContextMenus();
+  return cleanupPaneBeaconTabs().catch(() => {});
 });
 chrome.debugger.onDetach.addListener((source) => {
   if (!Number.isInteger(source.tabId)) return;
@@ -1474,6 +1476,12 @@ async function navigate(message) {
   if (wid == null) throw new Error("no multiprompt browser window bound for this session — open a pane (multiprompt-browser open / Alt+A) first; refusing to open a link in another window");
   const [activePaneTab] = await chrome.tabs.query({ active: true, windowId: wid }).catch(() => []);
   const activate = message?.activate === true;
+  const beacon = (await chrome.tabs.query({ windowId: wid })).find(isPaneBeaconTab);
+  if (beacon) {
+    const tab = await chrome.tabs.update(beacon.id, { url, active: beacon.active || activate });
+    rememberZsbTargetTab(wid, tab?.id);
+    return { tab: compactTab(tab) };
+  }
   if (!activate && message?.newTab !== true) {
     const target = await getRememberedZsbTargetTab(wid);
     const provenance = target && agentNavigateTabs.get(target.id);
@@ -1600,6 +1608,14 @@ const PANE_BEACON_URL_PREFIX = "data:text/html,<title>ZSPANE";
 
 function isPaneBeaconTab(tab) {
   return typeof tab?.url === "string" && tab.url.startsWith(PANE_BEACON_URL_PREFIX);
+}
+
+async function cleanupPaneBeaconTabs() {
+  const tabs = await chrome.tabs.query({});
+  const contentWindows = new Set(tabs.filter((tab) => !isPaneBeaconTab(tab)).map((tab) => tab.windowId));
+  for (const tab of tabs) {
+    if (isPaneBeaconTab(tab) && contentWindows.has(tab.windowId)) await chrome.tabs.remove(tab.id);
+  }
 }
 
 function isExtensionTab(tab) {
