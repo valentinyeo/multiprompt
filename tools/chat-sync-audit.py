@@ -23,6 +23,12 @@ def run(argv, **kwargs):
     return subprocess.run(argv, capture_output=True, text=True, timeout=60, check=True, **kwargs).stdout
 
 
+def chat_agent(argv):
+    if argv and Path(argv[0]).name in ('node', 'bun'):
+        argv = argv[1:]
+    return not (argv and Path(argv[0]).name in ('codex', 'codex.js') and argv[1:2] == ['cloud'])
+
+
 def normalize(text):
     text = text.translate(str.maketrans('‘’“”', '\'\'""'))
     text = re.sub(r'</?pasted_content\b[^>]*>', ' ', text, flags=re.I)
@@ -240,6 +246,8 @@ def main():
             for agent in ('claude', 'codex'):
                 agent_pid = reader.agent_pid_for_panes([int(pid)], table, agent)
                 if agent_pid is None:
+                    continue
+                if not chat_agent(table.get(agent_pid, (0, []))[1]):
                     continue
                 checked += 1
                 try:
