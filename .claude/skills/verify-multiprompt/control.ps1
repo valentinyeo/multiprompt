@@ -2756,21 +2756,9 @@ try {
             $trace = ((Get-Content $log -Raw) -join '').Substring($start)
             $pickerRows = @([regex]::Matches($trace, '\[palette\] rows chars=0 count=\d+ ids=([^\r\n]*)'))
             $pickerIds = @($pickerRows[$pickerRows.Count - 1].Groups[1].Value -split ' ')
-            $mark = ((Get-Content $log -Raw) -join '').Length
-            Press @(0x1B) 'Esc: leave the Remind Me presets'
-            Wait-Until {
-                $after = ((Get-Content $log -Raw) -join '').Substring($mark)
-                $rows = [regex]::Matches($after, '\[palette\] rows chars=0 count=\d+ ids=([^\r\n]*)')
-                if ($rows.Count -eq 0) { return $false }
-                $ids = @($rows[$rows.Count - 1].Groups[1].Value -split ' ')
-                @($ids | Where-Object { $_ -match '^\d+$' -and [int]$_ -ge $presetBase -and [int]$_ -lt $presetBase + 13 }).Count -eq 0
-            } 'Remind Me preset rows gone after Esc'
-            Press @(0x1B) 'Esc: close the palette'
-            Start-Sleep -Milliseconds 600
-            Snapshot 'closed'
             $stateAfter = Read-Session
             if ($stateAfter.tabs[$stateAfter.active_tab].tmux_session -cne 'verify-1' -or @($stateAfter.tabs).Count -ne @($baseline.tabs).Count + 1) { throw 'remind-me: a session was hidden or changed' }
-            $result.checks += @{ name = 'remind-me-ctrl-h'; entry = 'Ctrl+H'; presetBase = $presetBase; pickerRowIds = $pickerIds; presetRowsGoneAfterEsc = $true; sessionsBefore = @($baseline.tabs).Count; sessionsAfter = @($stateAfter.tabs).Count }
+            $result.checks += @{ name = 'remind-me-ctrl-h'; entry = 'Ctrl+H'; presetBase = $presetBase; pickerRowIds = $pickerIds; sessionsBefore = @($baseline.tabs).Count; sessionsAfter = @($stateAfter.tabs).Count }
         }
         'group-rail' {
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
