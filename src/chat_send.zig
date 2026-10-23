@@ -2302,7 +2302,10 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    if (@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 4096, &wire, &job.written)) job.rejected = chatTmuxSendRejected(wire.items);
+    if (@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 4096, &wire, &job.written)) {
+        job.rejected = chatTmuxSendRejected(wire.items);
+        job.box_not_clear = std.mem.indexOf(u8, wire.items, "\tsend\terror\tbox_not_clear\t") != null;
+    }
 }
 
 fn chatTmuxSendRejected(wire: []const u8) bool {
@@ -2333,8 +2336,14 @@ fn chatTmuxSendFinish() void {
         entry.channel_sent_ms = @intCast(GetTickCount64());
         if (job.retry) entry.channel_retries += 1;
         if (entry.state != .not_sent) entry.state = .delivered;
+        if (job.box_not_clear) {
+            entry.channel_sent = false;
+            entry.state = .not_sent;
+            entry.write_started = false;
+            entry.retryable = true;
+        }
     }
-    if ((!job.written or job.rejected) and !job.retry and (ei == null or app_state.g_chat_outbox.items[ei.?].state != .not_sent)) {
+    if (!job.box_not_clear and (!job.written or job.rejected) and !job.retry and (ei == null or app_state.g_chat_outbox.items[ei.?].state != .not_sent)) {
         const result = chatSendViaConsole(idx, job.text, job.echo_id);
         if (ei) |i| {
             app_state.g_chat_outbox.items[i].state = if (result != .ok) .not_sent else if (chatShouldUseDirectInput(idx)) .sending else .delivered;

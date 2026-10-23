@@ -25,8 +25,58 @@ def record(file, **values):
         output.write(data)
 
 
-def screen(value):
-    return "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n\u276f " + (value["suggestion"] if value["mode"] == "idle" else "") + "\n" + "\u2500" * 50 + "\n"
+BOX_WIDTH = 30
+
+
+def box_rows(buffer):
+    rows = []
+    for line in buffer.split("\n"):
+        rows.extend([line[i:i + BOX_WIDTH] for i in range(0, len(line), BOX_WIDTH)] or [""])
+    return rows
+
+
+def stateful(value):
+    return "leftover" in value or value["mode"] == "idle"
+
+
+def box_buffer():
+    file = ROOT / "box.json"
+    if file.exists():
+        return json.loads(file.read_text(encoding="utf-8"))["buffer"]
+    value = state()
+    return value["leftover"] + "\n" if "leftover" in value else ""
+
+
+def ctrl_u(buffer):
+    if not buffer or buffer.endswith("\n"):
+        return buffer[:-1]
+    start = buffer.rfind("\n") + 1
+    rel = len(buffer) - start
+    row = rel // BOX_WIDTH - (1 if rel % BOX_WIDTH == 0 else 0)
+    return buffer[:start + row * BOX_WIDTH]
+
+
+def ctrl_k(buffer, cursor):
+    if cursor >= len(buffer):
+        return buffer
+    if buffer[cursor] == "\n":
+        return buffer[:cursor] + buffer[cursor + 1:]
+    start = buffer.rfind("\n", 0, cursor) + 1
+    stop = start + ((cursor - start) // BOX_WIDTH + 1) * BOX_WIDTH
+    newline = buffer.find("\n", cursor)
+    if newline != -1:
+        stop = min(stop, newline)
+    return buffer[:cursor] + buffer[stop:]
+
+
+def screen(value, buffer=None):
+    head = "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n"
+    if stateful(value):
+        if buffer is None:
+            buffer = value["leftover"] + "\n" if "leftover" in value else ""
+        rows = box_rows(buffer) if buffer else [value["suggestion"] if value["mode"] == "idle" else ""]
+        return head + "\u276f " + rows[0] + "\n" + "".join("  " + row + "\n" for row in rows[1:]) + "\u2500" * 50 + "\n"
+    return head + "\u276f " + (value["suggestion"] if value["mode"] == "idle" else "") + "\n" + "\u2500" * 50 + "\n"
 
 
 class COORD(ctypes.Structure):
@@ -63,7 +113,8 @@ def attach(session):
             raise ctypes.WinError(ctypes.get_last_error())
         geometry = (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
         if (value, geometry) != previous:
-            top = max(0, info.window.Bottom - 6)
+            lines = len(screen(value).splitlines())
+            top = max(0, info.window.Bottom - lines)
             size = info.size.X * info.size.Y
             if not kernel.FillConsoleOutputCharacterW(handle, " ", size, COORD(0, 0), ctypes.byref(count)):
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -77,10 +128,10 @@ def attach(session):
                 if not kernel.FillConsoleOutputAttribute(handle, 8, len(value["suggestion"]), COORD(2, top + 4), ctypes.byref(count)):
                     raise ctypes.WinError(ctypes.get_last_error())
             kernel.SetConsoleCursorPosition(handle, COORD(2, top + 4))
-            raw = ctypes.create_unicode_buffer(info.size.X * 6)
+            raw = ctypes.create_unicode_buffer(info.size.X * lines)
             if not kernel.ReadConsoleOutputCharacterW(handle, raw, len(raw), COORD(0, top), ctypes.byref(count)):
                 raise ctypes.WinError(ctypes.get_last_error())
-            rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(6)]
+            rows = [raw[i * info.size.X:(i + 1) * info.size.X].rstrip() for i in range(lines)]
             if rows != [line.rstrip() for line in screen(value).splitlines()]:
                 raise RuntimeError("Console screen readback mismatch")
             attribute = wintypes.WORD()
@@ -94,13 +145,39 @@ def attach(session):
         time.sleep(0.1)
 
 
+def box_send():
+    buffer = box_buffer()
+    submitted = None
+    sent = ARGS[3:]
+    if sent[:1] == ["-l"]:
+        buffer += sent[sent.index("--") + 1] if "--" in sent else ""
+    else:
+        for name in sent:
+            if name == "C-u":
+                buffer = ctrl_u(buffer)
+            elif name == "C-k":
+                buffer = ctrl_k(buffer, len(buffer))
+            elif name == "Enter":
+                submitted = buffer if buffer.strip() else None
+                buffer = ""
+            else:
+                record("unsupported.jsonl", operation="box key", argv=ARGS)
+                return 95
+    (ROOT / "box.json").write_text(json.dumps(dict(buffer=buffer)), encoding="utf-8")
+    record("agent-buffer.jsonl", argv=ARGS, submitted=submitted, box=buffer)
+    return 0
+
+
 def tmux():
     if ARGS[:1] == ["capture-pane"]:
-        shown = screen(state())
+        value = state()
+        shown = screen(value, box_buffer() if stateful(value) else None)
         record("capture.jsonl", argv=ARGS, screen=shown)
         sys.stdout.write(shown)
         return 0
     if ARGS[:1] == ["send-keys"]:
+        if stateful(state()):
+            return box_send()
         record("agent-buffer.jsonl", argv=ARGS)
         return 0
     if ARGS[:1] == ["list-panes"]:
