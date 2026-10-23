@@ -221,9 +221,10 @@ fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
     const action_tick = if (app_state.g_focus_user_action_tick >= app_state.g_focus_input_tick) app_state.g_focus_user_action_tick else 0;
     const user_action = action_tick != 0 and now -| action_tick <= 1500;
     const pane_authorized = app_state.active_shell < app_state.shell_count and app_state.g_focus_browser_shell_id == app_state.shells[app_state.active_shell].shell_id and
-        target != null and target == app_state.shells[app_state.active_shell].browser_hwnd and now <= app_state.g_focus_authorized_until;
-    const authorized = now <= app_state.g_focus_authorized_until and (target == app_state.g_focus_authorized_hwnd or pane_authorized or
-        (target == app_state.g_main_hwnd and app_state.g_focus_authorized_hwnd != null and IsChild(app_state.g_main_hwnd, app_state.g_focus_authorized_hwnd) != 0));
+        target != null and target == app_state.shells[app_state.active_shell].browser_hwnd and
+        (now <= app_state.g_focus_authorized_until or app_state.g_native_browser_focus_pending_shell_id == app_state.shells[app_state.active_shell].shell_id);
+    const authorized = pane_authorized or (now <= app_state.g_focus_authorized_until and (target == app_state.g_focus_authorized_hwnd or
+        (target == app_state.g_main_hwnd and app_state.g_focus_authorized_hwnd != null and IsChild(app_state.g_main_hwnd, app_state.g_focus_authorized_hwnd) != 0)));
     const same_surface = target != null and (target == app_state.g_focus_return_hwnd or
         (raise_container and target == app_state.g_main_hwnd and app_state.g_focus_return_hwnd != null and !focusGuardConsole(app_state.g_focus_return_hwnd) and IsChild(app_state.g_main_hwnd, app_state.g_focus_return_hwnd) != 0));
     if (target != null and focusGuardPolicy(now, action_tick, same_surface, authorized, foregroundIsOurs())) {
@@ -260,7 +261,8 @@ fn focusGuardLanded(hwnd: HANDLE) void {
     const now = GetTickCount64();
     const requested_pane = app_state.active_shell < app_state.shell_count and app_state.g_focus_browser_shell_id == app_state.shells[app_state.active_shell].shell_id and hwnd == app_state.shells[app_state.active_shell].browser_hwnd;
     if (hwnd == app_state.g_focus_paste_target or (app_state.g_focus_user_action_tick != 0 and now -| app_state.g_focus_user_action_tick <= 1500) or
-        (now <= app_state.g_focus_authorized_until and (hwnd == app_state.g_focus_authorized_hwnd or requested_pane)))
+        (now <= app_state.g_focus_authorized_until and (hwnd == app_state.g_focus_authorized_hwnd or requested_pane)) or
+        (requested_pane and app_state.g_native_browser_focus_pending_shell_id == app_state.shells[app_state.active_shell].shell_id))
     {
         if (app_state.g_focus_return_hwnd != hwnd) app_state.g_focus_typing_tick = 0;
         app_state.g_focus_return_hwnd = focusGuardSurface(hwnd);
@@ -919,6 +921,18 @@ pub fn activeShellHasForegroundFocus() bool {
     return if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == target;
 }
 
+pub fn browserPageFocusCommand(pane_foreground: bool, alt_down: bool) ?WPARAM {
+    const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;
+    return if (pane_foreground and !alt_down) IDC_FOCUS_WEB_CONTENTS_PANE else null;
+}
+
+test "IGSH-724 browser handoff focuses web contents instead of restoring toolbar focus" {
+    try std.testing.expectEqual(@as(?WPARAM, 39009), browserPageFocusCommand(true, false));
+    try std.testing.expectEqual(@as(?WPARAM, null), browserPageFocusCommand(false, false));
+    try std.testing.expectEqual(@as(?WPARAM, null), browserPageFocusCommand(true, true));
+    try std.testing.expectEqual(@as(?WPARAM, null), browserPageFocusCommand(false, true));
+}
+
 pub fn focusActiveBrowserPane() void {
     const bh = activeBrowserHwndLive() orelse return;
     if (!focusGuard(bh)) return;
@@ -941,6 +955,9 @@ pub fn focusActiveBrowserPane() void {
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
     keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+    if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {
+        _ = PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0);
+    }
     armBrowserEdgeMaskRaise();
     altqLog("pane_hop result bh_fg={} fg={X} main_fg={} pane={X} chat={} handoff_left={}", .{ activeBrowserHasForegroundFocus(), altqPtr(GetForegroundWindow()), app_state.g_main_hwnd != null and GetForegroundWindow() == app_state.g_main_hwnd, altqPtr(bh), app_state.g_chat_active, app_state.g_chat_browser_handoff_until -| GetTickCount64() });
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -954,14 +971,28 @@ pub fn cancelPendingNativeBrowserFocus() void {
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
 }
 
+pub fn browserFocusRequestMatches(requested_sid: u32, active_sid: u32, foreground_owned: bool) bool {
+    return requested_sid != 0 and requested_sid == active_sid and foreground_owned;
+}
+
+test "IGSH-724 pending page focus survives docking only without intervening input or a session change" {
+    try std.testing.expect(browserFocusRequestMatches(7, 7, true));
+    try std.testing.expect(!browserFocusRequestMatches(0, 7, true));
+    try std.testing.expect(!browserFocusRequestMatches(7, 8, true));
+    try std.testing.expect(!browserFocusRequestMatches(7, 7, false));
+}
+
 pub fn requestNativeBrowserFocus() void {
     focusGuardReadMouse();
-    if (app_state.g_focus_user_action_tick == 0 or app_state.g_focus_user_action_tick < app_state.g_focus_input_tick or GetTickCount64() -| app_state.g_focus_user_action_tick > 1500) {
+    const recorded_request = app_state.active_shell < app_state.shell_count and
+        browserFocusRequestMatches(app_state.g_focus_browser_shell_id, app_state.shells[app_state.active_shell].shell_id, foregroundIsOurs());
+    if (!recorded_request and (app_state.g_focus_user_action_tick == 0 or app_state.g_focus_user_action_tick < app_state.g_focus_input_tick or GetTickCount64() -| app_state.g_focus_user_action_tick > 1500)) {
         debugLog("focus guard: blocked browser focus request without user action");
         return;
     }
     if (app_state.active_shell < app_state.shell_count) {
         app_state.g_focus_browser_shell_id = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_focus_authorized_hwnd = null;
         app_state.g_focus_authorized_until = app_state.g_focus_user_action_tick + 1500;
     }
     altqLog("request_native chat={} chat_owns={} enabled={} pane_fg={} fg={X}", .{ app_state.g_chat_active, chatViewOwnsInput(), app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled, activeBrowserHasForegroundFocus(), altqPtr(GetForegroundWindow()) });

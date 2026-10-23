@@ -3293,7 +3293,7 @@ try {
                                     [VerifyNative]::GetForegroundWindow() -eq $browser
                             } 'verified pane native address bar has keyboard focus'
                             $pageTitle = 'Switch paint ' + $tab
-                            $html = '<title>' + $pageTitle + '</title><style>html,body{margin:0;width:100%;height:100%;background:' + $colors[$tab] + '}</style>'
+                            $html = '<title>' + $pageTitle + '</title><style>html,body{margin:0;width:100%;height:100%;background:' + $colors[$tab] + '}</style><script>let keys=0;addEventListener("keydown",e=>{if([" ","ArrowDown","j","k"].includes(e.key)){e.preventDefault();document.title="' + $pageTitle + ' keys "+(++keys)}})</script>'
                             $pageUrl = 'data:text/html,' + [Uri]::EscapeDataString($html)
                             if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost address-bar focus' }
                             [VerifyNative]::Text($pageUrl)
@@ -3312,6 +3312,32 @@ try {
                                     [VerifyNative]::Title($browser).StartsWith($pageTitle + ' ', [StringComparison]::Ordinal) -and
                                     [VerifyNative]::PagePainted($dock, $rgb[$tab])
                             } 'active pane tab is the color page and target session color visibly painted below the browser toolbar' -Tight
+                            Record 'IGSH-724: leave the omnibox focused before Alt+Q returns to the page'
+                            [VerifyNative]::Chord(@(0x11, 0x4C))
+                            if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'Ctrl+L did not focus the browser address bar' }
+                            [VerifyNative]::Chord(@(0x12, 0x51))
+                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 Alt+Q did not restore the session input' }
+                            [VerifyNative]::Chord(@(0x12, 0x51))
+                            $pageKeys = 0
+                            foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
+                                if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Refusing page key outside the owned browser' }
+                                [VerifyNative]::Chord(@($key))
+                                $pageKeys++
+                                if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 Alt+Q sent a page key to browser chrome' }
+                            }
+                            Record 'IGSH-724: F6 still reaches browser chrome'
+                            [VerifyNative]::Chord(@(0x75))
+                            if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'F6 did not reach the browser address bar' }
+                            [VerifyNative]::Chord(@(0x12, 0x51))
+                            Palette 'open browser'
+                            Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'
+                            if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Opening the pane did not focus its browser' }
+                            [VerifyNative]::Chord(@(0x20))
+                            $pageKeys++
+                            if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }
+                            [VerifyNative]::Chord(@(0x12, 0x51))
+                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 page-to-input return lost session typing focus' }
+                            $result.checks += @{ name = 'IGSH-724 browser-page-focus'; mode = $mode; tab = $tab; pageKeys = $pageKeys; ctrlL = $true; f6 = $true; inputReturn = $true }
                             $browsers[$tab] = $browser
                             $docks[$tab] = $dock
                         }
