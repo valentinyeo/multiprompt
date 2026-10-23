@@ -147,7 +147,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
-    run_exe_tests.has_side_effects = b.graph.env_map.get("MULTIPROMPT_CHAT_RENDER_PROOF") != null;
+    run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
     const main_test_step = b.step("test-main", "Run desktop module tests");
     main_test_step.dependOn(&run_exe_tests.step);
 
