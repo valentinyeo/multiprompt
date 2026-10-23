@@ -81,6 +81,8 @@ const tabRowY = @import("sidebar.zig").tabRowY;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
 const focusGuard = @import("focus.zig").focusGuard;
+const foregroundIsOurs = @import("focus.zig").foregroundIsOurs;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
 const SetFocus = @import("focus.zig").SetFocus;
 const SetWindowPos = @import("focus.zig").SetWindowPos;
@@ -144,6 +146,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
             return 0;
         }
         if (wp == 0x0D) {
+            app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
             commitRename();
             return 0;
         }
@@ -777,4 +780,16 @@ pub fn captureSearchBackdrop() void {
     app_state.g_search_backdrop_bmp = bmp;
     app_state.g_search_backdrop_w = w;
     app_state.g_search_backdrop_h = h;
+}
+
+fn renameCommitActionTick(dispatched_tick: u64, now: u64, foreground_owned: bool) u64 {
+    return if (foreground_owned) now else dispatched_tick;
+}
+
+test "ISSUE-597 rename Enter retains focus authority after injected input" {
+    try std.testing.expectEqual(@as(u64, 5000), renameCommitActionTick(0, 5000, true));
+    try std.testing.expectEqual(@as(u64, 5000), renameCommitActionTick(1000, 5000, true));
+    try std.testing.expectEqual(@as(u64, 5000), renameCommitActionTick(5000, 5000, true));
+    try std.testing.expectEqual(@as(u64, 0), renameCommitActionTick(0, 5000, false));
+    try std.testing.expectEqual(@as(u64, 1000), renameCommitActionTick(1000, 5000, false));
 }

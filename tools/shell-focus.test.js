@@ -356,3 +356,78 @@ test('workspace pill capture rejects the actual 3729aa3 implementation', { skip:
   const baseline = execFileSync('git', ['show', `${process.env.WORKSPACE_FOCUS_BASELINE}:src/focus.zig`], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' });
   assert.throws(() => assertWorkspacePillCapture(baseline), /landing must capture/, 'the old app must fail the same shell/chat landing scenario');
 });
+
+function renameCommitAction(source) {
+  const policy = source.match(/fn renameCommitActionTick\([^]*?\) u64 \{([^]*?)\n\}/)?.[1];
+  if (!policy) return tick => tick;
+  return new Function('dispatched_tick', 'now', 'foreground_owned', policy
+    .replace(/return if \(([^]*?)\) ([^]*?) else ([^]*?);/, 'return ($1) ? $2 : $3;'));
+}
+
+function assertRenameCommitFocus(rename) {
+  const edit = body(rename, 'editSubclassProc', 'startWindowRename');
+  const dispatch = edit.slice(edit.indexOf('    const prior_focus_action ='), edit.indexOf('    if (msg == WM_KILLFOCUS'));
+  const enter = edit.match(/        if \(wp == 0x0D\) \{([^]*?)\n        \}/)?.[1];
+  assert.ok(enter);
+  assert.match(dispatch, /defer app_state\.g_focus_user_action_tick = prior_focus_action;/);
+  const run = new Function('msg', 'wp', 'lp', 'app_state', 'focusGuardDispatchTick', 'renameCommitActionTick', 'GetTickCount64', 'foregroundIsOurs', 'commitRename', `
+    ${dispatch.replace('defer app_state.g_focus_user_action_tick = prior_focus_action;', '')}
+    try { if (msg === 256 && wp === 13) { ${enter} } }
+    finally { app_state.g_focus_user_action_tick = prior_focus_action; }
+  `);
+  const focus = fs.readFileSync(path.resolve(__dirname, '..', 'src/focus.zig'), 'utf8');
+  const guard = focus.match(/fn focusGuardPolicy\([^]*?\) bool \{([^]*?)\n\}/)?.[1];
+  assert.ok(guard);
+  const allows = new Function('now', 'action_tick', 'same_surface', 'authorized', 'foreground_owned', guard.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
+  const commit = body(rename, 'commitRename', 'openTabContextPalette');
+  const tail = commit.slice(commit.lastIndexOf('    app_state.g_shell_focused = true;'), commit.lastIndexOf('}'));
+  const finish = new Function('app_state', 'focusActiveShell', 'activeShellHasForegroundFocus', 'requestShellRefocus', tail);
+  for (const owned of [false, true]) {
+    for (const dispatched of [0, 1000, 5000]) {
+      for (const [msg, wp] of [[256, 13], [256, 27], [8, 13]]) {
+        const state = { g_focus_user_action_tick: 0, g_focus_input_tick: dispatched, g_focus_return_hwnd: 'edit', g_shell_focused: false };
+        let foreground = owned ? 'frame' : 'foreign';
+        let commits = 0;
+        run(msg, wp, 0, state, () => dispatched, renameCommitAction(rename), () => 5000, () => owned, () => {
+          commits++;
+          const action = state.g_focus_user_action_tick >= state.g_focus_input_tick ? state.g_focus_user_action_tick : 0;
+          if (!owned) assert.equal(state.g_focus_user_action_tick, dispatched, 'rename Enter must not authorize foreign foreground');
+          const permitted = () => owned && allows(5000, action, false, false, owned);
+          finish(state, () => { if (permitted()) foreground = 'console'; }, () => foreground === 'console', () => {
+            if (permitted()) foreground = 'console';
+          });
+        });
+        const committed = msg === 256 && wp === 13;
+        assert.equal(commits, committed ? 1 : 0);
+        assert.equal(foreground, committed && owned ? 'console' : owned ? 'frame' : 'foreign', 'rename Enter must authorize the console even without a physical input tick');
+        assert.equal(state.g_focus_user_action_tick, 0, 'rename authority must end with the edit dispatch');
+        assert.equal(state.g_focus_input_tick, dispatched, 'injected Enter must not manufacture physical input history');
+        assert.equal(state.g_focus_return_hwnd, 'edit', 'only an actual focus landing may change the return surface');
+      }
+    }
+  }
+}
+
+test('ISSUE-597 rename Enter transfers dispatch authority to the console without changing physical input history', () => {
+  const rename = fs.readFileSync(path.resolve(__dirname, '..', 'src/rename.zig'), 'utf8');
+  assertRenameCommitFocus(rename);
+  const grant = 'app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());';
+  assert.ok(rename.includes(grant));
+  assert.throws(() => assertRenameCommitFocus(rename.replace(grant, '')), /rename Enter must authorize the console/);
+  assert.throws(() => assertRenameCommitFocus(rename.replace('return if (foreground_owned) now else dispatched_tick;', 'return dispatched_tick;')), /rename Enter must authorize the console/);
+  assert.throws(() => assertRenameCommitFocus(rename.replace('return if (foreground_owned) now else dispatched_tick;', 'return now;')), /rename Enter must not authorize foreign foreground/);
+  const regression = rename.match(/test "ISSUE-597 rename Enter retains focus authority after injected input" \{([^]*?)\n\}/)?.[1];
+  assert.ok(regression);
+  const assertions = [...regression.matchAll(/expectEqual\(@as\(u64, (\d+)\), renameCommitActionTick\((\d+), (\d+), (true|false)\)\)/g)];
+  assert.equal(assertions.length, 5);
+  for (const [, expected, tick, now, owned] of assertions) {
+    assert.equal(renameCommitAction(rename)(Number(tick), Number(now), owned === 'true'), Number(expected));
+  }
+  const oldDecision = rename.replace('return if (foreground_owned) now else dispatched_tick;', 'return dispatched_tick;');
+  assert.notEqual(renameCommitAction(oldDecision)(0, 5000, true), 5000, 'the first Zig assertion rejects the old zero-authority decision');
+});
+
+test('ISSUE-597 console handoff rejects the actual pre-fix edit dispatch', { skip: !process.env.RENAME_FOCUS_BASELINE }, () => {
+  const baseline = execFileSync('git', ['show', `${process.env.RENAME_FOCUS_BASELINE}:src/rename.zig`], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' });
+  assert.throws(() => assertRenameCommitFocus(baseline), /rename Enter must authorize the console/);
+});
