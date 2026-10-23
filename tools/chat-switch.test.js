@@ -20,7 +20,7 @@ function paintFirst(text) {
   const paint = body('chatTranscriptWndProc', text);
   assert.match(paint, /EndPaint\(hwnd, &ps\);\s*if \(painted\) chatSwitchDidPaint\(\);/);
   assert.match(paint, /painted = BitBlt\([^]*\) != 0;/);
-  assert.match(body('chatSwitchDidPaint', text), /\.didPaint\(shells\[active_shell\]\.shell_id\)[\s\S]*SetTimer\(g_main_hwnd, TIMER_CHAT_BROWSER_SWAP, 0, null\)/);
+  assert.match(body('chatSwitchDidPaint', text), /\.didPaint\(shells\[active_shell\]\.shell_id\)[\s\S]*PostMessageW\(g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0\)/);
   assert.match(body('chatSwitchBrowserTick', text), /\.take\(shells\[active_shell\]\.shell_id\)[\s\S]*updateBrowserVisibility\(\)/);
 }
 

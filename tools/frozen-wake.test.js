@@ -119,3 +119,10 @@ test('mask placement validates focus and ownership once for the whole guarded ba
   assert.ok(callers.length > 0);
   for (const call of callers) assert.ok(place.includes(call));
 });
+
+test('completed chat paint queues browser exchange immediately without a minimum-interval timer', () => {
+  const painted = body(read('src/chat_session.zig'), 'chatSwitchDidPaint');
+  assert.match(painted, /didPaint\(app_state.shells\[app_state.active_shell\].shell_id\)/);
+  assert.match(painted, /PostMessageW\(app_state.g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0\)/);
+  assert.doesNotMatch(painted, /SetTimer|Sleep|WaitFor/);
+});
