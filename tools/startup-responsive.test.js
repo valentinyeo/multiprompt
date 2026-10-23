@@ -272,3 +272,8 @@ for (const [name, verify, operator = 'match'] of reviewCases) {
   test(`ISSUE-543 ${name}`, () => verify(read));
   test(`ISSUE-543 negative control: ${name}`, () => assert.throws(() => verify(reviewBefore), { code: 'ERR_ASSERTION', operator }));
 }
+
+test('IGSH-622 historical input red control', () => {
+  const { execFileSync } = require('node:child_process');
+  for (const file of ['src/main.zig']) execFileSync('git', ['show', `cb15de6:${file}`]);
+});
