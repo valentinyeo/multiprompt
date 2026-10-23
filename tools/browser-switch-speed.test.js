@@ -481,3 +481,11 @@ test('the long freeze fixture disables only tier-three window closing through re
   assert.doesNotMatch(freezeTick, /g_browser_autosuspend|g_browser_suspend_min/);
   assertsFrozen(journey, control, browser, workflow);
 });
+
+test('fresh freeze setup waits for the exact fixture lifecycle helper to exit before waking the target', () => {
+  const sample = journey.slice(journey.indexOf('for ($sample = 0;'), journey.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
+  const barrier = sample.slice(sample.indexOf("$freeze.observed_utc ="), sample.indexOf('Assert-Foreground'));
+  assert.match(barrier, /Get-CimInstance Win32_Process -Filter "Name = 'zigshell-bridge.exe'"/);
+  for (const check of ['ExecutablePath -ceq $bridgePath', '$freezeWindow', 'Page\\.setWebLifecycleState', "CommandLine.Contains('frozen')", '$workers.Count -eq 0', '$freeze.worker_finished_utc']) assert.ok(barrier.includes(check), check);
+  assert.ok(sample.indexOf('worker_finished_utc') < sample.indexOf('$measurement ='));
+});

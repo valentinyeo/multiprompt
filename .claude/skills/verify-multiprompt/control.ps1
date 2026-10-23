@@ -2392,6 +2392,15 @@ try {
                             $freeze.wait_ms = $parked.Elapsed.TotalMilliseconds
                             $freeze.status = 'frozen'
                             $freeze.observed_utc = [DateTime]::UtcNow.ToString('o')
+                            $bridgePath = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+                            $freezeWindow = @((Read-Inbox).shells | Where-Object { $_.sid -eq $shellIds[$target] })[0].browser_window_id
+                            Wait-Until {
+                                $workers = @(Get-CimInstance Win32_Process -Filter "Name = 'zigshell-bridge.exe'" | Where-Object {
+                                    $_.ExecutablePath -ceq $bridgePath -and $_.CommandLine -match ('--window\s+' + $freezeWindow + '\s+cdp\s+Page\.setWebLifecycleState\s+') -and $_.CommandLine.Contains('frozen')
+                                })
+                                $workers.Count -eq 0
+                            } 'app freeze helper exited before timed input; dispatch-only markers cannot race wake'
+                            $freeze.worker_finished_utc = [DateTime]::UtcNow.ToString('o')
                             Doctor
                             Assert-Foreground
                         }
