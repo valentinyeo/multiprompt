@@ -35,6 +35,7 @@ SETTLE_SUFFIX_MIN = 24
 ISSUE_345_STALE_JUMPS_TO_TAIL = True
 ISSUE_349_QUEUED_STAMP_FROM_QUEUE = True
 ISSUE_358_TAIL_STARTS_AT_QUESTION = True
+ISSUE_631_TAIL_FILLS_SHOWN_BUDGET = True
 ISSUE_263_TOOL_STEPS = True
 ISSUE_268_CHAT_FIND = True
 ISSUE_270_DIFF_CARDS = True
@@ -703,13 +704,18 @@ def asks_question(raw, agent):
     return message is not None and message.get("role") == "user"
 
 
-def read_tail(source, size, agent, captured=None):
+def read_tail(source, size, agent, captured=None, fill=True):
+    fill = fill and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET
     base, end, data = read_window(source, size, captured=captured)
-    if not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or not data or any(asks_question(raw, agent) for raw in data.splitlines()):
+    if not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or (not data and not fill) or any(asks_question(raw, agent) for raw in data.splitlines()):
         return base, end, data
     start, _, older = read_window(source, base, QUESTION_SCAN_BYTES - TAIL_BYTES, captured)
     shown = 0
     offset = base
+    if fill:
+        held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(json.loads(raw), agent, base))
+        fill = fill and held < TAIL_BYTES // 2
+        fill_at = base
     for raw in reversed(older.splitlines(keepends=True)):
         offset -= len(raw)
         messages = conversation_rows(json.loads(raw), agent, offset)
@@ -718,6 +724,10 @@ def read_tail(source, size, agent, captured=None):
             break
         if any(row["role"] == "user" for row in messages):
             return offset, end, older[offset - start:] + data
+        if fill and held + shown <= TAIL_BYTES:
+            fill_at = offset
+    if fill:
+        return fill_at, end, older[fill_at - start:] + data
     return base, end, data
 
 
@@ -1125,7 +1135,7 @@ def response(q, source=None, as_owner=False):
         else:
             mode = "delta"
             if ISSUE_345_STALE_JUMPS_TO_TAIL and not q.get("no_jump") and info.st_size - offset > 2 * SCAN_BYTES:
-                base, end, data = read_tail(source, info.st_size, agent, captured)
+                base, end, data = read_tail(source, info.st_size, agent, captured, fill=False)
                 if data:
                     jumped = True
                     mode = "tail"
