@@ -1609,7 +1609,18 @@ fn minttyFontHeightFromConsoleHeight() u32 {
 fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_cmd: ?[]const u8, zsb_shell_id: u32, new_session: bool) ?[*:0]u16 {
     var pos: usize = 0;
 
-    if (kind == .tmux and tmux_session != null) {
+    if (kind == .cmd) {
+        if (!appendWideAscii(buf, &pos, "\"")) return null;
+        if (buf.len - pos <= 1) return null;
+        const n = @import("win32.zig").GetSystemDirectoryW(buf[pos..].ptr, @intCast(buf.len - pos));
+        if (n == 0 or n >= buf.len - pos) return null;
+        pos += n;
+        if (!appendWideAscii(buf, &pos, "\\cmd.exe\"")) return null;
+        if (startup_cmd) |cmd| {
+            if (!appendWideAscii(buf, &pos, " /K ")) return null;
+            if (!appendWideAscii(buf, &pos, cmd)) return null;
+        }
+    } else if (kind == .tmux and tmux_session != null) {
         {
             var diag_buf: [200]u8 = undefined;
             const diag = std.fmt.bufPrint(&diag_buf, "[tmux-attach] instance={s} session='{s}' host={d}", .{ getInstanceName(), tmux_session.?, app_state.g_pending_tmux_host }) catch "[tmux-attach fmt-err]";
@@ -1635,7 +1646,6 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
         }
     } else if (startup_cmd) |cmd| {
         const prefix: []const u8 = switch (kind) {
-            .cmd => "cmd.exe /K ",
             .pwsh => "pwsh.exe -NoExit -Command \"",
             else => return null,
         };
@@ -1656,13 +1666,6 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
         }
     } else {
         switch (kind) {
-            .cmd => {
-                for ("cmd.exe") |c| {
-                    if (pos >= buf.len - 1) return null;
-                    buf[pos] = @intCast(c);
-                    pos += 1;
-                }
-            },
             .pwsh => {
                 for ("pwsh.exe") |c| {
                     if (pos >= buf.len - 1) return null;
@@ -1721,6 +1724,7 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
                 }
                 if (!appendWideAscii(buf, &pos, " -- /usr/bin/bash --login -i")) return null;
             },
+            else => return null,
         }
     }
 

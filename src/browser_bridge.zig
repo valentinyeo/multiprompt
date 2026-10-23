@@ -1798,6 +1798,11 @@ fn tunnelInboundThread(srv_usize: usize) void {
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
+        const peer_identity = @import("peer_identity.zig");
+        if (!@atomicLoad(*const fn (SOCKET) bool, &peer_identity.peer_check, .acquire)(client)) {
+            _ = closesocket(client);
+            continue;
+        }
 
         const send_timeout_ms: u32 = 5000;
         if (setsockopt(client, SOL_SOCKET, 0x1005, @ptrCast(&send_timeout_ms), @sizeOf(u32)) != 0) {

@@ -255,6 +255,11 @@ pub fn notifyListenerThread() void {
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
+        const peer_identity = @import("peer_identity.zig");
+        if (!@atomicLoad(*const fn (SOCKET) bool, &peer_identity.peer_check, .acquire)(client)) {
+            _ = closesocket(client);
+            continue;
+        }
 
         const timeout_ms: u32 = 5000;
         const win32 = @import("win32.zig");

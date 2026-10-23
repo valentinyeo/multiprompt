@@ -117,6 +117,13 @@ jobs:
       - name: Test installer prune
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/install-prune.test.js
+      - name: Check local listener accounts
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        shell: pwsh
+        run: |
+          zig build local-listener-helper -Dcpu=x86_64_v3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tools/local-listener-accounts.ps1
       - name: Bound Zig cache before save
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash

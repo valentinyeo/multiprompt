@@ -1093,8 +1093,10 @@ pub fn pasteTextToShellDirectEx(shell_index: u32, text_buf: []const u16, force_b
 }
 
 pub fn queueShotPaste(shell_id: u32, url: []const u8, user_initiated: bool) void {
-    if (shell_id == 0 or url.len == 0) return;
-    const copy_len = @min(url.len, SHOT_PASTE_URL_CAP - 1);
+    if (shell_id == 0 or url.len >= SHOT_PASTE_URL_CAP) return;
+    if (!std.mem.startsWith(u8, url, "https://") and !std.mem.startsWith(u8, url, "http://")) return;
+    for (url) |byte| if (byte <= 0x20 or byte == 0x7f) return;
+    const copy_len = url.len;
     while (!app_state.g_shot_paste_mutex.tryLock()) Sleep(0);
     if (app_state.g_shot_paste_count == SHOT_PASTE_QUEUE_CAP) {
         app_state.g_shot_paste_mutex.unlock();

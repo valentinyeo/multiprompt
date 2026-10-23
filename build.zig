@@ -46,6 +46,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("comdlg32", .{});
     exe.root_module.linkSystemLibrary("shell32", .{});
     exe.root_module.linkSystemLibrary("dwrite", .{});
+    exe.root_module.linkSystemLibrary("iphlpapi", .{});
+    exe.root_module.linkSystemLibrary("advapi32", .{});
     const stable_opts = b.addOptions();
     stable_opts.addOption(bool, "is_dev", false);
     exe.root_module.addOptions("build_config", stable_opts);
@@ -88,6 +90,8 @@ pub fn build(b: *std.Build) void {
     dev_exe.root_module.linkSystemLibrary("comdlg32", .{});
     dev_exe.root_module.linkSystemLibrary("shell32", .{});
     dev_exe.root_module.linkSystemLibrary("dwrite", .{});
+    dev_exe.root_module.linkSystemLibrary("iphlpapi", .{});
+    dev_exe.root_module.linkSystemLibrary("advapi32", .{});
     const dev_opts = b.addOptions();
     dev_opts.addOption(bool, "is_dev", true);
     dev_exe.root_module.addOptions("build_config", dev_opts);
@@ -147,6 +151,13 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
+
+    const listener_helper = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"local listener account helper"},
+    });
+    const install_listener_helper = b.addInstallArtifact(listener_helper, .{ .dest_sub_path = "local-listener-helper.exe" });
+    b.step("local-listener-helper", "Build the local listener account test helper").dependOn(&install_listener_helper.step);
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
