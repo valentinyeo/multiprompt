@@ -111,6 +111,9 @@ jobs:
       - name: Sweep real zsb.exe command help
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/zsb-help.test.js
+      - name: Test installer prune
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        run: node --test tools/install-prune.test.js
       - name: Bound Zig cache before save
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash
