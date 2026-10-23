@@ -4586,7 +4586,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
     _ = SelectObject(hdc, old_font);
 }
 
-test "IGSH-457 Starred sidebar equals inbox split live without moving sessions" {
+test "IGSH-457 Starred sidebar shows every starred session live without moving sessions" {
     const saved_starred = app_state.g_starred_workspace;
     const saved_single = app_state.g_single_window;
     const saved_count = app_state.shell_count;
@@ -4624,14 +4624,14 @@ test "IGSH-457 Starred sidebar equals inbox split live without moving sessions" 
         app_state.shells[1].favorite = favorite;
         var rows: [MAX_ROWS]Row = undefined;
         const count = layoutRows(&rows);
-        try std.testing.expectEqual(@as(u32, if (favorite) 2 else 0), count);
+        try std.testing.expectEqual(@as(u32, if (favorite) 3 else 1), count);
         var expected: u32 = 0;
         for (0..4) |i| {
             const shell = app_state.shells[i];
-            const in_inbox = @import("inbox.zig").inboxPublishesShell(&shell) and @import("workspace_view.zig").splitMatches(frequent.favorites_split, shell.workspace, shell.favorite);
-            try std.testing.expectEqual(!in_inbox, isTabHidden(@intCast(i)));
+            const in_favorites = @import("workspace_view.zig").splitMatches(frequent.favorites_split, shell.workspace, shell.favorite);
+            try std.testing.expectEqual(!in_favorites, isTabHidden(@intCast(i)));
             try std.testing.expectEqual(@as(u8, @intCast(i % 2)), shell.workspace);
-            if (!in_inbox) continue;
+            if (!in_favorites) continue;
             try std.testing.expectEqual(@as(u32, @intCast(i)), rows[expected].shell_idx);
             expected += 1;
         }
@@ -4639,9 +4639,9 @@ test "IGSH-457 Starred sidebar equals inbox split live without moving sessions" 
     }
     app_state.shells[0].inbox_archived = true;
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
-    app_state.shells[0].needs_attention = true;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    app_state.shells[0].needs_attention = true;
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
     try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
 }
