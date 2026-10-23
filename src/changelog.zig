@@ -53,6 +53,13 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.843", .items = &.{
+        .{ .text = "The sidebar status card is now one line on every page, with the full numbers when you hover it.", .ticket = "IGSH-673" },
+        .{ .text = "Messages queued in Claude from the shell now show in Chat View in order, and both views mark them as sent together.", .ticket = "IGSH-682" },
+        .{ .text = "What you type in the Chat View box and in the Claude prompt box now stays the same in both places.", .ticket = "IGSH-682" },
+        .{ .text = "Ctrl+K has a new Edit Queued Messages action that pulls Claude's queued messages back into the prompt box.", .ticket = "IGSH-682" },
+        .{ .text = "Chat View no longer shows an error when a saved conversation has one damaged line.", .ticket = "IGSH-690" },
+    } },
     .{ .ver = "0.28.842", .items = &.{
         .{ .text = "A workspace you list in browser-own-profile.txt now opens its browser pane in its own separate profile, while your other workspaces keep their usual browser.", .ticket = "IGSH-672" },
     } },
