@@ -2301,15 +2301,6 @@ try {
             Save-Json $starred 'session-starred-grouped.json'
             Press @(0x1B) 'Escape: finish Favorites group inline rename without changing its name'
             Snapshot 'starred-grouped'
-            Palette 'mute tab'
-            Press @(0x0D) 'Enter: Mute Tab on the starred session'
-            Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].PSObject.Properties['muted'] -and $state.tabs[$tabIndex].muted -eq $true } 'muted true saved on the starred session'
-            Press @(0x12, 0x32) 'Alt+2: leave Favorites before reopening it'
-            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and -not $state.starred_view -and $state.active_tab -eq $tabIndex } 'home workspace selected before reopening Favorites'
-            Press @(0x12, 0x31) 'Alt+1: reopen Favorites with the muted starred session'
-            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and $state.starred_view -and $state.active_tab -eq $tabIndex -and $state.tabs[$tabIndex].starred_group_id -eq $favoritesGroupId -and $state.tabs[$tabIndex].muted -eq $true } 'muted starred session still listed and selected in Favorites group F'
-            Save-Json (Read-Session) 'session-starred-muted.json'
-            Snapshot 'starred-muted'
             Press @(0x12, 0x32) 'Alt+2: return to home workspace'
             Wait-Until {
                 $state = Read-Session
@@ -2318,6 +2309,21 @@ try {
             Save-Json (Read-Session) 'session-home-returned.json'
             Snapshot 'after'
             $result.checks += @{ name = 'favorites-groups-independent'; group_id = $homeGroupId; starred_group_id = $favoritesGroupId; tab = $tabIndex }
+            $tabsBefore = @((Read-Session).tabs).Count
+            Palette 'new cmd'
+            Press @(0x0D) 'Enter: New CMD shell so the Inbox keeps one unmuted session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $tabsBefore + 1 -and $state.active_tab -ne $tabIndex } 'second unmuted CMD tab saved and active'
+            Press @(0x12, 0x31) 'Alt+1: Favorites with the starred session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and $state.starred_view -and $state.active_tab -eq $tabIndex } 'starred session selected in Favorites'
+            Palette 'mute tab'
+            Press @(0x0D) 'Enter: Mute Tab on the starred session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].PSObject.Properties['muted'] -and $state.tabs[$tabIndex].muted -eq $true } 'muted true saved on the starred session'
+            Press @(0x12, 0x32) 'Alt+2: leave Favorites before reopening it'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and -not $state.starred_view } 'home workspace before reopening Favorites'
+            Press @(0x12, 0x31) 'Alt+1: reopen Favorites with the muted starred session'
+            Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and $state.starred_view -and $state.active_tab -eq $tabIndex -and $state.tabs[$tabIndex].starred_group_id -eq $favoritesGroupId -and $state.tabs[$tabIndex].muted -eq $true } 'muted starred session still listed and selected in Favorites group F'
+            Save-Json (Read-Session) 'session-starred-muted.json'
+            Snapshot 'starred-muted'
             $result.checks += @{ name = 'favorites-keeps-muted-starred'; starred_group_id = $favoritesGroupId; tab = $tabIndex; muted = $true }
         }
         'session-open' {
