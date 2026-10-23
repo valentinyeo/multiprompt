@@ -99,6 +99,7 @@ def transcript_evidence(reader, path, wire, finding):
             if not messages:
                 fact = reader.settlement_event(event, fields[9])
                 messages = [fact] if fact else []
+                record = 'queued_prompt'
                 if fact and fact['settlement']['content'].lstrip().startswith('<task-notification>'):
                     record = 'task_notification'
             matches = False
