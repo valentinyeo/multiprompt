@@ -128,6 +128,7 @@ function journeyContract(source) {
     assert.ok(at >= from, `missing or misordered ${step}`);
     from = at + step.length;
   }
+  assert.match(source, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'restarted app foreground'\s+Doctor/);
   assert.match(source, /Join-Path \$scratch 'roaming\/ZigShell\/session\.json\.launch\.json'/);
   assert.match(source, /if \(-not \(Test-Path \$path\)\) \{ return \$false \}/);
   assert.match(source, /\$launch = Get-Content \$path -Raw \| ConvertFrom-Json\s+\$launch\.PSObject\.Properties\['sort_auto'\] -and -not \$launch\.sort_auto/);
@@ -151,6 +152,18 @@ test('ISSUE-611 Windows journey drives real input, asserts every saved view, res
   for (const required of ['Read-Session', '@($state.tabs).Count -ne 3', '$state.active_tab -ne $Active', '$on -ne $Views[$i]', "$state.tabs[2].chat_view_lock -ceq 'shell'", "PSObject.Properties['chat_view_mode']", "ClassNameProperty, 'ZigShellChatTranscript'", '$visible -eq [int]$Views[$Active]', 'Save-Json (Read-Session)', 'Snapshot $Step']) assert.ok(wait.includes(required), required);
   assert.match(journey, /for \(\$count = 2; \$count -le 3; \$count\+\+\)/);
   assert.match(journey, /@\(\$state.tabs\).Count -eq \$count -and \$state.active_tab -eq \$count - 1/);
+});
+
+test('ISSUE-611 restart foreground contract rejects one-shot and bare activation', () => {
+  journeyContract(journey);
+  for (const replacement of [
+    '[void][VerifyNative]::SetForegroundWindow($script:window)\n            Wait-Until {',
+    'Wait-Until {\n                [void][VerifyNative]::SetForegroundWindow($script:window)',
+  ]) {
+    const broken = journey.replace(/Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)/, replacement);
+    assert.notEqual(broken, journey);
+    assert.throws(() => journeyContract(broken), assert.AssertionError);
+  }
 });
 
 test('ISSUE-611 feature map, branch Windows tests, PR matrix, documentation and changelog are wired', () => {

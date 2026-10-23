@@ -1278,8 +1278,10 @@ try {
             } 'restarted owned window and three restored sessions' 60
             [void][VerifyNative]::ShowWindow($script:window, 9)
             [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-            [void][VerifyNative]::SetForegroundWindow($script:window)
-            Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'restarted app foreground'
+            Wait-Until {
+                [VerifyNative]::BringToForeground($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'restarted app foreground'
             Doctor
             Save-Json (Read-Session) 'restart-before-input.session.json'
             Press @(0x11, 0x31) 'Ctrl+1: restored first session'
