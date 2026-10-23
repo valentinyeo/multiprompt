@@ -83,5 +83,10 @@
     "name": "snoozed_workspace",
     "base": "SEARCH_WS_SNOOZED_ROW_OFFSET",
     "size": "MAX_REMINDERS"
+  },
+  {
+    "name": "palette_header",
+    "base": "SEARCH_PALETTE_HEADER_OFFSET",
+    "size": "PALETTE_HEADER_COUNT"
   }
 ]

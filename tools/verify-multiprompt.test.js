@@ -1142,3 +1142,30 @@ test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four 
   ]);
   assert.match(read('tools/chat-local-agent.c'), /WriteConsoleW\(output, clear,[^\n]+\n\s*CONSOLE_SCREEN_BUFFER_INFO info;\s*if \(!GetConsoleScreenBufferInfo\(output, &info\)\) return 4;\s*COORD origin = \{0, info.srWindow.Bottom\}/);
 });
+
+test('IGSH-612 palette-order journey seeds only the usage fixture and fails releases on the selected row', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'palette-order'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'palette-order'/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"palette-order"\]'\)/);
+  assert.match(control, /if \(\$Feature -eq 'palette-order'\) \{\s+\$config = Join-Path \$env:APPDATA 'ZigShell'\s+New-Item -ItemType Directory -Force \$config \| Out-Null\s+Copy-Item \$paletteUsageFixture \(Join-Path \$config 'palette-usage.tsv'\)\s+\}/);
+  assert.ok(control.indexOf("Copy-Item $paletteUsageFixture") < control.indexOf('$job = New-Object VerifyJob'));
+  const journey = control.slice(control.indexOf("        'palette-order' {"), control.indexOf("        'chat-view-everywhere' {"));
+  assert.match(journey, /throw "palette-order: selected row \$selected, expected most used command/);
+  assert.match(journey, /\$ids\[0\] -ne 'h0'/);
+  assert.match(journey, /text = 'chat view per tab'; id = 0/);
+  assert.match(journey, /text = 'copy shell diagnostics'; id = 6247/);
+  assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
+  const fixture = read('tools/fixtures/IGSH-612/palette-usage.tsv').split('\r\n').filter(Boolean).map(line => line.split('\t'));
+  assert.ok(fixture.length > 10);
+  for (const [id, count, last] of fixture) {
+    assert.match(id, /^\d+$/);
+    assert.match(count, /^\d+$/);
+    assert.match(last, /^\d+$/);
+    assert.ok(!['6202', '6205'].includes(id));
+  }
+  assert.equal(new Set(fixture.map(([, count]) => count)).size, fixture.length);
+  const map = read(skill + 'features/palette-order.md');
+  for (const heading of ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']) assert.ok(map.includes(heading));
+  assert.match(read(skill + 'features/README.md'), /\[Palette order\]\(palette-order.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`palette-order`/);
+});

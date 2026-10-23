@@ -129,8 +129,8 @@ test("Ctrl+K ranks intent, workspace context, and decaying usage stably", () => 
   const update = functionBody("updateSearchResults", "u16ToLower");
   assert.match(update, /sortSearchResultsByRank\(\);[\s\S]*?keepSearchSelectionVisible\(\)/,
     "the completed top-level result list must be ranked before selection is clamped");
-  assert.match(source, /const target = g_search_results\[g_search_sel\];\s+recordPaletteUsage\(target\);/,
-    "confirming a palette action must persist its use");
+  assert.match(source, /const target = g_search_results\[g_search_sel\];\s+if \(paletteRowIsHeader\(target\)\) return 0;\s+recordPaletteUsage\(target\);/,
+    "confirming a palette action must persist its use, and a group header row is never confirmed");
   assert.match(source, /loadPaletteUsage\(\);[\s\S]*?loadSnippetsIfChanged\(\);[\s\S]*?updateSearchResults\(\);/,
     "each palette open must see usage recorded by other workspace windows");
 });
@@ -185,7 +185,7 @@ test("all session rename entry points synchronize display surfaces without chang
   assert.match(source, /target == SEARCH_RENAME_SYNC_OFFSET[\s\S]*?beginPaletteRenameInput\(active_shell\)/,
     "Ctrl+K Rename Session must enter the app modal rather than the inline F2 editor");
   assert.match(source, /L\("Rename Session"\)/);
-  assert.match(source, /L\("Use Agent\/Tmux Name"\)/);
+  assert.match(source, /L\("Use Agent or Terminal Session Name"\)/);
 
   assert.match(canonical, /blockExternalNameSyncUntilTitleChanges/,
     "an outbound rename must block the old agent title from taking the tab name back");
@@ -213,7 +213,7 @@ test("Ctrl+K spawn actions use normalized names without decorative plus prefixes
     "New PowerShell",
     "New Bash Shell",
     "New Git Bash Shell",
-    "New Codex tmux Session",
+    "New Codex Session in This Folder",
   ]) {
     assert.match(paint, new RegExp(label), `missing normalized palette label: ${label}`);
   }
@@ -248,9 +248,9 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
   assert.match(source, /const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;/);
   assert.match(source,
-    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "reconnect claude primary telemetry"/);
+    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
   assert.match(source,
-    /SEARCH_USAGE_LOGIN_INNE_OFFSET => "reconnect claude secondary telemetry"/);
+    /SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account"/);
 
   const update = functionBody("updateSearchResults", "u16ToLower");
   for (const alias of [
@@ -274,7 +274,7 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   const paint = source.slice(paintStart, paintEnd);
   assert.match(paint, /const is_usage_login = is_usage_login_primary or is_usage_login_inne;/);
   assert.match(paint,
-    /else if \(is_usage_login\)[\s\S]*?L\("Reconnect Claude: Primary"\)[\s\S]*?L\("Reconnect Claude: Secondary"\)[\s\S]*?L\("secondary@example.com"\)/);
+    /else if \(is_usage_login\)[\s\S]*?L\("Usage: Sign In to Primary Claude Account"\)[\s\S]*?L\("Usage: Sign In to Secondary Claude Account"\)[\s\S]*?L\("secondary@example.com"\)/);
   for (const classifier of ["const is_newwin =", "const is_openall =", "const is_new_shell ="]) {
     const start = paint.indexOf(classifier);
     const end = paint.indexOf(";", start);

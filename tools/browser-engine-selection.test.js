@@ -48,8 +48,8 @@ test("one global switch closes every old-engine pane before delayed relaunch", (
 
 test("Ctrl+K exposes the global dedicated-browser choice", () => {
   assert.match(source, /SEARCH_BROWSER_ENGINE_OFFSET/);
-  assert.match(source, /Browser Engine: Switch every pane to dedicated Chrome/);
-  assert.match(source, /Browser Engine: Switch every pane to dedicated Edge/);
+  assert.match(source, /Browser: Switch All Panes to Chrome/);
+  assert.match(source, /Browser: Switch All Panes to Edge/);
   assert.match(source, /target == SEARCH_BROWSER_ENGINE_OFFSET[\s\S]{0,260}?WM_APP_BROWSER_ENGINE_TOGGLE/);
 });
 

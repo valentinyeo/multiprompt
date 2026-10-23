@@ -175,3 +175,45 @@ test('ISSUE-266 permission button labels use the agent option text rather than f
   assert.match(paint, /g_chat_permission\.optionText\(action\)/);
   assert.match(paint, /DrawTextW\(hdc, text\.ptr, @intCast\(text\.len\)/);
 });
+
+function topLevelSearchRows(text) {
+  const start = text.indexOf('pub fn updateSearchResults() void {');
+  assert.notEqual(start, -1, 'updateSearchResults');
+  let body = text.slice(start, text.indexOf('\n}\n', start));
+  for (;;) {
+    const mode = body.search(/\n    if \(app_state\.g_search_\w+_mode\) \{/);
+    if (mode < 0) break;
+    const end = body.indexOf('\n    }', mode + 1);
+    assert.notEqual(end, -1, 'submenu block end');
+    body = body.slice(0, mode) + body.slice(end + 6);
+  }
+  return new Set([...body.matchAll(/\bg_search_results\[[^\]]+\]\s*=\s*(SEARCH_\w+_OFFSET)\b/g)].map(([, name]) => name));
+}
+
+function groupOfSource(text) {
+  const start = text.indexOf('pub fn paletteGroupOf(target: usize) ?u8 {');
+  assert.notEqual(start, -1, 'paletteGroupOf');
+  return text.slice(start, text.indexOf('\n}\n', start));
+}
+
+test('IGSH-612 every top-level Ctrl+K row belongs to a palette group', () => {
+  const sessionRows = palette.match(/fn paletteRowIsSession\(target: usize\) bool \{[^}]*\}/);
+  assert.ok(sessionRows, 'paletteRowIsSession');
+  const mapped = comparisons(groupOfSource(palette) + '\n' + sessionRows[0], 'target', values);
+  const rows = topLevelSearchRows(palette);
+  assert.ok(rows.has('SEARCH_SHELL_DIAG_OFFSET') && rows.has('SEARCH_NEW_OFFSET'), 'top-level rows were found');
+  assert.ok(!rows.has('SEARCH_SKILLS_BACK_OFFSET'), 'submenu rows are excluded');
+  const missing = [...rows].filter(name => !mapped.has(name));
+  assert.deepEqual(missing, [], `Ctrl+K rows without a group in paletteGroupOf: ${missing.join(', ')}`);
+  const broken = palette.replace(', SEARCH_SHELL_DIAG_OFFSET => 4', ' => 4');
+  assert.notEqual(broken, palette);
+  assert.ok(!comparisons(groupOfSource(broken), 'target', values).has('SEARCH_SHELL_DIAG_OFFSET'));
+});
+
+test('IGSH-612 empty Ctrl+K groups rows and keeps selection off headers', () => {
+  assert.match(palette, /groupEmptyPaletteResults\(lead\);/);
+  assert.match(palette, /\[palette\] rows chars=\{d\} count=\{d\} ids=/);
+  assert.match(main, /if \(paletteRowIsHeader\(target\)\) return 0;/);
+  assert.match(main, /stepOverPaletteHeaders\(/);
+  assert.equal(Number(state.match(/pub const SEARCH_PALETTE_HEADER_OFFSET: usize = (\d+);/)[1]), 11000);
+});

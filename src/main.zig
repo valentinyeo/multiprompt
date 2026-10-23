@@ -1126,6 +1126,8 @@ const searchResultRowAtClientPoint = @import("drawing.zig").searchResultRowAtCli
 const paintSidebar = @import("sidebar.zig").paintSidebar;
 const keepSearchSelectionVisible = @import("command_palette.zig").keepSearchSelectionVisible;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
+const paletteRowIsHeader = @import("command_palette.zig").paletteRowIsHeader;
+const stepOverPaletteHeaders = @import("command_palette.zig").stepOverPaletteHeaders;
 const BROWSER_SHORTCUT_OPEN_GUARD_MS = @import("app_state.zig").BROWSER_SHORTCUT_OPEN_GUARD_MS;
 const claimBrowserToggleEvent = @import("shortcuts.zig").claimBrowserToggleEvent;
 const physicalBrowserShortcutShouldRecover = @import("shortcuts.zig").physicalBrowserShortcutShouldRecover;
@@ -1805,6 +1807,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const click_oy = @divFloor(click_win_h - click_oh, 3);
 
                 if (searchResultRowAtClientPoint(mx, my)) |clicked_row| {
+                    if (paletteRowIsHeader(app_state.g_search_results[clicked_row])) return 0;
                     app_state.g_search_sel = clicked_row;
                     if (app_state.g_search_ws_sort_mode) {
                         const t = app_state.g_search_results[app_state.g_search_sel];
@@ -2169,7 +2172,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (app_state.g_search_active and (wp & MK_LBUTTON) == 0) {
                 if (searchResultRowAtClientPoint(GET_X(lp), GET_Y(lp))) |hovered_row| {
-                    if (hovered_row != app_state.g_search_sel) {
+                    if (hovered_row != app_state.g_search_sel and !paletteRowIsHeader(app_state.g_search_results[hovered_row])) {
                         app_state.g_search_sel = hovered_row;
                         _ = InvalidateRect(hwnd, null, 0);
                     }
@@ -4186,6 +4189,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     else => {},
                 }
+                stepOverPaletteHeaders(wp == 0 or wp == 2 or wp == 4 or wp == 6, wp == 0 or wp == 1);
                 app_state.g_search_workspace_delete_confirm = null;
                 app_state.g_search_snippet_delete_confirm = null;
                 keepSearchSelectionVisible();
@@ -4381,6 +4385,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
+                if (paletteRowIsHeader(target)) return 0;
                 recordPaletteUsage(target);
                 if (verboseLoggingEnabled()) {
                     var dbg_cf: [96]u8 = undefined;
