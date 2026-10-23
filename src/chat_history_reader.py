@@ -1422,25 +1422,6 @@ def box_is_empty(box):
     return not box
 
 
-def clear_prompt_box(target, box):
-    presses = 0
-    stalled = 0
-    stuck = False
-    limit = len(box) + 2
-    while not box_is_empty(box) and presses < limit:
-        subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
-        presses += 1
-        after = prompt_box_text(target)
-        stalled = stalled + 1 if after == box else 0
-        box = after
-        if stalled == 2:
-            subprocess.run(["tmux", "send-keys", "-t", target, "C-k"], check=True, capture_output=True, timeout=5)
-            box = prompt_box_text(target)
-            stuck = True
-            break
-    return box, stuck
-
-
 def send_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
@@ -1458,7 +1439,21 @@ def send_response(q):
             if wanted and wanted == "".join(box.split()):
                 pass
             else:
-                box, stuck = clear_prompt_box(target, box)
+                presses = 0
+                stalled = 0
+                stuck = False
+                limit = len(box) + 2
+                while not box_is_empty(box) and presses < limit:
+                    subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
+                    presses += 1
+                    after = prompt_box_text(target)
+                    stalled = stalled + 1 if after == box else 0
+                    box = after
+                    if stalled == 2:
+                        subprocess.run(["tmux", "send-keys", "-t", target, "C-k"], check=True, capture_output=True, timeout=5)
+                        box = prompt_box_text(target)
+                        stuck = True
+                        break
                 if not stuck and not box_is_empty(box):
                     reason = "box_not_clear"
                 if reason is None:
@@ -1513,10 +1508,10 @@ def draft_response(q):
             target = "=" + name + ":"
             box = box_draft(target)
             if box is None or box.strip() != text.strip():
-                box, _ = clear_prompt_box(target, prompt_box_text(target))
-                if not box_is_empty(box):
-                    reason = "box_not_clear"
-                elif text:
+                if box:
+                    for i in range(len(box.splitlines())):
+                        subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
+                if text:
                     type_into_box(target, text, rid)
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_draft_failed"
