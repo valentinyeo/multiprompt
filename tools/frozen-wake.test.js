@@ -126,3 +126,9 @@ test('completed chat paint queues browser exchange immediately without a minimum
   assert.match(painted, /PostMessageW\(app_state.g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0\)/);
   assert.doesNotMatch(painted, /SetTimer|Sleep|WaitFor/);
 });
+
+test('post-paint dispatch reuses the existing guarded PostMessageW binding exactly once', () => {
+  const chat = read('src/chat_session.zig');
+  assert.equal((chat.match(/^const PostMessageW =/gm) || []).length, 1);
+  assert.match(chat, /const PostMessageW = @import\("focus.zig"\).PostMessageW;/);
+});

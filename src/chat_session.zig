@@ -15,7 +15,6 @@ const HANDLE = @import("win32.zig").HANDLE;
 const WM_APP_CHAT_FILE_READY = @import("win32.zig").WM_APP_CHAT_FILE_READY;
 const TIMER_CHAT_REFRESH = @import("win32.zig").TIMER_CHAT_REFRESH;
 const TIMER_CHAT_BROWSER_SWAP = @import("win32.zig").TIMER_CHAT_BROWSER_SWAP;
-const PostMessageW = @import("win32.zig").PostMessageW;
 const WM_TIMER = @import("win32.zig").WM_TIMER;
 const POINT = @import("win32.zig").POINT;
 const RECT = @import("win32.zig").RECT;
