@@ -85,6 +85,7 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, IntPtr text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
@@ -379,8 +380,9 @@ public static class VerifyNative {
     }
     public static string EditText(IntPtr hwnd) {
         if (Class(hwnd) != "Edit") throw new InvalidOperationException("Expected the owned Edit control");
-        StringBuilder text = new StringBuilder(512);
         UIntPtr length;
+        if (SendMessageTimeout(hwnd, 0x000E, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out length) == IntPtr.Zero) throw new InvalidOperationException("Cannot read Edit text length within timeout");
+        StringBuilder text = new StringBuilder(checked((int)length.ToUInt64() + 2));
         if (SendMessageTimeout(hwnd, 0x000D, new UIntPtr((uint)text.Capacity), text, 2, 1000, out length) == IntPtr.Zero) throw new InvalidOperationException("Cannot read Edit text within timeout");
         if (length.ToUInt64() >= (ulong)(text.Capacity - 1)) throw new InvalidOperationException("Edit text may be truncated");
         return text.ToString();
@@ -1639,12 +1641,15 @@ function Wait-ChatFocus([string]$Class, [string]$Step) {
 function Assert-ChatTyping([string]$Text, [string]$Step) {
     Wait-ChatFocus 'Edit' ($Step + '-focused')
     $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
-    $textPattern = $composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-    if ($textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n") -cne '') { throw 'Expected an empty composer before typing proof' }
+    $handle = [IntPtr]$composer.Current.NativeWindowHandle
+    if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::Class($handle) -cne 'Edit' -or
+        [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Expected the owned composer Edit before reading text' }
+    if ([VerifyNative]::EditText($handle) -cne '') { throw 'Expected an empty composer before typing proof' }
     Type-Text $Text
-    Wait-Until { $textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n") -ceq $Text } ("UIA TextPattern typing landed: $Step")
+    Wait-Until { [VerifyNative]::EditText($handle) -ceq $Text } ("WM_GETTEXT typing landed: $Step")
     Wait-ChatFocus 'Edit' $Step
-    Save-Json @{ textPattern = $textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n"); handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')
+    if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -ne $handle) { throw 'Typing focus left the original composer Edit' }
+    Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')
 }
 
 try {

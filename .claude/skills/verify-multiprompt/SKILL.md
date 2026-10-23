@@ -46,7 +46,7 @@ The `session-restore` journey uses `--single-window` with restoration enabled an
 
 The [Chat View everywhere](features/chat-view-everywhere.md) journey switches three local sessions once, checks a persistent shell lock, toggles one unlocked session, restarts the owned app in the same isolated profile, and proves the removed per-tab palette query has no rows. Alt+T creates workspace tmux sessions; this offline journey instead uses the real Ctrl+K New CMD Shell action.
 
-The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session, proves immediate composer typing through UI Automation, and recovers typing with Alt+Q and Alt+M while Find is open and without a browser pane.
+The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session, proves immediate composer typing through bounded WM_GETTEXT with UI Automation focus identity, and recovers typing with Alt+Q and Alt+M while Find is open and without a browser pane. The native Edit may appear as a UIA Pane with no text patterns; validate its Edit class and owned root before reading standard WM_GETTEXTLENGTH/WM_GETTEXT messages.
 
 ## Doctor
 

@@ -125,16 +125,19 @@ function journeyContract(source) {
 }
 
 function typingContract(source) {
-  const readText = '$textPattern.DocumentRange.GetText(-1).TrimEnd([char[]]"`r`n")';
+  const readText = '[VerifyNative]::EditText($handle)';
   const steps = [
     "Wait-ChatFocus 'Edit' ($Step + '-focused')",
     '$composer = [System.Windows.Automation.AutomationElement]::FocusedElement',
-    '$textPattern = $composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)',
+    '$handle = [IntPtr]$composer.Current.NativeWindowHandle',
+    "if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::Class($handle) -cne 'Edit' -or",
+    "[VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Expected the owned composer Edit before reading text' }",
     `if (${readText} -cne '') { throw 'Expected an empty composer before typing proof' }`,
     'Type-Text $Text',
-    `Wait-Until { ${readText} -ceq $Text } ("UIA TextPattern typing landed: $Step")`,
+    `Wait-Until { ${readText} -ceq $Text } ("WM_GETTEXT typing landed: $Step")`,
     "Wait-ChatFocus 'Edit' $Step",
-    `Save-Json @{ textPattern = ${readText}; handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')`,
+    "if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -ne $handle) { throw 'Typing focus left the original composer Edit' }",
+    `Save-Json @{ WM_GETTEXT = ${readText}; handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')`,
   ];
   let from = 0;
   for (const step of steps) {
@@ -142,10 +145,51 @@ function typingContract(source) {
     assert.ok(at >= from, `missing or misordered ${step}`);
     from = at + step.length;
   }
-  assert.doesNotMatch(source, /ValuePattern|\.Current\.Value|\.value\.json/);
+  assert.doesNotMatch(source, /TextPattern|ValuePattern|GetCurrentPattern|\.Current\.Value|\.value\.json|\.Trim/);
 }
 
-test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal restart and independent focused-element/TextPattern proof', () => {
+function nativeTextContract(source) {
+  assert.match(source, /DllImport\("user32.dll", CharSet=CharSet.Unicode, SetLastError=true\)\] static extern IntPtr SendMessageTimeout\(IntPtr hwnd, uint message, UIntPtr count, StringBuilder text, uint flags, uint timeout, out UIntPtr result\);/);
+  assert.match(source, /DllImport\("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true\)\] static extern IntPtr SendMessageTimeout\(IntPtr hwnd, uint message, UIntPtr count, IntPtr text, uint flags, uint timeout, out UIntPtr result\);/);
+  const start = source.indexOf('public static string EditText(');
+  const reader = source.slice(start, source.indexOf('public static string Title(', start));
+  const steps = [
+    'if (Class(hwnd) != "Edit") throw',
+    'if (SendMessageTimeout(hwnd, 0x000E, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out length) == IntPtr.Zero) throw',
+    'StringBuilder text = new StringBuilder(checked((int)length.ToUInt64() + 2));',
+    'if (SendMessageTimeout(hwnd, 0x000D, new UIntPtr((uint)text.Capacity), text, 2, 1000, out length) == IntPtr.Zero) throw',
+    'if (length.ToUInt64() >= (ulong)(text.Capacity - 1)) throw',
+    'return text.ToString();',
+  ];
+  let from = 0;
+  for (const step of steps) {
+    const at = reader.indexOf(step, from);
+    assert.ok(at >= from, `missing or misordered ${step}`);
+    from = at + step.length;
+  }
+  assert.doesNotMatch(reader, /GetWindowText|SetFocus|PostMessage|\.Trim/);
+}
+
+test('ISSUE-716 composer uses bounded Unicode WM_GETTEXTLENGTH then WM_GETTEXT with truncation protection', () => {
+  nativeTextContract(driver);
+  for (const [before, after] of [
+    ['Class(hwnd) != "Edit"', 'false'],
+    ['hwnd, 0x000E,', 'hwnd, 0x000D,'],
+    ['EntryPoint="SendMessageTimeoutW"', 'EntryPoint="SendMessageTimeoutA"'],
+    ['CharSet=CharSet.Unicode', 'CharSet=CharSet.Ansi'],
+    ['IntPtr.Zero, 2, 1000, out length', 'IntPtr.Zero, 8, 1000, out length'],
+    ['checked((int)length.ToUInt64() + 2)', '512'],
+    ['hwnd, 0x000D,', 'hwnd, 0x000E,'],
+    ['text, 2, 1000, out length', 'text, 8, 1000, out length'],
+    ['length.ToUInt64() >= (ulong)(text.Capacity - 1)', 'false'],
+    ['return text.ToString();', 'return text.ToString().Trim();'],
+  ]) {
+    assert.ok(driver.includes(before), before);
+    assert.throws(() => nativeTextContract(driver.replaceAll(before, after)), before);
+  }
+});
+
+test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal restart and independent focused-element/WM_GETTEXT proof', () => {
   journeyContract(recipe);
   for (const step of ['Restart-ChatView 1', "Wait-ChatFocus 'ZigShellChatTranscript' 'find-open'", "Assert-ChatTyping 'abc' 'restart-typing'", 'GetAncestor($handle, 2) -ne $script:window', 'Doctor\n            Assert-Foreground']) {
     assert.throws(() => journeyContract(recipe.replace(step, '')));
@@ -158,12 +202,17 @@ test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal
   const typing = waits.slice(waits.indexOf('function Assert-ChatTyping('));
   typingContract(typing);
   for (const [before, after] of [
-    ['TextPattern]::Pattern', 'ValuePattern]::Pattern'],
-    ['.TrimEnd([char[]]"`r`n")', '.Trim()'],
+    ['$handle = [IntPtr]$composer.Current.NativeWindowHandle', '$handle = $script:window'],
+    ['$composer.Current.ProcessId -ne $process.Id', '$false'],
+    ["[VerifyNative]::Class($handle) -cne 'Edit'", '$false'],
+    ['[VerifyNative]::GetAncestor($handle, 2) -ne $script:window', '$false'],
+    ['[VerifyNative]::EditText($handle)', '$composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)'],
+    ['[VerifyNative]::EditText($handle)', '[VerifyNative]::EditText($handle).Trim()'],
     ["-cne ''", "-cne 'abc'"],
     ['-ceq $Text', '-eq $Text'],
     ["Wait-ChatFocus 'Edit' $Step", ''],
-    ['textPattern =', 'valuePattern ='],
+    ['FocusedElement.Current.NativeWindowHandle -ne $handle', '$false'],
+    ['WM_GETTEXT =', 'textPattern ='],
     ["'.text.json'", "'.value.json'"],
   ]) assert.throws(() => typingContract(typing.replace(before, after)));
   const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Click-WorkspacePill('));
@@ -182,9 +231,10 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus.test.js/);
   const map = read(skill + 'features/chat-focus.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
-  for (const required of ['v0.28.848', 'TextPattern.DocumentRange.GetText(-1)', 'trimming only trailing CR/LF', 'textPattern JSON key', 'restart-typing.text.json', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
+  for (const required of ['v0.28.848', 'WM_GETTEXTLENGTH (0x000E)', 'WM_GETTEXT (0x000D)', 'without trimming or normalizing', 'WM_GETTEXT JSON key', 'ControlType.Pane', 'same owned Edit', 'restart-typing.text.json', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
   assert.ok(read(skill + 'features/README.md').includes('](chat-focus.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-focus.md)'));
+  assert.ok(read(skill + 'SKILL.md').includes('WM_GETTEXTLENGTH/WM_GETTEXT'));
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
   const changelog = read('changelog.d/IGSH-716-alt-q-focus.md').trim();
   assert.equal(changelog.split('\n').length, 1);
