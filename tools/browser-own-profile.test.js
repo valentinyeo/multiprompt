@@ -35,8 +35,8 @@ test('IGSH-672 the opt-in file is a read-only list of workspace ids next to the 
 });
 
 test('IGSH-672 token and folder derivation match SHA-256 in Zig and in the verify journey', () => {
-  const expected = tokenFor('ws-inne-test');
-  assert.equal(expected, 'own-9fcaf773c928d505d4457afd');
+  const expected = tokenFor('ws-own-test');
+  assert.equal(expected, 'own-adee37bbc9fa6013ec24ccfd');
   assert.ok(own.includes(`"${expected}"`), 'Zig test vector must match SHA-256');
   assert.ok(own.includes(`BrowserWorkspaces\\\\chrome\\\\${expected}`), 'Zig folder vector must match SHA-256');
   assert.ok(control.includes(expected), 'journey must cross-check the same vector');

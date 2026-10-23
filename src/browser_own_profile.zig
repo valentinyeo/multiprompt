@@ -140,31 +140,31 @@ test "IGSH-672 own profile tokens are stable, distinct and pipe safe" {
     var first: [TOKEN_LEN]u8 = undefined;
     var again: [TOKEN_LEN]u8 = undefined;
     var other: [TOKEN_LEN]u8 = undefined;
-    try std.testing.expectEqualStrings("own-9fcaf773c928d505d4457afd", try token(&first, "ws-inne-test"));
-    _ = try token(&again, "ws-inne-test");
+    try std.testing.expectEqualStrings("own-adee37bbc9fa6013ec24ccfd", try token(&first, "ws-own-test"));
+    _ = try token(&again, "ws-own-test");
     _ = try token(&other, "ws-other-test");
     try std.testing.expectEqualStrings(&first, &again);
     try std.testing.expect(!std.mem.eql(u8, &first, &other));
     try std.testing.expect(isToken(&first));
-    try std.testing.expect(!isToken("9fcaf773c928d505d4457afd0123"));
-    try std.testing.expect(!isToken("own-9FCAF773C928D505D4457AFD"));
+    try std.testing.expect(!isToken("adee37bbc9fa6013ec24ccfd0123"));
+    try std.testing.expect(!isToken("own-ADEE37BBC9FA6013EC24CCFD"));
     try std.testing.expectError(error.MissingWorkspaceId, token(&again, ""));
 }
 
 test "IGSH-672 opt-in file lists exact workspace ids one per line" {
-    try std.testing.expect(listed("ws-inne-test\n", "ws-inne-test"));
-    try std.testing.expect(listed("\xEF\xBB\xBFws-a\r\n  ws-inne-test  \r\n", "ws-inne-test"));
-    try std.testing.expect(!listed("ws-inne-test-2\n", "ws-inne-test"));
-    try std.testing.expect(!listed("", "ws-inne-test"));
-    try std.testing.expect(!listed("ws-inne-test\n", ""));
+    try std.testing.expect(listed("ws-own-test\n", "ws-own-test"));
+    try std.testing.expect(listed("\xEF\xBB\xBFws-a\r\n  ws-own-test  \r\n", "ws-own-test"));
+    try std.testing.expect(!listed("ws-own-test-2\n", "ws-own-test"));
+    try std.testing.expect(!listed("", "ws-own-test"));
+    try std.testing.expect(!listed("ws-own-test\n", ""));
 }
 
 test "IGSH-672 own profile folders never name the shared profile or old hash folders" {
     var value: [TOKEN_LEN]u8 = undefined;
-    _ = try token(&value, "ws-inne-test");
+    _ = try token(&value, "ws-own-test");
     var buf: [256]u8 = undefined;
     const root = try path(&buf, "C:\\Local", "chrome", &value);
-    try std.testing.expectEqualStrings("C:\\Local\\ZigShell\\BrowserWorkspaces\\chrome\\own-9fcaf773c928d505d4457afd", root);
+    try std.testing.expectEqualStrings("C:\\Local\\ZigShell\\BrowserWorkspaces\\chrome\\own-adee37bbc9fa6013ec24ccfd", root);
     var found: [TOKEN_LEN]u8 = undefined;
     try std.testing.expectEqualStrings(&value, (try tokenFromPath(&found, "C:\\Local", root)).?);
     try std.testing.expectEqual(@as(?[]const u8, null), try tokenFromPath(&found, "C:\\Local", "C:\\Local\\ZigShell\\ChromeUserData"));
@@ -174,12 +174,12 @@ test "IGSH-672 own profile folders never name the shared profile or old hash fol
 
 test "IGSH-672 commands gain a profile only for an own profile" {
     var value: [TOKEN_LEN]u8 = undefined;
-    _ = try token(&value, "ws-inne-test");
+    _ = try token(&value, "ws-own-test");
     var buf: [256]u8 = undefined;
     const original = "\"C:\\Program Files\\bridge.exe\" --window 42 tabs";
     try std.testing.expectEqualStrings(original, try command(&buf, original, ""));
     const qualified = try command(&buf, original, &value);
-    try std.testing.expectEqualStrings("\"C:\\Program Files\\bridge.exe\" --profile own-9fcaf773c928d505d4457afd --window 42 tabs", qualified);
+    try std.testing.expectEqualStrings("\"C:\\Program Files\\bridge.exe\" --profile own-adee37bbc9fa6013ec24ccfd --window 42 tabs", qualified);
     try std.testing.expectError(error.InvalidProfileCommand, command(&buf, "bridge.exe tabs", &value));
     const profile = (try userDataArgument(std.testing.allocator, "chrome.exe --user-data-dir=\"C:\\Local Space\\profile\" --app=about:blank")).?;
     defer std.testing.allocator.free(profile);

@@ -2949,7 +2949,7 @@ try {
             Snapshot 'after'
         }
         'browser-own-profile' {
-            if ((Get-OwnProfileToken 'ws-inne-test') -cne 'own-9fcaf773c928d505d4457afd') { throw 'Journey token derivation differs from the app test vector' }
+            if ((Get-OwnProfileToken 'ws-own-test') -cne 'own-adee37bbc9fa6013ec24ccfd') { throw 'Journey token derivation differs from the app test vector' }
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard input' 60
             $sharedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData')).TrimEnd('\')
             $ownBase = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'ZigShell/BrowserWorkspaces')).TrimEnd('\')
@@ -2997,7 +2997,7 @@ try {
             $script:browserShellId = (Read-Inbox).active_shell_id
             Snapshot 'action'
             $ownProof = Open-WorkspaceBrowser 'opted-in'
-            if ($ownProof.userDataDir -ine $ownRoot) { throw ('Inne workspace has no own browser profile: ' + $ownProof.userDataDir) }
+            if ($ownProof.userDataDir -ine $ownRoot) { throw ('Opted-in workspace has no own browser profile: ' + $ownProof.userDataDir) }
             if ($ownProof.pid -eq $sharedProof.pid) { throw 'Opted-in pane reused the shared browser process' }
             Wait-OwnProfilePipe $ownToken 'opted-in'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'opted-in pane bound through its own native host' 60
