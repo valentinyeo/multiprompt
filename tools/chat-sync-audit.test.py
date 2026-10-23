@@ -286,7 +286,26 @@ class ChatSyncAuditTest(unittest.TestCase):
                 evidence.assert_called_once_with(reader, path, wire, finding)
             self.assertEqual(finding['transcript_lines'][0]['location'], 'after_snapshot')
 
-    def test_settle_pending_keeps_text_that_never_lands_and_waits_once(self):
+    def test_settle_pending_drops_text_appended_after_third_wait(self):
+        reader = audit.load_reader()
+        text = 'The neutral assistant message arrives after several waits'
+        event = dict(type='assistant', message=dict(role='assistant', content=text))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            finding = dict(kind='pane_missing', text=text, transcript_lines=[])
+            sleeps = []
+            def append(seconds):
+                sleeps.append(seconds)
+                if len(sleeps) == 3:
+                    with path.open('a') as source:
+                        source.write(json.dumps(event) + '\n')
+            self.assertEqual(audit.settle_pending(reader, path, wire, [finding], append), [])
+            self.assertEqual(sleeps, [audit.SETTLE_SECONDS] * 3)
+            self.assertEqual(sum(sleeps), 15)
+
+    def test_settle_pending_keeps_text_that_never_lands_and_waits_until_limit(self):
         reader = audit.load_reader()
         findings = [dict(kind='pane_missing', text=text, transcript_lines=[]) for text in
                     ('The first neutral message never lands', 'The second neutral message never lands')]
@@ -295,7 +314,7 @@ class ChatSyncAuditTest(unittest.TestCase):
             path.write_bytes(b'')
             with patch.object(audit.time, 'sleep') as sleep:
                 self.assertEqual(audit.settle_pending(reader, path, self.wire([]), findings, sleep), findings)
-                sleep.assert_called_once_with(audit.SETTLE_SECONDS)
+                self.assertEqual(sum(call.args[0] for call in sleep.call_args_list), audit.SETTLE_LIMIT_SECONDS)
             self.assertTrue(all(item['transcript_lines'] == [] for item in findings))
 
     def test_settle_pending_does_not_wait_without_empty_pane_evidence(self):
