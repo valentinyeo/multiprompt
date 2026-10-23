@@ -40,6 +40,7 @@ const capacityHostLabel = @import("capacity.zig").capacityHostLabel;
 const effectiveCapacityState = @import("capacity.zig").effectiveCapacityState;
 const sidebarVpsHost = @import("capacity.zig").sidebarVpsHost;
 const sidebarStickyCardRect = @import("capacity.zig").sidebarStickyCardRect;
+const SIDEBAR_STATUS_DETAIL_H = @import("app_state.zig").SIDEBAR_STATUS_DETAIL_H;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const AiPaceStatus = @import("app_state.zig").AiPaceStatus;
 const AiPaceProvider = @import("app_state.zig").AiPaceProvider;
@@ -62,6 +63,11 @@ const LADDER_MAX_AGE_SECS = @import("app_state.zig").LADDER_MAX_AGE_SECS;
 const uiScaled = @import("drawing.zig").uiScaled;
 const capacityStateColor = @import("capacity.zig").capacityStateColor;
 const paintSidebarVpsCard = @import("capacity.zig").paintSidebarVpsCard;
+const paintSidebarVpsDetail = @import("capacity.zig").paintSidebarVpsDetail;
+const capacityLoadPercent = @import("capacity.zig").capacityLoadPercent;
+const drawAsciiRun = @import("drawing.zig").drawAsciiRun;
+const asciiTextWidth = @import("drawing.zig").asciiTextWidth;
+const status_line = @import("status_line.zig");
 const paintSidebarCardFrame = @import("capacity.zig").paintSidebarCardFrame;
 const nowFileTime = @import("inbox.zig").nowFileTime;
 
@@ -793,7 +799,82 @@ fn paintAiPaceBar(hdc: HANDLE, left: i32, top: i32, right: i32, goal: AiPaceGoal
     }
 }
 
-fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
+fn aiPaceNextWeeklyReset(now: u64) ?u64 {
+    const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
+    var resets = [_]u64{0} ** app_state.g_ai_pace.goals.len;
+    for (app_state.g_ai_pace.goals[0..goal_count], 0..) |goal, slot| {
+        if (goal.available and goal.has_weekly_reset) resets[slot] = goal.weekly_reset_filetime;
+    }
+    return status_line.earliestReset(now, resets[0..goal_count]);
+}
+
+fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: DWORD) i32 {
+    const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
+    var x = start_x;
+    for (app_state.g_ai_pace.goals[0..goal_count], 0..) |goal, slot| {
+        if (slot > 0) {
+            _ = SetTextColor(hdc, dim);
+            x = drawAsciiRun(hdc, " | ", x, rect.top, rect.bottom, limit);
+        }
+        var segment_buf: [24]u8 = undefined;
+        const segment = status_line.formatWeekSegment(&segment_buf, status_line.providerShortLabel(@tagName(goal.provider)), goal.available and goal.has_total_used, goal.total_used_tenths);
+        _ = SetTextColor(hdc, if (goal.available) aiPaceProviderColor(goal, slot) else dim);
+        x = drawAsciiRun(hdc, segment, x, rect.top, rect.bottom, limit);
+    }
+    return x;
+}
+
+fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
+    paintSidebarCardFrame(hdc, rect);
+    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
+    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
+    const inner_left = rect.left + uiScaled(10);
+    const inner_right = rect.right - uiScaled(10);
+    if (inner_right <= inner_left) return;
+    _ = SelectObject(hdc, font_subtitle);
+
+    var x = inner_left;
+    if (app_state.g_ai_pace.from_ladder) {
+        const burn_codex = app_state.g_ai_pace.ladder_mode == 2;
+        const chip_color: DWORD = if (burn_codex)
+            (if (app_state.g_light_theme) RGB(20, 125, 86) else RGB(70, 190, 140))
+        else
+            (if (app_state.g_light_theme) RGB(175, 82, 52) else RGB(224, 125, 91));
+        const chip_text: []const u8 = if (burn_codex) "CX" else "CL";
+        var chip = RECT{ .left = x, .top = rect.top + uiScaled(5), .right = x + asciiTextWidth(hdc, chip_text) + uiScaled(10), .bottom = rect.bottom - uiScaled(5) };
+        const chip_brush = CreateSolidBrush(chip_color);
+        _ = FillRect(hdc, &chip, chip_brush);
+        _ = DeleteObject(chip_brush);
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(20, 22, 26));
+        drawAscii(hdc, chip_text, &chip, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_CENTER);
+        x = chip.right + uiScaled(8);
+    } else {
+        _ = SetTextColor(hdc, bright);
+        x = drawAsciiRun(hdc, "AI", x, rect.top, rect.bottom, inner_right) + uiScaled(8);
+    }
+
+    var limit = inner_right;
+    const now = nowFileTime();
+    if (aiPaceNextWeeklyReset(now)) |reset| {
+        var reset_buf: [16]u8 = undefined;
+        const reset_text = status_line.formatResetHours(&reset_buf, now, reset);
+        _ = SetTextColor(hdc, dim);
+        var reset_rc = RECT{ .left = @max(x, inner_right - asciiTextWidth(hdc, reset_text)), .top = rect.top, .right = inner_right, .bottom = rect.bottom };
+        drawAscii(hdc, reset_text, &reset_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+        limit = reset_rc.left - uiScaled(6);
+    }
+
+    if (app_state.g_ai_pace.goal_count == 0) {
+        if (!app_state.g_ai_pace.available) {
+            _ = SetTextColor(hdc, dim);
+            _ = drawAsciiRun(hdc, "CONNECTING", x, rect.top, rect.bottom, limit);
+        }
+        return;
+    }
+    _ = paintAiPaceWeekRuns(hdc, x, rect, limit, dim);
+}
+
+fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
     paintSidebarCardFrame(hdc, rect);
     const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
     const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
@@ -972,17 +1053,12 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subt
     }
 }
 
-fn paintSidebarCombinedCard(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
-    paintSidebarCardFrame(hdc, rect);
-    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
-    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
-    const inner_left = rect.left + uiScaled(10);
-    const inner_right = rect.right - uiScaled(10);
-    const host = sidebarVpsHost();
-    const vps_state = if (host) |value| effectiveCapacityState(value) else CapacityState.unknown;
+const SidebarOverviewStatus = struct { label: []const u8, color: DWORD };
+
+fn sidebarOverviewStatus(vps_state: CapacityState, dim: DWORD) SidebarOverviewStatus {
     const to_go = aiPaceToGoCount();
     const stale = aiPaceStaleCount();
-    const overall_label: []const u8 = if (vps_state == .red or vps_state == .critical)
+    const label: []const u8 = if (vps_state == .red or vps_state == .critical)
         "CRITICAL"
     else if (vps_state == .amber)
         "WATCH"
@@ -994,7 +1070,7 @@ fn paintSidebarCombinedCard(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_su
         "WAITING"
     else
         "GOOD";
-    const overall_color: DWORD = if (vps_state == .red or vps_state == .critical)
+    const color: DWORD = if (vps_state == .red or vps_state == .critical)
         capacityStateColor(vps_state, dim)
     else if (vps_state == .amber)
         aiPaceStatusColor(.to_go, dim)
@@ -1006,6 +1082,59 @@ fn paintSidebarCombinedCard(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_su
         dim
     else
         aiPaceStatusColor(.done, dim);
+    return .{ .label = label, .color = color };
+}
+
+fn paintSidebarCombinedCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
+    paintSidebarCardFrame(hdc, rect);
+    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
+    const inner_left = rect.left + uiScaled(10);
+    const inner_right = rect.right - uiScaled(10);
+    if (inner_right <= inner_left) return;
+    const host = sidebarVpsHost();
+    const vps_state = if (host) |value| effectiveCapacityState(value) else CapacityState.unknown;
+    const overview = sidebarOverviewStatus(vps_state, dim);
+
+    drawAttentionDot(hdc, inner_left + uiScaled(4), @divTrunc(rect.top + rect.bottom, 2), uiScaled(3), overview.color);
+    _ = SelectObject(hdc, font_subtitle);
+    _ = SetTextColor(hdc, overview.color);
+    var overall_rc = RECT{ .left = @max(inner_left, inner_right - asciiTextWidth(hdc, overview.label)), .top = rect.top, .right = inner_right, .bottom = rect.bottom };
+    drawAscii(hdc, overview.label, &overall_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+    const limit = overall_rc.left - uiScaled(6);
+
+    var x = inner_left + uiScaled(12);
+    const has_goals = app_state.g_ai_pace.goal_count > 0;
+    if (host) |value| {
+        const metrics = app_state.g_host_capacity[value];
+        var host_buf: [32]u8 = undefined;
+        _ = SetTextColor(hdc, capacityStateColor(vps_state, dim));
+        x = drawAsciiRun(hdc, status_line.formatHostLoad(&host_buf, capacityHostLabel(value), metrics.valid and metrics.cores > 0, capacityLoadPercent(metrics)), x, rect.top, rect.bottom, limit);
+        if (has_goals) {
+            _ = SetTextColor(hdc, dim);
+            x = drawAsciiRun(hdc, " | ", x, rect.top, rect.bottom, limit);
+        }
+    }
+    if (has_goals) {
+        _ = paintAiPaceWeekRuns(hdc, x, rect, limit, dim);
+    } else if (host == null and !app_state.g_ai_pace.available) {
+        _ = SetTextColor(hdc, dim);
+        _ = drawAsciiRun(hdc, "CONNECTING", x, rect.top, rect.bottom, limit);
+    }
+}
+
+fn paintSidebarCombinedDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
+    paintSidebarCardFrame(hdc, rect);
+    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
+    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
+    const inner_left = rect.left + uiScaled(10);
+    const inner_right = rect.right - uiScaled(10);
+    const host = sidebarVpsHost();
+    const vps_state = if (host) |value| effectiveCapacityState(value) else CapacityState.unknown;
+    const to_go = aiPaceToGoCount();
+    const stale = aiPaceStaleCount();
+    const overview = sidebarOverviewStatus(vps_state, dim);
+    const overall_label = overview.label;
+    const overall_color = overview.color;
 
     _ = SelectObject(hdc, font_title);
     _ = SetTextColor(hdc, bright);
@@ -1115,7 +1244,7 @@ fn paintSidebarCollapsedStatusCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDL
     drawAscii(hdc, page, &page_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_CENTER);
 }
 
-pub fn paintSidebarStickyStatusCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HANDLE) void {
+pub fn paintSidebarStickyStatusCard(hdc: HANDLE, font_subtitle: HANDLE) void {
     if (app_state.g_hide_sidebar) return;
     const rect = sidebarStickyCardRect();
     if (rect.bottom <= rect.top or rect.right <= rect.left) return;
@@ -1124,14 +1253,38 @@ pub fn paintSidebarStickyStatusCard(hdc: HANDLE, font_title: HANDLE, font_subtit
         return;
     }
     switch (app_state.g_sidebar_status_card) {
-        0 => paintSidebarCombinedCard(hdc, rect, font_title, font_subtitle),
+        0 => paintSidebarCombinedCard(hdc, rect, font_subtitle),
         1 => {
             if (sidebarVpsHost()) |host| {
-                paintSidebarVpsCard(hdc, host, rect.top, font_title, font_subtitle);
+                paintSidebarVpsCard(hdc, host, rect, font_subtitle);
             } else {
-                paintSidebarCombinedCard(hdc, rect, font_title, font_subtitle);
+                paintSidebarCombinedCard(hdc, rect, font_subtitle);
             }
         },
-        else => paintSidebarAiPaceCard(hdc, rect, font_title, font_subtitle),
+        else => paintSidebarAiPaceCard(hdc, rect, font_subtitle),
+    }
+}
+
+pub fn sidebarStatusPopupRect() RECT {
+    const layout = @import("window_layout.zig");
+    const card = sidebarStickyCardRect();
+    const bottom = card.top - layout.paneGap();
+    return .{ .left = card.left, .top = @max(layout.paneOuterMargin(), bottom - uiScaled(SIDEBAR_STATUS_DETAIL_H)), .right = card.right, .bottom = bottom };
+}
+
+pub fn paintSidebarStatusCardPopup(hdc: HANDLE, font_title: HANDLE, font_subtitle: HANDLE) void {
+    if (!app_state.g_status_card_hover or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) return;
+    const rect = sidebarStatusPopupRect();
+    if (rect.bottom <= rect.top or rect.right <= rect.left) return;
+    switch (app_state.g_sidebar_status_card) {
+        0 => paintSidebarCombinedDetail(hdc, rect, font_title, font_subtitle),
+        1 => {
+            if (sidebarVpsHost()) |host| {
+                paintSidebarVpsDetail(hdc, host, rect, font_title, font_subtitle);
+            } else {
+                paintSidebarCombinedDetail(hdc, rect, font_title, font_subtitle);
+            }
+        },
+        else => paintSidebarAiPaceDetail(hdc, rect, font_title, font_subtitle),
     }
 }

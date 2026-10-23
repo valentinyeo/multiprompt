@@ -4,6 +4,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| IGSH-673 | The sidebar status card is one line on every page, with full numbers on hover. | status-card | journey added, not yet run | Run the branch journey on GitHub Windows, run it with tag=v0.28.839 to see the height check fail, and inspect the screenshots. Live usage and VPS numbers need real telemetry. |
 | IGSH-612 | Ctrl+K groups commands by job, lists your most used commands first and uses clearer names. | palette-order | journey added, not yet run | Run the branch journey on GitHub Windows, run it against the previous release to see it fail, and inspect the screenshots. |
 | IGSH-672 | A workspace listed in `browser-own-profile.txt` gets its own browser profile; other workspaces keep the shared one. | browser-own-profile | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; also dispatch it against the latest release tag and require it to fail at the own-profile check. |
 | IGSH-611 | Everywhere view actions switch once and skip persistent session view locks. | chat-view-everywhere | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; native migration and lock round-trip tests also require Windows CI. |

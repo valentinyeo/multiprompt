@@ -367,6 +367,7 @@ const paintThreadTitle = @import("drawing.zig").paintThreadTitle;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const paintWorkspaceStrip = @import("drawing.zig").paintWorkspaceStrip;
 const paintSidebarStickyStatusCard = @import("telemetry_panel.zig").paintSidebarStickyStatusCard;
+const paintSidebarStatusCardPopup = @import("telemetry_panel.zig").paintSidebarStatusCardPopup;
 const stopSpinnerTimerIfIdle = @import("clipboard.zig").stopSpinnerTimerIfIdle;
 const ReadConsoleOutputCharacterW = @import("win32.zig").ReadConsoleOutputCharacterW;
 const asciiToWideZ = @import("voice.zig").asciiToWideZ;
@@ -2202,10 +2203,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
             }
         }
 
-        paintSidebarStickyStatusCard(hdc, font_title, font_status_card);
+        paintSidebarStickyStatusCard(hdc, font_status_card);
         paintSidebarUpdateCard(hdc, font_title, font_status_card);
 
         paintWorkspaceStrip(hdc, sidebar_bg);
+        paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
     }
 
     if (app_state.g_search_active) {

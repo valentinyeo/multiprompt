@@ -9,6 +9,7 @@ const DT_CENTER = @import("win32.zig").DT_CENTER;
 const DT_RIGHT = @import("win32.zig").DT_RIGHT;
 const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
 const DT_END_ELLIPSIS = @import("win32.zig").DT_END_ELLIPSIS;
+const DT_CALCRECT = @import("win32.zig").DT_CALCRECT;
 const TRANSPARENT = @import("win32.zig").TRANSPARENT;
 const NULL_BRUSH = @import("win32.zig").NULL_BRUSH;
 const RECT = @import("win32.zig").RECT;
@@ -98,6 +99,20 @@ pub fn drawAsciiLong(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void 
         n += 1;
     }
     _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), rc, flags);
+}
+
+pub fn asciiTextWidth(hdc: HANDLE, text: []const u8) i32 {
+    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    drawAscii(hdc, text, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    return calc.right - calc.left;
+}
+
+pub fn drawAsciiRun(hdc: HANDLE, text: []const u8, x: i32, top: i32, bottom: i32, right_limit: i32) i32 {
+    if (text.len == 0 or x >= right_limit) return x;
+    const width = asciiTextWidth(hdc, text);
+    var rc = RECT{ .left = x, .top = top, .right = @min(x + width, right_limit), .bottom = bottom };
+    drawAscii(hdc, text, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    return x + width;
 }
 
 pub fn drawModalShadow(hdc: HANDLE, x: i32, y: i32, w: i32, h: i32, radius: i32) void {

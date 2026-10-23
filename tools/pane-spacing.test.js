@@ -46,7 +46,7 @@ const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read
 const chat_history = struct { ${fn(read('chat_history'), 'column')} };
 const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
-${['GROUP_HEADER_H', 'BROWSER_SPLIT_DEFAULT_PERMILLE', 'CHAT_BUBBLE_RADIUS', 'DEV_TOP_PAD', 'DEV_SHELL_COLS', 'SIDEBAR_W_COLLAPSED', 'SIDEBAR_VPS_CARD_H', 'SIDEBAR_STICKY_CARD_H', 'SIDEBAR_STICKY_CARD_COLLAPSED_H', 'SIDEBAR_STICKY_CARD_GAP', 'THREAD_TITLE_H', 'BROWSER_SPLIT_W', 'BrowserLayout', 'ChatViewLayout'].map(n => n.endsWith('Layout') ? state.slice(state.indexOf('pub const ' + n + ' = struct'), state.indexOf('\n};', state.indexOf('pub const ' + n + ' = struct')) + 3) : declaration(n)).join('\n')}
+${['GROUP_HEADER_H', 'BROWSER_SPLIT_DEFAULT_PERMILLE', 'CHAT_BUBBLE_RADIUS', 'DEV_TOP_PAD', 'DEV_SHELL_COLS', 'SIDEBAR_W_COLLAPSED', 'SIDEBAR_STICKY_CARD_H', 'SIDEBAR_STICKY_CARD_COLLAPSED_H', 'SIDEBAR_STICKY_CARD_GAP', 'THREAD_TITLE_H', 'BROWSER_SPLIT_W', 'BrowserLayout', 'ChatViewLayout'].map(n => n.endsWith('Layout') ? state.slice(state.indexOf('pub const ' + n + ' = struct'), state.indexOf('\n};', state.indexOf('pub const ' + n + ' = struct')) + 3) : declaration(n)).join('\n')}
 const ConsoleColumn = struct { left: i32, width: i32 };
 ${shared ? layout.slice(layout.indexOf('pub const PaneRects'), layout.indexOf('\n};', layout.indexOf('pub const PaneRects')) + 3) : ''}
 const LOOK_UNIFIED = true;

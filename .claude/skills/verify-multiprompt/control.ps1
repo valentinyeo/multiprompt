@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'palette-order', 'browser-own-profile')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -309,6 +309,18 @@ public static class VerifyNative {
         RequireBrowserStrip(pane, owner, point);
         MouseAt(point.X, point.Y, 0);
         foreach (uint flags in new uint[] { 2, 4, 2, 4 }) MouseAt(point.X, point.Y, flags);
+    }
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+    public static void MoveMouseClient(IntPtr hwnd, int x, int y, bool requireOwned) {
+        Point target = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref target)) throw new InvalidOperationException("Cannot map mouse target");
+        if (requireOwned && WindowFromPoint(target) != hwnd) throw new InvalidOperationException("Mouse target is not in the owned window");
+        Point start;
+        if (!GetCursorPos(out start)) start = target;
+        for (int step = 1; step <= 12; step++) {
+            MouseAt(start.X + (target.X - start.X) * step / 12, start.Y + (target.Y - start.Y) * step / 12, 0);
+            Thread.Sleep(15);
+        }
     }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
@@ -1405,6 +1417,48 @@ function Select-Theme([string]$Theme, [string]$ActionShot) {
     Wait-Until { (Test-Path $path) -and (Get-Content $path -Raw).Trim() -eq $Theme } "app-written theme-mode.txt equals $Theme"
     Snapshot ($ActionShot + '-selected')
     Press @(0x1B) 'Esc: close Themes palette'
+}
+
+function Measure-StatusCard([string]$Name) {
+    $frame = New-Object VerifyNative+Rect
+    $client = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'status-card native geometry unavailable' }
+    $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+    $scale = $dpi / 96.0
+    $offsetX = $origin.X - $frame.Left
+    $offsetY = $origin.Y - $frame.Top
+    $x = $offsetX + [int][Math]::Round(14 * $scale)
+    $limit = $offsetY
+    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
+    try {
+        $y = $offsetY + $client.Bottom - 1
+        $background = $image.GetPixel($x, $y)
+        while ($y -gt $limit) {
+            $pixel = $image.GetPixel($x, $y)
+            if ([Math]::Max([Math]::Abs($pixel.R - $background.R), [Math]::Max([Math]::Abs($pixel.G - $background.G), [Math]::Abs($pixel.B - $background.B))) -gt 8) { break }
+            $y--
+        }
+        $bottom = $y
+        $fill = $image.GetPixel($x, $bottom - [Math]::Max(2, [int][Math]::Round(3 * $scale)))
+        $y = $bottom - 1
+        while ($y -gt $limit) {
+            $pixel = $image.GetPixel($x, $y)
+            if ([Math]::Max([Math]::Abs($pixel.R - $fill.R), [Math]::Max([Math]::Abs($pixel.G - $fill.G), [Math]::Abs($pixel.B - $fill.B))) -gt 8) { break }
+            $y--
+        }
+        $top = $y
+        $borderColor = $image.GetPixel($x, $bottom)
+        $fillColor = @($fill.R, $fill.G, $fill.B)
+    } finally { $image.Dispose() }
+    if ($bottom -le $limit -or $top -le $limit) { throw "status-card: no card frame found in $Name.png" }
+    $pixels = $bottom - $top + 1
+    return [ordered]@{
+        screenshot = $Name + '.png'; x = $x; top = $top; bottom = $bottom; clientBottom = $offsetY + $client.Bottom
+        border = @($borderColor.R, $borderColor.G, $borderColor.B); fill = $fillColor
+        devicePixels = $pixels; dpi = $dpi; height = [Math]::Round($pixels / $scale, 1)
+    }
 }
 
 function Sidebar-Luminance([string]$Name) {
@@ -3030,6 +3084,48 @@ try {
             $result.checks += @{ name = 'browser-own-profile shared-untouched'; entries = $sharedAfter.Count }
             $result.checks += @{ name = 'browser-own-profile restored'; userDataDir = $restoredProof.userDataDir }
             Snapshot 'after'
+        }
+        'status-card' {
+            $client = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client)) { throw 'status-card client rectangle unavailable' }
+            $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+            Doctor
+            Assert-Foreground
+            Record 'Mouse: move away from the sidebar status card'
+            [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
+            $statusFile = Join-Path $scratch 'roaming/ZigShell/sidebar-status-card.txt'
+            $pages = @()
+            $heights = @()
+            foreach ($page in 0..2) {
+                if ($page -gt 0) {
+                    Press @(0x11, 0x10, 0x47) ('Ctrl+Shift+G: status card page ' + ($page + 1))
+                    Wait-Until { (Test-Path -LiteralPath $statusFile) -and ([IO.File]::ReadAllText($statusFile).Trim() -eq [string]$page) } ('status card page ' + ($page + 1) + ' saved by the app')
+                    Start-Sleep -Milliseconds 500
+                }
+                $shot = 'status-card-' + ($page + 1)
+                Snapshot $shot
+                $measure = Measure-StatusCard $shot
+                $measure.page = $page + 1
+                $pages += $measure
+                $heights += $measure.height
+            }
+            $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages }
+            Save-Json $result.statusCard 'status-card.json'
+            Snapshot 'action'
+            Doctor
+            Assert-Foreground
+            Record 'Mouse: hover the sidebar status card'
+            [VerifyNative]::MoveMouseClient($script:window, [int][Math]::Round(60 * $scale), $client.Bottom - [int][Math]::Round(14 * $scale), $true)
+            Start-Sleep -Milliseconds 600
+            Snapshot 'hover'
+            Record 'Mouse: leave the sidebar status card'
+            [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
+            Start-Sleep -Milliseconds 300
+            Snapshot 'after'
+            foreach ($height in $heights) {
+                if ($height -gt 30 -or $height -lt 20) { throw ('status-card: card height ' + $height + ' outside 20..30; heights ' + ($heights -join ', ')) }
+            }
+            $result.checks += @{ name = 'status-card'; heights = $heights; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
         }
         'command-palette' {
             Palette 'interface'
