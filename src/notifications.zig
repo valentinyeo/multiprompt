@@ -255,6 +255,11 @@ pub fn notifyListenerThread() void {
     while (true) {
         const client = accept(srv, null, null);
         if (client == INVALID_SOCKET) continue;
+        const peer_identity = @import("peer_identity.zig");
+        if (!@atomicLoad(*const fn (SOCKET) bool, &peer_identity.peer_check, .acquire)(client)) {
+            _ = closesocket(client);
+            continue;
+        }
 
         const timeout_ms: u32 = 5000;
         const win32 = @import("win32.zig");
@@ -1543,4 +1548,123 @@ test "hardening listeners close idle clients and serve the next request" {
         }
         try std.testing.expectEqualStrings("ACTIVE:deadline-check", payload[0..len]);
     }
+}
+
+const LocalListenerChecks = struct {
+    var calls = std.atomic.Value(u32).init(0);
+    var directory: [512]u8 = undefined;
+    var directory_len: usize = 0;
+
+    fn reject(_: SOCKET) bool {
+        _ = calls.fetchAdd(1, .release);
+        return false;
+    }
+
+    fn record(client: SOCKET) bool {
+        const allowed = @import("peer_identity.zig").peerIsSameUser(client);
+        var addr: SOCKADDR_IN = undefined;
+        var len: i32 = @sizeOf(SOCKADDR_IN);
+        if (@import("win32.zig").getsockname(client, &addr, &len) != 0) return false;
+        const index = calls.fetchAdd(1, .acq_rel);
+        var name: [560]u8 = undefined;
+        const path = std.fmt.bufPrint(&name, "{s}\\decision-{d}", .{ directory[0..directory_len], index }) catch return false;
+        var text: [64]u8 = undefined;
+        const value = std.fmt.bufPrint(&text, "{d}:{s}", .{ htons(addr.sin_port), if (allowed) "accepted" else "rejected" }) catch return false;
+        if (!@import("file_io.zig").writeFileAtomicW(path, value)) return false;
+        return allowed;
+    }
+};
+
+test "local listener rejects peer of another user" {
+    defer {
+        while (!app_state.g_notify_mutex.tryLock()) Sleep(0);
+        app_state.g_notify_head = 0;
+        app_state.g_notify_tail = 0;
+        app_state.g_notify_count = 0;
+        app_state.g_notify_mutex.unlock();
+        while (!app_state.g_shot_paste_mutex.tryLock()) Sleep(0);
+        app_state.g_shot_paste_head = 0;
+        app_state.g_shot_paste_tail = 0;
+        app_state.g_shot_paste_count = 0;
+        app_state.g_shot_paste_mutex.unlock();
+    }
+    const peer = @import("peer_identity.zig");
+    const win = @import("win32.zig");
+    const port = try hardeningNotifyPort();
+    @import("browser_bridge.zig").startTunnelInboundListener();
+    try std.testing.expect(app_state.g_tunnel_inbound_port != 0);
+    const srv = socket(AF_INET, SOCK_STREAM, 0);
+    try std.testing.expect(srv != INVALID_SOCKET);
+    defer _ = closesocket(srv);
+    var addr = SOCKADDR_IN{ .sin_family = AF_INET, .sin_port = 0, .sin_addr = 0x0100007F, .sin_zero = @splat(0) };
+    try std.testing.expectEqual(@as(i32, 0), bind(srv, &addr, @sizeOf(SOCKADDR_IN)));
+    var len: i32 = @sizeOf(SOCKADDR_IN);
+    try std.testing.expectEqual(@as(i32, 0), win.getsockname(srv, &addr, &len));
+    try std.testing.expectEqual(@as(i32, 0), listen(srv, 1));
+    const same = try hardeningConnect(htons(addr.sin_port));
+    defer _ = closesocket(same);
+    const accepted = accept(srv, null, null);
+    try std.testing.expect(accepted != INVALID_SOCKET);
+    defer _ = closesocket(accepted);
+    try std.testing.expect(peer.peerIsSameUser(accepted));
+    LocalListenerChecks.calls.store(0, .release);
+    const saved_check = @atomicRmw(*const fn (SOCKET) bool, &peer.peer_check, .Xchg, LocalListenerChecks.reject, .acq_rel);
+    defer @atomicStore(*const fn (SOCKET) bool, &peer.peer_check, saved_check, .release);
+    for ([_]u16{ port, app_state.g_tunnel_inbound_port }, [_][]const u8{
+        "SHOT:0:https://example.invalid/a\n",
+        "ZSB:workspace:d29ya3NwYWNlLWxpc3Q=\n",
+    }) |target, request| {
+        const client = try hardeningConnect(target);
+        defer _ = closesocket(client);
+        const sent = send(client, request.ptr, @intCast(request.len), 0);
+        try std.testing.expect(sent == @as(i32, @intCast(request.len)) or (sent == -1 and WSAGetLastError() == 10054));
+        var response: [256]u8 = undefined;
+        const n = recv(client, &response, response.len, 0);
+        try std.testing.expect(n == 0 or (n == -1 and WSAGetLastError() == 10054));
+        var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
+        var queued_len = dequeueNotification(&payload);
+        const deadline = GetTickCount64() + 1000;
+        while (queued_len == 0 and LocalListenerChecks.calls.load(.acquire) == 0 and GetTickCount64() < deadline) {
+            Sleep(1);
+            queued_len = dequeueNotification(&payload);
+        }
+        try std.testing.expectEqual(@as(u32, 0), queued_len);
+        try std.testing.expect(LocalListenerChecks.calls.load(.acquire) > 0);
+        try std.testing.expect(!app_state.g_zsb_workspace_pending);
+        try std.testing.expectEqual(@as(usize, 0), app_state.g_shot_paste_count);
+    }
+    try std.testing.expectEqual(@as(u32, 2), LocalListenerChecks.calls.load(.acquire));
+}
+
+test "local listener account helper" {
+    const n = GetEnvironmentVariableA("IGSH664_LISTENER_DIR", &LocalListenerChecks.directory, LocalListenerChecks.directory.len);
+    if (n == 0) return;
+    try std.testing.expect(n < LocalListenerChecks.directory.len);
+    LocalListenerChecks.directory_len = n;
+    LocalListenerChecks.calls.store(0, .release);
+    const peer = @import("peer_identity.zig");
+    const saved_check = @atomicRmw(*const fn (SOCKET) bool, &peer.peer_check, .Xchg, LocalListenerChecks.record, .acq_rel);
+    defer @atomicStore(*const fn (SOCKET) bool, &peer.peer_check, saved_check, .release);
+    const port = try hardeningNotifyPort();
+    const bridge = @import("browser_bridge.zig");
+    bridge.startTunnelInboundListener();
+    try std.testing.expect(app_state.g_tunnel_inbound_port != 0);
+    var path_buf: [560]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\ports", .{LocalListenerChecks.directory[0..n]});
+    var ports_buf: [64]u8 = undefined;
+    const ports = try std.fmt.bufPrint(&ports_buf, "{d}\n{d}", .{ port, app_state.g_tunnel_inbound_port });
+    try std.testing.expect(@import("file_io.zig").writeFileAtomicW(path, ports));
+    const deadline = GetTickCount64() + 180_000;
+    var done_buf: [560]u8 = undefined;
+    const done_path = try std.fmt.bufPrint(&done_buf, "{s}\\done", .{LocalListenerChecks.directory[0..n]});
+    while (GetTickCount64() < deadline) {
+        bridge.handleZsbWorkspaceRequest();
+        if (win32OpenRead(done_path)) |file| {
+            _ = CloseHandle(file);
+            try std.testing.expectEqual(@as(u32, 4), LocalListenerChecks.calls.load(.acquire));
+            return;
+        }
+        Sleep(1);
+    }
+    return error.AccountChecksIncomplete;
 }

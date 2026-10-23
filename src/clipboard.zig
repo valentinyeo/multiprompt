@@ -1093,8 +1093,10 @@ pub fn pasteTextToShellDirectEx(shell_index: u32, text_buf: []const u16, force_b
 }
 
 pub fn queueShotPaste(shell_id: u32, url: []const u8, user_initiated: bool) void {
-    if (shell_id == 0 or url.len == 0) return;
-    const copy_len = @min(url.len, SHOT_PASTE_URL_CAP - 1);
+    if (shell_id == 0 or url.len >= SHOT_PASTE_URL_CAP) return;
+    if (!std.mem.startsWith(u8, url, "https://") and !std.mem.startsWith(u8, url, "http://")) return;
+    for (url) |byte| if (byte <= 0x20 or byte == 0x7f) return;
+    const copy_len = url.len;
     while (!app_state.g_shot_paste_mutex.tryLock()) Sleep(0);
     if (app_state.g_shot_paste_count == SHOT_PASTE_QUEUE_CAP) {
         app_state.g_shot_paste_mutex.unlock();
@@ -1449,4 +1451,38 @@ test "hardening clipboard reads reject unterminated allocations and preserve tex
         try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("hello"), out[0..5]);
         try std.testing.expectEqual(@as(u16, 0), out[5]);
     }
+}
+
+test "screenshot link rejects control bytes" {
+    const saved_head = app_state.g_shot_paste_head;
+    const saved_tail = app_state.g_shot_paste_tail;
+    const saved_count = app_state.g_shot_paste_count;
+    const saved_queue = app_state.g_shot_paste_queue;
+    defer {
+        app_state.g_shot_paste_head = saved_head;
+        app_state.g_shot_paste_tail = saved_tail;
+        app_state.g_shot_paste_count = saved_count;
+        app_state.g_shot_paste_queue = saved_queue;
+    }
+    app_state.g_shot_paste_head = 0;
+    app_state.g_shot_paste_tail = 0;
+    app_state.g_shot_paste_count = 0;
+    for ([_][]const u8{
+        "https://example.invalid/a\r\nnext",
+        "javascript:x",
+        "https://example.invalid/a b",
+        "https://example.invalid/a\x00b",
+        "https://example.invalid/a\x7f",
+        "https://" ++ "a" ** (SHOT_PASTE_URL_CAP - 8),
+    }) |url| {
+        queueShotPaste(1, url, false);
+        try std.testing.expectEqual(@as(usize, 0), app_state.g_shot_paste_count);
+    }
+    const valid = "https://example.invalid/shot.png";
+    queueShotPaste(1, valid, true);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_shot_paste_count);
+    const slot = app_state.g_shot_paste_queue[0];
+    try std.testing.expectEqualStrings(valid, slot.url[0..slot.url_len]);
+    try std.testing.expect(slot.user_initiated);
+    try std.testing.expectEqual(@as(u32, 1), slot.shell_id);
 }
