@@ -154,6 +154,7 @@ pub fn windowKey(msg: u32, vk: usize) bool {
         return true;
     }
     if (!app_state.g_chat_find_open) return false;
+    if (@import("focus.zig").browserFocusChord(msg, vk, ctrl, alt)) return false;
     if (down) routeKey(@intCast(vk), ctrl, shift, alt);
     if (msg == 0x0102) {
         const char: u16 = @truncate(vk);

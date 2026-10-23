@@ -15,6 +15,7 @@ const main = read('src/main.zig');
 const session = read('src/session.zig');
 const driver = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
+const restart = driver.slice(driver.indexOf('function Restart-ChatView('), driver.indexOf('function Wait-ChatFocus('));
 const journey = driver.slice(driver.indexOf("        'chat-view-everywhere' {"), driver.indexOf("        'appearance' {"));
 
 function noGlobalForcing(source) {
@@ -100,7 +101,9 @@ test('ISSUE-611 commands are searchable, painted and handled for the active sess
   assert.throws(() => assert.doesNotMatch('chat view per tab', /chat view per tab|Chat View: Per Tab/));
 });
 
-function journeyContract(source) {
+function journeyContract(source, restartSource = restart) {
+  assert.match(source, /Restart-ChatView 3/);
+  source = source.replace('Restart-ChatView 3', restartSource);
   assert.ok(source.length > 0);
   const steps = [
     "Focus-Palette 'tab order' 6217", "'Down: Tab Order Manual'", "'Enter: keep creation order for Ctrl+1/2/3'",
@@ -114,7 +117,7 @@ function journeyContract(source) {
     "Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'",
     "Focus-Palette 'chat view off everywhere' 6347", "Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'",
     '$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$job.Stop()', '$stopped.ActiveProcesses -ne 0',
-    '$job.Start($Exe, $scratch,', "'restarted owned window and three restored sessions' 60", 'Doctor',
+    '$job.Start($Exe, $scratch,', "'restarted owned window and restored sessions' 60", 'Doctor',
     "Wait-ChatViews @($false, $false, $false) 0 'restart-session-1'",
     "Wait-ChatViews @($false, $false, $false) 1 'restart-session-2'",
     "Wait-ChatViews @($false, $false, $false) 2 'restart-session-3'",
@@ -128,7 +131,7 @@ function journeyContract(source) {
     assert.ok(at >= from, `missing or misordered ${step}`);
     from = at + step.length;
   }
-  assert.match(source, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'restarted app foreground'\s+Doctor/);
+  assert.match(source, /Wait-Until \{\s+Doctor\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'restarted app foreground'\s+Doctor/);
   assert.match(source, /Join-Path \$scratch 'roaming\/ZigShell\/session\.json\.launch\.json'/);
   assert.match(source, /if \(-not \(Test-Path \$path\)\) \{ return \$false \}/);
   assert.match(source, /\$launch = Get-Content \$path -Raw \| ConvertFrom-Json\s+\$launch\.PSObject\.Properties\['sort_auto'\] -and -not \$launch\.sort_auto/);
@@ -139,7 +142,7 @@ test('ISSUE-611 Windows journey drives real input, asserts every saved view, res
   journeyContract(journey);
   assert.throws(() => journeyContract(journey.replace("Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'", '')));
   assert.throws(() => journeyContract(journey.replace('ready chars=17 count=0 target=0', 'ready chars=17 count=1 target=6464')));
-  assert.throws(() => journeyContract(journey.replace('$stopped.ActiveProcesses -ne 0', '$false')));
+  assert.throws(() => journeyContract(journey, restart.replace('$stopped.ActiveProcesses -ne 0', '$false')));
   for (const before of ["Focus-Palette 'tab order' 6217", "'Down: Tab Order Manual'", "'manual tab order saved before creating sessions'", "-not $launch.sort_auto"]) {
     assert.throws(() => journeyContract(journey.replace(before, '')));
   }
@@ -160,9 +163,9 @@ test('ISSUE-611 restart foreground contract rejects one-shot and bare activation
     '[void][VerifyNative]::SetForegroundWindow($script:window)\n            Wait-Until {',
     'Wait-Until {\n                [void][VerifyNative]::SetForegroundWindow($script:window)',
   ]) {
-    const broken = journey.replace(/Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)/, replacement);
-    assert.notEqual(broken, journey);
-    assert.throws(() => journeyContract(broken), assert.AssertionError);
+    const brokenRestart = restart.replace(/Wait-Until \{\s+Doctor\s+\[VerifyNative\]::BringToForeground\(\$script:window\)/, replacement);
+    assert.notEqual(brokenRestart, restart);
+    assert.throws(() => journeyContract(journey, brokenRestart), assert.AssertionError);
   }
 });
 

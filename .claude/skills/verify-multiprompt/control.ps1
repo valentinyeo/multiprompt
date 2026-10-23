@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -1599,6 +1599,54 @@ function Sidebar-Luminance([string]$Name) {
     } finally { $image.Dispose() }
 }
 
+function Restart-ChatView([int]$ShellCount) {
+    Doctor
+    Record 'Close only the owned app normally and restart with the same isolated data directory'
+    if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Owned app did not close normally for view persistence restart' }
+    $stopped = $job.Stop()
+    Save-Json $stopped 'restart-process-tree.json'
+    if ($stopped.ActiveProcesses -ne 0) { throw 'Owned descendants survived before restart' }
+    $job.Dispose()
+    $script:job = New-Object VerifyJob
+    $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
+    $script:window = [IntPtr]::Zero
+    Wait-Until {
+        $process.Refresh()
+        $script:window = $process.MainWindowHandle
+        $state = Read-Inbox
+        $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -eq $ShellCount
+    } 'restarted owned window and restored sessions' 60
+    [void][VerifyNative]::ShowWindow($script:window, 9)
+    [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+    Wait-Until {
+        Doctor
+        [VerifyNative]::BringToForeground($script:window)
+        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+    } 'restarted app foreground'
+    Doctor
+}
+
+function Wait-ChatFocus([string]$Class, [string]$Step) {
+    Wait-Until {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $focused.Current.ProcessId -eq $process.Id -and $focused.Current.ClassName -ceq $Class -and
+            -not $focused.Current.IsOffscreen -and $focused.Current.NativeWindowHandle -ne 0 -and
+            [VerifyNative]::GetAncestor([IntPtr]$focused.Current.NativeWindowHandle, 2) -eq $script:window
+    } ("owned focused $Class`: $Step")
+    Snapshot $Step
+}
+
+function Assert-ChatTyping([string]$Text, [string]$Step) {
+    Wait-ChatFocus 'Edit' ($Step + '-focused')
+    $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
+    $value = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    if ($value.Current.Value -cne '') { throw 'Expected an empty composer before typing proof' }
+    Type-Text $Text
+    Wait-Until { $value.Current.Value -ceq $Text } ("UIA ValuePattern typing landed: $Step")
+    Wait-ChatFocus 'Edit' $Step
+    Save-Json @{ text = $value.Current.Value; handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.value.json')
+}
+
 try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
@@ -1810,29 +1858,7 @@ try {
             Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'
             Press @(0x11, 0x33) 'Ctrl+3: shell-locked session stays in shell'
             Wait-ChatViews @($false, $false, $false) 2 'locked-after-off'
-            Doctor
-            Record 'Close only the owned app normally and restart with the same isolated data directory'
-            if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Owned app did not close normally for view persistence restart' }
-            $stopped = $job.Stop()
-            Save-Json $stopped 'restart-process-tree.json'
-            if ($stopped.ActiveProcesses -ne 0) { throw 'Owned descendants survived before restart' }
-            $job.Dispose()
-            $job = New-Object VerifyJob
-            $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
-            $script:window = [IntPtr]::Zero
-            Wait-Until {
-                $process.Refresh()
-                $script:window = $process.MainWindowHandle
-                $state = Read-Inbox
-                $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -eq 3
-            } 'restarted owned window and three restored sessions' 60
-            [void][VerifyNative]::ShowWindow($script:window, 9)
-            [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
-            Wait-Until {
-                [VerifyNative]::BringToForeground($script:window)
-                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-            } 'restarted app foreground'
-            Doctor
+            Restart-ChatView 3
             Save-Json (Read-Session) 'restart-before-input.session.json'
             Press @(0x11, 0x31) 'Ctrl+1: restored first session'
             Wait-ChatViews @($false, $false, $false) 0 'restart-session-1'
@@ -1857,6 +1883,51 @@ try {
             Press @(0x1B) 'Esc: close empty palette'
             Wait-ChatViews @($false, $false, $false) 2 'after'
             $result.checks += @{ name = 'chat-view-everywhere-once'; unlockedOn = @(0, 1); skippedShellLock = 2; laterToggleSticks = $true; offEverywhere = $true; restartViewsAndLock = $true; removedPerTabRowCount = 0; entry = 'Ctrl+K, Ctrl+1/2/3 and Alt+C' }
+        }
+        'chat-focus' {
+            $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'Offline CMD session proves typing focus, not agent delivery' }
+            Press @(0x12, 0x43) 'Alt+C: enable Chat View for the isolated CMD session'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].cv -and
+                    -not ($state.tabs[0].PSObject.Properties['bon'] -and $state.tabs[0].bon)
+            } 'one saved Chat View session without a browser pane'
+            Wait-ChatFocus 'Edit' 'chat-enabled'
+            Restart-ChatView 1
+            Assert-ChatTyping 'abc' 'restart-typing'
+            Press @(0x11, 0x41) 'Ctrl+A: select restart draft'
+            Press @(0x08) 'Backspace: clear restart draft'
+            Press @(0x11, 0x46) 'Ctrl+F: open Chat Find'
+            Wait-ChatFocus 'ZigShellChatTranscript' 'find-open'
+            Snapshot 'action'
+            Press @(0x12, 0x51) 'Alt+Q: close Find and restore typing without a pane'
+            Assert-ChatTyping 'abc' 'find-alt-q-typing'
+            Press @(0x11, 0x41) 'Ctrl+A: select recovered draft'
+            Press @(0x08) 'Backspace: clear recovered draft'
+            Press @(0x1B) 'Esc: dismiss any remaining Find'
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+            $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+            if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen) { throw 'Owned transcript is not visible for mouse input' }
+            $handle = [IntPtr]$transcript.Current.NativeWindowHandle
+            if ($handle -eq [IntPtr]::Zero -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Transcript is not in the owned app window' }
+            $rect = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetClientRect($handle, [ref]$rect) -or $rect.Right -le 0 -or $rect.Bottom -le 0) { throw 'Owned transcript rectangle unavailable' }
+            Doctor
+            Assert-Foreground
+            Record 'Click the ownership-checked transcript rectangle using real mouse input'
+            [VerifyNative]::ClickClient($handle, [int]($rect.Right / 2), [int]($rect.Bottom / 2))
+            Snapshot 'transcript-clicked'
+            Press @(0x12, 0x51) 'Alt+Q: return from transcript to composer without a pane'
+            Assert-ChatTyping 'abc' 'transcript-alt-q-typing'
+            Press @(0x11, 0x41) 'Ctrl+A: select final draft'
+            Press @(0x08) 'Backspace: clear final draft'
+            Press @(0x11, 0x46) 'Ctrl+F: reopen Find for the Alt+M alias'
+            Wait-ChatFocus 'ZigShellChatTranscript' 'alias-find-open'
+            Press @(0x12, 0x4D) 'Alt+M: close Find and restore typing without a pane'
+            Assert-ChatTyping 'abc' 'find-alt-m-typing'
+            Snapshot 'after'
+            $result.checks += @{ name = 'chat-focus'; restartTyping = $true; findAltQTyping = $true; transcriptAltQTyping = $true; findAltMTyping = $true; panePresent = $false; entry = 'Alt+C, Ctrl+F, Alt+Q, mouse and Alt+M' }
         }
         'appearance' {
             Select-Theme 'dark' 'baseline-dark-action'

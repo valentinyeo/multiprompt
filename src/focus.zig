@@ -547,6 +547,39 @@ pub fn isCtrlDown() bool {
     return (GetAsyncKeyState(0x11) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
 }
 
+pub fn browserFocusChord(msg: usize, vk: usize, ctrl: bool, alt: bool) bool {
+    return (msg == WM_KEYDOWN or msg == WM_SYSKEYDOWN) and alt and !ctrl and (vk == 0x51 or vk == 0x4D);
+}
+
+test "ISSUE-716 Alt+Q and Alt+M escape Find in both keydown forms" {
+    for ([_]usize{ WM_KEYDOWN, WM_SYSKEYDOWN }) |msg| {
+        for ([_]usize{ 0x51, 0x4D }) |vk| {
+            try std.testing.expect(browserFocusChord(msg, vk, false, true));
+            try std.testing.expect(!browserFocusChord(msg, vk, true, true));
+            try std.testing.expect(!browserFocusChord(msg, vk, false, false));
+        }
+    }
+    try std.testing.expect(!browserFocusChord(0x0101, 0x51, false, true));
+    try std.testing.expect(!browserFocusChord(0x0105, 0x4D, false, true));
+    try std.testing.expect(!browserFocusChord(WM_SYSKEYDOWN, 0x41, false, true));
+}
+
+pub fn browserFocusReturnsToInput(pane_present: bool, chat_owns: bool, focus_drifted: bool) bool {
+    return !pane_present or (chat_owns and focus_drifted);
+}
+
+test "ISSUE-716 no pane always restores input and drifted Chat View returns to the composer" {
+    for ([_]bool{ false, true }) |chat_owns| {
+        for ([_]bool{ false, true }) |drifted| {
+            try std.testing.expect(browserFocusReturnsToInput(false, chat_owns, drifted));
+        }
+    }
+    try std.testing.expect(browserFocusReturnsToInput(true, true, true));
+    try std.testing.expect(!browserFocusReturnsToInput(true, true, false));
+    try std.testing.expect(!browserFocusReturnsToInput(true, false, true));
+    try std.testing.expect(!browserFocusReturnsToInput(true, false, false));
+}
+
 pub fn isAltDown(flags: DWORD) bool {
     return (flags & 0x20) != 0 or
         (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;

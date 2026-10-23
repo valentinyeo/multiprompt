@@ -1,0 +1,161 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const skill = '.claude/skills/verify-multiprompt/';
+const focus = read('src/focus.zig');
+const shortcuts = read('src/shortcuts.zig');
+const find = read('src/chat_find_ui.zig');
+const main = read('src/main.zig');
+const composer = read('src/chat_composer.zig');
+const driver = read(skill + 'control.ps1');
+const workflow = read('.github/workflows/verify.yml');
+const recipe = driver.slice(driver.indexOf("        'chat-focus' {"), driver.indexOf("        'appearance' {\n            Select-Theme"));
+
+function body(source, name) {
+  const start = source.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, name);
+  const end = source.indexOf('\n}', start);
+  assert.ok(end > start, name);
+  return source.slice(start, end + 2);
+}
+
+function decision(source, name, args) {
+  const expression = body(source, name).match(/return ([\s\S]*?);/);
+  assert.ok(expression, name);
+  return Function(...args, `return ${expression[1].replace(/\band\b/g, '&&').replace(/\bor\b/g, '||').replace(/\bWM_KEYDOWN\b/g, '0x100').replace(/\bWM_SYSKEYDOWN\b/g, '0x104')};`);
+}
+
+function chordContract(source) {
+  const chord = decision(source, 'browserFocusChord', ['msg', 'vk', 'ctrl', 'alt']);
+  for (const msg of [0x100, 0x104]) {
+    for (const vk of [0x51, 0x4d]) {
+      assert.equal(chord(msg, vk, false, true), true);
+      assert.equal(chord(msg, vk, true, true), false);
+      assert.equal(chord(msg, vk, false, false), false);
+    }
+  }
+  for (const msg of [0x101, 0x105, 0x102, 0x106]) assert.equal(chord(msg, 0x51, false, true), false);
+  assert.equal(chord(0x104, 0x41, false, true), false);
+}
+
+test('ISSUE-716 shared native chord decision preserves both key forms and excludes Ctrl/AltGr and keyup', () => {
+  chordContract(focus);
+  assert.match(focus, /test "ISSUE-716 Alt\+Q and Alt\+M escape Find in both keydown forms"/);
+  assert.throws(() => chordContract(focus.replace('or msg == WM_SYSKEYDOWN', '')));
+  assert.throws(() => chordContract(focus.replace('or vk == 0x4D', '')));
+  assert.throws(() => chordContract(focus.replace('and !ctrl', '')));
+});
+
+function recoveryContract(source) {
+  const recover = decision(source, 'browserFocusReturnsToInput', ['pane_present', 'chat_owns', 'focus_drifted']);
+  for (const chat of [false, true]) {
+    for (const drift of [false, true]) assert.equal(recover(false, chat, drift), true, 'no pane must restore composer or console');
+  }
+  assert.equal(recover(true, true, true), true, 'null/frame/transcript focus must restore composer');
+  assert.equal(recover(true, true, false), false, 'composer or pane focus keeps normal toggle');
+  assert.equal(recover(true, false, false), false, 'console view keeps normal toggle');
+  assert.equal(recover(true, false, true), false, 'console view does not take the Chat View repair path');
+}
+
+test('ISSUE-716 native recovery decision rejects old no-pane no-op and drift-to-pane behavior', () => {
+  recoveryContract(focus);
+  assert.match(focus, /test "ISSUE-716 no pane always restores input and drifted Chat View returns to the composer"/);
+  assert.throws(() => recoveryContract(focus.replace('!pane_present or (chat_owns and focus_drifted)', 'false')));
+  assert.throws(() => recoveryContract(focus.replace('!pane_present or (chat_owns and focus_drifted)', '!pane_present')));
+  assert.throws(() => recoveryContract(focus.replace('!pane_present or (chat_owns and focus_drifted)', 'true')));
+});
+
+function hookContract(source) {
+  assert.match(source, /const focus_chord = @import\("focus.zig"\).browserFocusChord\(wp, kb.vkCode, isCtrlDown\(\), isAltDown\(kb.flags\)\);/);
+  assert.match(source, /ownsKeys\(app_state.g_chat_find_open, foregroundIsOurs\(\)\) and !find_modifier and !focus_chord/);
+  const start = source.indexOf('if (focus_chord and foregroundIsOurs() and app_state.active_shell < app_state.shell_count)');
+  assert.ok(start > source.indexOf('ownsKeys('));
+  const block = source.slice(start, source.indexOf('\n        }', start));
+  for (const required of ['claimBrowserFocusPress(true', 'g_sysmenu_pending = false', 'WM_APP_BROWSER_FOCUS_TOGGLE']) assert.ok(block.includes(required), required);
+  assert.doesNotMatch(block.split('\n')[0], /browser_enabled/);
+}
+
+test('ISSUE-716 hook bypasses Find only for the shared focus chord, preserves latch and posts on the UI thread without a pane prerequisite', () => {
+  hookContract(shortcuts);
+  assert.throws(() => hookContract(shortcuts.replace('and !find_modifier and !focus_chord', 'and !find_modifier')));
+  assert.throws(() => hookContract(shortcuts.replace('focus_chord and foregroundIsOurs() and app_state.active_shell < app_state.shell_count)', 'focus_chord and foregroundIsOurs() and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled)')));
+  assert.match(body(find, 'windowKey'), /if \(@import\("focus.zig"\).browserFocusChord\(msg, vk, ctrl, alt\)\) return false;/);
+  const toggle = main.slice(main.indexOf('        WM_APP_BROWSER_FOCUS_TOGGLE => {'), main.indexOf('        WM_APP_QUIT_ALL => {'));
+  assert.ok(toggle.indexOf('chat_find_ui.zig").close(false)') < toggle.indexOf('browserFocusReturnsToInput('));
+  assert.match(toggle, /chatFocusDrifted\(\) and !activeBrowserHasForegroundFocus\(\) and !webView2HasInputFocus\(\)/);
+  assert.match(toggle, /browserFocusReturnsToInput\(pane_present, chatViewOwnsInput\(\), focus_drifted\)/);
+  assert.match(toggle, /cancelPendingNativeBrowserFocus\(\);\s*app_state.g_chat_browser_handoff_until = 0;\s*app_state.g_browser_focus_mode = false;\s*app_state.g_shell_focused = true;\s*focusActiveShell\(\);\s*return 0;/);
+  for (const required of ['if (webView2HasInputFocus() or app_state.g_browser_focus_mode)', 'requestWebView2Focus();', 'toggle_pending cancel', 'toggle_back pane_to_shell', 'requestNativeBrowserFocus();']) assert.ok(toggle.includes(required), required);
+  const harness = read('tools/chat-view-gaps.test.js');
+  assert.ok(harness.includes('.replaceAll(\'@import("focus.zig").browserFocusChord\', \'browserFocusChord\')'));
+  assert.ok(harness.includes("${fileBody('focus.zig', 'browserFocusChord')}"));
+});
+
+test('ISSUE-716 startup retains cached and restored composer focus, and activation repairs null/frame focus', () => {
+  assert.match(read('src/launch_cache.zig'), /if \(s.chat\) \{[\s\S]*?@import\("chat_composer.zig"\).openChatView\(\);/);
+  assert.match(main, /launch_cache.bindRestoredChat\(\);\s*@import\("chat_composer.zig"\).applySessionView\(\);/);
+  assert.match(body(composer, 'openChatView'), /SetForegroundWindow\(app_state.g_main_hwnd\);\s*_ = SetFocus\(app_state.g_chat_composer_hwnd\);/);
+  assert.match(body(focus, 'focusGuardActivationTarget'), /chatComposerFocusAllowed\(\) and \(focused == null or focused == app_state.g_main_hwnd\)/);
+  assert.match(main, /if \(focusGuardComposerRepairAllowed\(\)\) \{\s*_ = SetFocus\(app_state.g_chat_composer_hwnd\);\s*altqLog\("composer_focus site=activate/);
+  assert.match(body(composer, 'chatFocusDrifted'), /f == null or f == app_state.g_main_hwnd or f == app_state.g_chat_transcript_hwnd/);
+});
+
+function journeyContract(source) {
+  const steps = [
+    "Press @(0x12, 0x43)", "'one saved Chat View session without a browser pane'", "Wait-ChatFocus 'Edit' 'chat-enabled'",
+    'Restart-ChatView 1', "Assert-ChatTyping 'abc' 'restart-typing'", "Press @(0x11, 0x46)",
+    "Wait-ChatFocus 'ZigShellChatTranscript' 'find-open'", "Press @(0x12, 0x51)", "Assert-ChatTyping 'abc' 'find-alt-q-typing'",
+    "Press @(0x1B)", "ClassNameProperty, 'ZigShellChatTranscript'", '$transcript.Current.ProcessId -ne $process.Id',
+    'GetAncestor($handle, 2) -ne $script:window', 'GetClientRect($handle, [ref]$rect)',
+    'Doctor\n            Assert-Foreground', 'ClickClient($handle,', "Snapshot 'transcript-clicked'", "Press @(0x12, 0x51)",
+    "Assert-ChatTyping 'abc' 'transcript-alt-q-typing'", "Wait-ChatFocus 'ZigShellChatTranscript' 'alias-find-open'",
+    "Press @(0x12, 0x4D)", "Assert-ChatTyping 'abc' 'find-alt-m-typing'", "$result.checks += @{ name = 'chat-focus'",
+  ];
+  let from = 0;
+  for (const step of steps) {
+    const at = source.indexOf(step, from);
+    assert.ok(at >= from, `missing or misordered ${step}`);
+    from = at + step.length;
+  }
+  assert.match(source, /PSObject.Properties\['bon'\] -and \$state.tabs\[0\].bon/);
+  assert.doesNotMatch(source, /PostMessage|SendMessage|Set-Content|WriteAll|Copy-Item|SetEnvironmentVariable|Start-Sleep|Thread.Sleep|\.SetFocus\(|\.SetValue\(/);
+}
+
+test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal restart and independent focused-element/value proof', () => {
+  journeyContract(recipe);
+  for (const step of ['Restart-ChatView 1', "Wait-ChatFocus 'ZigShellChatTranscript' 'find-open'", "Assert-ChatTyping 'abc' 'restart-typing'", 'GetAncestor($handle, 2) -ne $script:window', 'Doctor\n            Assert-Foreground']) {
+    assert.throws(() => journeyContract(recipe.replace(step, '')));
+  }
+  const restart = driver.slice(driver.indexOf('function Restart-ChatView('), driver.indexOf('function Wait-ChatFocus('));
+  for (const required of ['Doctor', '$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$job.Stop()', '$stopped.ActiveProcesses -ne 0', '$script:process = $job.Start($Exe, $scratch,', '@($state.shells).Count -eq $ShellCount', '[VerifyNative]::BringToForeground($script:window)']) assert.ok(restart.includes(required), required);
+  assert.match(driver, /'chat-view-everywhere' \{[\s\S]*?Restart-ChatView 3/);
+  const waits = driver.slice(driver.indexOf('function Wait-ChatFocus('), driver.indexOf('\ntry {\n', driver.indexOf('function Wait-ChatFocus(')));
+  for (const required of ['::FocusedElement', '$focused.Current.ProcessId -eq $process.Id', '$focused.Current.ClassName -ceq $Class', 'GetAncestor([IntPtr]$focused.Current.NativeWindowHandle, 2) -eq $script:window', 'Snapshot $Step', "Wait-ChatFocus 'Edit' ($Step + '-focused')", 'GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)', "$value.Current.Value -cne ''", 'Type-Text $Text', '$value.Current.Value -ceq $Text', "'.value.json'"]) assert.ok(waits.includes(required), required);
+  const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Click-WorkspacePill('));
+  assert.match(press, /function Press\([^\n]*\) \{\s*Doctor/);
+  assert.match(press, /function Type-Text\([^\n]*\) \{\s*Doctor/);
+  assert.ok(driver.includes("Save-Json $result 'result.json'"));
+  assert.ok(recipe.includes("Snapshot 'action'"));
+  assert.ok(recipe.includes("Snapshot 'after'"));
+});
+
+test('ISSUE-716 feature registration, PR journey, public docs and user changelog are complete', () => {
+  assert.match(driver, /ValidateSet\([^\n]*'chat-focus'/);
+  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-focus'/);
+  assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-focus"/);
+  assert.ok(workflow.includes('- tools/chat-focus.test.js'));
+  assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus.test.js/);
+  const map = read(skill + 'features/chat-focus.md');
+  assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
+  for (const required of ['v0.28.848', 'ValuePattern', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
+  assert.ok(read(skill + 'features/README.md').includes('](chat-focus.md)'));
+  assert.ok(read(skill + 'SKILL.md').includes('](features/chat-focus.md)'));
+  assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
+  const changelog = read('changelog.d/IGSH-716-alt-q-focus.md').trim();
+  assert.equal(changelog.split('\n').length, 1);
+  assert.match(changelog, /Alt\+Q.*Find.*no browser pane/);
+  assert.doesNotMatch(changelog, /\.zig|WM_APP|ISSUE-|JSON/);
+});
