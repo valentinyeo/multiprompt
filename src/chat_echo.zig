@@ -352,6 +352,7 @@ fn messageMatches(block: []const u16, p: Pending) bool {
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
     if (norm.len == 0 or body.len <= norm.len) return false;
     if (norm.len < MIN_PARTIAL) return body[body.len - norm.len - 1] == ' ' and std.mem.endsWith(u16, body, norm);
+    if (std.mem.endsWith(u16, body, norm)) return true;
     const at = std.mem.indexOf(u16, body, norm) orelse return false;
     return (at == 0 or body[at - 1] == ' ') and (at + norm.len == body.len or body[at + norm.len] == ' ');
 }
