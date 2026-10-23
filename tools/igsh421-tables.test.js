@@ -90,6 +90,7 @@ fn GetTextExtentExPointW(dc: HANDLE, text: [*]const u16, len: i32, available: i3
     size.* = .{ .cx = width, .cy = 20 };
     return 1;
 }
+const chatDrawText = DrawTextW;
 fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, rect: *RECT, flags: u32) i32 {
     if ((flags & DT_CALCRECT) == 0) {
         draws += 1; last_x = rect.left;

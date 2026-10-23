@@ -1215,6 +1215,8 @@ test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
 
 test "IGSH-376 received Markdown keeps blue sender layout selection and copied text" {
     try std.testing.expect(@import("fonts.zig").register());
+    defer @import("fonts.zig").unregister();
+    defer @import("drawing.zig").resetFontCache();
     defer app_state.g_chat_tables.clear(std.heap.page_allocator);
     const w = @import("win32.zig");
     const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
