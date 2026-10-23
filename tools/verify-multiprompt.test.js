@@ -1157,7 +1157,7 @@ test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four 
 test('IGSH-612 palette-order journey seeds only the usage fixture and fails releases on the selected row', () => {
   assert.match(control, /ValidateSet\([^\n)]*'palette-order'/);
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'palette-order'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"palette-order"\]'\)/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"palette-order"[^\]]*\]'\)/);
   assert.match(control, /if \(\$Feature -eq 'palette-order'\) \{\s+\$config = Join-Path \$env:APPDATA 'ZigShell'\s+New-Item -ItemType Directory -Force \$config \| Out-Null\s+Copy-Item \$paletteUsageFixture \(Join-Path \$config 'palette-usage.tsv'\)\s+\}/);
   assert.ok(control.indexOf("Copy-Item $paletteUsageFixture") < control.indexOf('$job = New-Object VerifyJob'));
   const journey = control.slice(control.indexOf("        'palette-order' {"), control.indexOf("        'chat-view-everywhere' {"));
@@ -1184,7 +1184,7 @@ test('IGSH-612 palette-order journey seeds only the usage fixture and fails rele
 test('IGSH-673 status-card journey measures all three pages by pixels and fails outside 20..30', () => {
   assert.match(control, /ValidateSet\([^\n)]*'status-card'/);
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'status-card'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"status-card", "palette-order"\]'\)/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"status-card", "palette-order"[^\]]*\]'\)/);
   const journey = control.slice(control.indexOf("        'status-card' {"), control.indexOf("        'command-palette' {"));
   assert.ok(journey.length > 0);
   assert.match(journey, /foreach \(\$page in 0\.\.2\)/);
@@ -1604,4 +1604,25 @@ test('IGSH-678 chat code font journey measures real console code and names every
   ]);
   assert.match(read(skill + 'features/README.md'), /\[Chat code font\]\(chat-code-font.md\)/);
   assert.match(read(skill + 'coverage.md'), /\| IGSH-678 \|[^\n]*\| chat-code-font \|/);
+});
+
+test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app palette rows log', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'remind-me'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'remind-me'/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"remind-me"\]'\)/);
+  const journey = control.slice(control.indexOf("        'remind-me' {"), control.indexOf("        'group-rail' {"));
+  assert.match(journey, /Press @\(0x11, 0x48\)/);
+  assert.match(journey, /SEARCH_REMIND_PRESET_OFFSET/);
+  assert.match(journey, /Snapshot 'action'[\s\S]*Snapshot 'after'/);
+  assert.match(journey, /Remind Me preset rows published after Ctrl\+H/);
+  assert.match(journey, /pickerRowIds = \$pickerIds/);
+  const dismissal = /Press @\(0x1B\)|presetRowsGoneAfterEsc|Snapshot 'closed'/;
+  for (const step of ["Press @(0x1B) 'Esc: leave the Remind Me presets'", 'presetRowsGoneAfterEsc = $true', "Snapshot 'closed'"]) assert.match(step, dismissal);
+  assert.doesNotMatch(journey, dismissal);
+  const map = read(skill + 'features/remind-me.md');
+  assert.match(map, /Esc is not covered/);
+  assert.match(map, /foreground on the GitHub runner/);
+  for (const heading of ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']) assert.ok(map.includes(heading));
+  assert.match(read(skill + 'features/README.md'), /\[Remind Me\]\(remind-me.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`remind-me`/);
 });

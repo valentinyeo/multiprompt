@@ -6,6 +6,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | --- | --- | --- | --- | --- |
 | IGSH-675 | While the agent works, Stop is a small square button inside the message box, with Send beside it once you type. | chat-view (`stop-in-box`) | journey added, not yet run | Run the branch journey on GitHub Windows and inspect `stop-in-box.png`; also dispatch it against the latest release tag and require `stop-in-box` to fail. |
 | IGSH-673 | The sidebar status card is one line on every page, with full numbers on hover. | status-card | journey added, not yet run | Run the branch journey on GitHub Windows, run it with tag=v0.28.839 to see the height check fail, and inspect the screenshots. Live usage and VPS numbers need real telemetry. |
+| IGSH-702 | Ctrl+H opens Remind Me with 1 to 12 hour and tomorrow evening presets. | remind-me | journey added, not yet run | Run the branch journey on GitHub Windows and inspect picker.png; choosing a preset and the wake-up are not covered. |
 | IGSH-612 | Ctrl+K groups commands by job, lists your most used commands first and uses clearer names. | palette-order | journey added, not yet run | Run the branch journey on GitHub Windows, run it against the previous release to see it fail, and inspect the screenshots. |
 | IGSH-672 | A workspace listed in `browser-own-profile.txt` gets its own browser profile; other workspaces keep the shared one. | browser-own-profile | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; also dispatch it against the latest release tag and require it to fail at the own-profile check. |
 | IGSH-611 | Everywhere view actions switch once and skip persistent session view locks. | chat-view-everywhere | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; native migration and lock round-trip tests also require Windows CI. |
@@ -104,6 +105,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | browser-pane-stuck | 39871210688, v0.28.821 | passed |
 | browser-pane-locked | 39871210688, v0.28.821 | passed |
 | palette-order | not run in this pass; added afterwards by IGSH-612 with its own GitHub runs | — |
+| remind-me | not run in this pass; added by IGSH-702 | — |
 | group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
 | pane-layout | 39871210688, v0.28.821 | passed |
 | chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
