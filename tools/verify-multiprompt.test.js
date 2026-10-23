@@ -357,7 +357,7 @@ test('IGSH-376 Chat View keeps desktop toggle evidence separate from native rece
   assert.match(workflow, /zig build test-main --summary all/);
   assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Native desktop rendering tests failed' \}/);
   assert.match(workflow, /evidence\/chat-markdown-render\.png/);
-  assert.equal((chat.match(/Press @\(0x12, 0x43\)/g) || []).length, 3);
+  assert.equal((chat.split('$localAgent =')[0].match(/Press @\(0x12, 0x43\)/g) || []).length, 3);
   const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = (\d+)/)[1]);
   const waits = [...chat.matchAll(/AddMilliseconds\((\d+)\)/g)];
   assert.equal(waits.length, 2);
@@ -1027,4 +1027,73 @@ test('chat-delivery is an explicit saved-tmux boundary journey, not a live-deliv
   assert.match(read(skill + 'features/chat-view.md'), /\[Chat delivery\]\(chat-delivery.md\)/);
   assert.match(read(skill + 'features/chat-delivery.md'), /production `ssh-path.txt` override/);
   assert.match(read(skill + 'features/chat-delivery.md'), /not real Claude or a real server/);
+});
+
+test('IGSH-599 local Chat View journey observes suggestion delivery and protects a typed draft', () => {
+  const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
+  const agent = read('tools/chat-local-agent.c');
+  assert.match(workflow, /fromJSON\('\[[^'\n]*"chat-view"/);
+  assert.match(workflow, /- tools\/chat-local-agent\.c/);
+  assert.match(workflow, /if: env\.RELEASE_TAG == ''[^\n]*\|\| env\.FEATURE == 'chat-view'/);
+  assert.match(workflow, /zig cc -target x86_64-windows-gnu -O2 tools\/chat-local-agent\.c -o verify-bin\/claude\.exe/);
+  assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Local Claude console stand-in build failed' \}/);
+  assert.match(chat, /foreach \(\$mode in @\('typed', 'suggestion'\)\)/);
+  assert.match(chat, /Palette 'new cmd'[\s\S]*?Type-Text \('"' \+ \$localAgent/);
+  assert.match(chat, /\$inbox = Read-Inbox[\s\S]*?\$_.sid -eq \$localState.tabs\[\$localTab\].shell_id[\s\S]*?\$_.ag -eq 1/);
+  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+)\s*\n/);
+  const normalNamePoll = read('src/power.zig').match(/\.normal\s*=>\s*setCoalescableTimerInterval\(hwnd, TIMER_NAME_POLL, ([\d_]+)\)/);
+  assert.ok(detectionWait, 'local Claude detection wait must specify -Seconds');
+  assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
+  assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
+  assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
+  const normalSend = /Type-Text \$message\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
+  assert.match(chat, normalSend);
+  assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
+  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received.Contains\(\$message\) -and \$received.Contains\("`r"\)/;
+  assert.match(chat, stdinDelivery);
+  assert.doesNotMatch(chat.replace('$received.Contains($message)', '$true'), stdinDelivery);
+  assert.doesNotMatch(chat.replace('[IO.FileShare]::ReadWrite', '[IO.FileShare]::Read'), stdinDelivery);
+  const draftProtection = /finally \{[\s\S]*?\$typedCheck.receivedBytes = \(Get-Item \(\$typedPrefix \+ '-stdin.bin'\)\).Length[\s\S]*?\$_.t -ceq \$typedMessage -and \$_.s -eq 0 -and \$_.x -eq 0[\s\S]*?\$typedCheck.receivedBytes -eq 0 -and \$typedCheck.queued[\s\S]*?if \(-not \$typedCheck.passed\) \{ throw/;
+  assert.match(chat, draftProtection);
+  assert.doesNotMatch(chat.replace('$typedCheck.receivedBytes -eq 0', '$true'), draftProtection);
+  for (const name of ['local-route-suggestion', 'local-route-typed']) {
+    assert.match(chat, new RegExp(`name = '${name}'; passed = \\$false`));
+    assert.ok(read(skill + 'features/chat-view.md').includes('`' + name + '`'));
+  }
+  assert.match(chat, /\$result.checks \+= \$typedCheck\s+\$result.checks \+= \$suggestionCheck/);
+  assert.match(agent, /SetConsoleMode\(output, mode \| ENABLE_VIRTUAL_TERMINAL_PROCESSING\)/);
+  assert.ok(agent.includes('L"\\x276f \\x1b[90m\\x1b[7mT\\x1b[27m\\x1b[2mry a suggested reply\\x1b[22m\\x1b[39m\\r\\x1b[2C"'));
+  assert.ok(agent.includes('L"\\x276f user draft\\x1b[7m \\x1b[27m"'));
+  assert.match(agent, /ReadConsoleOutputAttribute\(output, attributes, 32, origin/);
+  assert.match(agent, /ReadConsoleInputW\(input, &record/);
+  assert.match(agent, /fputc\(\(char\)c, received\)/);
+  assert.match(agent, /fflush\(received\)/);
+  assert.doesNotMatch(agent, /Sleep\(|SetConsoleTextAttribute|AttachConsole|CreateProcess/);
+  assert.doesNotMatch(chat, /Start-Sleep|AddSeconds|Set-Content|WriteAll|PostMessage|Invoke-Zsb/);
+});
+
+test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four Zig regressions', () => {
+  const send = read('src/chat_send.zig');
+  const idle = send.slice(send.indexOf('fn chatInputRowIsIdle('), send.indexOf('test "Chat View idle input row detection"'));
+  const capture = send.slice(send.indexOf('fn chatOutboxInputRowIdle('), send.indexOf('fn sendTextToShellVerifiedAt('));
+  assert.match(idle, /row: \[\]const u16, attributes: \[\]const u16/);
+  assert.match(idle, /if \(blank\) return true/);
+  assert.match(idle, /attributes.len != row.len/);
+  assert.match(idle, /attributes\[2\] & reverse_video == 0/);
+  assert.match(idle, /default_foreground = attributes\[1\] & foreground_mask/);
+  assert.match(idle, /if \(foreground == default_foreground or foreground != gray_foreground\) return false/);
+  assert.doesNotMatch(idle, /app_state|ReadConsole|Sleep|GetTickCount/);
+  assert.match(capture, /@intFromPtr\(line.ptr\) - @intFromPtr\(&app_state.g_chat_raw\[r \* width\]\)/);
+  assert.match(capture, /\.x = @intCast\(column\), \.y = @intCast\(@as\(i32, start_row\) \+ @as\(i32, @intCast\(r\)\)\)/);
+  assert.match(capture, /ReadConsoleOutputAttribute\(handle, attributes.ptr, @intCast\(line.len\), origin, &attributes_read\) == 0 or attributes_read != line.len/);
+  assert.match(capture, /return chatInputRowIsIdle\(line, attributes\)/);
+  assert.match(read('src/win32.zig'), /pub extern "kernel32" fn ReadConsoleOutputAttribute\(HANDLE, \[\*\]u16, DWORD, COORD, \*DWORD\) callconv\(WINAPI\) BOOL/);
+  const cases = [...send.matchAll(/test "ISSUE-599 ([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(cases, [
+    'suggestion row counts idle',
+    'typed text row counts busy',
+    'typed text with the inverse cursor after it counts busy',
+    'blank row still idle',
+  ]);
+  assert.match(read('tools/chat-local-agent.c'), /WriteConsoleW\(output, clear,[^\n]+\n\s*CONSOLE_SCREEN_BUFFER_INFO info;\s*if \(!GetConsoleScreenBufferInfo\(output, &info\)\) return 4;\s*COORD origin = \{0, info.srWindow.Bottom\}/);
 });

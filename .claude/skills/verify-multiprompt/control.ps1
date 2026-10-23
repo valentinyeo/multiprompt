@@ -1655,6 +1655,91 @@ try {
             Save-Json $after 'session-after.json'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
+            $localAgent = Join-Path (Split-Path $Exe) 'claude.exe'
+            if (-not (Test-Path $localAgent)) { throw 'Local Claude console stand-in is missing' }
+            $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
+            $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
+            $result.checks += $typedCheck
+            $result.checks += $suggestionCheck
+            $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
+            $typedPrefix = Join-Path $scratch 'local-route-typed'
+            $typedMessage = 'local route typed must stay queued'
+            try {
+                foreach ($mode in @('typed', 'suggestion')) {
+                    $beforeLocal = Read-Session
+                    Palette 'new cmd'
+                    Press @(0x0D) 'Enter: create local console for direct-route check'
+                    Wait-Until {
+                        $state = Read-Session
+                        @($state.tabs).Count -eq @($beforeLocal.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+                    } 'new local CMD session saved'
+                    $localState = Read-Session
+                    $localTab = $localState.active_tab
+                    if ($localState.tabs[$localTab].PSObject.Properties['cv'] -and $localState.tabs[$localTab].cv) {
+                        Press @(0x12, 0x43) 'Alt+C: show new local console'
+                    }
+                    Wait-WorkspaceSurface $localState.active_workspace $localTab $false
+                    $prefix = Join-Path $scratch ('local-route-' + $mode)
+                    Type-Text ('"' + $localAgent + '" ' + $mode + ' "' + $prefix + '"')
+                    Press @(0x0D) 'Enter: launch console-backed Claude stand-in'
+                    Wait-Until {
+                        if (-not (Test-Path ($prefix + '-ready.json'))) { return $false }
+                        $script:localReady = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
+                        $script:localReady.chars.Count -eq 32 -and $script:localReady.attributes.Count -eq 32
+                    } 'stand-in rendered prompt and recorded console attributes'
+                    $ready = $script:localReady
+                    if ($ready.chars[0] -ne 0x276F -or $ready.chars[1] -ne 32) { throw 'Stand-in did not render the Claude prompt glyph and separator' }
+                    if ($mode -eq 'suggestion' -and (($ready.attributes[2] -band 0x4000) -eq 0 -or ($ready.attributes[3] -band 0xF) -ne 8)) { throw 'Real console did not retain the suggestion cursor and gray foreground' }
+                    Wait-Until {
+                        $inbox = Read-Inbox
+                        @($inbox.shells | Where-Object { $_.sid -eq $localState.tabs[$localTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
+                    } 'local claude.exe detected as Claude for the direct input route' -Seconds 45
+                    Press @(0x12, 0x43) 'Alt+C: open local agent Chat View'
+                    Wait-Until {
+                        $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                        $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                        $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                        $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle
+                    } 'owned local Chat View composer focused'
+                    $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
+                    Type-Text $message
+                    Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                    if ($mode -eq 'typed') {
+                        Wait-Until {
+                            if (-not (Test-Path $outboxPath)) { return $false }
+                            $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
+                            @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
+                        } 'typed prompt keeps the Chat View message queued without starting a write'
+                        $typedCheck.console = $ready
+                        Snapshot 'local-route-typed'
+                    } else {
+                        $suggestionCheck.console = $ready
+                        Wait-Until {
+                            $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                            try {
+                                $buffer = New-Object IO.MemoryStream
+                                try {
+                                    $stdin.CopyTo($buffer)
+                                    $receivedBytes = $buffer.ToArray()
+                                } finally { $buffer.Dispose() }
+                            } finally { $stdin.Dispose() }
+                            $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
+                            $suggestionCheck.received = $received
+                            $received.Contains($message) -and $received.Contains("`r")
+                        } 'local suggestion prompt receives the Chat View message and Enter on stdin'
+                        $suggestionCheck.passed = $true
+                        Snapshot 'local-route-suggestion'
+                    }
+                }
+            } finally {
+                if ($typedCheck.ContainsKey('console')) {
+                    $typedCheck.receivedBytes = (Get-Item ($typedPrefix + '-stdin.bin')).Length
+                    $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
+                    $typedCheck.queued = @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
+                    $typedCheck.passed = $typedCheck.receivedBytes -eq 0 -and $typedCheck.queued
+                    if (-not $typedCheck.passed) { throw 'Chat View overwrote a local typed draft or stopped keeping its message queued' }
+                }
+            }
         }
         'inbox' {
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'

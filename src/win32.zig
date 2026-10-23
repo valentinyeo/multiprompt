@@ -1385,6 +1385,7 @@ pub extern "comdlg32" fn GetOpenFileNameW(*OPENFILENAMEW) callconv(WINAPI) BOOL;
 pub extern "wininet" fn InternetGetConnectedState(lpdwFlags: ?*DWORD, dwReserved: DWORD) BOOL;
 
 pub extern "kernel32" fn ReadConsoleOutputCharacterW(HANDLE, [*]u16, DWORD, COORD, *DWORD) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn ReadConsoleOutputAttribute(HANDLE, [*]u16, DWORD, COORD, *DWORD) callconv(WINAPI) BOOL;
 pub const NOTIFY_PAYLOAD_CAP: usize = 1024;
 
 pub extern "user32" fn SetTimer(HANDLE, usize, UINT, ?*anyopaque) callconv(WINAPI) usize;
