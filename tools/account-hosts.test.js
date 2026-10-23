@@ -19,7 +19,7 @@ function audit(desktop, client) {
   assert.match(discovery, /host\.user = try a\.dupe\(u8, host\.user\);/);
   assert.match(discovery, /for \(incoming_keys, owned_keys\) \|key, \*owned\| owned\.\* = try a\.dupe\(u8, key\);/);
   assert.match(discovery, /host\.host_keys = owned_keys;/);
-  assert.match(request, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) synced_hosts else try account_hosts\.withoutRemoved\(alloc, server\.value\.hosts orelse &\.\{\}, removed\)\) else null;/);
+  assert.match(request, /const publish_hosts = if \(hosts_ready\) synced_hosts else server\.value\.hosts;\s*rebased\.hosts = if \(remote\.hosts_supported\) try account_hosts\.withoutRemoved\(alloc, publish_hosts orelse &\.\{\}, removed\) else null;/);
   assert.match(request, /remote\.hosts_supported and hosts_ready and account_hosts\.needsPublish\(synced_hosts, server.value.hosts orelse &\.\{\}\)/);
   assert.match(discovery, /app_state\.SSH_TARGET_DE, app_state\.SSH_TARGET_UK, app_state\.SSH_TARGET_INNE/);
   assert.match(discovery, /appendSshExe\(/);
@@ -46,7 +46,9 @@ test('hosts sync discovery is worker-serialized, cached with owned data, bounded
   const desktop = read('src/account_desktop.zig'), client = read('src/account_client.zig');
   audit(desktop, client);
   for (const [before, after] of [
-    ['rebased.hosts = if (remote.hosts_supported) (if (hosts_ready) synced_hosts else try account_hosts.withoutRemoved(alloc, server.value.hosts orelse &.{}, removed)) else null;', 'rebased.hosts = hosts;'],
+    ['rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;', 'rebased.hosts = hosts;'],
+    ['const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;', 'const publish_hosts = synced_hosts;'],
+    ['account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed)', 'account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, &.{})'],
     ['remote.hosts_supported and account_hosts.shouldRefresh', 'account_hosts.shouldRefresh'],
     ['remote.hosts_supported and hosts_ready and account_hosts.needsPublish', 'account_hosts.needsPublish'],
     ['const hosts = g_account_hosts_cache.hosts;', ''],
@@ -72,7 +74,7 @@ test('hosts support is fail-closed and rechecked from the latest reply after con
   audit(desktop, client);
   const request = desktop.slice(desktop.indexOf('fn accountRequest('), desktop.indexOf('fn layoutSyncWorker('));
   const loop = request.slice(request.indexOf('while (attempts < 3)'));
-  assert.match(loop, /rebased\.hosts = if \(remote\.hosts_supported\) \(if \(hosts_ready\) synced_hosts else try account_hosts\.withoutRemoved\(alloc, server\.value\.hosts orelse &\.\{\}, removed\)\) else null;/);
+  assert.match(loop, /const publish_hosts = if \(hosts_ready\) synced_hosts else server\.value\.hosts;\s*rebased\.hosts = if \(remote\.hosts_supported\) try account_hosts\.withoutRemoved\(alloc, publish_hosts orelse &\.\{\}, removed\) else null;/);
   assert.match(loop, /\.emit_null_optional_fields = false/);
   assert.match(loop, /remote = put;/);
   assert.ok(loop.indexOf('rebased.hosts =') < loop.indexOf('account_client.request("PUT"'));

@@ -24,7 +24,7 @@ test('usage reaches the debounced layout publisher and server times refresh Freq
     desktop.replace('@import("inbox.zig").loadInboxModel();', ''),
   ]) assert.throws(() => audit(mutated, inbox, session));
   assert.throws(() => audit(desktop, inbox, session.replace('if (saveSessionTo(path, null)) publishSessionLayout();', '')));
-  assert.ok(read('src/account_client.zig').includes('X-Layout-Features: favorite,used,visits,input,settings,hosts\\r\\n'));
+  assert.ok(read('src/account_client.zig').includes('X-Layout-Features: favorite,used,visits,input,settings,hosts,host_removal\\r\\n'));
 });
 
 test('Unix usage stamps are marked in all local serializers and the clock is converted only for usage', () => {
