@@ -353,6 +353,9 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test remote browser command list
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        run: node --test tools/zsb-remote-commands.test.js
       - name: Test held-session CDP scripts
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node --test tools/zsb-cdp-script.test.js
