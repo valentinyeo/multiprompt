@@ -25,7 +25,7 @@ function expect(result, status, pattern) {
 }
 
 test('Windows 5.1 inventory includes the required automatic names and aliases without case duplicates', () => {
-  for (const [key, names] of Object.entries({ automaticVariables: ['ShellId', 'Host', 'PID', 'PSHOME', 'true', 'false', 'null', 'Error', 'input', 'args', 'this', '_', 'PSItem', 'Matches'], aliases: ['Move', 'cd', 'ls', 'cp', 'mv', 'rm', 'del', 'sort', 'where', 'select', 'foreach'] })) {
+  for (const [key, names] of Object.entries({ automaticVariables: ['ShellId', 'Host', 'PID', 'PSHOME', 'true', 'false', 'null', 'Error', 'ConsoleFileName', 'ExecutionContext', 'HOME', 'PSCulture', 'PSEdition', 'PSUICulture', 'PSVersionTable'], aliases: ['Move', 'cd', 'ls', 'cp', 'mv', 'rm', 'del', 'sort', 'where', 'select', 'foreach'] })) {
     const actual = inventory[key].map(name => name.toLowerCase());
     assert.equal(new Set(actual).size, actual.length);
     for (const name of names) assert.ok(actual.includes(name.toLowerCase()), name);
@@ -45,11 +45,29 @@ test('historical 73c3331 typed ShellId parameter is rejected case-insensitively'
   }
 });
 
-test('all inventoried automatic parameters, assignment forms and foreach binders are rejected', { skip: unavailable }, t => {
+test('reserved automatic parameters and read-only assignment/foreach targets are rejected', { skip: unavailable }, t => {
   for (const name of inventory.automaticVariables) expect(fixture(t, `param($${name})`), 1, /automatic variable/);
-  for (const source of ['$Host = 1', '[uint32]$PID = 2', '$PSHOME += 1', '$local, $Error = 1, 2', 'foreach ($input in 1, 2) {}', '$PID++']) {
+  for (const source of ['$Host = 1', '[uint32]$PID = 2', '$PSHOME += 1', '$local, $Error = 1, 2', '$null, $ShellId = 1, 2', '[string]$ShellId = "bad"', 'foreach ($Host in 1, 2) {}', '$PID++']) {
     expect(fixture(t, source, 'psm1'), 1, /control.psm1:1 .*automatic variable/);
   }
+});
+
+test('$null discard assignments, including casts and tuple forms, pass without execution', { skip: unavailable }, t => {
+  for (const source of ['$null = Get-Thing', '$null = $a, $b', '[void]($null = Get-Thing)', '[object]$NuLl = Get-Thing', '$null, $value = Get-Thing', '$value, $null = Get-Thing', '[void](Get-Thing)']) {
+    expect(fixture(t, source), 0, /PowerShell host names OK: 1 tracked scripts/);
+  }
+});
+
+test('writable Windows 5.1 automatic bindings are not inventoried as read-only', () => {
+  const names = inventory.automaticVariables.map(name => name.toLowerCase());
+  for (const name of ['Matches', 'input', 'args', 'this', '_', 'PSItem', 'PSDebugContext']) assert.ok(!names.includes(name.toLowerCase()), name);
+});
+
+test('writable Windows 5.1 automatic assignments and input binders pass', { skip: unavailable }, t => {
+  for (const name of ['Matches', 'input', 'args', 'this', '_', 'PSItem', 'PSDebugContext']) {
+    expect(fixture(t, `$${name} = @()`), 0, /PowerShell host names OK: 1 tracked scripts/);
+  }
+  expect(fixture(t, 'foreach ($input in 1, 2) {}'), 0, /PowerShell host names OK: 1 tracked scripts/);
 });
 
 test('historical caa9eb9 Move function and all requested aliases are rejected', { skip: unavailable }, t => {

@@ -53,7 +53,10 @@ foreach ($file in $files) {
         if ($node -is [System.Management.Automation.Language.ParameterAst]) {
             Add-VariableDiagnostic $node.Name 'parameter' $file
         } elseif ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) {
-            foreach ($variable in @(Get-AssignmentVariables $node.Left)) { Add-VariableDiagnostic $variable 'assignment target' $file }
+            foreach ($variable in @(Get-AssignmentVariables $node.Left)) {
+                if ($variable.VariablePath.UserPath -ieq 'null') { continue }
+                Add-VariableDiagnostic $variable 'assignment target' $file
+            }
         } elseif ($node -is [System.Management.Automation.Language.ForEachStatementAst]) {
             Add-VariableDiagnostic $node.Variable 'foreach target' $file
         } elseif ($node -is [System.Management.Automation.Language.UnaryExpressionAst]) {
