@@ -951,7 +951,7 @@ test('ISSUE-569 Starred restore persists the view and reuses the real workspace 
 test('ISSUE-569 journey restores the same favorite in Starred and at home with real keys', () => {
   function contract(driver) {
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
-    assert.match(restart, /\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)/);
+    assert.match(restart, /\$trace = \(\(Get-Content \$log -Raw\) -join ''\).Substring\(\$logStart\)/);
     assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
     assert.doesNotMatch(recipe, /SetForegroundWindow|GetFocusedWindow|Start-Sleep/);
