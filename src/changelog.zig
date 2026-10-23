@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.843", .items = &.{
+        .{ .text = "Chat View no longer shows an error when a saved conversation has one damaged line.", .ticket = "IGSH-690" },
+    } },
     .{ .ver = "0.28.842", .items = &.{
         .{ .text = "A workspace you list in browser-own-profile.txt now opens its browser pane in its own separate profile, while your other workspaces keep their usual browser.", .ticket = "IGSH-672" },
     } },
