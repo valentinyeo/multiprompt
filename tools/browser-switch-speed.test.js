@@ -33,7 +33,7 @@ function assertsNative(source) {
   assert.match(measure, /if \(SwitchReady\(owner, console, suffix, browser, dock, composer, draft\)\)/);
   assert.match(measure, /if \(visible < 0\) visible = timer.Elapsed.TotalMilliseconds;/);
   assert.match(measure, /if \(painted < 0 && \(browser == IntPtr.Zero \|\| PaintMatches\(dock, rgb, pixels, graphics\)\)\) painted = timer.Elapsed.TotalMilliseconds;/);
-  assert.match(measure, /if \(painted >= 0 && \(frozenMarker == null \|\| awake >= 0\)\) \{\s+timer.Stop\(\);\s+return new double\[\] \{ painted, visible, awake \};/);
+  assert.match(measure, /if \(painted >= 0 && \(!frozen \|\| awake >= 0\)\) \{\s+timer.Stop\(\);\s+return new double\[\] \{ painted, visible, awake \};/);
   assert.match(measure, /Thread.Sleep\(1\);[\s\S]*timer.ElapsedMilliseconds < 20000/);
   assert.doesNotMatch(source, /AutomationElement|SetForegroundWindow|::Chord|SendMessage\(|PostMessage|DwmFlush/);
 }
@@ -410,7 +410,7 @@ test('new measurement code adds no removable code comments', async () => {
 function assertsRealBridge(driver, yaml) {
   const setup = driver.slice(driver.indexOf("    if ($Feature -eq 'browser-switch-speed') {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
-    'process.env.VERIFY_BROWSER_MODULE', '("puppeteer").executablePath()',
+    "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",
     "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",
     "HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.zigshell.bridge",
     "'zigshell-bridge.exe'", 'chrome-extension://$extensionId/',
@@ -424,12 +424,16 @@ function assertsRealBridge(driver, yaml) {
   const wait = driver.slice(driver.indexOf('function Wait-SwitchNativeHost'), driver.indexOf('function Read-BrowserFrozen'));
   for (const step of ["'multiprompt-browser-isolated'", '$pipe.Connect(100)', '$pipe.IsConnected', '$pipe.Dispose()', "'native messaging host reconnect on extension keepalive' 90"]) assert.ok(wait.includes(step), step);
   assert.match(driver, /\$pane = Open-BrowserPane \(\$mode \+ '-' \+ \$tab\)\s+Wait-SwitchNativeHost\s+Wait-Until/);
+  assert.ok(driver.indexOf("Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'") < driver.indexOf("$env:USERPROFILE = Join-Path $scratch 'profile'"));
   assert.match(driver, /\$edge = \$chrome\s+\$profile = Join-Path \$env:LOCALAPPDATA 'ZigShell\/ChromeUserData'/);
 }
 
 test('switch panes use pinned real Chrome via user configuration and wait for real host keepalive reconnect', () => {
   assertsRealBridge(control, workflow);
-  for (const before of ['("puppeteer").executablePath()', "Join-Path $config 'chrome-exe.txt'", '$pipe.Connect(100)', '$pipe.IsConnected', 'Wait-SwitchNativeHost\n                            Wait-Until']) {
+  const resolver = read(base + 'browser-switch-chrome.mjs');
+  assert.match(resolver, /createRequire\(path.join\(process.env.VERIFY_BROWSER_MODULE, 'package.json'\)\)/);
+  assert.match(resolver, /require\('puppeteer'\).executablePath\(\)/);
+  for (const before of ["Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'", "Join-Path $config 'chrome-exe.txt'", '$pipe.Connect(100)', '$pipe.IsConnected', 'Wait-SwitchNativeHost\n                            Wait-Until']) {
     assert.throws(() => assertsRealBridge(control.replaceAll(before, 'false'), workflow), `reject missing real bridge step: ${before}`);
   }
   assert.throws(() => assertsRealBridge(control, workflow.replaceAll("|| env.FEATURE == 'browser-switch-speed'", '')));
@@ -438,8 +442,8 @@ test('switch panes use pinned real Chrome via user configuration and wait for re
 function assertsWakeTiming(source, driver) {
   const measure = source.slice(source.indexOf('public static double[] MeasureSessionSwitch'));
   assert.match(measure, /File.ReadAllText\(frozenMarker\).Trim\(\) != "1"[\s\S]+var timer = BeginSessionSwitch\(\)/);
-  assert.match(measure, /if \(frozenMarker != null && awake < 0 && !System.IO.File.Exists\(frozenMarker\)\) awake = timer.Elapsed.TotalMilliseconds/);
-  assert.match(measure, /if \(painted >= 0 && \(frozenMarker == null \|\| awake >= 0\)\)/);
+  assert.match(measure, /if \(frozen && awake < 0 && !System.IO.File.Exists\(frozenMarker\)\) awake = timer.Elapsed.TotalMilliseconds/);
+  assert.match(measure, /if \(painted >= 0 && \(!frozen \|\| awake >= 0\)\)/);
   assert.match(measure, /return new double\[\] \{ painted, visible, awake \}/);
   assert.match(driver, /\$frozenMarker = if \(\$frozen\) \{ Join-Path \$scratch \("roaming\/ZigShell\/panehib-zss-\$\(\$shellIds\[\$target\]\).flag"\) \} else \{ \$null \}/);
   for (const [field, index] of [['window_visible_ms', 1], ['wake_flag_cleared_ms', 2], ['target_color_painted_ms', 0]]) {

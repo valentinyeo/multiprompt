@@ -245,14 +245,15 @@ public static class VerifyNative {
             double visible = -1;
             double painted = -1;
             double awake = -1;
-            if (frozenMarker != null && (!System.IO.File.Exists(frozenMarker) || System.IO.File.ReadAllText(frozenMarker).Trim() != "1")) throw new InvalidOperationException("Target freeze marker missing before input");
+            bool frozen = !String.IsNullOrEmpty(frozenMarker);
+            if (frozen && (!System.IO.File.Exists(frozenMarker) || System.IO.File.ReadAllText(frozenMarker).Trim() != "1")) throw new InvalidOperationException("Target freeze marker missing before input");
             var timer = BeginSessionSwitch();
             do {
-                if (frozenMarker != null && awake < 0 && !System.IO.File.Exists(frozenMarker)) awake = timer.Elapsed.TotalMilliseconds;
+                if (frozen && awake < 0 && !System.IO.File.Exists(frozenMarker)) awake = timer.Elapsed.TotalMilliseconds;
                 if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
                     if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
                     if (painted < 0 && (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics))) painted = timer.Elapsed.TotalMilliseconds;
-                    if (painted >= 0 && (frozenMarker == null || awake >= 0)) {
+                    if (painted >= 0 && (!frozen || awake >= 0)) {
                         timer.Stop();
                         return new double[] { painted, visible, awake };
                     }
@@ -1279,6 +1280,10 @@ try {
     foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
+    if ($Feature -eq 'browser-switch-speed') {
+        $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
+    }
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
@@ -1303,8 +1308,8 @@ try {
         $switchNativeRegistry = $registry
         New-Item -Path $registry -Force | Out-Null
         Set-Item -Path $registry -Value $nativeManifest
-        $chrome = & node -e 'const {createRequire}=require("node:module"); const path=require("node:path"); console.log(createRequire(path.join(process.env.VERIFY_BROWSER_MODULE,"package.json"))("puppeteer").executablePath())'
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
+        $edge = $chrome
+        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $chrome)
@@ -1327,11 +1332,9 @@ try {
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
     if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed')) {
-        $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
-        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
-        if ($Feature -eq 'browser-switch-speed') {
-            $edge = $chrome
-            $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
+        if ($Feature -ne 'browser-switch-speed') {
+            $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
+            $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
         }
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires the configured browser executable' }
         $warmupJob = New-Object VerifyJob
