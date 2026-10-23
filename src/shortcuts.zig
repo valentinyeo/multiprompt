@@ -173,7 +173,7 @@ const activeBrowserHwndLive = @import("browser_pane.zig").activeBrowserHwndLive;
 const activeShellHasShotUrlPane = @import("browser_pane.zig").activeShellHasShotUrlPane;
 const activeBrowserHasForegroundFocus = @import("browser_pane.zig").activeBrowserHasForegroundFocus;
 const activeBrowserSurfaceHasForegroundFocus = @import("browser_pane.zig").activeBrowserSurfaceHasForegroundFocus;
-const spawnBrowserCliHidden = @import("browser_pane.zig").spawnBrowserCliHidden;
+const spawnBrowserCliForShell = @import("browser_pane.zig").spawnBrowserCliForShell;
 const bridgeExePath = @import("browser_pane.zig").bridgeExePath;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
@@ -2170,7 +2170,7 @@ pub fn recordNativeBrowserDropGesture(pt: POINT) void {
         "\"{s}\" --window {d} browser-drop-gesture",
         .{ bridgeExePath(), window_id },
     ) catch return;
-    spawnBrowserCliHidden(cmd);
+    spawnBrowserCliForShell(idx, cmd);
 }
 
 pub fn mouseHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {

@@ -5,6 +5,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
 | IGSH-612 | Ctrl+K groups commands by job, lists your most used commands first and uses clearer names. | palette-order | journey added, not yet run | Run the branch journey on GitHub Windows, run it against the previous release to see it fail, and inspect the screenshots. |
+| IGSH-672 | A workspace listed in `browser-own-profile.txt` gets its own browser profile; other workspaces keep the shared one. | browser-own-profile | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; also dispatch it against the latest release tag and require it to fail at the own-profile check. |
 | IGSH-611 | Everywhere view actions switch once and skip persistent session view locks. | chat-view-everywhere | journey added, not yet run | Run the branch journey on GitHub Windows and inspect screenshots; native migration and lock round-trip tests also require Windows CI. |
 | IGSH-127 | Mobile page previews survive navigation and reload. | browser-emulation | covered | — |
 | IGSH-154 | Browser commands finish instead of hanging; Slack opens in the pane. | browser-emulation, browser-pane-stuck | partial | Force a never-ending page command, require bounded failure and a successful next call; open Slack in a real pane. Signed-in Slack needs an account. |

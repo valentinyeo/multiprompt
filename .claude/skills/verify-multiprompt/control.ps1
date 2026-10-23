@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'palette-order')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation', 'palette-order', 'browser-own-profile')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -1348,6 +1348,53 @@ function Assert-SessionRestoreSelection([string]$Name, [int]$Workspace, [string]
     } "published and persisted selection is $Name in the original workspace, Starred=$Starred"
 }
 
+function Get-OwnProfileToken([string]$WorkspaceId) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($WorkspaceId)) } finally { $sha.Dispose() }
+    return 'own-' + (-join ($digest | ForEach-Object { $_.ToString('x2') })).Substring(0, 24)
+}
+
+function Get-PaneUserDataDir([IntPtr]$Browser) {
+    [uint32]$browserPid = 0
+    [void][VerifyNative]::GetWindowThreadProcessId($Browser, [ref]$browserPid)
+    if ($browserPid -eq 0) { throw 'Docked pane has no browser process' }
+    $line = (Get-CimInstance Win32_Process -Filter "ProcessId = $browserPid").CommandLine
+    $match = [regex]::Match($line, '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))')
+    if (-not $match.Success) { throw 'Docked pane browser has no user data directory' }
+    $dir = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    return @{ pid = $browserPid; hwnd = $Browser.ToInt64(); commandLine = $line; userDataDir = [IO.Path]::GetFullPath($dir).TrimEnd('\') }
+}
+
+function Get-SharedProfileListing([string]$Root) {
+    $names = @(Get-ChildItem -LiteralPath $Root -Force -Directory | ForEach-Object { $_.Name })
+    $default = Join-Path $Root 'Default'
+    if (Test-Path -LiteralPath $default) { $names += @(Get-ChildItem -LiteralPath $default -Force -Directory | ForEach-Object { 'Default/' + $_.Name }) }
+    return @($names | Sort-Object)
+}
+
+function Wait-OwnProfilePipe([string]$Token, [string]$Step) {
+    Wait-Until {
+        $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', ('multiprompt-browser-isolated-' + $Token), [IO.Pipes.PipeDirection]::Out)
+        try { $pipe.Connect(100); return $pipe.IsConnected } catch { return $false } finally { $pipe.Dispose() }
+    } "browser-own-profile ${Step}: native host serves the own profile pipe" 90
+}
+
+function Open-WorkspaceBrowser([string]$Step) {
+    Palette 'open browser'
+    Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
+    Wait-Until {
+        $pane = Read-BrowserPane
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero
+    } "browser-own-profile ${Step}: docked pane connected" 60
+    $pane = Read-BrowserPane
+    $browser = [VerifyNative]::DockedPaneWindow($script:window)
+    if ([VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Docked pane is not owned by the app window' }
+    $proof = Get-PaneUserDataDir $browser
+    Save-Json @{ pane = $pane; browser = $proof } ("browser-own-profile-$Step.json")
+    Focus-BrowserPaneOwner $Step $pane.browser_connection_id
+    return $proof
+}
+
 function Select-Theme([string]$Theme, [string]$ActionShot) {
     Palette 'themes'
     Press @(0x0D) 'Enter: Themes...'
@@ -1383,7 +1430,7 @@ try {
     foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
-    if ($Feature -eq 'browser-switch-speed') {
+    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
         $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
     }
@@ -1392,7 +1439,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     $env:USERPROFILE = Join-Path $scratch 'profile'
     $env:HOME = $env:USERPROFILE
-    if ($Feature -eq 'browser-switch-speed') {
+    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
         New-Item -ItemType Directory -Force (Split-Path $extension) | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
@@ -1430,6 +1477,8 @@ try {
     $env:ZIGSHELL_DEBUG = '1'
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
+    } elseif ($Feature -eq 'browser-own-profile') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
@@ -2897,6 +2946,89 @@ try {
             Palette 'close all browser panes'
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
+            Snapshot 'after'
+        }
+        'browser-own-profile' {
+            if ((Get-OwnProfileToken 'ws-own-test') -cne 'own-adee37bbc9fa6013ec24ccfd') { throw 'Journey token derivation differs from the app test vector' }
+            Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard input' 60
+            $sharedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData')).TrimEnd('\')
+            $ownBase = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'ZigShell/BrowserWorkspaces')).TrimEnd('\')
+            $optIn = Join-Path $env:APPDATA 'ZigShell/browser-own-profile.txt'
+            if ((Test-Path -LiteralPath $ownBase) -or (Test-Path -LiteralPath $optIn)) { throw 'Own browser profile state existed before the journey' }
+            $warmupJob = New-Object VerifyJob
+            $arguments = '--user-data-dir="' + $sharedRoot + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
+            $warmup = $warmupJob.Start($chrome, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
+            Wait-Until {
+                $warmup.Refresh()
+                if ($warmup.HasExited) { throw 'Browser setup process exited before readiness' }
+                $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt verification browser ready'
+            } 'shared browser profile rendered setup page' 60
+            Wait-SwitchNativeHost
+            [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
+            $warmupStopped = $warmupJob.Stop()
+            Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
+            $warmupJob.Dispose()
+            $warmupJob = $null
+            Wait-Until {
+                [void][VerifyNative]::SetForegroundWindow($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'main window foreground after shared browser setup'
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            $sharedProof = Open-WorkspaceBrowser 'shared'
+            if ($sharedProof.userDataDir -ine $sharedRoot) { throw 'Workspace without opt-in left the shared browser profile' }
+            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'shared pane bound through the shared native host' 60
+            $sharedBefore = Get-SharedProfileListing $sharedRoot
+            $before = (Read-Session).workspace_count
+            Press @(0x11, 0x4E) 'Ctrl+N: create the workspace that gets its own browser profile'
+            Wait-Until { $script:ownSession = Read-Session; $null -ne $script:ownSession -and $script:ownSession.workspace_count -eq $before + 1 -and $script:ownSession.active_workspace -ne 0 } 'new workspace persisted'
+            $ownWorkspace = $script:ownSession.active_workspace
+            $ownWorkspaceId = $script:ownSession.workspaces[$ownWorkspace].wid
+            if ([string]::IsNullOrWhiteSpace($ownWorkspaceId) -or $ownWorkspaceId -ceq $script:ownSession.workspaces[0].wid) { throw 'Expected a distinct workspace identity' }
+            $ownToken = Get-OwnProfileToken $ownWorkspaceId
+            $ownRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $ownToken))).TrimEnd('\')
+            if (Test-Path -LiteralPath $ownBase) { throw 'Own browser profile folder appeared before opt-in' }
+            Record 'Opt the new workspace into its own browser profile with browser-own-profile.txt'
+            [IO.File]::WriteAllText($optIn, $ownWorkspaceId + "`n")
+            Wait-Until {
+                $state = Read-Inbox
+                $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+                $selected.Count -eq 1 -and $selected[0].ws -eq $ownWorkspace
+            } 'new workspace CMD selected'
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            Snapshot 'action'
+            $ownProof = Open-WorkspaceBrowser 'opted-in'
+            if ($ownProof.userDataDir -ine $ownRoot) { throw ('Opted-in workspace has no own browser profile: ' + $ownProof.userDataDir) }
+            if ($ownProof.pid -eq $sharedProof.pid) { throw 'Opted-in pane reused the shared browser process' }
+            Wait-OwnProfilePipe $ownToken 'opted-in'
+            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'opted-in pane bound through its own native host' 60
+            if ($null -eq (Get-Process -Id $sharedProof.pid -ErrorAction SilentlyContinue)) { throw 'Shared browser closed when the opted-in pane opened' }
+            $sharedAfter = Get-SharedProfileListing $sharedRoot
+            $missing = @($sharedBefore | Where-Object { $_ -notin $sharedAfter })
+            $foreign = @($sharedAfter | Where-Object { $_ -match '(?i)own-[0-9a-f]{24}|BrowserWorkspaces|workspace-owner' })
+            if ($missing.Count -ne 0 -or $foreign.Count -ne 0) { throw ('Shared browser profile changed: missing ' + ($missing -join ', ') + '; foreign ' + ($foreign -join ', ')) }
+            $engines = @(Get-ChildItem -LiteralPath $ownBase -Force | ForEach-Object { $_.Name })
+            $leaves = @(Get-ChildItem -LiteralPath (Join-Path $ownBase 'chrome') -Force | ForEach-Object { $_.Name })
+            if ($engines.Count -ne 1 -or $engines[0] -cne 'chrome' -or $leaves.Count -ne 1 -or $leaves[0] -cne $ownToken) { throw 'Own browser profile folder is not exactly one own-<hash> leaf' }
+            Restart-SessionRestore 'own-profile-restart' $false
+            Wait-Until {
+                $state = Read-Inbox
+                $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+                $selected.Count -eq 1 -and $selected[0].ws -eq $ownWorkspace
+            } 'restored selection is the opted-in workspace'
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            Wait-Until {
+                $pane = Read-BrowserPane
+                $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero
+            } 'restored opted-in pane docked without an open command' 90
+            $restoredProof = Get-PaneUserDataDir ([VerifyNative]::DockedPaneWindow($script:window))
+            if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile: ' + $restoredProof.userDataDir) }
+            Wait-OwnProfilePipe $ownToken 'restored'
+            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'restored opted-in pane bound through its own native host' 60
+            Save-Json @{ token = $ownToken; workspaceId = $ownWorkspaceId; ownRoot = $ownRoot; sharedRoot = $sharedRoot; shared = $sharedProof; opted = $ownProof; restored = $restoredProof; sharedBefore = $sharedBefore; sharedAfter = $sharedAfter } 'browser-own-profile.json'
+            $result.checks += @{ name = 'browser-own-profile shared'; userDataDir = $sharedProof.userDataDir }
+            $result.checks += @{ name = 'browser-own-profile opted-in'; userDataDir = $ownProof.userDataDir; token = $ownToken }
+            $result.checks += @{ name = 'browser-own-profile shared-untouched'; entries = $sharedAfter.Count }
+            $result.checks += @{ name = 'browser-own-profile restored'; userDataDir = $restoredProof.userDataDir }
             Snapshot 'after'
         }
         'command-palette' {

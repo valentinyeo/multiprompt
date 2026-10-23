@@ -1,6 +1,7 @@
 const std = @import("std");
 const windows = std.os.windows;
 const browser_profile_clone = @import("browser_profile_clone.zig");
+const own_profile = @import("browser_own_profile.zig");
 
 const app_name = "com.zigshell.bridge";
 const version = @import("bridge_config").extension_version;
@@ -13,6 +14,9 @@ const browser_request_attempts = 4;
 
 var g_window_id: ?i64 = null;
 var g_profile_token: []const u8 = "";
+var g_native_own_profile: [own_profile.TOKEN_LEN]u8 = undefined;
+var g_window_file_profile: [own_profile.TOKEN_LEN]u8 = undefined;
+var g_window_file_profile_set = false;
 var request_sequence = std.atomic.Value(u64).init(0);
 
 const BOOL = i32;
@@ -201,6 +205,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     defer if (profile_env) |token| allocator.free(token);
     g_profile_token = if (is_legacy_host) "" else profile_override orelse profile_env orelse "";
+    if (!is_native_host and profile_override == null and profile_env == null and g_window_file_profile_set) g_profile_token = &g_window_file_profile;
+    if (is_native_host and !is_legacy_host) {
+        if (own_profile.nativeParentToken(allocator, &g_native_own_profile) catch null) |own| g_profile_token = own;
+    }
     var pipe_name_buf: [128]u8 = undefined;
     const profile_pipe_name = isolatedPipeName(&pipe_name_buf, g_profile_token) catch {
         if (!is_native_host) {
@@ -1169,11 +1177,18 @@ fn resolveWindowFromEnv(allocator: std.mem.Allocator) ?i64 {
         );
         if (file == INVALID_HANDLE_VALUE) return null;
         defer _ = CloseHandle(file);
-        var file_buf: [64]u8 = undefined;
+        var file_buf: [96]u8 = undefined;
         var read: windows.DWORD = 0;
         if (ReadFile(file, &file_buf, @intCast(file_buf.len), &read, null) == 0) return null;
         const trimmed = std.mem.trim(u8, file_buf[0..read], " \t\r\n");
-        if (std.fmt.parseInt(i64, trimmed, 10)) |id| {
+        var lines = std.mem.splitScalar(u8, trimmed, '\n');
+        const first = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+        if (std.fmt.parseInt(i64, first, 10)) |id| {
+            const own = std.mem.trim(u8, lines.next() orelse "", " \t\r");
+            if (own_profile.isToken(own)) {
+                @memcpy(&g_window_file_profile, own);
+                g_window_file_profile_set = true;
+            }
             return id;
         } else |_| {}
     }
@@ -3140,4 +3155,8 @@ test "ISSUE-410 extended paths normalize before overlapping path protection" {
     try fixture.same("clone", ".multiprompt-clone-complete", "");
     try fixture.unchanged();
     std.debug.print("ISSUE-410 extended paths passed\n", .{});
+}
+
+test "IGSH-672 own profile module" {
+    std.testing.refAllDecls(own_profile);
 }

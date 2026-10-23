@@ -322,6 +322,7 @@ pub const Shell = struct {
     browser_first_launch_tick: u64 = 0,
     browser_connection_id: u64 = 0,
     browser_open_failed: bool = false,
+    browser_profile_token: [32]u8 = std.mem.zeroes([32]u8),
     browser_suspended: bool = false,
     browser_native: bool = true,
     browser_split_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
@@ -2353,6 +2354,7 @@ pub var g_bridge_exe_len: usize = 0;
 
 pub const BrowserResolveJob = struct {
     shell_id: u32,
+    profile: [32]u8 = std.mem.zeroes([32]u8),
     nonce: [40]u8 = std.mem.zeroes([40]u8),
     nonce_len: usize = 0,
     connection_id: u64 = 0,
@@ -3345,6 +3347,7 @@ pub var g_zsb_sidebar_session: [64]u8 = std.mem.zeroes([64]u8);
 pub var g_zsb_sidebar_session_len: u32 = 0;
 
 pub const ZsbPaneInfo = struct {
+    profile: [32]u8 = std.mem.zeroes([32]u8),
     name: [64]u16 = std.mem.zeroes([64]u16),
     name_len: u32 = 0,
     shell_id: u32 = 0,
