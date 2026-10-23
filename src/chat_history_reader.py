@@ -1255,7 +1255,7 @@ def stop_response(q):
 
 
 def box_is_empty(box):
-    return not box or (box.startswith('Try "') and box.endswith('"'))
+    return not box
 
 
 def send_response(q):
@@ -1277,6 +1277,7 @@ def send_response(q):
             else:
                 presses = 0
                 stalled = 0
+                stuck = False
                 limit = len(box) + 2
                 while not box_is_empty(box) and presses < limit:
                     subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
@@ -1285,8 +1286,11 @@ def send_response(q):
                     stalled = stalled + 1 if after == box else 0
                     box = after
                     if stalled == 2:
+                        subprocess.run(["tmux", "send-keys", "-t", target, "C-k"], check=True, capture_output=True, timeout=5)
+                        box = prompt_box_text(target)
+                        stuck = True
                         break
-                if not box_is_empty(box):
+                if not stuck and not box_is_empty(box):
                     reason = "box_not_clear"
                 if reason is None:
                     if "\n" in text or "\r" in text:

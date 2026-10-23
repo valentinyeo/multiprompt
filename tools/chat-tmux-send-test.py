@@ -124,18 +124,13 @@ class SendTest(unittest.TestCase):
 
     def test_IGSH_608_multiline_leftover_clearing_is_bounded(self):
         box = "leftover first line\nleftover second line\nleftover third line"
-        for after in ('Try "how do I log an error?"', ""):
-            with self.subTest(after=after), patch.object(reader, "prompt_box_text", side_effect=[box, after, ""]), \
-                    patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
-                self.assertIn("\tsend\tok\t", self.send())
-                calls = [call.args[0] for call in run.call_args_list]
-                self.assertEqual(calls[0], ["tmux", "send-keys", "-t", "=term-1:", "C-u"])
-                self.assertEqual(calls[1], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "please check the build"])
-                self.assertEqual(len(calls), 3)
-        with patch.object(reader, "prompt_box_text", return_value=box), \
+        with patch.object(reader, "prompt_box_text", side_effect=[box, "", ""]), \
                 patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
-            self.assertIn("\terror\tbox_not_clear\t", self.send())
-            self.assertEqual(run.call_count, 2)
+            self.assertIn("\tsend\tok\t", self.send())
+            calls = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(calls[0], ["tmux", "send-keys", "-t", "=term-1:", "C-u"])
+            self.assertEqual(calls[1], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "please check the build"])
+            self.assertEqual(len(calls), 3)
 
     def test_enter_is_pressed_again_only_while_the_text_stays_in_the_box(self):
         for after, enters in (("", 1), ("please check the build", 2)):
@@ -150,8 +145,21 @@ class SendTest(unittest.TestCase):
             self.assertIn("\tsend\tok\t", self.send())
             self.assertEqual(sum(call.args[0][-1] == "Enter" for call in run.call_args_list), 2)
 
-    def test_IGSH_608_box_that_will_not_clear_is_never_typed_over(self):
-        with patch.object(reader, "prompt_box_text", return_value="old leftover text"), \
+    def test_IGSH_608_suggestion_only_box_is_sent_after_c_u_c_u_c_k(self):
+        with patch.object(reader, "prompt_box_text", return_value="Try asking about the next step"), \
+                patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
+            self.assertIn("\tsend\tok\t", self.send())
+            self.assertEqual([call.args[0] for call in run.call_args_list], [
+                ["tmux", "send-keys", "-t", "=term-1:", "C-u"],
+                ["tmux", "send-keys", "-t", "=term-1:", "C-u"],
+                ["tmux", "send-keys", "-t", "=term-1:", "C-k"],
+                ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "please check the build"],
+                ["tmux", "send-keys", "-t", "=term-1:", "Enter"],
+            ])
+
+    def test_IGSH_608_box_that_keeps_changing_but_never_empties_is_never_typed_over(self):
+        count = iter(range(1000))
+        with patch.object(reader, "prompt_box_text", side_effect=lambda target: "leftover text %d" % next(count)), \
                 patch.object(reader.subprocess, "run") as run, patch.object(reader.time, "sleep"):
             self.assertEqual(self.send(), "@mp\t7\tsend\terror\tbox_not_clear\t0\n@@MP_END@@\n")
             calls = [call.args[0] for call in run.call_args_list]
