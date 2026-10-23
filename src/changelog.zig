@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.833", .items = &.{
+        .{ .text = "Sessions that could not reconnect at startup now keep their Chat View and browser settings.", .ticket = "IGSH-611" },
+    } },
     .{ .ver = "0.28.832", .items = &.{
         .{ .text = "The laptop installer no longer stops when an old backup is still open.", .ticket = "IGSH-618" },
         .{ .text = "Desktop verification waits for restored window focus and workspace changes, avoiding intermittent failures on busy runners.", .ticket = "IGSH-619" },
