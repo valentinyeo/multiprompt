@@ -251,6 +251,11 @@ pub fn shouldRefresh(now: u64, last_refresh: ?u64, immediate: bool, local: []con
     return false;
 }
 
+pub fn displayName(remote: []const Host, slot: u8, default: []const u8) []const u8 {
+    for (remote) |host| if (host.slot == slot) return host.name;
+    return default;
+}
+
 pub fn needsPublish(local: []const Host, remote: []const Host) bool {
     for (local) |host| {
         var found = false;
@@ -325,6 +330,19 @@ test "hosts publishing is slot based and detects local changes without deleting 
     try std.testing.expect(needsPublish(&.{other}, &.{fixture}));
     try std.testing.expect(needsPublish(&.{fixture}, &.{}));
     try std.testing.expect(!needsPublish(&.{}, &.{fixture}));
+}
+
+test "IGSH-576 resolved hosts keep account display names without publishing defaults" {
+    var remote = fixture;
+    remote.name = "Server A";
+    const resolved = parseSshConfig("hostname 203.0.113.5\nport 22\nuser owner\n").?;
+    const local = Host{ .slot = 0, .name = displayName(&.{remote}, 0, "Host 1"), .hostname = resolved.hostname, .port = resolved.port, .user = resolved.user };
+    try std.testing.expectEqualStrings("Server A", local.name);
+    try std.testing.expect(!needsPublish(&.{local}, &.{remote}));
+    try std.testing.expect(needsPublish(&.{fixture}, &.{remote}));
+    try std.testing.expectEqualStrings("Host 1", displayName(&.{}, 0, "Host 1"));
+    remote.slot = 1;
+    try std.testing.expectEqualStrings("Host 1", displayName(&.{remote}, 0, "Host 1"));
 }
 
 test "hosts refresh on first run even with no remote hosts" {

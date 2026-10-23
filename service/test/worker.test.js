@@ -800,6 +800,26 @@ test('hosts partial PUT replaces slot 1 and keeps slot 0 sorted across empty and
   }
 });
 
+for (const [slot, defaultName] of ['Host 1', 'Host 2', 'Remote host 3'].entries()) {
+  for (const [scenario, name, hostname, expectedName] of [
+    ['default preserves account name', defaultName, host.hostname, 'Server A'],
+    ['custom rename replaces account name', 'Server B', host.hostname, 'Server B'],
+    ['different hostname accepts default', defaultName, 'example.com', defaultName],
+    ['another slot default is a rename', slot === 0 ? 'Host 2' : 'Host 1', host.hostname, slot === 0 ? 'Host 2' : 'Host 1']
+  ]) test(`IGSH-576 hosts slot ${slot}: ${scenario}`, async () => {
+    const { token } = await enroll();
+    const previous = { ...host, slot, name: 'Server A' };
+    const incoming = { ...host, slot, name, hostname, port: 2222, user: 'operator' };
+    await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, hosts: [previous] })).run();
+    const headers = { ...auth(token), 'X-Layout-Features': 'hosts' };
+    const response = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: 1, layout: { ...layout, hosts: [incoming] } }) });
+    assert.equal(response.status, 200);
+    const expected = [{ ...incoming, name: expectedName }];
+    assert.deepEqual((await response.json()).layout.hosts, expected);
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT layout FROM layouts').first()).layout).hosts, expected);
+  });
+}
+
 test('hosts invalid values return invalid_hosts without changing D1', async () => {
   const { token } = await enroll();
   await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(layout)).run();

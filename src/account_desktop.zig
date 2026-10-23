@@ -612,7 +612,7 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host) ![
             }
             accountAppendSshFile(config, block) catch continue;
         } else host.host_keys = keys[0..@min(keys.len, 4)];
-        host.name = name;
+        host.name = try a.dupe(u8, account_hosts.displayName(remote, @intCast(slot), name));
         try hosts.append(a, host);
     }
     return hosts.toOwnedSlice(a);
