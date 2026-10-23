@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.832", .items = &.{
+        .{ .text = "The laptop installer no longer stops when an old backup is still open.", .ticket = "IGSH-618" },
+        .{ .text = "Desktop verification waits for restored window focus and workspace changes, avoiding intermittent failures on busy runners.", .ticket = "IGSH-619" },
+    } },
     .{ .ver = "0.28.831", .items = &.{
         .{ .text = "Chat View on everywhere and off everywhere now switch sessions just once, so you can change each session afterwards.", .ticket = "IGSH-611" },
         .{ .text = "Choose Always Chat View or Always shell view for a session to keep its view across restarts and skip everywhere actions, or clear Always view to unlock it.", .ticket = "IGSH-611" },
