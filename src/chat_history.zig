@@ -464,6 +464,10 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
+pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
+    return force or pending or !scrolled_up;
+}
+
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
     const bottom = content_h - viewport_h;
     if (follow_bottom) return bottom;
@@ -1223,4 +1227,29 @@ test "ISSUE-402 identical split text keeps find identity through suffix clone an
             }
         }
     }
+}
+
+test "IGSH-720 passive messages preserve the anchor while forced refresh follows" {
+    const follow = followBottom(false, false, true);
+    try std.testing.expect(!follow);
+    try std.testing.expectEqual(@as(i32, 120), scrollAfterLayout(1400, 800, 120, follow, 100, 20));
+    try std.testing.expectEqual(@as(i32, 200), scrollAfterLayout(1600, 800, 120, follow, 180, 20));
+    try std.testing.expectEqual(@as(i32, 800), scrollAfterLayout(1600, 800, 120, followBottom(true, false, true), 180, 20));
+}
+
+test "IGSH-720 bottom follows new messages until upward scrolling clears pending" {
+    try std.testing.expect(followBottom(false, false, false));
+    try std.testing.expectEqual(@as(i32, 600), scrollAfterLayout(1400, 800, 400, followBottom(false, false, false), null, 0));
+    try std.testing.expectEqual(@as(i32, 600), scrollAfterLayout(1400, 800, 120, followBottom(false, true, true), null, 0));
+    try std.testing.expect(!followBottom(false, false, true));
+    try std.testing.expectEqual(@as(i32, 120), scrollAfterLayout(1600, 800, 120, followBottom(false, false, true), null, 0));
+}
+
+test "IGSH-720 fresh sends and forced refreshes show the bottom even when scrolled up" {
+    for ([_][2]bool{ .{ false, true }, .{ true, false }, .{ true, true } }) |request| {
+        const follow = followBottom(request[0], request[1], true);
+        try std.testing.expect(follow);
+        try std.testing.expectEqual(@as(i32, 1000), scrollAfterLayout(1800, 800, 200, follow, 160, 40));
+    }
+    try std.testing.expectEqual(@as(i32, 200), scrollAfterLayout(1800, 800, 200, followBottom(false, false, true), 160, 40));
 }

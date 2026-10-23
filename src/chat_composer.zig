@@ -156,7 +156,7 @@ const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
-const chatRelayout = @import("chat_render.zig").chatRelayout;
+const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
 const DragAcceptFiles = @import("win32.zig").DragAcceptFiles;
 const ChangeWindowMessageFilterEx = @import("win32.zig").ChangeWindowMessageFilterEx;
 const chatDropFiles = @import("chat_render.zig").chatDropFiles;
@@ -553,8 +553,7 @@ pub fn layoutChatControls() void {
     if (app_state.g_chat_layout_dirty and app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
-        chatRelayout(rc.right - rc.left);
-        app_state.g_chat_scroll_y = app_state.g_chat_content_h - (rc.bottom - rc.top);
+        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
     }
     chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
     _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);
@@ -1626,7 +1625,11 @@ pub fn chatShellDraftPushDue() void {
     const text = composerText(&composer);
     const now = GetTickCount64();
     if (!shell_draft.pushDue(text, now)) return;
-    if (@import("chat_send.zig").chatShellOp(app_state.active_shell, "draft", text)) shell_draft.pushed(text, now);
+    if (@import("chat_send.zig").chatShellOp(app_state.active_shell, "draft", text, &shell_draft.push_in_flight)) {
+        shell_draft.pushed(text, now);
+    } else {
+        shell_draft.pushFinished();
+    }
 }
 
 fn chatDraftNoteEdit() void {

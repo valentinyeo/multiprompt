@@ -123,3 +123,6 @@ Claude Code is the single source of truth for a tmux Claude tab. The history rea
 Chat View lists the shell queue in order after the transcript and merges its own outbox entries into it: an outbox message whose text matches a shell queue item is that item, never a second row. Every change of that list writes one `CHAT_QUEUE items=[{"text":...,"state":"queued"|"sent"}]` line to the debug log.
 
 The draft follows the focused side. Edits in the Chat View box are pushed 500 ms after the last keystroke with the reader's `draft` op (clear the box, type the text, no Enter), never while a send is in flight. When the Chat View box is not the side being edited, the shell box text fills it, and unsent text is not erased by a shell clear. Ctrl+K "Chat View: Edit Queued Messages" sends Claude's Up key through the `edit_queued` op so Claude moves its queue into the box, and the draft sync shows it. The chat-delivery verify journey case `queue-draft-sync` proves all of this.
+
+Draft updates verify the shell prompt box is empty before typing; a failed clear leaves the new draft untyped.
+Scrolling up cancels pending bottom jumps; new messages and layout changes preserve the reader’s position. Sending again or forcing a transcript refresh still shows the bottom.

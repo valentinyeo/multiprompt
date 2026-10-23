@@ -1797,7 +1797,7 @@ class SharedQueueDraftTest(unittest.TestCase):
         def run(argv, **kwargs):
             calls.append(argv)
             return subprocess.CompletedProcess(argv, 0, b'', b'')
-        with patch.object(reader, 'box_draft', return_value='old text'), patch.object(reader.subprocess, 'run', side_effect=run):
+        with patch.object(reader, 'box_draft', return_value='old text'), patch.object(reader, 'prompt_box_text', side_effect=['old text', '']), patch.object(reader.subprocess, 'run', side_effect=run):
             wire = reader.draft_response(dict(op='draft', id=4, tmux='term-1', text='new text'))
         self.assertTrue(wire.startswith('@mp\t4\tdraft\tok\t-\t0\n'))
         self.assertEqual(calls, [['tmux', 'send-keys', '-t', '=term-1:', 'C-u'], ['tmux', 'send-keys', '-t', '=term-1:', '-l', '--', 'new text']])
@@ -1805,11 +1805,51 @@ class SharedQueueDraftTest(unittest.TestCase):
         with patch.object(reader, 'box_draft', return_value='same'), patch.object(reader.subprocess, 'run', side_effect=run):
             reader.draft_response(dict(op='draft', id=4, tmux='term-1', text='same'))
         self.assertEqual(calls, [])
-        with patch.object(reader, 'box_draft', return_value='gone'), patch.object(reader.subprocess, 'run', side_effect=run):
+        with patch.object(reader, 'box_draft', return_value='gone'), patch.object(reader, 'prompt_box_text', side_effect=['gone', '']), patch.object(reader.subprocess, 'run', side_effect=run):
             reader.draft_response(dict(op='draft', id=4, tmux='term-1', text=''))
         self.assertEqual(calls, [['tmux', 'send-keys', '-t', '=term-1:', 'C-u']])
         for name, text in (('bad name', 'x'), ('term-1', 'x\x00')):
             self.assertIn('\terror\t', reader.draft_response(dict(op='draft', id=4, tmux=name, text=text)))
+
+    def test_IGSH_720_draft_clears_rows_missing_from_first_capture(self):
+        box = 'old first\nold second'
+        captures = 0
+        calls = []
+
+        def run(argv, **kwargs):
+            nonlocal box, captures
+            calls.append(argv)
+            shown = ''
+            if 'capture-pane' in argv:
+                captures += 1
+                visible = box.split('\n')[-1] if captures == 1 else box
+                shown = '❯ ' + visible.replace('\n', '\n  ') + '\n' + '─' * 20 + '\n'
+            elif 'send-keys' in argv:
+                if argv[-1] == 'C-u':
+                    box = box.rsplit('\n', 1)[0] if '\n' in box else ''
+                elif '-l' in argv:
+                    box += argv[-1]
+            return subprocess.CompletedProcess(argv, 0, shown, '')
+
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.draft_response(dict(op='draft', id=720, tmux='term-1', text='new draft'))
+        self.assertIn('\tdraft\tok\t-\t0\n', wire)
+        self.assertEqual(box, 'new draft')
+        self.assertEqual(sum('-l' in call for call in calls), 1)
+        self.assertFalse(any(call[-1] == 'Enter' for call in calls))
+
+    def test_IGSH_720_draft_does_not_type_when_clear_stalls(self):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            shown = '❯ stuck draft\n' + '─' * 20 + '\n' if 'capture-pane' in argv else ''
+            return subprocess.CompletedProcess(argv, 0, shown, '')
+
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.draft_response(dict(op='draft', id=720, tmux='term-1', text='new draft'))
+        self.assertIn('\tdraft\terror\tbox_not_clear\t0\n', wire)
+        self.assertEqual([call[-1] for call in calls if 'send-keys' in call], ['C-u', 'C-u', 'C-k'])
 
     def test_IGSH_682_edit_queued_presses_only_up(self):
         calls = []

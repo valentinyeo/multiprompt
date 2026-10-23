@@ -169,13 +169,21 @@ pub const Draft = struct {
     push_ms: u64 = 0,
     quiet_until_ms: u64 = 0,
     edit_pending: bool = false,
+    push_in_flight: std.atomic.Value(bool) = .init(false),
 
     pub fn onShell(self: *Draft, shell_id: u32, shell: []const u16, composer: []const u16, focused: bool, now: u64) Pull {
         const shell_hash = draftHash(shell);
         const composer_hash = draftHash(composer);
         const composer_blank = isBlankDraft(composer);
         if (self.shell_id != shell_id or !self.known) {
-            self.* = .{ .shell_id = shell_id, .known = true, .shell_hash = shell_hash };
+            self.shell_id = shell_id;
+            self.known = true;
+            self.shell_hash = shell_hash;
+            self.synced_hash = 0;
+            self.edit_ms = 0;
+            self.push_ms = 0;
+            self.quiet_until_ms = 0;
+            self.edit_pending = false;
             if (shell_hash == composer_hash) {
                 self.synced_hash = shell_hash;
                 return .none;
@@ -217,14 +225,20 @@ pub const Draft = struct {
     }
 
     pub fn pushDue(self: *Draft, composer: []const u16, now: u64) bool {
-        if (!self.edit_pending) return false;
+        if (self.push_in_flight.load(.acquire) or !self.edit_pending) return false;
         if (now < self.quiet_until_ms) {
             self.edit_pending = false;
             return false;
         }
         self.edit_pending = false;
         if (composer.len > DRAFT_PUSH_CAP) return false;
-        return draftHash(composer) != self.synced_hash;
+        if (draftHash(composer) == self.synced_hash) return false;
+        self.push_in_flight.store(true, .release);
+        return true;
+    }
+
+    pub fn pushFinished(self: *Draft) void {
+        self.push_in_flight.store(false, .release);
     }
 
     pub fn pushed(self: *Draft, composer: []const u16, now: u64) void {
@@ -401,4 +415,62 @@ test "composer text uses carriage return line feed" {
     var out: [16]u16 = undefined;
     const n = toComposer(&out, w("a\nb"));
     try std.testing.expectEqualSlices(u16, w("a\r\nb"), out[0..n]);
+}
+
+test "IGSH-720 a second push waits for completion and keeps the latest edit pending" {
+    var draft: Draft = .{};
+    draft.onComposerEdit(1000);
+    try std.testing.expect(draft.pushDue(w("first"), 1500));
+    draft.pushed(w("first"), 1500);
+    draft.onComposerEdit(1600);
+    try std.testing.expect(!draft.pushDue(w("intermediate"), 2100));
+    try std.testing.expect(draft.edit_pending);
+    draft.onComposerEdit(2200);
+    try std.testing.expect(!draft.pushDue(w("latest"), 2700));
+    try std.testing.expect(draft.edit_pending);
+    draft.pushFinished();
+    try std.testing.expect(draft.pushDue(w("latest"), 2800));
+    draft.pushed(w("latest"), 2800);
+    draft.pushFinished();
+    try std.testing.expectEqual(draftHash(w("latest")), draft.synced_hash);
+    try std.testing.expect(!draft.pushDue(w("latest"), 3300));
+}
+
+test "IGSH-720 serialized push log ends with the newest composer text" {
+    var draft: Draft = .{};
+    var sent: std.ArrayList([]const u16) = .empty;
+    defer sent.deinit(std.testing.allocator);
+    var composer = w("older");
+    draft.onComposerEdit(1000);
+    if (draft.pushDue(composer, 1500)) {
+        try sent.append(std.testing.allocator, composer);
+        draft.pushed(composer, 1500);
+    }
+    try std.testing.expectEqual(@as(usize, 1), sent.items.len);
+    try std.testing.expectEqualSlices(u16, composer, sent.items[sent.items.len - 1]);
+    for ([_][]const u16{ w("intermediate"), w("newest") }, 0..) |text, i| {
+        composer = text;
+        const now = 2000 + @as(u64, @intCast(i)) * 1000;
+        draft.onComposerEdit(now);
+        if (draft.pushDue(composer, now + 500)) {
+            try sent.append(std.testing.allocator, composer);
+            draft.pushed(composer, now + 500);
+        }
+        try std.testing.expectEqual(@as(usize, 1), sent.items.len);
+        try std.testing.expect(draft.edit_pending);
+    }
+    draft.pushFinished();
+    if (draft.pushDue(composer, 4000)) {
+        try sent.append(std.testing.allocator, composer);
+        draft.pushed(composer, 4000);
+    }
+    try std.testing.expectEqual(@as(usize, 2), sent.items.len);
+    try std.testing.expectEqualSlices(u16, w("older"), sent.items[0]);
+    try std.testing.expectEqualSlices(u16, composer, sent.items[sent.items.len - 1]);
+    draft.onComposerEdit(4100);
+    try std.testing.expect(!draft.pushDue(composer, 4500));
+    draft.pushFinished();
+    try std.testing.expect(!draft.pushDue(composer, 5000));
+    try std.testing.expectEqual(@as(usize, 2), sent.items.len);
+    try std.testing.expectEqualSlices(u16, w("newest"), sent.items[sent.items.len - 1]);
 }

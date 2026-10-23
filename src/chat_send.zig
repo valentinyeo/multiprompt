@@ -66,9 +66,7 @@ const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const refreshChatTranscript = @import("chat_session.zig").refreshChatTranscript;
-const chatRelayout = @import("chat_render.zig").chatRelayout;
-const chatMaxScroll = @import("chat_render.zig").chatMaxScroll;
-const chatMinScroll = @import("chat_render.zig").chatMinScroll;
+const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
 const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
 const chatAcAgent = @import("chat_composer.zig").chatAcAgent;
 const chatAcClose = @import("chat_composer.zig").chatAcClose;
@@ -833,8 +831,7 @@ pub fn chatOutboxChanged() void {
     if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
-        chatRelayout(rc.right - rc.left);
-        app_state.g_chat_scroll_y = if (app_state.g_chat_scrolled_up) std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll()) else app_state.g_chat_content_h - (rc.bottom - rc.top);
+        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -2626,10 +2623,10 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
 
 pub fn chatShellEditQueued() bool {
     if (!app_state.g_chat_active) return false;
-    return chatShellOp(app_state.active_shell, "edit_queued", null);
+    return chatShellOp(app_state.active_shell, "edit_queued", null, null);
 }
 
-pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16) bool {
+pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16, in_flight: ?*std.atomic.Value(bool)) bool {
     if (shell_index >= app_state.shell_count) return false;
     const shell = &app_state.shells[shell_index];
     if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
@@ -2643,7 +2640,7 @@ pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16) bool {
         store[kept] = c;
         kept += 1;
     }
-    const thread = std.Thread.spawn(.{}, chatShellOpThread, .{ key, op, store, kept }) catch {
+    const thread = std.Thread.spawn(.{}, chatShellOpThread, .{ key, op, store, kept, in_flight }) catch {
         a.free(store);
         return false;
     };
@@ -2651,7 +2648,8 @@ pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16) bool {
     return true;
 }
 
-fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u8, store: []u8, kept: usize) void {
+fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u8, store: []u8, kept: usize, in_flight: ?*std.atomic.Value(bool)) void {
+    defer if (in_flight) |flag| flag.store(false, .release);
     const a = std.heap.page_allocator;
     defer a.free(store);
     const query = std.json.Stringify.valueAlloc(a, .{ .op = op, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = store[0..kept] }, .{}) catch return;
