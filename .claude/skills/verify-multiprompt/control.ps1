@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -181,6 +181,81 @@ public static class VerifyNative {
         }, IntPtr.Zero);
         if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
         return pane;
+    }
+    public static IntPtr DockedPaneWindow(IntPtr owner) {
+        Rect frame;
+        if (!GetWindowRect(owner, out frame)) throw new InvalidOperationException("Missing owned frame rectangle");
+        IntPtr pane = IntPtr.Zero;
+        int count = 0;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            Rect rect;
+            if (GetProp(hwnd, "ZigShellPaneOwner") != owner || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, out rect)) return true;
+            if (rect.Right <= rect.Left || rect.Bottom <= rect.Top || rect.Left >= frame.Right || rect.Right <= frame.Left || rect.Top >= frame.Bottom || rect.Bottom <= frame.Top) return true;
+            pane = hwnd;
+            count++;
+            return true;
+        }, IntPtr.Zero);
+        if (count > 1) throw new InvalidOperationException("Multiple onscreen owned browser panes");
+        return pane;
+    }
+    public static System.Diagnostics.Stopwatch BeginSessionSwitch() {
+        Input[] inputs = new Input[4];
+        for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
+        inputs[0].data.keyboard = new Keyboard { key = 0x11 };
+        inputs[1].data.keyboard = new Keyboard { key = 0x09 };
+        inputs[2].data.keyboard = new Keyboard { key = 0x09, flags = 2 };
+        inputs[3].data.keyboard = new Keyboard { key = 0x11, flags = 2 };
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput Ctrl+Tab failed");
+        return timer;
+    }
+    public static bool SwitchReady(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft) {
+        if (composer != IntPtr.Zero) {
+            if (GetForegroundWindow() != owner || GetAncestor(composer, 2) != owner || !IsWindowVisible(composer) ||
+                GetFocusedWindow(owner) != composer || EditText(composer) != draft) return false;
+        } else if (GetForegroundWindow() != console || GetAncestor(console, 2) != owner || !IsWindowVisible(console) ||
+            Class(console) != "ConsoleWindowClass" || !Title(console).EndsWith(suffix, StringComparison.Ordinal)) return false;
+        if (browser != IntPtr.Zero) {
+            Rect actual;
+            if (GetProp(browser, "ZigShellPaneOwner") != owner || !IsWindowVisible(browser) || !GetWindowRect(browser, out actual) ||
+                actual.Left != dock.Left || actual.Top != dock.Top || actual.Right != dock.Right || actual.Bottom != dock.Bottom) return false;
+        } else if (PaneVisible(owner)) return false;
+        return true;
+    }
+    static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        if (dock.Right - dock.Left < 16 || dock.Bottom - dock.Top < 200) throw new InvalidOperationException("Browser content area is too small");
+        int x = dock.Left + (dock.Right - dock.Left) / 2;
+        int y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4;
+        graphics.CopyFromScreen(x, y, 0, 0, pixels.Size);
+        for (int row = 0; row < pixels.Height; row++) {
+            for (int col = 0; col < pixels.Width; col++) {
+                var pixel = pixels.GetPixel(col, row);
+                if (Math.Abs(pixel.R - ((rgb >> 16) & 255)) > 8 || Math.Abs(pixel.G - ((rgb >> 8) & 255)) > 8 || Math.Abs(pixel.B - (rgb & 255)) > 8) return false;
+            }
+        }
+        return true;
+    }
+    public static bool PagePainted(Rect dock, int rgb) {
+        using (var pixels = new System.Drawing.Bitmap(3, 3))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) return PaintMatches(dock, rgb, pixels, graphics);
+    }
+    public static double[] MeasureSessionSwitch(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft, int rgb) {
+        using (var pixels = new System.Drawing.Bitmap(3, 3))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            double visible = -1;
+            var timer = BeginSessionSwitch();
+            do {
+                if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
+                    if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
+                    if (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics)) {
+                        timer.Stop();
+                        return new double[] { timer.Elapsed.TotalMilliseconds, visible };
+                    }
+                }
+                Thread.Sleep(1);
+            } while (timer.ElapsedMilliseconds < 20000);
+            throw new TimeoutException("Target session surface and browser paint did not become ready within 20 seconds");
+        }
     }
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     static void MouseAt(int x, int y, uint flags) {
@@ -638,6 +713,7 @@ $process = $null
 $job = $null
 $warmupJob = $null
 $warmup = $null
+$switchNativeRegistry = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -708,13 +784,13 @@ function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {
     }
 }
 
-function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20, [int]$PollMilliseconds = 200) {
+function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20, [int]$PollMilliseconds = 200, [switch]$Tight) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     do {
         if ($process.HasExited) { throw "App exited while waiting for $Description" }
         try { if (& $Condition) { return } } catch { $lastError = $_.Exception.Message }
-        Start-Sleep -Milliseconds $PollMilliseconds
+        if ($Tight) { [Threading.Thread]::Sleep(1) } else { Start-Sleep -Milliseconds $PollMilliseconds }
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Missing precondition or resulting state: $Description. $lastError"
 }
@@ -762,6 +838,15 @@ function Read-BrowserPane {
     return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
 }
 
+function Read-BrowserFrozen([uint32]$ShellId) {
+    $path = Join-Path $scratch ("roaming/ZigShell/panehib-zss-$ShellId.flag")
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { if ((Get-Content -LiteralPath $path -Raw -ErrorAction Stop).Trim() -ceq '1') { return $true } } catch { return $null }
+        return $null
+    }
+    return $false
+}
+
 function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0) {
     Wait-Until {
         $pane = Read-BrowserPane
@@ -771,7 +856,7 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
              ($State -in @('closed', 'failed') -and $pane.browser_connection_id -eq 0))
     } "browser-pane-stuck ${Step}: $State and connection identity" 25
     $pane = Read-BrowserPane
-    if ($pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
+    if ($Feature -ne 'browser-switch-speed' -and $pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
     Save-Json $pane ("browser-pane-$Step.json")
     $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id }
     Write-Host "browser-pane-stuck $Step PASS"
@@ -898,6 +983,15 @@ function Assert-ConnectedPaneStaysVisible([long]$ConnectionId) {
     } while ([DateTime]::UtcNow -lt $deadline)
     $pane = Assert-BrowserPane 'connected' 'connected-pane-stays-visible' ($ConnectionId - 1)
     Snapshot 'connected'
+}
+
+function Get-SwitchMedian($Values) {
+    if (@($Values).Count -eq 0) { return $null }
+    foreach ($value in $Values) { if ($null -eq $value) { return $null } }
+    $sorted = @($Values | Sort-Object)
+    $middle = [int][Math]::Floor($sorted.Count / 2)
+    if ($sorted.Count % 2) { return [double]$sorted[$middle] }
+    return ([double]$sorted[$middle - 1] + [double]$sorted[$middle]) / 2
 }
 
 function Doctor {
@@ -1178,6 +1272,27 @@ try {
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     $env:USERPROFILE = Join-Path $scratch 'profile'
     $env:HOME = $env:USERPROFILE
+    if ($Feature -eq 'browser-switch-speed') {
+        $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
+        New-Item -ItemType Directory -Force (Split-Path $extension) | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
+        $manifestPath = Join-Path $extension 'manifest.json'
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+        $publicKey = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDQp16XVv5KtjSlsEqMuPshm2xYXIvCx5DIAvNpHvxVpg2xJylPEsBoMC3pNeqqz9qG3g9MHQx7X08ItIevQXaOEWBrX7ZVHHXzoQBnlQ/LZbcSkpFucyNItAURMUCGg8XpwuAXi+rFcMkBcib6IpHklkAk97Kxc3NTevJ8TNSUewIDAQAB'
+        $manifest | Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force
+        $manifest | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 $manifestPath
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $sha.ComputeHash([Convert]::FromBase64String($publicKey)) } finally { $sha.Dispose() }
+        $extensionId = -join ($digest[0..15] | ForEach-Object { [char](97 + ($_ -shr 4)); [char](97 + ($_ -band 15)) })
+        $nativeManifest = Join-Path $scratch 'native-host.json'
+        @{ name = 'com.zigshell.bridge'; description = 'Synthetic switch timing bridge'; path = (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'); type = 'stdio'; allowed_origins = @("chrome-extension://$extensionId/") } | ConvertTo-Json | Set-Content -Encoding UTF8 $nativeManifest
+        $registry = 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.zigshell.bridge'
+        if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }
+        $switchNativeRegistry = $registry
+        New-Item -Path $registry -Force | Out-Null
+        Set-Item -Path $registry -Value $nativeManifest
+        Save-Json @{ extensionId = $extensionId; version = $manifest.version; installed = $true } 'switch-extension.json'
+    }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
@@ -1193,7 +1308,7 @@ try {
         $state = Read-Inbox
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked')) {
+    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed')) {
         $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires installed Edge' }
         $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
@@ -2055,6 +2170,262 @@ try {
             $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-found', 'row-icon-found', 'group-line-clears-icon'); pixels = $proof }
             Snapshot 'after'
         }
+        'browser-switch-speed' {
+            $modes = @('browser_off', 'browser_on', 'frozen_browser_on', 'chat_browser_off', 'chat_browser_on', 'chat_frozen_browser_on')
+            $timings = [ordered]@{ steps = @{} }
+            $traces = @{}
+            foreach ($mode in $modes) {
+                $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
+                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null }
+                $timings.steps[$mode] = $null
+                $traces[$mode] = @()
+            }
+            $traceLines = New-Object System.Collections.ArrayList
+            $frozenSwitches = New-Object System.Collections.ArrayList
+            $frozenLogStart = $null
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $colors = @('#db2855', '#26b8d4')
+            $rgb = @(0xDB2855, 0x26B8D4)
+            $drafts = @('switch-paint-0', 'switch-paint-1')
+            $composerHandle = [IntPtr]::Zero
+            $gapCase = @{ name = 'switch-gap'; status = 'failed'; detail = 'Switch measurement did not complete'; phase = 'initial-console' }
+            $result.checks += $gapCase
+            try {
+                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD for switch timing'
+                $initial = Read-Session
+                Wait-WorkspaceSurface $initial.active_workspace 0 $false
+                $gapCase.phase = 'group-setup'
+                Focus-Palette 'move to group' 6301
+                Press @(0x0D) 'Enter: Move to Group submenu'
+                Type-Text 'new group'
+                Press @(0x0D) 'Enter: New group containing timing CMD'
+                Wait-Until {
+                    $state = Read-Session
+                    $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[0].group_id -eq $state.groups[0].id
+                } 'timing CMD membership in the user-created group'
+                Press @(0x1B) 'Esc: leave inline group rename using the saved default name'
+                $gapCase.phase = 'second-console'
+                Palette 'new cmd'
+                Press @(0x0D) 'Enter: create second CMD for Ctrl+Tab timing'
+                Wait-Until {
+                    $state = Read-Session
+                    @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'cmd' -and
+                        (-not $state.tabs[1].PSObject.Properties['group_id'] -or $state.tabs[1].group_id -eq 0)
+                } 'second ungrouped timing CMD saved and selected'
+                $consoleTab = (Read-Session).active_tab
+                Wait-WorkspaceSurface $initial.active_workspace $consoleTab $false
+                $state = Read-Session
+                $consoles = @{}
+                $browsers = @{}
+                $docks = @{}
+                $shellIds = @($state.tabs[0].shell_id, $state.tabs[1].shell_id)
+                foreach ($tab in @(0, 1)) {
+                    $gapCase.phase = "console-identification-$tab"
+                    Press @(0x11, (0x31 + $tab)) ('Ctrl+' + ($tab + 1) + ': identify timing console')
+                    Wait-WorkspaceSurface $initial.active_workspace $tab $false
+                    $consoles[$tab] = [VerifyNative]::GetForegroundWindow()
+                    $browsers[$tab] = [IntPtr]::Zero
+                    $docks[$tab] = New-Object VerifyNative+Rect
+                }
+                $gapCase.phase = 'browser-off-baseline'
+                if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Browser-off baseline already has a pane' }
+                $warmupStopped = $warmupJob.Stop()
+                Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
+                $warmupJob.Dispose()
+                $warmupJob = $null
+                foreach ($mode in $modes) {
+                    $chat = $mode.StartsWith('chat_')
+                    $browserOn = $mode.EndsWith('browser_on')
+                    $frozen = $mode.Contains('frozen_')
+                    $sampleCount = $timings[$mode].samples_ms.Count
+                    if ($mode -eq 'chat_browser_off') {
+                        $gapCase.phase = 'chat-setup'
+                        Focus-Palette 'clear always view for this session' 6466
+                        Press @(0x0D) 'Enter: clear Always view for the switch test session'
+                        Wait-Until { -not (Read-Session).PSObject.Properties['chat_view_mode'] } 'per-session Chat View mode saved'
+                        foreach ($tab in @(0, 1)) {
+                            Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
+                            Wait-WorkspaceSurface $initial.active_workspace $tab $false
+                            $script:browserShellId = $shellIds[$tab]
+                            Press @(0x12, 0x41) 'Alt+A: close browser pane for Chat View baseline'
+                            $null = Assert-BrowserPane 'closed' ('chat-baseline-' + $tab)
+                            $browsers[$tab] = [IntPtr]::Zero
+                            Press @(0x12, 0x43) 'Alt+C: enable Chat View for this session'
+                            Wait-Until { (Read-Session).tabs[$tab].cv } 'Chat View saved for this session'
+                            $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                            $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                            Wait-Until {
+                                $candidate = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                                $null -ne $candidate -and $candidate.Current.ProcessId -eq $process.Id -and -not $candidate.Current.IsOffscreen
+                            } 'owned Chat View composer visible'
+                            $composerHandle = [IntPtr]($root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition).Current.NativeWindowHandle)
+                            Wait-WorkspaceSurface $initial.active_workspace $tab $true ($composerHandle.ToInt32())
+                            Type-Text $drafts[$tab]
+                            Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq $drafts[$tab] } 'distinct unsent synthetic session draft'
+                        }
+                    }
+                    if ($browserOn -and -not $frozen) {
+                        foreach ($tab in @(0, 1)) {
+                            $gapCase.phase = "$mode-setup-$tab"
+                            Press @(0x11, (0x31 + $tab)) ('Ctrl+' + ($tab + 1) + ': open this session browser')
+                            Wait-WorkspaceSurface $initial.active_workspace $tab $chat ($composerHandle.ToInt32())
+                            $script:browserShellId = $shellIds[$tab]
+                            $pane = Open-BrowserPane ($mode + '-' + $tab)
+                            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } 'connected timing browser with app-published CDP binding in its session' 30
+                            $browser = [VerifyNative]::DockedPaneWindow($script:window)
+                            $dock = New-Object VerifyNative+Rect
+                            if (-not [VerifyNative]::GetWindowRect($browser, [ref]$dock)) { throw 'Timing browser dock rectangle unavailable' }
+                            Palette 'jump browser'
+                            Press @(0x0D) 'Enter: focus the session browser through the palette'
+                            Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $browser } 'target browser foreground for real address-bar navigation'
+                            Doctor
+                            if ([VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window -or [VerifyNative]::DockedPaneWindow($script:window) -ne $browser) { throw 'Navigation browser ownership changed' }
+                            [uint32]$browserPid = 0
+                            [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
+                            Record 'Focus verified session browser HWND before address-bar input'
+                            [VerifyNative]::FocusOwnedWindow($browser, $browserPid, $script:window)
+                            if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before Ctrl+L' }
+                            Record 'Ctrl+L: navigate through the native browser address bar'
+                            [VerifyNative]::Chord(@(0x11, 0x4C))
+                            $browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browser)
+                            $omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
+                            Wait-Until {
+                                $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+                                $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus -and
+                                    [System.Windows.Automation.Automation]::Compare($omnibox, [System.Windows.Automation.AutomationElement]::FocusedElement) -and
+                                    [VerifyNative]::GetForegroundWindow() -eq $browser
+                            } 'verified pane native address bar has keyboard focus'
+                            $pageTitle = 'Switch paint ' + $tab
+                            $html = '<title>' + $pageTitle + '</title><style>html,body{margin:0;width:100%;height:100%;background:' + $colors[$tab] + '}</style>'
+                            $pageUrl = 'data:text/html,' + [Uri]::EscapeDataString($html)
+                            if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost address-bar focus' }
+                            [VerifyNative]::Text($pageUrl)
+                            Wait-Until {
+                                $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+                                $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus -and
+                                    $omnibox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ceq $pageUrl -and
+                                    [VerifyNative]::GetForegroundWindow() -eq $browser
+                            } 'complete color URL is in the focused pane address bar'
+                            if ([VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window -or [VerifyNative]::DockedPaneWindow($script:window) -ne $browser) { throw 'Navigation browser ownership changed before Enter' }
+                            if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before navigation' }
+                            Record 'Enter: show the synthetic full-viewport session color'
+                            [VerifyNative]::Chord(@(0x0D))
+                            Wait-Until {
+                                [VerifyNative]::DockedPaneWindow($script:window) -eq $browser -and
+                                    [VerifyNative]::Title($browser).StartsWith($pageTitle + ' ', [StringComparison]::Ordinal) -and
+                                    [VerifyNative]::PagePainted($dock, $rgb[$tab])
+                            } 'active pane tab is the color page and target session color visibly painted below the browser toolbar' -Tight
+                            $browsers[$tab] = $browser
+                            $docks[$tab] = $dock
+                        }
+                        if ($browsers[0] -eq $browsers[1]) { throw 'Timing sessions do not have distinct browser HWNDs' }
+                        $identities = foreach ($tab in @(0, 1)) {
+                            @{ tab = $tab; shellId = $shellIds[$tab]; consoleHwnd = $consoles[$tab].ToInt64(); browserHwnd = $browsers[$tab].ToInt64(); dock = $docks[$tab]; color = $colors[$tab] }
+                        }
+                        Save-Json @($identities) ("$mode-window-identities.json")
+                    }
+                    if ($frozen) {
+                        foreach ($tab in @(1, 0)) {
+                            $gapCase.phase = "$mode-reset-$tab"
+                            Press @(0x11, (0x31 + $tab)) 'Select session to verify its freeze marker is cleared before fresh sampling'
+                            Wait-WorkspaceSurface $initial.active_workspace $tab $chat ($composerHandle.ToInt32())
+                            Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$tab]) } 'active browser freeze marker cleared'
+                        }
+                        Wait-Until {
+                            $panes = @((Read-Inbox).shells | Where-Object { $_.sid -in $shellIds -and $_.browser_state -eq 'connected' -and $_.browser_window_id -gt 0 })
+                            $panes.Count -eq 2
+                        } 'both timing browsers have app-published CDP window bindings' 30
+                    }
+                    $gapCase.phase = "$mode-start"
+                    Press @(0x11, 0x31) 'Ctrl+1: start timing from first session'
+                    Wait-WorkspaceSurface $initial.active_workspace 0 $chat ($composerHandle.ToInt32())
+                    if ($browserOn) { Wait-Until { [VerifyNative]::PagePainted($docks[0], $rgb[0]) } 'first session color before measurement' -Tight }
+                    Snapshot $(if ($mode -eq 'browser_off') { 'before' } elseif ($mode -eq 'browser_on') { 'action' } else { $mode + '-action' })
+                    for ($sample = 0; $sample -lt $sampleCount; $sample++) {
+                        $gapCase.phase = "$mode-sample-$sample"
+                        $target = ($sample + 1) % 2
+                        Doctor
+                        if ($frozen) {
+                            $frozenLogStart = (Get-Content $log -Raw).Length
+                            $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $shellIds[$target]; marker = "panehib-zss-$($shellIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; log_start = $frozenLogStart; log_end = $null }
+                            [void]$frozenSwitches.Add($freeze)
+                            if ($false -ne (Read-BrowserFrozen $shellIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }
+                            $parked = [Diagnostics.Stopwatch]::StartNew()
+                            Wait-Until {
+                                $state = Read-Session
+                                $null -ne $state -and $state.active_tab -eq (1 - $target) -and $state.tabs[$target].shell_id -eq $shellIds[$target] -and
+                                    ($true -eq (Read-BrowserFrozen $shellIds[$target]))
+                            } "fresh app-published freeze marker for parked target $target" 150
+                            $freeze.wait_ms = $parked.Elapsed.TotalMilliseconds
+                            $freeze.status = 'frozen'
+                            $freeze.observed_utc = [DateTime]::UtcNow.ToString('o')
+                            Doctor
+                            Assert-Foreground
+                        }
+                        Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
+                        $logStart = (Get-Content $log -Raw).Length
+                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target])
+                        $timings[$mode].samples_ms[$sample] = $measurement[0]
+                        $timings[$mode].window_visible_ms[$sample] = $measurement[1]
+                        Wait-WorkspaceSurface $initial.active_workspace $target $chat ($composerHandle.ToInt32())
+                        $pattern = 'switch-timing: to=' + $target + ' total_us=\d+[^\r\n]*'
+                        $traceMatches = [regex]::Matches((Get-Content $log -Raw).Substring($logStart), $pattern)
+                        $steps = $null
+                        if ($traceMatches.Count -eq 1) {
+                            $line = $traceMatches[0].Value
+                            [void]$traceLines.Add($line)
+                            $steps = @{}
+                            foreach ($field in [regex]::Matches($line, '(\w+_us)=(\d+)')) { $steps[$field.Groups[1].Value] = [double]$field.Groups[2].Value }
+                        }
+                        $traces[$mode] += $steps
+                        if ($frozen) {
+                            Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$target]) } 'target freeze marker removed by app wake'
+                            $freeze.marker_cleared = $true
+                            $freeze.status = 'painted-and-awake'
+                            $freeze.log_end = (Get-Content $log -Raw).Length
+                        }
+                    }
+                }
+                foreach ($mode in $modes) { $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms }
+                $gapCase.phase = 'switch-gap'
+                $gaps = foreach ($pair in @(@('browser_off', 'browser_on'), @('chat_browser_off', 'chat_browser_on'), @('browser_off', 'frozen_browser_on'), @('chat_browser_off', 'chat_frozen_browser_on'))) {
+                    $gap = $timings[$pair[1]].median_ms - $timings[$pair[0]].median_ms
+                    @{ off = $pair[0]; on = $pair[1]; gap_ms = $gap }
+                }
+                $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; required <= 50 ms" }) -join '; '
+                foreach ($pair in $gaps) { if ($pair.gap_ms -gt 50) { throw $gapCase.detail } }
+                $gapCase.phase = 'after-snapshot'
+                Snapshot 'after'
+                $gapCase.status = 'passed'
+            } catch {
+                $gapCase.detail = $gapCase.phase + ': ' + $_.Exception.Message
+                throw
+            } finally {
+                foreach ($mode in $modes) {
+                    $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
+                    $timings[$mode].window_visible_median_ms = Get-SwitchMedian $timings[$mode].window_visible_ms
+                    if ($traces[$mode].Count -eq $timings[$mode].samples_ms.Count -and @($traces[$mode] | Where-Object { $null -eq $_ }).Count -eq 0) {
+                        $timings.steps[$mode] = @{}
+                        foreach ($step in $traces[$mode][0].Keys) {
+                            $values = @($traces[$mode] | ForEach-Object { $_[$step] })
+                            $timings.steps[$mode][$step] = Get-SwitchMedian $values
+                        }
+                    }
+                }
+                Save-Json $timings 'switch-timings.json'
+                Save-Json $traces 'switch-traces.json'
+                if ($null -ne $frozenLogStart -and (Test-Path $log)) {
+                    $debug = Get-Content $log -Raw
+                    foreach ($freeze in $frozenSwitches) {
+                        $end = if ($null -eq $freeze.log_end) { $debug.Length } else { $freeze.log_end }
+                        $lines = $debug.Substring($freeze.log_start, $end - $freeze.log_start)
+                        $lines | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $freeze.mode, $freeze.sample))
+                    }
+                }
+                Save-Json @($frozenSwitches.ToArray()) 'frozen-switches.json'
+                $traceLines | Set-Content -Encoding UTF8 (Join-Path $Evidence 'switch-timing-debug.log')
+            }
+        }
         'browser-pane-locked' {
             Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             $script:browserShellId = (Read-Inbox).shells[0].sid
@@ -2250,6 +2621,10 @@ try {
                     Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
                 }
             } finally {
+                if ($null -ne $switchNativeRegistry) {
+                    Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
+                    $switchNativeRegistry = $null
+                }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'

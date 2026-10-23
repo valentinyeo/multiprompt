@@ -645,7 +645,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.equal((palette.match(/Press @\(0x11, 0x4B\)/g) || []).length, 1);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);

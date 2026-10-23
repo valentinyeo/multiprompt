@@ -1,3 +1,4 @@
+const switch_timing = @import("switch_timing.zig");
 const app_state = @import("app_state.zig");
 const Shell = @import("app_state.zig").Shell;
 const WM_APP_BROWSER_TOGGLE = @import("win32.zig").WM_APP_BROWSER_TOGGLE;
@@ -618,6 +619,8 @@ pub fn threadTitleTop() i32 {
 }
 
 pub fn armBrowserVisibilitySettle(ticks: i32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.arm_settle, timing_started);
     if (app_state.g_main_hwnd == null or ticks <= 0) return;
     if (webView2OwnsActiveShell()) {
         cancelBrowserVisibilitySettle();
@@ -1039,6 +1042,8 @@ fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: 
 }
 
 pub fn spawnBrowserCliHidden(cmd: []const u8) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_launch, timing_started);
     const owned = std.heap.page_allocator.dupe(u8, cmd) catch return;
     const thread = std.Thread.spawn(.{}, spawnBrowserCliWorker, .{owned}) catch {
         std.heap.page_allocator.free(owned);
@@ -1754,11 +1759,9 @@ fn setBrowserFrozenMarkerForShell(idx: u32, frozen: bool) void {
         const sess = app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len];
         if (frozen) writeBrowserFrozenMarkerKey(sess) else removeBrowserFrozenMarkerKey(sess);
     }
-    if (isRemoteShellKind(app_state.shells[idx].kind)) {
-        var key_buf: [64]u8 = undefined;
-        const key = shellZsbSessionKey(app_state.shells[idx].shell_id, &key_buf);
-        if (frozen) writeBrowserFrozenMarkerKey(key) else removeBrowserFrozenMarkerKey(key);
-    }
+    var key_buf: [64]u8 = undefined;
+    const key = shellZsbSessionKey(app_state.shells[idx].shell_id, &key_buf);
+    if (frozen) writeBrowserFrozenMarkerKey(key) else removeBrowserFrozenMarkerKey(key);
 }
 
 pub fn buildBrowserCdpLifecycleCmd(buf: []u8, window_id: i64, state: []const u8) ?[]const u8 {
@@ -1798,6 +1801,8 @@ fn freezeBrowserPaneForShell(idx: u32) void {
 }
 
 pub fn wakeBrowserPaneFromFreeze(idx: u32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_wake, timing_started);
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_frozen) return;
     app_state.shells[idx].browser_frozen = false;
     setBrowserFrozenMarkerForShell(idx, false);
@@ -2173,11 +2178,15 @@ fn focusBrowserThenConsole(idx: u32) void {
 }
 
 fn showBrowserWindowAsync(hwnd: HANDLE, cmd: i32) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_show, timing_started);
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = ShowWindowAsync(hwnd, if (cmd == SW_HIDE) cmd else SW_SHOWNOACTIVATE);
 }
 
 fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32, h: i32, flags: UINT) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_swp, timing_started);
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = SetWindowPos(hwnd, after, x, y, w, h, flags | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
     if (browser_onscreen.moveLeavesOnScreen(x, BROWSER_PARK_X, flags & SWP_NOMOVE != 0, flags & SWP_HIDEWINDOW != 0)) |on_screen| {
@@ -2186,6 +2195,8 @@ fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32,
 }
 
 pub fn parkStrayBrowserPanes(keep: HANDLE) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.park, timing_started);
     if (!browser_onscreen.enabled_igsh357) return;
     var out: [browser_onscreen.capacity]usize = undefined;
     for (app_state.g_browser_onscreen.takeAllExcept(@intFromPtr(keep), &out)) |stray| {
@@ -2513,6 +2524,8 @@ fn unlockForegroundAfterRequestLaunch() void {
 }
 
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_launch, timing_started);
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     const launch_now = GetTickCount64();
@@ -2702,6 +2715,8 @@ fn cancelBrowserAdoptionForShell(idx: u32) void {
 }
 
 pub fn positionActiveBrowser() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.position, timing_started);
     if (app_state.g_monitor_transition.active and !app_state.g_monitor_transition.positioning) {
         hideBrowserEdgeMasks();
         return;
@@ -3020,6 +3035,8 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_visible, timing_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_updating_browser_visibility) return;
     app_state.g_updating_browser_visibility = true;
@@ -3116,6 +3133,8 @@ pub fn relaunchActiveRestoredBrowserPane() void {
 }
 
 pub fn hideActiveBrowser() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.hide_prev_browser, timing_started);
     browserTrace("hideActiveBrowser");
     cancelBrowserVisibilitySettle();
     hideBrowserEdgeMasks();

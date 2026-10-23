@@ -1,3 +1,4 @@
+const switch_timing = @import("switch_timing.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const IS_DEV = @import("main.zig").IS_DEV;
@@ -2549,6 +2550,9 @@ pub fn switchToShellByUser(idx: u32) void {
 }
 
 pub fn switchToShell(idx: u32) void {
+    var timing: switch_timing.Trace = .{};
+    const timing_previous = switch_timing.begin(&timing);
+    defer switch_timing.finish(&timing, timing_previous, idx);
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
             app_state.g_starred_last_shell = app_state.shells[idx].shell_id;
@@ -2655,13 +2659,25 @@ pub fn switchToShell(idx: u32) void {
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);
                 if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
             } else if (app_state.shells[idx].hwnd != null) {
-                _ = showShellConsole(idx, SW_SHOW, "switchToShell");
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.console_shown, timing_started);
+                    _ = showShellConsole(idx, SW_SHOW, "switchToShell");
+                }
                 app_state.g_nudge_repaint = true;
-                repositionActive();
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.reposition, timing_started);
+                    repositionActive();
+                }
                 armConsoleGeometrySettle(app_state.g_main_hwnd);
                 updateBrowserVisibility();
                 if (browserPaneActive()) armBrowserVisibilitySettle(12);
-                focusActiveShell();
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.focus, timing_started);
+                    focusActiveShell();
+                }
             }
         }
     }
