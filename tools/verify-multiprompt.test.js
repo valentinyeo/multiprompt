@@ -671,6 +671,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
     assert.match(restart, /\$script:process = \$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
     assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\)/);
     assert.match(restart, /Substring\(\$logStart\)/);
+    assert.match(restart, /\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser'\s+\} "\$Stage relaunch publishes its owned window and restored shells before activation" 60/);
     assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     assert.doesNotMatch(restart, /no-window-restore|Remove-Item|Set-Content|WriteAll|Stop-Process -Name|New-Item/);
     const recipe = driver.slice(driver.indexOf("        'session-restore' {"), driver.indexOf("        'workspaces' {"));
@@ -734,7 +735,10 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.match(restart, /\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'/);
     assert.match(restart, /ShowWindow\(\$script:window, 9\)/);
     assert.match(restart, /MoveWindow\(\$script:window, 10, 10, 1000, 650, \$true\)/);
-    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Doctor/);
+    const publication = restart.slice(restart.indexOf('    Wait-Until {'), restart.indexOf('    [void][VerifyNative]::ShowWindow'));
+    assert.match(publication, /Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser'\s+\} "\$Stage relaunch publishes its owned window and restored shells before activation" 60/);
+    assert.doesNotMatch(publication, /installHook|BringToForeground|Start-Sleep/);
+    assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(Get-Content \$log -Raw\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'\s+\} "\$Stage relaunch owns its published state after session restore" 60\s+Doctor/);
     assert.doesNotMatch(restart, /Assert-Foreground/);
     const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
     assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
@@ -744,6 +748,12 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.match(driver, /\$bitmap.Save\(\(Join-Path \$Evidence \(\$Name \+ '.png'\)\)/);
   }
   contract(control);
+  const publicationStart = control.indexOf('    Wait-Until {', control.indexOf('function Restart-SessionRestore('));
+  const activationStart = control.indexOf('    [void][VerifyNative]::ShowWindow', publicationStart);
+  const readinessStart = control.indexOf('    Wait-Until {', control.indexOf('    } "$Stage relaunched window foreground before input"', activationStart));
+  const doctor = control.indexOf('    Doctor\n}', readinessStart);
+  const racy = control.slice(0, publicationStart) + control.slice(readinessStart, doctor) + control.slice(activationStart, readinessStart) + control.slice(doctor);
+  assert.throws(() => contract(racy), assert.AssertionError);
   for (const [before, after] of [
     ['AttachThreadInput(currentThread, foregroundThread, true)', 'false'],
     ['if (attached) AttachThreadInput(currentThread, foregroundThread, false);', ''],
@@ -751,7 +761,9 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     ['Key(0x12, 0, 0);\n        try {', 'try {'],
     ['            SetForegroundWindow(hwnd);\n        } finally {', '        } finally {'],
     ['[VerifyNative]::BringToForeground($script:window)\n        [VerifyNative]::GetAncestor', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        [VerifyNative]::GetAncestor'],
-    ['} "$Stage relaunched window foreground before input"\n    Doctor', '} "$Stage relaunched window foreground before input"\n    Assert-Foreground\n    Doctor'],
+    ['} "$Stage relaunched window foreground before input"\n    Wait-Until {', '} "$Stage relaunched window foreground before input"\n    Assert-Foreground\n    Wait-Until {'],
+    ['} "$Stage relaunch publishes its owned window and restored shells before activation" 60', '} "$Stage relaunch publishes its owned window and restored shells before activation" 1'],
+    ['} "$Stage relaunch owns its published state after session restore" 60', '} "$Stage relaunch owns its published state after session restore" 1'],
     ["Snapshot 'failure'", "Snapshot 'ignored'"],
     ["($Name + '.focus.json')", "($Name + '.ignored.json')"],
     ["$bitmap.Save((Join-Path $Evidence ($Name + '.png'))", "$bitmap.Save((Join-Path $Evidence ($Name + '.ignored'))"],
