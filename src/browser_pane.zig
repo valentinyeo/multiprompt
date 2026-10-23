@@ -2913,7 +2913,7 @@ pub fn revealPaintedChatBrowser() void {
         app_state.g_monitor_transition.active or app_state.g_app_closing or !foregroundIsOurs() or browserChromeHiddenForOverlay() or
         webView2OwnsActiveShell()) return;
     const sh = &app_state.shells[app_state.active_shell];
-    if (!sh.browser_enabled or !sh.browser_native or sh.browser_docking or sh.browser_frozen or sh.browser_lifecycle_pending) return;
+    if (!sh.browser_enabled or !sh.browser_native or sh.browser_docking or sh.browser_frozen) return;
     const bh = sh.browser_hwnd orelse return;
     if (IsWindow(bh) == 0 or IsWindowVisible(bh) == 0) return;
     const layout = calcBrowserLayout() orelse return;
@@ -2959,7 +2959,7 @@ pub fn positionActiveBrowser() void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;
+    if (app_state.shells[app_state.active_shell].browser_frozen) return;
     const layout = calcBrowserLayout() orelse {
         if (verboseLoggingEnabled()) debugLog("[browser] positionActiveBrowser: calcBrowserLayout returned null (no dock)");
         hideBrowserEdgeMasks();

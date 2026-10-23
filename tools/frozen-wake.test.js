@@ -65,6 +65,37 @@ test('lifecycle dispatch is nonblocking, serializes an inflight freeze before wa
   assert.throws(() => lifecycleContract(pane.replace('    if (!sendBrowserLifecycle(idx, false)) return;', '    Sleep(1);\n    if (!sendBrowserLifecycle(idx, false)) return;')));
 });
 
+function overlappingWakePresentation(source) {
+  const wake = body(source, 'wakeBrowserPaneFromFreeze');
+  const sent = wake.indexOf('if (!sendBrowserLifecycle(idx, false)) return;');
+  assert.ok(sent >= 0 && sent < wake.indexOf('app_state.shells[idx].browser_frozen = false;'));
+  for (const name of ['revealPaintedChatBrowser', 'positionActiveBrowser']) {
+    const present = body(source, name);
+    const frozen = present.indexOf('browser_frozen');
+    assert.ok(frozen >= 0 && frozen < present.indexOf('setBrowserWindowPosAsync('), name);
+    assert.doesNotMatch(present, /browser_lifecycle_pending/, name);
+    assert.doesNotMatch(present, /sendBrowserLifecycle|setBrowserFrozenMarkerForShell|SetTimer|Sleep|WaitFor|SetForegroundWindow|SetFocus/, name);
+  }
+  const reveal = body(source, 'revealPaintedChatBrowser');
+  for (const guard of ['g_chat_browser_swap.shell_id != app_state.shells[app_state.active_shell].shell_id', 'sh.browser_docking', 'IsWindowVisible(bh) == 0', 'actual.right - actual.left != target.right - target.left', 'actual.bottom - actual.top != target.bottom - target.top']) {
+    assert.ok(reveal.indexOf(guard) >= 0 && reveal.indexOf(guard) < reveal.indexOf('setBrowserWindowPosAsync('), guard);
+  }
+  assert.match(reveal, /SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW/);
+}
+
+test('IGSH-712: dispatched wake overlaps safe native presentation without waiting for acknowledgment', () => {
+  overlappingWakePresentation(pane);
+  for (const name of ['revealPaintedChatBrowser', 'positionActiveBrowser']) {
+    const present = body(pane, name);
+    const guarded = present.replace('browser_frozen', 'browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending');
+    assert.throws(() => overlappingWakePresentation(pane.replace(present, guarded)), assert.AssertionError);
+  }
+  for (const guard of ['sh.browser_frozen', 'IsWindowVisible(bh) == 0', 'actual.right - actual.left != target.right - target.left', 'actual.bottom - actual.top != target.bottom - target.top']) {
+    assert.throws(() => overlappingWakePresentation(pane.replace(guard, 'false')), assert.AssertionError);
+  }
+  assert.throws(() => overlappingWakePresentation(pane.replace('    if (!sendBrowserLifecycle(idx, false)) return;\n', '')), assert.AssertionError);
+});
+
 test('pure lifecycle acknowledgment helper has Zig positive and negative unit cases without running Zig here', () => {
   const helper = body(pane, 'browserLifecycleReplySucceeded');
   assert.match(helper, /json_reader.parse\(std.heap.page_allocator, reply\) catch return false/);
@@ -184,7 +215,7 @@ test('shared native pipe transport targets each lifecycle window and isolates co
   const done = body(pane, 'handleBrowserLifecycleDone');
   assert.match(done, /if \(job.confirmed and !job.frozen and idx == app_state.active_shell\) updateBrowserVisibility\(\)/);
   const position = body(pane, 'positionActiveBrowser');
-  const wake = position.indexOf('if (app_state.shells[app_state.active_shell].browser_frozen or app_state.shells[app_state.active_shell].browser_lifecycle_pending) return;');
+  const wake = position.indexOf('if (app_state.shells[app_state.active_shell].browser_frozen) return;');
   assert.ok(wake >= 0 && wake < position.indexOf('setBrowserWindowPosAsync('));
   assert.doesNotMatch(done, /showBrowserWindowAsync/);
   assert.doesNotMatch(done, /SetForegroundWindow|SetFocus|Sleep|WaitFor/);
@@ -207,6 +238,6 @@ test('closing or replacing a browser connection clears frozen and pending lifecy
     assert.ok(reset.includes('sh.browser_parked_since = 0'));
   }
   const position = body(pane, 'positionActiveBrowser');
-  assert.ok(position.indexOf('browserChromeHiddenForOverlay()') < position.indexOf('browser_lifecycle_pending) return;'));
-  assert.ok(position.indexOf('if (bh == null)') < position.indexOf('browser_lifecycle_pending) return;'));
+  assert.ok(position.indexOf('browserChromeHiddenForOverlay()') < position.indexOf('browser_frozen) return;'));
+  assert.ok(position.indexOf('if (bh == null)') < position.indexOf('browser_frozen) return;'));
 });
