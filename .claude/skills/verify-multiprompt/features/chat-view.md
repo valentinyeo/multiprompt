@@ -4,6 +4,9 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 
 ## Sub-features
 
+- `message-menu`: real right-click on an owned message bubble shows exactly Reply, Copy; Esc closes the native popup.
+- `grey-buttons`: screenshots of the working composer, empty and with a typed letter, show neutral Send and Stop backgrounds distinct from the composer.
+
 - `local-route-suggestion`: a local console-backed Claude stand-in renders a gray suggested reply with an inverse first character; a normal Chat View send must reach its stdin.
 - `local-route-suggestion-attributes`: pure `ISSUE-599` Zig tests accept an inverse cursor at the first input cell followed by a non-default legacy gray foreground; they keep normal typed text, a trailing cursor, mixed text and missing attributes busy.
 - `local-route-blank-prompt`: the same regression tests preserve blank and nonbreaking-space prompts even without attribute data.
@@ -41,6 +44,9 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - The working stand-in (`claude.exe working <prefix>`) clears the screen, writes `✻ Thinking… (esc to interrupt)` two rows above an empty `❯ ` prompt and records stdin like the other modes. Launch it in a third new local CMD tab the same way, wait for `ag: 1`, open Chat View and wait for the composer to be focused.
 - With `ZIGSHELL_DEBUG=1` the app logs `[chat] composer card l,t,r,b size=N` then `[chat] send rect` and `[chat] stop rect` lines for each visible button whenever they change. The driver reads the last composer frame: Stop must be N by N, inside the card, with no Send rect while the composer is empty. After typing one letter, Send and Stop must both be in the card with Send's right edge at or left of Stop's left edge. Retain `stop-in-box.png`, press Esc and require byte 0x1B in that stand-in's stdin recording.
 - Record `stop-in-box` in `result.json` checks with `passed` and the failing `reason`; any failure fails the journey. A release before IGSH-675 logs a 64 px wide Stop pill above the card and no composer card, so it fails here.
+- After the suggestion stand-in receives its sent message, find its painted user bubble in the visible owned `ZigShellChatTranscript`. Derive the bubble fill from the transcript background, require a matching interior pixel patch, and ownership-check that screen point before genuine SendInput right-click. Require one new debug line ending exactly `[chat] message menu items=Reply,Copy`, one visible owned `#32768` popup, and retain `message-menu.png` while open. Press Esc and require no visible `#32768` window belonging to the process.
+- From the existing empty working composer frame retain `grey-buttons-stop.png`; after typing a letter retain `grey-buttons.png`. Map the logged client Send/Stop rectangles into those screenshots and sample each button at one-quarter width and height, away from its central glyph and rounded edge. Require max RGB channel minus min channel at most 12 and a colour different from a blank composer-card sample. Record the sample coordinates and RGB values.
+- Both `message-menu` and `grey-buttons` are required `result.json` checks with `name`, `passed`, and `reason`; any failure throws and fails the journey. Before this change the absent menu log and blue button fill make these checks fail. Native unit tests and baseline/changed Windows journeys must run on GitHub Windows, never on the shared Linux machine.
 - Inspect the real desktop screenshots and the separate painter image. Require `result.json` to pass, Doctor identity, cleanup, and zero active owned processes. The renderer image must show readable formatting, a blue bubble and `from Agent Blue`, with no envelope tags.
 
 ## Gotchas

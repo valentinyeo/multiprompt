@@ -338,6 +338,55 @@ public static class VerifyNative {
             Thread.Sleep(35);
         }
     }
+    public static void RightClickTranscript(IntPtr hwnd, uint pid, IntPtr owner, Point point) {
+        uint actualPid;
+        GetWindowThreadProcessId(hwnd, out actualPid);
+        if (actualPid != pid || Class(hwnd) != "ZigShellChatTranscript" || GetAncestor(hwnd, 2) != owner ||
+            GetForegroundWindow() != owner || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Message bubble is not in the foreground owned transcript");
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 8);
+        MouseAt(point.X, point.Y, 16);
+    }
+    public static Point MessageBubblePoint(IntPtr hwnd) {
+        Rect rect;
+        if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
+        using (var pixels = new System.Drawing.Bitmap(rect.Right - rect.Left, rect.Bottom - rect.Top))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
+            var bg = pixels.GetPixel(0, pixels.Height / 2);
+            int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
+            var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
+            for (int y = pixels.Height - 2; y > 0; y--) {
+                for (int x = pixels.Width - 2; x > 0; x--) {
+                    if (pixels.GetPixel(x, y).ToArgb() == fill.ToArgb() && pixels.GetPixel(x - 1, y).ToArgb() == fill.ToArgb() &&
+                        pixels.GetPixel(x, y - 1).ToArgb() == fill.ToArgb()) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
+                }
+            }
+        }
+        throw new InvalidOperationException("No painted user message bubble in transcript");
+    }
+    public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {
+        Rect frame;
+        Point origin = new Point();
+        if (!GetWindowRect(owner, out frame) || !ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Composer screen origin unavailable");
+        using (var pixels = new System.Drawing.Bitmap(image)) {
+            int dx = origin.X - frame.Left, dy = origin.Y - frame.Top;
+            var bg = pixels.GetPixel(dx + (card[0] + card[2]) / 2, dy + card[1] + (card[3] - card[1]) / 4);
+            var samples = new List<int[]>();
+            foreach (int[] rect in new int[][] { stop, send }) {
+                if (rect == null) continue;
+                int x = rect[0] + (rect[2] - rect[0]) / 4;
+                int y = rect[1] + (rect[3] - rect[1]) / 4;
+                Point screen = new Point { X = origin.X + x, Y = origin.Y + y };
+                if (WindowFromPoint(screen) != owner) throw new InvalidOperationException("Button sample is not in the owned composer");
+                var c = pixels.GetPixel(dx + x, dy + y);
+                samples.Add(new int[] { x, y, c.R, c.G, c.B });
+                if (Math.Max(c.R, Math.Max(c.G, c.B)) - Math.Min(c.R, Math.Min(c.G, c.B)) > 12 || c.ToArgb() == bg.ToArgb())
+                    throw new InvalidOperationException("Send or Stop background is not neutral grey distinct from composer: " + c);
+            }
+            return samples;
+        }
+    }
     public static void FocusOwnedWindow(IntPtr hwnd, uint pid, IntPtr owner) {
         uint actualPid;
         uint targetThread = GetWindowThreadProcessId(hwnd, out actualPid);
@@ -2526,6 +2575,11 @@ try {
             Save-Json $after 'session-after.json'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
+            $menuCheck = @{ name = 'message-menu'; passed = $false; reason = 'not reached' }
+            $greyCheck = @{ name = 'grey-buttons'; passed = $false; reason = 'not reached' }
+            $result.checks += $menuCheck
+            $result.checks += $greyCheck
+            $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $localAgent = Join-Path (Split-Path $Exe) 'claude.exe'
             if (-not (Test-Path $localAgent)) { throw 'Local Claude console stand-in is missing' }
             $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
@@ -2600,6 +2654,37 @@ try {
                         } 'local suggestion prompt receives the Chat View message and Enter on stdin'
                         $suggestionCheck.passed = $true
                         Snapshot 'local-route-suggestion'
+                        try {
+                            $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                            $transcripts = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $process.Id })
+                            if ($transcripts.Count -ne 1) { throw 'Expected exactly one visible owned transcript for the message menu' }
+                            $transcript = [IntPtr]$transcripts[0].Current.NativeWindowHandle
+                            Wait-Until {
+                                $script:messagePoint = [VerifyNative]::MessageBubblePoint($transcript)
+                                $true
+                            } 'painted message bubble after suggestion delivery'
+                            $menuLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' }).Count
+                            Doctor
+                            Record 'Real SendInput right-click inside the owned transcript message bubble'
+                            [VerifyNative]::RightClickTranscript($transcript, $process.Id, $script:window, $script:messagePoint)
+                            Wait-Until {
+                                $lines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
+                                $lines.Count -gt $menuLinesBefore
+                            } 'app logged the opened message menu'
+                            $menuLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
+                            if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
+                            $menuCheck.items = 'Reply,Copy'
+                            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                            Snapshot 'message-menu'
+                            Press @(0x1B) 'Esc: dismiss message menu'
+                            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
+                            $menuCheck.passed = $true
+                            $menuCheck.reason = ''
+                        } catch {
+                            $menuCheck.reason = $_.Exception.Message
+                            throw
+                        }
                     }
                 }
             } finally {
@@ -2677,6 +2762,13 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
+                Snapshot 'grey-buttons-stop'
+                try {
+                    $greyCheck.empty = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'grey-buttons-stop.png'), $script:window, $empty.card, $empty.stop, $null)
+                } catch {
+                    $greyCheck.reason = $_.Exception.Message
+                    throw
+                }
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
                 $typed = & $readStopFrame
@@ -2685,6 +2777,15 @@ try {
                 if ($typed.send[2] -gt $typed.stop[0]) { throw ('Send rect ' + ($typed.send -join ',') + ' is not left of Stop rect ' + ($typed.stop -join ',')) }
                 if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
                 Snapshot 'stop-in-box'
+                Snapshot 'grey-buttons'
+                try {
+                    $greyCheck.typed = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'grey-buttons.png'), $script:window, $typed.card, $typed.stop, $typed.send)
+                    $greyCheck.passed = $true
+                    $greyCheck.reason = ''
+                } catch {
+                    $greyCheck.reason = $_.Exception.Message
+                    throw
+                }
                 Press @(0x1B) 'Esc: stop the working agent from the composer'
                 Wait-Until {
                     $stdin = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
