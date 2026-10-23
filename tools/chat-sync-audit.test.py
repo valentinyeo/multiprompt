@@ -167,6 +167,35 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
                 self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
 
+    def test_igsh643_queued_prompt_is_not_missing_chat_until_delivered(self):
+        reader = audit.load_reader()
+        prompt = 'please keep going on the neutral ticket now and report back'
+        events = [dict(type='queue-operation', operation='enqueue', content=prompt,
+                       timestamp='2026-01-01T00:00:00Z')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            capture = '❯ ' + prompt + '\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else '{"probe":0,"present":false}\n'
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command):
+                evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=prompt))
+                self.assertEqual([item['record'] for item in evidence], ['queued_prompt'])
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit')), [])
+                events.append(dict(type='queue-operation', operation='remove', content=prompt,
+                                   reason='absorbed_mid_turn', timestamp='2026-01-01T00:00:01Z'))
+                events.append(dict(type='attachment', attachment=dict(type='queued_command', prompt=prompt)))
+                path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+                wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+                reader.response.return_value = wire
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'))
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
+
     def test_settle_pending_drops_text_appended_during_wait(self):
         reader = audit.load_reader()
         text = 'The neutral assistant message is still being written'
