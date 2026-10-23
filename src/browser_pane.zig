@@ -4211,11 +4211,6 @@ pub fn armBrowserEdgeMaskRaise() void {
 
 fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32) void {
     if (w <= 0 or h <= 0) return;
-    if (activeBrowserTransientPopupHasForegroundFocus()) return;
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
-        hideBrowserEdgeMasks();
-        return;
-    }
     const idx: usize = @intFromEnum(side);
     const hw = app_state.g_browser_edge_mask_hwnds[idx];
     if (hw == null or IsWindow(hw) == 0) return;

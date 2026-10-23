@@ -109,3 +109,13 @@ test('unchanged corner bitmaps survive session hides while changed paint and siz
   cornerCache(pane);
   for (const before of ['or prev.right != w', 'or prev.bottom != h', 'and app_state.g_browser_edge_mask_shown[idx]', 'if (need_bitmap) {']) assert.throws(() => cornerCache(pane.replace(before, '')));
 });
+
+test('mask placement validates focus and ownership once for the whole guarded batch, not ten times', () => {
+  const place = body(pane, 'positionBrowserEdgeMasks');
+  for (const guard of ['activeBrowserTransientPopupHasForegroundFocus()', 'activeBrowserEdgeMasksAllowed()', 'browserChromeForegroundAllowed()', 'browserChromeHiddenForOverlay()']) assert.ok(place.indexOf(guard) >= 0 && place.indexOf(guard) < place.indexOf('moveBrowserEdgeMask('), guard);
+  const move = body(pane, 'moveBrowserEdgeMask');
+  assert.doesNotMatch(move, /activeBrowserTransientPopupHasForegroundFocus|activeBrowserEdgeMasksAllowed|browserChromeForegroundAllowed/);
+  const callers = pane.split('\n').filter(line => line.includes('moveBrowserEdgeMask(') && !line.startsWith('fn '));
+  assert.ok(callers.length > 0);
+  for (const call of callers) assert.ok(place.includes(call));
+});
