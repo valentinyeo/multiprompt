@@ -2754,7 +2754,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 repositionActive();
                 if (app_state.shells[target_idx].browser_enabled and target_idx == app_state.active_shell) {
                     armBrowserVisibilitySettle(12);
-                    requestNativeBrowserFocus();
                 }
                 syncMouseHookForUrlClicks();
                 invalidateSidebar();
@@ -2807,7 +2806,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             updateBrowserVisibility();
             syncMouseHookForUrlClicks();
             _ = InvalidateRect(hwnd, null, 0);
-            requestNativeBrowserFocus();
             _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
             return 0;
         },
@@ -7204,6 +7202,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (alt_down) altqLog("timer_alt waiting retries={} chat={} pane_fg={}", .{ app_state.g_native_browser_focus_retries, app_state.g_chat_active, activeBrowserHasForegroundFocus() });
                 if (alt_down) return 0;
 
+                if (activeBrowserHasForegroundFocus()) {
+                    altqLog("timer_focused ok fg={X} chat={}", .{ altqPtr(GetForegroundWindow()), app_state.g_chat_active });
+                    cancelPendingNativeBrowserFocus();
+                    app_state.g_browser_focus_mode = true;
+                    app_state.g_shell_focused = false;
+                    return 0;
+                }
                 if (activeBrowserHwndLive() == null) {
                     if (app_state.g_native_browser_focus_retries > 0) app_state.g_native_browser_focus_retries -= 1;
                     if (app_state.g_native_browser_focus_retries % 100 == 0 or app_state.g_native_browser_focus_retries == 0) altqLog("timer_no_pane waiting retries={} chat={} enabled={}", .{ app_state.g_native_browser_focus_retries, app_state.g_chat_active, app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled });
