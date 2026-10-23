@@ -268,7 +268,7 @@ pub const Shell = struct {
     launch_failed: bool = false,
     disconnected: bool = false,
     chat_view_on: bool = false,
-    chat_shell_override: bool = false,
+    chat_view_lock: @import("chat_view.zig").Lock = .none,
     chat_todo_open: bool = false,
     chat_todo_scroll: i32 = 0,
     cached_cwd: [512]u8,
@@ -1028,9 +1028,6 @@ pub var g_snippet_text_hwnd: HANDLE = null;
 pub var g_snippet_edit_orig_proc: isize = 0;
 
 pub var g_chat_active: bool = false;
-pub const ChatViewMode = enum { per_session, everywhere, nowhere };
-pub var g_chat_view_mode: ChatViewMode = .per_session;
-pub var g_chat_view_restore_on: bool = false;
 pub var g_chat_transcript_hwnd: HANDLE = null;
 pub var g_chat_status_hwnd: HANDLE = null;
 pub var g_chat_hover_link: ?link_detect.Range = null;
@@ -1318,7 +1315,9 @@ pub const SEARCH_VOICE_MODE_OFF_OFFSET: usize = 6341;
 pub const SEARCH_ETA_NUMBERS_OFFSET: usize = 6342;
 pub const SEARCH_ETA_PROGRESS_OFFSET: usize = 6343;
 pub const SEARCH_ETA_ACCURACY_OFFSET: usize = 6344;
-pub const SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET: usize = 6345;
+pub const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET: usize = 6464;
+pub const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET: usize = 6465;
+pub const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET: usize = 6466;
 pub const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET: usize = 6346;
 pub const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET: usize = 6347;
 pub const SEARCH_VOICE_ALWAYS_ON_OFFSET: usize = 6349;
@@ -1401,6 +1400,9 @@ pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
 pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
 pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
+pub const SEARCH_TABCTX_VIEW_CHAT: usize = 7185;
+pub const SEARCH_TABCTX_VIEW_SHELL: usize = 7186;
+pub const SEARCH_TABCTX_VIEW_CLEAR: usize = 7187;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -2016,11 +2018,11 @@ pub const SavedTab = struct {
     kaw: bool = false,
     cv: bool = false,
     cso: bool = false,
+    chat_view_lock: @import("chat_view.zig").Lock = .none,
     fw: bool = false,
 };
 
 pub const ISSUE_347_KEEP_FULL_WIDTH = true;
-pub const ISSUE_373_SHELL_OVERRIDE = true;
 pub const ISSUE_440_FULL_WIDTH_CHAT = true;
 pub const ISSUE_274_DOT_ON_SELECTED_TAB = true;
 

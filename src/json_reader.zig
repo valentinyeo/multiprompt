@@ -127,6 +127,12 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "inbox_excluded", "favorite", "locked", "bon", "kaw", "cv", "cso", "fw" }) |key| {
             @field(tab, key) = boolTrue(obj, key);
         }
+        const mode = string(field(root, "chat_view_mode")) orelse "";
+        if (std.mem.eql(u8, mode, "everywhere")) tab.cv = !tab.cso;
+        if (std.mem.eql(u8, mode, "nowhere")) tab.cv = false;
+        const lock = string(field(obj, "chat_view_lock")) orelse "";
+        tab.chat_view_lock = if (std.mem.eql(u8, lock, "chat")) .chat else if (std.mem.eql(u8, lock, "shell")) .shell else .none;
+        tab.cv = @import("chat_view.zig").shouldShow(tab.cv, tab.chat_view_lock);
         tab.inbox_archived = boolTrue(obj, "iah");
         tab.needs_attention = boolTrue(obj, "att");
         tab.bnat = !boolFalse(obj, "bnat");

@@ -115,7 +115,6 @@ pub fn restore() void {
     state.g_sidebar_w_full = s.sidebar_width;
     state.g_chat_font_pt = s.font;
     if (s.chat) {
-        state.g_chat_view_mode = .per_session;
         state.g_chat_last_len = s.text.len;
         @memcpy(state.g_chat_capture[0..s.text.len], s.text);
         state.g_chat_block_count = s.blocks.len;

@@ -78,7 +78,7 @@ function harness() {
     'staleFontShellCount', 'fontSyncMarkAllStale', 'fontSyncActiveNow', 'fontSyncShell',
     'fontSyncTimerTick', 'settleConsoleGeometry', 'reclaimShell', 'registerBundledConsoleFonts',
     'unregisterBundledConsoleFonts'].map(name => fn(consoleSource, name)).join('\n');
-  const visibility = ['fullWidthShouldResizeConsole', 'chatViewShouldShowForTab', 'shellConsoleVisibilityAllowed',
+  const visibility = ['fullWidthShouldResizeConsole', 'shellConsoleVisibilityAllowed',
     'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView']
     .map(name => fn(chat, name)).join('\n');
   const bundled = between(consoleSource, 'pub const BundledConsoleFonts = struct {', '\npub fn registerBundledConsoleFonts');
@@ -133,7 +133,8 @@ const BOOL = i32;
 const DWORD = u32;
 const WORD = u16;
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
-const ChatViewMode = enum { per_session, everywhere, nowhere };
+const ViewLock = @import("chat_view.zig").Lock;
+const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
 const COORD = struct { x: i16 = 9, y: i16 = 18 };
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 1200, bottom: i32 = 540 };
 const SMALL_RECT = struct { left: i16 = 0, top: i16 = 0, right: i16 = 99, bottom: i16 = 29 };
@@ -149,7 +150,7 @@ const Shell = struct {
     base_font_h: i16 = 0, base_font_w: i16 = 0, base_font_dpi: i32 = 96,
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
-    chat_view_on: bool = false, chat_shell_override: bool = true, full_width_pending_console_resize: bool = false,
+    chat_view_on: bool = false, chat_view_lock: ViewLock = .none, full_width_pending_console_resize: bool = false,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false,
 };
@@ -158,7 +159,6 @@ const MAX_SHELLS = 8;
 const LOOK_UNIFIED = true;
 const ISSUE_441 = true;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
-const ISSUE_373_SHELL_OVERRIDE = true;
 const DEV_SHELL_COLS = 100;
 const SW_HIDE = 0;
 const SW_SHOW = 5;
@@ -211,7 +211,6 @@ var g_font_gen: u32 = 1;
 var g_font_sync_started: u64 = 0;
 var g_font_sync_done: usize = 0;
 var g_monitor_transition: struct { active: bool = false, expected_valid: bool = false, expected_frame: RECT = .{} } = .{};
-var g_chat_view_mode: ChatViewMode = .per_session;
 var g_chat_active = false;
 var g_restoring = false;
 var g_startup_progress = false;
@@ -418,7 +417,7 @@ fn prepare() BundledConsoleFonts {
     event_count = 0; writes = 0; resets = 0; redraws = 0; read_failures = 0;
     fail_set = false; reject_shell_font = false; fail_attach = false; fail_registration = false; selection_errors = 0;
     g_console_font_override = 0; g_main_monitor_dpi = 96; g_font_gen = 1; g_font_sync_done = 0;
-    g_chat_active = false; g_chat_view_mode = .per_session; g_active_workspace = 0;
+    g_chat_active = false; g_active_workspace = 0;
     g_starred_workspace = false; g_starred_last_shell = 0; g_inbox_step_context_active = false;
     test_pane_h = 540; geometry_pending = false; g_monitor_transition = .{};
     return registerBundledConsoleFonts();
@@ -530,12 +529,12 @@ test "IGSH-457 Starred workspace switch keeps the selected console on the shell 
     try std.testing.expectEqual(@as(u32, 1), active_shell);
 }
 test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
-    for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
+    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
         for ([_]bool{ false, true }) |full| {
             for (0..3) |toggles| {
                 const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
                 try std.testing.expect(spawnSession(.tmux, 0)); drain();
-                g_chat_view_mode = mode; g_chat_active = true; shells[0].full_width = full;
+                shells[0].chat_view_lock = lock; g_chat_active = true; shells[0].full_width = full;
                 const before = resets;
                 for (0..toggles) |_| _ = toggleFullWidth(g_main_hwnd);
                 try std.testing.expectEqual(before, resets);
@@ -644,7 +643,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
   const dir = fs.mkdtempSync(path.join(process.env.CONSOLE_FONT_TEST_TMP || os.tmpdir(), 'console-font-lifecycle-'));
   try {
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
-    copyZig(['workspace_view.zig'], dir);
+    copyZig(['workspace_view.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness());
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {

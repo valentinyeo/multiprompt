@@ -447,10 +447,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
         }
-        if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.shells[i].chat_shell_override and pos < json_buf.len - 540) {
-            const cso = ",\"cso\":true";
-            @memcpy(json_buf[pos .. pos + cso.len], cso);
-            pos += cso.len;
+        if (pos < json_buf.len - 540) {
+            const saved_lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
+            @memcpy(json_buf[pos .. pos + saved_lock.len], saved_lock);
+            pos += saved_lock.len;
         }
         if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
             const fw = ",\"fw\":true";
@@ -601,16 +601,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         json_buf[pos] = '"';
         pos += 1;
     };
-    if (app_state.g_chat_view_mode != .per_session and pos + 40 < json_buf.len) {
-        const cvm: []const u8 = if (app_state.g_chat_view_mode == .everywhere) ",\"chat_view_mode\":\"everywhere\"" else ",\"chat_view_mode\":\"nowhere\"";
-        @memcpy(json_buf[pos .. pos + cvm.len], cvm);
-        pos += cvm.len;
-    }
-    if (app_state.g_chat_view_mode == .everywhere and app_state.g_chat_active and pos + 24 < json_buf.len) {
-        const gca = ",\"chat_active\":true";
-        @memcpy(json_buf[pos .. pos + gca.len], gca);
-        pos += gca.len;
-    }
     if (!app_state.g_igsh354_paste_focus and pos + 36 < json_buf.len) {
         const setting = ",\"igsh354_paste_focus\":false";
         @memcpy(json_buf[pos .. pos + setting.len], setting);
@@ -1000,7 +990,7 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     restoreArchiveMarkers(&app_state.shells[idx], tab);
     app_state.shells[idx].keep_awake = tab.kaw;
     app_state.shells[idx].chat_view_on = tab.cv;
-    if (app_state.ISSUE_373_SHELL_OVERRIDE) app_state.shells[idx].chat_shell_override = tab.cso;
+    app_state.shells[idx].chat_view_lock = tab.chat_view_lock;
     if (app_state.ISSUE_347_KEEP_FULL_WIDTH) app_state.shells[idx].full_width = tab.fw;
     if (tab.burl_len > 0) {
         @memcpy(app_state.shells[idx].browser_url[0..tab.burl_len], tab.burl[0..tab.burl_len]);
@@ -1094,7 +1084,25 @@ test "favorite JSON flag is scoped to its own saved tab and defaults off" {
     try std.testing.expect(!tabs[2].favorite);
 }
 
-test "ISSUE-373 shell override survives session write, parse and restore with legacy defaults" {
+test "ISSUE-611 ISSUE-373 legacy everywhere and nowhere migrate shell overrides once" {
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    const fixture = @embedFile("fixtures/json-reader/session-shell-override.json");
+    for ([_][]const u8{ "everywhere", "nowhere", "per_session" }) |mode| {
+        const json = try std.fmt.allocPrint(std.testing.allocator, "{{\"chat_view_mode\":\"{s}\",{s}", .{ mode, fixture[1..] });
+        defer std.testing.allocator.free(json);
+        try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(json, &tabs));
+        try std.testing.expect(tabs[0].cso);
+        try std.testing.expect(!tabs[1].cso);
+        try std.testing.expect(!tabs[2].cso);
+        for (0..3) |i| {
+            const want_chat = if (std.mem.eql(u8, mode, "everywhere")) i != 0 else if (std.mem.eql(u8, mode, "nowhere")) false else i == 0;
+            try std.testing.expectEqual(want_chat, tabs[i].cv);
+            try std.testing.expectEqual(@import("chat_view.zig").Lock.none, tabs[i].chat_view_lock);
+        }
+    }
+}
+
+test "ISSUE-611 session locks survive session write parse and restore" {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(@embedFile("fixtures/json-reader/session-shell-override.json"), &tabs));
     try std.testing.expect(tabs[0].cso);
@@ -1110,18 +1118,17 @@ test "ISSUE-373 shell override survives session write, parse and restore with le
     for (0..3) |i| {
         app_state.shells[i] = empty_shell;
         app_state.shells[i].kind = .tmux;
-        app_state.shells[i].chat_shell_override = true;
         restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
     }
-    try std.testing.expect(app_state.shells[0].chat_shell_override);
+    try std.testing.expectEqual(@import("chat_view.zig").Lock.none, app_state.shells[0].chat_view_lock);
     try std.testing.expect(app_state.shells[0].chat_view_on);
-    try std.testing.expect(!app_state.shells[1].chat_shell_override);
-    try std.testing.expect(!app_state.shells[2].chat_shell_override);
+    @import("chat_view.zig").setLock(&app_state.shells[0], .shell);
+    @import("chat_view.zig").setLock(&app_state.shells[1], .chat);
     var temp: [512]u8 = undefined;
     const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
     try std.testing.expect(temp_len > 0 and temp_len < temp.len);
     var path_buf: [600]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-373-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-611-{d}-{d}.json", .{ temp[0..temp_len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
     defer {
         for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
             var clean_buf: [640]u8 = undefined;
@@ -1134,11 +1141,17 @@ test "ISSUE-373 shell override survives session write, parse and restore with le
     try std.testing.expect(saveSessionTo(path, 0));
     const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
     defer std.heap.page_allocator.free(bytes);
-    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"cso\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"cso\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"chat_view_mode\"") == null);
     try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(bytes, &tabs));
-    try std.testing.expect(tabs[0].cso);
-    try std.testing.expect(!tabs[1].cso);
-    try std.testing.expect(!tabs[2].cso);
+    const locks = [_]@import("chat_view.zig").Lock{ .shell, .chat, .none };
+    for (locks, 0..) |lock, i| {
+        try std.testing.expectEqual(lock, tabs[i].chat_view_lock);
+        app_state.shells[i] = empty_shell;
+        restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
+        try std.testing.expectEqual(lock, app_state.shells[i].chat_view_lock);
+        try std.testing.expectEqual(i == 1, app_state.shells[i].chat_view_on);
+    }
 }
 
 test "full width JSON flag is scoped to its own saved tab, defaults off and restores onto the shell" {
@@ -1546,13 +1559,6 @@ pub fn restoreSession() u32 {
         }
     }
     app_state.g_inbox_tab = @import("frequent.zig").migrateSplit(@intCast(@min(json_reader.uint(json, "inbox_tab"), std.math.maxInt(u32))), json_reader.boolTrue(json, "inbox_visits_order"));
-    const chat_mode = json_reader.string(json_reader.field(json, "chat_view_mode")) orelse "";
-    if (std.mem.eql(u8, chat_mode, "everywhere")) {
-        app_state.g_chat_view_mode = .everywhere;
-    } else if (std.mem.eql(u8, chat_mode, "nowhere")) {
-        app_state.g_chat_view_mode = .nowhere;
-    }
-    if (app_state.g_chat_view_mode == .everywhere and json_reader.boolTrue(json, "chat_active")) app_state.g_chat_view_restore_on = true;
     app_state.g_igsh354_paste_focus = !json_reader.boolFalse(json, "igsh354_paste_focus");
     app_state.g_voice_always_listen = !json_reader.boolFalse(json, "voice_always_listen");
     app_state.g_external_browser_links = !json_reader.boolFalse(json, "external_browser_links");

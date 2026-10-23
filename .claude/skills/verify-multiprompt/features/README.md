@@ -12,7 +12,7 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 ## Driving conventions
 
-Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail and pane-layout. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout and chat-view-everywhere. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
@@ -46,6 +46,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
+- [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions, independent later toggles, a shell lock and restart persistence through real input.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
 

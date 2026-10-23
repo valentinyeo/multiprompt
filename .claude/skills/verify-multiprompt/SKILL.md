@@ -22,13 +22,13 @@ gh run watch <id> --interval 60
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, and `browser-emulation`. [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `chat-tables`, `safe-updates`, `chat-view`, `chat-view-everywhere`, and `browser-emulation`. [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
 ```
 
-If GitHub refuses because the workflow is not on the default branch yet, open or update the branch's PR. Its path-filtered `pull_request` trigger runs `appearance`, `session-restore`, `workspace-focus`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, and `pane-layout` against the PR merge revision; identify that event and head SHA with `gh run list`, then use the same watch and download commands. Never substitute a default-branch run for the proposed change.
+If GitHub refuses because the workflow is not on the default branch yet, open or update the branch's PR. Its path-filtered `pull_request` trigger runs `appearance`, `session-restore`, `workspace-focus`, `favorites-groups`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, and `chat-view-everywhere` against the PR merge revision; identify that event and head SHA with `gh run list`, then use the same watch and download commands. Never substitute a default-branch run for the proposed change.
 
 To exercise a published executable instead of compiling the branch:
 
@@ -43,6 +43,8 @@ The `session-restore` journey uses `--single-window` with restoration enabled an
 `IGSH_246=0` keeps the selected branch/release executable fixed during verification; update download and rollback behavior is tested separately on GitHub Windows.
 
 `MULTIPROMPT_NO_LOGIN=1` is the documented development/offline mode. This is an explicit stand-in for account sign-in and layout sync, not proof those work. No account credentials are supplied. `ZIGSHELL_DEBUG=1` enables real app logs. Isolated app data and disabled workspace restoration prevent shared-session driving; the fresh hosted desktop also isolates machine-wide resources. Do not run multiple harnesses on one desktop.
+
+The [Chat View everywhere](features/chat-view-everywhere.md) journey switches three local sessions once, checks a persistent shell lock, toggles one unlocked session, restarts the owned app in the same isolated profile, and proves the removed per-tab palette query has no rows. Alt+T creates workspace tmux sessions; this offline journey instead uses the real Ctrl+K New CMD Shell action.
 
 ## Doctor
 

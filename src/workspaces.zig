@@ -2371,7 +2371,7 @@ test "ISSUE-439 remembered session beats constantly redrawing btop" {
     shells[0].shell_id = 41;
     shells[0].last_active = 10;
     shells[0].full_width = true;
-    shells[0].chat_shell_override = true;
+    shells[0].chat_view_lock = .shell;
     shells[1].workspace = 0;
     shells[1].shell_id = 99;
     shells[1].last_active = 1000;
@@ -2399,7 +2399,6 @@ test "ISSUE-439 stale moved and archived remembered sessions fall back to activi
 
 test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last shell" {
     const old_active = app_state.g_active_workspace;
-    const old_mode = app_state.g_chat_view_mode;
     const old_snoozed = app_state.g_ws_snoozed;
     const old_single = app_state.g_single_window;
     const old_count = app_state.g_lws_count;
@@ -2413,7 +2412,6 @@ test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last 
     const old_shells = app_state.shells[0..2].*;
     defer {
         app_state.g_active_workspace = old_active;
-        app_state.g_chat_view_mode = old_mode;
         app_state.g_ws_snoozed = old_snoozed;
         app_state.g_single_window = old_single;
         app_state.g_lws_count = old_count;
@@ -2426,7 +2424,6 @@ test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last 
         app_state.shell_count = old_shell_count;
         app_state.shells[0..2].* = old_shells;
     }
-    app_state.g_chat_view_mode = .per_session;
     app_state.g_single_window = true;
     app_state.g_lws_count = 2;
     app_state.shell_count = 2;
@@ -2651,19 +2648,16 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
     const old_shells = app_state.shells[0..3].*;
     const old_count = app_state.shell_count;
     const old_active = app_state.active_shell;
-    const old_mode = app_state.g_chat_view_mode;
     defer {
         app_state.g_ws_focus = old_focus;
         app_state.g_ws_last_shell = old_last_shell;
         app_state.shells[0..3].* = old_shells;
         app_state.shell_count = old_count;
         app_state.active_shell = old_active;
-        app_state.g_chat_view_mode = old_mode;
     }
     app_state.shell_count = 3;
     app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
-    app_state.g_chat_view_mode = .per_session;
     for (0..3) |i| {
         app_state.shells[i] = empty_shell;
         app_state.shells[i].shell_id = @intCast(41 + i);
@@ -2675,30 +2669,30 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
         rememberWorkspaceFocus(1, 42, .shell);
         app_state.shells[0].chat_view_on = input == .chat;
-        app_state.shells[0].chat_shell_override = input == .shell;
+        app_state.shells[0].chat_view_lock = if (input == .shell) .shell else .none;
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
         try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
         try std.testing.expectEqual(input, app_state.g_ws_focus[0]);
         const session = &app_state.shells[app_state.active_shell];
-        try std.testing.expectEqual(input == .chat, chatViewShouldShowForTab(app_state.g_chat_view_mode, session.chat_view_on, session.chat_shell_override, false, true));
+        try std.testing.expectEqual(input == .chat, chatViewShouldShowForTab(session.chat_view_on, session.chat_view_lock));
         try std.testing.expectEqual(input == .chat, app_state.shells[0].chat_view_on);
-        try std.testing.expectEqual(input == .shell, app_state.shells[0].chat_shell_override);
+        try std.testing.expectEqual(input == .shell, app_state.shells[0].chat_view_lock == .shell);
     }
     rememberWorkspaceFocus(0, 41, .chat);
     app_state.shells[0].chat_view_on = false;
-    app_state.shells[0].chat_shell_override = true;
+    app_state.shells[0].chat_view_lock = .shell;
     rememberWorkspaceFocus(0, 41, .none);
     app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
     app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
     try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
     try std.testing.expectEqual(app_state.WorkspaceFocus.chat, app_state.g_ws_focus[0]);
     const shell = &app_state.shells[app_state.active_shell];
-    try std.testing.expect(!chatViewShouldShowForTab(app_state.g_chat_view_mode, shell.chat_view_on, shell.chat_shell_override, true, true));
+    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
     try std.testing.expect(!shell.chat_view_on);
-    try std.testing.expect(shell.chat_shell_override);
-    try std.testing.expect(!chatViewShouldShowForTab(.everywhere, shell.chat_view_on, shell.chat_shell_override, true, true));
+    try std.testing.expect(shell.chat_view_lock == .shell);
+    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
     shell.chat_view_on = true;
-    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, shell.chat_view_on, shell.chat_shell_override, true, true));
+    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
     rememberWorkspaceFocus(0, 43, .none);
     try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[0]);
     for ([_][]const u8{ "{}", "{\"focus\":\"unknown\"}", "{\"focus\":42}" }) |raw| {
@@ -3824,10 +3818,10 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
         }
-        if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.shells[i].chat_shell_override and pos < json_buf.len - 540) {
-            const cso = ",\"cso\":true";
-            @memcpy(json_buf[pos .. pos + cso.len], cso);
-            pos += cso.len;
+        if (pos < json_buf.len - 540) {
+            const saved_lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
+            @memcpy(json_buf[pos .. pos + saved_lock.len], saved_lock);
+            pos += saved_lock.len;
         }
         if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
             const fw = ",\"fw\":true";

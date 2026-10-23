@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-delivery', 'browser-emulation')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-delivery', 'browser-emulation')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -735,6 +735,27 @@ function Read-Inbox {
     return $null
 }
 
+function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step) {
+    Wait-Until {
+        $state = Read-Session
+        if ($null -eq $state -or @($state.tabs).Count -ne 3 -or $state.active_tab -ne $Active) { return $false }
+        if ($state.PSObject.Properties['chat_view_mode']) { throw 'Global forcing mode was saved again' }
+        for ($i = 0; $i -lt 3; $i++) {
+            $on = $state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv -eq $true
+            if ($on -ne $Views[$i]) { return $false }
+        }
+        $state.tabs[2].PSObject.Properties['chat_view_lock'] -and $state.tabs[2].chat_view_lock -ceq 'shell'
+    } "app-written views and shell lock: $Step"
+    Wait-Until {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+        $visible = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count
+        $visible -eq [int]$Views[$Active]
+    } "visible active view: $Step"
+    Save-Json (Read-Session) ($Step + '.session.json')
+    Snapshot $Step
+}
+
 function Read-BrowserPane {
     $state = Read-Inbox
     if ($null -eq $state) { return $null }
@@ -1194,6 +1215,99 @@ try {
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
     switch ($Feature) {
+        'chat-view-everywhere' {
+            $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'Local CMD sessions exercise view preferences and persistence, not agent delivery or remote tmux creation' }
+            Palette 'interface'
+            Press @(0x28) 'Down: UI Size: Decrease'
+            Press @(0x28) 'Down: UI Size: Reset'
+            Press @(0x0D) 'Enter: persist initial session through UI Size: Reset'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 } 'one initial saved CMD session'
+            Focus-Palette 'tab order' 6217
+            Press @(0x28) 'Down: Tab Order Manual'
+            Press @(0x0D) 'Enter: keep creation order for Ctrl+1/2/3'
+            Wait-Until {
+                $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+                if (-not (Test-Path $path)) { return $false }
+                $launch = Get-Content $path -Raw | ConvertFrom-Json
+                $launch.PSObject.Properties['sort_auto'] -and -not $launch.sort_auto
+            } 'manual tab order saved before creating sessions'
+            for ($count = 2; $count -le 3; $count++) {
+                Focus-Palette 'new cmd' 2000
+                Snapshot ("new-session-$count-action")
+                Press @(0x0D) 'Enter: New CMD Shell'
+                Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count -and $state.active_tab -eq $count - 1 } "user-created CMD session $count"
+            }
+            Snapshot 'sessions-created'
+            Focus-Palette 'always shell view for this session' 6465
+            Snapshot 'lock-action'
+            Press @(0x0D) 'Enter: Always shell view for this session on session 3'
+            Wait-ChatViews @($false, $false, $false) 2 'locked-shell'
+            Focus-Palette 'chat view on everywhere' 6346
+            Snapshot 'action'
+            Press @(0x0D) 'Enter: Chat View on everywhere once'
+            Wait-ChatViews @($true, $true, $false) 2 'on-everywhere'
+            Press @(0x11, 0x31) 'Ctrl+1: show session 1 in Chat View'
+            Wait-ChatViews @($true, $true, $false) 0 'session-1-chat'
+            Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'
+            Wait-ChatViews @($false, $true, $false) 0 'session-1-toggled'
+            Press @(0x11, 0x32) 'Ctrl+2: show session 2 in Chat View'
+            Wait-ChatViews @($false, $true, $false) 1 'session-2-chat'
+            Press @(0x11, 0x31) 'Ctrl+1: return to session 1 without forcing Chat View'
+            Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'
+            Focus-Palette 'chat view off everywhere' 6347
+            Snapshot 'off-action'
+            Press @(0x0D) 'Enter: Chat View off everywhere once'
+            Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'
+            Press @(0x11, 0x33) 'Ctrl+3: shell-locked session stays in shell'
+            Wait-ChatViews @($false, $false, $false) 2 'locked-after-off'
+            Doctor
+            Record 'Close only the owned app normally and restart with the same isolated data directory'
+            if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Owned app did not close normally for view persistence restart' }
+            $stopped = $job.Stop()
+            Save-Json $stopped 'restart-process-tree.json'
+            if ($stopped.ActiveProcesses -ne 0) { throw 'Owned descendants survived before restart' }
+            $job.Dispose()
+            $job = New-Object VerifyJob
+            $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'relaunch.stdout.log'), (Join-Path $Evidence 'relaunch.stderr.log'))
+            $script:window = [IntPtr]::Zero
+            Wait-Until {
+                $process.Refresh()
+                $script:window = $process.MainWindowHandle
+                $state = Read-Inbox
+                $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -eq 3
+            } 'restarted owned window and three restored sessions' 60
+            [void][VerifyNative]::ShowWindow($script:window, 9)
+            [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+            Wait-Until {
+                [VerifyNative]::BringToForeground($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'restarted app foreground'
+            Doctor
+            Save-Json (Read-Session) 'restart-before-input.session.json'
+            Press @(0x11, 0x31) 'Ctrl+1: restored first session'
+            Wait-ChatViews @($false, $false, $false) 0 'restart-session-1'
+            Press @(0x11, 0x32) 'Ctrl+2: restored second session'
+            Wait-ChatViews @($false, $false, $false) 1 'restart-session-2'
+            Press @(0x11, 0x33) 'Ctrl+3: restored shell lock'
+            Wait-ChatViews @($false, $false, $false) 2 'restart-session-3'
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Focus-Palette 'chat view on everywhere' 6346
+            Press @(0x1B) 'Esc: close known positive palette query'
+            $start = (Get-Content $log -Raw).Length
+            Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
+            Wait-Until {
+                (Get-Content $log -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
+                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+            } 'empty palette ready for removed-command query'
+            Type-Text 'chat view per tab'
+            Wait-Until {
+                (Get-Content $log -Raw).Substring($start) -match '\[palette\] ready chars=17 count=0 target=0(?:\r?\n|$)'
+            } 'removed per-tab command has zero palette rows'
+            Snapshot 'per-tab-absent'
+            Press @(0x1B) 'Esc: close empty palette'
+            Wait-ChatViews @($false, $false, $false) 2 'after'
+            $result.checks += @{ name = 'chat-view-everywhere-once'; unlockedOn = @(0, 1); skippedShellLock = 2; laterToggleSticks = $true; offEverywhere = $true; restartViewsAndLock = $true; removedPerTabRowCount = 0; entry = 'Ctrl+K, Ctrl+1/2/3 and Alt+C' }
+        }
         'appearance' {
             Select-Theme 'dark' 'baseline-dark-action'
             Snapshot 'before'
@@ -1498,12 +1612,12 @@ try {
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'per tab' 6345
-            Press @(0x0D) 'Enter: Chat View per tab'
+            Focus-Palette 'clear always view for this session' 6466
+            Press @(0x0D) 'Enter: clear Always view for the test session'
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and -not ($state.PSObject.Properties.Name -contains 'chat_view_mode')
-            } 'per-session Chat View mode saved'
+                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']
+            } 'unlocked per-session Chat View saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {

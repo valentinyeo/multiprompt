@@ -154,7 +154,12 @@ const SEARCH_VOICE_MODE_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_
 const SEARCH_ETA_NUMBERS_OFFSET = @import("app_state.zig").SEARCH_ETA_NUMBERS_OFFSET;
 const SEARCH_ETA_PROGRESS_OFFSET = @import("app_state.zig").SEARCH_ETA_PROGRESS_OFFSET;
 const SEARCH_ETA_ACCURACY_OFFSET = @import("app_state.zig").SEARCH_ETA_ACCURACY_OFFSET;
-const SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
+const SEARCH_TABCTX_VIEW_CHAT = @import("app_state.zig").SEARCH_TABCTX_VIEW_CHAT;
+const SEARCH_TABCTX_VIEW_SHELL = @import("app_state.zig").SEARCH_TABCTX_VIEW_SHELL;
+const SEARCH_TABCTX_VIEW_CLEAR = @import("app_state.zig").SEARCH_TABCTX_VIEW_CLEAR;
 const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
 const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
 const SEARCH_VOICE_ALWAYS_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_ON_OFFSET;
@@ -534,6 +539,9 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    if (target == SEARCH_TABCTX_VIEW_CHAT) return "always chat view for this session";
+    if (target == SEARCH_TABCTX_VIEW_SHELL) return "always shell view for this session";
+    if (target == SEARCH_TABCTX_VIEW_CLEAR) return "clear always view for this session";
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
     if (target == SEARCH_TABCTX_START_SESSION) return "start new session";
@@ -694,7 +702,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_ETA_NUMBERS_OFFSET => "eta countdown numbers",
         SEARCH_ETA_PROGRESS_OFFSET => "eta progress line",
         SEARCH_ETA_ACCURACY_OFFSET => "estimate accuracy",
-        SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET => "chat view per tab",
+        SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET => "always chat view for this session",
+        SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET => "always shell view for this session",
+        SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET => "clear always view for this session",
         SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET => "chat view on everywhere",
         SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET => "chat view off everywhere",
         SEARCH_VOICE_STOP_OFFSET => "voice stop speaking mute",
@@ -1927,6 +1937,24 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always Chat View for this session", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_CHAT;
+            app_state.g_search_result_count += 1;
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always shell view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_SHELL;
+            app_state.g_search_result_count += 1;
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear Always view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_CLEAR;
+            app_state.g_search_result_count += 1;
+        }
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
@@ -3079,32 +3107,39 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always Chat View for this session", app_state.g_search_buf[0..app_state.g_search_len])))
     {
-        var show_cvm = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const cvm_labels = [_][]const u8{ "chat view mode", "chat view", "chat", "per tab", "on everywhere", "off everywhere", "everywhere", "off", "on" };
-            for (cvm_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_cvm = true;
-                    break;
-                }
-            }
-        }
-        if (show_cvm) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-        }
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always shell view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear Always view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View off everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     {

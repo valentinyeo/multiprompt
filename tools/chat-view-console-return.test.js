@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_composer.zig'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
@@ -16,7 +17,7 @@ function fn(text, name) {
   assert.ok(end > start, name);
   return text.slice(start, end + 2);
 }
-const names = ['fullWidthShouldResizeConsole', 'chatViewShouldShowForTab', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView'];
+const names = ['fullWidthShouldResizeConsole', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView'];
 
 function toggle(text) {
   const start = text.indexOf('        WM_APP_TOGGLE_FULLWIDTH => {');
@@ -40,13 +41,12 @@ const SW_SHOW = 5;
 const TIMER_CHAT_BROWSER_SWAP = 1;
 const TIMER_CHAT_REFRESH = 2;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
-const ISSUE_373_SHELL_OVERRIDE = true;
-const ChatViewMode = enum { per_session, everywhere, nowhere };
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, chat_view_on: bool = true, chat_shell_override: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
+const ViewLock = @import("chat_view.zig").Lock;
+const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, chat_view_on: bool = true, chat_view_lock: ViewLock = .none, full_width: bool = false, full_width_pending_console_resize: bool = false };
 var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
-var g_chat_view_mode: ChatViewMode = .per_session;
 var g_chat_active = true;
 var g_restoring = false;
 var g_startup_progress = false;
@@ -94,9 +94,8 @@ fn openChatView() void { g_chat_active = true; }
 fn saveSession() void {}
 ${production}
 ${toggle(main)}
-fn prepare(mode: ChatViewMode, full: bool) void {
-    g_chat_view_mode = mode;
-    shells[0] = .{ .full_width = full };
+fn prepare(lock: ViewLock, full: bool) void {
+    shells[0] = .{ .full_width = full, .chat_view_lock = lock };
     shells[1] = .{ .hwnd = 9, .pid = 43, .full_width_pending_console_resize = true };
     active_shell = 0;
     g_chat_active = true;
@@ -112,36 +111,36 @@ fn prepare(mode: ChatViewMode, full: bool) void {
     focuses = 0;
 }
 test "close chat reveals native shell without resetting its buffer or font" {
-    for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
+    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
         for ([_]bool{ false, true }) |full| {
-            prepare(mode, full);
-            if (mode == .nowhere) closeChatView() else toggleChatView();
+            prepare(lock, full);
+            if (lock != .none) closeChatView() else toggleChatView();
             try std.testing.expect(!g_chat_active);
-            try std.testing.expect(visible[10]);
+            try std.testing.expectEqual(lock != .chat, visible[10]);
             try std.testing.expect(!visible[2] and !visible[3] and !visible[4]);
             try std.testing.expectEqual(@as(usize, 1), layouts);
             try std.testing.expectEqual(@as(usize, 1), focuses);
             try std.testing.expectEqual(@as(usize, 0), theme_resets);
             try std.testing.expect(!shells[0].full_width_pending_console_resize);
             try std.testing.expect(shells[1].full_width_pending_console_resize);
-            if (mode == .per_session) try std.testing.expect(!shells[0].chat_view_on);
-            if (mode == .everywhere) try std.testing.expect(shells[0].chat_shell_override);
+            try std.testing.expect(!shells[0].chat_view_on);
+            try std.testing.expectEqual(lock, shells[0].chat_view_lock);
         }
     }
 }
-test "pending full width resets exactly once on exit in every mode and direction" {
-    for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
+test "pending full width resets exactly once on exit for every lock and direction" {
+    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
         for ([_]bool{ false, true }) |full| {
             for ([_]usize{ 1, 2 }) |toggles| {
-                prepare(mode, full);
+                prepare(lock, full);
                 for (0..toggles) |_| _ = toggleFullWidth(null);
                 try std.testing.expectEqual(@as(usize, 0), theme_resets);
                 try std.testing.expect(shells[0].full_width_pending_console_resize);
                 try std.testing.expectEqual(if (toggles == 1) !full else full, shells[0].full_width);
                 layouts = 0;
-                if (mode == .nowhere) closeChatView() else toggleChatView();
+                if (lock != .none) closeChatView() else toggleChatView();
                 try std.testing.expect(!g_chat_active);
-                try std.testing.expect(visible[10]);
+                try std.testing.expectEqual(lock != .chat, visible[10]);
                 try std.testing.expect(!visible[2] and !visible[3] and !visible[4]);
                 try std.testing.expectEqual(@as(usize, 1), layouts);
                 try std.testing.expectEqual(@as(usize, 1), focuses);
@@ -156,7 +155,7 @@ test "pending full width resets exactly once on exit in every mode and direction
     }
 }
 test "pending state is consumed for a shell with no process without resetting" {
-    prepare(.per_session, false);
+    prepare(.none, false);
     shells[0].pid = 0;
     _ = toggleFullWidth(null);
     try std.testing.expect(shells[0].full_width_pending_console_resize);
@@ -166,7 +165,7 @@ test "pending state is consumed for a shell with no process without resetting" {
     try std.testing.expect(visible[10]);
 }
 test "closing behind palette preserves containment until palette is dismissed" {
-    prepare(.per_session, false);
+    prepare(.none, false);
     g_search_active = true;
     closeChatView();
     try std.testing.expect(!visible[10]);
@@ -184,6 +183,7 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-console-return-'));
   const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
   try {
+    copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness(source));
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });

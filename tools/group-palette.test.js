@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'src', name + '.zig'), 'utf8');
 const state = read('app_state');
@@ -432,7 +433,7 @@ test "group band covers popup actions, scoped target, search and workspace desti
 test('extracted production group default, migration, explicit colors and palette dispatch', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-palette-'));
   try {
-    for (const name of ['json_reader', 'archive_rules', 'frequent', 'voice_filter']) fs.copyFileSync(path.join(root, 'src', name + '.zig'), path.join(dir, name + '.zig'));
+    copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness());
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
