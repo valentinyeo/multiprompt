@@ -1,1 +1,1 @@
-Switching to a terminal no longer briefly focuses the app frame while terminal activation is still in progress.
+Ctrl+Tab to a terminal session no longer sometimes waits a quarter second before you can type.
