@@ -191,6 +191,39 @@ class ChatSyncAuditTest(unittest.TestCase):
                     sleep.assert_called_once_with(audit.SETTLE_SECONDS)
                     evidence.assert_called_once_with(None, None, self.wire([]), finding)
 
+    def test_settle_pending_drops_older_evidence_above_user_row(self):
+        wire = self.wire([dict(role='user', text='neutral question'), dict(role='assistant', text='neutral reply')])
+        finding = dict(kind='pane_missing', text='neutral older message', transcript_lines=[])
+        rows = [dict(record='conversation', location='before_cold_tail')]
+        with patch.object(audit.time, 'sleep') as sleep, patch.object(audit, 'transcript_evidence', return_value=rows):
+            self.assertEqual(audit.settle_pending(None, None, wire, [finding], sleep), [])
+            self.assertEqual(finding['transcript_lines'], rows)
+
+    def test_settle_pending_keeps_older_evidence_without_user_row(self):
+        wire = self.wire([dict(role='assistant', text='neutral reply')])
+        finding = dict(kind='pane_missing', text='neutral older message', transcript_lines=[])
+        rows = [dict(record='conversation', location='before_cold_tail')]
+        with patch.object(audit.time, 'sleep') as sleep, patch.object(audit, 'transcript_evidence', return_value=rows):
+            self.assertEqual(audit.settle_pending(None, None, wire, [finding], sleep), [finding])
+            self.assertEqual(finding['transcript_lines'], rows)
+
+    def test_not_drift_keeps_in_window_conversation_with_user_row(self):
+        wire = self.wire([dict(role='user', text='neutral question')])
+        finding = dict(kind='pane_missing', transcript_lines=[dict(record='conversation', location='in_window')])
+        self.assertFalse(audit.not_drift(finding, wire))
+
+    def test_not_drift_explains_older_evidence_above_user_row(self):
+        wire = self.wire([dict(role='user', text='neutral question')])
+        finding = dict(kind='pane_missing', transcript_lines=[dict(record='conversation', location='before_cold_tail')])
+        self.assertTrue(audit.not_drift(finding, wire))
+
+    def test_not_drift_skips_non_object_wire_lines(self):
+        finding = dict(kind='pane_missing', transcript_lines=[dict(record='conversation', location='before_cold_tail')])
+        wire = self.wire([None, [], 'neutral text', 1]).replace('@@MP_END@@', 'not json\n@@MP_END@@')
+        self.assertFalse(audit.not_drift(finding, wire))
+        wire = wire.replace('@@MP_END@@', json.dumps(dict(role='user', text='neutral question')) + '\n@@MP_END@@')
+        self.assertTrue(audit.not_drift(finding, wire))
+
     def test_audit_pane_settles_pending_against_original_snapshot(self):
         reader = audit.load_reader()
         text = 'The neutral assistant message is still being written'
