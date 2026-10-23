@@ -883,6 +883,48 @@ pub fn browserUrlIsRealPage(url: []const u8) bool {
         std.mem.startsWith(u8, url, "file://");
 }
 
+fn paneLaunchFallbackBounds(work: RECT, buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, " --window-position={d},{d} --window-size=400,400", .{ work.left, work.top }) catch "";
+}
+
+test "pane launch fallback bounds stay inside the owner monitor work area" {
+    const areas = [_]RECT{
+        .{ .left = 0, .top = 40, .right = 1920, .bottom = 1080 },
+        .{ .left = -2560, .top = -493, .right = 0, .bottom = 947 },
+    };
+    for (areas) |work| {
+        var buf: [128]u8 = undefined;
+        const bounds = paneLaunchFallbackBounds(work, &buf);
+        var parts = std.mem.tokenizeAny(u8, bounds, " =,");
+        try std.testing.expectEqualStrings("--window-position", parts.next().?);
+        const x = try std.fmt.parseInt(i32, parts.next().?, 10);
+        const y = try std.fmt.parseInt(i32, parts.next().?, 10);
+        try std.testing.expectEqualStrings("--window-size", parts.next().?);
+        const width = try std.fmt.parseInt(i32, parts.next().?, 10);
+        const height = try std.fmt.parseInt(i32, parts.next().?, 10);
+        try std.testing.expectEqual(work.left, x);
+        try std.testing.expectEqual(work.top, y);
+        try std.testing.expectEqual(@as(i32, 400), width);
+        try std.testing.expectEqual(@as(i32, 400), height);
+        try std.testing.expect(x >= work.left and y >= work.top);
+        try std.testing.expect(x + width <= work.right and y + height <= work.bottom);
+        try std.testing.expect(parts.next() == null);
+    }
+}
+
+fn appendPaneLaunchFallbackBounds(params: []u16, pos: *usize) void {
+    const win = @import("win32.zig");
+    const monitor = if (app_state.g_main_hwnd != null)
+        win.MonitorFromWindow(app_state.g_main_hwnd, win.MONITOR_DEFAULTTOPRIMARY)
+    else
+        win.MonitorFromPoint(.{ .x = 0, .y = 0 }, win.MONITOR_DEFAULTTOPRIMARY);
+    var info: win.MONITORINFO = std.mem.zeroes(win.MONITORINFO);
+    info.cbSize = @sizeOf(win.MONITORINFO);
+    if (win.GetMonitorInfoW(monitor, &info) == 0) return;
+    var buf: [128]u8 = undefined;
+    appendBrowserWideAscii(params, pos, paneLaunchFallbackBounds(info.rcWork, &buf));
+}
+
 fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, launch_idx: ?u32) void {
     var params: [2048]u16 = std.mem.zeroes([2048]u16);
     var pos: usize = 0;
@@ -933,10 +975,10 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
                 }
             }
             if (!placed_at_pane) {
-                appendBrowserWideAscii(&params, &pos, " --window-position=-32000,-32000 --window-size=400,400");
+                appendPaneLaunchFallbackBounds(&params, &pos);
             }
         } else {
-            appendBrowserWideAscii(&params, &pos, " --window-position=-32000,-32000 --window-size=400,400");
+            appendPaneLaunchFallbackBounds(&params, &pos);
         }
     }
     params[@min(pos, params.len - 1)] = 0;
