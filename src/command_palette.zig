@@ -186,6 +186,7 @@ const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEU
 const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
 const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
 const SEARCH_CHAT_PUSH_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_PUSH_QUEUED_OFFSET;
+const SEARCH_CHAT_EDIT_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_EDIT_QUEUED_OFFSET;
 const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_OFFSET;
 const REMIND_PRESET_EVENING = @import("app_state.zig").REMIND_PRESET_EVENING;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
@@ -750,6 +751,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_RETRY_UNSENT_OFFSET => "chat view retry unsent messages not sent resend",
         SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "chat view discard unsent messages not sent",
         SEARCH_CHAT_PUSH_QUEUED_OFFSET => "chat view send queued in claude message now push",
+        SEARCH_CHAT_EDIT_QUEUED_OFFSET => "chat view edit queued messages pull back into the prompt box",
         SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multiprompt sync",
         SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
@@ -3921,6 +3923,15 @@ pub fn updateSearchResults() void {
         }
         if (show_push_queued and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_PUSH_QUEUED_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        var show_edit_queued = false;
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            show_edit_queued = asciiContainsQueryInsensitive("edit queued messages", q) or asciiContainsQueryInsensitive("queued messages edit", q);
+        }
+        if (show_edit_queued and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EDIT_QUEUED_OFFSET;
             app_state.g_search_result_count += 1;
         }
 

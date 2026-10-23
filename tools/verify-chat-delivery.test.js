@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const os = require('node:os');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -193,7 +194,7 @@ test('idle-suggestion oracle accepts clearing keys but rejects any submitted or 
 test('missing evidence evaluates every case and never produces a false green', () => {
   const result = evaluateEvidence(path.join(root, 'tools/verify-chat-delivery/nonexistent-evidence'));
   assert.equal(result.status, 'failed');
-  assert.deepEqual(result.cases.map(row => row.name), names);
+  assert.deepEqual(result.cases.map(row => row.name), allNames);
   assert.ok(result.cases.every(row => row.passed === false && row.detail));
   assert.equal(result.agentBoundary, agentBoundary);
 });
@@ -464,6 +465,84 @@ test('delivery implementation adds no removable code comments', async () => {
   assert.doesNotMatch(read('tools/verify-chat-delivery/boundary.py'), /^\s*#/m);
 });
 
+function queueFiles(base) {
+  const t = queueTexts;
+  const name = queueName;
+  const out = new Map();
+  const put = (file, value) => out.set(path.join(base, file), typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value));
+  const log = (file, rows) => out.set(path.join(base, file), rows.map(row => JSON.stringify(row)).join('\n'));
+  const png = Buffer.alloc(15000);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  const render = (mode, queue, box, escapes) => {
+    const rows = box ? box.split('\n') : [''];
+    const first = mode === 'idle' && !box ? (escapes ? `\u001b[2m${t.suggestion}\u001b[0m` : t.suggestion) : rows[0];
+    return ['Claude Code', '', mode === 'busy' ? 'Working... (esc to interrupt)' : 'Ready', '', ...queue.map(text => `  Queued: ${text}`), `❯ ${first}`, ...rows.slice(1).map(text => `  ${text}`), '─'.repeat(50)].join('\n') + '\n';
+  };
+  const script = [
+    ['shell', 'text', 'busy', [], t.a], ['shell', 'key', 'busy', [t.a], ''],
+    ['app', 'send-keys', 'busy', [t.a], t.b], ['app', 'send-keys', 'busy', [t.a, t.b], ''],
+    ['shell', 'key', 'busy', [], `${t.a}\n${t.b}`], ['shell', 'key', 'busy', [], ''],
+    ['shell', 'text', 'busy', [], t.a2], ['shell', 'key', 'busy', [t.a2], ''],
+    ['shell', 'text', 'busy', [t.a2], t.b], ['shell', 'key', 'busy', [t.a2, t.b], ''],
+    ['shell', 'idle', 'idle', [], ''],
+    ['shell', 'text', 'idle', [], t.shellDraft], ['shell', 'key', 'idle', [], ''],
+    ['app', 'send-keys', 'idle', [], t.chatDraft],
+  ];
+  log(`${name}/stand-in/frames.jsonl`, script.map(([origin, op, mode, queue, box], index) => ({
+    ms: 2000 + index, case: name, origin, op, argv: [], mode, queue, box, suggestionShown: mode === 'idle' && !box,
+    screen: render(mode, queue, box, false), escaped: render(mode, queue, box, true),
+  })));
+  const event = (type, fields) => ({ type, timestamp: '2026-10-23T10:00:00.000Z', sessionId: 'sid', ...fields });
+  const queued = (operation, content, extra) => event('queue-operation', { operation, ...(content === undefined ? {} : { content }), ...extra });
+  log(`${name}/transcript.jsonl`, [
+    event('user', { message: { role: 'user', content: 'start' } }),
+    queued('enqueue', t.a), queued('enqueue', t.b), queued('popAll', `${t.a}\n${t.b}`),
+    queued('enqueue', t.a2), queued('enqueue', t.b),
+    queued('remove', t.a2, { reason: 'absorbed_mid_turn' }), event('attachment', { attachment: { type: 'queued_command', prompt: t.a2 } }),
+    queued('dequeue'), event('attachment', { attachment: { type: 'queued_command', prompt: t.b } }),
+  ]);
+  const item = (state, text) => ({ text, state });
+  const views = [[item('queued', t.a)], [item('queued', t.a), item('queued', t.b)], [], [item('queued', t.a2)], [item('queued', t.a2), item('queued', t.b)], [item('sent', t.a2), item('sent', t.b)]];
+  put(`${name}/debug.log`, ['2026-10-23 10:00:00.000 [chat] transcript load shell=1 ok bytes=900 ms=5', ...views.map(view => `2026-10-23 10:00:01.000 CHAT_QUEUE items=${JSON.stringify(view)}`)].join('\n'));
+  put('build.json', { version: '0.0.1', sha256: 'a'.repeat(64) });
+  put(`${name}/observation.json`, { name, text: t.b, mode: 'busy', actionMs: 1000, endMs: 3000, error: null, texts: t, steps: queueSteps.map(step => ({ name: step, ok: true, ms: 1500, waitedMs: 100 })) });
+  put(`${name}/stand-in/state.json`, { name, mode: 'busy', suggestion: t.suggestion, fake: true });
+  const send = (...argv) => ({ ms: 1500, case: name, argv: ['send-keys', '-t', '=verify-agent:', ...argv] });
+  log(`${name}/stand-in/agent-buffer.jsonl`, [send('-l', '--', t.b), send('Enter'), send('C-u'), send('-l', '--', t.chatDraft)]);
+  const consoleRow = (mode, box) => {
+    const screen = render(mode, [], box, false);
+    return { case: name, session: 'verify-agent', screen, rows: screen.trimEnd().split('\n').map(line => line.trimEnd()), greySuggestion: mode === 'idle' && !box, suggestionAttribute: mode === 'idle' && !box ? 8 : 7 };
+  };
+  log(`${name}/stand-in/console.jsonl`, [consoleRow('busy', ''), consoleRow('idle', '')]);
+  log(`${name}/stand-in/capture.jsonl`, [{ case: name, argv: ['capture-pane', '-p', '-J'], screen: render('busy', [], '', false) }]);
+  log(`${name}/stand-in/invocations.jsonl`, [
+    { kind: 'attach', session: 'verify-agent' },
+    { kind: 'reader', argv: ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))', '--serve'] },
+  ]);
+  put(`${name}/doctor.json`, { version: '0.0.1', sha256: 'a'.repeat(64), pid: 1, hwnd: 2, composer: 3, focus: [2, 3], chat: true, tmux: true });
+  put(`${name}/cleanup.json`, { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+  put(`${name}/process-tree.json`, { ActiveProcesses: 0 });
+  put(`${name}/session-chat.json`, { active_tab: 0, tabs: [{ kind: 'tmux', tmux_session: 'verify-agent', cv: true }] });
+  for (const suffix of ['before', 'action', 'after', 'final']) out.set(path.join(base, `${name}-${suffix}.png`), png);
+  const act = (input, extra) => ({ case: name, ms: 1000, input, ...extra });
+  const actions = [
+    act('Ctrl+1: select saved tmux tab'), act('Alt+C: open Chat View'),
+    ...Array.from({ length: 10 }, () => act('shell input')),
+    act('type composer text', { text: t.b }), act('type composer text', { text: t.chatDraft }),
+  ];
+  return { files: out, actions };
+}
+
+function mockFiles(t, files) {
+  t.mock.method(fs, 'existsSync', file => files.has(String(file)));
+  t.mock.method(fs, 'readFileSync', (file, encoding) => {
+    if (!files.has(String(file))) throw new Error(`Missing fixture ${file}`);
+    const value = files.get(String(file));
+    return encoding && Buffer.isBuffer(value) ? value.toString(encoding) : value;
+  });
+}
+
+
 test('full evidence oracle recomputes all cases and rejects corrupt screens, identity, actions and cleanup', t => {
   const files = new Map();
   const base = path.join(root, 'tools/verify-chat-delivery/in-memory-evidence');
@@ -499,7 +578,10 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     for (const suffix of ['before', 'action', 'after', 'final']) files.set(path.join(base, `${name}-${suffix}.png`), png);
     for (const input of ['Ctrl+1: select saved tmux tab', 'Alt+C: open Chat View', 'type composer text', ...(name === 'steer-chord' ? ['Ctrl+X: steer prefix', 'Ctrl+S: steer send'] : ['Enter: send composer'])]) actions.push({ case: name, input, text: observation.text });
   }
-  put('actions.json', actions);
+  const queue = queueFiles(base);
+  for (const [file, value] of queue.files) files.set(file, value);
+  const allActions = [...actions, ...queue.actions];
+  put('actions.json', allActions);
   files.set(path.join(base, 'before.png'), png);
   files.set(path.join(base, 'after.png'), png);
   t.mock.method(fs, 'existsSync', file => files.has(String(file)));
@@ -518,7 +600,7 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     () => put('steer-chord/doctor.json', { version: 'wrong' }),
     () => put('busy-send/session-chat.json', { active_tab: 1 }),
     () => files.set(path.join(base, 'busy-send-after.png'), Buffer.alloc(15000)),
-    () => put('actions.json', actions.filter(row => row.input !== 'Ctrl+S: steer send')),
+    () => put('actions.json', allActions.filter(row => row.input !== 'Ctrl+S: steer send')),
     () => log('busy-send/stand-in/unsupported.jsonl', [{ operation: 'ignored' }]),
     () => log('wrapped-leftover/stand-in/agent-buffer.jsonl', fixture('wrapped-leftover').events.map(event => ({ ...event, submitted: event.submitted && leftover.slice(0, 30) + event.submitted }))),
     () => log('wrapped-leftover/stand-in/capture.jsonl', [{ case: 'wrapped-leftover', screen: '❯ unseeded' }]),
@@ -531,7 +613,157 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     mutate();
     const result = evaluateEvidence(base);
     assert.equal(result.status, 'failed');
-    assert.equal(result.cases.length, names.length);
+    assert.equal(result.cases.length, allNames.length);
     assert.equal(result.cases.filter(row => !row.passed).length, 1);
   }
+});
+
+
+function queueRow(base) {
+  return evaluateEvidence(base).cases.find(row => row.name === queueName);
+}
+
+test('queue-draft-sync evidence passes only with both views, ordered queue states, sent marks and draft sync', t => {
+  const base = path.join(root, 'tools/verify-chat-delivery/in-memory-queue-evidence');
+  const { files, actions } = queueFiles(base);
+  files.set(path.join(base, 'actions.json'), JSON.stringify(actions));
+  mockFiles(t, files);
+  const green = queueRow(base);
+  assert.equal(green.passed, true, JSON.stringify(green.detail));
+  assert.equal(green.detail.queueViews, 6);
+  const positive = new Map(files);
+  const file = name => path.join(base, queueName, name);
+  const mutate = (label, edit) => {
+    files.clear();
+    for (const [key, value] of positive) files.set(key, value);
+    edit();
+    const row = queueRow(base);
+    assert.equal(row.passed, false, `${label} must fail`);
+    return row.detail;
+  };
+  const debug = edit => () => files.set(file('debug.log'), edit(files.get(file('debug.log'))));
+  const without = pattern => debug(text => text.split('\n').filter(line => !pattern.test(line)).join('\n'));
+  const frames = edit => () => files.set(file('stand-in/frames.jsonl'), edit(files.get(file('stand-in/frames.jsonl')).split('\n')).join('\n'));
+  assert.match(mutate('no queue view at all', without(/CHAT_QUEUE/)), /Chat View never listed/);
+  assert.match(mutate('shell queued message never shown', without(/"shell queued alpha","state":"queued"\}\]$/)), /Chat View never listed/);
+  assert.match(mutate('order swapped', debug(text => text.replace('[{"text":"shell queued alpha","state":"queued"},{"text":"chat queued beta","state":"queued"}]', '[{"text":"chat queued beta","state":"queued"},{"text":"shell queued alpha","state":"queued"}]'))), /Chat View never listed/);
+  assert.match(mutate('sent never marked', debug(text => text.replaceAll('"state":"sent"', '"state":"queued"'))), /Chat View never listed/);
+  assert.match(mutate('edit never reflected', without(/shell queued alpha edited/)), /Chat View never listed/);
+  assert.match(mutate('transcript never read', debug(text => text.replace('transcript load shell=1 ok', 'transcript load shell=1 fail'))), /Chat View read the fake session transcript/);
+  assert.match(mutate('draft never reaches shell box', frames(rows => rows.slice(0, -1))), /expected shell frame missing/);
+  assert.match(mutate('draft reached the box from the shell', frames(rows => rows.map(row => row.replace('"origin":"app","op":"send-keys","argv":[],"mode":"idle"', '"origin":"shell","op":"send-keys","argv":[],"mode":"idle"')))), /expected shell frame missing|draft reached/);
+  assert.match(mutate('failed journey step', () => files.set(file('observation.json'), files.get(file('observation.json')).replace('{"name":"composer-shows-shell-draft","ok":true', '{"name":"composer-shows-shell-draft","ok":false'))), /journey steps failed: composer-shows-shell-draft/);
+  assert.match(mutate('missing journey step', () => files.set(file('observation.json'), files.get(file('observation.json')).replace('"suggestion-not-draft"', '"renamed"'))), /every journey step ran in order/);
+  assert.match(mutate('suggestion treated as text', () => files.set(file('stand-in/agent-buffer.jsonl'), files.get(file('stand-in/agent-buffer.jsonl')) + '\n' + JSON.stringify({ ms: 1, case: queueName, argv: ['send-keys', '-l', '--', queueTexts.suggestion] }))), /grey suggestion was never treated as text/);
+  assert.match(mutate('Claude never took the queue', () => files.set(file('transcript.jsonl'), files.get(file('transcript.jsonl')).split('\n').slice(0, -2).join('\n'))), /./);
+  assert.match(mutate('suggestion not rendered dim', frames(rows => rows.map(row => row.replaceAll('\\u001b[2m', '')))), /dim suggestion rendered/);
+  assert.match(mutate('unsupported boundary operation', () => files.set(file('stand-in/unsupported.jsonl'), '{"operation":"x"}')), /no silently unsupported/);
+  assert.match(mutate('shell never driven', () => files.set(path.join(base, 'actions.json'), '[]')), /./);
+});
+
+test('master-like evidence (no queue view, no composer or shell box sync) fails queue-draft-sync only', t => {
+  const base = path.join(root, 'tools/verify-chat-delivery/in-memory-master-evidence');
+  const { files, actions } = queueFiles(base);
+  files.set(path.join(base, 'actions.json'), JSON.stringify(actions));
+  const file = name => path.join(base, queueName, name);
+  files.set(file('debug.log'), '2026-10-23 10:00:00.000 [chat] transcript load shell=1 ok bytes=900 ms=5');
+  const observation = JSON.parse(files.get(file('observation.json')));
+  const failing = ['chat-lists-shell-queued', 'chat-lists-both-in-order', 'chat-lists-edited-in-order', 'chat-marks-both-sent', 'composer-shows-shell-draft', 'shell-box-shows-chat-draft'];
+  observation.steps = observation.steps.map(step => ({ ...step, ok: !failing.includes(step.name) }));
+  files.set(file('observation.json'), JSON.stringify(observation));
+  mockFiles(t, files);
+  const result = evaluateEvidence(base);
+  const row = result.cases.find(entry => entry.name === queueName);
+  assert.equal(row.passed, false);
+  assert.equal(row.detail, `journey steps failed: ${failing.join(', ')}`);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(result.cases.map(entry => entry.name), allNames);
+});
+
+test('fake Claude queues while busy, pops everything on Up, takes the queue FIFO and shows a dim suggestion only when empty', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-claude-'));
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  try {
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/sid-1.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: queueName, mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-1', cwd: 'C:/verify/work', panePid: 4242,
+      transcript, meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const run = (mode, ...args) => execFileSync('python3', ['-I', '-X', 'utf8', boundary, mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+    const shell = (...args) => run('shell', ...args);
+    const tmux = (...args) => run('tmux', ...args);
+    const events = () => fs.readFileSync(transcript, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const state = () => JSON.parse(shell('show'));
+    const pane = (...flags) => tmux('capture-pane', ...flags, '-t', '=verify-agent:');
+    shell('init');
+    assert.equal(fs.readFileSync(path.join(dir, 'proc/4242/cmdline'), 'latin1'), 'claude\0');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'home/.claude/sessions/4242.json'), 'utf8')).sessionId, 'sid-1');
+    assert.equal(tmux('list-panes', '-t', '=verify-agent', '-F', '#{pane_pid}').trim(), '4242');
+    const discovery = String.raw`
+import json, os, re, sys
+from pathlib import Path
+dir_ = Path(sys.argv[1])
+os.environ["HOME"] = str(dir_ / "home")
+source = open(sys.argv[2], encoding="utf-8").read()
+namespace = {"__name__": "reader"}
+exec(compile(re.search(r"READER_SOURCE = r'''(.*?)'''", source, re.S).group(1), "reader", "exec"), namespace)
+table = namespace["process_table"](dir_ / "proc")
+pid = namespace["agent_pid_for_panes"]([4242], table, "claude")
+sid, cwd = namespace["claude_session_metadata"](pid)
+path = namespace["conversation_path"]("claude", sid, cwd)
+print(json.dumps([pid, sid, cwd, str(path)]))
+`;
+    if (process.platform === 'linux') {
+      const found = JSON.parse(execFileSync('python3', ['-I', '-X', 'utf8', '-c', discovery, dir, path.join(root, 'src/chat_history_reader.py')], { encoding: 'utf8' }));
+      assert.deepEqual(found, [4242, 'sid-1', 'C:/verify/work', transcript], 'the production reader finds the fake transcript from the pane pid');
+    }
+    shell('text', 'alpha one');
+    assert.match(pane('-p', '-J'), /\u276f alpha one\n/);
+    shell('key', 'Enter');
+    tmux('send-keys', '-t', '=verify-agent:', '-l', '--', 'beta two');
+    tmux('send-keys', '-t', '=verify-agent:', 'Enter');
+    assert.deepEqual(state().queue, ['alpha one', 'beta two']);
+    const busyScreen = pane('-p', '-J');
+    assert.ok(busyScreen.includes('Working... (esc to interrupt)') && busyScreen.indexOf('Queued: alpha one') < busyScreen.indexOf('Queued: beta two'));
+    assert.ok(!busyScreen.includes(queueTexts.suggestion), 'no suggestion while busy');
+    shell('key', 'Up');
+    assert.deepEqual(state(), { mode: 'busy', box: 'alpha one\nbeta two', queue: [], suggestion: queueTexts.suggestion });
+    assert.match(pane('-p', '-J'), /\u276f alpha one\n {2}beta two\n\u2500/);
+    shell('key', 'C-u');
+    shell('text', 'alpha edited');
+    shell('key', 'Enter');
+    tmux('send-keys', '-t', '=verify-agent:', '-l', '--', 'beta two');
+    tmux('send-keys', '-t', '=verify-agent:', 'Enter');
+    shell('idle');
+    assert.equal(state().mode, 'idle');
+    const plain = pane('-p', '-J');
+    assert.ok(plain.includes(`\u276f ${queueTexts.suggestion}\n`) && !plain.includes('\u001b'));
+    assert.ok(pane('-e', '-p', '-J').includes(`\u276f \u001b[2m${queueTexts.suggestion}\u001b[0m\n`));
+    shell('text', 'draft');
+    assert.ok(!pane('-e', '-p', '-J').includes('\u001b[2m'), 'a typed draft is not dim');
+    const rows = events();
+    assert.deepEqual(rows.filter(row => row.type === 'queue-operation').map(row => [row.operation, row.content, row.reason]), [
+      ['enqueue', 'alpha one', undefined], ['enqueue', 'beta two', undefined], ['popAll', 'alpha one\nbeta two', undefined],
+      ['enqueue', 'alpha edited', undefined], ['enqueue', 'beta two', undefined],
+      ['remove', 'alpha edited', 'absorbed_mid_turn'], ['dequeue', undefined, undefined],
+    ]);
+    assert.deepEqual(rows.filter(row => row.type === 'attachment').map(row => [row.attachment.type, row.attachment.prompt]), [['queued_command', 'alpha edited'], ['queued_command', 'beta two']]);
+    assert.ok(rows.every(row => Number.isFinite(Date.parse(row.timestamp))));
+    const frames = fs.readFileSync(path.join(dir, 'frames.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(frames.some(frame => frame.origin === 'app' && frame.op === 'send-keys') && frames.some(frame => frame.origin === 'shell'));
+    assert.equal(tmux('send-keys', '-t', '=verify-agent:', 'C-x', 'C-s'), '');
+    assert.throws(() => tmux('send-keys', '-t', '=verify-agent:', 'F13'));
+    assert.ok(fs.existsSync(path.join(dir, 'unsupported.jsonl')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('queue-draft-sync is wired into the journey, the workflow fallback and the feature map', () => {
+  assert.ok(drive.includes("name='queue-draft-sync'"));
+  for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
+  for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text), text);
+  assert.match(drive, /CHAT_QUEUE items=/);
+  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'queue-draft-sync'\)/);
+  assert.match(read(skill + 'features/chat-delivery.md'), /`queue-draft-sync`[\s\S]*CHAT_QUEUE items=/);
 });

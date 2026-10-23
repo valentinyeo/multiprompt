@@ -246,6 +246,7 @@ const SEARCH_CHAT_QUEUE_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEU
 const SEARCH_CHAT_RETRY_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_RETRY_UNSENT_OFFSET;
 const SEARCH_CHAT_DISCARD_UNSENT_OFFSET = @import("app_state.zig").SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
 const SEARCH_CHAT_PUSH_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_PUSH_QUEUED_OFFSET;
+const SEARCH_CHAT_EDIT_QUEUED_OFFSET = @import("app_state.zig").SEARCH_CHAT_EDIT_QUEUED_OFFSET;
 const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_OFFSET;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
@@ -2348,7 +2349,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_retry_unsent = result_idx == SEARCH_CHAT_RETRY_UNSENT_OFFSET;
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_select_all or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued;
+                    const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
+                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_select_all or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3230,7 +3232,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var uu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("sequential"), -1, &uu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    } else if (is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued) {
+                    } else if (is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var queue_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
@@ -3244,6 +3246,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             L("Chat View: Retry Unsent Messages")
                         else if (is_chat_push_queued)
                             L("Chat View: Send Claude's Queued Message Now")
+                        else if (is_chat_edit_queued)
+                            L("Chat View: Edit Queued Messages")
                         else
                             L("Chat View: Discard Unsent Messages");
                         _ = DrawTextW(hdc, queue_label, -1, &queue_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);

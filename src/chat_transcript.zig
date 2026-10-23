@@ -37,7 +37,21 @@ pub const Todo = struct {
     len: usize = 0,
     status: TodoStatus = .pending,
 };
+pub const QUEUE_MAX: usize = 8;
+pub const QUEUE_TEXT: usize = 256;
+pub const DRAFT_TEXT: usize = 512;
+pub const QueueItem = struct {
+    text: [QUEUE_TEXT]u16 = @splat(0),
+    len: usize = 0,
+    sent: bool = false,
+};
 pub const Status = struct {
+    queue: [QUEUE_MAX]QueueItem = @splat(.{}),
+    queue_len: usize = 0,
+    live_known: bool = false,
+    draft: [DRAFT_TEXT]u16 = @splat(0),
+    draft_len: usize = 0,
+    draft_known: bool = false,
     model: [128]u16 = @splat(0),
     model_len: usize = 0,
     percent_left: ?u8 = null,
@@ -85,10 +99,36 @@ fn statusText(out: []u16, text: []const u8) usize {
     return n;
 }
 
+fn keepText(out: []u16, text: []const u8, keep_newlines: bool) usize {
+    var view = std.unicode.Utf8View.init(text) catch return 0;
+    var it = view.iterator();
+    var n: usize = 0;
+    while (it.nextCodepoint()) |cp| {
+        if (n + @as(usize, if (cp > 0xFFFF) 2 else 1) > out.len) break;
+        if (cp > 0xFFFF) {
+            out[n] = @intCast(0xD800 + ((cp - 0x10000) >> 10));
+            n += 1;
+            out[n] = @intCast(0xDC00 + ((cp - 0x10000) & 0x3FF));
+        } else out[n] = if (cp == '\n' and keep_newlines) '\n' else if (cp < 32) ' ' else @intCast(cp);
+        n += 1;
+    }
+    return n;
+}
+
+fn fillQueue(result: *Status, items: ?[]const []const u8, sent: bool) void {
+    for (items orelse return) |text| {
+        if (result.queue_len >= QUEUE_MAX) return;
+        var item = &result.queue[result.queue_len];
+        item.len = keepText(&item.text, text, false);
+        item.sent = sent;
+        result.queue_len += 1;
+    }
+}
+
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null };
+    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const []const u8 = null, sent: ?[]const []const u8 = null, draft: ?[]const u8 = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
@@ -96,6 +136,17 @@ pub fn parseStatus(line: []const u8) ?Parsed {
     var result: Status = .{};
     result.model_len = statusText(&result.model, value.model);
     result.percent_left = if (value.percent_left) |left| @min(left, 100) else null;
+    if (value.queue != null or value.sent != null) {
+        result.live_known = true;
+        fillQueue(&result, value.sent, true);
+        fillQueue(&result, value.queue, false);
+    }
+    if (value.draft) |draft| {
+        if (draft.len <= DRAFT_TEXT) {
+            result.draft_len = keepText(&result.draft, draft, true);
+            result.draft_known = true;
+        }
+    }
     if (value.todos) |todos| {
         result.todos_known = true;
         for (todos[0..@min(todos.len, result.todos.len)]) |todo| {
@@ -550,6 +601,25 @@ test "status row label omits missing parts and old responses parse identically" 
     try std.testing.expect(empty.known());
     try std.testing.expectEqual(@as(usize, 0), empty.total);
     try std.testing.expect(parseStatus("{\"role\":\"status\",\"percent_left\":\"bad\"}") == null);
+}
+
+test "IGSH-682 status row carries the shell queue sent first and the box draft" {
+    const parsed = (parseStatus("{\"role\":\"status\",\"queue\":[\"two\",\"three\\nlines\"],\"sent\":[\"one\"],\"draft\":\"typed\\nhere\"}").?).status;
+    try std.testing.expect(parsed.live_known);
+    try std.testing.expectEqual(@as(usize, 3), parsed.queue_len);
+    try std.testing.expect(parsed.queue[0].sent);
+    try std.testing.expect(!parsed.queue[1].sent);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one"), parsed.queue[0].text[0..parsed.queue[0].len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("three lines"), parsed.queue[2].text[0..parsed.queue[2].len]);
+    try std.testing.expect(parsed.draft_known);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("typed\nhere"), parsed.draft[0..parsed.draft_len]);
+    const plain = (parseStatus("{\"role\":\"status\",\"percent_left\":10}").?).status;
+    try std.testing.expect(!plain.live_known);
+    try std.testing.expect(!plain.draft_known);
+    const empty = (parseStatus("{\"role\":\"status\",\"queue\":[],\"sent\":[],\"draft\":\"\"}").?).status;
+    try std.testing.expect(empty.live_known);
+    try std.testing.expect(empty.draft_known);
+    try std.testing.expectEqual(@as(usize, 0), empty.queue_len);
 }
 
 test "status row caps todo arrays and keeps truncated Unicode valid" {
