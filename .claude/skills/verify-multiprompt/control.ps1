@@ -1200,9 +1200,9 @@ try {
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
             $before = (Read-Session).workspace_count
             Press @(0x11, 0x4E) 'Ctrl+N: create a different workspace with its first CMD session'
-            Wait-Until { (Read-Session).workspace_count -eq $before + 1 } 'new workspace persisted'
-            $workspace = (Read-Session).active_workspace
-            $workspaceId = (Read-Session).workspaces[$workspace].wid
+            Wait-Until { $script:createdSession = Read-Session; $null -ne $script:createdSession -and $script:createdSession.workspace_count -eq $before + 1 } 'new workspace persisted'
+            $workspace = $script:createdSession.active_workspace
+            $workspaceId = $script:createdSession.workspaces[$workspace].wid
             if ($workspace -eq 0 -or [string]::IsNullOrWhiteSpace($workspaceId)) { throw 'Expected a distinct named workspace identity' }
             $names = @('Restore first', 'Restore middle', 'Restore last')
             for ($i = 0; $i -lt $names.Count; $i++) {
