@@ -2886,3 +2886,26 @@ pub fn finishStartupShell(job: *StartupShell) void {
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
+
+test "cmd tab starts system cmd" {
+    const win = @import("win32.zig");
+    var system_dir: [32768]u16 = undefined;
+    const n = win.GetSystemDirectoryW(&system_dir, system_dir.len);
+    try std.testing.expect(n > 0 and n < system_dir.len);
+    var expected: [32780]u16 = undefined;
+    var pos: usize = 0;
+    try std.testing.expect(appendWideAscii(&expected, &pos, "\""));
+    @memcpy(expected[pos .. pos + n], system_dir[0..n]);
+    pos += n;
+    try std.testing.expect(appendWideAscii(&expected, &pos, "\\cmd.exe\""));
+    for ([_]?[]const u8{ null, "echo ready" }) |startup| {
+        var buf: [32780]u16 = undefined;
+        const line = makeCmdLine(.cmd, &buf, null, startup, 0, false) orelse return error.NoCmdLine;
+        const text = std.mem.span(line);
+        try std.testing.expect(std.mem.startsWith(u16, text, expected[0..pos]));
+        var suffix: [64]u16 = undefined;
+        var suffix_len: usize = 0;
+        if (startup != null) try std.testing.expect(appendWideAscii(&suffix, &suffix_len, " /K echo ready"));
+        try std.testing.expectEqualSlices(u16, suffix[0..suffix_len], text[pos..]);
+    }
+}

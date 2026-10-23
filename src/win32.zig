@@ -684,6 +684,7 @@ pub extern "kernel32" fn GetEnvironmentVariableA([*:0]const u8, ?[*]u8, DWORD) c
 pub extern "kernel32" fn SetEnvironmentVariableW(name: [*:0]const u16, value: ?[*:0]const u16) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn GetEnvironmentVariableW(name: [*:0]const u16, buf: [*]u16, buf_len: DWORD) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn GetCommandLineA() callconv(WINAPI) [*:0]const u8;
+pub extern "kernel32" fn GetSystemDirectoryW([*]u16, UINT) callconv(WINAPI) UINT;
 pub extern "kernel32" fn GetCurrentProcessId() callconv(WINAPI) DWORD;
 pub extern "kernel32" fn OpenProcess(DWORD, BOOL, DWORD) callconv(WINAPI) HANDLE;
 pub extern "kernel32" fn ReadProcessMemory(HANDLE, *const anyopaque, *anyopaque, usize, ?*usize) callconv(WINAPI) BOOL;
@@ -1450,3 +1451,5 @@ pub extern "kernel32" fn GetEnvironmentStringsW() callconv(WINAPI) ?[*:0]u16;
 pub extern "kernel32" fn FreeEnvironmentStringsW([*:0]u16) callconv(WINAPI) BOOL;
 pub extern "user32" fn MsgWaitForMultipleObjects(DWORD, ?[*]const HANDLE, BOOL, DWORD, DWORD) callconv(WINAPI) DWORD;
 pub extern "user32" fn PeekMessageW(*MSG, HANDLE, UINT, UINT, UINT) callconv(WINAPI) BOOL;
+
+pub extern "ws2_32" fn getpeername(SOCKET, *SOCKADDR_IN, *i32) callconv(WINAPI) i32;

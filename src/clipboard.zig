@@ -1450,3 +1450,37 @@ test "hardening clipboard reads reject unterminated allocations and preserve tex
         try std.testing.expectEqual(@as(u16, 0), out[5]);
     }
 }
+
+test "screenshot link rejects control bytes" {
+    const saved_head = app_state.g_shot_paste_head;
+    const saved_tail = app_state.g_shot_paste_tail;
+    const saved_count = app_state.g_shot_paste_count;
+    const saved_queue = app_state.g_shot_paste_queue;
+    defer {
+        app_state.g_shot_paste_head = saved_head;
+        app_state.g_shot_paste_tail = saved_tail;
+        app_state.g_shot_paste_count = saved_count;
+        app_state.g_shot_paste_queue = saved_queue;
+    }
+    app_state.g_shot_paste_head = 0;
+    app_state.g_shot_paste_tail = 0;
+    app_state.g_shot_paste_count = 0;
+    for ([_][]const u8{
+        "https://example.invalid/a\r\nnext",
+        "javascript:x",
+        "https://example.invalid/a b",
+        "https://example.invalid/a\x00b",
+        "https://example.invalid/a\x7f",
+        "https://" ++ "a" ** (SHOT_PASTE_URL_CAP - 8),
+    }) |url| {
+        queueShotPaste(1, url, false);
+        try std.testing.expectEqual(@as(usize, 0), app_state.g_shot_paste_count);
+    }
+    const valid = "https://example.invalid/shot.png";
+    queueShotPaste(1, valid, true);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_shot_paste_count);
+    const slot = app_state.g_shot_paste_queue[0];
+    try std.testing.expectEqualStrings(valid, slot.url[0..slot.url_len]);
+    try std.testing.expect(slot.user_initiated);
+    try std.testing.expectEqual(@as(u32, 1), slot.shell_id);
+}
