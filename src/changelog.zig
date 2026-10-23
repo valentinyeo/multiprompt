@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.845", .items = &.{
+        .{ .text = "In Chat View, Stop is now a small square button inside the message box while the agent works, and Send appears beside it as soon as you type.", .ticket = "IGSH-675" },
+    } },
     .{ .ver = "0.28.844", .items = &.{
         .{ .text = "Code in Chat View now uses Nordwand Mono SemiBold and is 2 points smaller.", .ticket = "IGSH-678" },
         .{ .text = "Long lines in file edit previews now have smooth edges on their green and red rows.", .ticket = "IGSH-678" },
