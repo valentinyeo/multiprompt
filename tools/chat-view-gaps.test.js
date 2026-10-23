@@ -634,6 +634,7 @@ function findKeyboard(t, name, assertions) {
     .replaceAll('app_state.', '')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
     .replaceAll('@import("focus.zig").isCtrlDown', 'isCtrlDown')
+    .replaceAll('@import("focus.zig").browserFocusChord', 'browserFocusChord')
     .replaceAll('@import("clipboard.zig").readClipboardTextWithRetry', 'readClipboardTextWithRetry')
     .replaceAll('@import("chat_composer.zig").chatViewOwnsInput', 'chatViewOwnsInput')
     .replaceAll('@import("command_palette.zig").reductionSearchChar', 'reductionSearchChar');
@@ -676,6 +677,8 @@ fn close(_: bool) void { g_chat_find_open = false; }
 fn changed() void {}
 fn jump() void {}
 fn invalidate() void {}
+const WM_KEYDOWN: u32 = 0x0100;
+${fileBody('focus.zig', 'browserFocusChord')}
 ${fileBody('command_palette.zig', 'reductionSearchChar')}
 ${production}
 test "ISSUE-407 ${name}" {

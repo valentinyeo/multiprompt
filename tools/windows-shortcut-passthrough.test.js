@@ -50,15 +50,54 @@ test("Alt+Shift+S reaches the screenshot extension instead of toggling favorites
   assert.equal(manifest.commands["take-tab-screenshot"].suggested_key.default, "Alt+Shift+S");
 });
 
+function assertFocusRepeatContract(text) {
+  const end = text.indexOf('\n}');
+  assert.ok(end > 0, "could not isolate the keyboard hook body");
+  text = text.slice(0, end + 2);
+  const release = text.match(/if \(\(kb\.vkCode == 0x51 or kb\.vkCode == 0x4D\) and \(wp == WM_KEYUP or wp == WM_SYSKEYUP\)\) \{\s*_ = claimBrowserFocusPress\(false, &g_browser_focus_chord_held\);/);
+  assert.ok(release, "Q and M key-up must release the one-press latch");
+  const chord = text.indexOf('const focus_chord = @import("focus.zig").browserFocusChord(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags));');
+  const find = text.indexOf('if (@import("chat_find.zig").ownsKeys(g_chat_find_open, foregroundIsOurs()) and !find_modifier and !focus_chord)');
+  const toggle = text.match(/if \(focus_chord and foregroundIsOurs\(\) and active_shell < shell_count\) \{\n([\s\S]*?)\n        \}/);
+  assert.ok(toggle, "Alt+Q must reach the repeat latch even without a browser pane");
+  assert.ok(release.index < chord && chord < find && find < toggle.index,
+    "key-up releases the latch before Find routing, and Find-open chords reach the same toggle route");
+  assert.match(toggle[1], /^\s*if \(!claimBrowserFocusPress\(true, &g_browser_focus_chord_held\)\) return 1;/,
+    "repeated keydowns must be consumed before any focus toggle is posted");
+  assert.match(toggle[1], /g_sysmenu_pending = false;/);
+  assert.equal((toggle[1].match(/PostMessageW\(g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0\)/g) || []).length, 1,
+    "only the first keydown from one physical Alt+Q press may post a focus toggle");
+  assert.match(toggle[1], /return 1;\s*$/, "the first keydown must also be consumed");
+  assert.doesNotMatch(toggle[1], /g_browser_focus_chord_held\s*=|claimBrowserFocusPress\(false/,
+    "keydown routing must not rearm the latch before physical key-up");
+}
+
 test("Alt+Q focus switching consumes key repeat until physical key-up", () => {
   assert.match(source, /var g_browser_focus_chord_held: bool = false/);
-  assert.match(hook,
-    /\(kb\.vkCode == 0x51 or kb\.vkCode == 0x4D\)[\s\S]{0,180}?WM_KEYUP[\s\S]{0,180}?claimBrowserFocusPress\(false, &g_browser_focus_chord_held\)/,
-    "Q and M key-up must release the one-press latch");
-  assert.match(hook,
-    /foregroundIsOurs\(\) and \(\(active_shell < shell_count[\s\S]{0,180}?claimBrowserFocusPress\(true, &g_browser_focus_chord_held\)[\s\S]{0,260}?WM_APP_BROWSER_FOCUS_TOGGLE/,
-    "only the first keydown from one physical Alt+Q press may post a focus toggle");
+  assert.match(source, /fn claimBrowserFocusPress\(key_down: bool, held: \*bool\) bool \{\s*if \(!key_down\) \{\s*held\.\* = false;\s*return false;\s*\}\s*if \(held\.\*\) return false;\s*held\.\* = true;\s*return true;\s*\}/,
+    "the latch must reject repeats and rearm only on key-up");
+  assert.match(source, /fn browserFocusChord\(msg: usize, vk: usize, ctrl: bool, alt: bool\) bool \{\s*return \(msg == WM_KEYDOWN or msg == WM_SYSKEYDOWN\) and alt and !ctrl and \(vk == 0x51 or vk == 0x4D\);\s*\}/,
+    "the shared chord must match only Alt+Q/M keydowns, excluding Ctrl/AltGr");
+  assertFocusRepeatContract(hook);
   assert.match(source,
     /fn uninstallKeyboardHook\(\)[\s\S]{0,300}?g_browser_focus_chord_held = false/,
     "hook replacement must not preserve a stale focus latch");
+});
+
+test("Alt+Q repeat contract rejects passthrough, duplicate posts, Find interception and a pane prerequisite", () => {
+  const latch = 'if (!claimBrowserFocusPress(true, &g_browser_focus_chord_held)) return 1;';
+  const post = '_ = PostMessageW(g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0);';
+  for (const [before, after] of [
+    [latch, ''],
+    [latch, latch.replace('return 1;', 'return CallNextHookEx(g_hook, nCode, wp, lp);')],
+    [latch, post + '\n            ' + latch],
+    [post, post + '\n            ' + post],
+    [post, 'g_browser_focus_chord_held = false;\n            ' + post],
+    ['and !find_modifier and !focus_chord', 'and !find_modifier'],
+    ['focus_chord and foregroundIsOurs() and active_shell < shell_count)', 'focus_chord and foregroundIsOurs() and active_shell < shell_count and shells[active_shell].browser_enabled)'],
+    ['claimBrowserFocusPress(false, &g_browser_focus_chord_held)', 'claimBrowserFocusPress(true, &g_browser_focus_chord_held)'],
+  ]) {
+    assert.ok(hook.includes(before), before);
+    assert.throws(() => assertFocusRepeatContract(hook.replaceAll(before, after)), assert.AssertionError, before);
+  }
 });

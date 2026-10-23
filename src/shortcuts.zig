@@ -376,7 +376,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+S", .b = "Screenshot browser tab, paste link + space, focus Chat View composer or shell", .header = false },
     .{ .a = "Ctrl+Shift+X", .b = "Insert current browser tab URL (or most recent) + space at the Chat View caret; never send", .header = false },
     .{ .a = "Ctrl+Shift+L / Ctrl+L", .b = "Focus browser address bar", .header = false },
-    .{ .a = "Alt+Q", .b = "Jump between shell and browser pane", .header = false },
+    .{ .a = "Alt+Q", .b = "Jump between typing and browser pane; restore typing if no pane", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Switch All Panes to Chrome / Edge", .b = "Switch every pane between dedicated Edge and dedicated Chrome profiles", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Use Browser Address Bar and Tabs / Use App Address Bar", .b = "Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar", .header = false },
     .{ .a = "Alt+Left / Alt+Right (browser focus)", .b = "Browser back / forward", .header = false },
@@ -691,7 +691,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         if (find_key_up) return 1;
         const find_modifier = kb.vkCode == 0x10 or kb.vkCode == 0x11 or kb.vkCode == 0x12 or (kb.vkCode >= 0xA0 and kb.vkCode <= 0xA5);
-        if (@import("chat_find.zig").ownsKeys(app_state.g_chat_find_open, foregroundIsOurs()) and !find_modifier) {
+        const focus_chord = @import("focus.zig").browserFocusChord(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags));
+        if (@import("chat_find.zig").ownsKeys(app_state.g_chat_find_open, foregroundIsOurs()) and !find_modifier and !focus_chord) {
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
         if (app_state.ISSUE_268_CHAT_FIND and !app_state.g_win_held and wp == WM_KEYDOWN and kb.vkCode == 0x46 and isCtrlDown() and
@@ -972,11 +973,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 1;
         }
         if ((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) altqLog("hook_ev vk={X} wp={X} alt_flag={} async_alt={} ctrl={} fg_ours={} chat={} chat_owns={} latch={} pane_enabled={} wv2={} mode={}", .{ kb.vkCode, wp, (kb.flags & 0x20) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0, isCtrlDown(), foregroundIsOurs(), app_state.g_chat_active, chatViewOwnsInput(), app_state.g_browser_focus_chord_held, app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled, webView2OwnsActiveShell(), app_state.g_browser_focus_mode });
-        if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and
-            ((kb.flags & 0x20) != 0 or (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0) and
-            !isCtrlDown() and (kb.vkCode == 0x51 or kb.vkCode == 0x4D) and
-            foregroundIsOurs() and ((app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) or webView2OwnsActiveShell()))
-        {
+        if (focus_chord and foregroundIsOurs() and app_state.active_shell < app_state.shell_count) {
             if (!claimBrowserFocusPress(true, &app_state.g_browser_focus_chord_held)) return 1;
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);

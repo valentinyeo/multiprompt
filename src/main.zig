@@ -2846,6 +2846,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_FOCUS_TOGGLE => {
+            if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
+            const pane_present = webView2OwnsActiveShell() or (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled);
+            const focus_drifted = @import("chat_composer.zig").chatFocusDrifted() and !activeBrowserHasForegroundFocus() and !webView2HasInputFocus();
+            if (@import("focus.zig").browserFocusReturnsToInput(pane_present, chatViewOwnsInput(), focus_drifted)) {
+                cancelPendingNativeBrowserFocus();
+                app_state.g_chat_browser_handoff_until = 0;
+                app_state.g_browser_focus_mode = false;
+                app_state.g_shell_focused = true;
+                focusActiveShell();
+                return 0;
+            }
             altqLog("toggle_enter chat={} chat_owns={} wv2={} pane={X} pane_live={} pending={} pane_fg={} frame_fg={} fg={X} mode={} handoff={}", .{ app_state.g_chat_active, chatViewOwnsInput(), webView2OwnsActiveShell(), if (app_state.active_shell < app_state.shell_count) altqPtr(app_state.shells[app_state.active_shell].browser_hwnd) else 0, activeBrowserHwndLive() != null, app_state.g_native_browser_focus_pending_shell_id, activeBrowserHasForegroundFocus(), app_state.g_main_hwnd != null and GetForegroundWindow() == app_state.g_main_hwnd, altqPtr(GetForegroundWindow()), app_state.g_browser_focus_mode, @intFromBool(GetTickCount64() < app_state.g_chat_browser_handoff_until) });
             if (webView2OwnsActiveShell()) {
                 if (webView2HasInputFocus() or app_state.g_browser_focus_mode) {
