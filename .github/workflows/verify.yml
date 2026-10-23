@@ -20,6 +20,7 @@ on:
       - tools/verify-multiprompt.test.js
       - tools/verify-chat-delivery.test.js
       - tools/verify-chat-delivery/**
+      - tools/chat-local-agent.c
       - tools/start-maximized.test.js
       - tools/verify-scratch.test.ps1
       - tools/favorites-groups.test.js
@@ -87,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
     env:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
@@ -120,7 +121,7 @@ jobs:
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-view'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -182,6 +183,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chat delivery boundary compile failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'Fake tmux compile failed' }
+      - name: Build local Claude console stand-in
+        if: env.FEATURE == 'chat-view'
+        run: |
+          zig cc -target x86_64-windows-gnu -O2 tools/chat-local-agent.c -o verify-bin/claude.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Local Claude console stand-in build failed' }
       - name: Render received Markdown with the real Windows painter
         if: env.FEATURE == 'chat-view' && env.RELEASE_TAG == ''
         shell: powershell
