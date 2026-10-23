@@ -369,6 +369,40 @@ class ChatSyncAuditTest(unittest.TestCase):
         with patch.object(audit, 'run', return_value=json.dumps(dict(success=True, tasks=[dict(section='Todo')]))):
             self.assertTrue(audit.ticket_is_open('DEMO-900'))
 
+    def test_chat_agent_excludes_only_codex_cloud_browser(self):
+        cases = [(['codex', 'cloud'], False),
+                 (['/usr/local/bin/codex', 'cloud'], False),
+                 (['node', '/x/codex.js', 'cloud'], False),
+                 (['codex'], True),
+                 (['codex', 'resume', 'abc'], True),
+                 (['node', '/x/codex.js'], True),
+                 (['claude', '--resume', 'abc'], True),
+                 (['codex', 'exec', 'cloud'], True),
+                 (['bun', '/x/codex.js', 'cloud'], False),
+                 (['/usr/local/bin/bun', '/x/codex.js'], True)]
+        for argv, expected in cases:
+            with self.subTest(argv=argv):
+                self.assertIs(audit.chat_agent(argv), expected)
+
+    def test_cli_skips_codex_cloud_browser(self):
+        class Reader:
+            def process_table(self):
+                return {10: (1, ['codex', 'cloud'])}
+
+            def agent_pid_for_panes(self, panes, table, agent):
+                return 10 if agent == 'codex' else None
+
+        output = io.StringIO()
+        with patch('sys.argv', ['chat-sync-audit.py', '--json']), \
+             patch.object(audit, 'load_reader', return_value=Reader()), \
+             patch.object(audit, 'run', return_value='%1\tigsh506-1\t1\n') as command, \
+             patch.object(audit, 'audit_pane', side_effect=AssertionError('Cloud browser must not be audited')), \
+             contextlib.redirect_stdout(output):
+            self.assertIsNone(audit.main())
+        command.assert_called_once_with(['tmux', 'list-panes', '-a', '-F', '#{pane_id}\t#{session_name}\t#{pane_pid}'])
+        rows = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(rows, [dict(summary='0 drift findings', findings=0, panes=0)])
+
     def test_cli_reports_execution_errors_without_nonzero_exit(self):
         output = io.StringIO()
         with patch('sys.argv', ['chat-sync-audit.py', '--json']), patch.object(audit, 'load_reader', side_effect=OSError()), contextlib.redirect_stdout(output):
