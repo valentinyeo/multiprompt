@@ -233,11 +233,13 @@ export default {
         try { decoded = atob(encoded); } catch { fail(400, 'invalid_key'); }
         if (btoa(decoded) !== encoded || decoded.length !== 51 || decoded.slice(0, 19) !== '\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20') fail(400, 'invalid_key');
         const result = await db.batch([
-          db.prepare("INSERT INTO device_keys (device_id,account,public_key,status,requested) SELECT ?,?,?,'pending',? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key,status='pending',requested=excluded.requested,decided=NULL,decided_by=NULL WHERE device_keys.public_key<>excluded.public_key AND device_keys.status<>'revoked' AND device_keys.account=excluded.account AND EXISTS (SELECT 1 FROM devices WHERE id=excluded.device_id AND account=excluded.account AND revoked=0)").bind(device.id, device.account, b.public_key, now(), device.id, device.account),
-          db.prepare('SELECT k.status FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.device_id=? AND k.account=? AND d.account=k.account AND d.revoked=0').bind(device.id, device.account)
+          db.prepare("INSERT INTO device_keys (device_id,account,public_key,status,requested) SELECT ?,?,?,'pending',? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0) ON CONFLICT(device_id) DO NOTHING").bind(device.id, device.account, b.public_key, now(), device.id, device.account),
+          db.prepare('SELECT k.status,k.public_key FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.device_id=? AND k.account=? AND d.account=k.account AND d.revoked=0').bind(device.id, device.account)
         ]);
         if (!result[1].results.length) fail(401, 'device_required');
-        return json({ status: result[1].results[0].status });
+        const key = result[1].results[0];
+        if (key.status !== 'revoked' && key.public_key !== b.public_key) fail(409, 'key_locked');
+        return json({ status: key.status });
       }
       if (url.pathname === '/v1/device-keys' && request.method === 'GET') {
         const result = await db.prepare('SELECT k.device_id,d.name,k.public_key,k.status,k.requested,k.decided FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.account=? ORDER BY k.requested,k.device_id').bind(device.account).all();

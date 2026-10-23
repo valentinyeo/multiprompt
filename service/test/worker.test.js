@@ -371,6 +371,20 @@ test('better auth: fresh sign-in displays the form with an existing session and 
   assert.equal(new Function(reauth + '; return REAUTH;')(), '/signin?fresh=1&next=' + encodeURIComponent(next));
 });
 
+for (const close of ['</script>', '</SCRIPT>']) test('fresh sign-in keeps script-like return targets inside its own script: ' + close, async () => {
+  const next = '/authorize?probe=' + close + '<script>window.x=1</script>';
+  const response = await request('/signin?fresh=1&next=' + encodeURIComponent(next));
+  assert.equal(response.status, 200);
+  const page = await response.text();
+  assert.match(page, /data-page="signin"/);
+  assert.equal((page.match(/<script/gi) || []).length, 1);
+  assert.equal(page.includes('</script><script>window.x'), false);
+  const encoded = JSON.stringify(next).replace(/</g, '\\u003c');
+  assert.ok(page.includes('const next = ' + encoded));
+  assert.ok(page.includes('\\u003c/script>'));
+  assert.equal(JSON.parse(page.match(/const next = (.*?); const msg/)[1]), next);
+});
+
 test('removed bridge routes return normal 404 responses with or without a session', async () => {
   for (const cookie of ['', await emailSignIn()]) {
     for (const path of ['/login/bridge', '/api/auth/access-bridge']) {
@@ -974,8 +988,9 @@ const deviceKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFhYWFhYWFhYWFhYWFhYWFhY
 const putDeviceKey = (token, public_key = deviceKey) => request('/v1/device-key', { method: 'PUT', headers: auth(token), body: JSON.stringify({ public_key }) });
 const decideDeviceKey = (caller, target, action = 'approve') => request('/v1/device-keys/' + target.device_id + '/' + action, { method: 'POST', headers: auth(caller) });
 
-test('device keys: registration is pending, unchanged keys preserve decisions and replacement requires approval again', async () => {
+for (const [action, status] of [['approve', 'approved'], ['deny', 'denied']]) test('device keys: pending registration and immutable keys preserve ' + status + ' decisions', async () => {
   const { token: a } = await enroll(), { token: b } = await enroll();
+  const replacement = 'ssh-ed25519 ' + Buffer.concat([Buffer.from(deviceKey.slice(12), 'base64').subarray(0, 19), Buffer.alloc(32, 98)]).toString('base64');
   const before = Math.floor(Date.now() / 1000);
   const registered = await putDeviceKey(a);
   assert.equal(registered.status, 200); assert.deepEqual(await registered.json(), { status: 'pending' });
@@ -983,29 +998,27 @@ test('device keys: registration is pending, unchanged keys preserve decisions an
   assert.deepEqual(pending, { device_id: a.device_id, account: a.account_id, public_key: deviceKey, status: 'pending', requested: pending.requested, decided: null, decided_by: null });
   assert.ok(pending.requested >= before && pending.requested <= Math.floor(Date.now() / 1000));
   await db.prepare('UPDATE device_keys SET requested=1 WHERE device_id=?').bind(a.device_id).run();
-  assert.deepEqual(await (await putDeviceKey(a)).json(), { status: 'pending' });
-  assert.equal((await db.prepare('SELECT requested FROM device_keys WHERE device_id=?').bind(a.device_id).first()).requested, 1);
-  for (const [action, status] of [['approve', 'approved'], ['deny', 'denied']]) {
-    const response = await decideDeviceKey(b, a, action);
-    assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status });
-    const decided = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first();
-    assert.equal(decided.status, status); assert.equal(decided.decided_by, b.device_id);
-    assert.ok(decided.decided >= before && decided.decided <= Math.floor(Date.now() / 1000));
-    assert.deepEqual(await (await putDeviceKey(a, decided.public_key)).json(), { status });
-    assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first(), decided);
-    for (const again of ['approve', 'deny']) {
-      const repeated = await decideDeviceKey(b, a, again);
-      assert.equal(repeated.status, 409); assert.deepEqual(await repeated.json(), { error: 'not_pending' });
-    }
-    if (action === 'approve') {
-      const replacement = 'ssh-ed25519 ' + Buffer.concat([Buffer.from(deviceKey.slice(12), 'base64').subarray(0, 19), Buffer.alloc(32, 98)]).toString('base64');
-      const changed = await putDeviceKey(a, replacement);
-      assert.equal(changed.status, 200); assert.deepEqual(await changed.json(), { status: 'pending' });
-      const row = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first();
-      assert.deepEqual(row, { ...pending, public_key: replacement, requested: row.requested });
-      assert.ok(row.requested >= before && row.requested <= Math.floor(Date.now() / 1000));
-    }
+  const unchanged = await putDeviceKey(a);
+  assert.equal(unchanged.status, 200); assert.deepEqual(await unchanged.json(), { status: 'pending' });
+  assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first(), { ...pending, requested: 1 });
+  const changedPending = await putDeviceKey(a, replacement);
+  assert.equal(changedPending.status, 409); assert.deepEqual(await changedPending.json(), { error: 'key_locked' });
+  assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first(), { ...pending, requested: 1 });
+  const response = await decideDeviceKey(b, a, action);
+  assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status });
+  const decided = await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first();
+  assert.equal(decided.status, status); assert.equal(decided.decided_by, b.device_id);
+  assert.ok(decided.decided >= before && decided.decided <= Math.floor(Date.now() / 1000));
+  const same = await putDeviceKey(a, decided.public_key);
+  assert.equal(same.status, 200); assert.deepEqual(await same.json(), { status });
+  assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first(), decided);
+  for (const again of ['approve', 'deny']) {
+    const repeated = await decideDeviceKey(b, a, again);
+    assert.equal(repeated.status, 409); assert.deepEqual(await repeated.json(), { error: 'not_pending' });
   }
+  const changed = await putDeviceKey(a, replacement);
+  assert.equal(changed.status, 409); assert.deepEqual(await changed.json(), { error: 'key_locked' });
+  assert.deepEqual(await db.prepare('SELECT * FROM device_keys WHERE device_id=?').bind(a.device_id).first(), decided);
   assert.equal((await putDeviceKey(b)).status, 200);
   assert.equal((await decideDeviceKey(a, b)).status, 200);
 });
@@ -1222,8 +1235,8 @@ for (const [name, encoded] of [
 });
 
 test('device key regression: real Ed25519 and live-probe wire keys remain accepted', async () => {
-  const { token } = await enroll();
   for (const wire of [keyWire, Buffer.concat([keyWire.subarray(0, 19), randomBytes(32)])]) {
+    const { token } = await enroll();
     const public_key = 'ssh-ed25519 ' + wire.toString('base64');
     const response = await putDeviceKey(token, public_key);
     assert.equal(response.status, 200); assert.deepEqual(await response.json(), { status: 'pending' });
