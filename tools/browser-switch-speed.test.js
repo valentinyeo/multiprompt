@@ -575,3 +575,46 @@ test('failure probes own separate single-launch jobs and stop only their own pro
   assert.match(probes, /\$probeJob.Dispose\(\)/);
   assert.doesNotMatch(probes, /\$job.Start|\$job.Stop/);
 });
+
+function assertsPageFocus(focus, main, pane, driver) {
+  assert.match(focus, /pub fn browserPageFocusCommand\(pane_foreground: bool, alt_down: bool\) \?WPARAM/);
+  assert.match(focus, /const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;/);
+  assert.match(focus, /return if \(pane_foreground and !alt_down\) IDC_FOCUS_WEB_CONTENTS_PANE else null;/);
+  const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
+  assert.match(handoff, /if \(!focusGuard\(bh\)\) return;/);
+  assert.ok(handoff.indexOf('SetFocus(bh)') < handoff.indexOf('browserPageFocusCommand('));
+  assert.ok(handoff.indexOf('KEYEVENTF_KEYUP') < handoff.indexOf('browserPageFocusCommand('));
+  assert.match(handoff, /browserPageFocusCommand\(GetForegroundWindow\(\) == bh, phys_alt\)/);
+  assert.match(handoff, /PostMessageW\(bh, @import\("win32.zig"\)\.WM_COMMAND, command, 0\)/);
+  const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
+  const activation = timer.indexOf('focusActiveBrowserPane();');
+  assert.ok(activation >= 0 && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
+  assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);
+  assert.match(pane, /browserFocusRequestMatches\(app_state.g_focus_browser_shell_id, app_state.shells\[idx\]\.shell_id, foregroundIsOurs\(\)\)/);
+  assert.match(focus, /return requested_sid != 0 and requested_sid == active_sid and foreground_owned;/);
+  assert.match(focus, /const authorized = pane_authorized or/);
+  for (const name of [
+    'IGSH-724 browser handoff focuses web contents instead of restoring toolbar focus',
+    'IGSH-724 pending page focus survives docking only without intervening input or a session change',
+  ]) assert.ok(focus.includes(`test "${name}"`));
+  for (const required of [
+    'document.title="', 'let keys=0', '++keys', 'foreach ($key in @(0x20, 0x28, 0x4A, 0x4B))',
+    'IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome',
+    "::Chord(@(0x75))", "::Chord(@(0x11, 0x4C))", "Palette 'open browser'",
+    'IGSH-724 page-to-input return lost session typing focus', "name = 'IGSH-724 browser-page-focus'",
+  ]) assert.ok(driver.includes(required), required);
+}
+
+test('IGSH-724 native handoff targets Chrome web contents and real keys distinguish page focus from toolbar activation', () => {
+  const focus = read('src/focus.zig');
+  const main = read('src/main.zig');
+  assertsPageFocus(focus, main, browser, journey);
+  for (const before of ['const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;', 'pane_foreground and !alt_down', 'PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0)', 'const authorized = pane_authorized or']) {
+    assert.throws(() => assertsPageFocus(focus.replace(before, ''), main, browser, journey));
+  }
+  assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPane();', ''), browser, journey));
+  assert.throws(() => assertsPageFocus(focus, main, browser.replace('if (idx == app_state.active_shell) @import("focus.zig").requestNativeBrowserFocus();', ''), journey));
+  for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys']) {
+    assert.throws(() => assertsPageFocus(focus, main, browser, journey.replace(before, '')));
+  }
+});
