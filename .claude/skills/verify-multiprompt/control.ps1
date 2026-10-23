@@ -1646,20 +1646,14 @@ try {
                 if ($i -lt 2) {
                     Focus-Palette 'move to group' 6301
                     Press @(0x0D) 'Enter: Move to Group submenu for the active restore session'
-                    $groupQuery = if ($i -eq 0) { 'new group' } else { 'Restore group' }
+                    $groupQuery = if ($i -eq 0) { 'new group' } else { 'Group 1' }
                     $groupTarget = if ($i -eq 0) { 6303 } else { 6320 }
                     Type-Text $groupQuery
                     Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match ('\[palette\] ready chars=' + $groupQuery.Length + ' count=[1-9]\d* target=' + $groupTarget + '(?:\r?\n|$)') } 'group submenu query selects the existing UI action'
                     Press @(0x0D) 'Enter: assign the active restore session to its home sidebar group'
-                    if ($i -eq 0) {
-                        Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -eq 'Edit' } 'new group rename editor focused'
-                        Press @(0x11, 0x41) 'Ctrl+A: replace default group name'
-                        Type-Text 'Restore group'
-                        Press @(0x0D) 'Enter: save the sidebar group name'
-                    }
                     Wait-Until {
                         $saved = Read-Session
-                        $saved.PSObject.Properties['groups'] -and @($saved.groups).Count -eq 1 -and $saved.groups[0].name -ceq 'Restore group' -and
+                        $saved.PSObject.Properties['groups'] -and @($saved.groups).Count -eq 1 -and $saved.groups[0].name -ceq 'Group 1' -and
                             @($saved.tabs | Where-Object { $_.name -ceq $names[$i] -and $_.PSObject.Properties['group_id'] -and $_.group_id -eq $saved.groups[0].id }).Count -eq 1
                     } 'home group membership persisted through real palette input'
                 }

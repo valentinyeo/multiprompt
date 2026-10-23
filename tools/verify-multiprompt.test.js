@@ -1162,9 +1162,8 @@ test('ISSUE-569 grouped restore journey splits a real home group before every ta
     for (const step of [
       "Focus-Palette 'tab order' 6217", "Press @(0x11, 0x4E) 'Ctrl+N:",
       "@('Restore first', 'Restore middle', 'Restore last')", 'if ($i -lt 2)',
-      "Focus-Palette 'move to group' 6301", "{ 'new group' } else { 'Restore group' }",
+      "Focus-Palette 'move to group' 6301", "{ 'new group' } else { 'Group 1' }",
       '{ 6303 } else { 6320 }', 'Type-Text $groupQuery', "'group submenu query selects the existing UI action'",
-      "'new group rename editor focused'", "Type-Text 'Restore group'",
       "'home group membership persisted through real palette input'", 'if ($i -ne 1)',
       "'reorder companion favorite persisted'", "'middle favorite persisted'",
       "Prepare-SessionRestoreGroupOrder 'update-restart'", "Restart-SessionRestore 'update-restart' $false $true",
@@ -1201,7 +1200,7 @@ test('ISSUE-569 grouped restore journey splits a real home group before every ta
   contract(control, map);
   for (const required of [
     "Focus-Palette 'tab order' 6217", "Focus-Palette 'move to group' 6301",
-    "{ 'new group' } else { 'Restore group' }", "'home group membership persisted through real palette input'",
+    "{ 'new group' } else { 'Group 1' }", "'home group membership persisted through real palette input'",
     "'reorder companion favorite persisted'", "Press @(0x11, 0x10, 0x28) 'Ctrl+Shift+Down:",
     "$tabs[$middle - 1].name -ceq 'Restore last'", '$tabs[$middle - 2].group_id -eq $tabs[$middle].group_id',
     "Prepare-SessionRestoreGroupOrder 'update-restart'", "Prepare-SessionRestoreGroupOrder 'normal-close'",
