@@ -125,7 +125,6 @@ const ShowWindow = @import("focus.zig").ShowWindow;
 const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
 const SetWindowPos = @import("focus.zig").SetWindowPos;
 const isCtrlDown = @import("focus.zig").isCtrlDown;
-const ChatViewMode = @import("app_state.zig").ChatViewMode;
 const CHAT_AC_ENTER_SENDS = @import("app_state.zig").CHAT_AC_ENTER_SENDS;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
@@ -1204,63 +1203,17 @@ test "ISSUE-440 full width never resizes the console behind Chat View" {
     try std.testing.expect(fullWidthShouldResizeConsole(false));
 }
 
-test "ISSUE-440 full width respects chat modes and per-session shell overrides" {
-    for ([_]ChatViewMode{ .everywhere, .per_session, .nowhere }) |mode| {
+test "ISSUE-440 full width respects remembered views and session locks" {
+    for ([_]@import("chat_view.zig").Lock{ .none, .chat, .shell }) |lock| {
         for ([_]bool{ false, true }) |remembered| {
-            for ([_]bool{ false, true }) |shell_override| {
-                for ([_]bool{ false, true }) |global| {
-                    for ([_]bool{ false, true }) |first| {
-                        const chat = chatViewShouldShowForTab(mode, remembered, shell_override, global, first);
-                        const want_chat = switch (mode) {
-                            .everywhere => !shell_override,
-                            .per_session => remembered,
-                            .nowhere => false,
-                        };
-                        try std.testing.expectEqual(want_chat, chat);
-                        try std.testing.expectEqual(!want_chat, fullWidthShouldResizeConsole(chat));
-                    }
-                }
-            }
+            const chat = chatViewShouldShowForTab(remembered, lock);
+            try std.testing.expectEqual(!chat, fullWidthShouldResizeConsole(chat));
+            try std.testing.expectEqual(if (lock == .none) remembered else lock == .chat, chat);
         }
     }
 }
 
-pub fn chatViewShouldShowForTab(mode: ChatViewMode, tab_remembered_on: bool, shell_override: bool, global_on: bool, is_first_view_after_switch: bool) bool {
-    _ = global_on;
-    _ = is_first_view_after_switch;
-    return switch (mode) {
-        .per_session => tab_remembered_on,
-        .everywhere => !(app_state.ISSUE_373_SHELL_OVERRIDE and shell_override),
-        .nowhere => false,
-    };
-}
-
-test "chatViewShouldShowForTab: per_session always follows the tab's own remembered flag" {
-    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, false, true));
-    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, false, true, true));
-    try std.testing.expect(chatViewShouldShowForTab(.per_session, true, false, false, false));
-    try std.testing.expect(!chatViewShouldShowForTab(.per_session, false, false, true, false));
-}
-
-test "ISSUE-373 everywhere follows sessions without a shell override and nowhere stays off" {
-    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, false, true));
-    try std.testing.expect(chatViewShouldShowForTab(.everywhere, false, false, false, false));
-    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, false, true, true));
-    try std.testing.expect(!chatViewShouldShowForTab(.nowhere, true, false, true, false));
-}
-
-test "ISSUE-373 shell overrides only suppress everywhere mode across tab switches" {
-    for ([_]bool{ false, true }) |remembered| {
-        for ([_]bool{ false, true }) |global| {
-            for ([_]bool{ false, true }) |first| {
-                try std.testing.expect(chatViewShouldShowForTab(.everywhere, remembered, false, global, first));
-                try std.testing.expect(!chatViewShouldShowForTab(.everywhere, remembered, true, global, first));
-                try std.testing.expectEqual(remembered, chatViewShouldShowForTab(.per_session, remembered, true, global, first));
-                try std.testing.expect(!chatViewShouldShowForTab(.nowhere, remembered, true, global, first));
-            }
-        }
-    }
-}
+pub const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
 
 fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_chat: bool, covered: bool) bool {
     return is_active and !chat_active and !tab_wants_chat and !covered;
@@ -1268,8 +1221,7 @@ fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_c
 
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
-    const tab_wants_chat = (app_state.g_chat_view_mode != .everywhere or app_state.g_restoring or app_state.g_startup_progress) and
-        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, false);
+    const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
     return shellConsoleVisibilityAllowed(
         idx == app_state.active_shell,
         app_state.g_chat_active,
@@ -1284,8 +1236,7 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
     if (!shellConsoleShouldBeVisible(idx)) {
         if (IsWindowVisible(app_state.shells[idx].hwnd) == 0) return 0;
         if (verboseLoggingEnabled() and (app_state.g_chat_active or
-            ((app_state.g_chat_view_mode != .everywhere or app_state.g_restoring or app_state.g_startup_progress) and
-                chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, false))))
+            chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock)))
         {
             var buf: [160]u8 = undefined;
             const line = std.fmt.bufPrint(&buf, "[chatview] suppressed console show shell={d} from={s}", .{ app_state.shells[idx].shell_id, from }) catch "[chatview] suppressed console show";
@@ -1305,8 +1256,8 @@ test "console visibility rejects chat, saved chat before restore, inactive tabs 
 }
 
 pub fn openChatView() void {
-    if (app_state.g_chat_view_mode == .nowhere) return;
     if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].chat_view_lock == .shell) return;
     if (app_state.g_chat_browser_swap.shell_id == 0) {
         app_state.g_chat_switch_started = GetTickCount64();
         app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id, app_state.g_chat_switch_started);
@@ -1329,7 +1280,7 @@ pub fn openChatView() void {
         showHeaderNoticeAscii("Chat View could not create its controls", 3500, true);
         return;
     }
-    if (app_state.g_chat_view_mode == .per_session) app_state.shells[app_state.active_shell].chat_view_on = true;
+    app_state.shells[app_state.active_shell].chat_view_on = true;
     _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     chatDraftBindToActive();
     chatDeferTranscriptLoad();
@@ -1363,7 +1314,7 @@ pub fn closeChatView() void {
     app_state.g_chat_screen_status_len = 0;
     chatSelectionClear();
     app_state.g_chat_sel_transcript_focus = false;
-    if (app_state.g_chat_view_mode == .per_session and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on = false;
+    if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on = false;
     if (app_state.g_voice_mode_active) {
         if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
     } else if (app_state.g_main_hwnd != null) {
@@ -1385,11 +1336,10 @@ pub fn closeChatView() void {
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
-test "ISSUE-373 overridden console is visible during restore and after tab switches" {
+test "ISSUE-611 shell-locked console is visible during restore and after tab switches" {
     const saved_shell = app_state.shells[0];
     const saved_count = app_state.shell_count;
     const saved_active = app_state.active_shell;
-    const saved_mode = app_state.g_chat_view_mode;
     const saved_chat = app_state.g_chat_active;
     const saved_restoring = app_state.g_restoring;
     const saved_startup = app_state.g_startup_progress;
@@ -1397,17 +1347,15 @@ test "ISSUE-373 overridden console is visible during restore and after tab switc
         app_state.shells[0] = saved_shell;
         app_state.shell_count = saved_count;
         app_state.active_shell = saved_active;
-        app_state.g_chat_view_mode = saved_mode;
         app_state.g_chat_active = saved_chat;
         app_state.g_restoring = saved_restoring;
         app_state.g_startup_progress = saved_startup;
     }
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].hwnd = @ptrFromInt(1);
-    app_state.shells[0].chat_shell_override = true;
+    app_state.shells[0].chat_view_lock = .shell;
     app_state.shell_count = 1;
     app_state.active_shell = 0;
-    app_state.g_chat_view_mode = .everywhere;
     app_state.g_chat_active = false;
     for ([_]bool{ false, true }) |restoring| {
         app_state.g_restoring = restoring;
@@ -1416,7 +1364,7 @@ test "ISSUE-373 overridden console is visible during restore and after tab switc
             try std.testing.expect(shellConsoleShouldBeVisible(0));
         }
     }
-    app_state.shells[0].chat_shell_override = false;
+    app_state.shells[0].chat_view_lock = .chat;
     try std.testing.expect(!shellConsoleShouldBeVisible(0));
 }
 
@@ -1719,24 +1667,25 @@ test "chat draft safe name is file-name safe and collision-free" {
 }
 
 pub fn toggleChatView() void {
-    if (app_state.g_chat_view_mode == .nowhere) {
-        showHeaderNoticeAscii("Chat View is off everywhere (Ctrl+K to change)", 3500, false);
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (shell.chat_view_lock != .none) {
+        showHeaderNoticeAscii("View is locked for this session (Ctrl+K to clear Always view)", 3500, false);
         return;
     }
-    if (app_state.active_shell >= app_state.shell_count) return;
-    if (app_state.ISSUE_373_SHELL_OVERRIDE and app_state.g_chat_view_mode == .everywhere and
-        app_state.shells[app_state.active_shell].chat_shell_override != app_state.g_chat_active)
-    {
-        app_state.shells[app_state.active_shell].chat_shell_override = app_state.g_chat_active;
-        var buf: [96]u8 = undefined;
-        const line = std.fmt.bufPrint(&buf, "ISSUE-373 override={s} shell={d}", .{
-            if (app_state.g_chat_active) @as([]const u8, "on") else "off",
-            app_state.shells[app_state.active_shell].shell_id,
-        }) catch unreachable;
-        debugLog(line);
-    }
-    if (app_state.g_chat_active) closeChatView() else openChatView();
+    shell.chat_view_on = app_state.g_chat_active;
+    @import("chat_view.zig").toggle(shell);
+    if (shell.chat_view_on) openChatView() else closeChatView();
     saveSession();
+}
+
+pub fn applySessionView() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    const want_chat = chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock);
+    if (want_chat != app_state.g_chat_active) {
+        if (want_chat) openChatView() else closeChatView();
+    }
 }
 
 pub fn invalidateChatHeader() void {

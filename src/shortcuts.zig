@@ -346,7 +346,10 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: ...\"", .b = "Chat View mode: On Everywhere (every tab opens in Chat View), Per Tab (Alt+C per tab, default), or Off Everywhere (Chat View never shows, Alt+C does nothing)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every unlocked session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
+    .{ .a = "Ctrl+K / right-click tab -> Always Chat View for this session", .b = "Lock this session to Chat View, including after restart; everywhere actions skip it", .header = false },
+    .{ .a = "Ctrl+K / right-click tab -> Always shell view for this session", .b = "Lock this session to the shell, including after restart; everywhere actions skip it", .header = false },
+    .{ .a = "Ctrl+K / right-click tab -> Clear Always view for this session", .b = "Unlock this session without changing its current view", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
     .{ .a = "Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Answer the live permission prompt: allow", .header = false },
     .{ .a = "Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Answer the live permission prompt: always allow", .header = false },
@@ -1980,7 +1983,7 @@ fn staleAltMouseHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LR
         }
         const down: i16 = @bitCast(@as(u16, 0x8000));
         const eligible = (ms.flags & LLMHF_INJECTED) == 0 and !app_state.g_chat_active and
-            app_state.g_chat_view_mode != .nowhere and !app_state.g_search_active and !app_state.g_inbox_active and
+            !app_state.g_search_active and !app_state.g_inbox_active and
             !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
             pointOverActiveShell(ms.pt) and win.IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0 and
             (GetAsyncKeyState(0x11) & down) == 0 and (GetAsyncKeyState(0x10) & down) == 0 and

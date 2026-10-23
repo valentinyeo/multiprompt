@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const source = require('./app-source').readAppSource();
@@ -77,7 +78,7 @@ test('every console reveal is guarded; a new HWND alias bypass are rejected', ()
 });
 
 function harness(text) {
-  const production = ['chatViewShouldShowForTab', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx'].map(name => fn(text, name)).join('\n\n');
+  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx'].map(name => fn(text, name)).join('\n\n');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
 const BOOL = i32;
@@ -86,16 +87,15 @@ const SW_HIDE = 0;
 const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
-const ISSUE_373_SHELL_OVERRIDE = true;
-const ChatViewMode = enum { per_session, everywhere, nowhere };
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_shell_override: bool = false };
+const ViewLock = @import("chat_view.zig").Lock;
+const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_view_lock: ViewLock = .none };
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
 var g_chat_active = false;
 var g_restoring = false;
 var g_startup_progress = false;
-var g_chat_view_mode: ChatViewMode = .per_session;
 var g_search_active = false;
 var g_shortcuts_active = false;
 var g_changelog_active = false;
@@ -150,7 +150,7 @@ test "URL picker close cannot put raw SSH console over chat; debug logs identify
     g_url_picker_active = true;
     debug_enabled = true;
     defer debug_enabled = false;
-    visible = true; // simulate conhost having independently re-shown itself
+    visible = true;
     closeUrlPickerInternal(true);
     try std.testing.expect(!visible);
     try std.testing.expect(!g_url_picker_active);
@@ -160,29 +160,29 @@ test "URL picker close cannot put raw SSH console over chat; debug logs identify
     _ = showShellConsole(0, SW_SHOW, "focus");
     try std.testing.expectEqual(@as(usize, 0), log_len);
 }
-test "restore, delayed focus and adoption respect remembered and global modes" {
+test "restore, delayed focus and adoption respect remembered views and session locks" {
     g_restoring = true;
     defer g_restoring = false;
-    for ([_]ChatViewMode{ .per_session, .everywhere, .nowhere }) |mode| {
-        g_chat_view_mode = mode;
+    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
+        shells[0].chat_view_lock = lock;
         for ([_]bool{ false, true }) |remembered| {
             shells[0].chat_view_on = remembered;
             for ([_]bool{ false, true }) |chat| {
                 g_chat_active = chat;
                 for ([_][]const u8{ "restoreSession", "wndProc.WM_APP_FOCUS", "wndProc.WM_APP_FOCUS_SHELL", "respawnShellInPlace", "wndProc.WM_COPYDATA", "main.adopt" }) |site| {
                     _ = showShellConsole(0, SW_SHOWNOACTIVATE, site);
-                    const want_chat = mode == .everywhere or (mode == .per_session and remembered);
+                    const want_chat = if (lock == .none) remembered else lock == .chat;
                     try std.testing.expectEqual(!chat and !want_chat, visible);
                 }
             }
         }
     }
-    g_chat_view_mode = .per_session;
+    shells[0].chat_view_lock = .none;
     g_chat_active = false;
     shells[0].chat_view_on = false;
 }
-test "Everywhere startup hides before controls exist, but an explicit return to Terminal works" {
-    g_chat_view_mode = .everywhere;
+test "ISSUE-611 remembered chat hides during startup but a later per-session shell return works" {
+    shells[0].chat_view_on = true;
     g_startup_progress = true;
     _ = showShellConsole(0, SW_SHOW, "main.adopt");
     try std.testing.expect(!visible);
@@ -191,9 +191,10 @@ test "Everywhere startup hides before controls exist, but an explicit return to 
     _ = showShellConsole(0, SW_SHOW, "focus");
     try std.testing.expect(!visible);
     g_chat_active = false;
+    shells[0].chat_view_on = false;
     _ = showShellConsole(0, SW_SHOW, "closeChatView");
     try std.testing.expect(visible);
-    g_chat_view_mode = .per_session;
+    shells[0].chat_view_lock = .none;
 }
 test "inactive, missing and out-of-range shells never qualify; overlays stay hidden" {
     try std.testing.expect(!shellConsoleShouldBeVisible(1));
@@ -236,6 +237,7 @@ test('executed production Zig decision, show, picker-close and input paths pass;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-console-zig-'));
   const zig = process.env.ZIG || 'zig';
   try {
+    copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, harness(source));
     const run = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });

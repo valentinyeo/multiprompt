@@ -654,7 +654,12 @@ const SEARCH_VOICE_MODE_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_
 const SEARCH_ETA_NUMBERS_OFFSET = @import("app_state.zig").SEARCH_ETA_NUMBERS_OFFSET;
 const SEARCH_ETA_PROGRESS_OFFSET = @import("app_state.zig").SEARCH_ETA_PROGRESS_OFFSET;
 const SEARCH_ETA_ACCURACY_OFFSET = @import("app_state.zig").SEARCH_ETA_ACCURACY_OFFSET;
-const SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
+const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
+const SEARCH_TABCTX_VIEW_CHAT = @import("app_state.zig").SEARCH_TABCTX_VIEW_CHAT;
+const SEARCH_TABCTX_VIEW_SHELL = @import("app_state.zig").SEARCH_TABCTX_VIEW_SHELL;
+const SEARCH_TABCTX_VIEW_CLEAR = @import("app_state.zig").SEARCH_TABCTX_VIEW_CLEAR;
 const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
 const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
 const SEARCH_VOICE_ALWAYS_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_ON_OFFSET;
@@ -1060,10 +1065,7 @@ const chatOutboxTick = @import("chat_send.zig").chatOutboxTick;
 const chatOutboxFlushActiveNow = @import("chat_send.zig").chatOutboxFlushActiveNow;
 const chatOutboxClearActive = @import("chat_send.zig").chatOutboxClearActive;
 const sshAutoReconnectTick = @import("chat_send.zig").sshAutoReconnectTick;
-const chatViewShouldShowForTab = @import("chat_composer.zig").chatViewShouldShowForTab;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
-const openChatView = @import("chat_composer.zig").openChatView;
-const closeChatView = @import("chat_composer.zig").closeChatView;
 const chatDraftFlush = @import("chat_composer.zig").chatDraftFlush;
 const toggleChatView = @import("chat_composer.zig").toggleChatView;
 const invalidateChatHeader = @import("chat_composer.zig").invalidateChatHeader;
@@ -4901,24 +4903,29 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET or target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET) {
-                    app_state.g_chat_view_mode = if (target == SEARCH_CHAT_VIEW_MODE_PER_SESSION_OFFSET) .per_session else if (target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET) .everywhere else .nowhere;
-                    if (app_state.g_chat_view_mode == .per_session and app_state.active_shell < app_state.shell_count) {
-                        app_state.shells[app_state.active_shell].chat_view_on = app_state.g_chat_active;
-                    }
-                    if (app_state.g_chat_view_mode == .nowhere and app_state.g_chat_active) closeChatView();
-                    saveSession();
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    repositionActive();
-                    if (app_state.g_chat_view_mode == .everywhere and app_state.active_shell < app_state.shell_count) {
-                        const want_chat = chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_active, false);
-                        if (want_chat != app_state.g_chat_active) {
-                            if (want_chat) openChatView() else closeChatView();
+                if (target == SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET or target == SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET or target == SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET or
+                    target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET or
+                    target == SEARCH_TABCTX_VIEW_CHAT or target == SEARCH_TABCTX_VIEW_SHELL or target == SEARCH_TABCTX_VIEW_CLEAR)
+                {
+                    if (target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET) {
+                        @import("chat_view.zig").setEverywhere(app_state.shells[0..app_state.shell_count], target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET);
+                    } else {
+                        const is_context = target == SEARCH_TABCTX_VIEW_CHAT or target == SEARCH_TABCTX_VIEW_SHELL or target == SEARCH_TABCTX_VIEW_CLEAR;
+                        const idx = if (is_context) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) @as(?u32, app_state.active_shell) else null;
+                        if (idx) |ti| {
+                            const lock: @import("chat_view.zig").Lock = if (target == SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET or target == SEARCH_TABCTX_VIEW_CHAT) .chat else if (target == SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET or target == SEARCH_TABCTX_VIEW_SHELL) .shell else .none;
+                            @import("chat_view.zig").setLock(&app_state.shells[ti], lock);
                         }
                     }
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    @import("chat_composer.zig").applySessionView();
+                    saveSession();
+                    showActiveShellAfterOverlay();
+                    repositionActive();
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -8252,11 +8259,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         .chat => {
             launch_cache.tabs_restored = true;
             launch_cache.bindRestoredChat();
-            if (app_state.active_shell < app_state.shell_count and
-                chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[app_state.active_shell].chat_view_on, app_state.shells[app_state.active_shell].chat_shell_override, app_state.g_chat_view_restore_on, true))
-            {
-                openChatView();
-            }
+            @import("chat_composer.zig").applySessionView();
             sessionFrontChanged();
             if (chatBenchEnabled()) _ = SetTimer(hwnd, TIMER_CHAT_BENCH, 1000, null);
             applyTitleBarTheme();

@@ -2043,7 +2043,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;
     const saved_chat_view_on = app_state.shells[idx].chat_view_on;
-    const saved_chat_shell_override = app_state.shells[idx].chat_shell_override;
+    const saved_chat_view_lock = app_state.shells[idx].chat_view_lock;
     const saved_last_active = app_state.shells[idx].last_active;
     const saved_last_viewed = app_state.shells[idx].last_viewed;
     const saved_preview = app_state.shells[idx].preview;
@@ -2180,7 +2180,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .disconnected = true,
         .full_width = saved_full_width,
         .chat_view_on = saved_chat_view_on,
-        .chat_shell_override = saved_chat_shell_override,
+        .chat_view_lock = saved_chat_view_lock,
         .last_active = if (saved_last_active != 0) saved_last_active else nowFileTime(),
         .last_viewed = saved_last_viewed,
         .workspace = saved_workspace,
@@ -2558,7 +2558,7 @@ pub fn switchToShell(idx: u32) void {
     }
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
-        chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != app_state.active_shell);
+        chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
     if (idx != app_state.active_shell) {
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
@@ -2646,7 +2646,7 @@ pub fn switchToShell(idx: u32) void {
             hideShellsForOverlay();
             updateBrowserVisibility();
         } else {
-            const want_chat = chatViewShouldShowForTab(app_state.g_chat_view_mode, app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_shell_override, app_state.g_chat_active, idx != prev);
+            const want_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {

@@ -32,9 +32,9 @@ const chat_style = @import("chat_style.zig");
 const app_state = @This();
 const HANDLE = ?usize;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
-const ISSUE_373_SHELL_OVERRIDE = true;
-const ChatViewMode = enum { everywhere, per_session, nowhere };
-var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, chat_shell_override: bool = false }{ .{}, .{} };
+const ViewLock = @import("chat_view.zig").Lock;
+const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
+var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, chat_view_lock: ViewLock = .none }{ .{}, .{} };
 var active_shell: u32 = 0;
 var shell_count: u32 = 2;
 var g_chat_active = false;
@@ -51,7 +51,6 @@ fn browserSplitPermilleForActiveShell() u16 { return 350; }
 var scale: i32 = 100;
 fn uiScaled(value: i32) i32 { return @divTrunc(value * scale, 100); }
 ${body(source, 'fullWidthShouldResizeConsole')}
-${body(source, 'chatViewShouldShowForTab')}
 ${handler}
 fn chatColumn(width: i32) struct { left: i32, width: i32 } {
     const slot = .{ .left = @as(i32, 220), .right = 220 + width };
@@ -79,33 +78,31 @@ test "production reading column and full width stay inside the shared pane" {
     }
 }
 test "ISSUE-440 production toggle changes only width and saves twice" {
-    for ([_]ChatViewMode{ .everywhere, .per_session, .nowhere }) |mode| {
+    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
         for ([_]bool{ false, true }) |remembered| {
-            for ([_]bool{ false, true }) |override| {
-                g_chat_active = chatViewShouldShowForTab(mode, remembered, override, false, true);
-                const chat = g_chat_active;
-                shells[0].full_width = false;
-                shells[0].full_width_pending_console_resize = false;
-                shells[1].full_width_pending_console_resize = false;
-                shells[0].chat_shell_override = override;
-                shells[1].full_width = true;
-                resizes = 0;
-                saves = 0;
-                layouts = 0;
-                try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
-                try std.testing.expect(shells[0].full_width);
-                try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
-                try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
-                try std.testing.expect(!shells[0].full_width);
-                try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
-                try std.testing.expect(!shells[1].full_width_pending_console_resize);
-                try std.testing.expectEqual(if (chat) @as(usize, 0) else 2, resizes);
-                try std.testing.expectEqual(@as(usize, 2), saves);
-                try std.testing.expectEqual(@as(usize, 2), layouts);
-                try std.testing.expectEqual(chat, g_chat_active);
-                try std.testing.expectEqual(override, shells[0].chat_shell_override);
-                try std.testing.expect(shells[1].full_width);
-            }
+            g_chat_active = chatViewShouldShowForTab(remembered, lock);
+            const chat = g_chat_active;
+            shells[0].full_width = false;
+            shells[0].full_width_pending_console_resize = false;
+            shells[1].full_width_pending_console_resize = false;
+            shells[0].chat_view_lock = lock;
+            shells[1].full_width = true;
+            resizes = 0;
+            saves = 0;
+            layouts = 0;
+            try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
+            try std.testing.expect(shells[0].full_width);
+            try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
+            try std.testing.expectEqual(@as(i32, 0), toggleFullWidth(null));
+            try std.testing.expect(!shells[0].full_width);
+            try std.testing.expectEqual(chat, shells[0].full_width_pending_console_resize);
+            try std.testing.expect(!shells[1].full_width_pending_console_resize);
+            try std.testing.expectEqual(if (chat) @as(usize, 0) else 2, resizes);
+            try std.testing.expectEqual(@as(usize, 2), saves);
+            try std.testing.expectEqual(@as(usize, 2), layouts);
+            try std.testing.expectEqual(chat, g_chat_active);
+            try std.testing.expectEqual(lock, shells[0].chat_view_lock);
+            try std.testing.expect(shells[1].full_width);
         }
     }
     shells[0].pid = 0;
@@ -120,7 +117,7 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
 test('ISSUE-440 executes the production toggle without resetting the Chat View console', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh440-'));
   try {
-    copyZig(['chat_style.zig'], dir);
+    copyZig(['chat_style.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
     function run(handler, geometry) {
@@ -148,9 +145,9 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
 test('ISSUE-440 palette, restoration and terminal return retain the same independent view and width state', () => {
   const palette = source.slice(source.indexOf('if (target == SEARCH_FULLWIDTH_OFFSET)'), source.indexOf('if (target == SEARCH_HIDESIDEBAR_OFFSET)'));
   assert.match(palette, /showActiveShellAfterOverlay\(\);[^]*WM_APP_TOGGLE_FULLWIDTH/);
-  assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_shell_override\s*=/);
+  assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_view_lock\s*=/);
   const restore = body(source, 'restoreBrowserStateFromSavedTab');
-  for (const field of ['chat_view_on = tab.cv', 'chat_shell_override = tab.cso', 'full_width = tab.fw']) assert.ok(restore.includes(field));
+  for (const field of ['chat_view_on = tab.cv', 'chat_view_lock = tab.chat_view_lock', 'full_width = tab.fw']) assert.ok(restore.includes(field));
   const close = body(source, 'closeChatView');
   assert.match(close, /if \(ISSUE_440_FULL_WIDTH_CHAT and shells\[active_shell\]\.full_width_pending_console_resize\)/);
   assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);

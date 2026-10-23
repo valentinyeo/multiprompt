@@ -33,7 +33,7 @@ function audit(source) {
   assert.equal((native.match(/if \(g_igsh354_paste_focus\) pasteFocusLanded\(target_hwnd\) else GetForegroundWindow\(\) == target_hwnd/g) || []).length, 2);
   const composer = body(source, 'chatComposerSubclassProc', 'chatComposerSubclassCore');
   assert.doesNotMatch(composer, /requestShotFocus|focusActiveShell|SetForegroundWindow/);
-  assert.match(body(source, 'chatComposerSubclassCore', 'chatViewShouldShowForTab'), /chatImagePasteIntercept\(msg, wp\)/);
+  assert.match(body(source, 'chatComposerSubclassCore', 'shellConsoleVisibilityAllowed'), /chatImagePasteIntercept\(msg, wp\)/);
 }
 
 test('paste focus keeps child input ownership separate from top-level foreground and preserves the disabled path', () => {
