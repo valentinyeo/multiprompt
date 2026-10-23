@@ -35,11 +35,16 @@ def box_rows(buffer):
     return rows
 
 
+def stateful(value):
+    return "leftover" in value or value["mode"] == "idle"
+
+
 def box_buffer():
     file = ROOT / "box.json"
     if file.exists():
         return json.loads(file.read_text(encoding="utf-8"))["buffer"]
-    return state()["leftover"] + "\n"
+    value = state()
+    return value["leftover"] + "\n" if "leftover" in value else ""
 
 
 def ctrl_u(buffer):
@@ -66,8 +71,10 @@ def ctrl_k(buffer, cursor):
 
 def screen(value, buffer=None):
     head = "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n"
-    if "leftover" in value:
-        rows = box_rows(value["leftover"] + "\n" if buffer is None else buffer)
+    if stateful(value):
+        if buffer is None:
+            buffer = value["leftover"] + "\n" if "leftover" in value else ""
+        rows = box_rows(buffer) if buffer else [value["suggestion"] if value["mode"] == "idle" else ""]
         return head + "\u276f " + rows[0] + "\n" + "".join("  " + row + "\n" for row in rows[1:]) + "\u2500" * 50 + "\n"
     return head + "\u276f " + (value["suggestion"] if value["mode"] == "idle" else "") + "\n" + "\u2500" * 50 + "\n"
 
@@ -164,12 +171,12 @@ def box_send():
 def tmux():
     if ARGS[:1] == ["capture-pane"]:
         value = state()
-        shown = screen(value, box_buffer() if "leftover" in value else None)
+        shown = screen(value, box_buffer() if stateful(value) else None)
         record("capture.jsonl", argv=ARGS, screen=shown)
         sys.stdout.write(shown)
         return 0
     if ARGS[:1] == ["send-keys"]:
-        if "leftover" in state():
+        if stateful(state()):
             return box_send()
         record("agent-buffer.jsonl", argv=ARGS)
         return 0

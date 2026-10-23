@@ -109,11 +109,12 @@ test('811 rejects both channel scenarios while master and 821 admit them before 
 const leftover = 'earlier long message about the weekly plan that keeps wrapping across rows';
 
 function fixture(name = 'busy-send') {
-  const observation = { name, text: 'typed public message', composerText: 'typed public message', actionMs: 1000, endMs: 16001, error: null };
-  if (name === 'wrapped-leftover') {
+  const observation = { name, text: 'typed public message', composerText: 'typed public message', actionMs: 1000, endMs: 16001, error: null, suggestion: 'Try the next step' };
+  if (name === 'wrapped-leftover' || name === 'idle-suggestion') {
     const target = ['send-keys', '-t', '=verify-agent:'];
-    const rows = [[...target, 'C-u'], [...target, 'C-u'], [...target, 'C-u'], [...target, 'C-u'], [...target, '-l', '--', observation.text], [...target, 'Enter']];
-    return { observation, events: rows.map((argv, index) => ({ ms: 1100 + index, case: name, argv, submitted: index === 5 ? observation.text : null, box: index === 5 ? '' : 'box' })) };
+    const clear = name === 'idle-suggestion' ? ['C-u', 'C-u', 'C-k'] : ['C-u', 'C-u', 'C-u', 'C-u'];
+    const rows = [...clear.map(key => [...target, key]), [...target, '-l', '--', observation.text], [...target, 'Enter']];
+    return { observation, events: rows.map((argv, index) => ({ ms: 1100 + index, case: name, argv, submitted: index === rows.length - 1 ? observation.text : null, box: index === rows.length - 1 ? '' : 'box' })) };
   }
   const args = [['send-keys', '-t', '=verify-agent:', '-l', '--', observation.text], ['send-keys', '-t', '=verify-agent:', 'Enter']];
   if (name === 'steer-chord') args.push(['send-keys', '-t', '=verify-agent:', 'C-x', 'C-s']);
@@ -123,7 +124,7 @@ function fixture(name = 'busy-send') {
 test('buffer oracle accepts exactly typed text, Enter and the ordered steer chord', () => {
   for (const name of names) {
     const { observation, events } = fixture(name);
-    assert.equal(evaluateDelivery(observation, events).writes, name === 'steer-chord' ? 3 : name === 'wrapped-leftover' ? 6 : 2);
+    assert.equal(evaluateDelivery(observation, events).writes, name === 'steer-chord' ? 3 : name === 'wrapped-leftover' ? 6 : name === 'idle-suggestion' ? 5 : 2);
   }
 });
 
@@ -168,6 +169,27 @@ test('wrapped-leftover oracle rejects the glued row, extra submissions, missing 
   }
 });
 
+test('idle-suggestion oracle accepts clearing keys but rejects any submitted or typed suggestion', () => {
+  const suggestion = 'Try the next step';
+  const control = fixture('idle-suggestion');
+  control.observation.suggestion = suggestion;
+  evaluateDelivery(control.observation, control.events);
+  const mutations = [
+    f => { f.events[4].submitted = suggestion + f.observation.text; },
+    f => { f.events[4].submitted = suggestion; },
+    f => { f.events[3].argv[5] = suggestion + f.events[3].argv[5]; },
+    f => { f.events[2].submitted = suggestion; },
+    f => { f.events.pop(); },
+    f => { f.events.push({ ...f.events[4], ms: 1200 }); },
+  ];
+  for (const mutate of mutations) {
+    const broken = fixture('idle-suggestion');
+    broken.observation.suggestion = suggestion;
+    mutate(broken);
+    assert.throws(() => evaluateDelivery(broken.observation, broken.events));
+  }
+});
+
 test('missing evidence evaluates every case and never produces a false green', () => {
   const result = evaluateEvidence(path.join(root, 'tools/verify-chat-delivery/nonexistent-evidence'));
   assert.equal(result.status, 'failed');
@@ -197,10 +219,10 @@ test('fake Claude box applies Ctrl+U by wrapped screen row and by trailing line 
   assert.ok(line.length > 60 && line.length < 90);
   assert.deepEqual(claudeBox(boundary, [line + '\n', line, line.slice(0, 60), line.slice(0, 30), 'a\nb', 'a\n', '']), [line, line.slice(0, 60), line.slice(0, 30), '', 'a\n', 'a', '', 'ab', 'a', 'x'.repeat(10) + 'x'.repeat(40), 'x'.repeat(30) + 'x'.repeat(10), 'abc']);
   const boundarySource = read('tools/verify-chat-delivery/boundary.py');
-  assert.match(boundarySource, /if "leftover" in state\(\):\s+return box_send\(\)/);
+  assert.match(boundarySource, /if stateful\(state\(\)\):\s+return box_send\(\)/);
   assert.match(boundarySource, /record\("agent-buffer.jsonl", argv=ARGS, submitted=submitted, box=buffer\)/);
   assert.match(boundarySource, /submitted = buffer if buffer.strip\(\) else None\s+buffer = ""/);
-  assert.match(boundarySource, /if "leftover" in value:\s+rows = box_rows\(/);
+  assert.match(boundarySource, /if stateful\(value\):[\s\S]*rows = box_rows\(buffer\) if buffer else \[value\["suggestion"\]/);
   assert.match(boundarySource, /"  " \+ row \+ "\\n"/);
   assert.match(drive, /name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'/);
   assert.match(drive, /if \(\$plan.ContainsKey\('leftover'\)\) \{ \$seed.leftover = \$plan.leftover/);
@@ -210,7 +232,7 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
   assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
-  assert.match(boundary, /if ARGS\[:1\] == \["send-keys"\]:\s+if "leftover" in state\(\):\s+return box_send\(\)\s+record\("agent-buffer.jsonl", argv=ARGS\)/);
+  assert.match(boundary, /if ARGS\[:1\] == \["send-keys"\]:\s+if stateful\(state\(\)\):\s+return box_send\(\)\s+record\("agent-buffer.jsonl", argv=ARGS\)/);
   assert.match(boundary, /if ARGS\[:1\] == \["capture-pane"\]/);
   assert.match(boundary, /esc to interrupt/);
   assert.match(boundary, /\\u276f/);

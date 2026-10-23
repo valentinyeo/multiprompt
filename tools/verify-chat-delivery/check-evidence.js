@@ -11,12 +11,18 @@ function evaluateDelivery(observation, events) {
   assert.equal(observation.composerText, observation.text, 'real composer text');
   assert.ok(Number.isSafeInteger(observation.actionMs) && observation.actionMs > 0);
   assert.ok(observation.endMs >= observation.actionMs + 15000, 'full observation window');
-  const wrapped = observation.name === 'wrapped-leftover';
-  if (wrapped) {
+  const boxed = observation.name === 'wrapped-leftover' || observation.name === 'idle-suggestion';
+  if (boxed) {
     assert.ok(events.length > 0, 'box keys reached fake tmux');
     assert.ok(events.every(event => event.argv[0] === 'send-keys' && Object.hasOwn(event, 'submitted')), 'stateful box rows');
     const submitted = events.filter(event => event.submitted !== null).map(event => event.submitted);
     assert.deepEqual(submitted, [observation.text], 'exactly one submission equal to the typed composer text, no leftover glued in');
+    if (observation.name === 'idle-suggestion') {
+      assert.ok(observation.suggestion && !observation.text.includes(observation.suggestion));
+      const typed = events.filter(event => event.argv.includes('-l')).map(event => event.argv.slice(event.argv.indexOf('--') + 1).join(''));
+      assert.ok(typed.length > 0 && typed.every(text => !text.includes(observation.suggestion)), 'suggestion text is never typed');
+      assert.ok(events.every(event => event.submitted === null || !event.submitted.includes(observation.suggestion)), 'suggestion text is never submitted');
+    }
   } else {
     const expected = [
       ['send-keys', '-t', '=verify-agent:', '-l', '--', observation.text],
@@ -73,8 +79,8 @@ function evaluateEvidence(root) {
       }
       const captures = lines(`${name}/stand-in/capture.jsonl`);
       assert.ok(captures.length > 0, 'production reader inspected fake tmux screen');
-      if (name === 'wrapped-leftover') {
-        assert.equal(captures[0].screen, ready.screen, 'first capture is the seeded leftover box');
+      if (name === 'wrapped-leftover' || name === 'idle-suggestion') {
+        assert.equal(captures[0].screen, ready.screen, 'first capture is the seeded box');
         assert.ok(captures.every(row => row.case === name && row.screen.startsWith('Claude Code\n\n') && /\n\u276f [^\n]*\n(?:  [^\n]*\n)*\u2500+\n$/.test(row.screen)), 'captures render the stateful box like Claude');
       } else assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
       const invocations = lines(`${name}/stand-in/invocations.jsonl`);
