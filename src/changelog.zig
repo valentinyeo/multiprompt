@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.831", .items = &.{
+        .{ .text = "Chat View on everywhere and off everywhere now switch sessions just once, so you can change each session afterwards.", .ticket = "IGSH-611" },
+        .{ .text = "Choose Always Chat View or Always shell view for a session to keep its view across restarts and skip everywhere actions, or clear Always view to unlock it.", .ticket = "IGSH-611" },
+    } },
     .{ .ver = "0.28.830", .items = &.{
         .{ .text = "Session browsers no longer keep a blank first tab with a long data address.", .ticket = "IGSH-613" },
     } },
