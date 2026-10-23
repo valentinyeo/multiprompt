@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 SETTLE_SECONDS = 5
+SETTLE_LIMIT_SECONDS = 45
 
 
 def load_reader():
@@ -165,17 +166,19 @@ def not_drift(item, wire):
 
 
 def settle_pending(reader, path, wire, findings, sleep=time.sleep):
-    if not any(item['kind'] == 'pane_missing' and not item['transcript_lines'] for item in findings):
-        return findings
-    sleep(SETTLE_SECONDS)
-    settled = []
-    for item in findings:
-        if item['kind'] == 'pane_missing' and not item['transcript_lines']:
-            item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
-            if not_drift(item, wire) or item.get('advising') and not item['transcript_lines']:
-                continue
-        settled.append(item)
-    return settled
+    for _ in range(0, SETTLE_LIMIT_SECONDS, SETTLE_SECONDS):
+        if not any(item['kind'] == 'pane_missing' and not item['transcript_lines'] for item in findings):
+            return findings
+        sleep(SETTLE_SECONDS)
+        settled = []
+        for item in findings:
+            if item['kind'] == 'pane_missing' and not item['transcript_lines']:
+                item['transcript_lines'] = transcript_evidence(reader, path, wire, item)
+                if not_drift(item, wire) or item.get('advising') and not item['transcript_lines']:
+                    continue
+            settled.append(item)
+        findings = settled
+    return findings
 
 
 def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep):
