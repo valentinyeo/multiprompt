@@ -1372,6 +1372,13 @@ function Get-SharedProfileListing([string]$Root) {
     return @($names | Sort-Object)
 }
 
+function Get-SharedProfileCore([string]$Root) {
+    $names = @(Get-ChildItem -LiteralPath $Root -Force -Directory | Where-Object { $_.Name -match '^(Default|Profile \d+)$' } | ForEach-Object { $_.Name })
+    if (Test-Path -LiteralPath (Join-Path $Root 'Local State') -PathType Leaf) { $names += 'Local State' }
+    if (Test-Path -LiteralPath (Join-Path $Root 'Default/Preferences') -PathType Leaf) { $names += 'Default/Preferences' }
+    return @($names | Sort-Object)
+}
+
 function Wait-OwnProfilePipe([string]$Token, [string]$Step) {
     Wait-Until {
         $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', ('multiprompt-browser-isolated-' + $Token), [IO.Pipes.PipeDirection]::Out)
@@ -2978,6 +2985,8 @@ try {
             if ($sharedProof.userDataDir -ine $sharedRoot) { throw 'Workspace without opt-in left the shared browser profile' }
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'shared pane bound through the shared native host' 60
             $sharedBefore = Get-SharedProfileListing $sharedRoot
+            $coreBefore = Get-SharedProfileCore $sharedRoot
+            if ('Default' -notin $coreBefore -or 'Local State' -notin $coreBefore) { throw 'Shared browser profile was not warmed' }
             $before = (Read-Session).workspace_count
             Press @(0x11, 0x4E) 'Ctrl+N: create the workspace that gets its own browser profile'
             Wait-Until { $script:ownSession = Read-Session; $null -ne $script:ownSession -and $script:ownSession.workspace_count -eq $before + 1 -and $script:ownSession.active_workspace -ne 0 } 'new workspace persisted'
@@ -3003,7 +3012,8 @@ try {
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'opted-in pane bound through its own native host' 60
             if ($null -eq (Get-Process -Id $sharedProof.pid -ErrorAction SilentlyContinue)) { throw 'Shared browser closed when the opted-in pane opened' }
             $sharedAfter = Get-SharedProfileListing $sharedRoot
-            $missing = @($sharedBefore | Where-Object { $_ -notin $sharedAfter })
+            $coreAfter = Get-SharedProfileCore $sharedRoot
+            $missing = @($coreBefore | Where-Object { $_ -notin $coreAfter })
             $foreign = @($sharedAfter | Where-Object { $_ -match '(?i)own-[0-9a-f]{24}|BrowserWorkspaces|workspace-owner' })
             if ($missing.Count -ne 0 -or $foreign.Count -ne 0) { throw ('Shared browser profile changed: missing ' + ($missing -join ', ') + '; foreign ' + ($foreign -join ', ')) }
             $engines = @(Get-ChildItem -LiteralPath $ownBase -Force | ForEach-Object { $_.Name })
@@ -3024,7 +3034,7 @@ try {
             if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile: ' + $restoredProof.userDataDir) }
             Wait-OwnProfilePipe $ownToken 'restored'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'restored opted-in pane bound through its own native host' 60
-            Save-Json @{ token = $ownToken; workspaceId = $ownWorkspaceId; ownRoot = $ownRoot; sharedRoot = $sharedRoot; shared = $sharedProof; opted = $ownProof; restored = $restoredProof; sharedBefore = $sharedBefore; sharedAfter = $sharedAfter } 'browser-own-profile.json'
+            Save-Json @{ token = $ownToken; workspaceId = $ownWorkspaceId; ownRoot = $ownRoot; sharedRoot = $sharedRoot; shared = $sharedProof; opted = $ownProof; restored = $restoredProof; sharedBefore = $sharedBefore; sharedAfter = $sharedAfter; coreBefore = $coreBefore; coreAfter = $coreAfter } 'browser-own-profile.json'
             $result.checks += @{ name = 'browser-own-profile shared'; userDataDir = $sharedProof.userDataDir }
             $result.checks += @{ name = 'browser-own-profile opted-in'; userDataDir = $ownProof.userDataDir; token = $ownToken }
             $result.checks += @{ name = 'browser-own-profile shared-untouched'; entries = $sharedAfter.Count }

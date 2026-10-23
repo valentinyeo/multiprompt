@@ -22,7 +22,7 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 2. Warm the shared `ChromeUserData` profile with the extension, wait for the shared native-host pipe, then stop the warmup. Open a pane in the first workspace through Ctrl+K `open browser`; read the docked HWND's process command line and require `--user-data-dir` to be the shared profile. Wait for its app-published window id, then list the shared profile's top-level and `Default` folders.
 3. Ctrl+N creates a second workspace. Read its `wid`, derive the expected own folder, then write only that id to `browser-own-profile.txt` while the app runs. Snapshot `action` and open a pane in the new workspace.
 4. Require the docked pane's browser process to use the own folder, otherwise fail with `Opted-in workspace has no own browser profile`. It must be a different process from the shared pane. Wait for the own native-host pipe and a nonzero window id, which proves the app routed binding to that profile.
-5. Require the shared browser still running, no shared folder missing, no `own-`, `BrowserWorkspaces` or `workspace-owner` entry inside the shared profile, and exactly one `chrome\own-<hash>` leaf under `BrowserWorkspaces`.
+5. Require the shared browser still running, no profile folder (`Default`, `Profile <n>`), `Local State` or `Default/Preferences` missing (Chrome's own transient folders such as `BrowserMetrics` are ignored), no `own-`, `BrowserWorkspaces` or `workspace-owner` entry inside the shared profile, and exactly one `chrome\own-<hash>` leaf under `BrowserWorkspaces`.
 6. Close the app normally and relaunch it with the same data. The restored selection must be the new workspace, and its pane must dock without an open command, use the own folder, reach the own pipe and bind a window id. Snapshot `after` and save `browser-own-profile.json`.
 
 ## Gotchas
@@ -30,4 +30,5 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 - A released executable without this feature is expected to fail at step 4 with `Opted-in workspace has no own browser profile`, because its second pane opens in the shared profile.
 - The opt-in file is read at pane launch, not at app start, so writing it while the app runs is a real user path. Changing it never moves an already open pane.
 - The own profile is a cold first run on every runner; waits for its pane and pipe are longer than the shared ones.
+- Chrome deletes and recreates transient top-level folders like `BrowserMetrics` while running, so the missing check counts only profile folders and `Local State`; the `foreign` check still reads the full listing.
 - The journey never seeds session JSON and never touches the shared profile's contents; it only lists folder names.
