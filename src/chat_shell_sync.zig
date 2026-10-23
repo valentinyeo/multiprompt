@@ -13,6 +13,8 @@ pub const Row = struct {
     text: [TEXT_CAP]u16 = @splat(0),
     len: usize = 0,
     sent: bool = false,
+    injected: bool = false,
+    sender: [64]u16 = @splat(0),
     local: bool = false,
     outbox_id: u64 = 0,
 
@@ -39,10 +41,10 @@ pub fn build(view: *View, status: *const chat_transcript.Status, pending: []cons
         for (status.queue[0..status.queue_len]) |item| {
             if (view.count >= MAX_ROWS) break;
             var row = &view.rows[view.count];
-            row.* = .{ .len = item.len, .sent = item.sent };
+            row.* = .{ .len = item.len, .sent = item.sent, .injected = item.injected, .sender = item.sender };
             @memcpy(row.text[0..item.len], item.text[0..item.len]);
             for (pending, 0..) |entry, i| {
-                if (i >= MAX_ROWS or used[i]) continue;
+                if (item.injected or i >= MAX_ROWS or used[i]) continue;
                 if (!chat_echo.sameText(clipped(entry.text), item.text[0..item.len])) continue;
                 used[i] = true;
                 row.local = true;
@@ -290,6 +292,23 @@ test "an outbox entry whose text is in the shell queue is that item and never a 
     try std.testing.expect(!view.rows[0].local);
     try std.testing.expect(view.rows[1].local);
     try std.testing.expectEqual(@as(u64, 7), view.rows[1].outbox_id);
+}
+
+test "IGSH-722 incoming queued and sent notes never consume matching local pending" {
+    const status = (chat_transcript.parseStatus("{\"role\":\"status\",\"sent\":[{\"text\":\"same\",\"sender\":\"RUNNER 5\",\"injected\":true}],\"queue\":[\"<cross-session-message from-name='RUNNER 5'>same</cross-session-message>\"]}").?).status;
+    var view: View = .{};
+    build(&view, &status, &.{.{ .id = 7, .text = w("same") }});
+    try std.testing.expectEqual(@as(usize, 3), view.count);
+    for (view.rows[0..2]) |row| {
+        try std.testing.expect(row.injected);
+        try std.testing.expect(!row.local);
+        try std.testing.expectEqual(@as(u64, 0), row.outbox_id);
+        try std.testing.expectEqualSlices(u16, w("RUNNER 5"), std.mem.sliceTo(&row.sender, 0));
+    }
+    try std.testing.expect(view.rows[0].sent);
+    try std.testing.expect(!view.rows[1].sent);
+    try std.testing.expect(view.rows[2].local and !view.rows[2].injected);
+    try std.testing.expectEqual(@as(u64, 7), view.rows[2].outbox_id);
 }
 
 test "an outbox entry the shell has not queued yet is appended as queued" {

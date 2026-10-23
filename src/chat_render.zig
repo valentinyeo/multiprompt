@@ -1629,10 +1629,13 @@ fn chatShellSyncBuild() void {
     debugLog(line.items);
 }
 
-fn chatPaintShellRow(hdc: HANDLE, text: []const u16, rc: RECT) void {
+fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) void {
+    const text = row.slice();
     _ = SetBkMode(hdc, TRANSPARENT);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) };
-    fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
+    const status_h = uiScaled(CHAT_STATUS_H);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h * @as(i32, if (row.injected) 2 else 1) };
+    fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
+    if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true, false);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
@@ -1641,6 +1644,10 @@ fn chatPaintShellRow(hdc: HANDLE, text: []const u16, rc: RECT) void {
     defer _ = SelectObject(hdc, old);
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
     var area = chatStatusRowRect(bubble);
+    if (row.injected) {
+        area.top += status_h;
+        area.bottom += status_h;
+    }
     _ = chatDrawText(hdc, L("\u{25F7} Queued in Claude"), -1, &area, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
@@ -1652,6 +1659,7 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
         if (row.local or row.sent or g_shell_rect_count >= g_shell_rect.len) continue;
         y += chatBlockGapBefore(true, .user, true, .single);
         var rc = chatMeasureEchoRect(hdc, row.slice(), width, y);
+        if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);
         rc.left += app_state.g_chat_content_left;
         rc.right += app_state.g_chat_content_left;
         g_shell_rect[g_shell_rect_count] = rc;
@@ -3997,7 +4005,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     rc.bottom -= app_state.g_chat_scroll_y;
                     if (rc.bottom < 0 or rc.top > h) continue;
                     if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
-                    chatPaintShellRow(mem_dc, g_shell_view.rows[g_shell_rect_row[i]].slice(), rc);
+                    chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
                 }
                 if (app_state.g_chat_block_count == 0) {
                     _ = SetBkMode(mem_dc, TRANSPARENT);

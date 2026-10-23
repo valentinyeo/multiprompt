@@ -44,6 +44,8 @@ pub const QueueItem = struct {
     text: [QUEUE_TEXT]u16 = @splat(0),
     len: usize = 0,
     sent: bool = false,
+    injected: bool = false,
+    sender: [64]u16 = @splat(0),
 };
 pub const Status = struct {
     queue: [QUEUE_MAX]QueueItem = @splat(.{}),
@@ -115,12 +117,42 @@ fn keepText(out: []u16, text: []const u8, keep_newlines: bool) usize {
     return n;
 }
 
-fn fillQueue(result: *Status, items: ?[]const []const u8, sent: bool) void {
-    for (items orelse return) |text| {
+fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
+    for (items orelse return) |value| {
         if (result.queue_len >= QUEUE_MAX) return;
         var item = &result.queue[result.queue_len];
-        item.len = keepText(&item.text, text, false);
-        item.sent = sent;
+        item.* = .{ .sent = sent };
+        switch (value) {
+            .string => |text| {
+                const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch continue;
+                defer std.heap.page_allocator.free(wide);
+                if (injectedEnvelope(wide, true)) |injected| {
+                    item.injected = true;
+                    const sender_len = decodeXml(injected.sender, item.sender[0 .. item.sender.len - 1], false);
+                    for (item.sender[0..sender_len]) |*c| if (c.* < 32) {
+                        c.* = ' ';
+                    };
+                    item.len = decodeXml(injected.body, &item.text, true);
+                    for (item.text[0..item.len]) |*c| if (c.* < 32) {
+                        c.* = ' ';
+                    };
+                } else item.len = keepText(&item.text, text, false);
+            },
+            .object => |object| {
+                const text = object.get("text") orelse continue;
+                if (text != .string) continue;
+                item.len = keepText(&item.text, text.string, false);
+                if (object.get("injected")) |flag| {
+                    item.injected = flag == .bool and flag.bool;
+                }
+                if (item.injected) {
+                    const sender = object.get("sender");
+                    const name = if (sender != null and sender.? == .string and sender.?.string.len > 0) sender.?.string else "another session";
+                    _ = keepText(item.sender[0 .. item.sender.len - 1], name, false);
+                }
+            },
+            else => continue,
+        }
         result.queue_len += 1;
     }
 }
@@ -128,7 +160,7 @@ fn fillQueue(result: *Status, items: ?[]const []const u8, sent: bool) void {
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const []const u8 = null, sent: ?[]const []const u8 = null, draft: ?[]const u8 = null };
+    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
@@ -191,6 +223,10 @@ fn xmlTagEnd(text: []const u16) ?usize {
 }
 
 pub fn injectedMessage(raw: []const u16) ?InjectedMessage {
+    return injectedEnvelope(raw, false);
+}
+
+fn injectedEnvelope(raw: []const u16, allow_truncated: bool) ?InjectedMessage {
     const text = std.mem.trim(u16, raw, XML_SPACE);
     const cross = std.unicode.utf8ToUtf16LeStringLiteral("<cross-session-message");
     const task = std.unicode.utf8ToUtf16LeStringLiteral("<task-notification");
@@ -200,8 +236,8 @@ pub fn injectedMessage(raw: []const u16) ?InjectedMessage {
     if (text[prefix.len] != '>' and std.mem.indexOfScalar(u16, XML_SPACE, text[prefix.len]) == null) return null;
     const end = xmlTagEnd(text) orelse return null;
     const close = if (is_task) std.unicode.utf8ToUtf16LeStringLiteral("</task-notification>") else std.unicode.utf8ToUtf16LeStringLiteral("</cross-session-message>");
-    const close_at = std.mem.indexOfPos(u16, text, end + 1, close) orelse return null;
-    if (close_at + close.len != text.len) return null;
+    const close_at = std.mem.indexOfPos(u16, text, end + 1, close) orelse if (allow_truncated) text.len else return null;
+    if (close_at < text.len and close_at + close.len != text.len) return null;
     var sender: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("another session");
     var attrs = std.mem.trim(u16, text[prefix.len..end], XML_SPACE);
     while (attrs.len > 0) {
@@ -620,6 +656,46 @@ test "IGSH-682 status row carries the shell queue sent first and the box draft" 
     try std.testing.expect(empty.live_known);
     try std.testing.expect(empty.draft_known);
     try std.testing.expectEqual(@as(usize, 0), empty.queue_len);
+}
+
+test "IGSH-722 long queued envelopes and clipped old reader strings become incoming notes" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const opening = "<cross-session-message from=\\\"uds:/run/user/1000/cc-socks/92156.sock\\\" hop-chain=\\\"relay\\\" from-name=\\\"RUNNER 5\\\" from-mode=\\\"bypass\\\">";
+    const body = "RUNNER 5: 7686 update &amp; <summary>ready</summary> " ++ "x" ** 700;
+    const prefix = "{\"role\":\"status\",\"queue\":[\"";
+    const suffix = "\"]}";
+    for ([_][]const u8{
+        prefix ++ opening ++ body ++ "</cross-session-message>" ++ suffix,
+        prefix ++ opening ++ body[0..300] ++ suffix,
+    }) |line| {
+        const status = (parseStatus(line).?).status;
+        const item = status.queue[0];
+        try std.testing.expectEqual(@as(usize, 1), status.queue_len);
+        try std.testing.expect(item.injected);
+        try std.testing.expect(!item.sent);
+        try std.testing.expectEqualSlices(u16, w("RUNNER 5"), std.mem.sliceTo(&item.sender, 0));
+        const text = item.text[0..item.len];
+        try std.testing.expect(std.mem.startsWith(u16, text, w("RUNNER 5: 7686 update & ready ")));
+        for ([_][]const u16{ w("<cross-session-message"), w("uds:"), w("hop-chain"), w("<summary>"), w("&amp;") }) |hidden| {
+            try std.testing.expect(std.mem.indexOf(u16, text, hidden) == null);
+        }
+    }
+}
+
+test "IGSH-722 queue accepts decoded reader notes and legacy task and sender fallback" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const status = (parseStatus("{\"role\":\"status\",\"sent\":[{\"text\":\"done & <ok>\",\"sender\":\"RUNNER & 5\",\"injected\":true}],\"queue\":[\"<task-notification><summary>done &amp; ready</summary></task-notification>\",\"<cross-session-message from='hidden'>hello\",\"mine\"]}").?).status;
+    try std.testing.expectEqual(@as(usize, 4), status.queue_len);
+    try std.testing.expect(status.queue[0].sent and status.queue[0].injected);
+    try std.testing.expectEqualSlices(u16, w("done & <ok>"), status.queue[0].text[0..status.queue[0].len]);
+    try std.testing.expectEqualSlices(u16, w("RUNNER & 5"), std.mem.sliceTo(&status.queue[0].sender, 0));
+    try std.testing.expect(status.queue[1].injected);
+    try std.testing.expectEqualSlices(u16, w("Task"), std.mem.sliceTo(&status.queue[1].sender, 0));
+    try std.testing.expectEqualSlices(u16, w("done & ready"), status.queue[1].text[0..status.queue[1].len]);
+    try std.testing.expect(status.queue[2].injected);
+    try std.testing.expectEqualSlices(u16, w("another session"), std.mem.sliceTo(&status.queue[2].sender, 0));
+    try std.testing.expect(!status.queue[3].injected);
+    try std.testing.expectEqualSlices(u16, w("mine"), status.queue[3].text[0..status.queue[3].len]);
 }
 
 test "status row caps todo arrays and keeps truncated Unicode valid" {
