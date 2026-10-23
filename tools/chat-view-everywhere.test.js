@@ -158,7 +158,12 @@ test('ISSUE-611 feature map, branch Windows tests, PR matrix, documentation and 
   assert.match(driver, /ValidateSet\([^\n]*'chat-view-everywhere'/);
   assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-view-everywhere'/);
   assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-view-everywhere"/);
-  assert.match(workflow, /if: \(env.FEATURE == 'chat-view' \|\| env.FEATURE == 'chat-view-everywhere'\) && env.RELEASE_TAG == ''[\s\S]*?zig build test-main --summary all/);
+  const branchTests = /if: \(env.FEATURE == 'chat-view' \|\| env.FEATURE == 'chat-view-everywhere'\) && env.RELEASE_TAG == ''(?:(?!\r?\n      - )[\s\S])*?\r?\n[ \t]+zig build test-main(?:[ \t][^\r\n]*)?\r?$/m;
+  assert.match(workflow, branchTests);
+  assert.doesNotMatch(workflow.replace(" || env.FEATURE == 'chat-view-everywhere'", ''), branchTests);
+  const withoutTestMain = workflow.replace(/^[ \t]+zig build test-main[^\r\n]*\r?$/m, '');
+  assert.doesNotMatch(withoutTestMain, branchTests);
+  assert.doesNotMatch(withoutTestMain + '\n      - name: Unrelated tests\n        run: zig build test-main --summary all\n', branchTests);
   assert.ok(workflow.includes('node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js'));
   const map = read(skill + `features/${feature}.md`);
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
