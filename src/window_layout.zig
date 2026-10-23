@@ -213,8 +213,9 @@ pub fn invalidateSidebar() void {
 }
 
 fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, stop }) void {
-    const accent = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(125, 211, 252));
-    const bg = if (enabled) accent else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
+    const hover = glyph == .stop and app_state.g_chat_stop_hover;
+    const grey: u8 = if (app_state.g_light_theme) (if (hover) 128 else 104) else (if (hover) 84 else 64);
+    const bg = if (enabled) RGB(grey, grey, grey) else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
     const brush = CreateSolidBrush(bg);
     const pen = CreatePen(0, 1, bg);
     const old_brush = SelectObject(hdc, brush);
@@ -226,7 +227,7 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     _ = DeleteObject(brush);
     _ = DeleteObject(pen);
     const ink = if (enabled)
-        (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(8, 20, 28))
+        (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(235, 235, 235))
     else
         customColorOr("subtitle", if (app_state.g_light_theme) RGB(150, 155, 165) else RGB(110, 116, 128));
     if (glyph == .stop) {

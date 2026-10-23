@@ -342,7 +342,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the model and context header; also click the header", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
-    .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click also has Copy / Select All / Copy Message)", .header = false },
+    .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click offers Reply and Copy)", .header = false },
     .{ .a = "Ctrl+A in Chat View", .b = "Select all transcript text (transcript focus; composer keeps its own Ctrl+A)", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
