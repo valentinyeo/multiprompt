@@ -2100,6 +2100,23 @@ fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
         std.heap.page_allocator.destroy(job);
 }
 
+fn resolvedNavigateUrl(pending: []const u8, has_nonce: bool) ?[]const u8 {
+    if (pending.len > 0) {
+        if (!has_nonce and std.mem.eql(u8, pending, "about:blank")) return null;
+        return pending;
+    }
+    return if (has_nonce) "about:blank" else null;
+}
+
+test "IGSH-613 only a fresh pane resolve navigates to blank" {
+    try std.testing.expect(resolvedNavigateUrl("", false) == null);
+    try std.testing.expect(resolvedNavigateUrl("about:blank", false) == null);
+    try std.testing.expectEqualStrings("https://example.com", resolvedNavigateUrl("https://example.com", false).?);
+    try std.testing.expectEqualStrings("about:blank", resolvedNavigateUrl("", true).?);
+    try std.testing.expectEqualStrings("about:blank", resolvedNavigateUrl("about:blank", true).?);
+    try std.testing.expectEqualStrings("https://example.com", resolvedNavigateUrl("https://example.com", true).?);
+}
+
 pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
     defer std.heap.page_allocator.destroy(job);
     const shell_id = job.shell_id;
@@ -2120,9 +2137,9 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         @memcpy(url_buf[0..len], app_state.shells[idx].browser_pending_url[0..len]);
         const activate = app_state.g_browser_pending_activate_sid == shell_id;
         app_state.g_browser_pending_activate_sid = 0;
-        navigateBrowserPaneWithActivation(idx, url_buf[0..len], activate);
-    } else {
-        navigateBrowserPaneWithActivation(idx, "about:blank", false);
+        if (resolvedNavigateUrl(url_buf[0..len], job.nonce_len > 0)) |url| navigateBrowserPaneWithActivation(idx, url, activate);
+    } else if (resolvedNavigateUrl("", job.nonce_len > 0)) |url| {
+        navigateBrowserPaneWithActivation(idx, url, false);
     }
     if (idx == app_state.active_shell) {
         repositionActive();
