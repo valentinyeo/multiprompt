@@ -1,4 +1,5 @@
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const js = v => JSON.stringify(v).replace(/[<\u2028\u2029]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 
 const style = `
 :root{--bg:#f4f4f4;--layer:#fff;--text:#161616;--muted:#525252;--border:#e0e0e0;--field:#f4f4f4;--line:#8d8d8d;--primary:#0f62fe;--primary-hover:#0353e9;--danger:#da1e28;--ok:#24a148;--warn:#f1c21b;--head:#161616;--head-text:#f4f4f4;--focus:#0f62fe}
@@ -75,7 +76,7 @@ ${mail ? '<div class="or">or</div>' : '<p id="no-mail" class="note">Email codes 
 ${google ? '<div class="or">or</div><button id="google" type="button" class="secondary">Continue with Google <span aria-hidden="true">&#8594;</span></button>' : ''}
 <div id="msg" class="note" role="status"></div></div></main>`;
   const script = common + `
-const next = ${JSON.stringify(next || '/')}; const msg = $('#msg'); let email = '';
+const next = ${js(next || '/')}; const msg = $('#msg'); let email = '';
 const done = () => { location.replace(next); };
 $('#f-email').onsubmit = async e => { e.preventDefault(); email = $('#email').value.trim().toLowerCase();
   const byCode = e.submitter && e.submitter.id === 'send-code';
