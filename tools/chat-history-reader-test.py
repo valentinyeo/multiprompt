@@ -1718,6 +1718,45 @@ class SharedQueueDraftTest(unittest.TestCase):
         status = [row for row in rows if row['role'] == 'status']
         return status[0] if status else None
 
+    def test_IGSH_722_queued_envelopes_are_unwrapped_before_clipping(self):
+        body = 'RUNNER 5: 7686 update &amp; <summary>ready</summary> ' + 'x' * 700
+        envelope = '<cross-session-message from="uds:/run/user/1000/cc-socks/92156.sock" hop-chain="relay" from-name="RUNNER 5" from-mode="bypass">' + body + '</cross-session-message>'
+        self.write(self.op('enqueue', envelope), self.op('enqueue', 'mine'))
+        with patch.object(reader, 'box_draft', return_value=''):
+            status = self.live()
+            expected = dict(text=('RUNNER 5: 7686 update & ready ' + 'x' * 700)[:reader.QUEUE_TEXT], sender='RUNNER 5', injected=True)
+            self.assertEqual(status['queue'], [expected, 'mine'])
+            for hidden in ('<cross-session-message', 'uds:', 'hop-chain', '<summary>', '&amp;'):
+                self.assertNotIn(hidden, json.dumps(status['queue']))
+            with self.path.open('a') as output:
+                output.write(json.dumps(self.op('remove', envelope)) + '\n')
+            status = self.live()
+            self.assertEqual(status['sent'], [expected])
+            self.assertEqual(status['queue'], ['mine'])
+
+    def test_IGSH_722_queue_sender_fallback_tasks_and_entities(self):
+        samples = [
+            ('<cross-session-message from="hidden">hello</cross-session-message>', 'another session', 'hello'),
+            ('<cross-session-message from-name="  ">hello</cross-session-message>', 'another session', 'hello'),
+            ('<cross-session-message from-name="RUNNER &amp; &#53;">&lt;ok&gt; &#x1F680;</cross-session-message>', 'RUNNER & 5', '<ok> 🚀'),
+            ('<task-notification from-name="ignored"><summary>done &amp; ready</summary></task-notification>', 'Task', 'done & ready'),
+            ('<cross-session-message from="' + 's' * 700 + '" from-name="RUNNER 5">body</cross-session-message>', 'RUNNER 5', 'body'),
+        ]
+        for envelope, sender, text in samples:
+            with self.subTest(ticket='IGSH-722', sender=sender):
+                self.write(self.op('enqueue', envelope))
+                with patch.object(reader, 'box_draft', return_value=None):
+                    self.assertEqual(self.live()['queue'], [dict(text=text, sender=sender, injected=True)])
+                self.query.update(cached_sid='', inode=0, offset=0)
+
+    def test_IGSH_722_queue_keeps_non_envelopes_as_plain_strings(self):
+        samples = ['hello', 'Please read <cross-session-message>example</cross-session-message>',
+                   '<cross-session-message>one</cross-session-message> and reply',
+                   '<cross-session-message from-name=R>bad</cross-session-message>']
+        self.write(*(self.op('enqueue', text) for text in samples))
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], samples)
+
     def test_IGSH_682_queue_is_replayed_in_file_order(self):
         self.write(self.event('hi'), self.op('enqueue', 'first'), self.op('enqueue', 'second'), self.op('enqueue', 'third'))
         with patch.object(reader, 'box_draft', return_value=''):

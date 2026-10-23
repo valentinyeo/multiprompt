@@ -4,6 +4,7 @@ import base64
 import difflib
 from datetime import datetime
 import hashlib
+import html
 import json
 import mmap
 import os
@@ -1031,9 +1032,29 @@ def box_draft(target):
     return box_draft_text(shown) if isinstance(shown, str) else None
 
 
+def queue_item(text):
+    envelope = re.fullmatch(r"""\s*<(cross-session-message|task-notification)(?=[\s>])((?:[^>"']|"[^"]*"|'[^']*')*)>(.*?)</\1>\s*""", text, re.S)
+    if envelope is None:
+        return text[:QUEUE_TEXT]
+    kind, attrs, body = envelope.groups()
+    if '</' + kind + '>' in body:
+        return text[:QUEUE_TEXT]
+    sender = 'another session'
+    while attrs.strip():
+        attr = re.match(r"""\s*([^=\s]+)\s*=\s*(["'])(.*?)\2(?=\s|$)""", attrs, re.S)
+        if attr is None:
+            return text[:QUEUE_TEXT]
+        name, _quote, value = attr.groups()
+        if name == 'from-name' and value.strip():
+            sender = value
+        attrs = attrs[attr.end():]
+    body = re.sub(r"""</?[A-Za-z](?:[^>"']|"[^"]*"|'[^']*')*>""", '', body.strip())
+    return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender), injected=True)
+
+
 def live_fields(source, size, tmux):
     queue, sent = queue_replay(source, size)
-    fields = dict(queue=[text[:QUEUE_TEXT] for text in queue[:QUEUE_SHOWN]], sent=[text[:QUEUE_TEXT] for text in sent[-QUEUE_SHOWN:]])
+    fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]], sent=[queue_item(text) for text in sent[-QUEUE_SHOWN:]])
     draft = box_draft("=" + tmux + ":")
     if draft is not None:
         fields["draft"] = draft[:DRAFT_TEXT]
