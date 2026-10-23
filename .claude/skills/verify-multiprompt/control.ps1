@@ -687,8 +687,8 @@ function Prepare-ScratchEvidence([string]$Path) {
     }
 }
 
-function Remove-ScratchPath([string]$Path) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     while (Test-Path -LiteralPath $Path) {
         try { Remove-Item $Path -Recurse -Force } catch {
@@ -1102,7 +1102,7 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash) {
         $trace = (Get-Content $log -Raw).Substring($logStart)
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
             $state.hwnd -eq $script:window.ToInt64().ToString() -and @($state.shells).Count -gt 0 -and
-            $trace -match 'launch step=browser'
+            $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
     } "$Stage relaunch owns its published state after session restore" 60
     [void][VerifyNative]::ShowWindow($script:window, 9)
     [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
@@ -1409,7 +1409,15 @@ try {
             Snapshot 'normal-close-after'
             $result.checks += @{ name = 'normal-close-selection'; session = 'Restore middle'; workspace = $workspace; workspaceId = $workspaceId; shellId = (Read-Inbox).active_shell_id }
             $result.checks += @{ name = 'starred-view-selection'; session = 'Restore middle'; starred_view = (Read-Inbox).starred_view }
+            Wait-Until {
+                Doctor
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'normal-close hook-ready owned foreground before workspace input'
             Press @([byte]0x12, [byte](0x32 + $workspace)) 'Alt+workspace digit: return to the favorite home workspace'
+            Wait-Until {
+                $state = Read-Inbox
+                $null -ne $state -and $state.active_workspace -eq $workspace -and $state.starred_view -eq $false
+            } 'favorite home workspace active outside Starred before palette input'
             $tabs = @((Read-Session).tabs)
             $middleIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
@@ -1429,6 +1437,10 @@ try {
             $firstIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore first') { $firstIndex = $i } }
             if ($firstIndex -lt 0) { throw 'First session missing from saved tabs' }
+            Wait-Until {
+                Doctor
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'favorite-home-kill hook-ready owned foreground before palette input'
             Focus-Palette 'Restore first' $firstIndex
             Press @(0x0D) 'Enter: select a different named session before the kill'
             Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId

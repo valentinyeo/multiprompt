@@ -382,7 +382,10 @@ pub fn installHook() void {
         if (app_state.g_hook == null) {
             debugLog("installHook: KEYBOARD_LL gave up after retries");
         }
-        if (app_state.g_hook != null) app_state.g_last_kb_hook_tick = GetTickCount64();
+        if (app_state.g_hook != null) {
+            app_state.g_last_kb_hook_tick = GetTickCount64();
+            debugLog("installHook: KEYBOARD_LL installed");
+        }
     }
 }
 

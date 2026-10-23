@@ -84,7 +84,7 @@ try {
     $handle = [IO.File]::Open($kept, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     try {
         $reported = $false
-        try { Remove-ScratchPath $scratch } catch {
+        try { Remove-ScratchPath $scratch 1 } catch {
             if ($_.Exception.Message -notlike '*Scratch cleanup left paths:*' -or -not $_.Exception.Message.Contains($kept)) { throw }
             $reported = $true
         }
