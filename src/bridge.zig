@@ -211,13 +211,17 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
     var child_read: win.HANDLE = null;
     var parent_write: win.HANDLE = null;
     if (win.CreatePipe(&child_read, &parent_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
-    defer if (child_read != null) _ = win.CloseHandle(child_read);
+    defer if (child_read != null) {
+        _ = win.CloseHandle(child_read);
+    };
     defer _ = win.CloseHandle(parent_write);
     var parent_read: win.HANDLE = null;
     var child_write: win.HANDLE = null;
     if (win.CreatePipe(&parent_read, &child_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
     errdefer _ = win.CloseHandle(parent_read);
-    defer if (child_write != null) _ = win.CloseHandle(child_write);
+    defer if (child_write != null) {
+        _ = win.CloseHandle(child_write);
+    };
     if (win.SetHandleInformation(parent_write, 1, 0) == 0 or win.SetHandleInformation(parent_read, 1, 0) == 0) return error.ChromePipeInheritanceFailed;
     const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items, @intFromPtr(child_read), @intFromPtr(child_write));
     defer allocator.free(command);
