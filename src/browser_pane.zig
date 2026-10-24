@@ -244,9 +244,7 @@ const BrowserResolveJob = @import("app_state.zig").BrowserResolveJob;
 const BrowserResolveInflight = @import("app_state.zig").BrowserResolveInflight;
 const BROWSER_RESOLVE_STALE_MS = @import("app_state.zig").BROWSER_RESOLVE_STALE_MS;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
-const BROWSER_PARK_X = @import("app_state.zig").BROWSER_PARK_X;
 const browser_onscreen = @import("browser_onscreen.zig");
-const BROWSER_PARK_Y = @import("app_state.zig").BROWSER_PARK_Y;
 const BROWSER_CRASH_RELAUNCH_DELAY_MS = @import("app_state.zig").BROWSER_CRASH_RELAUNCH_DELAY_MS;
 const BROWSER_HUNG_MISS_LIMIT = @import("app_state.zig").BROWSER_HUNG_MISS_LIMIT;
 const BROWSER_PLACEHOLDER_NOT_OPEN_MS = @import("app_state.zig").BROWSER_PLACEHOLDER_NOT_OPEN_MS;
@@ -2378,7 +2376,14 @@ fn setBrowserWindowPosAsync(hwnd: HANDLE, after: HANDLE, x: i32, y: i32, w: i32,
     defer switch_timing.record(.browser_swp, timing_started);
     if (hwnd == null or IsWindow(hwnd) == 0) return;
     _ = SetWindowPos(hwnd, after, x, y, w, h, flags | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE);
-    if (browser_onscreen.moveLeavesOnScreen(x, BROWSER_PARK_X, flags & SWP_NOMOVE != 0, flags & SWP_HIDEWINDOW != 0)) |on_screen| {
+    var rect = RECT{ .left = x, .top = y, .right = x + w, .bottom = y + h };
+    if (flags & SWP_NOMOVE == 0 and flags & SWP_NOSIZE != 0) {
+        var current: RECT = undefined;
+        if (GetWindowRect(hwnd, &current) == 0) return;
+        rect.right = x + current.right - current.left;
+        rect.bottom = y + current.bottom - current.top;
+    }
+    if (browser_onscreen.moveLeavesOnScreen(browserRectIsParked(rect), flags & SWP_NOMOVE != 0, flags & SWP_HIDEWINDOW != 0)) |on_screen| {
         if (on_screen) app_state.g_browser_onscreen.mark(@intFromPtr(hwnd)) else app_state.g_browser_onscreen.unmark(@intFromPtr(hwnd));
     }
 }
@@ -2492,7 +2497,7 @@ fn browserDockTarget(layout: BrowserLayout, native: bool) ?RECT {
 fn browserDockGuardTarget(idx: u32, current: RECT) ?RECT {
     if (app_state.g_monitor_transition.active or app_state.g_chat_browser_swap.shell_id != 0) return null;
     if (idx != app_state.active_shell or !app_state.shells[idx].browser_enabled or browserChromeHiddenForOverlay() or !foregroundIsOurs()) {
-        return .{ .left = BROWSER_PARK_X, .top = BROWSER_PARK_Y, .right = BROWSER_PARK_X + (current.right - current.left), .bottom = BROWSER_PARK_Y + (current.bottom - current.top) };
+        return browserParkRect(current);
     }
     return browserDockTarget(calcBrowserLayout() orelse return null, app_state.shells[idx].browser_native);
 }
@@ -2529,7 +2534,7 @@ pub fn handleBrowserDockGuard() void {
         const action = browserDockGuardAction(true, win.IsZoomed(hwnd) != 0, current, target);
         if (action == .none) continue;
         if (action == .restore) _ = ShowWindowAsync(hwnd, win.SW_RESTORE);
-        if (target.left == BROWSER_PARK_X) {
+        if (browserRectIsParked(target)) {
             parkBrowserWindow(hwnd);
         } else {
             positionActiveBrowser();
@@ -3084,9 +3089,141 @@ pub fn hideBrowserFloatingChrome() void {
     if (!app_state.g_browser_switch_preparing) hideBrowserEdgeMasks();
 }
 
+fn browserRectIsParked(rect: RECT) bool {
+    return @import("win32.zig").MonitorFromRect(&rect, 0) == null;
+}
+
+fn browserRectDistanceSquared(rect: RECT, monitor: RECT) i64 {
+    const dx = @max(@as(i64, 0), @max(@as(i64, monitor.left) - rect.right, @as(i64, rect.left) - monitor.right));
+    const dy = @max(@as(i64, 0), @max(@as(i64, monitor.top) - rect.bottom, @as(i64, rect.top) - monitor.bottom));
+    return dx * dx + dy * dy;
+}
+
+fn browserRectIntersectionArea(rect: RECT, monitor: RECT) i64 {
+    const width = @max(@as(i64, 0), @as(i64, @min(rect.right, monitor.right)) - @max(rect.left, monitor.left));
+    const height = @max(@as(i64, 0), @as(i64, @min(rect.bottom, monitor.bottom)) - @max(rect.top, monitor.top));
+    return width * height;
+}
+
+fn nearestBrowserMonitor(rect: RECT, monitors: []const RECT) ?usize {
+    var best: ?usize = null;
+    var distance: i64 = std.math.maxInt(i64);
+    var area: i64 = -1;
+    for (monitors, 0..) |monitor, index| {
+        const next_distance = browserRectDistanceSquared(rect, monitor);
+        const next_area = browserRectIntersectionArea(rect, monitor);
+        if (next_distance < distance or (next_distance == distance and next_area > area)) {
+            best = index;
+            distance = next_distance;
+            area = next_area;
+        }
+    }
+    return best;
+}
+
+fn browserParkRectPure(owner: RECT, monitors: []const RECT, width: i32, height: i32) ?RECT {
+    if (width <= 0 or height <= 0 or 32000 - width < -32000 or 32000 - height < -32000) return null;
+    const xs = [_]i32{
+        std.math.clamp(owner.right + 20000, -32000, 32000 - width),
+        std.math.clamp(owner.left - 20000 - width, -32000, 32000 - width),
+        std.math.clamp(owner.left, -32000, 32000 - width),
+    };
+    const ys = [_]i32{
+        std.math.clamp(owner.top, -32000, 32000 - height),
+        std.math.clamp(owner.bottom + 20000, -32000, 32000 - height),
+        std.math.clamp(owner.top - 20000 - height, -32000, 32000 - height),
+    };
+    for (ys) |y| {
+        for (xs) |x| {
+            const rect = RECT{ .left = x, .top = y, .right = x + width, .bottom = y + height };
+            const nearest = nearestBrowserMonitor(rect, monitors) orelse continue;
+            if (!std.meta.eql(monitors[nearest], owner)) continue;
+            var outside = true;
+            for (monitors) |monitor| {
+                if (browserRectIntersectionArea(rect, monitor) > 0) outside = false;
+            }
+            if (outside) return rect;
+        }
+    }
+    return null;
+}
+
+test "browser parking keeps the reported 96 DPI owner instead of the 120 DPI panel" {
+    const owner = RECT{ .left = 0, .top = 0, .right = 1920, .bottom = 1080 };
+    const panel = RECT{ .left = -2560, .top = -493, .right = 0, .bottom = 1107 };
+    const monitors = [_]RECT{ owner, panel };
+    const old = RECT{ .left = -32000, .top = -32000, .right = -30854, .bottom = -31007 };
+    try std.testing.expectEqual(@as(?usize, 1), nearestBrowserMonitor(old, &monitors));
+    const parked = browserParkRectPure(owner, &monitors, 1146, 993).?;
+    try std.testing.expectEqual(@as(?usize, 0), nearestBrowserMonitor(parked, &monitors));
+    try std.testing.expectEqual(@as(i32, 1146), parked.right - parked.left);
+    try std.testing.expectEqual(@as(i32, 993), parked.bottom - parked.top);
+}
+
+test "browser parking stays outside single right above and below monitor layouts" {
+    const owner = RECT{ .left = 0, .top = 0, .right = 1920, .bottom = 1080 };
+    const neighbors = [_]RECT{
+        .{ .left = 1920, .top = 0, .right = 4480, .bottom = 1600 },
+        .{ .left = 0, .top = -1600, .right = 2560, .bottom = 0 },
+        .{ .left = 0, .top = 1080, .right = 2560, .bottom = 2680 },
+    };
+    const single = [_]RECT{owner};
+    try std.testing.expect(browserParkRectPure(owner, &single, 1146, 993) != null);
+    for (neighbors) |neighbor| {
+        const monitors = [_]RECT{ owner, neighbor };
+        const parked = browserParkRectPure(owner, &monitors, 1146, 993).?;
+        try std.testing.expectEqual(@as(?usize, 0), nearestBrowserMonitor(parked, &monitors));
+        try std.testing.expect(parked.left >= -32000 and parked.right <= 32000);
+        try std.testing.expect(parked.top >= -32000 and parked.bottom <= 32000);
+        for (monitors) |monitor| try std.testing.expectEqual(@as(i64, 0), browserRectIntersectionArea(parked, monitor));
+    }
+}
+
+test "nearest browser monitor prefers the largest intersection at zero distance" {
+    const monitors = [_]RECT{
+        .{ .left = 0, .top = 0, .right = 100, .bottom = 100 },
+        .{ .left = 100, .top = 0, .right = 300, .bottom = 100 },
+    };
+    const rect = RECT{ .left = 90, .top = 0, .right = 200, .bottom = 100 };
+    try std.testing.expectEqual(@as(?usize, 1), nearestBrowserMonitor(rect, &monitors));
+}
+
+fn browserParkMonitorEnum(monitor: HANDLE, dc: HANDLE, rect: ?*RECT, data: LPARAM) callconv(WINAPI) BOOL {
+    _ = monitor;
+    _ = dc;
+    const monitors: *std.ArrayList(RECT) = @ptrFromInt(@as(usize, @bitCast(data)));
+    monitors.append(std.heap.page_allocator, (rect orelse return 0).*) catch return 0;
+    return 1;
+}
+
+fn browserParkRect(current: RECT) ?RECT {
+    const win = @import("win32.zig");
+    const owner = win.MonitorFromWindow(app_state.g_main_hwnd, win.MONITOR_DEFAULTTONEAREST);
+    var info = std.mem.zeroes(win.MONITORINFO);
+    info.cbSize = @sizeOf(win.MONITORINFO);
+    if (win.GetMonitorInfoW(owner, &info) == 0) return null;
+    var monitors: std.ArrayList(RECT) = .empty;
+    defer monitors.deinit(std.heap.page_allocator);
+    if (win.EnumDisplayMonitors(null, null, browserParkMonitorEnum, @bitCast(@intFromPtr(&monitors))) == 0) return null;
+    const rect = browserParkRectPure(info.rcMonitor, monitors.items, current.right - current.left, current.bottom - current.top) orelse return null;
+    if (!browserRectIsParked(rect) or win.MonitorFromRect(&rect, win.MONITOR_DEFAULTTONEAREST) != owner) return null;
+    return rect;
+}
+
 pub fn parkBrowserWindow(hwnd: HANDLE) void {
     if (hwnd == null or IsWindow(hwnd) == 0) return;
-    setBrowserWindowPosAsync(hwnd, null, BROWSER_PARK_X, BROWSER_PARK_Y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    var current: RECT = undefined;
+    if (GetWindowRect(hwnd, &current) == 0) return;
+    const target = browserParkRect(current) orelse fallback: {
+        debugLog("browser parking: no offscreen rectangle on owner monitor");
+        break :fallback RECT{
+            .left = -32000,
+            .top = -32000,
+            .right = -32000 + current.right - current.left,
+            .bottom = -32000 + current.bottom - current.top,
+        };
+    };
+    setBrowserWindowPosAsync(hwnd, null, target.left, target.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     showBrowserWindowAsync(hwnd, SW_SHOWNOACTIVATE);
 }
 
@@ -3735,7 +3872,7 @@ pub fn browserPaneCoversSlot() bool {
     if (!browserPaneMayOccupyLayout(app_state.active_shell)) return false;
     var wr: RECT = std.mem.zeroes(RECT);
     if (GetWindowRect(bh, &wr) == 0) return false;
-    return wr.left > BROWSER_PARK_X + 1000 and wr.top > BROWSER_PARK_Y + 1000;
+    return !browserRectIsParked(wr);
 }
 
 fn currentBrowserPlaceholder() BrowserPlaceholder {

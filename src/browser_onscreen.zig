@@ -53,10 +53,10 @@ pub const OnScreen = struct {
     }
 };
 
-pub fn moveLeavesOnScreen(x: i32, park_x: i32, no_move: bool, hide: bool) ?bool {
+pub fn moveLeavesOnScreen(parked: bool, no_move: bool, hide: bool) ?bool {
     if (hide) return false;
     if (no_move) return null;
-    return x != park_x;
+    return !parked;
 }
 
 test "a switch parks every pane on screen except the active one" {
@@ -93,10 +93,10 @@ test "a pane whose session replaced it stays tracked until parked" {
 }
 
 test "parking or hiding a pane removes it, moving it on screen adds it" {
-    try std.testing.expectEqual(@as(?bool, false), moveLeavesOnScreen(-32000, -32000, false, false));
-    try std.testing.expectEqual(@as(?bool, true), moveLeavesOnScreen(775, -32000, false, false));
-    try std.testing.expectEqual(@as(?bool, false), moveLeavesOnScreen(0, -32000, true, true));
-    try std.testing.expectEqual(@as(?bool, null), moveLeavesOnScreen(0, -32000, true, false));
+    try std.testing.expectEqual(@as(?bool, false), moveLeavesOnScreen(true, false, false));
+    try std.testing.expectEqual(@as(?bool, true), moveLeavesOnScreen(false, false, false));
+    try std.testing.expectEqual(@as(?bool, false), moveLeavesOnScreen(false, true, true));
+    try std.testing.expectEqual(@as(?bool, null), moveLeavesOnScreen(false, true, false));
     var set = OnScreen{};
     set.mark(0xA);
     set.mark(0xA);

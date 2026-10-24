@@ -77,7 +77,10 @@ public static class VerifyNative {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr MonitorFromRect(ref Rect rect, uint flags);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
@@ -140,7 +143,15 @@ public static class VerifyNative {
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    public static List<IntPtr> OwnedPaneWindows(IntPtr owner) {
+        var panes = new List<IntPtr>();
+        EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
+            if (GetProp(hwnd, "ZigShellPaneOwner") == owner) panes.Add(hwnd);
+            return true;
+        }, IntPtr.Zero);
+        return panes;
+    }
     public static Dictionary<string, object> WindowIdentity(IntPtr hwnd) {
         uint ownerPid;
         uint ownerThread = GetWindowThreadProcessId(hwnd, out ownerPid);
@@ -177,7 +188,9 @@ public static class VerifyNative {
         IntPtr pane = IntPtr.Zero;
         int count = 0;
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
-            if (GetProp(hwnd, "ZigShellPaneOwner") == owner && IsWindowVisible(hwnd)) { pane = hwnd; count++; }
+            Rect rect;
+            if (GetProp(hwnd, "ZigShellPaneOwner") == owner && IsWindowVisible(hwnd) &&
+                GetWindowRect(hwnd, out rect) && MonitorFromRect(ref rect, 0) != IntPtr.Zero) { pane = hwnd; count++; }
             return true;
         }, IntPtr.Zero);
         if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
@@ -1183,6 +1196,33 @@ function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
     return $pane
 }
 
+function Assert-BrowserPaneMonitors([string]$Step, [switch]$RequireParked) {
+    $ownerMonitor = [VerifyNative]::MonitorFromWindow($script:window, 2)
+    $previousDpiContext = [VerifyNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    if ($previousDpiContext -eq [IntPtr]::Zero) { throw 'Could not query pane monitors as per-monitor aware' }
+    try {
+        $proof = @([VerifyNative]::OwnedPaneWindows($script:window) | ForEach-Object {
+            $paneHwnd = $_
+            $rect = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetWindowRect($paneHwnd, [ref]$rect)) { throw 'Owned pane rectangle unavailable' }
+            $parked = [VerifyNative]::MonitorFromRect([ref]$rect, 0) -eq [IntPtr]::Zero
+            $paneMonitor = [VerifyNative]::MonitorFromWindow($paneHwnd, 2)
+            $visible = [VerifyNative]::IsWindowVisible($paneHwnd) -and -not $parked
+            $paneDpi = [VerifyNative]::GetDpiForWindow($paneHwnd)
+            [uint32]$monitorDpiX = 0; [uint32]$monitorDpiY = 0
+            $monitorDpiResult = [VerifyNative]::GetDpiForMonitor($paneMonitor, 0, [ref]$monitorDpiX, [ref]$monitorDpiY)
+            if ($parked -and $paneMonitor -ne $ownerMonitor) { throw 'Parked pane is nearest a different monitor than its owner' }
+            if ($visible -and ($monitorDpiResult -ne 0 -or $monitorDpiX -eq 0 -or $paneDpi -ne $monitorDpiX -or $paneDpi -ne $monitorDpiY)) { throw 'Visible pane DPI differs from its monitor DPI' }
+            @{ hwnd = $paneHwnd.ToInt64(); rect = $rect; parked = $parked; visible = $visible; monitor = $paneMonitor.ToInt64(); ownerMonitor = $ownerMonitor.ToInt64(); paneDpi = $paneDpi; monitorDpiX = $monitorDpiX; monitorDpiY = $monitorDpiY }
+        })
+        if ($proof.Count -eq 0) { throw 'No owned panes for monitor verification' }
+        if ($RequireParked -and @($proof | Where-Object { $_.parked }).Count -eq 0) { throw 'No parked pane exercised by the overlay' }
+        Save-Json $proof ("browser-pane-locked-monitors-$Step.json")
+        return $proof
+    }
+    finally { [void][VerifyNative]::SetThreadDpiAwarenessContext($previousDpiContext) }
+}
+
 function Assert-BrowserLaunchOnOwnMonitor([string]$Step) {
     Doctor
     $browser = [VerifyNative]::PaneWindow($script:window)
@@ -1209,11 +1249,19 @@ function Assert-BrowserLaunchOnOwnMonitor([string]$Step) {
     [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
     $mainDpi = [VerifyNative]::GetDpiForWindow($script:window)
     $paneDpi = [VerifyNative]::GetDpiForWindow($browser)
-    $proof = @{ step = $Step; launches = $launches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); paneHwnd = $browser.ToInt64(); panePid = $browserPid; mainDpi = $mainDpi; paneDpi = $paneDpi }
+    $paneMonitor = [VerifyNative]::MonitorFromWindow($browser, 2)
+    [uint32]$monitorDpiX = 0; [uint32]$monitorDpiY = 0
+    $previousDpiContext = [VerifyNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    if ($previousDpiContext -eq [IntPtr]::Zero) { throw 'Could not query effective monitor DPI as per-monitor aware' }
+    try { $monitorDpiResult = [VerifyNative]::GetDpiForMonitor($monitor, 0, [ref]$monitorDpiX, [ref]$monitorDpiY) }
+    finally { [void][VerifyNative]::SetThreadDpiAwarenessContext($previousDpiContext) }
+    $proof = @{ step = $Step; launches = $launches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); paneHwnd = $browser.ToInt64(); panePid = $browserPid; mainDpi = $mainDpi; paneDpi = $paneDpi; paneMonitor = $paneMonitor.ToInt64(); monitorDpiX = $monitorDpiX; monitorDpiY = $monitorDpiY }
     Save-Json $proof ("browser-pane-locked-launch-$Step.json")
     if ($launches.Count -eq 0 -or $browserPid -notin @($launches | ForEach-Object { $_.pid })) { throw 'No isolated browser launch command line for the owned pane' }
     if (@($launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor' }
     if ($mainDpi -eq 0 -or $paneDpi -ne $mainDpi) { throw "Pane DPI $paneDpi differs from owner DPI $mainDpi" }
+    if ($paneMonitor -ne $monitor -or $monitorDpiResult -ne 0 -or $monitorDpiX -eq 0 -or $paneDpi -ne $monitorDpiX -or $paneDpi -ne $monitorDpiY) { throw "Pane DPI $paneDpi differs from its target monitor DPI $monitorDpiX,$monitorDpiY" }
+    $null = Assert-BrowserPaneMonitors $Step
     return $proof
 }
 
@@ -3661,13 +3709,19 @@ try {
                     }
                     @{ pid = $_.ProcessId; commandLine = $_.CommandLine; parsed = $point.Success; x = $x; y = $y; inside = $inside }
                 })
-                $script:overlayLaunches.Count -gt 0
+                $parkedPanes = @([VerifyNative]::OwnedPaneWindows($script:window) | Where-Object {
+                    $rect = New-Object VerifyNative+Rect
+                    [VerifyNative]::GetWindowRect($_, [ref]$rect) -and
+                        [VerifyNative]::MonitorFromRect([ref]$rect, 0) -eq [IntPtr]::Zero
+                })
+                $script:overlayLaunches.Count -gt 0 -and $parkedPanes.Count -gt 0
             } 'positioned isolated browser launched while Shortcuts is open' 60
             $launchObservedAt = [DateTime]::UtcNow
             $overlayLaunch = @{ launches = $script:overlayLaunches; monitor = $info.Monitor; mainHwnd = $script:window.ToInt64(); overlayPostedAt = $overlayPostedAt; launchObservedAt = $launchObservedAt; overlayAtLaunch = $overlayPostedAt -lt $launchObservedAt }
             Save-Json $overlayLaunch 'browser-pane-locked-launch-restored-overlay.json'
             if (-not $overlayLaunch.overlayAtLaunch) { throw 'Shortcuts was not posted before the restored launch appeared' }
             if (@($overlayLaunch.launches | Where-Object { -not $_.parsed -or -not $_.inside }).Count -ne 0) { throw 'Browser launch point is outside the owner monitor while Shortcuts is open' }
+            $parkedMonitors = Assert-BrowserPaneMonitors 'restored-overlay' -RequireParked
             if (-not [VerifyNative]::PostMessage($script:window, 0x8036, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close Shortcuts after the restored browser launch' }
             Wait-Until {
                 [VerifyNative]::PaneVisible($script:window) -and
@@ -3676,7 +3730,7 @@ try {
             $script:browserShellId = (Read-Inbox).shells[0].sid
             $restoredLaunch = Assert-BrowserLaunchOnOwnMonitor 'restored'
             if (@($restoredLaunch.launches | Where-Object { $_.pid -in @($initialLaunch.launches | ForEach-Object { $_.pid }) }).Count -ne 0) { throw 'Relaunch reused an initial browser process instead of launching at startup' }
-            $result.checks += @{ name = 'browser-pane-locked launch-on-own-monitor'; initial = $initialLaunch; restored = $restoredLaunch; restoredOverlay = $overlayLaunch }
+            $result.checks += @{ name = 'browser-pane-locked launch-on-own-monitor'; initial = $initialLaunch; restored = $restoredLaunch; restoredOverlay = $overlayLaunch; parkedMonitors = $parkedMonitors }
             Write-Host 'browser-pane-locked launch-on-own-monitor PASS'
             $browser = [VerifyNative]::PaneWindow($script:window)
             if ($browser -eq [IntPtr]::Zero) { throw 'No visible owned docked browser HWND' }

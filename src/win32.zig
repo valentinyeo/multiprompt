@@ -507,6 +507,7 @@ pub extern "user32" fn GetFocus() callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetSystemMenu(HANDLE, BOOL) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetWindowRect(HANDLE, *RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn MonitorFromWindow(HANDLE, DWORD) callconv(WINAPI) HANDLE;
+pub extern "user32" fn MonitorFromRect(*const RECT, DWORD) callconv(WINAPI) HANDLE;
 pub extern "user32" fn MonitorFromPoint(POINT, DWORD) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMonitorInfoW(HANDLE, *MONITORINFO) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDpiForWindow(HANDLE) callconv(WINAPI) u32;
