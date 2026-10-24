@@ -4,6 +4,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| IGSH-717 | Selecting message text and pressing Enter quotes only that selection. | chat-view (`selection-enter-reply`) | branch drag failed; fix awaiting rerun | Run against v0.28.851 as a negative control and the branch on GitHub Windows; first require visible selection, then a nonempty partial quote, focused composer, no send, and inspect both selection screenshots. |
 | IGSH-716 | Restart focuses the chat box; Alt+Q and Alt+M restore typing with Find open or no browser pane. | chat-focus | journey added, not yet run | Run against v0.28.848 as a negative control and the branch on GitHub Windows; inspect UIA values, focused elements and screenshots. |
 | IGSH-675 | While the agent works, Stop is a small square button inside the message box, with Send beside it once you type. | chat-view (`stop-in-box`) | journey added, not yet run | Run the branch journey on GitHub Windows and inspect `stop-in-box.png`; also dispatch it against the latest release tag and require `stop-in-box` to fail. |
 | IGSH-673 | The sidebar status card is one line on every page, with full numbers on hover. | status-card | journey added, not yet run | Run the branch journey on GitHub Windows, run it with tag=v0.28.839 to see the height check fail, and inspect the screenshots. Live usage and VPS numbers need real telemetry. |

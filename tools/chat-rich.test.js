@@ -187,6 +187,45 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
   assert.match(body('chatRelayout'), /old_echo_ids[^]*chatSelectionClear\(\)/);
 });
 
+test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () => {
+  const check = source => {
+    const retry = source.slice(source.indexOf('fn chatEchoRetryAt('), source.indexOf('fn chatEchoRetryHover('));
+    assert.doesNotMatch(retry, /chatEchoPushQueuedNow/);
+    assert.match(retry, /chatEchoSendAgain\(id\)/);
+    assert.match(retry, /chatEchoRemove\(id\)/);
+    const up = source.slice(source.indexOf('        WM_LBUTTONUP => {'), source.indexOf('        WM_LBUTTONDBLCLK => {'));
+    assert.match(up, /if \(app_state.g_chat_sel_dragging\) \{[^]*const selected = chatSelRange\(\);/);
+    assert.match(up, /if \(selected == null and app_state.g_chat_sel_click_count == 1\) \{\s*if \(chatEchoAt\(GET_X\(lp\), GET_Y\(lp\)\)\) \|id\| \{\s*if \(chatOutboxIndexById\(id\)\) \|ei\| \{\s*const entry = app_state.g_chat_outbox.items\[ei\];\s*if \(entry.state == .delivered and !entry.channel_sent\) chatEchoPushQueuedNow\(\);/);
+    assert.match(up, /\[chat\] selection chars=\{d\}/);
+    assert.match(up, /if \(!app_state.g_chat_sel_active\) \{\s*app_state.g_chat_sel_transcript_focus = false/);
+  };
+  const chat = fs.readFileSync('src/chat_render.zig', 'utf8');
+  check(chat);
+  assert.throws(() => check(chat.replace('fn chatEchoRetryAt(x: i32, y: i32) bool {', 'fn chatEchoRetryAt(x: i32, y: i32) bool {\n    chatEchoPushQueuedNow();')));
+  assert.throws(() => check(chat.replace('selected == null and app_state.g_chat_sel_click_count == 1', 'true')));
+});
+
+test('IGSH-717 driver proves painted selection before Enter and retains strict quote checks', () => {
+  const control = fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8');
+  const pixels = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static List<int[]> GreyButtonPixels('));
+  const expression = pixels.match(/if \((\(c.R ==[^]*?)\) count\+\+;/)?.[1];
+  assert.ok(expression);
+  const selected = Function('c', `return ${expression}`);
+  const brush = body('chatSelBrush');
+  const colours = [...brush.matchAll(/RGB\((\d+), (\d+), (\d+)\)/g)].map(([, R, G, B]) => ({ R: +R, G: +G, B: +B }));
+  assert.equal(colours.length, 3);
+  for (const colour of colours) assert.equal(selected(colour), true);
+  for (const value of [0, 35, 88, 255]) assert.equal(selected({ R: value, G: value, B: value }), false);
+  assert.match(pixels, /WindowFromPoint\(points\[0\]\) != hwnd \|\| WindowFromPoint\(points\[1\]\) != hwnd/);
+  assert.match(pixels, /graphics.CopyFromScreen\(points\[0\].X, points\[0\].Y - pad/);
+  const journey = control.slice(control.indexOf("Record 'IGSH-717: genuine SendInput drag"), control.indexOf("Press @(0x1B) 'Esc: cancel the selection reply quote'"));
+  assert.match(journey, /SelectTranscriptText[^]*Snapshot 'selection-enter-reply-selected'[^]*Wait-Until \{\s*\$selectionCheck.selectionPixels = \[VerifyNative\]::TranscriptSelectionPixels[^]*\$selectionCheck.selectionPixels -ge \(\$selectionCheck.points\[1\].X - \$selectionCheck.points\[0\].X\)[^]*before Enter'\s*Press @\(0x0D\)/);
+  assert.match(journey, /\$quoteLines.Count -ne \$quoteLinesBefore \+ 1/);
+  assert.match(journey, /\$quoteChars -le 0 -or \$quoteChars -ge \$message.Length/);
+  assert.match(journey, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
+  assert.match(journey, /\.Length -ne \$stdinBytesBeforeReply/);
+});
+
 test('IGSH-567 fixed pending regions retain selections across compatible capture refreshes', () => {
   const hit = fs.readFileSync('src/chat_hit.zig', 'utf8');
   assert.match(hit, /pub const pending_selection_base: usize = std\.math\.maxInt\(usize\) \/ 2 \+ 1;/);

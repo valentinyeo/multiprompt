@@ -3139,10 +3139,6 @@ fn chatEchoRetryAt(x: i32, y: i32) bool {
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
-    if (entry.state == .delivered and !entry.channel_sent) {
-        chatEchoPushQueuedNow();
-        return true;
-    }
     if (!chat_echo.pendingActions(entry.state).send_again) return false;
     for (0..app_state.g_chat_echo_layout_count) |i| {
         if (app_state.g_chat_echo_layout_ids[i] != id) continue;
@@ -3432,6 +3428,41 @@ fn chatCopyTextAlloc(allocator: std.mem.Allocator, block: ?ChatBlock) ![]u16 {
     return allocator.realloc(out, n);
 }
 
+pub fn chatSelectionReplyKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool, has_selection: bool) bool {
+    return vk == 0x0D and !ctrl and !shift and !alt and has_selection;
+}
+
+pub fn chatSelectionReply(msg: UINT, wp: WPARAM, lp: LPARAM) bool {
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    if (!chatSelectionReplyKey(wp, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0, chatSelRange() != null)) return false;
+    const text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
+        showHeaderNoticeAscii("Could not quote text; try again", 2500, true);
+        return true;
+    };
+    defer std.heap.page_allocator.free(text);
+    app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
+    @import("chat_composer.zig").selectChatReply(text);
+    chatSelectionClear();
+    app_state.g_chat_sel_transcript_focus = false;
+    _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    return true;
+}
+
+test "IGSH-717 only unmodified Enter with a selection replies" {
+    try std.testing.expect(chatSelectionReplyKey(0x0D, false, false, false, true));
+    try std.testing.expect(!chatSelectionReplyKey(0x0D, false, false, false, false));
+    for ([_]bool{ false, true }) |ctrl| {
+        for ([_]bool{ false, true }) |shift| {
+            for ([_]bool{ false, true }) |alt| {
+                if (ctrl or shift or alt) try std.testing.expect(!chatSelectionReplyKey(0x0D, ctrl, shift, alt, true));
+            }
+        }
+    }
+    for ([_]WPARAM{ 0x0A, 0x1B, 0x20, 0x41 }) |vk| {
+        try std.testing.expect(!chatSelectionReplyKey(vk, false, false, false, true));
+    }
+}
+
 pub fn chatCopySelection() void {
     const text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
@@ -3467,6 +3498,31 @@ test "Chat View selection copies displayed ranges with CRLF and block joins" {
     const n = try chatSelectionToClipboard(&out);
     const expected = std.unicode.utf8ToUtf16LeStringLiteral("hello\r\n\r\nworld");
     try std.testing.expectEqualSlices(u16, expected, out[0..n]);
+}
+
+test "IGSH-717 reply text copies only the selected visible range in either direction" {
+    const sample = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} before chosen after\r\n\r\n\u{25cf} other message");
+    @memcpy(app_state.g_chat_capture[0..sample.len], sample);
+    app_state.g_chat_last_len = sample.len;
+    app_state.g_chat_block_count = chatClassifyBlocks(app_state.g_chat_capture[0..sample.len], app_state.g_chat_blocks);
+    const old_echo_count = app_state.g_chat_echo_layout_count;
+    app_state.g_chat_echo_layout_count = 0;
+    defer {
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_echo_layout_count = old_echo_count;
+        chatSelectionClear();
+    }
+    const expected = std.unicode.utf8ToUtf16LeStringLiteral("chosen");
+    const start = std.mem.indexOf(u16, sample, expected).?;
+    for ([_]bool{ false, true }) |reverse| {
+        app_state.g_chat_sel_anchor = if (reverse) start + expected.len else start;
+        app_state.g_chat_sel_caret = if (reverse) start else start + expected.len;
+        app_state.g_chat_sel_active = true;
+        const text = try chatCopyTextAlloc(std.testing.allocator, null);
+        defer std.testing.allocator.free(text);
+        try std.testing.expectEqualSlices(u16, expected, text);
+    }
 }
 
 test "IGSH-567 pending message text uses transcript selection and copy" {
@@ -4120,6 +4176,18 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 app_state.g_chat_sel_dragging = false;
                 _ = ReleaseCapture();
                 _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+                const selected = chatSelRange();
+                var log: [64]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&log, "[chat] selection chars={d}", .{if (selected) |sel| sel.end - sel.start else 0}) catch "");
+                if (selected == null and app_state.g_chat_sel_click_count == 1) {
+                    if (chatEchoAt(GET_X(lp), GET_Y(lp))) |id| {
+                        if (chatOutboxIndexById(id)) |ei| {
+                            const entry = app_state.g_chat_outbox.items[ei];
+                            if (entry.state == .delivered and !entry.channel_sent) chatEchoPushQueuedNow();
+                        }
+                    }
+                }
+                _ = InvalidateRect(hwnd, null, 0);
             }
             if (!app_state.g_chat_sel_active) {
                 app_state.g_chat_sel_transcript_focus = false;
@@ -4244,6 +4312,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_KEYDOWN => {
+            if (chatSelectionReply(msg, wp, lp)) return 0;
             if (chatCopyCodeKeyDown(wp)) {
                 chatCopyLatestCode();
                 return 0;
