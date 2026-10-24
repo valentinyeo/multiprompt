@@ -90,7 +90,7 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
-    if: inputs.feature != 'chat-sync-audit'
+    if: inputs.feature != 'chat-sync-audit' && inputs.feature != 'probe-chrome-pipe3'
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.feature == 'browser-switch-speed' && 60 || 30 }}
     strategy:
@@ -283,5 +283,167 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: verify-${{ env.FEATURE }}
+          path: evidence/
+          if-no-files-found: error
+  probe-chrome-pipe3:
+    if: inputs.feature == 'probe-chrome-pipe3'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build bridge
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
+          if ($LASTEXITCODE -ne 0) { throw 'Bridge build failed' }
+      - name: Compare branded Chrome pipe across profile drives
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $branded = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+          $ext = (Resolve-Path 'extension').Path
+          $theme = Join-Path $ext 'themes\dark'
+          $bridge = (Resolve-Path 'zig-out\bin\zigshell-bridge.exe').Path
+          $logRoot = Join-Path $env:APPDATA 'ZigShell'
+          $logPath = Join-Path $logRoot 'bridge-launch.log'
+          $stderrPath = Join-Path $logRoot 'chrome-launch-err.log'
+          New-Item -ItemType Directory -Force evidence, $logRoot | Out-Null
+          Write-Output "CHROME_VERSION $([System.Diagnostics.FileVersionInfo]::GetVersionInfo($branded).FileVersion) exe=$branded"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.ComponentModel;
+          using System.Diagnostics;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class DetachedBridge {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              struct STARTUPINFO {
+                  public int cb;
+                  public string lpReserved, lpDesktop, lpTitle;
+                  public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+                  public short wShowWindow, cbReserved2;
+                  public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              struct PROCESS_INFORMATION {
+                  public IntPtr hProcess, hThread;
+                  public int dwProcessId, dwThreadId;
+              }
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              static extern bool CreateProcessW(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref STARTUPINFO startup, out PROCESS_INFORMATION process);
+              [DllImport("kernel32.dll")]
+              static extern bool CloseHandle(IntPtr handle);
+              public static Process Start(string command) {
+                  var si = new STARTUPINFO();
+                  si.cb = Marshal.SizeOf(si);
+                  PROCESS_INFORMATION pi;
+                  if (!CreateProcessW(null, new StringBuilder(command), IntPtr.Zero, IntPtr.Zero, false, 0x08000008, IntPtr.Zero, null, ref si, out pi))
+                      throw new Win32Exception(Marshal.GetLastWin32Error());
+                  try { return Process.GetProcessById(pi.dwProcessId); }
+                  finally { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+              }
+          }
+          '@
+
+          function Invoke-Probe([string]$scenario, [string]$profile) {
+            if (Test-Path $profile) { throw "Profile is not fresh: $profile" }
+            New-Item -ItemType Directory -Force -Path $profile | Out-Null
+            Remove-Item $logPath, $stderrPath, (Join-Path $logRoot 'chrome-launch-out.log') -Force -ErrorAction SilentlyContinue
+            $arguments = 'chrome-launch "{0}" "{1}" "{2}" --silent-debugger-extension-api --user-data-dir="{3}" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode --load-extension="{1},{2}" --profile-directory=Default --new-window data:text/html,<title>ZSPANE1-PROBE3</title> --window-position=506,31 --window-size=500,600' -f $branded, $ext, $theme, $profile
+            Write-Output "SCENARIO $scenario profile=$profile length=$($profile.Length) entries=$(@(Get-ChildItem $profile -Force).Count)"
+            Write-Output "COMMAND `"$bridge`" $arguments"
+            $launcher = $null
+            $firstChrome = $null
+            $firstStderr = @()
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            try {
+              $launcher = [DetachedBridge]::Start(('"{0}" {1}' -f $bridge, $arguments))
+              while ($clock.Elapsed.TotalSeconds -lt 25) {
+                if (-not $firstChrome -and (Test-Path $logPath)) {
+                  $currentLog = Get-Content $logPath -Raw
+                  $created = [regex]::Match($currentLog, 'CreateProcessW result=1 pid=(\d+)')
+                  if ($created.Success) {
+                    $firstChrome = [int]$created.Groups[1].Value
+                    Write-Output "first-chrome $scenario pid=$firstChrome"
+                    Start-Sleep -Milliseconds 1500
+                    if (Test-Path $stderrPath) { $firstStderr = @(Get-Content $stderrPath -TotalCount 40) }
+                  }
+                }
+                Start-Sleep -Milliseconds 100
+              }
+              if (-not $firstChrome) { throw "No Chrome process recorded for $scenario" }
+            } finally {
+              if ($launcher) {
+                if (-not $launcher.HasExited) { $launcher.Kill(); $launcher.WaitForExit(5000) | Out-Null }
+                $launcher.Dispose()
+              }
+              $log = if (Test-Path $logPath) { Get-Content $logPath -Raw } else { '' }
+              $log | Set-Content "evidence/$scenario-bridge.log"
+              Write-Output "BRIDGE-LOG-BEGIN $scenario"
+              $log -split '\r?\n' | Select-Object -Last 80 | Write-Output
+              Write-Output "BRIDGE-LOG-END $scenario"
+              $replies = [regex]::Matches($log, '(?m)^CDP reply id=').Count
+              $result = "PROBE $scenario replies=$replies"
+              Write-Output $result
+              $result | Add-Content evidence/probe3.txt
+              $firstStderr | Set-Content "evidence/$scenario-first-chrome-stderr-first40.log"
+              $matches = @($firstStderr | Select-String -Pattern 'DevTools|load-extension|user-data-dir')
+              if ($matches.Count) {
+                $matches | ForEach-Object { Write-Output "STDERR-FIRST40 $scenario pid=$firstChrome $($_.Line)" }
+              } else {
+                Write-Output "STDERR-FIRST40 $scenario pid=$firstChrome NO_MATCH"
+              }
+              if (Test-Path $stderrPath) {
+                Copy-Item $stderrPath "evidence/$scenario-chrome-stderr.log"
+                Get-Content $stderrPath | Select-String -Pattern 'DevTools|load-extension|user-data-dir' | ForEach-Object { Write-Output "STDERR $scenario $($_.Line)" }
+              }
+              $chromePids = @([regex]::Matches($log, 'CreateProcessW result=1 pid=(\d+)') | ForEach-Object { [int]$_.Groups[1].Value } | Select-Object -Unique)
+              foreach ($chromePid in $chromePids) {
+                $process = Get-CimInstance Win32_Process -Filter "ProcessId=$chromePid"
+                if ($process -and $process.Name -eq 'chrome.exe' -and $process.CommandLine.Contains("--user-data-dir=$profile")) {
+                  Write-Output "CLEANUP $scenario chrome-pid=$chromePid"
+                  taskkill /PID $chromePid /T /F | Write-Output
+                }
+              }
+              Start-Sleep -Seconds 3
+            }
+          }
+
+          Invoke-Probe 'c-drive' 'C:\probe-own\own-1'
+          if (Test-Path 'D:\') {
+            New-Item -ItemType Directory -Force 'D:\probe-own' | Out-Null
+            Invoke-Probe 'd-drive-short' 'D:\probe-own\own-2'
+            $runnerProfile = Join-Path $env:RUNNER_TEMP 'probe-own\own-3'
+            Write-Output "RUNNER_TEMP_PROFILE $runnerProfile"
+            Invoke-Probe 'd-runner-temp' $runnerProfile
+          } else {
+            Write-Output 'NO_D_DRIVE'
+            foreach ($scenario in @('d-drive-short', 'd-runner-temp')) {
+              $result = "PROBE $scenario replies=SKIPPED NO_D_DRIVE"
+              Write-Output $result
+              $result | Add-Content evidence/probe3.txt
+            }
+          }
+          $longPrefix = 'multiprompt-verify-' + ('a' * 32) + '\local\ZigShell\BrowserWorkspaces\chrome\own-'
+          $longRelative = $longPrefix + ('b' * (130 - $longPrefix.Length))
+          if ($longRelative.Length -ne 130) { throw 'Expected 130-character nested profile suffix' }
+          Invoke-Probe 'c-long' (Join-Path 'C:\probe-own' $longRelative)
+          exit 0
+      - name: Upload Chrome drive probe evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: probe-chrome-pipe3
           path: evidence/
           if-no-files-found: error
