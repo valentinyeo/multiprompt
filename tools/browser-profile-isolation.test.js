@@ -76,6 +76,22 @@ test("selected isolated Chromium and ordinary Edge cannot share the native comma
     "each native host must serve only the pipe selected by its extension origin");
 });
 
+test("native Chrome own-profile adoption uses the opening budget and retains timeout cleanup", () => {
+  const pane = fs.readFileSync(path.join(__dirname, '..', 'src', 'browser_pane.zig'), 'utf8');
+  const launch = pane.slice(pane.indexOf('fn launchBrowserForShellEx('), pane.indexOf('\npub fn enumCloseStrayZspane('));
+  assert.match(launch, /app_state\.g_browser_adopt_deadline = if \(app_state\.shells\[idx\]\.browser_native and app_state\.g_browser_engine == \.chrome and browserProfileToken\(idx\)\.len > 0\)\s+now \+ BROWSER_PLACEHOLDER_NOT_OPEN_MS\s+else\s+now \+ 6000;/,
+    "only native Chrome own profiles must use the pane opening budget instead of six seconds");
+  assert.match(launch, /SetTimer\(app_state\.g_main_hwnd, TIMER_BROWSER_ADOPT, 150, null\)/);
+  const adopt = pane.slice(pane.indexOf('pub fn adoptBrowserTick('), pane.indexOf('\nfn cancelBrowserAdoptionForShell('));
+  assert.ok(adopt.indexOf('if (ctx.found_hwnd != null)') < adopt.indexOf('if (now >= app_state.g_browser_adopt_deadline'));
+  const timeout = adopt.slice(adopt.indexOf('if (now >= app_state.g_browser_adopt_deadline) {'));
+  assert.match(timeout, /app_state\.shells\[target\]\.browser_launch_tick = 0;/);
+  assert.match(timeout, /PostMessageW\(close_ctx\.found_hwnd, WM_CLOSE, 0, 0\)/);
+  assert.match(timeout, /EnumWindows\(&enumCloseStrayZspane, 0\)/);
+  const closeStrays = pane.slice(pane.indexOf('pub fn enumCloseStrayZspane('), pane.indexOf('\npub fn enumCloseOrphanPane('));
+  assert.match(closeStrays, /PostMessageW\(hwnd, WM_CLOSE, 0, 0\)/);
+});
+
 test("branded stable Chrome journey opens a cold own-profile pane and binds its native pipe on every launch", () => {
   const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
   const feature = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/features/browser-own-profile.md'), 'utf8');

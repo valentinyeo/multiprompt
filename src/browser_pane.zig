@@ -2816,7 +2816,10 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     @memcpy(app_state.shells[idx].browser_bind_nonce[0..nonce_slice.len], nonce_slice);
     app_state.shells[idx].browser_bind_nonce_len = @intCast(nonce_slice.len);
     publishInboxState();
-    app_state.g_browser_adopt_deadline = now + 6000;
+    app_state.g_browser_adopt_deadline = if (app_state.shells[idx].browser_native and app_state.g_browser_engine == .chrome and browserProfileToken(idx).len > 0)
+        now + BROWSER_PLACEHOLDER_NOT_OPEN_MS
+    else
+        now + 6000;
     browserTraceN("launchBrowserForShell idx=", idx);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch nonce=", nonce_slice);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
