@@ -91,6 +91,25 @@ def pane_candidates(capture):
     return candidates
 
 
+def tool_path(text, inputs, cwd):
+    match = re.match(r'^[A-Z][a-z]+ing (\S.*)$', normalize(text)[:60])
+    if not match:
+        return False
+    for key in ('file_path', 'path', 'notebook_path'):
+        value = inputs.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        file = Path(value)
+        paths = [str(file)]
+        if file.is_relative_to(Path.home()):
+            paths.append('~' + str(file)[len(str(Path.home())):])
+        if cwd and file.is_relative_to(cwd):
+            paths.append(str(file.relative_to(cwd)))
+        if any(normalize(path).startswith(match[1]) or match[1] == normalize(path) + '…' for path in paths):
+            return True
+    return False
+
+
 def transcript_evidence(reader, path, wire, finding):
     fields = wire.splitlines()[0].split('\t')
     base, end = int(fields[5]), int(fields[6])
@@ -138,6 +157,9 @@ def transcript_evidence(reader, path, wire, finding):
                             value, record = part.get('thinking', ''), 'thinking'
                         elif part.get('type') == 'tool_use':
                             value, record = (part.get('input') or {}).get('description', ''), 'tool_activity'
+                            if tool_path(finding['text'], part.get('input') or {}, event.get('cwd')):
+                                matches = True
+                                break
                         else:
                             continue
                         if isinstance(value, str) and normalize(finding['text'])[:60] in normalize(value.replace('**', '').replace('`', '')):
