@@ -243,6 +243,7 @@ const BrowserAdoptCtx = @import("app_state.zig").BrowserAdoptCtx;
 const BrowserResolveJob = @import("app_state.zig").BrowserResolveJob;
 const BrowserResolveInflight = @import("app_state.zig").BrowserResolveInflight;
 const BROWSER_RESOLVE_STALE_MS = @import("app_state.zig").BROWSER_RESOLVE_STALE_MS;
+const BROWSER_RESOLVE_RETRY_BUDGET_MS = @import("app_state.zig").BROWSER_RESOLVE_RETRY_BUDGET_MS;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
 const browser_onscreen = @import("browser_onscreen.zig");
 const BROWSER_CRASH_RELAUNCH_DELAY_MS = @import("app_state.zig").BROWSER_CRASH_RELAUNCH_DELAY_MS;
@@ -2329,13 +2330,48 @@ pub fn startBrowserWindowResolve(idx: u32) void {
     app_state.g_browser_resolve_inflight[slot] = .{ .shell_id = shell_id, .started = now, .nonce = job.nonce, .nonce_len = nonce_len };
 }
 
+fn browserResolveBeforeDeadline(now: u64, deadline: u64) bool {
+    return now < deadline;
+}
+
+test "IGSH-738 browser resolve retries stop at the budget" {
+    const started: u64 = 1000;
+    const deadline = started + BROWSER_RESOLVE_RETRY_BUDGET_MS;
+    try std.testing.expect(browserResolveBeforeDeadline(started, deadline));
+    try std.testing.expect(browserResolveBeforeDeadline(deadline - 1, deadline));
+    try std.testing.expect(!browserResolveBeforeDeadline(deadline, deadline));
+    try std.testing.expect(!browserResolveBeforeDeadline(deadline + 1, deadline));
+}
+
 fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
     crash_recorder.guardThread();
     browser_command_profile = job.profile;
-    const resolved = if (job.nonce_len > 0)
-        resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
-    else
-        resolveBrowserWindowIdForShell(job.shell_id);
+    const deadline = GetTickCount64() + BROWSER_RESOLVE_RETRY_BUDGET_MS;
+    var resolved: ?i64 = null;
+    while (browserResolveBeforeDeadline(GetTickCount64(), deadline)) {
+        if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
+            std.heap.page_allocator.destroy(job);
+            return;
+        }
+        resolved = if (job.nonce_len > 0)
+            resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
+        else
+            resolveBrowserWindowIdForShell(job.shell_id);
+        if (resolved != null) break;
+        for (&app_state.g_browser_resolve_inflight) |*entry| {
+            if (entry.shell_id == job.shell_id and std.mem.eql(u8, entry.nonce[0..entry.nonce_len], job.nonce[0..job.nonce_len])) {
+                entry.started = GetTickCount64();
+                break;
+            }
+        }
+        const now = GetTickCount64();
+        if (!browserResolveBeforeDeadline(now, deadline)) break;
+        Sleep(@intCast(@min(@as(u64, 250), deadline - now)));
+    }
+    if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
+        std.heap.page_allocator.destroy(job);
+        return;
+    }
     job.window_id = resolved orelse 0;
     if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_RESOLVED, 0, @bitCast(@intFromPtr(job))) == 0)
         std.heap.page_allocator.destroy(job);
