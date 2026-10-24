@@ -489,6 +489,28 @@ class ChatSyncAuditTest(unittest.TestCase):
             evidence = audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=content))
             self.assertEqual(evidence[0]['record'], 'thinking')
 
+    def test_igsh730_read_tool_path_status_is_tool_activity(self):
+        reader = audit.load_reader()
+        file = Path.home() / 'demo-config/projects/-demo' / ('a' * 40) / 'tool-results/result.txt'
+        event = dict(type='assistant', cwd=str(Path.home() / 'demo-config'), timestamp='2026-01-01T00:00:00Z',
+                     message=dict(role='assistant', content=[dict(type='tool_use', name='Read', input=dict(file_path=str(file)))]))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(json.dumps(event) + '\n')
+            wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            text = ('Reading ~/demo-config/projects/-demo/' + 'a' * 40)[:80]
+            finding = dict(kind='pane_missing', text=text)
+            finding['transcript_lines'] = audit.transcript_evidence(reader, path, wire, finding)
+            self.assertEqual(finding['transcript_lines'], [dict(line=1, timestamp=event['timestamp'],
+                                                              location='in_window', record='tool_activity')])
+            self.assertTrue(audit.not_drift(finding, wire))
+            self.assertEqual(audit.transcript_evidence(reader, path, wire,
+                             dict(kind='pane_missing', text='Reading ~/demo-config/projects/-demo/aaaa, the log shows the cut')), [])
+            evidence = audit.transcript_evidence(reader, path, wire,
+                                                dict(kind='pane_missing', text='Reading projects/-demo/aaaa'))
+            self.assertEqual(evidence, [dict(line=1, timestamp=event['timestamp'],
+                                            location='in_window', record='tool_activity')])
+
     def test_transcript_evidence_system_notice(self):
         reader = audit.load_reader()
         notice = 'A neutral worker is now idle'
