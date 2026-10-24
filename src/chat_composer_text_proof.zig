@@ -74,7 +74,9 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
     defer _ = w.DeleteObject(bitmap);
     const old_bitmap = w.SelectObject(dc, bitmap);
     defer _ = w.SelectObject(dc, old_bitmap);
-    const edit = w.CreateWindowExW(0, L("EDIT"), L("The message box should look as smooth as the chat text."), w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, width, height, null, null, null, null) orelse return error.TestUnexpectedResult;
+    const parent = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, width, height, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = w.CreateWindowExW(0, L("EDIT"), L("The message box should look as smooth as the chat text."), w.WS_CHILD | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, width, height, parent, null, null, null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(edit);
     const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
     var proof: [8]u16 = undefined;
@@ -146,9 +148,12 @@ test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native 
     defer _ = w.DeleteObject(font);
     defer @import("dwrite_text.zig").resetFonts();
     const sample = L("office cafe\u{301}\twrapping stays native and keeps every character\r\nsecond line\r\nthird line\r\nfourth line\r\nfifth line");
-    const edit = w.CreateWindowExW(0, L("EDIT"), sample, w.ES_MULTILINE | w.ES_AUTOVSCROLL | 0x0100, 0, 0, 180, 60, null, null, null, null) orelse return error.TestUnexpectedResult;
+    const parent = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 180, 60, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = w.CreateWindowExW(0, L("EDIT"), sample, w.WS_CHILD | w.ES_MULTILINE | w.ES_AUTOVSCROLL | 0x0100, 0, 0, 180, 60, parent, null, null, null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(edit);
     _ = w.SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
+    _ = w.ShowScrollBar(edit, w.SB_VERT, 1);
     const lines = w.SendMessageW(edit, 0x00BA, 0, 0);
     std.debug.print("IGSH-731 geometry lines={d}\n", .{lines});
     try std.testing.expect(lines > 5);
