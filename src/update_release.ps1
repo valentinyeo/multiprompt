@@ -58,6 +58,16 @@ function Save-Update([string]$Target, [string]$Version, [string]$Architecture) {
         Invoke-WebRequest $assets[$i].browser_download_url -Headers $headers -UseBasicParsing -TimeoutSec 30 -OutFile "$dir/$($files[$i])"
         Assert-Update "$dir/$($files[$i])" "$dir/SHA256SUMS.txt" $names[$i] $Target
     }
+    Remove-Item -LiteralPath "$dir/release-notes.json" -Force -ErrorAction SilentlyContinue
+    if (@($release.assets | Where-Object { $_.name -ceq 'release-notes.json' }).Count -gt 0) {
+        $notesAsset = Get-ReleaseAsset $release 'release-notes.json'
+        Invoke-WebRequest $notesAsset.browser_download_url -Headers $headers -UseBasicParsing -TimeoutSec 15 -OutFile "$dir/notes.tmp"
+        Assert-Update "$dir/notes.tmp" "$dir/SHA256SUMS.txt" 'release-notes.json' $Target
+        if ((Get-Item -LiteralPath "$dir/notes.tmp").Length -gt 1048576) { throw 'Release notes too large' }
+        $notes = Get-Content -LiteralPath "$dir/notes.tmp" -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($notes.version -cne $release.tag_name.TrimStart('v')) { throw 'Release notes version mismatch' }
+        Move-Item -LiteralPath "$dir/notes.tmp" -Destination "$dir/release-notes.json" -Force
+    }
     $marker = "MPVERSION=$($release.tag_name.TrimStart('v'));"
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$dir/download.exe")).Contains($marker)) { throw 'Release executable version mismatch' }
     Move-Item -LiteralPath "$dir/download.exe" -Destination "$dir/next.exe" -Force

@@ -154,6 +154,25 @@ pub fn poll() ?[]const u8 {
 
 var version_buf: [update_check.MAX_VERSION_LEN]u8 = undefined;
 
+pub fn cardNotes(offered: []const u8) @import("update_notes.zig").Notes {
+    if (!initialize()) return .{};
+    const a = std.heap.page_allocator;
+    const exe8 = std.unicode.utf16LeToUtf8Alloc(a, exe[0..exe_len]) catch return .{};
+    defer a.free(exe8);
+    var path_buf: [600]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}.update\\release-notes.json", .{exe8}) catch return .{};
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, 1024 * 1024 + 1) orelse return .{};
+    defer a.free(bytes);
+    if (bytes.len > 1024 * 1024) return .{};
+    const parsed = std.json.parseFromSlice(@import("update_notes.zig").Document, a, bytes, .{ .ignore_unknown_fields = true }) catch return .{};
+    defer parsed.deinit();
+    if (update_check.versionNewer(parsed.value.version, offered)) return .{};
+    for (parsed.value.releases) |release| {
+        if (std.mem.eql(u8, release.version, offered)) return @import("update_notes.zig").pick(parsed.value.releases, APP_VERSION, offered);
+    }
+    return .{};
+}
+
 pub fn hasStaged() bool {
     return initialize() and update_check.statFile(&staged) != null;
 }

@@ -18,13 +18,22 @@ if (root === '--prepare-key') {
   process.exit(0);
 }
 const wrong = generateKeyPairSync('ed25519');
-for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true]]) {
+for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true], ['9.10.0', false]]) {
   const dir = path.join(root, `v${version}`);
   fs.mkdirSync(dir, { recursive: true });
   const app = Buffer.concat([fs.readFileSync(path.join(root, broken ? 'broken.exe' : 'fixture.exe')), Buffer.from(`MPVERSION=${version};`)]);
   const bridge = Buffer.concat([fs.readFileSync(path.join(root, 'fixture.exe')), Buffer.from(`BRIDGEVERSION=${version};`)]);
   const names = ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip'];
   for (const [i, bytes] of [app, bridge, fs.readFileSync(path.join(root, 'extension.zip'))].entries()) fs.writeFileSync(path.join(dir, names[i]), bytes);
+  const releases = version === '9.10.0' ? [
+    { version: '9.8.0', changes: ['Older change.'] },
+    { version: '9.9.0', changes: ['Middle change.', 'Another middle change.', 'Last middle change.'] },
+    { version: '10.0.0', changes: ['Not offered yet.'] },
+    { version: '0.0.0', changes: ['Already installed.'] },
+    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Tabs open sooner.', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
+  ] : [{ version, changes: ['Typing feels faster.'] }];
+  fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
+  names.push('release-notes.json');
   const sums = Buffer.from(names.map(name => `${createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}  ${name}\n`).join(''));
   fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt'), sums);
   fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt.sig'), sign(null, sums, privateKey));
