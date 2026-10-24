@@ -2304,8 +2304,8 @@ try {
             $typingCrop.Top = $composerFrame.Top - 1
             $typingCrop.Right = [Math]::Min($composerFrame.Right - 1, $row[2] + 5 * $em)
             $typingCrop.Bottom = [Math]::Min($composerFrame.Bottom, $row[3] + 2)
-            $inkRect = @{ left = $prefixRow[0] - $typingCrop.Left; top = $prefixRow[1] - $typingCrop.Top; right = $prefixRow[2] - $typingCrop.Left; bottom = $prefixRow[3] - $typingCrop.Top }
-            $rowRect = @{ left = $row[0] - $typingCrop.Left; top = $row[1] - $typingCrop.Top; right = $row[2] - $typingCrop.Left; bottom = $row[3] - $typingCrop.Top }
+            $inkRect = @{ left = [Math]::Max($prefixRow[0], $typingCrop.Left) - $typingCrop.Left; top = [Math]::Max($prefixRow[1], $typingCrop.Top) - $typingCrop.Top; right = [Math]::Min($prefixRow[2], $typingCrop.Right) - $typingCrop.Left; bottom = [Math]::Min($prefixRow[3], $typingCrop.Bottom) - $typingCrop.Top }
+            $rowRect = @{ left = [Math]::Max($row[0], $typingCrop.Left) - $typingCrop.Left; top = [Math]::Max($row[1], $typingCrop.Top) - $typingCrop.Top; right = [Math]::Min($row[2], $typingCrop.Right) - $typingCrop.Left; bottom = [Math]::Min($row[3], $typingCrop.Bottom) - $typingCrop.Top }
             Press @(0x11, 0x41) 'Ctrl+A: select settled sentence before typing burst'
             Press @(0x08) 'Backspace: empty owned composer before typing burst'
             Assert-ChatTyping $sentence 'composer-typing-burst' {

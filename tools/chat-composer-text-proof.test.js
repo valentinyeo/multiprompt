@@ -211,6 +211,30 @@ test('IGSH-760 rejects blank, short, stalled or non-typing captures and malforme
   assert.equal(evaluateTypingFrames(frames, typingMetadata).passed, false);
 });
 
+test('IGSH-760 capture rectangles intersect the screen crop before becoming bitmap-local half-open bounds', async () => {
+  const { runInNewContext } = require('node:vm');
+  const { evaluateTypingFrames } = await import('./chat-composer-text-proof.mjs');
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const rectangles = (row, prefixRow, typingCrop) => Object.fromEntries(['inkRect', 'rowRect'].map(name => {
+    const assignment = control.match(new RegExp(`\\$${name} = @\\{([^}]+)\\}`));
+    assert.ok(assignment, name);
+    const rect = Object.fromEntries([...assignment[1].matchAll(/(left|top|right|bottom)\s*=\s*([^;]+)/g)].map(([, key, expression]) => [key, runInNewContext(expression.replace(/\[Math\]::(Min|Max)/g, (_, method) => `Math.${method.toLowerCase()}`).replace(/\$(row|prefixRow|typingCrop)\b/g, '$1'), { row, prefixRow, typingCrop })]));
+    return [name, rect];
+  }));
+  const actual = rectangles([105, 201, 432, 227], [105, 201, 159, 227], { Left: 100, Top: 200, Right: 512, Bottom: 223 });
+  assert.deepEqual(actual, { inkRect: { left: 5, top: 1, right: 59, bottom: 23 }, rowRect: { left: 5, top: 1, right: 332, bottom: 23 } });
+  assert.deepEqual(rectangles([-95, -99, 232, -73], [-95, -99, -41, -73], { Left: -100, Top: -100, Right: 312, Bottom: -77 }), actual);
+  const { frames, metadata: typingMetadata } = typingFixture();
+  const clipped = rectangles([99, 199, 285, 240], [99, 199, 140, 240], { Left: 100, Top: 200, Right: 280, Bottom: 232 });
+  assert.deepEqual(clipped, { inkRect: { left: 0, top: 0, right: 40, bottom: 32 }, rowRect: { left: 0, top: 0, right: 180, bottom: 32 } });
+  assert.equal(evaluateTypingFrames(frames, { ...typingMetadata, ...clipped }).passed, true);
+  for (const name of ['inkRect', 'rowRect']) {
+    assert.throws(() => evaluateTypingFrames(frames, { ...typingMetadata, [name]: { ...typingMetadata[name], bottom: 33 } }), /Invalid typing rectangle/);
+  }
+  const outside = rectangles([300, 200, 400, 232], [300, 200, 340, 232], { Left: 100, Top: 200, Right: 280, Bottom: 232 });
+  assert.throws(() => evaluateTypingFrames(frames, { ...typingMetadata, ...outside }), /Invalid typing rectangle/);
+});
+
 test('IGSH-760 capture is concurrent screen BitBlt during owned keyboard input, not a forced settled repaint', () => {
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
   const capture = control.slice(control.indexOf('    public static Dictionary<string, object> ComposerTypingFrames('), control.indexOf('    public static int[] ReadSwitchScreenPatch('));
