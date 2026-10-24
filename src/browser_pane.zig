@@ -1002,7 +1002,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     }
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
     appendBrowserWideAscii(&params, &pos, launch_dir);
-    appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode ");
+    appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode ");
     const extension_path = edgeExtensionPath();
     if (extension_path.len > 0) {
         appendBrowserWideAscii(&params, &pos, "--load-extension=\"");
@@ -1389,6 +1389,7 @@ pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate
             launchBrowserForShell(idx);
             repositionActive();
             updateBrowserVisibility();
+            if (activate) @import("focus.zig").requestNativeBrowserFocus();
             _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         }
         return;
@@ -1441,6 +1442,7 @@ pub fn openBrowserPaneForShell(idx: u32, raw_url: []const u8) void {
     repositionActive();
     updateBrowserVisibility();
     armBrowserVisibilitySettle(12);
+    if (idx == app_state.active_shell) @import("focus.zig").requestNativeBrowserFocus();
     invalidateSidebar();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
@@ -2673,6 +2675,10 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
         parkBrowserWindow(hwnd);
         positionActiveBrowser();
         armBrowserVisibilitySettle(12);
+        @import("focus.zig").focusGuardReadMouse();
+        if (@import("focus.zig").browserFocusRequestMatches(app_state.g_focus_browser_shell_id, app_state.shells[idx].shell_id, foregroundIsOurs())) {
+            @import("focus.zig").requestNativeBrowserFocus();
+        }
     } else {
         parkBrowserWindow(hwnd);
     }

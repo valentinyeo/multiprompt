@@ -4,6 +4,7 @@
 
 - Real Ctrl+Tab latency in console view and Chat View, each with browser panes off, warm, and freshly frozen.
 - Browser-on completion requires the target session's solid-color page to be painted on screen, not just a visible Chrome HWND.
+- IGSH-724 setup checks Alt+Q from the native address bar back to console or composer and then into the page: Space, Down, j and k must each update the synthetic page's key counter in its title. F6 must still reach the address bar; reopening the existing pane through the palette must send Space into the page again. Both console and Chat View retain exact input identity and unsent drafts.
 - Separate window-visible, wake-flag-cleared and painted timings distinguish docking from compositor latency.
 - Every sample must be a real switch: before input the other session must be the visible foreground one and the target must not be ready, and afterwards the app log must hold exactly one `switch-timing:` line to the target (plus the freeze, Ctrl+Tab and wake lines for frozen samples), or the journey fails.
 - The named `switch-gap` case fails if either view's warm or frozen browser-on median minus browser-off median exceeds 50 ms, or any required end state cannot be reached.
