@@ -250,7 +250,7 @@ fn buildChromeLaunchCommand(allocator: std.mem.Allocator, exe: []const u8, args:
     var command = std.array_list.Managed(u8).init(allocator);
     errdefer command.deinit();
     try appendChromeArgument(&command, exe);
-    try command.appendSlice(" --remote-debugging-pipe --enable-unsafe-extension-debugging");
+    try command.appendSlice(" --remote-debugging-pipe --enable-unsafe-extension-debugging --disable-background-networking --disable-component-update --disable-default-apps --disable-sync --metrics-recording-only --no-service-autorun --disable-features=Translate,OptimizationHintsExample");
     for (args) |arg| {
         try command.append(' ');
         try appendChromeArgument(&command, arg);
@@ -473,6 +473,13 @@ test "IGSH-738 Chrome command preserves Windows arguments without io-pipes" {
     try std.testing.expectEqualStrings("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", parsed.next().?);
     try std.testing.expectEqualStrings("--remote-debugging-pipe", parsed.next().?);
     try std.testing.expectEqualStrings("--enable-unsafe-extension-debugging", parsed.next().?);
+    try std.testing.expectEqualStrings("--disable-background-networking", parsed.next().?);
+    try std.testing.expectEqualStrings("--disable-component-update", parsed.next().?);
+    try std.testing.expectEqualStrings("--disable-default-apps", parsed.next().?);
+    try std.testing.expectEqualStrings("--disable-sync", parsed.next().?);
+    try std.testing.expectEqualStrings("--metrics-recording-only", parsed.next().?);
+    try std.testing.expectEqualStrings("--no-service-autorun", parsed.next().?);
+    try std.testing.expectEqualStrings("--disable-features=Translate,OptimizationHintsExample", parsed.next().?);
     try std.testing.expect(std.mem.indexOf(u8, command, "--remote-debugging-io-pipes") == null);
     for (args) |arg| try std.testing.expectEqualStrings(arg, parsed.next().?);
     try std.testing.expect(parsed.next() == null);
