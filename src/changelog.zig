@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.861", .items = &.{
+        .{ .text = "Chat View now shows messages without tool activity lines or green check marks.", .ticket = "IGSH-759" },
+    } },
     .{ .ver = "0.28.860", .items = &.{
         .{ .text = "Message box text now looks as smooth as the chat text.", .ticket = "IGSH-731" },
     } },
