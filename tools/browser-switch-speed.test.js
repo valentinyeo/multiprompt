@@ -380,7 +380,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
   assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
   assert.match(app, /browser_frozen != job.frozen\) return;/);
-  const timeout = yaml.match(/timeout-minutes: \$\{\{ matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
+  const timeout = yaml.match(/timeout-minutes: \$\{\{ matrix.feature == 'browser-switch-speed' && (\d+) \|\| \(matrix\.feature == 'browser-own-profile' && \d+ \|\| (\d+)\) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;
   const samples = Number(source.match(/Contains\('frozen_'\)\) \{ (\d+) \}/)[1]);
@@ -406,7 +406,7 @@ test('frozen returns require five fresh app-published freezes per view, native c
   ]) assert.throws(() => assertsFrozen(journey.replace(before, after), control, browser, workflow), `reject frozen regression: ${before}`);
   assert.throws(() => assertsFrozen(journey, control.replace(".Trim() -ceq '1'", '.Trim() -ceq \'0\''), browser, workflow));
   assert.throws(() => assertsFrozen(journey, control, browser.replace('fn setBrowserFrozenMarkerForShell(idx: u32, frozen: bool) void {', 'fn setBrowserFrozenMarkerForShell(idx: u32, frozen: bool) void {\n    if (isRemoteShellKind(app_state.shells[idx].kind)) return;'), workflow));
-  assert.throws(() => assertsFrozen(journey, control, browser, workflow.replace("&& 60 || 30", "&& 30 || 30")));
+  assert.throws(() => assertsFrozen(journey, control, browser, workflow.replace("matrix.feature == 'browser-switch-speed' && 60", "matrix.feature == 'browser-switch-speed' && 30")));
 });
 
 function assertsSwitchExtension(driver) {

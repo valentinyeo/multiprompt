@@ -92,7 +92,7 @@ jobs:
   verify:
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
-    timeout-minutes: ${{ (matrix.feature == 'browser-switch-speed' || matrix.feature == 'browser-own-profile') && 60 || 30 }}
+    timeout-minutes: ${{ matrix.feature == 'browser-switch-speed' && 60 || (matrix.feature == 'browser-own-profile' && 60 || 30) }}
     strategy:
       fail-fast: false
       matrix:
