@@ -163,16 +163,30 @@ fn appendChromeArgument(command: *std.array_list.Managed(u8), arg: []const u8) !
     try command.append('"');
 }
 
-fn buildChromeLaunchCommand(allocator: std.mem.Allocator, exe: []const u8, args: []const []const u8, read_handle: usize, write_handle: usize) ![]u8 {
+fn buildChromeLaunchCommand(allocator: std.mem.Allocator, exe: []const u8, args: []const []const u8) ![]u8 {
     var command = std.array_list.Managed(u8).init(allocator);
     errdefer command.deinit();
     try appendChromeArgument(&command, exe);
-    try command.print(" --remote-debugging-pipe --enable-unsafe-extension-debugging --remote-debugging-io-pipes={d},{d}", .{ read_handle, write_handle });
+    try command.appendSlice(" --remote-debugging-pipe --enable-unsafe-extension-debugging");
     for (args) |arg| {
         try command.append(' ');
         try appendChromeArgument(&command, arg);
     }
     return command.toOwnedSlice();
+}
+
+fn chromePipeReserved2(read_handle: usize, write_handle: usize) [4 + 5 * (1 + @sizeOf(usize))]u8 {
+    var buffer: [4 + 5 * (1 + @sizeOf(usize))]u8 = undefined;
+    std.mem.writeInt(u32, buffer[0..4], 5, .little);
+    @memset(buffer[4..9], 0);
+    buffer[7] = 0x01 | 0x08;
+    buffer[8] = 0x01 | 0x08;
+    const handles = [_]usize{ @intFromPtr(INVALID_HANDLE_VALUE), @intFromPtr(INVALID_HANDLE_VALUE), @intFromPtr(INVALID_HANDLE_VALUE), read_handle, write_handle };
+    for (handles, 0..) |handle, i| {
+        const offset = 9 + i * @sizeOf(usize);
+        std.mem.writeInt(usize, buffer[offset..][0..@sizeOf(usize)], handle, .little);
+    }
+    return buffer;
 }
 
 fn chromeLoadUnpackedMessage(allocator: std.mem.Allocator, id: u32, path: []const u8) ![]u8 {
@@ -184,12 +198,40 @@ fn chromeLoadUnpackedMessage(allocator: std.mem.Allocator, id: u32, path: []cons
     return message.toOwnedSlice();
 }
 
+fn chromeLoadUnpackedFailed(reply: []const u8) bool {
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, reply, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .object) return false;
+    const id = parsed.value.object.get("id") orelse return false;
+    return id == .integer and id.integer == 1 and parsed.value.object.contains("error");
+}
+
 fn drainChromePipe(pipe: windows.HANDLE) void {
     defer _ = CloseHandle(pipe);
     var buffer: [4096]u8 = undefined;
+    var message = std.array_list.Managed(u8).init(std.heap.page_allocator);
+    defer message.deinit();
+    var discard = false;
     while (true) {
         var read: u32 = 0;
         if (ReadFile(pipe, &buffer, buffer.len, &read, null) == 0 or read == 0) return;
+        for (buffer[0..read]) |byte| {
+            if (byte == 0) {
+                if (!discard and chromeLoadUnpackedFailed(message.items)) {
+                    std.debug.print("Chrome Extensions.loadUnpacked failed (CDP id 1).\n", .{});
+                }
+                message.clearRetainingCapacity();
+                discard = false;
+            } else if (!discard) {
+                if (message.items.len >= max_native_message) {
+                    discard = true;
+                } else {
+                    message.append(byte) catch {
+                        discard = true;
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -223,7 +265,7 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         _ = win.CloseHandle(child_write);
     };
     if (win.SetHandleInformation(parent_write, 1, 0) == 0 or win.SetHandleInformation(parent_read, 1, 0) == 0) return error.ChromePipeInheritanceFailed;
-    const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items, @intFromPtr(child_read), @intFromPtr(child_write));
+    const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items);
     defer allocator.free(command);
     const command_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, command);
     defer allocator.free(command_w);
@@ -231,6 +273,9 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
     defer allocator.free(exe_w);
     var si = std.mem.zeroes(win.STARTUPINFOW);
     si.cb = @sizeOf(win.STARTUPINFOW);
+    var reserved2 = chromePipeReserved2(@intFromPtr(child_read), @intFromPtr(child_write));
+    si.cbReserved2 = @intCast(reserved2.len);
+    si.lpReserved2 = &reserved2;
     var pi: win.PROCESS_INFORMATION = undefined;
     if (win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi) == 0) return error.ChromeLaunchFailed;
     defer _ = win.CloseHandle(pi.hProcess);
@@ -249,7 +294,7 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
     _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
 }
 
-test "IGSH-738 Chrome command preserves Windows arguments and passes raw pipe handles" {
+test "IGSH-738 Chrome command preserves Windows arguments without io-pipes" {
     const allocator = std.testing.allocator;
     const args = [_][]const u8{
         "--user-data-dir=C:\\Browser Workspaces\\chrome\\own-adee37bbc9fa6013ec24ccfd",
@@ -263,7 +308,7 @@ test "IGSH-738 Chrome command preserves Windows arguments and passes raw pipe ha
         "",
         "C:\\Unicode-é\\",
     };
-    const command = try buildChromeLaunchCommand(allocator, "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", &args, 123, 456);
+    const command = try buildChromeLaunchCommand(allocator, "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", &args);
     defer allocator.free(command);
     const wide = try std.unicode.utf8ToUtf16LeAlloc(allocator, command);
     defer allocator.free(wide);
@@ -272,9 +317,32 @@ test "IGSH-738 Chrome command preserves Windows arguments and passes raw pipe ha
     try std.testing.expectEqualStrings("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", parsed.next().?);
     try std.testing.expectEqualStrings("--remote-debugging-pipe", parsed.next().?);
     try std.testing.expectEqualStrings("--enable-unsafe-extension-debugging", parsed.next().?);
-    try std.testing.expectEqualStrings("--remote-debugging-io-pipes=123,456", parsed.next().?);
+    try std.testing.expect(std.mem.indexOf(u8, command, "--remote-debugging-io-pipes") == null);
     for (args) |arg| try std.testing.expectEqualStrings(arg, parsed.next().?);
     try std.testing.expect(parsed.next() == null);
+}
+
+test "IGSH-738 Chrome reserved2 packs CRT flags and unaligned fd 3 and 4 handles" {
+    const read_handle: usize = 0x12345678;
+    const write_handle: usize = 0x76543210;
+    const buffer = chromePipeReserved2(read_handle, write_handle);
+    try std.testing.expectEqual(@as(usize, 4 + 5 * (1 + @sizeOf(usize))), buffer.len);
+    try std.testing.expectEqualSlices(u8, &.{ 5, 0, 0, 0 }, buffer[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0x09, 0x09 }, buffer[4..9]);
+    const handles = [_]usize{ std.math.maxInt(usize), std.math.maxInt(usize), std.math.maxInt(usize), read_handle, write_handle };
+    for (handles, 0..) |handle, i| {
+        for (0..@sizeOf(usize)) |byte| {
+            const expected: u8 = @truncate(handle >> @intCast(byte * 8));
+            try std.testing.expectEqual(expected, buffer[9 + i * @sizeOf(usize) + byte]);
+        }
+    }
+}
+
+test "IGSH-738 Chrome reports only loadUnpacked id 1 error replies" {
+    try std.testing.expect(chromeLoadUnpackedFailed("{\"id\":1,\"error\":{\"code\":-32602,\"message\":\"denied\"}}"));
+    for ([_][]const u8{ "{\"id\":1,\"result\":{\"id\":\"extension\"}}", "{\"id\":2,\"error\":{}}", "{\"method\":\"event\",\"error\":{}}", "{\"id\":\"1\",\"error\":{}}", "[]", "invalid" }) |reply| {
+        try std.testing.expect(!chromeLoadUnpackedFailed(reply));
+    }
 }
 
 test "IGSH-738 loadUnpacked frames are NUL terminated JSON with escaped main and theme paths" {
