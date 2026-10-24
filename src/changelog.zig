@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.855", .items = &.{
+        .{ .text = "Select text in a chat message and press Enter to quote just that part in your reply.", .ticket = "IGSH-717" },
+    } },
     .{ .ver = "0.28.854", .items = &.{
         .{ .text = "Messages from other sessions waiting in Claude's queue now show as a note from that session, not as your own message.", .ticket = "IGSH-722" },
         .{ .text = "Messages from other sessions now leave the queue once Claude has read them.", .ticket = "IGSH-722" },
