@@ -1,0 +1,48 @@
+name: check-red-run
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/chat-unconfirmed-duplicate.test.js
+      - tools/update-card-notes.test.js
+      - .github/workflows/check-red-run.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check-red-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        include:
+          - check: chat-unconfirmed-duplicate
+            test: tools/chat-unconfirmed-duplicate.test.js
+            prefix: 75e963c5019728d7666b23c8306cce327b5d52c3
+          - check: update-card-notes
+            test: tools/update-card-notes.test.js
+            prefix: e5ef62480b14bb71e3410d52e428144d1e877ca7
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Restore pre-fix source
+        run: git checkout ${{ matrix.prefix }} -- src/
+      - name: Require the check to fail
+        shell: bash
+        run: |
+          set -e
+          status=0
+          node --test "${{ matrix.test }}" > output.log 2>&1 || status=$?
+          cat output.log
+          if [ "$status" -eq 0 ]; then
+            echo "::error::${{ matrix.check }} stayed green on pre-fix source"
+            exit 1
+          fi
+          echo "RED PROVEN ${{ matrix.check }} exit=$status on pre-fix source"
+          exit 0
