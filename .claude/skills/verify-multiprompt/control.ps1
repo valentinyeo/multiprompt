@@ -2206,6 +2206,17 @@ try {
             Select-Theme 'dark' 'composer-dark'
             Snapshot 'before'
             Press @(0x12, 0x43) 'Alt+C: open Chat View for the composer'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
+            } 'owned visible composer after Alt+C'
+            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
+            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
+            [VerifyNative]::BringToForeground($script:window)
+            Record 'Click the owned composer to recover typing focus from the hidden console'
+            [VerifyNative]::ClickClient($handle, 8, 8)
             Wait-ChatFocus 'Edit' 'composer-open'
             $sentence = 'The message box should look as smooth as the chat text.'
             Assert-ChatTyping $sentence 'composer-typed'

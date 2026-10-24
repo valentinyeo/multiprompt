@@ -64,12 +64,11 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
     while (i < n) {
         const origin = position(hwnd, i) orelse break;
         if (origin.y >= clip.bottom) break;
-        const in_selection = selected and i >= start and i < end;
         const begin = i;
         var right = origin.x;
         while (i < n) {
             const point = position(hwnd, i) orelse break;
-            if (point.y != origin.y or (selected and i >= start and i < end) != in_selection) break;
+            if (point.y != origin.y) break;
             const units: usize = if (text[i] >= 0xd800 and text[i] <= 0xdbff and i + 1 < n and text[i + 1] >= 0xdc00 and text[i + 1] <= 0xdfff) 2 else 1;
             const next = position(hwnd, i + units);
             var size: w.SIZE = undefined;
@@ -80,12 +79,18 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
             if (text[i] == '\r' or text[i] == '\n' or text[i] == '\t') break;
             i += units;
         }
-        if (origin.y + metric.cy > clip.top and right > clip.left and origin.x < clip.right) {
-            if (in_selection) {
-                const rect = w.RECT{ .left = origin.x, .top = origin.y, .right = right, .bottom = origin.y + metric.cy };
+        if (origin.y + metric.cy > clip.top and @max(right, origin.x) > clip.left and @min(origin.x, right) < clip.right) {
+            if (i > begin and !dwrite.drawPositioned(dc, text[begin..i], advances[begin..i], origin.x, origin.y, clip, foreground)) return false;
+            if (selected and end > begin and start < i + @as(usize, @intFromBool(i < n and text[i] == '\t'))) {
+                const selected_start: usize = @max(start, begin);
+                const selected_end: usize = @min(end, i + @as(usize, @intFromBool(i < n and text[i] == '\t')));
+                const left_point = position(hwnd, selected_start) orelse origin;
+                const end_point = position(hwnd, selected_end);
+                const selection_right = if (end_point != null and end_point.?.y == origin.y) end_point.?.x else right;
+                const rect = w.RECT{ .left = @max(clip.left, @min(left_point.x, selection_right)), .top = @max(clip.top, origin.y), .right = @min(clip.right, @max(left_point.x, selection_right)), .bottom = @min(clip.bottom, origin.y + metric.cy) };
                 _ = w.FillRect(dc, &rect, selection_brush);
+                if (i > begin and !dwrite.drawPositioned(dc, text[begin..i], advances[begin..i], origin.x, origin.y, rect, w.GetSysColor(14))) return false;
             }
-            if (i > begin and !dwrite.drawPositioned(dc, text[begin..i], advances[begin..i], origin.x, origin.y, clip, if (in_selection) w.GetSysColor(14) else foreground)) return false;
         }
         if (i == begin or (i < n and (text[i] == '\r' or text[i] == '\n' or text[i] == '\t'))) i += 1;
     }
