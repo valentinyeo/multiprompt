@@ -47,13 +47,14 @@ test('IGSH-672 token and folder derivation match SHA-256 in Zig and in the verif
   assert.ok(!/^[0-9a-f]{30}$/.test(expected), 'must not look like a leftover IGSH-224 hash folder');
 });
 
-test('IGSH-672 a workspace that is not opted in launches and routes exactly like before', () => {
+test('IGSH-672 a workspace that is not opted in launches and routes to the shared profile explicitly', () => {
   const launch = body(pane, 'shellExecuteEdgeUrl');
   assert.match(launch, /const user_data_dir = browserUserDataDir\(\);/);
   assert.match(launch, /const launch_dir = if \(own_token\.len > 0\) ownBrowserUserDataDir\(&own_dir_buf, own_token\) else user_data_dir;/);
   const cli = body(pane, 'spawnBrowserCliForShell');
-  assert.match(cli, /if \(own_token\.len == 0\) \{\s+spawnBrowserCliHidden\(cmd\);\s+return;\s+\}/);
-  assert.match(body(own, 'command'), /if \(value\.len == 0\) return std\.fmt\.bufPrint\(buf, "\{s\}", \.\{original\}\);/);
+  assert.match(cli, /browser_own_profile\.command\(&qualified_buf, cmd, own_token\)/);
+  assert.match(cli, /spawnBrowserCliHidden\(qualified\)/);
+  assert.ok(body(own, 'command').includes('if (value.len == 0) "\\\"\\\"" else value'));
   const file = body(pane, 'writeBrowserWindowIdFile');
   assert.match(file, /if \(own_token\.len > 0\) std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n\{s\}\\n", \.\{ wid, own_token \}\) else std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n", \.\{wid\}\)/);
   assert.match(body(pane, 'assignBrowserProfileForLaunch'), /browser_profile_token = std\.mem\.zeroes\(\[32\]u8\);/);

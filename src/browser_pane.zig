@@ -368,10 +368,6 @@ fn ownBrowserUserDataDir(buf: *[1024]u8, own_token: []const u8) []const u8 {
 
 pub fn spawnBrowserCliForShell(idx: u32, cmd: []const u8) void {
     const own_token = browserProfileToken(idx);
-    if (own_token.len == 0) {
-        spawnBrowserCliHidden(cmd);
-        return;
-    }
     var qualified_buf: [WIN32_COMMAND_LINE_CAP]u8 = undefined;
     const qualified = browser_own_profile.command(&qualified_buf, cmd, own_token) catch return;
     spawnBrowserCliHidden(qualified);
@@ -1305,13 +1301,13 @@ pub fn pollBrowserUrlTick() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     if (!app_state.shells[app_state.active_shell].browser_enabled) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd == null) return;
-    if (app_state.shells[app_state.active_shell].browser_window_id == 0) {
-        if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL);
-        return;
-    }
     if (app_state.shells[app_state.active_shell].browser_suspended) return;
     if (IsIconic(app_state.g_main_hwnd) != 0) return;
     if (!foregroundIsOurs()) return;
+    if (app_state.shells[app_state.active_shell].browser_window_id == 0) {
+        startBrowserWindowResolve(app_state.active_shell);
+        return;
+    }
     if (app_state.g_browser_url_poll_pending) return;
     app_state.g_browser_url_poll_pending = true;
     app_state.g_browser_url_poll_shell_id = app_state.shells[app_state.active_shell].shell_id;
@@ -1554,6 +1550,24 @@ fn enumBrowserSnapshot(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     return 1;
 }
 
+fn browserWindowProfileMatches(hwnd: HANDLE, idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    const win = @import("win32.zig");
+    var pid: DWORD = 0;
+    _ = GetWindowThreadProcessId(hwnd, &pid);
+    const process = win.OpenProcess(win.PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) orelse return false;
+    defer _ = CloseHandle(process);
+    const allocator = std.heap.page_allocator;
+    const line = browser_own_profile.processCommandLine(allocator, process) catch return false;
+    defer allocator.free(line);
+    const actual = (browser_own_profile.userDataArgument(allocator, line) catch return false) orelse return false;
+    defer allocator.free(actual);
+    var own_dir_buf: [1024]u8 = undefined;
+    const own_token = browserProfileToken(idx);
+    const expected = if (own_token.len > 0) ownBrowserUserDataDir(&own_dir_buf, own_token) else browserUserDataDir();
+    return expected.len > 0 and std.ascii.eqlIgnoreCase(expected, actual);
+}
+
 fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!edgeWindowClassMatches(hwnd)) return 1;
     if (browserSnapshotContains(hwnd)) return 1;
@@ -1584,6 +1598,7 @@ fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
         }
     }
     if (!found_nonce) return 1;
+    if (!browserWindowProfileMatches(hwnd, app_state.g_browser_adopt_target_idx)) return 1;
     const ctx: *BrowserAdoptCtx = @ptrFromInt(@as(usize, @bitCast(lp)));
     ctx.found_hwnd = hwnd;
     return 0;
@@ -2317,7 +2332,11 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
     }
     if (app_state.g_app_closing or app_state.g_account_locked) return;
     const idx = findShellById(shell_id) orelse return;
-    if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id) or job.window_id <= 0) return;
+    if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id)) return;
+    if (job.window_id <= 0) {
+        if (verboseLoggingEnabled()) debugLog2("[browser-resolve] pending profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
+        return;
+    }
     const bh = app_state.shells[idx].browser_hwnd orelse return;
     if (IsWindow(bh) == 0 or app_state.shells[idx].browser_window_id != 0) return;
     const current = app_state.shells[idx].browser_bind_nonce[0..app_state.shells[idx].browser_bind_nonce_len];
@@ -2723,6 +2742,7 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     defer switch_timing.record(.browser_launch, timing_started);
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
+    if (app_state.g_browser_adopt_target_idx != 0xFFFFFFFF) return;
     const launch_now = GetTickCount64();
     if (app_state.shells[idx].browser_relaunch_after_tick != 0 and launch_now < app_state.shells[idx].browser_relaunch_after_tick) return;
     if (app_state.shells[idx].browser_hwnd) |existing| {
@@ -2761,6 +2781,7 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     app_state.g_browser_adopt_deadline = now + 6000;
     browserTraceN("launchBrowserForShell idx=", idx);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch nonce=", nonce_slice);
+    if (verboseLoggingEnabled()) debugLog2("[browser] launch profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
     app_state.g_browser_adopt_via_extension = !user_initiated and isolatedBrowserHasLivePane(idx) and
         requestInactivePaneWindow(idx, nonce_url);
     if (!app_state.g_browser_adopt_via_extension) {
@@ -2819,6 +2840,7 @@ pub fn adoptBrowserTick() void {
         return;
     }
     const target = app_state.g_browser_adopt_target_idx;
+    defer updateBrowserVisibility();
     const now = GetTickCount64();
     if (target >= app_state.shell_count) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_ADOPT);
@@ -2839,7 +2861,13 @@ pub fn adoptBrowserTick() void {
         app_state.g_browser_adopt_foreground_launch = false;
         app_state.g_browser_adopt_via_extension = false;
         unlockForegroundAfterRequestLaunch();
-        if (verboseLoggingEnabled()) debugLog("[browser] adopted edge window, docking");
+        if (verboseLoggingEnabled()) {
+            var pid: DWORD = 0;
+            _ = GetWindowThreadProcessId(ctx.found_hwnd, &pid);
+            var lbuf: [160]u8 = undefined;
+            const line = std.fmt.bufPrint(&lbuf, "[browser-adopt] shell_id={d} pid={d} profile={s}", .{ app_state.shells[target].shell_id, pid, if (browserProfileToken(target).len > 0) browserProfileToken(target) else "shared" }) catch "";
+            debugLog(line);
+        }
         if (app_state.shells[target].browser_enabled and !webView2OwnsShell(target)) {
             dockBrowserWindow(target, ctx.found_hwnd, foreground_launch);
             @memcpy(app_state.shells[target].browser_bind_nonce[0..adopted_nonce_len], adopted_nonce[0..adopted_nonce_len]);
@@ -3447,7 +3475,7 @@ pub fn updateBrowserVisibility() void {
             if (!app_state.shells[app_state.active_shell].browser_native and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
                 if (IsWindowVisible(app_state.g_urlbar_hwnd) == 0) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_SHOWNOACTIVATE);
             }
-            if (app_state.shells[app_state.active_shell].browser_window_id != 0 and app_state.g_main_hwnd != null) {
+            if (app_state.g_main_hwnd != null) {
                 _ = SetTimer(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL, 2000, null);
             }
         } else {

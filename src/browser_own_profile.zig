@@ -55,10 +55,9 @@ pub fn path(buf: []u8, local: []const u8, engine: []const u8, value: []const u8)
 }
 
 pub fn command(buf: []u8, original: []const u8, value: []const u8) ![]const u8 {
-    if (value.len == 0) return std.fmt.bufPrint(buf, "{s}", .{original});
-    if (!isToken(value) or original.len == 0 or original[0] != '"') return error.InvalidProfileCommand;
+    if ((value.len > 0 and !isToken(value)) or original.len == 0 or original[0] != '"') return error.InvalidProfileCommand;
     const end = (std.mem.indexOfScalarPos(u8, original, 1, '"') orelse return error.InvalidProfileCommand) + 1;
-    return std.fmt.bufPrint(buf, "{s} --profile {s}{s}", .{ original[0..end], value, original[end..] });
+    return std.fmt.bufPrint(buf, "{s} --profile {s}{s}", .{ original[0..end], if (value.len == 0) "\"\"" else value, original[end..] });
 }
 
 pub fn processCommandLine(allocator: std.mem.Allocator, process: windows.HANDLE) ![]u8 {
@@ -172,12 +171,12 @@ test "IGSH-672 own profile folders never name the shared profile or old hash fol
     try std.testing.expectError(error.InvalidEngine, path(&buf, "C:\\Local", "firefox", &value));
 }
 
-test "IGSH-672 commands gain a profile only for an own profile" {
+test "IGSH-726 commands explicitly select shared and own profiles" {
     var value: [TOKEN_LEN]u8 = undefined;
     _ = try token(&value, "ws-own-test");
     var buf: [256]u8 = undefined;
     const original = "\"C:\\Program Files\\bridge.exe\" --window 42 tabs";
-    try std.testing.expectEqualStrings(original, try command(&buf, original, ""));
+    try std.testing.expectEqualStrings("\"C:\\Program Files\\bridge.exe\" --profile \"\" --window 42 tabs", try command(&buf, original, ""));
     const qualified = try command(&buf, original, &value);
     try std.testing.expectEqualStrings("\"C:\\Program Files\\bridge.exe\" --profile own-adee37bbc9fa6013ec24ccfd --window 42 tabs", qualified);
     try std.testing.expectError(error.InvalidProfileCommand, command(&buf, "bridge.exe tabs", &value));

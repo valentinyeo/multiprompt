@@ -1697,20 +1697,33 @@ function Wait-OwnProfilePipe([string]$Token, [string]$Step) {
     } "browser-own-profile ${Step}: native host serves the own profile pipe" 90
 }
 
-function Open-WorkspaceBrowser([string]$Step) {
-    Palette 'open browser'
-    Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
+function Assert-WorkspaceBrowser([string]$Step, [string]$ExpectedRoot = '', [int]$Workspace = -1) {
     Wait-Until {
+        $state = Read-Inbox
+        if ($null -eq $state) { return $false }
+        $activeSessionId = $state.active_shell_id
+        $selected = @($state.shells | Where-Object { $_.sid -eq $activeSessionId })
+        if ($selected.Count -ne 1 -or ($Workspace -ge 0 -and $selected[0].ws -ne $Workspace)) { return $false }
+        $script:browserShellId = $activeSessionId
         $pane = Read-BrowserPane
-        $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero
-    } "browser-own-profile ${Step}: docked pane connected" 60
+        $browser = [VerifyNative]::DockedPaneWindow($script:window)
+        $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and
+            $browser -ne [IntPtr]::Zero -and [VerifyNative]::Title($browser) -notmatch '^ZSPANE'
+    } "browser-own-profile ${Step}: docked pane bound and launch placeholder replaced" 60
     $pane = Read-BrowserPane
     $browser = [VerifyNative]::DockedPaneWindow($script:window)
     if ([VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Docked pane is not owned by the app window' }
     $proof = Get-PaneUserDataDir $browser
-    Save-Json @{ pane = $pane; browser = $proof } ("browser-own-profile-$Step.json")
+    if ($ExpectedRoot -ne '' -and $proof.userDataDir -ine $ExpectedRoot) { throw ('Browser switched to the wrong profile at ' + $Step) }
+    Save-Json @{ pane = $pane; browser = $proof; title = [VerifyNative]::Title($browser) } ("browser-own-profile-$Step.json")
     Focus-BrowserPaneOwner $Step $pane.browser_connection_id
     return $proof
+}
+
+function Open-WorkspaceBrowser([string]$Step) {
+    Palette 'open browser'
+    Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
+    return Assert-WorkspaceBrowser $Step
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot) {
@@ -3857,6 +3870,14 @@ try {
             $engines = @(Get-ChildItem -LiteralPath $ownBase -Force | ForEach-Object { $_.Name })
             $leaves = @(Get-ChildItem -LiteralPath (Join-Path $ownBase 'chrome') -Force | ForEach-Object { $_.Name })
             if ($engines.Count -ne 1 -or $engines[0] -cne 'chrome' -or $leaves.Count -ne 1 -or $leaves[0] -cne $ownToken) { throw 'Own browser profile folder is not exactly one own-<hash> leaf' }
+            Press @(0x12, 0x32) 'Alt+2: switch to stored workspace 0'
+            $null = Assert-WorkspaceBrowser 'shared-return' $sharedRoot 0
+            Press @(0x12, 0x51) 'Alt+Q: focus the shared-profile browser'
+            $null = Assert-WorkspaceBrowser 'shared-altq' $sharedRoot 0
+            Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
+            $null = Assert-WorkspaceBrowser 'own-return' $ownRoot $ownWorkspace
+            Press @(0x12, 0x51) 'Alt+Q: focus the own-profile browser'
+            $null = Assert-WorkspaceBrowser 'own-altq' $ownRoot $ownWorkspace
             Restart-SessionRestore 'own-profile-restart' $false
             Wait-Until {
                 $state = Read-Inbox
@@ -3872,6 +3893,10 @@ try {
             if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile: ' + $restoredProof.userDataDir) }
             Wait-OwnProfilePipe $ownToken 'restored'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'restored opted-in pane bound through its own native host' 60
+            Press @(0x12, 0x32) 'Alt+2: switch to stored workspace 0'
+            $null = Assert-WorkspaceBrowser 'shared-restored-return' $sharedRoot 0
+            Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
+            $null = Assert-WorkspaceBrowser 'own-restored-return' $ownRoot $ownWorkspace
             Save-Json @{ token = $ownToken; workspaceId = $ownWorkspaceId; ownRoot = $ownRoot; sharedRoot = $sharedRoot; shared = $sharedProof; opted = $ownProof; restored = $restoredProof; sharedBefore = $sharedBefore; sharedAfter = $sharedAfter; coreBefore = $coreBefore; coreAfter = $coreAfter } 'browser-own-profile.json'
             $result.checks += @{ name = 'browser-own-profile shared'; userDataDir = $sharedProof.userDataDir }
             $result.checks += @{ name = 'browser-own-profile opted-in'; userDataDir = $ownProof.userDataDir; token = $ownToken }
