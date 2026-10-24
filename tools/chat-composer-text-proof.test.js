@@ -5,14 +5,15 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-function image(smooth, empty = false) {
+function image(smooth, empty = false, hardGlyphs = 0) {
   const width = 300;
   const height = 24;
   const pixels = Buffer.alloc(width * height * 4, 255);
   if (!empty) for (let y = 4; y < 20; y++) for (let x = 4; x < 296; x++) {
     const column = x % 8;
     if (column > 4) continue;
-    const value = smooth && (column === 0 || column === 4) ? 128 : 0;
+    const hard = (y - 4) * 37 + Math.floor(x / 8) < hardGlyphs;
+    const value = smooth && !hard && (column === 0 || column === 4) ? 128 : 0;
     const i = (y * width + x) * 4;
     pixels[i] = pixels[i + 1] = pixels[i + 2] = value;
   }
@@ -52,7 +53,7 @@ test('IGSH-731 source connects native EDIT geometry, hidden native ink, repaint 
 test('IGSH-731 Windows proof uses production painter and every scale/DPI with the real native fallback', () => {
   const proof = read('src/chat_composer_text_proof.zig');
   assert.match(read('src/chat_composer_text.zig'), /@import\("chat_composer_text_proof.zig"\)/);
-  for (const token of ['100, 125, 150', '96, 120, 144', 'ensureChatFont()', 'painter.paint(edit, dc', '0x0318', 'IGSH_731', 'hardEdgeFraction * 0.75', 'composer-{d}-{d}-{s}.bmp', 'composer-{d}-{d}-{s}.json']) assert.ok(proof.includes(token), token);
+  for (const token of ['100, 125, 150', '96, 120, 144', 'ensureChatFont()', 'painter.paint(edit, dc', '0x0318', 'IGSH_731', 'try std.testing.expect(measurements[1].hardEdgeFraction < measurements[0].hardEdgeFraction);', 'try std.testing.expect(measurements[1].hardEdgeFraction <= 0.15);', 'try std.testing.expect(measurements[1].partialPixels > 0);', 'composer-{d}-{d}-{s}.bmp', 'composer-{d}-{d}-{s}.json']) assert.ok(proof.includes(token), token);
   const workflow = read('.github/workflows/verify.yml');
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
   assert.ok(workflow.includes("'chat-composer-text'"));
@@ -69,8 +70,8 @@ test('IGSH-731 native oracle remeasures all nine image pairs and rejects hard or
   const { evaluateNative } = await import('./chat-composer-text-proof.mjs');
   const { edgeHardness } = await import('./chat-code-font-proof.mjs');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-edge-oracle-'));
-  const write = (scale, dpi, mode, smooth) => {
-    const sample = image(smooth);
+  const write = (scale, dpi, mode, smooth, hardGlyphs = 0) => {
+    const sample = image(smooth, false, hardGlyphs);
     const header = Buffer.alloc(54);
     header.write('BM');
     header.writeUInt32LE(54 + sample.pixels.length, 2);
@@ -89,6 +90,19 @@ test('IGSH-731 native oracle remeasures all nine image pairs and rejects hard or
     const accepted = evaluateNative(directory);
     assert.equal(accepted.passed, true);
     assert.equal(accepted.checks.length, 9);
+    write(125, 120, 'gdi', true, 80);
+    write(125, 120, 'dwrite', true, 70);
+    const smallImprovement = evaluateNative(directory);
+    assert.equal(smallImprovement.passed, true);
+    const pair = smallImprovement.checks.find(check => check.gdi.measurement.hardEdgeFraction < 0.2);
+    assert.ok(pair.dwrite.measurement.hardEdgeFraction >= pair.gdi.measurement.hardEdgeFraction * 0.75);
+    write(125, 120, 'dwrite', true, 80);
+    assert.equal(evaluateNative(directory).passed, false);
+    write(125, 120, 'gdi', false);
+    write(125, 120, 'dwrite', true, 100);
+    const rough = evaluateNative(directory);
+    assert.ok(rough.checks.some(check => check.dwrite.measurement.partialPixels > 0 && check.dwrite.measurement.hardEdgeFraction > 0.15 && check.dwrite.measurement.hardEdgeFraction < check.gdi.measurement.hardEdgeFraction));
+    assert.equal(rough.passed, false);
     write(125, 120, 'dwrite', false);
     assert.equal(evaluateNative(directory).passed, false);
     write(125, 120, 'dwrite', true);

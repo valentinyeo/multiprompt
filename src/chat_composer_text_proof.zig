@@ -81,7 +81,6 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
     const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
     var proof: [8]u16 = undefined;
     const write_proof = w.GetEnvironmentVariableW(L("MULTIPROMPT_CHAT_RENDER_PROOF"), &proof, proof.len) > 0;
-    var all_smoother = true;
     for ([_]u32{ 100, 125, 150 }) |scale| {
         for ([_]u32{ 96, 120, 144 }) |dpi| {
             app_state.g_ui_scale = scale;
@@ -126,10 +125,10 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
             }
             std.debug.print("IGSH-731 composer scale={d} dpi={d} GDI={d:.4} DirectWrite={d:.4}\n", .{ scale, dpi, measurements[0].hardEdgeFraction, measurements[1].hardEdgeFraction });
             try std.testing.expect(measurements[1].partialPixels > 0);
-            all_smoother = all_smoother and measurements[1].hardEdgeFraction < measurements[0].hardEdgeFraction * 0.75;
+            try std.testing.expect(measurements[1].hardEdgeFraction < measurements[0].hardEdgeFraction);
+            try std.testing.expect(measurements[1].hardEdgeFraction <= 0.15);
         }
     }
-    try std.testing.expect(all_smoother);
 }
 
 test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native positions" {

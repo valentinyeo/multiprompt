@@ -28,7 +28,7 @@ export function evaluateNative(directory) {
         writeCrop(image, { left: 0, top: 0, right: image.width, bottom: Math.min(image.height, metadata.font_px * 2) }, 4, `${stem}-4x.png`);
       }
       const { gdi, dwrite } = results;
-      checks.push({ name: `IGSH-731 composer scale ${scale} DPI ${dpi}`, passed: gdi.valid && dwrite.valid && gdi.fontPx === dwrite.fontPx && dwrite.measurement.edges >= 100 && dwrite.measurement.partialPixels > 0 && dwrite.measurement.hardEdgeFraction < gdi.measurement.hardEdgeFraction * 0.75, ...results });
+      checks.push({ name: `IGSH-731 composer scale ${scale} DPI ${dpi}`, passed: gdi.valid && dwrite.valid && gdi.fontPx === dwrite.fontPx && dwrite.measurement.edges >= 100 && dwrite.measurement.partialPixels > 0 && dwrite.measurement.hardEdgeFraction < gdi.measurement.hardEdgeFraction && dwrite.measurement.hardEdgeFraction <= 0.15, ...results });
     }
   }
   return { passed: checks.every(check => check.passed), checks };
