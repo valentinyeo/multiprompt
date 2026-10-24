@@ -116,6 +116,7 @@ const GET_Y = @import("startup.zig").GET_Y;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const customColorOr = @import("themes.zig").customColorOr;
 const themeConsoleBg = @import("themes.zig").themeConsoleBg;
+const themeConsoleFg = @import("themes.zig").themeConsoleFg;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const DEV_TOP_PAD = @import("app_state.zig").DEV_TOP_PAD;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
@@ -1082,6 +1083,7 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    defer @import("chat_composer_text.zig").invalidateAfter(hwnd, msg);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
         chatDropFiles(@ptrFromInt(wp));
@@ -1147,23 +1149,30 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         return 0;
     }
 
-    if (msg == WM_PAINT) {
+    if (msg == WM_PAINT or msg == 0x0318) {
         const result = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
+        const dc = if (msg == WM_PAINT) GetDC(hwnd) else @as(HANDLE, @ptrFromInt(wp));
+        if (dc == null) return result;
+        defer if (msg == WM_PAINT) {
+            _ = ReleaseDC(hwnd, dc);
+        };
         var probe: [2]u16 = .{ 0, 0 };
         if (GetWindowTextW(hwnd, &probe, 2) == 0) {
-            const dc = GetDC(hwnd);
-            if (dc != null) {
-                var rc: RECT = std.mem.zeroes(RECT);
-                _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@as(isize, @intCast(@intFromPtr(&rc)))));
-                if (rc.right <= rc.left) {
-                    _ = GetClientRect(hwnd, &rc);
-                    rc.left += uiScaled(2);
-                }
-                _ = SetBkMode(dc, TRANSPARENT);
-                _ = SelectObject(dc, ensureChatFont());
-                _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
-                _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
-                _ = ReleaseDC(hwnd, dc);
+            var rc: RECT = std.mem.zeroes(RECT);
+            _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@as(isize, @intCast(@intFromPtr(&rc)))));
+            if (rc.right <= rc.left) {
+                _ = GetClientRect(hwnd, &rc);
+                rc.left += uiScaled(2);
+            }
+            _ = SetBkMode(dc, TRANSPARENT);
+            _ = SelectObject(dc, ensureChatFont());
+            _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+            _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+        } else if (@import("chat_composer_text.zig").enabled()) {
+            if (!@import("chat_composer_text.zig").paint(hwnd, dc, customColorOr("text", themeConsoleFg()), app_state.g_chat_input_color)) {
+                @import("chat_composer_text.zig").native_paint = true;
+                defer @import("chat_composer_text.zig").native_paint = false;
+                _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
             }
         }
         return result;

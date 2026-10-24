@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -40,6 +40,33 @@ public static class VerifyNative {
     [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
     [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
     [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
+    [DllImport("user32.dll", SetLastError=true)] static extern bool SystemParametersInfo(uint action, uint parameter, IntPtr value, uint flags);
+    public static bool FontSmoothing() {
+        IntPtr value = Marshal.AllocHGlobal(4);
+        try {
+            if (!SystemParametersInfo(0x004A, 0, value, 0)) throw new System.ComponentModel.Win32Exception();
+            return Marshal.ReadInt32(value) != 0;
+        } finally { Marshal.FreeHGlobal(value); }
+    }
+    public static void FontSmoothing(bool enabled) {
+        if (!SystemParametersInfo(0x004B, enabled ? 1u : 0u, IntPtr.Zero, 0)) throw new System.ComponentModel.Win32Exception();
+        if (FontSmoothing() != enabled) throw new InvalidOperationException("Font smoothing setting did not change");
+    }
+    public static int[] ComposerRow(IntPtr hwnd, int length, int em) {
+        Point origin = new Point();
+        if (!ClientToScreen(hwnd, ref origin)) throw new InvalidOperationException("Missing composer client origin");
+        UIntPtr first, last;
+        if (SendMessageTimeout(hwnd, 0x00D6, UIntPtr.Zero, IntPtr.Zero, 2, 2000, out first) == IntPtr.Zero ||
+            SendMessageTimeout(hwnd, 0x00D6, new UIntPtr((uint)(length - 5)), IntPtr.Zero, 2, 2000, out last) == IntPtr.Zero) throw new InvalidOperationException("Missing composer character positions");
+        int x = (short)(first.ToUInt64() & 0xffff), y = (short)((first.ToUInt64() >> 16) & 0xffff);
+        int right = (short)(last.ToUInt64() & 0xffff), lastY = (short)((last.ToUInt64() >> 16) & 0xffff);
+        if (lastY != y || right <= x) throw new InvalidOperationException("Composer sentence did not fit one row");
+        return new int[] { origin.X + x, origin.Y + y, origin.X + right, origin.Y + y + (int)Math.Ceiling(em * 1.6) };
+    }
+    public static void Bmp(string input, string output) {
+        using (var image = new System.Drawing.Bitmap(input))
+        using (var bitmap = image.Clone(new System.Drawing.Rectangle(0, 0, image.Width, image.Height), System.Drawing.Imaging.PixelFormat.Format32bppRgb)) bitmap.Save(output, System.Drawing.Imaging.ImageFormat.Bmp);
+    }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -1015,6 +1042,7 @@ $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
+$originalFontSmoothing = $null
 
 function Save-Json($Value, [string]$Name) {
     ConvertTo-Json -InputObject $Value -Depth 12 | Set-Content -Encoding UTF8 (Join-Path $Evidence $Name)
@@ -1848,6 +1876,10 @@ function Assert-ChatTyping([string]$Text, [string]$Step) {
 }
 
 try {
+    if ($Feature -eq 'chat-composer-text') {
+        $originalFontSmoothing = [VerifyNative]::FontSmoothing()
+        [VerifyNative]::FontSmoothing($false)
+    }
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
@@ -2167,6 +2199,50 @@ try {
             $buildsAfter = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
             if ($buildsAfter -ne $buildsBefore) { throw "Unchanged table rebuilt across tab switch: $buildsBefore -> $buildsAfter" }
             $result.checks += @{ name = 'console-table-switch-return'; tableTab = $tableTab; buildsBefore = $buildsBefore; buildsAfter = $buildsAfter; marker = (Get-Content (Join-Path $scratch 'table-ready.txt') -Raw).Trim(); chatViewSaved = $true }
+        }
+        'chat-composer-text' {
+            $composerCheck = @{ name = 'IGSH-731 composer edges'; passed = $false; fontSmoothing = [VerifyNative]::FontSmoothing() }
+            $result.checks += $composerCheck
+            Select-Theme 'dark' 'composer-dark'
+            Snapshot 'before'
+            Press @(0x12, 0x43) 'Alt+C: open Chat View for the composer'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
+            } 'owned visible composer after Alt+C'
+            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
+            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
+            [VerifyNative]::BringToForeground($script:window)
+            Record 'Click the owned composer to recover typing focus from the hidden console'
+            [VerifyNative]::ClickClient($handle, 8, 8)
+            Wait-ChatFocus 'Edit' 'composer-open'
+            $sentence = 'The message box should look as smooth as the chat text.'
+            Assert-ChatTyping $sentence 'composer-typed'
+            Snapshot 'action'
+            Snapshot 'after'
+            $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $state = Read-Session
+            $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            $em = [int][Math]::Floor(16 * $dpi / 96)
+            $row = [VerifyNative]::ComposerRow([IntPtr]$composer.Current.NativeWindowHandle, $sentence.Length, $em)
+            $frame = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame)) { throw 'Composer frame unavailable' }
+            $rect = @{ left = $row[0] - $frame.Left; top = $row[1] - $frame.Top; right = $row[2] - $frame.Left; bottom = $row[3] - $frame.Top }
+            Save-Json @{ rect = $rect; fontSmoothing = [VerifyNative]::FontSmoothing(); text = $sentence; dpi = $dpi } 'composer-live.json'
+            [VerifyNative]::Bmp((Join-Path $Evidence 'after.png'), (Join-Path $Evidence 'composer-live.bmp'))
+            & node (Join-Path $PSScriptRoot '../../../tools/chat-composer-text-proof.mjs') $Evidence
+            $summary = Get-Content (Join-Path $Evidence 'composer-live-summary.json') -Raw | ConvertFrom-Json
+            $composerCheck.measurement = $summary.measurement
+            $composerCheck.passed = $summary.passed -eq $true
+            $composerCheck.threshold = $summary.threshold
+            if (-not $composerCheck.passed) { throw 'IGSH-731 composer edges: hard-edge fraction must be below 0.18 with system font smoothing OFF' }
+            if (-not $env:RELEASE_TAG) {
+                $native = Get-Content (Join-Path $Evidence 'composer-native-summary.json') -Raw | ConvertFrom-Json
+                $result.checks += @{ name = 'IGSH-731 composer native scale and DPI'; passed = $native.passed; checks = $native.checks }
+                if (-not $native.passed) { throw 'IGSH-731 composer native painter proof failed' }
+            }
         }
         'chat-code-font' {
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'A real CMD prints a fenced code block that Chat View formats from console text; diff previews only come from an agent transcript, so their rows are proven by the branch painter image' }
@@ -4078,6 +4154,7 @@ try {
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $process) { $process.Dispose() }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
+    if ($null -ne $originalFontSmoothing) { [VerifyNative]::FontSmoothing([bool]$originalFontSmoothing) }
     Save-Json $result 'result.json'
 }
 if ($result.status -ne 'passed') { throw ('Verification failed: ' + ($result | ConvertTo-Json -Depth 8 -Compress)) }
