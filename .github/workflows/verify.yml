@@ -285,3 +285,141 @@ jobs:
           name: verify-${{ env.FEATURE }}
           path: evidence/
           if-no-files-found: error
+  probe-chrome-pipe2:
+    if: inputs.feature == 'probe-chrome-pipe2'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Install Chrome for Testing
+        run: npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
+      - name: Build bridge
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
+      - name: Compare Chrome pipe launch commands
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $branded = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+          $ext = (Resolve-Path 'extension').Path
+          $theme = Join-Path $ext 'themes\dark'
+          $bridge = (Resolve-Path 'zig-out\bin\zigshell-bridge.exe').Path
+          $logPath = Join-Path $env:APPDATA 'ZigShell\bridge-launch.log'
+          $root = Join-Path $env:RUNNER_TEMP 'probe2'
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          Write-Output "BRANDED exe=$branded version=$([System.Diagnostics.FileVersionInfo]::GetVersionInfo($branded).FileVersion)"
+          Write-Output "EXTENSION $ext"
+          Write-Output "THEME $theme"
+          Write-Output "BRIDGE $bridge"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.ComponentModel;
+          using System.Diagnostics;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class DetachedBridge {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              struct STARTUPINFO {
+                  public int cb;
+                  public string lpReserved, lpDesktop, lpTitle;
+                  public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+                  public short wShowWindow, cbReserved2;
+                  public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+              }
+              [StructLayout(LayoutKind.Sequential)]
+              struct PROCESS_INFORMATION {
+                  public IntPtr hProcess, hThread;
+                  public int dwProcessId, dwThreadId;
+              }
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              static extern bool CreateProcessW(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref STARTUPINFO startup, out PROCESS_INFORMATION process);
+              [DllImport("kernel32.dll")]
+              static extern bool CloseHandle(IntPtr handle);
+              public static Process Start(string command) {
+                  var si = new STARTUPINFO();
+                  si.cb = Marshal.SizeOf(si);
+                  PROCESS_INFORMATION pi;
+                  if (!CreateProcessW(null, new StringBuilder(command), IntPtr.Zero, IntPtr.Zero, false, 0x08000008, IntPtr.Zero, null, ref si, out pi))
+                      throw new Win32Exception(Marshal.GetLastWin32Error());
+                  try { return Process.GetProcessById(pi.dwProcessId); }
+                  finally { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
+              }
+          }
+          '@
+
+          function Stop-Chrome {
+            $processes = @(Get-Process -Name chrome -ErrorAction SilentlyContinue)
+            $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+            foreach ($process in $processes) {
+              try { $process.WaitForExit() } catch { Write-Output "CHROME-EXIT $_" }
+            }
+          }
+
+          function Invoke-Probe([string]$scenario) {
+            $profile = Join-Path $root $scenario
+            New-Item -ItemType Directory -Path $profile -ErrorAction Stop | Out-Null
+            Remove-Item $logPath -Force -ErrorAction SilentlyContinue
+            $arguments = 'chrome-launch "{0}" "{1}" "{2}" --silent-debugger-extension-api --user-data-dir="{3}" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode --load-extension="{1},{2}" --profile-directory=Default --new-window data:text/html,<title>PROBE</title> --window-position=100,100 --window-size=800,600' -f $branded, $ext, $theme, $profile
+            if ($scenario -eq 'minimal') {
+              $arguments = 'chrome-launch "{0}" "{1}" "{2}" "--user-data-dir={3}" "--no-first-run" "--no-default-browser-check" "--new-window" "data:text/html,<title>PROBE</title>"' -f $branded, $ext, $theme, $profile
+            } elseif ($scenario -eq 'no-silent-flag') {
+              $arguments = $arguments.Replace('--silent-debugger-extension-api ', '')
+            } elseif ($scenario -eq 'no-load-extension') {
+              $arguments = $arguments.Replace(('--load-extension="{0},{1}" ' -f $ext, $theme), '')
+            }
+            Write-Output "SCENARIO $scenario profile=$profile entries=$(@(Get-ChildItem $profile -Force).Count)"
+            Write-Output "COMMAND `"$bridge`" $arguments"
+            $launcher = $null
+            try {
+              if ($scenario -eq 'app-exact-detached') {
+                $launcher = [DetachedBridge]::Start(('"{0}" {1}' -f $bridge, $arguments))
+              } else {
+                $launcher = Start-Process -FilePath $bridge -ArgumentList $arguments -PassThru
+              }
+              Start-Sleep -Seconds 30
+            } catch {
+              Write-Output "PROBE-ERROR $scenario $_"
+            } finally {
+              $log = if (Test-Path $logPath) { Get-Content $logPath -Raw } else { '' }
+              Write-Output "BRIDGE-LOG-BEGIN $scenario"
+              Write-Output $log
+              Write-Output "BRIDGE-LOG-END $scenario"
+              $log | Set-Content "evidence/$scenario.log"
+              $replies = [regex]::Matches($log, '(?m)^CDP reply id=').Count
+              $result = "PROBE $scenario replies=$replies"
+              Write-Output $result
+              $result | Add-Content evidence/probe2.txt
+              Stop-Chrome
+              if ($launcher) {
+                if (-not $launcher.WaitForExit(5000)) {
+                  $launcher | Stop-Process -Force -ErrorAction SilentlyContinue
+                  $launcher.WaitForExit()
+                }
+                $launcher.Dispose()
+              }
+            }
+          }
+
+          Stop-Chrome
+          foreach ($scenario in @('minimal', 'app-exact', 'app-exact-detached', 'app-exact-coldprofile', 'no-silent-flag', 'no-load-extension')) {
+            Invoke-Probe $scenario
+          }
+          exit 0
+      - name: Upload Chrome pipe comparison logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: probe-chrome-pipe2
+          path: evidence/
+          if-no-files-found: error
