@@ -40,7 +40,7 @@ test('IGSH-731 source connects native EDIT geometry, hidden native ink, repaint 
   const main = read('src/main.zig');
   const dwrite = read('src/dwrite_text.zig');
   for (const token of ['0x00D6', '0x00B0', '0x00CE', '0x00BB', 'GetSysColor(13)', 'GetSysColor(14)', 'HideCaret(hwnd)', 'ShowCaret(hwnd)', 'drawPositioned', '0x010D...0x010F']) assert.ok(painter.includes(token), token);
-  assert.match(main, /SetTextColor\(dc, if \(@import\("chat_composer_text.zig"\).enabled\(\)\) app_state.g_chat_input_color else customColorOr\("text", themeConsoleFg\(\)\)\)/);
+  assert.ok(main.includes('SetTextColor(dc, if (@import("chat_composer_text.zig").enabled() and !@import("chat_composer_text.zig").native_paint) app_state.g_chat_input_color else customColorOr("text", themeConsoleFg()))'));
   assert.match(composer, /defer @import\("chat_composer_text.zig"\).invalidateAfter\(hwnd, msg\)/);
   assert.match(composer, /chat_composer_text.zig"\).paint\(hwnd, dc/);
   const api = dwrite.slice(dwrite.indexOf('pub fn drawPositioned'), dwrite.indexOf('\nfn paint('));

@@ -6,11 +6,11 @@ const L = std.unicode.utf8ToUtf16LeStringLiteral;
 extern "user32" fn HideCaret(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 extern "user32" fn ShowCaret(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
-pub threadlocal var failed = false;
+pub threadlocal var native_paint = false;
 
 pub fn enabled() bool {
     var value: [8]u16 = undefined;
-    return !failed and !(w.GetEnvironmentVariableW(L("IGSH_731"), &value, value.len) == 1 and value[0] == '0');
+    return !(w.GetEnvironmentVariableW(L("IGSH_731"), &value, value.len) == 1 and value[0] == '0');
 }
 
 fn position(hwnd: w.HANDLE, index: usize) ?w.POINT {
@@ -112,12 +112,15 @@ pub fn invalidateAfter(hwnd: w.HANDLE, msg: u32) void {
         0x00B7,
         0x00C2,
         0x00C7,
+        0x00CB,
         0x0100...0x0102,
         0x010D...0x010F,
+        0x0113,
         0x0114,
         0x0115,
         0x0200...0x0203,
         0x020A,
+        0x0286,
         0x0300...0x0304,
         => {
             _ = w.InvalidateRect(hwnd, null, 0);

@@ -10,7 +10,7 @@ Scope: DirectWrite composer glyphs at EDIT positions without changing editing be
 - [x] G2: source-only Node regressions pass without invoking native builds or copied Zig fixtures
   CHECK: node --test tools/chat-composer-text-proof.test.js tools/chat-code-font-proof.test.js tools/verify-multiprompt.test.js tools/chat-font-weight.test.js tools/one-font.test.js tools/console-font.test.js tools/font-probe.test.js
   EXPECT: fail 0
-  EVIDENCE: automatic-evidence=v1; definition-sha256=fb60ce65c7359037170a919e75cf746319840d92b0635e2073f6d001f2703d33; exit=0; EXPECT=matched; output-sha256=37b4fa786e5091b052e5df4fcaa85f2c61b8ae41cdf3bd8c5bde595dbb559721; output-bytes=19629; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-IGSH-731; path=169277661364/28 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=fb60ce65c7359037170a919e75cf746319840d92b0635e2073f6d001f2703d33; exit=0; EXPECT=matched; output-sha256=ee18985216e171855171ea187cdf348178b706a2e9b87f18f7e7c6d1a530d0fd; output-bytes=19628; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-IGSH-731; path=169277661364/28 entries
 
 - [x] G3: changed source contains no comments and diff has no whitespace errors
   CHECK: node tools/strip-comments.mjs --check && git diff --check

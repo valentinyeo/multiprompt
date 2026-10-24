@@ -125,3 +125,49 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
         }
     }
 }
+
+test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native positions" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 180, .height = -60 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-18, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer @import("dwrite_text.zig").resetFonts();
+    const sample = L("office cafe\u{301}\twrapping stays native and keeps every character\r\nsecond line\r\nthird line\r\nfourth line\r\nfifth line");
+    const edit = w.CreateWindowExW(0, L("EDIT"), sample, w.ES_MULTILINE | w.ES_AUTOVSCROLL | 0x0100, 0, 0, 180, 60, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = w.SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
+    try std.testing.expect(w.SendMessageW(edit, 0x00BA, 0, 0) > 5);
+    _ = w.SendMessageW(edit, 0x00B1, 2, 34);
+    _ = w.SendMessageW(edit, 0x00C2, 1, @bitCast(@intFromPtr(L("native selection and undo"))));
+    try std.testing.expect(w.SendMessageW(edit, 0x00C6, 0, 0) != 0);
+    _ = w.SendMessageW(edit, 0x00B1, 1, 8);
+    for ([_]isize{ 0, 2 }) |scroll| {
+        _ = w.SendMessageW(edit, 0x00B6, 0, scroll);
+        const first_line = w.SendMessageW(edit, 0x00CE, 0, 0);
+        if (scroll != 0) try std.testing.expect(first_line > 0);
+        const first_char = w.SendMessageW(edit, 0x00BB, @intCast(first_line), 0);
+        const position_before = w.SendMessageW(edit, 0x00D6, @intCast(first_char), 0);
+        const selection_before = w.SendMessageW(edit, 0x00B0, 0, 0);
+        const undo_before = w.SendMessageW(edit, 0x00C6, 0, 0);
+        var before: [256]u16 = undefined;
+        const length_before = w.GetWindowTextW(edit, &before, before.len);
+        @memset(@as([*]u8, @ptrCast(bits.?))[0 .. 180 * 60 * 4], 255);
+        try std.testing.expect(painter.paint(edit, dc, 0, 0xffffff));
+        try std.testing.expectEqual(first_line, w.SendMessageW(edit, 0x00CE, 0, 0));
+        try std.testing.expectEqual(position_before, w.SendMessageW(edit, 0x00D6, @intCast(first_char), 0));
+        try std.testing.expectEqual(selection_before, w.SendMessageW(edit, 0x00B0, 0, 0));
+        try std.testing.expectEqual(undo_before, w.SendMessageW(edit, 0x00C6, 0, 0));
+        var after: [256]u16 = undefined;
+        try std.testing.expectEqual(length_before, w.GetWindowTextW(edit, &after, after.len));
+        try std.testing.expectEqualSlices(u16, before[0..@intCast(length_before)], after[0..@intCast(length_before)]);
+    }
+}
