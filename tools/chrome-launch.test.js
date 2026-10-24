@@ -256,3 +256,92 @@ test('the production retry loop retries errors and silence, stops on success, an
     assert.ok(observed.includes(2), 'the theme reply must be observed');
   }
 });
+
+function routeChromeReply(reply, replies, log = []) {
+  const code = body(bridge, 'routeChromeReply')
+    .replace(/const id = chromeLoadUnpackedReplyId\(reply\) orelse return;/, 'const id = replyId(reply); if (id === null) return;')
+    .replace('defer chrome_replies.mutex.unlock();', '')
+    .replaceAll(' and ', ' && ')
+    .replaceAll(' or ', ' || ')
+    .replace(/logChromeLaunch\([^\n]+/, 'log.push({ id, reply });');
+  vm.runInNewContext(`(() => { ${code} })()`, {
+    reply, chrome_replies: replies, log,
+    replyId: text => {
+      const value = JSON.parse(text);
+      return Number.isInteger(value?.id) && value.id > 0 ? value.id : null;
+    },
+    chromeLoadUnpackedFailed: text => Object.hasOwn(JSON.parse(text), 'error'),
+  });
+}
+
+function chromeReplies() {
+  return { mutex: { lock() {}, unlock() {} }, expected_id: 1, extension_loaded: false, theme_replied: false };
+}
+
+test('production reply routing separates theme, current extension and late extension successes', () => {
+  const replies = chromeReplies();
+  const log = [];
+  routeChromeReply('{"id":2,"result":{"id":"theme"}}', replies, log);
+  assert.equal(replies.theme_replied, true, 'theme reply is observed independently');
+  assert.equal(replies.extension_loaded, false, 'theme success cannot mark extension loaded');
+  routeChromeReply('{"id":1,"error":{"message":"starting"}}', replies, log);
+  assert.equal(replies.extension_loaded, false, 'extension errors remain retryable');
+  replies.expected_id = 3;
+  routeChromeReply('{"id":8,"result":{}}', replies, log);
+  assert.equal(replies.extension_loaded, false, 'unsent reply ids cannot mark extension loaded');
+  routeChromeReply('{"id":1,"result":{"id":"extension"}}', replies, log);
+  assert.equal(replies.extension_loaded, true, 'late success from an earlier attempt is retained');
+  routeChromeReply('{"id":3,"error":{"message":"late error"}}', replies, log);
+  assert.equal(replies.extension_loaded, true, 'late errors cannot undo successful installation');
+  assert.deepEqual(log.map(entry => entry.id), [2, 1, 1, 3]);
+});
+
+function runChromeLoads(onTick, sendFailure = false, theme = 'theme') {
+  const replies = chromeReplies();
+  const sent = [];
+  let ticks = 0;
+  const code = body(bridge, 'loadChromeExtensions')
+    .replace('for (0..8) |attempt|', 'for (let attempt = 0; attempt < 8; attempt++)')
+    .replace('const id: u32 = @intCast(if (attempt == 0) 1 else attempt + 2);', 'const id = attempt === 0 ? 1 : attempt + 2;')
+    .replaceAll('defer chrome_replies.mutex.unlock();', '')
+    .replace(/sendChromeExtension\(([^\n]+)\) catch \{([^]*?)\n            \};/g, 'try { sendChromeExtension($1); } catch { $2\n            }')
+    .replace('for (0..30) |_|', 'for (let tick = 0; tick < 30; tick++)')
+    .replaceAll(' and ', ' && ')
+    .replaceAll(' or ', ' || ')
+    .replaceAll('theme.len', 'theme.length')
+    .replace(/logChromeLaunch\([^\n]+/g, '');
+  vm.runInNewContext(`(() => { ${code} })()`, {
+    allocator: null, pipe: null, extension: 'extension', theme, chrome_replies: replies,
+    sendChromeExtension: (_allocator, _pipe, id, path) => {
+      sent.push({ id, path });
+      if (sendFailure) throw Error('closed pipe');
+    },
+    Sleep: ms => { assert.equal(ms, 25); onTick(++ticks, replies, sent); },
+  });
+  return { replies, sent, ticks };
+}
+
+test('production startup retries errors and silence but stops after extension and theme replies', () => {
+  for (const firstReply of ['error', 'silence']) {
+    const result = runChromeLoads((tick, replies) => {
+      if (tick === 1) {
+        routeChromeReply('{"id":2,"result":{}}', replies);
+        if (firstReply === 'error') routeChromeReply('{"id":1,"error":{}}', replies);
+      }
+      if (tick === 31) routeChromeReply('{"id":3,"result":{"id":"extension"}}', replies);
+    });
+    assert.deepEqual(result.sent.map(entry => entry.id), [1, 2, 3], `${firstReply} triggers a fresh extension request id`);
+    assert.equal(result.replies.extension_loaded, true, 'retry succeeds during profile migration');
+    assert.equal(result.ticks, 31, 'success ends the startup wait promptly');
+  }
+  const silent = runChromeLoads(() => {});
+  assert.equal(silent.sent.filter(entry => entry.path === 'extension').length, 8, 'silent Chrome has bounded attempts');
+  assert.equal(silent.ticks, 240, 'startup retries are bounded to six seconds');
+  const delayedTheme = runChromeLoads((tick, replies) => {
+    if (tick === 1) routeChromeReply('{"id":1,"result":{}}', replies);
+    if (tick === 40) routeChromeReply('{"id":2,"error":{}}', replies);
+  });
+  assert.deepEqual(delayedTheme.sent.map(entry => entry.id), [1, 2], 'loaded extension is not reinstalled while waiting for theme');
+  assert.equal(delayedTheme.ticks, 40, 'theme reply is awaited even after extension success');
+  assert.equal(runChromeLoads(() => {}, true).sent.length, 1, 'broken writes end attempts');
+});
