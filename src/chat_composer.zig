@@ -1951,7 +1951,7 @@ test "IGSH-760 typing presents completed smooth frames without native inline pai
         }
         var text: [32]u16 = undefined;
         const n = GetWindowTextW(edit, &text, text.len);
-        try std.testing.expectEqualSlices(u16, L("seedabcd")[0..7], text[0..@intCast(n)]);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("seedabcd")), text[0..@intCast(n)]);
         std.debug.print("IGSH-760 guarded={} chars=4 inline_color_requests={d} paints={d} offscreen_prints={d} window_prints={d}\n", .{ guarded, inline_paints[mode], Spy.paints, Spy.prints - Spy.window_prints, Spy.window_prints });
         if (guarded) {
             try std.testing.expectEqual(@as(usize, 0), inline_paints[mode]);
