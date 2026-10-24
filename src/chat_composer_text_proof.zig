@@ -95,7 +95,7 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
                 const before = @import("dwrite_text.zig").painted_runs;
                 if (painter.enabled()) {
                     const painted = painter.paint(edit, dc, 0, 0xffffff);
-                    std.debug.print("IGSH-731 geometry painted={} selection={d}\n", .{ painted, selection_before });
+                    std.debug.print("IGSH-731 scale={d} dpi={d} painted={}\n", .{ scale, dpi, painted });
                     try std.testing.expect(painted);
                     try std.testing.expect(@import("dwrite_text.zig").painted_runs > before);
                 } else {
