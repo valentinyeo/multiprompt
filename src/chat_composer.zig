@@ -1592,7 +1592,7 @@ fn composerText(buf: *[16400]u16) []const u16 {
 
 pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) void {
     if (!status.draft_known or app_state.g_chat_composer_hwnd == null or app_state.g_chat_draft_owner_len == 0) return;
-    if (@import("chat_session.zig").chatDeliveryPending(shell_id)) return;
+    if (@import("chat_session.zig").chatDeliveryPending(shell_id, true)) return;
     var composer: [16400]u16 = undefined;
     const text = composerText(&composer);
     const shell = status.draft[0..status.draft_len];

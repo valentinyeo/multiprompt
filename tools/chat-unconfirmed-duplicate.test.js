@@ -30,7 +30,7 @@ function deliveryPending(source) {
     .replace('for (app_state.g_chat_outbox.items) |entry| {', 'for (const entry of outbox) {')
     .replace('@import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue', 'resolve(entry.key); if (idx == null) continue')
     .replaceAll('app_state.shells', 'shells');
-  return new Function('outbox', 'shells', 'resolve', 'shell_id', code);
+  return new Function('outbox', 'shells', 'resolve', 'shell_id', 'include_not_sent', code);
 }
 
 function draftModel() {
@@ -63,7 +63,7 @@ function journey(next, pending = deliveryPending(session)) {
   const a = 'message A';
   draft.onShell(1, '', box, true, 1000);
   const pull = (text, now, focused) => {
-    if (pending(outbox, shells, resolve, 1)) return;
+    if (pending(outbox, shells, resolve, 1, true)) return;
     if (draft.onShell(1, text, box, focused, now) !== 'apply') return;
     box = text;
     draft.applied(text);
@@ -109,8 +109,8 @@ test('IGSH-720 production send, unconfirmed transition and draft pull use the mo
   assert.match(body(send, 'chatTmuxSendFinish'), /entry\.channel_sent = \(job\.written and !job\.rejected\) or job\.retry;/);
   assert.match(body(send, 'chatTmuxSettle'), /\.unconfirmed => \{\s*if \(entry\.state != \.not_sent\) \{\s*entry\.state = \.not_sent;\s*entry\.retryable = true;/);
   const pull = body(composer, 'chatShellDraftPull');
-  assert.ok(pull.indexOf('chatDeliveryPending(shell_id)') < pull.indexOf('shell_draft.onShell('));
-  assert.match(pull, /if \(@import\("chat_session.zig"\)\.chatDeliveryPending\(shell_id\)\) return;/);
+  assert.ok(pull.indexOf('chatDeliveryPending(shell_id, true)') < pull.indexOf('shell_draft.onShell('));
+  assert.match(pull, /if \(@import\("chat_session.zig"\)\.chatDeliveryPending\(shell_id, true\)\) return;/);
   assert.match(pull, /shell_draft\.onShell\([^\n]*\) != \.apply\) return;/);
   assert.match(pull, /SetWindowTextW\(app_state\.g_chat_composer_hwnd, @ptrCast\(&out\)\)/);
   assert.match(pull, /chatDraftNoteEdit\(\)/);
@@ -121,11 +121,14 @@ test('IGSH-720 delivery ownership stays shell-specific and releases on settlemen
   const shells = [{ shell_id: 1 }, { shell_id: 2 }];
   const resolve = key => key === 'one' ? 0 : null;
   const written = { key: 'one', channel_sent: true, state: 'not_sent', write_started: true };
-  assert.equal(pending([written], shells, resolve, 1), true);
-  assert.equal(pending([written], shells, resolve, 2), false);
-  assert.equal(pending([{ ...written, key: 'removed-shell' }], shells, resolve, 1), false);
-  assert.equal(pending([{ ...written, channel_sent: false, write_started: false }], shells, resolve, 1), false);
-  assert.equal(pending([], shells, resolve, 1), false);
+  assert.equal(pending([written], shells, resolve, 1, true), true);
+  assert.equal(pending([written], shells, resolve, 1, false), false);
+  assert.equal(pending([{ ...written, state: 'delivered' }], shells, resolve, 1, false), true);
+  assert.match(session, /chatDeliveryPending\(entry\.key\.shell_id, false\)/);
+  assert.equal(pending([written], shells, resolve, 2, true), false);
+  assert.equal(pending([{ ...written, key: 'removed-shell' }], shells, resolve, 1, true), false);
+  assert.equal(pending([{ ...written, channel_sent: false, write_started: false }], shells, resolve, 1, true), false);
+  assert.equal(pending([], shells, resolve, 1, true), false);
   const draft = draftModel();
   draft.onShell(1, '', '', false, 1000);
   assert.equal(draft.onShell(1, 'new shell draft', '', false, 30000), 'apply');
@@ -133,7 +136,8 @@ test('IGSH-720 delivery ownership stays shell-specific and releases on settlemen
 });
 
 test('IGSH-720 ownership oracle rejects the old unconfirmed exclusion', () => {
-  const old = session.replace('if (!entry.channel_sent) continue;', 'if (!entry.channel_sent or entry.state == .not_sent) continue;');
+  const old = session.replace('if (!entry.channel_sent or (!include_not_sent and entry.state == .not_sent)) continue;', 'if (!entry.channel_sent or entry.state == .not_sent) continue;');
+  assert.notEqual(old, session);
   const pending = deliveryPending(old);
   assert.throws(() => expectJourney('message B', pending), assert.AssertionError);
   assert.deepEqual(journey('message A', pending).sent, ['message A', 'message Amessage A']);

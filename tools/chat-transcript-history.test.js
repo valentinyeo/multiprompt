@@ -135,7 +135,7 @@ fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { return 1; }
 fn chatSelectionClear() void {}
 fn chatEchoMatchActive() void {}
 fn chatFilePollInterval() u64 { return 2000; }
-fn chatDeliveryPending(_: u32) bool { return false; }
+fn chatDeliveryPending(_: u32, _: bool) bool { return false; }
 fn chatFileRequest(key: chat_transcript.Identity) void {
     if (chatHistoryEntry(key)) |e| if (chat_history.retryDue(e.pending, GetTickCount64(), e.next)) { e.pending = true; request_count += 1; };
 }
