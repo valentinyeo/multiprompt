@@ -4169,3 +4169,4 @@ try {
 }
 if ($result.status -ne 'passed') { throw ('Verification failed: ' + ($result | ConvertTo-Json -Depth 8 -Compress)) }
 Write-Output "VERIFIED $Feature with real input and retained evidence"
+exit 0
