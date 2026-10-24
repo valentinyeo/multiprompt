@@ -1608,7 +1608,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (child == app_state.g_chat_composer_hwnd) {
                 refreshChatBrushes();
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
-                _ = SetTextColor(dc, customColorOr("text", themeConsoleFg()));
+                _ = SetTextColor(dc, if (@import("chat_composer_text.zig").enabled()) app_state.g_chat_input_color else customColorOr("text", themeConsoleFg()));
                 _ = SetBkColor(dc, app_state.g_chat_input_color);
                 if (app_state.g_chat_input_brush != null) return @bitCast(@as(usize, @intFromPtr(app_state.g_chat_input_brush.?)));
             }

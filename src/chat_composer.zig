@@ -1082,6 +1082,7 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    defer @import("chat_composer_text.zig").invalidateAfter(hwnd, msg);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
         chatDropFiles(@ptrFromInt(wp));
@@ -1164,6 +1165,15 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
                 _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
                 _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
                 _ = ReleaseDC(hwnd, dc);
+            }
+        } else if (@import("chat_composer_text.zig").enabled()) {
+            const dc = GetDC(hwnd);
+            if (dc != null) {
+                defer _ = ReleaseDC(hwnd, dc);
+                if (!@import("chat_composer_text.zig").paint(hwnd, dc, customColorOr("text", themeConsoleFg()), app_state.g_chat_input_color)) {
+                    @import("chat_composer_text.zig").failed = true;
+                    _ = InvalidateRect(hwnd, null, 1);
+                }
             }
         }
         return result;

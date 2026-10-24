@@ -46,6 +46,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("comdlg32", .{});
     exe.root_module.linkSystemLibrary("shell32", .{});
     exe.root_module.linkSystemLibrary("dwrite", .{});
+    exe.root_module.linkSystemLibrary("usp10", .{});
     exe.root_module.linkSystemLibrary("iphlpapi", .{});
     exe.root_module.linkSystemLibrary("advapi32", .{});
     const stable_opts = b.addOptions();
@@ -90,6 +91,7 @@ pub fn build(b: *std.Build) void {
     dev_exe.root_module.linkSystemLibrary("comdlg32", .{});
     dev_exe.root_module.linkSystemLibrary("shell32", .{});
     dev_exe.root_module.linkSystemLibrary("dwrite", .{});
+    dev_exe.root_module.linkSystemLibrary("usp10", .{});
     dev_exe.root_module.linkSystemLibrary("iphlpapi", .{});
     dev_exe.root_module.linkSystemLibrary("advapi32", .{});
     const dev_opts = b.addOptions();
