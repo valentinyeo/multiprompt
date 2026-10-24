@@ -3943,6 +3943,35 @@ try {
             if ($stableVersion.ProductName -cne 'Google Chrome' -or $stableVersion.ProductMajorPart -lt 137) { throw 'Own-profile regression requires branded Google Chrome 137 or newer' }
             Record 'Switch the app to branded Chrome stable; Chrome for Testing cannot prove the extension bootstrap regression'
             [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $stableChrome)
+            $existingOwn = Get-Process -Id $restoredProof.pid
+            & taskkill.exe /PID $existingOwn.Id /T /F
+            if ($LASTEXITCODE -ne 0 -or -not $existingOwn.WaitForExit(10000)) { throw 'Existing own-profile browser did not exit before stable warm-up' }
+            $existingOwn.Dispose()
+            $stableWarmupLog = Join-Path $config 'bridge-launch.log'
+            $stableWarmupLogStart = if (Test-Path -LiteralPath $stableWarmupLog) { @(Get-Content -LiteralPath $stableWarmupLog).Count } else { 0 }
+            $stableWarmupClock = [Diagnostics.Stopwatch]::StartNew()
+            $stableWarmup = Start-Process -FilePath (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe') -ArgumentList ('chrome-launch "' + $stableChrome + '" "' + $extension + '" "' + (Join-Path $extension 'themes/dark') + '" "--user-data-dir=' + $ownRoot + '" "--no-first-run" "--no-default-browser-check" "--new-window" "data:text/html,<title>ZSPANE-WARM</title>"') -PassThru
+            try {
+                Wait-Until {
+                    if ($stableWarmup.HasExited) { throw 'Stable warm-up bridge exited before loading the extension' }
+                    (Test-Path -LiteralPath $stableWarmupLog) -and
+                        @(Get-Content -LiteralPath $stableWarmupLog | Select-Object -Skip $stableWarmupLogStart | Where-Object { $_ -ceq 'extension loaded' }).Count -gt 0
+                } 'branded Chrome own-profile warm-up loaded the extension' 60
+            } finally {
+                $stableWarmupChrome = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $stableWarmup.Id) | Where-Object { $_.ExecutablePath -ieq $stableChrome } | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+                if (-not $stableWarmup.HasExited) {
+                    & taskkill.exe /PID $stableWarmup.Id /T /F
+                    if ($LASTEXITCODE -ne 0) { throw 'Stable warm-up process tree did not stop' }
+                }
+                foreach ($browser in $stableWarmupChrome) {
+                    if (-not $browser.WaitForExit(10000)) { throw 'Stable warm-up Chrome did not exit' }
+                    $browser.Dispose()
+                }
+                if (-not $stableWarmup.WaitForExit(10000)) { throw 'Stable warm-up bridge did not exit' }
+                $stableWarmup.Dispose()
+                $stableWarmupClock.Stop()
+            }
+            $result.checks += @{ name = 'browser-own-profile stable-warmup'; seconds = $stableWarmupClock.Elapsed.TotalSeconds }
             Restart-SessionRestore 'stable-chrome-switch' $false
             $null = Assert-WorkspaceBrowser 'stable-existing-own' $ownRoot $ownWorkspace
             Press @(0x11, 0x4E) 'Ctrl+N: create a cold branded Chrome workspace'

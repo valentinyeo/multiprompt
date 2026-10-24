@@ -31,6 +31,7 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 
 ## Gotchas
 
+- The branded phase warms the own profile once through the bridge before the app restarts, because a first-run branded Chrome on a loaded runner needs longer than the pane's opening budget.
 - Branded Google Chrome refuses its DevTools pipe when `USERPROFILE` is redirected, so this journey keeps `USERPROFILE` real while `APPDATA` and `LOCALAPPDATA` stay in the scratch.
 - A released executable without this feature is expected to fail at step 4 with `Opted-in workspace has no own browser profile`, because its second pane opens in the shared profile.
 - The opt-in file is read at pane launch, not at app start, so writing it while the app runs is a real user path. Changing it never moves an already open pane.
