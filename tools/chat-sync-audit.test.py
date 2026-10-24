@@ -196,6 +196,39 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
                 self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
 
+    def test_igsh739_cleared_session_without_transcript_is_not_drift(self):
+        reader = audit.load_reader()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+             patch.object(reader, 'claude_session_metadata', return_value=('6aadb489-f042-40ba-a4f7-e4d6cf6e766f', '/home/valentin/projects')), \
+             patch.object(reader, 'conversation_path', return_value=None), \
+             patch.object(reader, 'read_process_cwd', return_value='/home/valentin/projects'), \
+             patch.object(audit, 'run', return_value=''):
+            self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda _: None), [])
+
+    def test_igsh739_text_without_any_transcript_is_still_drift(self):
+        reader = audit.load_reader()
+        capture = '● This neutral assistant reply is real chat content\n' + '\n' * 8
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+             patch.object(reader, 'claude_session_metadata', return_value=('6aadb489-f042-40ba-a4f7-e4d6cf6e766f', '/home/valentin/projects')), \
+             patch.object(reader, 'conversation_path', return_value=None), \
+             patch.object(reader, 'read_process_cwd', return_value='/home/valentin/projects'), \
+             patch.object(audit, 'run', return_value=capture):
+            findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda _: None)
+            self.assertEqual(findings, [dict(kind='transcript_missing', session='neutral', pane='%1',
+                                             text='Live agent transcript could not be resolved')])
+
+    def test_igsh739_slow_transcript_resolution_is_not_drift(self):
+        reader = audit.load_reader()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            with patch.object(reader, 'resolve_tmux_agent', side_effect=[None, ('sid', path)]), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', return_value=''):
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda _: None), [])
+
     def test_igsh662_text_before_running_advisor_is_not_missing_chat(self):
         reader = audit.load_reader()
         text = 'The neutral change is ready for an advisor review before the next step.'

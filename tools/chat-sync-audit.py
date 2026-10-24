@@ -203,9 +203,25 @@ def settle_pending(reader, path, wire, findings, sleep=time.sleep):
     return findings
 
 
-def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep):
+def resolved_with_settle(reader, agent, session, agent_pid, sleep):
     resolved = reader.resolve_tmux_agent(agent, session, agent_pid)
+    for _ in range(0, SETTLE_LIMIT_SECONDS, SETTLE_SECONDS):
+        if resolved:
+            return resolved
+        sleep(SETTLE_SECONDS)
+        resolved = reader.resolve_tmux_agent(agent, session, agent_pid)
+    return resolved
+
+
+def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep):
+    resolved = resolved_with_settle(reader, agent, session, agent_pid, sleep)
     if not resolved:
+        capture = run(['tmux', 'capture-pane', '-p', '-J', '-t', pane, '-S', '-120'])
+        candidates = pane_candidates(capture)
+        if not candidates and agent == 'claude':
+            sid, cwd = reader.claude_session_metadata(agent_pid)
+            if sid and reader.conversation_path('claude', sid, cwd or reader.read_process_cwd(agent_pid)) is None:
+                return []
         return [dict(kind='transcript_missing', session=session, pane=pane, text='Live agent transcript could not be resolved')]
     sid, path = resolved
     truth_sid, _ = reader.claude_session_metadata(agent_pid) if agent == 'claude' else (None, None)
