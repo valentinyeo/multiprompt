@@ -103,7 +103,7 @@ test('the production reply classifier accepts only id 1 errors', () => {
   }
 });
 
-test('the production drain handles split/coalesced frames and keeps draining after errors or oversized frames', () => {
+function drainReplies(chunks, onReply = () => {}, failAppend = false) {
   const code = body(bridge, 'drainChromePipe')
     .replace('defer _ = CloseHandle(pipe);', '')
     .replace('var buffer: [4096]u8 = undefined;', 'const buffer = Buffer.alloc(4096);')
@@ -116,22 +116,25 @@ test('the production drain handles split/coalesced frames and keeps draining aft
     .replace('std.debug.print("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n", .{});', 'stderr.push("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n");')
     .replace('message.items.len', 'message.items.length')
     .replace(/message.append\(byte\) catch \{\s*discard = true;\s*\};/, 'try { message.append(byte); } catch { discard = true; }');
+  const stderr = [];
+  const message = { items: [], append(byte) { if (failAppend && byte === 120) throw Error('allocation failed'); this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
+  vm.runInNewContext(`(() => { ${code} })()`, {
+    Buffer, chunks, message, stderr, max_native_message: 128,
+    chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()),
+    routeChromeReply: bytes => onReply(Buffer.from(bytes).toString()),
+  });
+  assert.equal(chunks.length, 0);
+  return stderr;
+}
+
+test('the production drain handles split/coalesced frames and keeps draining after errors or oversized frames', () => {
   const failure = '{"id":1,"error":{"message":"denied"}}';
   const frames = `{"id":2,"error":{}}\0${failure}\0{"id":1,"result":{}}\0`;
   for (const chunks of [[Buffer.from(frames)], [...Buffer.from(frames)].map(byte => Buffer.from([byte]))]) {
-    const stderr = [];
-    const message = { items: [], append(byte) { this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
-    vm.runInNewContext(`(() => { ${code} })()`, { Buffer, chunks, message, stderr, max_native_message: 128, chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()) });
-    assert.deepEqual(stderr, ['Chrome Extensions.loadUnpacked failed (CDP id 1).\n']);
-    assert.equal(chunks.length, 0);
+    assert.deepEqual(drainReplies(chunks), ['Chrome Extensions.loadUnpacked failed (CDP id 1).\n']);
   }
   for (const failAppend of [false, true]) {
-    const chunks = [Buffer.from(`${'x'.repeat(129)}\0${failure}\0`)];
-    const stderr = [];
-    const message = { items: [], append(byte) { if (failAppend && byte === 120) throw Error('allocation failed'); this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
-    vm.runInNewContext(`(() => { ${code} })()`, { Buffer, chunks, message, stderr, max_native_message: 128, chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()) });
-    assert.equal(stderr.length, 1);
-    assert.equal(chunks.length, 0);
+    assert.equal(drainReplies([Buffer.from(`${'x'.repeat(129)}\0${failure}\0`)], undefined, failAppend).length, 1);
   }
 });
 
@@ -205,4 +208,51 @@ test('only native Chrome own profiles use a detached bridge while adoption remai
   assert.match(identity, /processCommandLine\(allocator, process\)/);
   assert.match(identity, /std.ascii.eqlIgnoreCase\(expected, actual\)/);
   assert.doesNotMatch(identity + body(pane, 'enumBrowserAdopt'), /parent[Pp]id|GetCurrentProcessId/);
+});
+
+test('the production drain routes both extension and theme replies, including split and late replies', () => {
+  const replies = ['{"id":2,"result":{"id":"theme"}}', '{"id":1,"error":{"message":"migrating"}}', '{"id":3,"result":{"id":"extension"}}'];
+  const frames = Buffer.from(`${replies.join('\0')}\0`);
+  for (const chunks of [[frames], [...frames].map(byte => Buffer.from([byte]))]) {
+    const routed = [];
+    drainReplies(chunks, reply => routed.push(reply));
+    assert.deepEqual(routed, replies, 'drain must route extension and theme replies rather than discard them');
+  }
+});
+
+test('the production retry loop retries errors and silence, stops on success, and observes the theme reply', () => {
+  const source = body(bridge, 'loadChromeExtensions');
+  const code = source
+    .replaceAll('try ', '')
+    .replace(/var attempt: u32 = 0;/, 'let attempt = 0;')
+    .replace(/const id: u32 = if \(attempt == 0\) 1 else attempt \+ 2;/, 'const id = attempt === 0 ? 1 : attempt + 2;')
+    .replace(/while \(chromeExtensionNeedsRetry\(\) and attempt < chrome_extension_attempts\) : \(attempt \+= 1\)/, 'for (; chromeExtensionNeedsRetry() && attempt < chrome_extension_attempts; attempt++)')
+    .replaceAll('parent_write.?', 'pipe')
+    .replace(/sendChromeExtension\(([^;]+)\) catch \{\};/g, 'sendChromeExtension($1);')
+    .replace(/logChromeAttempt\(([^;]+)\);/g, 'logChromeAttempt($1);')
+    .replaceAll(' and ', ' && ')
+    .replaceAll(' or ', ' || ')
+    .replaceAll('g_chrome_replies.loaded.load(.acquire)', 'loaded()');
+  for (const scenario of ['error', 'silent', 'success', 'late', 'exhausted', 'exited']) {
+    const sent = [], observed = [];
+    let extensionLoaded = false;
+    vm.runInNewContext(`(() => { ${code} })()`, {
+      allocator: {}, pipe: {}, process: {}, extension: 'extension', theme: 'theme', log: {},
+      chrome_extension_attempts: 8,
+      chromeExtensionNeedsRetry: () => !extensionLoaded,
+      loaded: () => extensionLoaded,
+      sendChromeExtension: (_allocator, _pipe, id, target) => sent.push([id, target]),
+      waitChromeReply: (_process, id) => {
+        observed.push(id);
+        if (id !== 2 && (scenario === 'success' || (scenario !== 'exhausted' && scenario !== 'exited' && sent.filter(([, target]) => target === 'extension').length === 2))) extensionLoaded = true;
+        return scenario !== 'exited';
+      },
+      logChromeAttempt: () => {},
+    });
+    const attempts = sent.filter(([, target]) => target === 'extension');
+    assert.equal(attempts.length, scenario === 'success' || scenario === 'exited' ? 1 : scenario === 'exhausted' ? 8 : 2, scenario);
+    assert.equal(new Set(sent.map(([id]) => id)).size, sent.length, 'every retry needs its own reply id');
+    assert.deepEqual(sent.find(([, target]) => target === 'theme'), [2, 'theme']);
+    assert.ok(observed.includes(2), 'the theme reply must be observed');
+  }
 });
