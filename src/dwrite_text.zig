@@ -330,7 +330,7 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
                 }
             }
             const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(count), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
-            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
+            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), 0, &run, params.?, color, null) < 0) return false;
             break;
         }
     }

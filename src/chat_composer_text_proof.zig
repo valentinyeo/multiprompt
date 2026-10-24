@@ -79,6 +79,7 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
     const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
     var proof: [8]u16 = undefined;
     const write_proof = w.GetEnvironmentVariableW(L("MULTIPROMPT_CHAT_RENDER_PROOF"), &proof, proof.len) > 0;
+    var all_smoother = true;
     for ([_]u32{ 100, 125, 150 }) |scale| {
         for ([_]u32{ 96, 120, 144 }) |dpi| {
             app_state.g_ui_scale = scale;
@@ -93,7 +94,9 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
                 @memset(pixels, 255);
                 const before = @import("dwrite_text.zig").painted_runs;
                 if (painter.enabled()) {
-                    try std.testing.expect(painter.paint(edit, dc, 0, 0xffffff));
+                    const painted = painter.paint(edit, dc, 0, 0xffffff);
+                    std.debug.print("IGSH-731 geometry painted={} selection={d}\n", .{ painted, selection_before });
+                    try std.testing.expect(painted);
                     try std.testing.expect(@import("dwrite_text.zig").painted_runs > before);
                 } else {
                     _ = w.SendMessageW(edit, 0x0318, @intFromPtr(dc), 4);
@@ -121,9 +124,10 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
             }
             std.debug.print("IGSH-731 composer scale={d} dpi={d} GDI={d:.4} DirectWrite={d:.4}\n", .{ scale, dpi, measurements[0].hardEdgeFraction, measurements[1].hardEdgeFraction });
             try std.testing.expect(measurements[1].partialPixels > 0);
-            try std.testing.expect(measurements[1].hardEdgeFraction < measurements[0].hardEdgeFraction * 0.75);
+            all_smoother = all_smoother and measurements[1].hardEdgeFraction < measurements[0].hardEdgeFraction * 0.75;
         }
     }
+    try std.testing.expect(all_smoother);
 }
 
 test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native positions" {
@@ -145,14 +149,19 @@ test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native 
     const edit = w.CreateWindowExW(0, L("EDIT"), sample, w.ES_MULTILINE | w.ES_AUTOVSCROLL | 0x0100, 0, 0, 180, 60, null, null, null, null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(edit);
     _ = w.SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
-    try std.testing.expect(w.SendMessageW(edit, 0x00BA, 0, 0) > 5);
+    const lines = w.SendMessageW(edit, 0x00BA, 0, 0);
+    std.debug.print("IGSH-731 geometry lines={d}\n", .{lines});
+    try std.testing.expect(lines > 5);
     _ = w.SendMessageW(edit, 0x00B1, 2, 34);
     _ = w.SendMessageW(edit, 0x00C2, 1, @bitCast(@intFromPtr(L("native selection and undo"))));
-    try std.testing.expect(w.SendMessageW(edit, 0x00C6, 0, 0) != 0);
+    const undo = w.SendMessageW(edit, 0x00C6, 0, 0);
+    std.debug.print("IGSH-731 geometry undo={d}\n", .{undo});
+    try std.testing.expect(undo != 0);
     _ = w.SendMessageW(edit, 0x00B1, 1, 8);
     for ([_]isize{ 0, 2 }) |scroll| {
         _ = w.SendMessageW(edit, 0x00B6, 0, scroll);
         const first_line = w.SendMessageW(edit, 0x00CE, 0, 0);
+        std.debug.print("IGSH-731 geometry scroll={d} first_line={d}\n", .{ scroll, first_line });
         if (scroll != 0) try std.testing.expect(first_line > 0);
         const first_char = w.SendMessageW(edit, 0x00BB, @intCast(first_line), 0);
         const position_before = w.SendMessageW(edit, 0x00D6, @intCast(first_char), 0);
@@ -161,7 +170,9 @@ test "IGSH-731 painting preserves wrapped tabs selection scroll undo and native 
         var before: [256]u16 = undefined;
         const length_before = w.GetWindowTextW(edit, &before, before.len);
         @memset(@as([*]u8, @ptrCast(bits.?))[0 .. 180 * 60 * 4], 255);
-        try std.testing.expect(painter.paint(edit, dc, 0, 0xffffff));
+        const painted = painter.paint(edit, dc, 0, 0xffffff);
+        std.debug.print("IGSH-731 geometry painted={} selection={d}\n", .{ painted, selection_before });
+        try std.testing.expect(painted);
         try std.testing.expectEqual(first_line, w.SendMessageW(edit, 0x00CE, 0, 0));
         try std.testing.expectEqual(position_before, w.SendMessageW(edit, 0x00D6, @intCast(first_char), 0));
         try std.testing.expectEqual(selection_before, w.SendMessageW(edit, 0x00B0, 0, 0));

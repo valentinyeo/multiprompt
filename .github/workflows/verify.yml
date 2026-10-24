@@ -243,6 +243,7 @@ jobs:
           node tools/chat-code-font-proof.mjs evidence
           if ($LASTEXITCODE -ne 0) { throw 'IGSH-678 painter proof evaluation crashed' }
       - name: Paint composer text at every UI scale and DPI on Windows
+        id: composer-native
         if: env.FEATURE == 'chat-composer-text' && env.RELEASE_TAG == ''
         shell: powershell
         env:
@@ -250,12 +251,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           zig build test-main -Drender-proof=true --summary all
-          if ($LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests failed' }
-          Copy-Item composer-*.bmp, composer-*.json evidence/
+          $nativeExit = $LASTEXITCODE
+          Get-ChildItem composer-*.bmp, composer-*.json -ErrorAction SilentlyContinue | Copy-Item -Destination evidence/
           node tools/chat-composer-text-proof.mjs evidence --native
-          if ($LASTEXITCODE -ne 0) { throw 'IGSH-731 composer native edge proof failed' }
+          if ($nativeExit -ne 0 -or $LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests or edge proof failed' }
       - name: Launch Doctor Drive Evidence Cleanup
-        if: env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
+        if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
