@@ -120,3 +120,27 @@ test("branded stable Chrome journey opens a cold own-profile pane and binds its 
   assert.match(feature, /browser-own-profile-stable\.json/);
   assert.match(feature, /stable-restored-own/);
 });
+
+test("only the own-profile journey keeps USERPROFILE real while browser data and HOME stay disposable", () => {
+  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const redirects = /\$env:APPDATA = Join-Path \$scratch 'roaming'\s+\$env:LOCALAPPDATA = Join-Path \$scratch 'local'\s+if \(\$Feature -ne 'browser-own-profile'\) \{ \$env:USERPROFILE = Join-Path \$scratch 'profile' \}\s+\$env:HOME = Join-Path \$scratch 'profile'/;
+  assert.match(control, redirects);
+  assert.equal(control.match(/\$env:USERPROFILE\s*=/g).length, 1);
+  assert.doesNotMatch(control.replace("if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }", "$env:USERPROFILE = Join-Path $scratch 'profile'"), redirects);
+  assert.doesNotMatch(control.replace("$env:HOME = Join-Path $scratch 'profile'", '$env:HOME = $env:USERPROFILE'), redirects);
+  assert.match(control, /\$ownBase = \[IO.Path\]::GetFullPath\(\(Join-Path \$env:LOCALAPPDATA 'ZigShell\/BrowserWorkspaces'\)\)/);
+});
+
+test("journey cleanup owns only the extension checkout created by this run at its resolved path", () => {
+  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const setup = /\$extension = Join-Path \$env:USERPROFILE 'Documents\/GitHub\/zigshell\/extension'\s+\$extensionRoot = \[IO.Path\]::GetFullPath\(\(Split-Path \$extension\)\)\s+\$extensionRootExisted = Test-Path -LiteralPath \$extensionRoot\s+if \(-not \$extensionRootExisted\) \{\s+New-Item -ItemType Directory -Path \$extensionRoot \| Out-Null\s+\$switchExtensionRoot = \(Resolve-Path -LiteralPath \$extensionRoot\).Path\s+\}\s+Copy-Item/;
+  assert.match(control, setup);
+  assert.doesNotMatch(control.replace('if (-not $extensionRootExisted)', 'if ($extensionRootExisted)'), setup);
+  assert.doesNotMatch(control.replace('New-Item -ItemType Directory -Path $extensionRoot', 'New-Item -ItemType Directory -Force -Path $extensionRoot'), setup);
+  assert.equal(control.match(/\$switchExtensionRoot\s*=/g).length, 3);
+  assert.ok(control.indexOf('$switchExtensionRoot = $null') < control.indexOf('$original = @{}'));
+  const cleanup = control.slice(control.lastIndexOf('} finally {'));
+  assert.match(cleanup, /if \(\$null -ne \$switchExtensionRoot\) \{\s+Remove-Item -LiteralPath \$switchExtensionRoot -Recurse -Force\s+\$switchExtensionRoot = \$null\s+\}/);
+  assert.ok(cleanup.indexOf('$warmupJob.Stop()') < cleanup.indexOf('Remove-Item -LiteralPath $switchExtensionRoot'));
+  assert.ok(cleanup.indexOf('Remove-Item -LiteralPath $switchExtensionRoot') < cleanup.indexOf('Remove-ScratchPath $scratch'));
+});
