@@ -1962,7 +1962,7 @@ test "IGSH-760 typing presents completed smooth frames without native inline pai
         }
     }
     try std.testing.expect(inline_paints[0] > 0);
-    _ = w.ShowWindow(edit, SW_HIDE);
+    _ = ShowWindow(edit, SW_HIDE);
     _ = SendMessageW(edit, 0x0102, 'e', 1);
     try std.testing.expect(IsWindowVisible(edit) == 0);
 }
