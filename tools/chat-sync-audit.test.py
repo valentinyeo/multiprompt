@@ -502,6 +502,16 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['text'] for item in candidates], [message])
                 self.assertEqual([item['pane_line'] for item in candidates], [5])
 
+    def test_IGSH_735_wrapped_background_task_row_is_not_chat(self):
+        capture = ['● Task "while pgrep -f "cut the Windows RAM" >/dev/null; do sleep 30; done; echo',
+                   'done" still running in background'] + [''] * 8
+        self.assertEqual(audit.pane_candidates('\n'.join(capture) + '\n'), [])
+        capture = ['● Task "neutral check" still running in background'] + [''] * 8
+        self.assertEqual(audit.pane_candidates('\n'.join(capture) + '\n'), [])
+        message = '● Task "neutral check" still running in background; I will wait'
+        candidates = audit.pane_candidates('\n'.join([message] + [''] * 8) + '\n')
+        self.assertEqual([item['text'] for item in candidates], [message[2:]])
+
     def test_ISSUE_571_real_messages_about_background_tasks_remain_candidates(self):
         messages = ['● The Task "neutral check" still running in background needs attention',
                     '● Task "neutral check" still running in background; I will wait',
