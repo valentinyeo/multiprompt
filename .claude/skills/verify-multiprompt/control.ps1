@@ -4023,7 +4023,7 @@ try {
             $null = Assert-WorkspaceBrowser 'shared-stable-warmup' $sharedRoot 0
             $existingOwn = Get-Process -Id $restoredProof.pid
             & taskkill.exe /PID $existingOwn.Id /T /F
-            if ($LASTEXITCODE -ne 0 -or -not $existingOwn.WaitForExit(10000)) { throw 'Existing own-profile browser did not exit before stable warm-up' }
+            if (-not $existingOwn.WaitForExit(10000)) { throw 'Existing own-profile browser did not exit before stable warm-up' }
             $existingOwn.Dispose()
             $stableWarmupLog = Join-Path $config 'bridge-launch.log'
             $stableWarmupLogStart = if (Test-Path -LiteralPath $stableWarmupLog) { @(Get-Content -LiteralPath $stableWarmupLog).Count } else { 0 }
@@ -4039,7 +4039,6 @@ try {
                 $stableWarmupChrome = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $stableWarmup.Id) | Where-Object { $_.ExecutablePath -ieq $stableChrome } | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
                 if (-not $stableWarmup.HasExited) {
                     & taskkill.exe /PID $stableWarmup.Id /T /F
-                    if ($LASTEXITCODE -ne 0) { throw 'Stable warm-up process tree did not stop' }
                 }
                 foreach ($browser in $stableWarmupChrome) {
                     if (-not $browser.WaitForExit(10000)) { throw 'Stable warm-up Chrome did not exit' }
