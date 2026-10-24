@@ -14,6 +14,7 @@ SETTLE_LIMIT_SECONDS = 45
 
 
 def load_reader():
+
     spec = importlib.util.spec_from_file_location('chat_reader_audit', ROOT / 'src/chat_history_reader.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
