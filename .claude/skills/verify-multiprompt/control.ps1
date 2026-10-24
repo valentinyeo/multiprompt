@@ -3943,6 +3943,8 @@ try {
             if ($stableVersion.ProductName -cne 'Google Chrome' -or $stableVersion.ProductMajorPart -lt 137) { throw 'Own-profile regression requires branded Google Chrome 137 or newer' }
             Record 'Switch the app to branded Chrome stable; Chrome for Testing cannot prove the extension bootstrap regression'
             [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $stableChrome)
+            Press @(0x12, 0x32) 'Alt+2: keep the own workspace inactive during stable warm-up'
+            $null = Assert-WorkspaceBrowser 'shared-stable-warmup' $sharedRoot 0
             $existingOwn = Get-Process -Id $restoredProof.pid
             & taskkill.exe /PID $existingOwn.Id /T /F
             if ($LASTEXITCODE -ne 0 -or -not $existingOwn.WaitForExit(10000)) { throw 'Existing own-profile browser did not exit before stable warm-up' }
@@ -3972,6 +3974,12 @@ try {
                 $stableWarmupClock.Stop()
             }
             $result.checks += @{ name = 'browser-own-profile stable-warmup'; seconds = $stableWarmupClock.Elapsed.TotalSeconds }
+            Wait-Until {
+                [VerifyNative]::BringToForeground($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'main window foreground after stable warm-up'
+            Press @(0x12, (0x32 + $ownWorkspace)) 'Return to the own workspace before the stable restart'
+            Wait-Until { (Read-Session).active_workspace -eq $ownWorkspace } 'own workspace selection persisted after stable warm-up'
             Restart-SessionRestore 'stable-chrome-switch' $false
             $null = Assert-WorkspaceBrowser 'stable-existing-own' $ownRoot $ownWorkspace
             Press @(0x11, 0x4E) 'Ctrl+N: create a cold branded Chrome workspace'
