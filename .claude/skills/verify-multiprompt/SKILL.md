@@ -78,7 +78,7 @@ Bounded condition waits inspect actual saved state and window titles. A missing 
 
 ### Messages only
 
-Read [Messages only](features/chat-messages-only.md). Dispatch `gh workflow run verify.yml --ref ceo/IGSH-759 -f feature=chat-messages-only`. The identical driver runs against unchanged master first (required visible-row failure) and the branch second. Both screenshots include the real composer and transcript. This journey reuses the delivery stand-in's explicit isolated saved-tab and synthetic-agent-transcript boundary; it does not write the app's transcript cache or use an app setter. All builds and tests run on GitHub Windows.
+Read [Messages only](features/chat-messages-only.md). Dispatch `gh workflow run verify.yml --ref ceo/IGSH-759 -f feature=chat-messages-only`. The identical driver runs first against the pinned pre-fix commit 42cecfd3 (required visible-row failure) and then against the branch. Both screenshots include the real composer and transcript. This journey reuses the delivery stand-in's explicit isolated saved-tab and synthetic-agent-transcript boundary; it does not write the app's transcript cache or use an app setter. All builds and tests run on GitHub Windows.
 
 ### Chat delivery
 

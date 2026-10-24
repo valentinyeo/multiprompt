@@ -287,13 +287,13 @@ jobs:
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha || 'master' }}
+          ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
-      - name: Build unchanged master negative control
+      - name: Build the pre-fix commit 42cecfd3 negative control
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
         working-directory: negative-source
         run: zig build
-      - name: Require unchanged master to show activity rows with the identical journey
+      - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
         shell: powershell
         run: |

@@ -14,7 +14,7 @@ Open a conversation in Chat View with Alt+C. Assistant messages remain; tool act
 ## Driving it with control.ps1
 
 - Dispatch exactly `gh workflow run verify.yml --ref ceo/IGSH-759 -f feature=chat-messages-only` and download `verify-chat-messages-only`.
-- The workflow runs `zig build test-main --summary all` on Windows, then builds unchanged master in a separate runner checkout. It requires the same journey to fail specifically because visible activity changes the transcript, with successful owned cleanup. Launch, identity, parsing, missing data or blank screenshots are not acceptable red controls.
+- The workflow runs `zig build test-main --summary all` on Windows, then builds the pinned pre-fix commit 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f in a separate runner checkout. It requires the same journey to fail specifically because visible activity changes the transcript, with successful owned cleanup. Launch, identity, parsing, missing data or blank screenshots are not acceptable red controls.
 - Exact workflow-side journey command:
 
 ```powershell
@@ -26,7 +26,7 @@ Open a conversation in Chat View with Alt+C. Assistant messages remain; tool act
 - Capture `messages-only-before-tools.png` and its 32-bit BMP with two real rendered messages and the typed composer. Ask the stand-in agent to append twelve tool calls and twelve successful results. Wait for all twelve successful paired tool rows in the app-written cache and use Ctrl+0 to require the renderer's existing font/layout log to show fourteen blocks. Ctrl+0 is also applied before the baseline image.
 - Capture `messages-only-after-tools.png` and BMP. `node tools/chat-messages-only-proof.mjs evidence` compares every RGB pixel in the owned transcript rectangle, rejects a blank baseline, checks the unchanged visible message data and all tool data, and requires zero changed pixels. This rejects both visible rows and reserved empty space. The whole-window screenshots also retain the real typed composer.
 - After cleanup, `node tools/chat-messages-only-proof.mjs evidence --complete` additionally checks Doctor/hash/version/focus, source transcript, screenshots and zero owned processes. Inspect both screenshots, `messages-only-measurement.json`, `result.json`, `cleanup.json` and the retained cache/transcript yourself.
-- The unchanged-master evidence is under `negative/`, including its revision/hash in `build.json`. Its result must fail `IGSH-759 messages only` on changed transcript pixels, not an earlier prerequisite. The branch must pass the identical oracle.
+- The pre-fix evidence is under `negative/`, including its revision/hash in `build.json`. Its result must fail `IGSH-759 messages only` on changed transcript pixels, not an earlier prerequisite. The branch must pass the identical oracle.
 
 ## Gotchas
 
