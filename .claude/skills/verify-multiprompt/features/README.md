@@ -30,6 +30,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject unchanged master.
+
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.

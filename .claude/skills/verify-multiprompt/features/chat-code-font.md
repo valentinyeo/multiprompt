@@ -7,7 +7,7 @@ IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiB
 - `code-cell-size`: a fenced code block printed by a real CMD and formatted by Chat View draws 40 full-block cells exactly 40 Nordwand cells wide at the new size (`chat_font_pt - 3`, minimum 8, scaled by UI size and DPI). The previous size (`chat_font_pt - 1`) draws wider cells and fails.
 - `code-font-face`: under `ZIGSHELL_DEBUG=1` the app logs `[chatcode] face=... em=... advance=... body_em=... pt=...` once each time it creates the Chat View code font, read back from the selected GDI font. The face must be `Nordwand Mono MP SemiBold`, the em size the new size, exactly 2 px below the previous size at 100% UI size and 96 DPI, and smaller than body text.
 - `code-edges`: the code crop from the real window is saved at 4x as `code-crop-4x.png`, with its antialiased pixel counts.
-- `diff-rows-smooth`: branch builds only. The native painter test draws a synthetic `Wrote dec.html +2 -1` tool block whose added and removed rows are wider than the row, plus a code block, once with `IGSH_610=1` (DirectWrite) and once with `IGSH_610=0` (the GDI path these rows used to fall back to). DirectWrite must draw every diff and code run with no GDI fallback, and its diff rows must have fewer hard edges than the GDI image.
+- `diff-rows-smooth`: low-level painter coverage only; Chat View no longer displays tool/activity blocks (IGSH-759). Branch builds only. The native painter test draws a synthetic `Wrote dec.html +2 -1` tool block whose added and removed rows are wider than the row, plus a code block, once with `IGSH_610=1` (DirectWrite) and once with `IGSH_610=0` (the GDI path these rows used to fall back to). DirectWrite must draw every diff and code run with no GDI fallback, and its diff rows must have fewer hard edges than the GDI image.
 
 ## How to get to it (user POV)
 
@@ -27,6 +27,6 @@ IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiB
 ## Gotchas
 
 - A release built before IGSH-678 draws 13 px code at default size and has no `[chatcode]` line, so it fails `IGSH-678 code cell size` after launch and Chat View opened. That is the expected red, not a launch failure.
-- The fenced block is formatted from real console text, not a seeded transcript or app setter. Diff previews only come from an agent transcript, which the offline runner does not have; their rows are covered by the branch painter image, not the live window.
+- The fenced block is formatted from real console text, not a seeded transcript or app setter. Tool/diff blocks are hidden in Chat View. The separate branch painter image still exercises their low-level drawing routine directly, not visible transcript rows.
 - Fenced code lines that fit already drew through DirectWrite before IGSH-678; only rows wider than their space (diff previews ending in `...`) fell back to GDI. The live crop therefore records edges, while the painter compares DirectWrite against GDI.
 - Lines containing a tab or a character the font lacks still fall back to GDI, as body text does.
