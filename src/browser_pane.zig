@@ -370,10 +370,6 @@ fn ownBrowserUserDataDir(buf: *[1024]u8, own_token: []const u8) []const u8 {
 
 pub fn spawnBrowserCliForShell(idx: u32, cmd: []const u8) void {
     const own_token = browserProfileToken(idx);
-    if (own_token.len == 0) {
-        spawnBrowserCliHidden(cmd);
-        return;
-    }
     var qualified_buf: [WIN32_COMMAND_LINE_CAP]u8 = undefined;
     const qualified = browser_own_profile.command(&qualified_buf, cmd, own_token) catch return;
     spawnBrowserCliHidden(qualified);
