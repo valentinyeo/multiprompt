@@ -446,7 +446,7 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         return error.ChromePipeReaderFailed;
     };
     reader.detach();
-    loadChromeExtensions(allocator, parent_write.?, pi.hProcess, extension, theme);
+    loadChromeExtensions(allocator, parent_write.?, pi.hProcess.?, extension, theme);
     _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
 }
 
