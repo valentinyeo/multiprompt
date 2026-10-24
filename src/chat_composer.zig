@@ -1083,7 +1083,8 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-    defer @import("chat_composer_text.zig").invalidateAfter(hwnd, msg);
+    const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
+    defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
         chatDropFiles(@ptrFromInt(wp));
@@ -1137,6 +1138,39 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     return result;
 }
 
+fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
+    const w = @import("win32.zig");
+    var client: RECT = undefined;
+    if (GetClientRect(hwnd, &client) == 0 or client.right <= 0 or client.bottom <= 0) return false;
+    const dc = w.CreateCompatibleDC(target) orelse return false;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = client.right, .height = -client.bottom } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(target, &info, 0, &bits, null, 0) orelse return false;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+    var probe: [2]u16 = .{ 0, 0 };
+    if (GetWindowTextW(hwnd, &probe, 2) == 0) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@intFromPtr(&rc)));
+        if (rc.right <= rc.left) {
+            rc = client;
+            rc.left += uiScaled(2);
+        }
+        _ = SetBkMode(dc, TRANSPARENT);
+        _ = SelectObject(dc, ensureChatFont());
+        _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+        _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+    } else if (!@import("chat_composer_text.zig").paint(hwnd, dc, customColorOr("text", themeConsoleFg()), app_state.g_chat_input_color)) {
+        @import("chat_composer_text.zig").native_paint = true;
+        defer @import("chat_composer_text.zig").native_paint = false;
+        _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+    }
+    return w.BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, w.GDI_SRCCOPY) != 0;
+}
+
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
     if (msg == WM_KEYDOWN and wp == 0x41 and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
         _ = SendMessageW(hwnd, 0x00B1, 0, -1);
@@ -1149,6 +1183,21 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         return 0;
     }
 
+    if (msg == WM_ERASEBKGND and @import("chat_composer_text.zig").enabled()) return 1;
+    if ((msg == WM_PAINT or msg == 0x0318) and @import("chat_composer_text.zig").enabled()) {
+        var ps: PAINTSTRUCT = undefined;
+        const dc = if (msg == WM_PAINT) BeginPaint(hwnd, &ps) else @as(HANDLE, @ptrFromInt(wp));
+        if (dc == null) return 0;
+        defer if (msg == WM_PAINT) {
+            _ = EndPaint(hwnd, &ps);
+        };
+        if (!chatComposerPaintBuffered(hwnd, dc)) {
+            @import("chat_composer_text.zig").native_paint = true;
+            defer @import("chat_composer_text.zig").native_paint = false;
+            _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+        }
+        return 0;
+    }
     if (msg == WM_PAINT or msg == 0x0318) {
         const result = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, msg, wp, lp);
         const dc = if (msg == WM_PAINT) GetDC(hwnd) else @as(HANDLE, @ptrFromInt(wp));
@@ -1168,12 +1217,6 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
             _ = SelectObject(dc, ensureChatFont());
             _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
             _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
-        } else if (@import("chat_composer_text.zig").enabled()) {
-            if (!@import("chat_composer_text.zig").paint(hwnd, dc, customColorOr("text", themeConsoleFg()), app_state.g_chat_input_color)) {
-                @import("chat_composer_text.zig").native_paint = true;
-                defer @import("chat_composer_text.zig").native_paint = false;
-                _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
-            }
         }
         return result;
     }
@@ -1810,4 +1853,116 @@ pub fn applySessionView() void {
 pub fn invalidateChatHeader() void {
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     updateMainWindowTitle();
+}
+
+test "IGSH-760 typing presents completed smooth frames without native inline paints" {
+    const w = @import("win32.zig");
+    const painter = @import("chat_composer_text.zig");
+    const Spy = struct {
+        var edit_original: isize = 0;
+        var parent_original: isize = 0;
+        var colors: usize = 0;
+        var paints: usize = 0;
+        var prints: usize = 0;
+        var window_prints: usize = 0;
+        var guarded = false;
+        var background_brush: HANDLE = null;
+
+        extern "user32" fn WindowFromDC(HANDLE) callconv(WINAPI) HANDLE;
+
+        fn parentProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == 0x0133 or msg == 0x0138) {
+                colors += 1;
+                const dc: HANDLE = @ptrFromInt(wp);
+                _ = SetTextColor(dc, if (painter.enabled() and !painter.native_paint) app_state.g_chat_input_color else customColorOr("text", themeConsoleFg()));
+                _ = w.SetBkColor(dc, app_state.g_chat_input_color);
+                return @bitCast(@intFromPtr(background_brush));
+            }
+            return CallWindowProcW(parent_original, hwnd, msg, wp, lp);
+        }
+
+        fn nativeProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == 0x0318) {
+                prints += 1;
+                if (WindowFromDC(@ptrFromInt(wp)) == hwnd) window_prints += 1;
+            }
+            return CallWindowProcW(edit_original, hwnd, msg, wp, lp);
+        }
+
+        fn editProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            const redraw = guarded and painter.suspendNativePaint(hwnd, msg);
+            defer if (guarded) painter.resumeNativePaint(hwnd, msg, redraw) else painter.invalidateAfter(hwnd, msg);
+            if (msg == WM_PAINT) paints += 1;
+            if (msg == WM_PAINT or msg == WM_ERASEBKGND or msg == 0x0318) return chatComposerSubclassCore(hwnd, msg, wp, lp);
+            return nativeProc(hwnd, msg, wp, lp);
+        }
+    };
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const font = fonts.chat(-18, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(font);
+    defer @import("dwrite_text.zig").resetFonts();
+    var previous: [32768]u16 = undefined;
+    const length = w.GetEnvironmentVariableW(L("IGSH_731"), &previous, previous.len);
+    defer _ = w.SetEnvironmentVariableW(L("IGSH_731"), if (length > 0 and length < previous.len) @ptrCast(&previous) else null);
+    const saved_original = app_state.g_chat_composer_orig_proc;
+    const saved_color = app_state.g_chat_input_color;
+    defer {
+        app_state.g_chat_composer_orig_proc = saved_original;
+        app_state.g_chat_input_color = saved_color;
+    }
+    app_state.g_chat_input_color = customColorOr("text", themeConsoleFg()) ^ 0xffffff;
+    Spy.background_brush = CreateSolidBrush(app_state.g_chat_input_color) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(Spy.background_brush);
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000 | WS_VISIBLE, 0, 0, 320, 80, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    Spy.parent_original = GetWindowLongPtrW(parent, -4);
+    _ = SetWindowLongPtrW(parent, -4, @bitCast(@intFromPtr(&Spy.parentProc)));
+    const edit = CreateWindowExW(0, L("EDIT"), L("seed"), WS_CHILD | WS_VISIBLE | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, 320, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
+    Spy.edit_original = GetWindowLongPtrW(edit, -4);
+    app_state.g_chat_composer_orig_proc = @bitCast(@intFromPtr(&Spy.nativeProc));
+    _ = SetWindowLongPtrW(edit, -4, @bitCast(@intFromPtr(&Spy.editProc)));
+    _ = w.UpdateWindow(parent);
+    var inline_paints: [2]usize = .{ 0, 0 };
+    try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_731"), L("1")) != 0);
+    for ([_]bool{ false, true }, 0..) |guarded, mode| {
+        Spy.guarded = guarded;
+        _ = SetWindowTextW(edit, L("seed"));
+        _ = SendMessageW(edit, 0x00B1, 4, 4);
+        _ = SetFocus(edit);
+        _ = InvalidateRect(edit, null, 1);
+        _ = w.UpdateWindow(edit);
+        Spy.paints = 0;
+        Spy.prints = 0;
+        Spy.window_prints = 0;
+        const runs_before = @import("dwrite_text.zig").painted_runs;
+        for ("abcd") |character| {
+            Spy.colors = 0;
+            _ = SendMessageW(edit, WM_KEYDOWN, character - 32, 1);
+            _ = SendMessageW(edit, 0x0102, character, 1);
+            _ = SendMessageW(edit, WM_KEYUP, character - 32, 1);
+            inline_paints[mode] += Spy.colors;
+            _ = w.UpdateWindow(edit);
+            try std.testing.expect(IsWindowVisible(edit) != 0);
+            try std.testing.expectEqual(edit, GetFocus());
+        }
+        var text: [32]u16 = undefined;
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, L("seedabcd"), text[0..@intCast(n)]);
+        std.debug.print("IGSH-760 guarded={} chars=4 inline_color_requests={d} paints={d} offscreen_prints={d} window_prints={d}\n", .{ guarded, inline_paints[mode], Spy.paints, Spy.prints - Spy.window_prints, Spy.window_prints });
+        if (guarded) {
+            try std.testing.expectEqual(@as(usize, 0), inline_paints[mode]);
+            try std.testing.expectEqual(@as(usize, 4), Spy.paints);
+            try std.testing.expectEqual(@as(usize, 4), Spy.prints);
+            try std.testing.expectEqual(@as(usize, 0), Spy.window_prints);
+            try std.testing.expectEqual(runs_before + 4, @import("dwrite_text.zig").painted_runs);
+        }
+    }
+    try std.testing.expect(inline_paints[0] > 0);
+    _ = w.ShowWindow(edit, SW_HIDE);
+    _ = SendMessageW(edit, 0x0102, 'e', 1);
+    try std.testing.expect(IsWindowVisible(edit) == 0);
 }

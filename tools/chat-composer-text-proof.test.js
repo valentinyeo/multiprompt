@@ -42,7 +42,8 @@ test('IGSH-731 source connects native EDIT geometry, hidden native ink, repaint 
   const dwrite = read('src/dwrite_text.zig');
   for (const token of ['0x00D6', '0x00B0', '0x00CE', '0x00BB', 'GetSysColor(13)', 'GetSysColor(14)', 'HideCaret(hwnd)', 'ShowCaret(hwnd)', 'drawPositioned', '0x010D...0x010F']) assert.ok(painter.includes(token), token);
   assert.ok(main.includes('SetTextColor(dc, if (@import("chat_composer_text.zig").enabled() and !@import("chat_composer_text.zig").native_paint) app_state.g_chat_input_color else customColorOr("text", themeConsoleFg()))'));
-  assert.match(composer, /defer @import\("chat_composer_text.zig"\).invalidateAfter\(hwnd, msg\)/);
+  assert.match(composer, /const redraw = @import\("chat_composer_text.zig"\).suspendNativePaint\(hwnd, msg\)/);
+  assert.match(composer, /defer @import\("chat_composer_text.zig"\).resumeNativePaint\(hwnd, msg, redraw\)/);
   assert.match(composer, /chat_composer_text.zig"\).paint\(hwnd, dc/);
   const api = dwrite.slice(dwrite.indexOf('pub fn drawPositioned'), dwrite.indexOf('\nfn paint('));
   for (const token of ['fontFace(hdc)', 'ensureTarget(', 'drawGlyphRun', 'params.?', 'advances']) assert.ok(api.includes(token), token);
@@ -116,4 +117,14 @@ test('IGSH-731 native oracle remeasures all nine image pairs and rejects hard or
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('IGSH-760 composer paint contract rejects the shipped direct-paint path', () => {
+  const { spawnSync } = require('node:child_process');
+  const fixed = spawnSync(process.execPath, ['tools/composer-paint-audit.mjs', '--require-buffered'], { cwd: root, encoding: 'utf8' });
+  assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
+  assert.match(fixed.stdout, /COMPOSER PAINT CONTRACT VERIFIED/);
+  const broken = spawnSync(process.execPath, ['tools/composer-paint-audit.mjs', '--source=tools/fixtures/IGSH-760', '--require-buffered'], { cwd: root, encoding: 'utf8' });
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stderr, /composer clears the visible text area/);
 });

@@ -97,9 +97,23 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
     return true;
 }
 
+pub fn suspendNativePaint(hwnd: w.HANDLE, msg: u32) bool {
+    if (!enabled() or !repaintsAfter(msg) or w.GetWindowLongPtrW(hwnd, -16) & w.WS_VISIBLE == 0) return false;
+    _ = w.SendMessageW(hwnd, 0x000B, 0, 0);
+    return true;
+}
+
+pub fn resumeNativePaint(hwnd: w.HANDLE, msg: u32, redraw: bool) void {
+    if (redraw) _ = w.SendMessageW(hwnd, 0x000B, 1, 0);
+    invalidateAfter(hwnd, msg);
+}
+
 pub fn invalidateAfter(hwnd: w.HANDLE, msg: u32) void {
-    if (!enabled()) return;
-    switch (msg) {
+    if (enabled() and repaintsAfter(msg)) _ = w.InvalidateRect(hwnd, null, 0);
+}
+
+fn repaintsAfter(msg: u32) bool {
+    return switch (msg) {
         0x0005,
         0x0007,
         0x0008,
@@ -122,11 +136,9 @@ pub fn invalidateAfter(hwnd: w.HANDLE, msg: u32) void {
         0x020A,
         0x0286,
         0x0300...0x0304,
-        => {
-            _ = w.InvalidateRect(hwnd, null, 0);
-        },
-        else => {},
-    }
+        => true,
+        else => false,
+    };
 }
 
 test "IGSH-731 switch defaults on and only zero restores native EDIT" {
