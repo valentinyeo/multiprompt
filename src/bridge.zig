@@ -19,6 +19,12 @@ var g_native_own_profile: [own_profile.TOKEN_LEN]u8 = undefined;
 var g_window_file_profile: [own_profile.TOKEN_LEN]u8 = undefined;
 var g_window_file_profile_set = false;
 var request_sequence = std.atomic.Value(u64).init(0);
+var native_resolve_log = struct {
+    mutex: SpinMutex = .{},
+    ids: [32][128]u8 = undefined,
+    lengths: [32]usize = @splat(0),
+    next: usize = 0,
+}{};
 
 const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
@@ -1597,6 +1603,13 @@ fn commandDeadline(is_script: bool) void {
 }
 
 fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8) !void {
+    if (std.Thread.spawn(.{}, flushChromeLaunchLog, .{})) |logger| {
+        logger.detach();
+    } else |_| {}
+    var line: [128]u8 = undefined;
+    const profile = if (g_profile_token.len > 0) g_profile_token else "shared";
+    logChromeLaunch(std.fmt.bufPrint(&line, "native host start profile={s}", .{profile[0..@min(profile.len, 64)]}) catch "native host start profile=<too long>");
+
     const profile_mutex = if (g_profile_token.len > 0) blk: {
         var name_buf: [128]u8 = undefined;
         const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
@@ -2594,6 +2607,26 @@ fn runPipeServer(allocator: std.mem.Allocator, context: *HostContext, command_pi
         };
         defer allocator.free(payload);
 
+        if (std.json.parseFromSlice(std.json.Value, allocator, payload, .{})) |parsed| {
+            defer parsed.deinit();
+            if (parsed.value == .object) {
+                const object = parsed.value.object;
+                if (std.mem.eql(u8, getString(object.get("method")) orelse "", "resolveWindow")) {
+                    var line: [128]u8 = undefined;
+                    logChromeLaunch(std.fmt.bufPrint(&line, "native resolve request shell={d}", .{getI64(object.get("shellId")) orelse -1}) catch "native resolve request shell=<unknown>");
+                    if (getString(object.get("id"))) |id| {
+                        if (id.len > 0 and id.len <= native_resolve_log.ids[0].len) {
+                            lockMutex(&native_resolve_log.mutex);
+                            const index = native_resolve_log.next;
+                            @memcpy(native_resolve_log.ids[index][0..id.len], id);
+                            native_resolve_log.lengths[index] = id.len;
+                            native_resolve_log.next = (index + 1) % native_resolve_log.ids.len;
+                            native_resolve_log.mutex.unlock();
+                        }
+                    }
+                }
+            }
+        } else |_| {}
         writeNativeMessageLocked(context, payload) catch {};
         _ = DisconnectNamedPipe(pipe);
         _ = CloseHandle(pipe);
@@ -2656,6 +2689,29 @@ fn routeReplyPipe(allocator: std.mem.Allocator, payload: []const u8) !bool {
 
     if (parsed.value != .object) return false;
     const reply_pipe = getString(parsed.value.object.get("replyPipe")) orelse return false;
+
+    if (getString(parsed.value.object.get("id"))) |id| {
+        var resolved = false;
+        lockMutex(&native_resolve_log.mutex);
+        for (&native_resolve_log.ids, &native_resolve_log.lengths) |*stored, *length| {
+            if (length.* > 0 and std.mem.eql(u8, stored[0..length.*], id)) {
+                length.* = 0;
+                resolved = true;
+                break;
+            }
+        }
+        native_resolve_log.mutex.unlock();
+        if (resolved) {
+            if (parsed.value.object.get("result")) |result| {
+                if (result == .object) {
+                    if (getI64(result.object.get("windowId"))) |window_id| {
+                        var line: [128]u8 = undefined;
+                        logChromeLaunch(std.fmt.bufPrint(&line, "native resolve reply windowId={d}", .{window_id}) catch "native resolve reply windowId=<unknown>");
+                    }
+                }
+            }
+        }
+    }
 
     const pipe_path = try allocator.dupeZ(u8, reply_pipe);
     defer allocator.free(pipe_path);
