@@ -866,7 +866,7 @@ pub fn chatFileOnReady() void {
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id)) @as(u64, 1000) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -1282,13 +1282,36 @@ test "chatLatestAgentReply returns only the reply after the last prompt" {
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second answer"), out[0..n]);
 }
 
-pub fn chatDeliveryPending(shell_id: u32) bool {
+pub fn chatDeliveryPending(shell_id: u32, include_not_sent: bool) bool {
     for (app_state.g_chat_outbox.items) |entry| {
-        if (!entry.channel_sent or entry.state == .not_sent) continue;
+        if (!entry.channel_sent or (!include_not_sent and entry.state == .not_sent)) continue;
         const idx = @import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
         if (app_state.shells[idx].shell_id == shell_id) return true;
     }
     return false;
+}
+
+test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polling" {
+    const old_count = app_state.shell_count;
+    const old_shell = app_state.shells[0];
+    const old_outbox = app_state.g_chat_outbox;
+    app_state.g_chat_outbox = .empty;
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_outbox = old_outbox;
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_count;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 720;
+    app_state.shells[0].chat_id = 720;
+    var entry = app_state.ChatOutboxEntry{ .channel_sent = true, .state = .not_sent };
+    const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
+    entry.key_len = @intCast(key.len);
+    try app_state.g_chat_outbox.append(std.testing.allocator, entry);
+    try std.testing.expect(chatDeliveryPending(720, true));
+    try std.testing.expect(!chatDeliveryPending(720, false));
 }
 
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {
