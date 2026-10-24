@@ -149,6 +149,7 @@ const ReadFile = @import("win32.zig").ReadFile;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
 const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const Sleep = @import("win32.zig").Sleep;
 const SECURITY_ATTRIBUTES = @import("win32.zig").SECURITY_ATTRIBUTES;
 const EnumWindows = @import("win32.zig").EnumWindows;
 const SendMessageW = @import("win32.zig").SendMessageW;
@@ -2334,6 +2335,17 @@ fn browserResolveBeforeDeadline(now: u64, deadline: u64) bool {
     return now < deadline;
 }
 
+fn browserResolveRetryInterval(attempt: u32) u64 {
+    return if (attempt < 4) 250 else 1000;
+}
+
+test "IGSH-738 browser resolve asks quickly first, then backs off" {
+    try std.testing.expectEqual(@as(u64, 250), browserResolveRetryInterval(0));
+    try std.testing.expectEqual(@as(u64, 250), browserResolveRetryInterval(3));
+    try std.testing.expectEqual(@as(u64, 1000), browserResolveRetryInterval(4));
+    try std.testing.expectEqual(@as(u64, 1000), browserResolveRetryInterval(120));
+}
+
 test "IGSH-738 browser resolve retries stop at the budget" {
     const started: u64 = 1000;
     const deadline = started + BROWSER_RESOLVE_RETRY_BUDGET_MS;
@@ -2348,6 +2360,7 @@ fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
     browser_command_profile = job.profile;
     const deadline = GetTickCount64() + BROWSER_RESOLVE_RETRY_BUDGET_MS;
     var resolved: ?i64 = null;
+    var attempt: u32 = 0;
     while (browserResolveBeforeDeadline(GetTickCount64(), deadline)) {
         if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
             std.heap.page_allocator.destroy(job);
@@ -2366,7 +2379,9 @@ fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
         }
         const now = GetTickCount64();
         if (!browserResolveBeforeDeadline(now, deadline)) break;
-        Sleep(@intCast(@min(@as(u64, 250), deadline - now)));
+        const interval = browserResolveRetryInterval(attempt);
+        attempt += 1;
+        Sleep(@intCast(@min(interval, deadline - now)));
     }
     if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
         std.heap.page_allocator.destroy(job);
