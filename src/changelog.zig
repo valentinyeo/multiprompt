@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.856", .items = &.{
+        .{ .text = "Browser panes keep the correct display scale while parked, switched, or restored across monitors.", .ticket = "IGSH-725" },
+    } },
     .{ .ver = "0.28.855", .items = &.{
         .{ .text = "Select text in a chat message and press Enter to quote just that part in your reply.", .ticket = "IGSH-717" },
     } },
