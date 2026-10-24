@@ -3816,11 +3816,11 @@ try {
             $engines = @(Get-ChildItem -LiteralPath $ownBase -Force | ForEach-Object { $_.Name })
             $leaves = @(Get-ChildItem -LiteralPath (Join-Path $ownBase 'chrome') -Force | ForEach-Object { $_.Name })
             if ($engines.Count -ne 1 -or $engines[0] -cne 'chrome' -or $leaves.Count -ne 1 -or $leaves[0] -cne $ownToken) { throw 'Own browser profile folder is not exactly one own-<hash> leaf' }
-            Click-WorkspacePill 0
+            Press @(0x12, 0x32) 'Alt+2: switch to stored workspace 0'
             $null = Assert-WorkspaceBrowser 'shared-return' $sharedRoot 0
             Press @(0x12, 0x51) 'Alt+Q: focus the shared-profile browser'
             $null = Assert-WorkspaceBrowser 'shared-altq' $sharedRoot 0
-            Click-WorkspacePill $ownWorkspace
+            Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
             $null = Assert-WorkspaceBrowser 'own-return' $ownRoot $ownWorkspace
             Press @(0x12, 0x51) 'Alt+Q: focus the own-profile browser'
             $null = Assert-WorkspaceBrowser 'own-altq' $ownRoot $ownWorkspace
@@ -3839,9 +3839,9 @@ try {
             if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile: ' + $restoredProof.userDataDir) }
             Wait-OwnProfilePipe $ownToken 'restored'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'restored opted-in pane bound through its own native host' 60
-            Click-WorkspacePill 0
+            Press @(0x12, 0x32) 'Alt+2: switch to stored workspace 0'
             $null = Assert-WorkspaceBrowser 'shared-restored-return' $sharedRoot 0
-            Click-WorkspacePill $ownWorkspace
+            Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
             $null = Assert-WorkspaceBrowser 'own-restored-return' $ownRoot $ownWorkspace
             Save-Json @{ token = $ownToken; workspaceId = $ownWorkspaceId; ownRoot = $ownRoot; sharedRoot = $sharedRoot; shared = $sharedProof; opted = $ownProof; restored = $restoredProof; sharedBefore = $sharedBefore; sharedAfter = $sharedAfter; coreBefore = $coreBefore; coreAfter = $coreAfter } 'browser-own-profile.json'
             $result.checks += @{ name = 'browser-own-profile shared'; userDataDir = $sharedProof.userDataDir }
