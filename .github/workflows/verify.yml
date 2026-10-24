@@ -18,6 +18,8 @@ on:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
       - tools/verify-multiprompt.test.js
+      - tools/chat-sync-audit.py
+      - tools/chat-sync-audit.test.py
       - tools/chat-focus.test.js
       - tools/chat-view-everywhere.test.js
       - tools/chat-view-everywhere-policy.test.js
@@ -46,8 +48,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  chat-sync-audit-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE...$HEAD" -- tools/chat-sync-audit.py tools/chat-sync-audit.test.py)
+          if [ -n "$changed" ]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
   chat-sync-audit:
-    if: inputs.feature == 'chat-sync-audit'
+    needs: chat-sync-audit-changes
+    if: inputs.feature == 'chat-sync-audit' || (github.event_name == 'pull_request' && needs.chat-sync-audit-changes.outputs.changed == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
