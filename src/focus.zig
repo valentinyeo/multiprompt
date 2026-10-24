@@ -942,6 +942,7 @@ pub fn focusActiveBrowserPane() void {
     cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
 
+    keybd_event(VK_MENU, 0, 0, 0);
     const fg = GetForegroundWindow();
     const target_thread = GetWindowThreadProcessId(bh, null);
     const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
@@ -953,6 +954,9 @@ pub fn focusActiveBrowserPane() void {
     _ = SetFocus(bh);
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
+    keybd_event(0xE8, 0, 0, 0);
+    keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);
+    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {
         _ = PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0);
     }
@@ -967,6 +971,32 @@ pub fn cancelPendingNativeBrowserFocus() void {
     app_state.g_native_browser_focus_retries = 0;
     app_state.g_native_browser_focus_attempts = 0;
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
+}
+
+test "IGSH-724 browser foreground unlock masks lone Alt menu activation" {
+    const source = @embedFile("focus.zig");
+    const start = std.mem.indexOf(u8, source, "pub fn focusActiveBrowserPane() void {").?;
+    const end = std.mem.indexOfPos(u8, source, start, "\npub fn cancelPendingNativeBrowserFocus()").?;
+    const handoff = source[start..end];
+    var cursor: usize = 0;
+    inline for (.{
+        "if (!focusGuard(bh)) return;",
+        "if (phys_alt) return;",
+        "keybd_event(VK_MENU, 0, 0, 0);",
+        "_ = SetForegroundWindow(bh);",
+        "_ = SetFocus(bh);",
+        "if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);",
+        "keybd_event(0xE8, 0, 0, 0);",
+        "keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);",
+        "keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);",
+        "browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)",
+        "PostMessageW(bh, @import(\"win32.zig\").WM_COMMAND, command, 0)",
+    }) |statement| {
+        const position = std.mem.indexOfPos(u8, handoff, cursor, statement);
+        try std.testing.expect(position != null);
+        cursor = position.? + statement.len;
+    }
+    try std.testing.expectEqual(@as(usize, 4), std.mem.count(u8, handoff, "keybd_event("));
 }
 
 pub fn browserFocusRequestMatches(requested_sid: u32, active_sid: u32, foreground_owned: bool) bool {
