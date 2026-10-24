@@ -50,7 +50,7 @@ test('messages-only verification drives the real transcript and retains a requir
   assert.match(workflow, /"chat-messages-only"/);
   assert.match(workflow, /tools\/chat-messages-only-proof.test.mjs/);
   assert.match(workflow, /working-directory: negative-source\s+run: zig build/);
-  assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \|\| 'master' \}\}/);
+  assert.match(workflow, /ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f\s+path: negative-source/);
   assert.match(workflow, /Negative control did not fail on visible activity rows/);
   assert.match(driver, /Shell-Input 'activity'/);
   assert.match(driver, /blocks=14 content_h=/);
