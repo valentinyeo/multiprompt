@@ -150,7 +150,6 @@ var chrome_replies = struct {
     mutex: SpinMutex = .{},
     expected_id: u32 = 1,
     extension_loaded: bool = false,
-    extension_replied: bool = false,
     theme_replied: bool = false,
 }{};
 
@@ -307,9 +306,8 @@ fn routeChromeReply(reply: []const u8) void {
     while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
     if (id == 2) {
         chrome_replies.theme_replied = true;
-    } else if (id <= chrome_replies.expected_id) {
-        chrome_replies.extension_replied = true;
-        if (!parsed.value.object.contains("error")) chrome_replies.extension_loaded = true;
+    } else if (id <= chrome_replies.expected_id and !parsed.value.object.contains("error")) {
+        chrome_replies.extension_loaded = true;
     }
     chrome_replies.mutex.unlock();
     var line: [256]u8 = undefined;
@@ -360,14 +358,13 @@ fn sendChromeExtension(allocator: std.mem.Allocator, pipe: windows.HANDLE, id: u
     try writeAll(pipe, message);
 }
 
-fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, process: windows.HANDLE, extension: []const u8, theme: []const u8, timeout_ms: u64) bool {
+fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, process: windows.HANDLE, extension: []const u8, theme: []const u8) void {
     while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
     chrome_replies.expected_id = 1;
     chrome_replies.extension_loaded = false;
-    chrome_replies.extension_replied = false;
     chrome_replies.theme_replied = theme.len == 0;
     chrome_replies.mutex.unlock();
-    const deadline = GetTickCount64() + timeout_ms;
+    const deadline = GetTickCount64() + 120_000;
     load: {
         logChromeLaunch("CDP attempt id=1");
         sendChromeExtension(allocator, pipe, 1, extension) catch break :load;
@@ -393,10 +390,6 @@ fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, proc
         }
     }
     logChromeLaunch(if (chromeExtensionNeedsRetry()) "extension not-loaded" else "extension loaded");
-    while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
-    const replied = chrome_replies.extension_replied;
-    chrome_replies.mutex.unlock();
-    return replied;
 }
 
 fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
@@ -406,68 +399,55 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
     var chrome_args = std.array_list.Managed([]const u8).init(allocator);
     defer chrome_args.deinit();
     while (args.next()) |arg| try chrome_args.append(arg);
+    var sa = win.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(win.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
+    var child_read: win.HANDLE = null;
+    var parent_write: win.HANDLE = null;
+    if (win.CreatePipe(&child_read, &parent_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
+    defer if (child_read != null) {
+        _ = win.CloseHandle(child_read);
+    };
+    defer _ = win.CloseHandle(parent_write);
+    var parent_read: win.HANDLE = null;
+    var child_write: win.HANDLE = null;
+    if (win.CreatePipe(&parent_read, &child_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
+    errdefer _ = win.CloseHandle(parent_read);
+    defer if (child_write != null) {
+        _ = win.CloseHandle(child_write);
+    };
+    if (win.SetHandleInformation(parent_write, 1, 0) == 0 or win.SetHandleInformation(parent_read, 1, 0) == 0) return error.ChromePipeInheritanceFailed;
+    const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items);
+    defer allocator.free(command);
+    const command_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, command);
+    defer allocator.free(command_w);
+    const exe_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, exe);
+    defer allocator.free(exe_w);
+    var si = std.mem.zeroes(win.STARTUPINFOW);
+    si.cb = @sizeOf(win.STARTUPINFOW);
+    var reserved2 = chromePipeReserved2(@intFromPtr(child_read), @intFromPtr(child_write));
+    si.cbReserved2 = @intCast(reserved2.len);
+    si.lpReserved2 = &reserved2;
+    var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
     if (std.Thread.spawn(.{}, flushChromeLaunchLog, .{})) |logger| {
         logger.detach();
     } else |_| {}
-    for (0..2) |attempt| {
-        if (attempt > 0) {
-            Sleep(500);
-            logChromeLaunch("launch retry after no extension reply");
-        }
-        var sa = win.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(win.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
-        var child_read: win.HANDLE = null;
-        var parent_write: win.HANDLE = null;
-        if (win.CreatePipe(&child_read, &parent_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
-        defer if (child_read != null) {
-            _ = win.CloseHandle(child_read);
-        };
-        defer _ = win.CloseHandle(parent_write);
-        var parent_read: win.HANDLE = null;
-        var child_write: win.HANDLE = null;
-        if (win.CreatePipe(&parent_read, &child_write, &sa, 0) == 0) return error.ChromePipeCreationFailed;
-        errdefer _ = win.CloseHandle(parent_read);
-        defer if (child_write != null) {
-            _ = win.CloseHandle(child_write);
-        };
-        if (win.SetHandleInformation(parent_write, 1, 0) == 0 or win.SetHandleInformation(parent_read, 1, 0) == 0) return error.ChromePipeInheritanceFailed;
-        const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items);
-        defer allocator.free(command);
-        const command_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, command);
-        defer allocator.free(command_w);
-        const exe_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, exe);
-        defer allocator.free(exe_w);
-        var si = std.mem.zeroes(win.STARTUPINFOW);
-        si.cb = @sizeOf(win.STARTUPINFOW);
-        var reserved2 = chromePipeReserved2(@intFromPtr(child_read), @intFromPtr(child_write));
-        si.cbReserved2 = @intCast(reserved2.len);
-        si.lpReserved2 = &reserved2;
-        var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
-        var launch_line: [4096]u8 = undefined;
-        logChromeLaunch(std.fmt.bufPrint(&launch_line, "launch exe={s}", .{exe}) catch "launch exe=<too long>");
-        const created = win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
-        logChromeLaunch(std.fmt.bufPrint(&launch_line, "CreateProcessW result={d} pid={d}", .{ created, pi.dwProcessId }) catch "CreateProcessW result=<unknown>");
-        if (created == 0) return error.ChromeLaunchFailed;
-        defer _ = win.CloseHandle(pi.hProcess);
-        _ = win.CloseHandle(pi.hThread);
-        _ = win.CloseHandle(child_read);
-        child_read = null;
-        _ = win.CloseHandle(child_write);
-        child_write = null;
-        const reader = std.Thread.spawn(.{}, drainChromePipe, .{parent_read.?}) catch {
-            _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
-            return error.ChromePipeReaderFailed;
-        };
-        const replied = loadChromeExtensions(allocator, parent_write.?, pi.hProcess.?, extension, theme, if (attempt == 0) 3000 else 110_000);
-        if (attempt == 0 and !replied) {
-            _ = win.TerminateProcess(pi.hProcess, 1);
-            _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
-            reader.join();
-            continue;
-        }
-        reader.detach();
+    var launch_line: [4096]u8 = undefined;
+    logChromeLaunch(std.fmt.bufPrint(&launch_line, "launch exe={s}", .{exe}) catch "launch exe=<too long>");
+    const created = win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
+    logChromeLaunch(std.fmt.bufPrint(&launch_line, "CreateProcessW result={d} pid={d}", .{ created, pi.dwProcessId }) catch "CreateProcessW result=<unknown>");
+    if (created == 0) return error.ChromeLaunchFailed;
+    defer _ = win.CloseHandle(pi.hProcess);
+    _ = win.CloseHandle(pi.hThread);
+    _ = win.CloseHandle(child_read);
+    child_read = null;
+    _ = win.CloseHandle(child_write);
+    child_write = null;
+    const reader = std.Thread.spawn(.{}, drainChromePipe, .{parent_read.?}) catch {
         _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
-        return;
-    }
+        return error.ChromePipeReaderFailed;
+    };
+    reader.detach();
+    loadChromeExtensions(allocator, parent_write.?, pi.hProcess.?, extension, theme);
+    _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
 }
 
 test "IGSH-738 Chrome command preserves Windows arguments without io-pipes" {
