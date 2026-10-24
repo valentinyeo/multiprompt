@@ -942,7 +942,6 @@ pub fn focusActiveBrowserPane() void {
     cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
 
-    keybd_event(VK_MENU, 0, 0, 0);
     const fg = GetForegroundWindow();
     const target_thread = GetWindowThreadProcessId(bh, null);
     const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
@@ -954,7 +953,6 @@ pub fn focusActiveBrowserPane() void {
     _ = SetFocus(bh);
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
-    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {
         _ = PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0);
     }

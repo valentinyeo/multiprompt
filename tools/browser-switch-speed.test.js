@@ -583,7 +583,7 @@ function assertsPageFocus(focus, main, pane, driver) {
   const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
   assert.match(handoff, /if \(!focusGuard\(bh\)\) return;/);
   assert.ok(handoff.indexOf('SetFocus(bh)') < handoff.indexOf('browserPageFocusCommand('));
-  assert.ok(handoff.indexOf('KEYEVENTF_KEYUP') < handoff.indexOf('browserPageFocusCommand('));
+  assert.doesNotMatch(handoff, /keybd_event\(/);
   assert.match(handoff, /browserPageFocusCommand\(GetForegroundWindow\(\) == bh, phys_alt\)/);
   assert.match(handoff, /PostMessageW\(bh, @import\("win32.zig"\)\.WM_COMMAND, command, 0\)/);
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
@@ -609,6 +609,7 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
   const focus = read('src/focus.zig');
   const main = read('src/main.zig');
   assertsPageFocus(focus, main, browser, journey);
+  assert.throws(() => assertsPageFocus(focus.replace('    _ = SetFocus(bh);', '    _ = SetFocus(bh);\n    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);'), main, browser, journey));
   for (const before of ['const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;', 'pane_foreground and !alt_down', 'PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0)', 'const authorized = pane_authorized or']) {
     assert.throws(() => assertsPageFocus(focus.replace(before, ''), main, browser, journey));
   }
