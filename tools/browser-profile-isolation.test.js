@@ -75,3 +75,32 @@ test("selected isolated Chromium and ordinary Edge cannot share the native comma
   assert.match(bridgeSource, /runPipeServer,[\s\S]{0,120}?command_pipe_name/,
     "each native host must serve only the pipe selected by its extension origin");
 });
+
+test("branded stable Chrome journey opens a cold own-profile pane and binds its native pipe on every launch", () => {
+  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const feature = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/features/browser-own-profile.md'), 'utf8');
+  const journey = control.slice(control.indexOf("        'browser-own-profile' {"), control.indexOf("        'status-card' {"));
+  for (const required of [
+    "Google/Chrome/Application/chrome.exe",
+    "$stableVersion.ProductName -cne 'Google Chrome'",
+    '$stableVersion.ProductMajorPart -lt 137',
+    "[IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $stableChrome)",
+    "Restart-SessionRestore 'stable-chrome-switch' $false",
+    "if (Test-Path -LiteralPath $stableRoot) { throw 'Branded Chrome own profile must start empty' }",
+    "Open-WorkspaceBrowser 'stable-cold-own'",
+    '$stableProcess.ExecutablePath -ine $stableChrome',
+    "$holder.CommandLine -notmatch 'chrome-launch'",
+    "Wait-OwnProfilePipe $stableToken 'stable-cold-own'",
+    '$stablePane.browser_window_id -le 0',
+    "'browser-own-profile-stable.json'",
+    "Restart-SessionRestore 'stable-own-restart' $false",
+    "Wait-OwnProfilePipe $stableToken 'stable-restored-own'",
+    "Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace",
+  ]) {
+    assert.ok(journey.includes(required), required);
+  }
+  assert.ok(journey.indexOf('if (Test-Path -LiteralPath $stableRoot)') < journey.indexOf("Open-WorkspaceBrowser 'stable-cold-own'"));
+  assert.match(feature, /branded Google Chrome stable/);
+  assert.match(feature, /browser-own-profile-stable\.json/);
+  assert.match(feature, /stable-restored-own/);
+});
