@@ -1037,6 +1037,7 @@ $job = $null
 $warmupJob = $null
 $warmup = $null
 $switchNativeRegistry = $null
+$switchExtensionRoot = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -1893,11 +1894,16 @@ try {
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
-    $env:USERPROFILE = Join-Path $scratch 'profile'
-    $env:HOME = $env:USERPROFILE
+    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
+    $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
-        New-Item -ItemType Directory -Force (Split-Path $extension) | Out-Null
+        $extensionRoot = [IO.Path]::GetFullPath((Split-Path $extension))
+        $extensionRootExisted = Test-Path -LiteralPath $extensionRoot
+        if (-not $extensionRootExisted) {
+            New-Item -ItemType Directory -Path $extensionRoot | Out-Null
+            $switchExtensionRoot = (Resolve-Path -LiteralPath $extensionRoot).Path
+        }
         Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
         $manifestPath = Join-Path $extension 'manifest.json'
         $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
@@ -4161,6 +4167,10 @@ try {
                 if ($null -ne $switchNativeRegistry) {
                     Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
                     $switchNativeRegistry = $null
+                }
+                if ($null -ne $switchExtensionRoot) {
+                    Remove-Item -LiteralPath $switchExtensionRoot -Recurse -Force
+                    $switchExtensionRoot = $null
                 }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
