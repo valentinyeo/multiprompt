@@ -214,7 +214,7 @@ foreach ($plan in $plans) {
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
                 $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
-                @($rows | Where-Object { $_.role -eq 'tool' }).Count -eq 12 -and @($rows | Where-Object { $_.role -eq 'tool_result' }).Count -eq 12
+                @($rows | Where-Object { $_.role -eq 'tool' -and $_.status -eq 'ok' -and $_.detail.Contains('verified') }).Count -eq 12
             })
             Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Tool updates changed the composer' }
@@ -299,6 +299,7 @@ foreach ($plan in $plans) {
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
             }
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
+            if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
             if ($hasTranscript -and $procDir) {

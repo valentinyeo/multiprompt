@@ -39,11 +39,11 @@ export function evaluate(root, complete) {
   assert.deepEqual(messages(beforeRows), [['user', 'start the fake session'], ['assistant', 'The fake session is ready.']]);
   assert.deepEqual(messages(rows), messages(beforeRows), 'tool updates must not change message data');
   const tools = rows.filter(row => row.role === 'tool');
-  const results = rows.filter(row => row.role === 'tool_result');
+  const completed = tools.filter(row => row.status === 'ok' && row.detail.includes('verified'));
   assert.equal(tools.length, 12, 'production reader retained all tool calls');
-  assert.equal(results.length, 12, 'production reader retained all tool results');
+  assert.equal(completed.length, 12, 'production reader retained all paired successful results');
   assert.deepEqual([...new Set(tools.map(row => row.text))].sort(), ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head'].sort());
-  for (const tool of tools) assert.ok(results.some(row => row.id === tool.id && row.status === 'ok'));
+  assert.equal(new Set(tools.map(row => row.id)).size, 12);
   const measured = compareTranscript(readBmp(path.join(root, 'messages-only-before-tools.bmp')), readBmp(path.join(root, 'messages-only-after-tools.bmp')), observation.transcript);
   if (complete) {
     const cleanup = json('cleanup.json');
@@ -63,9 +63,14 @@ export function evaluate(root, complete) {
       assert.ok(bytes.length > 10000);
     }
     const source = lines('messages-only/transcript.jsonl');
-    assert.equal(source.flatMap(row => row.message?.content || []).filter(part => part.type === 'tool_use').length, 12);
+    const parts = source.flatMap(row => row.message?.content || []);
+    const calls = parts.filter(part => part.type === 'tool_use');
+    const results = parts.filter(part => part.type === 'tool_result');
+    assert.equal(calls.length, 12);
+    assert.equal(results.length, 12);
+    for (const call of calls) assert.ok(results.some(part => part.tool_use_id === call.id && part.is_error === false && part.content === 'verified'));
   }
-  return { ...measured, toolCalls: tools.length, completedResults: results.length };
+  return { ...measured, toolCalls: tools.length, completedResults: completed.length };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

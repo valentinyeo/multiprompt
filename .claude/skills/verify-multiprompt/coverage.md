@@ -127,4 +127,4 @@ Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684
 
 A change that alters a mapped feature updates its map and this table in the same PR.
 
-| IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and unchanged-master red control | chat-messages-only | Pending GitHub Windows run; no local builds or tests |
+| IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and unchanged-master red control | chat-messages-only | Run results and screenshot review are recorded in GATES.md; no local builds or tests |
