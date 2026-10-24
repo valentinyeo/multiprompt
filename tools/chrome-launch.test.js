@@ -307,7 +307,7 @@ test('production reply routing retains current and late successes, ignores event
 });
 
 test('production retry stops on extension success without waiting for the theme, or on broken writes', () => {
-  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, pi\.hProcess, extension, theme\)/);
+  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, pi\.hProcess\.\?, extension, theme\)/);
   for (const first of ['error', 'silence', 'late']) {
     const runtime = chromeRuntime((tick, context) => {
       if (tick === 1) {
