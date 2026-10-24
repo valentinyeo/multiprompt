@@ -186,7 +186,7 @@ test('pipe holder bypasses CLI deadlines and owns both pipes until the Chrome pr
   assert.ok(launch.lastIndexOf('WaitForSingleObject(pi.hProcess, 0xFFFFFFFF)') > launch.indexOf('reader.detach()'));
   assert.match(body(bridge, 'drainChromePipe'), /while \(true\)[\s\S]*ReadFile/);
   assert.match(body(bridge, 'sendChromeExtension'), /try writeAll\(pipe, message\)/);
-  assert.doesNotMatch(launch, /Browser\.close|Sleep|GetTickCount|commandDeadline/);
+  assert.doesNotMatch(launch, /Browser\.close|GetTickCount|commandDeadline/);
 });
 
 test('only native Chrome own profiles use a detached bridge while adoption remains HWND/profile based', () => {
@@ -209,7 +209,7 @@ test('only native Chrome own profiles use a detached bridge while adoption remai
 });
 
 function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme', exitTick = Infinity) {
-  const state = { expected_id: 1, extension_loaded: false, theme_replied: false };
+  const state = { expected_id: 1, extension_loaded: false, extension_replied: false, theme_replied: false };
   let locked = false;
   state.mutex = {
     tryLock() { assert.equal(locked, false); locked = true; return true; },
@@ -245,7 +245,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme', exitTick 
   });
   for (const [name, args] of [
     ['chromeLoadUnpackedReplyId', 'reply'], ['routeChromeReply', 'reply'],
-    ['chromeExtensionNeedsRetry', ''], ['loadChromeExtensions', 'allocator, pipe, process, extension, theme'],
+    ['chromeExtensionNeedsRetry', ''], ['loadChromeExtensions', 'allocator, pipe, process, extension, theme, timeout_ms'],
   ]) {
     const code = body(bridge, name)
       .replace(/const parsed = std\.json\.parseFromSlice[^\n]+catch return(?: (null|false))?;/g, 'let parsed; try { parsed = parse(reply); } catch { return $1; }')
@@ -273,7 +273,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme', exitTick 
       .replace(/logChromeLaunch\(if \(chromeExtensionNeedsRetry\(\)\) ("[^"]+") else ("[^"]+")\);/, 'logChromeLaunch(chromeExtensionNeedsRetry() ? $1 : $2);');
     assert.doesNotThrow(() => vm.runInContext(`function ${name}(${args}) { ${code} }`, context, { filename: name }), `${name}: ${code}`);
   }
-  return { state, sent, logs, context, run() { context.loadChromeExtensions(null, null, process, 'extension', theme); return ticks; } };
+  return { state, sent, logs, context, run(timeout = 120000) { context.loadChromeExtensions(null, null, process, 'extension', theme, timeout); return ticks; } };
 }
 
 test('production reply routing retains current and late successes, ignores events, and routes complete frames once', () => {
@@ -307,7 +307,7 @@ test('production reply routing retains current and late successes, ignores event
 });
 
 test('production retry stops on extension success without waiting for the theme, or on broken writes', () => {
-  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, pi\.hProcess\.\?, extension, theme\)/);
+  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, pi\.hProcess\.\?, extension, theme, if \(attempt == 0\) 3000 else 110_000\)/);
   for (const first of ['error', 'silence', 'late']) {
     const runtime = chromeRuntime((tick, context) => {
       if (tick === 1) {
@@ -371,6 +371,169 @@ test('production retry bounds a silent live Chrome to 120 seconds and throttles 
   assert.equal(delayed.run(), 1);
   assert.deepEqual(delayed.sent, [[1, 'extension'], [2, 'theme']]);
   assert.equal(delayed.logs.at(-1), 'extension not-loaded');
+});
+
+function chromeLaunchRuntime(reply = () => null) {
+  const attempts = [], events = [], handles = [], pipes = [];
+  let current;
+  const runtime = chromeRuntime((tick, context) => {
+    const response = reply(attempts.length, tick - current.startTick);
+    if (response) context.routeChromeReply(response);
+  });
+  const { context } = runtime;
+  let now = 0;
+  const tickCount = context.GetTickCount64;
+  context.GetTickCount64 = () => tickCount() + now;
+  const close = handle => {
+    assert.ok(handle && !handle.closed, 'close each live handle once');
+    handle.closed = true;
+    events.push(['close', handle]);
+    return 1;
+  };
+  const handle = kind => {
+    const value = { kind, closed: false };
+    handles.push(value);
+    return value;
+  };
+  const originalSleep = context.Sleep;
+  const send = context.sendChromeExtension;
+  Object.assign(context, {
+    exe: 'chrome.exe', extension: 'extension', theme: 'theme', allocator: { free() {} }, chrome_args: { items: ['--profile-directory=Default'] },
+    createPipe(assign, sa) {
+      assert.equal(sa.bInheritHandle, 1);
+      const read = handle('read'), write = handle('write');
+      pipes.push({ read, write });
+      assign(read, write);
+      return 1;
+    },
+    chromePipeReserved2: (read, write) => ({ read, write, len: 49 }),
+    buildChromeLaunchCommand: (_allocator, exe, args) => `${exe} ${args.join(' ')}`,
+    utf16: (_allocator, text) => ({ ptr: text }),
+    spawnReader(pipe) {
+      current.reader = pipe;
+      return {
+        join() { assert.equal(current.process.terminated, true); events.push(['join', current.process]); close(pipe); },
+        detach() { events.push(['detach', current.process]); },
+      };
+    },
+    sendChromeExtension(allocator, pipe, id, target) {
+      assert.equal(pipe, current.input);
+      assert.equal(pipe.closed, false);
+      current.sent.push([id, target]);
+      send(allocator, pipe, id, target);
+    },
+    Sleep(ms) {
+      if (ms === 500) {
+        assert.equal(attempts.length, 1);
+        assert.equal(handles.every(handle => handle.closed), true, 'all first-attempt handles close before retry');
+        events.push(['pause', ms]);
+        now += ms;
+      } else {
+        originalSleep(ms);
+      }
+    },
+  });
+  Object.assign(context.win, {
+    CloseHandle: close,
+    SetHandleInformation(value, mask, flags) { assert.equal(value.closed, false); assert.equal(mask, 1); assert.equal(flags, 0); return 1; },
+    CreateProcessW(exe, command, _pa, _ta, inherit, flags, _env, _cwd, si, pi) {
+      assert.equal(exe, 'chrome.exe');
+      assert.equal(command, 'chrome.exe --profile-directory=Default');
+      assert.equal(inherit, 1);
+      assert.equal(flags, 0x08000000);
+      assert.deepEqual(Object.keys(pi), [], 'each attempt gets fresh zeroed PROCESS_INFORMATION');
+      assert.equal(si.lpReserved2.read.closed, false);
+      assert.equal(si.lpReserved2.write.closed, false);
+      pi.hProcess = handle('process');
+      pi.hThread = handle('thread');
+      pi.dwProcessId = attempts.length + 1;
+      current = { process: pi.hProcess, input: pipes.at(-2).write, reserved2: si.lpReserved2, pi, startTick: tickCount() / 25, sent: [] };
+      attempts.push(current);
+      events.push(['launch', current.process]);
+      return 1;
+    },
+    TerminateProcess(process, code) {
+      assert.equal(process, current.process);
+      assert.equal(code, 1);
+      process.terminated = true;
+      events.push(['terminate', process]);
+      return 1;
+    },
+    WaitForSingleObject(process, timeout) {
+      assert.equal(process, current.process);
+      assert.equal(process.closed, false);
+      if (timeout === 0) return 258;
+      assert.equal(timeout, 0xFFFFFFFF);
+      events.push(['wait', process]);
+      return 0;
+    },
+  });
+  let code = body(bridge, 'runChromeLaunch');
+  code = code.slice(code.indexOf('    for (0..2)'))
+    .replace(/\btry /g, '')
+    .replace(/defer if \((\w+) != null\) \{\s*_ = win.CloseHandle\(\1\);\s*\};/g, 'deferred.push(() => { if ($1 != null) win.CloseHandle($1); });')
+    .replace(/errdefer[^\n]+/g, '')
+    .replace(/defer _ = ([^\n]+);/g, 'deferred.push(() => { $1; });')
+    .replace(/defer allocator.free\((\w+)\);/g, 'deferred.push(() => allocator.free($1));')
+    .replace(/var sa = win.SECURITY_ATTRIBUTES\{[^\n]+/g, 'const sa = { bInheritHandle: 1 };')
+    .replace(/var (\w+): win.HANDLE = null;/g, 'let $1 = null;')
+    .replace(/win.CreatePipe\(&(\w+), &(\w+), &sa, 0\)/g, 'createPipe((read, write) => { $1 = read; $2 = write; }, sa)')
+    .replace(/return error\.(\w+);/g, 'throw Error("$1");')
+    .replace(/var (\w+) = std.mem.zeroes\(win.\w+\);/g, 'const $1 = {};')
+    .replace('si.cb = @sizeOf(win.STARTUPINFOW);', 'si.cb = 104;')
+    .replaceAll('@intFromPtr(child_read)', 'child_read').replaceAll('@intFromPtr(child_write)', 'child_write')
+    .replace('var reserved2 =', 'const reserved2 =').replaceAll('@intCast(reserved2.len)', 'reserved2.len')
+    .replaceAll('&reserved2', 'reserved2').replaceAll('&si, &pi', 'si, pi')
+    .replaceAll('std.unicode.utf8ToUtf16LeAllocZ', 'utf16')
+    .replace(/var launch_line: \[4096\]u8 = undefined;/, '')
+    .replace(/std.fmt.bufPrint\(&launch_line, ("[^"\n]+"), \.\{\s*([^\n]+?)\s*\}\) catch "[^"]*"/g, 'format($1, [$2])')
+    .replace(/const reader = std.Thread.spawn\([\s\S]+?\n        \};/, 'const reader = spawnReader(parent_read);')
+    .replaceAll('parent_write.?', 'parent_write').replaceAll('pi.hProcess.?', 'pi.hProcess')
+    .replace('if (attempt == 0) 3000 else 110_000', '(attempt == 0 ? 3000 : 110000)')
+    .replaceAll(' and ', ' && ').replaceAll(' or ', ' || ').replaceAll('_ = ', '')
+    .replace('for (0..2) |attempt| {', 'for (let attempt = 0; attempt < 2; attempt++) { const deferred = []; try {');
+  code = `${code.slice(0, code.lastIndexOf('}'))} } finally { while (deferred.length) deferred.pop()(); } }`;
+  assert.doesNotThrow(() => vm.runInContext(`(() => { ${code} })()`, context), code);
+  return { ...runtime, attempts, events };
+}
+
+test('a silent first production launch is terminated and retried once with fresh pipes and process handles', () => {
+  for (const secondReplies of [true, false]) {
+    const runtime = chromeLaunchRuntime((attempt, tick) => secondReplies && attempt === 2 && tick === 1 ? '{"id":1,"result":{}}' : null);
+    const { attempts, events, logs } = runtime;
+    assert.equal(attempts.length, 2);
+    const [first, second] = attempts;
+    assert.equal(first.process.terminated, true);
+    assert.equal(second.process.terminated, undefined);
+    assert.notEqual(first.process, second.process);
+    assert.notEqual(first.pi, second.pi);
+    assert.notEqual(first.input, second.input);
+    assert.notEqual(first.reader, second.reader);
+    assert.notEqual(first.reserved2.read, second.reserved2.read);
+    assert.notEqual(first.reserved2.write, second.reserved2.write);
+    assert.equal(second.startTick * 25, 3000);
+    for (const attempt of attempts) assert.deepEqual(attempt.sent.slice(0, 2), [[1, 'extension'], [2, 'theme']]);
+    assert.deepEqual(events.filter(([event]) => ['launch', 'terminate', 'wait', 'join', 'pause', 'detach'].includes(event)), [
+      ['launch', first.process], ['terminate', first.process], ['wait', first.process], ['join', first.process], ['pause', 500],
+      ['launch', second.process], ['detach', second.process], ['wait', second.process],
+    ]);
+    assert.equal(logs.filter(line => line === 'launch retry after no extension reply').length, 1);
+    assert.equal(logs.at(-1), secondReplies ? 'extension loaded' : 'extension not-loaded');
+    assert.equal(runtime.context.GetTickCount64(), 3500 + (secondReplies ? 25 : 110000));
+  }
+});
+
+test('a first production launch that answers is retained and never retried, even for an extension error', () => {
+  for (const response of ['{"id":1,"result":{}}', '{"id":1,"error":{}}']) {
+    const runtime = chromeLaunchRuntime((_attempt, tick) => tick === 1 ? response : null);
+    assert.equal(runtime.attempts.length, 1);
+    const [{ process, sent }] = runtime.attempts;
+    assert.equal(process.terminated, undefined);
+    assert.deepEqual(sent.slice(0, 2), [[1, 'extension'], [2, 'theme']]);
+    assert.deepEqual(runtime.events.filter(([event]) => ['terminate', 'pause', 'join', 'detach', 'wait'].includes(event)), [['detach', process], ['wait', process]]);
+    assert.equal(runtime.logs.includes('launch retry after no extension reply'), false);
+    assert.equal(runtime.state.theme_replied, false);
+  }
 });
 
 test('production APPDATA launch log stays capped, plain-line, and best-effort', () => {
