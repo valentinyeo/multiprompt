@@ -116,6 +116,7 @@ const GET_Y = @import("startup.zig").GET_Y;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const customColorOr = @import("themes.zig").customColorOr;
 const themeConsoleBg = @import("themes.zig").themeConsoleBg;
+const themeConsoleFg = @import("themes.zig").themeConsoleFg;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const DEV_TOP_PAD = @import("app_state.zig").DEV_TOP_PAD;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;

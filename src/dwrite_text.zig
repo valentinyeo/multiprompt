@@ -315,11 +315,15 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
                 const cluster_start = glyph;
                 glyph += 1;
                 while (glyph < count and attributes[glyph] & 0x10 == 0) : (glyph += 1) {}
-                var anchor: f32 = std.math.inf(f32);
+                const rtl = item.analysis.flags & 0x0400 != 0;
+                var anchor: f32 = if (rtl) -std.math.inf(f32) else std.math.inf(f32);
                 for (clusters[begin..end], begin..) |cluster, unit| {
-                    if (cluster == cluster_start) anchor = @min(anchor, positions[unit]);
+                    if (cluster == cluster_start) anchor = if (rtl) @max(anchor, positions[unit]) else @min(anchor, positions[unit]);
                 }
                 if (!std.math.isFinite(anchor)) return false;
+                if (rtl) for (widths[cluster_start..glyph]) |advance| {
+                    anchor -= @floatFromInt(advance);
+                };
                 for (cluster_start..glyph) |g| {
                     offsets[g] = .{ .advance = anchor + @as(f32, @floatFromInt(native_offsets[g].x)), .ascender = @floatFromInt(native_offsets[g].y) };
                     anchor += @floatFromInt(widths[g]);

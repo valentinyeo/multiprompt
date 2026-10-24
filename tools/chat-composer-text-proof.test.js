@@ -63,3 +63,43 @@ test('IGSH-731 Windows proof uses production painter and every scale/DPI with th
   assert.ok(read('.claude/skills/verify-multiprompt/features/README.md').includes('chat-composer-text.md'));
   assert.ok(read('.claude/skills/verify-multiprompt/features/chat-composer-text.md').includes('v0.28.858'));
 });
+
+test('IGSH-731 native oracle remeasures all nine image pairs and rejects hard or forged evidence', async () => {
+  const os = require('node:os');
+  const { evaluateNative } = await import('./chat-composer-text-proof.mjs');
+  const { edgeHardness } = await import('./chat-code-font-proof.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-edge-oracle-'));
+  const write = (scale, dpi, mode, smooth) => {
+    const sample = image(smooth);
+    const header = Buffer.alloc(54);
+    header.write('BM');
+    header.writeUInt32LE(54 + sample.pixels.length, 2);
+    header.writeUInt32LE(54, 10);
+    header.writeUInt32LE(40, 14);
+    header.writeInt32LE(sample.width, 18);
+    header.writeInt32LE(-sample.height, 22);
+    header.writeUInt16LE(1, 26);
+    header.writeUInt16LE(32, 28);
+    const stem = path.join(directory, `composer-${scale}-${dpi}-${mode}`);
+    fs.writeFileSync(`${stem}.bmp`, Buffer.concat([header, sample.pixels]));
+    fs.writeFileSync(`${stem}.json`, JSON.stringify({ ticket: 'IGSH-731', ui_scale: scale, dpi, direct_write: mode === 'dwrite', font_smoothing: false, font_px: 16, measurement: edgeHardness(sample, metadata.rect, 1) }));
+  };
+  try {
+    for (const scale of [100, 125, 150]) for (const dpi of [96, 120, 144]) for (const mode of ['gdi', 'dwrite']) write(scale, dpi, mode, mode === 'dwrite');
+    const accepted = evaluateNative(directory);
+    assert.equal(accepted.passed, true);
+    assert.equal(accepted.checks.length, 9);
+    write(125, 120, 'dwrite', false);
+    assert.equal(evaluateNative(directory).passed, false);
+    write(125, 120, 'dwrite', true);
+    const file = path.join(directory, 'composer-150-144-dwrite.json');
+    const forged = JSON.parse(fs.readFileSync(file));
+    forged.measurement.edges += 1;
+    fs.writeFileSync(file, JSON.stringify(forged));
+    assert.equal(evaluateNative(directory).passed, false);
+    fs.unlinkSync(file);
+    assert.throws(() => evaluateNative(directory), /ENOENT/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
