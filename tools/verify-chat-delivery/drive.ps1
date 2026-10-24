@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$Ssh,
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
-    [Parameter(Mandatory)][string]$Evidence
+    [Parameter(Mandatory)][string]$Evidence,
+    [ValidateSet('chat-delivery', 'chat-messages-only')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -24,6 +25,7 @@ $plans = @(
     @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
     @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'}
 )
+if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -45,7 +47,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png) }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -141,6 +143,8 @@ foreach ($plan in $plans) {
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
     $isQueue = $plan.name -eq 'queue-draft-sync'
+    $isActivity = $plan.name -eq 'messages-only'
+    $hasTranscript = $isQueue -or $isActivity
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -157,7 +161,7 @@ foreach ($plan in $plans) {
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         $standIn = $seed
-        if ($isQueue) {
+        if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
             $cwd = 'C:/verify/work'
             $procDir = [IO.Path]::GetPathRoot($profile) + 'proc\4242'
@@ -173,7 +177,7 @@ foreach ($plan in $plans) {
             $observation.steps = $steps
         }
         Save $standIn "$state/state.json"
-        if ($isQueue) { Shell-Run @('init') }
+        if ($hasTranscript) { Shell-Run @('init') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
@@ -190,7 +194,39 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isQueue) {
+        if ($isActivity) {
+            if (-not (Step 'initial-transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)) { throw 'Initial transcript was not read' }
+            $cache = Wait-For 'app-written message cache' {
+                @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains('The fake session is ready.') }) | Select-Object -First 1
+            }
+            Type-Composer $plan.text
+            if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer typing failed' }
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+            $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+            $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+            if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
+            $bounds = $views[0].Current.BoundingRectangle
+            $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+            Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
+            Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
+            Shot 'messages-only-before-tools'
+            $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Shell-Input 'activity'
+            [void](Wait-For 'all twelve completed tool calls in app-written cache' {
+                $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
+                @($rows | Where-Object { $_.role -eq 'tool' }).Count -eq 12 -and @($rows | Where-Object { $_.role -eq 'tool_result' }).Count -eq 12
+            })
+            Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
+            if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Tool updates changed the composer' }
+            Press @(0x11, 0x30) 'Ctrl+0: lay out the tool-heavy transcript' $true
+            [void](Wait-For 'tool-heavy transcript applied to the real renderer' { (Read-Shared "$settings/debug.log") -match '\[chatfont\] pt=\d+ blocks=14 content_h=\d+' })
+            $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
+            Save $observation "$caseDir/observation.json"
+            Shot 'messages-only-after-tools'
+            & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
+            if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($isQueue) {
             $t = $queueTexts
             [void](Step 'chat-view-read-transcript' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
             Shell-Input 'text' $t.a
@@ -263,9 +299,9 @@ foreach ($plan in $plans) {
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
             }
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
-            if ($isQueue -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
+            if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
-            if ($isQueue -and $procDir) {
+            if ($hasTranscript -and $procDir) {
                 Remove-Item -LiteralPath $procDir -Recurse -Force -ErrorAction SilentlyContinue
                 $procRoot = Split-Path $procDir
                 if ((Test-Path -LiteralPath $procRoot) -and -not (Get-ChildItem -LiteralPath $procRoot -Force)) { Remove-Item -LiteralPath $procRoot -Force }
@@ -276,7 +312,7 @@ foreach ($plan in $plans) {
         Save $observation "$caseDir/observation.json"
         Save $cleanup "$caseDir/cleanup.json"
         ($results | Where-Object { $_.name -eq $plan.name }).detail = $(if ($observation.error) { $observation.error } else { 'Awaiting independent buffer evaluation' })
-        Save @{feature='chat-delivery'; status='failed'; agentBoundary='stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'; cases=$results} "$Evidence/result.json"
+        Save @{feature=$Feature; status='failed'; agentBoundary='stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'; cases=$results} "$Evidence/result.json"
     }
 }
 Save $actions.ToArray() "$Evidence/actions.json"
@@ -285,5 +321,9 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
-& node "$PSScriptRoot/check-evidence.js" $Evidence
+if ($Feature -eq 'chat-messages-only') {
+    & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --complete
+} else {
+    & node "$PSScriptRoot/check-evidence.js" $Evidence
+}
 if ($LASTEXITCODE -ne 0) { exit 1 }

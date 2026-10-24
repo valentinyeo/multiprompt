@@ -26,6 +26,8 @@ on:
       - tools/verify-chat-delivery.test.js
       - tools/verify-chat-delivery/**
       - tools/chat-local-agent.c
+      - tools/chat-messages-only-proof.mjs
+      - tools/chat-messages-only-proof.test.mjs
       - tools/chat-code-font-proof.mjs
       - tools/chat-code-font-proof.test.js
       - tools/chat-composer-text-proof.mjs
@@ -121,7 +123,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
     env:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
@@ -133,7 +135,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js
+        run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
@@ -142,19 +144,19 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')) { throw 'Unknown feature map' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
-          if ($env:FEATURE -eq 'chat-delivery') {
+          if ($env:FEATURE -in @('chat-delivery', 'chat-messages-only')) {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-chat-delivery/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-view'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -205,11 +207,11 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'chat-delivery'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only'
         with:
           python-version: '3.12'
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'chat-delivery'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
@@ -278,6 +280,43 @@ jobs:
           Get-ChildItem composer-*.bmp, composer-*.json -ErrorAction SilentlyContinue | Copy-Item -Destination evidence/
           node tools/chat-composer-text-proof.mjs evidence --native
           if ($nativeExit -ne 0 -or $LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests or edge proof failed' }
+      - name: Run messages-only native layout regressions
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        run: zig build test-main --summary all
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || 'master' }}
+          path: negative-source
+      - name: Build unchanged master negative control
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        working-directory: negative-source
+        run: zig build
+      - name: Require unchanged master to show activity rows with the identical journey
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence/negative | Out-Null
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-source/zig-out/bin/
+          $source = Get-Content negative-source/src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Negative control version missing' }
+          $version = $Matches[1]
+          $exe = "$pwd/negative-source/zig-out/bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ revision = (git -C negative-source rev-parse HEAD).Trim(); version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-messages-only -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
+          } catch {
+            Write-Host "Negative control returned: $_"
+          }
+          if (-not (Test-Path evidence/negative/result.json)) { throw 'Negative control produced no result' }
+          $red = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          if ($red.status -ne 'failed' -or $red.error -notmatch 'IGSH-759 activity rows, ticks or reserved space changed the transcript') { throw 'Negative control did not fail on visible activity rows' }
+          $cleanup = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
+          if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
+          $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
         shell: powershell

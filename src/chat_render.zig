@@ -1710,8 +1710,21 @@ pub fn chatRelayout(client_width: i32) void {
     }
     app_state.g_chat_img_mutex.unlock();
     var y: i32 = if (reuse > 0) app_state.g_chat_layout_rects[reuse - 1].bottom else if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0;
+    var has_previous = false;
+    for (app_state.g_chat_blocks[0..reuse]) |block| {
+        if (block.role != .tool) {
+            has_previous = true;
+            break;
+        }
+    }
     for (reuse..app_state.g_chat_block_count) |i| {
-        y += chatBlockGapBefore(i > 0, app_state.g_chat_blocks[i].role, app_state.g_chat_blocks[i].first, app_state.g_chat_bubble_pos[i]);
+        if (app_state.g_chat_blocks[i].role == .tool) {
+            app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = y, .right = 0, .bottom = y };
+            chatImgStoreLayout(i, .{});
+            continue;
+        }
+        y += chatBlockGapBefore(has_previous, app_state.g_chat_blocks[i].role, app_state.g_chat_blocks[i].first, app_state.g_chat_bubble_pos[i]);
+        has_previous = true;
         var block_imgs = ChatImgLayout{};
         const rc = chatMeasureBlockRect(hdc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], width, y, if (i >= first_img_block and (!app_state.g_chat_blocks_from_file or app_state.g_chat_blocks[i].image_count > 0)) &block_imgs else null);
         app_state.g_chat_layout_rects[i] = rc;
@@ -4026,6 +4039,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
                 const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
                 for (first..app_state.g_chat_block_count) |i| {
+                    if (app_state.g_chat_blocks[i].role == .tool) continue;
                     var rc = app_state.g_chat_layout_rects[i];
                     rc.left += app_state.g_chat_content_left;
                     rc.right += app_state.g_chat_content_left;
@@ -4845,4 +4859,80 @@ test "IGSH-436 production table layout reuses its cached build" {
     const second = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(first, second);
     try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
+}
+
+test "IGSH-759 tool rows have no layout paint targets or hit area through streamed updates" {
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("messages only"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_hwnd = app_state.g_chat_transcript_hwnd;
+    const old_count = app_state.shell_count;
+    const old_scroll = app_state.g_chat_scroll_y;
+    defer {
+        app_state.g_chat_transcript_hwnd = old_hwnd;
+        app_state.shell_count = old_count;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.shell_count = 0;
+    app_state.g_chat_scroll_y = 37;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("QuestionReadyRan Check app-smoke stateExpanded details+added\n-removed");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    const user = ChatBlock{ .start = 0, .len = 8, .role = .user, .first = true };
+    const reply = ChatBlock{ .start = 8, .len = 5, .role = .prose, .first = true };
+    const tool = ChatBlock{ .start = 13, .len = 25, .role = .tool, .tool_status = .ok, .tool_open = true, .detail_start = 38, .detail_len = 16, .diff_start = 54, .diff_len = text.len - 54 };
+    app_state.g_chat_blocks[0] = user;
+    app_state.g_chat_blocks[1] = reply;
+    app_state.g_chat_block_count = 2;
+    app_state.g_chat_layout_reuse = 0;
+    chatRelayout(800);
+    const user_rc = app_state.g_chat_layout_rects[0];
+    const reply_rc = app_state.g_chat_layout_rects[1];
+    const height = app_state.g_chat_content_h;
+    for ([_]usize{ 0, 1, 2 }) |insert| {
+        app_state.g_chat_block_count = 5;
+        var visible: usize = 0;
+        for (0..5) |i| {
+            if (i >= insert and i < insert + 3) {
+                app_state.g_chat_blocks[i] = tool;
+                app_state.g_chat_blocks[i].tool_status = switch (i - insert) {
+                    0 => .running,
+                    1 => .ok,
+                    else => .@"error",
+                };
+            } else {
+                app_state.g_chat_blocks[i] = if (visible == 0) user else reply;
+                visible += 1;
+            }
+        }
+        app_state.g_chat_layout_reuse = 0;
+        chatRelayout(800);
+        try std.testing.expectEqual(height, app_state.g_chat_content_h);
+        try std.testing.expectEqual(@as(i32, 37), app_state.g_chat_scroll_y);
+        for (0..5) |i| {
+            const block = app_state.g_chat_blocks[i];
+            const rc = app_state.g_chat_layout_rects[i];
+            if (block.role == .tool) {
+                try std.testing.expectEqual(rc.top, rc.bottom);
+                try std.testing.expectEqual(@as(i32, 0), rc.right - rc.left);
+                try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_img_count[i]);
+                try std.testing.expect(chatToolAt(0, rc.top - 37) == null);
+            } else {
+                try std.testing.expect(std.meta.eql(if (block.role == .user) user_rc else reply_rc, rc));
+                var copied: [32]u16 = undefined;
+                const n = try chatCopyBlockText(&copied, block, block.start, block.start + block.len);
+                try std.testing.expectEqualSlices(u16, text[block.start..][0..block.len], copied[0..n]);
+            }
+        }
+        app_state.g_chat_layout_reuse = insert + 2;
+        app_state.g_chat_blocks[insert + 2].tool_open = false;
+        chatRelayout(800);
+        try std.testing.expectEqual(height, app_state.g_chat_content_h);
+        try std.testing.expectEqualSlices(u16, text, app_state.g_chat_capture[0..text.len]);
+        try std.testing.expect(std.meta.eql(tool, app_state.g_chat_blocks[insert + 1]));
+    }
 }

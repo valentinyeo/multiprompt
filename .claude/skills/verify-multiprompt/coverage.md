@@ -126,3 +126,5 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684784) fails earlier at `renamed tab persisted`. There is no earlier verify.yml sessions run. Keep this product gap separate from harness fixes and do not weaken the journey. Appearance on v0.28.820 failed `IGSH-587: main window did not start maximized` because that release predates the asserted change; use a release containing every change the harness asserts.
 
 A change that alters a mapped feature updates its map and this table in the same PR.
+
+| IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and unchanged-master red control | chat-messages-only | Pending GitHub Windows run; no local builds or tests |

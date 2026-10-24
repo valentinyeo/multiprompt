@@ -265,6 +265,13 @@ def shell():
     op = ARGS[0] if ARGS else ""
     if op == "init":
         return fake_init()
+    if op == "activity":
+        descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]
+        for i in range(12):
+            identity = "activity-" + str(i)
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo verified", description=descriptions[i % len(descriptions)]))]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="verified", is_error=False)]))
+        return 0
     if op == "show":
         sys.stdout.write(json.dumps(fake_locked(fake_read)) + "\n")
         return 0

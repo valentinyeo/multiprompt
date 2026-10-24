@@ -76,6 +76,10 @@ The `browser-pane-stuck` journey reads the app-published `browser_state`, `brows
 
 Bounded condition waits inspect actual saved state and window titles. A missing precondition fails the journey with an error and retained evidence. Never change the expected outcome, write settings yourself, add a test-only setter, or skip the failing action to make a run green. Fix a broken driver only when the real user path is unchanged.
 
+### Messages only
+
+Read [Messages only](features/chat-messages-only.md). Dispatch `gh workflow run verify.yml --ref ceo/IGSH-759 -f feature=chat-messages-only`. The identical driver runs against unchanged master first (required visible-row failure) and the branch second. Both screenshots include the real composer and transcript. This journey reuses the delivery stand-in's explicit isolated saved-tab and synthetic-agent-transcript boundary; it does not write the app's transcript cache or use an app setter. All builds and tests run on GitHub Windows.
+
 ### Chat delivery
 
 Read [Chat delivery](features/chat-delivery.md). Dispatch `gh workflow run verify.yml --ref ceo/IGSH-595 -f feature=chat-delivery -f tag=v0.28.811` and repeat with `tag=v0.28.821`; omit the tag for a branch build. After merge the default-branch dispatch may omit `--ref`. The artifact is `verify-chat-delivery`, with root `result.json` status and all three named cases. This journey delegates from control.ps1 to tools/verify-chat-delivery/drive.ps1 and uses the reconnect pattern's explicit saved-session exception: isolated saved tmux tabs plus the production ssh-path.txt override, never an app test setter.
