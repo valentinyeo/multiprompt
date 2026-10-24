@@ -534,7 +534,7 @@ pub fn build(b: *std.Build) void {
     const browser_own_profile_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-own-profile.test.js" });
     test_step.dependOn(&browser_own_profile_tests.step);
     vps_test_step.dependOn(&browser_own_profile_tests.step);
-    const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js", "tools/browser-profile-adoption.test.js" });
+    const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js", "tools/browser-profile-adoption.test.js", "tools/browser-native-profile.test.js" });
     test_step.dependOn(&browser_profile_isolation_tests.step);
     const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js" });
     test_step.dependOn(&browser_engine_selection_tests.step);
