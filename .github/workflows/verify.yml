@@ -285,3 +285,148 @@ jobs:
           name: verify-${{ env.FEATURE }}
           path: evidence/
           if-no-files-found: error
+  probe-chrome-pipe4:
+    if: inputs.feature == 'probe-chrome-pipe4'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build bridge
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
+          if ($LASTEXITCODE -ne 0) { throw 'Bridge build failed' }
+      - name: Compare branded Chrome pipe with redirected environments
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path 'C:\probe4') { throw 'Probe root is not fresh' }
+          New-Item -ItemType Directory -Path 'C:\probe4', 'evidence' | Out-Null
+          $branded = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+          Write-Output "CHROME_VERSION $([System.Diagnostics.FileVersionInfo]::GetVersionInfo($branded).FileVersion) exe=$branded"
+          @'
+          param([string]$Scenario, [string]$Profile, [string]$Scratch)
+          $ErrorActionPreference = 'Stop'
+          $branded = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+          $ext = (Resolve-Path 'extension').Path
+          $theme = Join-Path $ext 'themes\dark'
+          $bridge = (Resolve-Path 'zig-out\bin\zigshell-bridge.exe').Path
+          $saved = @{}
+          foreach ($key in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'TEMP', 'TMP')) {
+            $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+          }
+          $launcher = $null
+          $log = ''
+          try {
+            if ($Scenario -like 'redirected*') {
+              $env:APPDATA = Join-Path $Scratch 'roaming'
+              $env:LOCALAPPDATA = Join-Path $Scratch 'local'
+              $env:USERPROFILE = Join-Path $Scratch 'profile'
+              $env:TEMP = Join-Path $Scratch 'temp'
+              $env:TMP = $env:TEMP
+              New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:USERPROFILE, $env:TEMP | Out-Null
+              if ($Scenario -ne 'redirected-missing-local') {
+                New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+              }
+            } elseif ($Scenario -eq 'no-localappdata') {
+              Remove-Item Env:LOCALAPPDATA
+            }
+            if (Test-Path $Profile) { throw "Profile is not fresh: $Profile" }
+            # Precreating the profile in this case would erase the missing-LOCALAPPDATA condition.
+            if ($Scenario -ne 'redirected-missing-local') {
+              New-Item -ItemType Directory -Force -Path $Profile | Out-Null
+            } elseif (Test-Path $env:LOCALAPPDATA) {
+              throw 'LOCALAPPDATA must not exist at launch'
+            }
+            $logRoot = Join-Path $env:APPDATA 'ZigShell'
+            New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+            $logPath = Join-Path $logRoot 'bridge-launch.log'
+            $stderrPath = Join-Path $logRoot 'chrome-launch-err.log'
+            Remove-Item $logPath, $stderrPath, (Join-Path $logRoot 'chrome-launch-out.log') -Force -ErrorAction SilentlyContinue
+            $arguments = 'chrome-launch "{0}" "{1}" "{2}" --silent-debugger-extension-api --user-data-dir="{3}" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode --load-extension="{1},{2}" --profile-directory=Default --new-window data:text/html,<title>ZSPANE1-PROBE4</title> --window-position=506,31 --window-size=500,600' -f $branded, $ext, $theme, $Profile
+            Write-Output "SCENARIO $Scenario profile=$Profile"
+            foreach ($key in $saved.Keys | Sort-Object) {
+              Write-Output "ENV $Scenario $key=$([Environment]::GetEnvironmentVariable($key, 'Process'))"
+            }
+            Write-Output "LOCALAPPDATA_EXISTS $Scenario $(if ($env:LOCALAPPDATA) { Test-Path $env:LOCALAPPDATA } else { $false })"
+            Write-Output "COMMAND `"$bridge`" $arguments"
+            $launcher = Start-Process -FilePath $bridge -ArgumentList $arguments -PassThru
+            Start-Sleep -Seconds 25
+          } finally {
+            if ($launcher -and -not $launcher.HasExited) {
+              $launcher.Kill()
+              $launcher.WaitForExit(5000) | Out-Null
+            }
+            if ($logPath -and (Test-Path $logPath)) { $log = Get-Content $logPath -Raw }
+            Write-Output "BEGIN $Scenario bridge-launch.log"
+            Write-Output $log
+            Write-Output "END $Scenario bridge-launch.log"
+            $log | Set-Content "evidence/$Scenario-bridge-launch.log"
+            $replies = [regex]::Matches($log, '(?m)^CDP reply id=').Count
+            $result = "PROBE $Scenario replies=$replies"
+            Write-Output $result
+            $result | Add-Content evidence/probe4.txt
+            Write-Output "BEGIN $Scenario chrome-launch-err.log matches"
+            if ($stderrPath -and (Test-Path $stderrPath)) {
+              Copy-Item $stderrPath "evidence/$Scenario-chrome-launch-err.log"
+              $matches = @(Select-String -Path $stderrPath -Pattern 'DevTools|user-data-dir|load-extension')
+              $matches | ForEach-Object { Write-Output "STDERR $Scenario $($_.Line)" }
+              if (-not $matches.Count) { Write-Output "STDERR $Scenario NO_MATCH" }
+            } else {
+              Write-Output "STDERR $Scenario LOG_MISSING"
+            }
+            Write-Output "END $Scenario chrome-launch-err.log matches"
+            $chrome = @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'")
+            $owned = [System.Collections.Generic.HashSet[uint32]]::new()
+            foreach ($match in [regex]::Matches($log, 'CreateProcessW result=1 pid=(\d+)')) {
+              $owned.Add([uint32]$match.Groups[1].Value) | Out-Null
+            }
+            do {
+              $added = $false
+              foreach ($process in $chrome) {
+                if (($launcher -and $process.ParentProcessId -eq $launcher.Id) -or $owned.Contains($process.ParentProcessId) -or ($process.CommandLine -and $process.CommandLine.Replace('"', '').Contains("--user-data-dir=$Profile"))) {
+                  if ($owned.Add($process.ProcessId)) { $added = $true }
+                }
+              }
+            } while ($added)
+            foreach ($process in $chrome) {
+              if ($owned.Contains($process.ProcessId)) {
+                Write-Output "CLEANUP $Scenario chrome-pid=$($process.ProcessId)"
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+              }
+            }
+            if ($launcher) { $launcher.Dispose() }
+            foreach ($key in $saved.Keys) {
+              [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
+            }
+          }
+          if ($log -notmatch 'CreateProcessW result=1 pid=') { throw "No successful Chrome launch recorded for $Scenario" }
+          if (-not (Test-Path $stderrPath)) { throw "Chrome stderr log missing for $Scenario" }
+          '@ | Set-Content 'C:\probe4\launch.ps1'
+          $scenarios = @(
+            @{ name = 'plain'; profile = 'C:\probe4\own-plain'; scratch = '' },
+            @{ name = 'redirected'; profile = 'C:\probe4\scratch\local\ZigShell\BrowserWorkspaces\chrome\own-adee37bbc9fa6013ec24ccfd'; scratch = 'C:\probe4\scratch' },
+            @{ name = 'redirected-missing-local'; profile = 'C:\probe4\scratch-missing-local\local\ZigShell\BrowserWorkspaces\chrome\own-bdee37bbc9fa6013ec24ccfd'; scratch = 'C:\probe4\scratch-missing-local' },
+            @{ name = 'no-localappdata'; profile = 'C:\probe4\own-nolocal'; scratch = '' }
+          )
+          foreach ($scenario in $scenarios) {
+            & "$PSHOME/pwsh.exe" -NoProfile -File 'C:\probe4\launch.ps1' -Scenario $scenario.name -Profile $scenario.profile -Scratch $scenario.scratch
+            if ($LASTEXITCODE -ne 0) { throw "Probe failed: $($scenario.name)" }
+          }
+      - name: Upload Chrome environment probe evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: probe-chrome-pipe4
+          path: evidence/
+          if-no-files-found: error
