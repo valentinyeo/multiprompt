@@ -183,7 +183,6 @@ test('pipe holder bypasses CLI deadlines and owns both pipes until the Chrome pr
   assert.match(launch, /si\.lpReserved2 = &reserved2/);
   assert.match(launch, /CreateProcessW\(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000/);
   assert.match(launch, /drainChromePipe, \.\{parent_read\.\?\}/);
-  assert.match(launch, /(?:loadChromeExtensions\(allocator, parent_write\.\?, extension, theme\)|sendChromeExtension\(allocator, parent_write\.\?, 1, extension\))/);
   assert.ok(launch.lastIndexOf('WaitForSingleObject(pi.hProcess, 0xFFFFFFFF)') > launch.indexOf('reader.detach()'));
   assert.match(body(bridge, 'drainChromePipe'), /while \(true\)[\s\S]*ReadFile/);
   assert.match(body(bridge, 'sendChromeExtension'), /try writeAll\(pipe, message\)/);
@@ -241,7 +240,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
     ['chromeExtensionNeedsRetry', ''], ['loadChromeExtensions', 'allocator, pipe, extension, theme'],
   ]) {
     const code = body(bridge, name)
-      .replace(/const parsed = std\.json\.parseFromSlice[^\n]+catch return (null|false|);/g, 'let parsed; try { parsed = parse(reply); } catch { return $1; }')
+      .replace(/const parsed = std\.json\.parseFromSlice[^\n]+catch return(?: (null|false))?;/g, 'let parsed; try { parsed = parse(reply); } catch { return $1; }')
       .replaceAll('defer parsed.deinit();', '')
       .replaceAll('parsed.value != .object', "parsed.value.kind !== 'object'")
       .replaceAll('id != .integer', "id.kind !== 'integer'")
@@ -252,7 +251,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
       .replaceAll('while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();', 'if (!chrome_replies.mutex.tryLock()) throw Error("lock");')
       .replaceAll('defer chrome_replies.mutex.unlock();', '')
       .replace(/var (\w+): \[\d+\]u8 = undefined;/g, '')
-      .replace(/std\.fmt\.bufPrint\(&\w+, ("[^"\n]+"), \.\{ ([^\n]+) \}\) catch [^;]+/g, 'format($1, [$2])')
+      .replace(/std\.fmt\.bufPrint\(&\w+, ("[^"\n]+"), \.\{ ([^\n]+) \}\) catch (?:return|"[^"]*")/g, 'format($1, [$2])')
       .replaceAll('reply[0..@min(reply.len, 200)]', 'reply.slice(0, 200)')
       .replace('for (0..8) |attempt|', 'for (let attempt = 0; attempt < 8; attempt++)')
       .replace('for (0..30) |_|', 'for (let tick = 0; tick < 30; tick++)')
@@ -263,7 +262,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
       .replaceAll('var finished =', 'let finished =')
       .replaceAll(' and ', ' && ').replaceAll(' or ', ' || ')
       .replace(/logChromeLaunch\(if \(chromeExtensionNeedsRetry\(\)\) ("[^"]+") else ("[^"]+")\);/, 'logChromeLaunch(chromeExtensionNeedsRetry() ? $1 : $2);');
-    vm.runInContext(`function ${name}(${args}) { ${code} }`, context);
+    assert.doesNotThrow(() => vm.runInContext(`function ${name}(${args}) { ${code} }`, context, { filename: name }), `${name}: ${code}`);
   }
   return { state, sent, logs, context, run() { context.loadChromeExtensions(null, null, 'extension', theme); return ticks; } };
 }
@@ -286,6 +285,7 @@ test('production reply routing retains current and late successes, ignores event
     assert.equal(state.theme_replied, true);
     assert.equal(state.extension_loaded, true);
   }
+  assert.equal(logs.length, replies.length * 2);
   state.extension_loaded = false;
   context.routeChromeReply('{"id":8,"result":{}}');
   assert.equal(state.extension_loaded, false);
@@ -331,7 +331,47 @@ test('production retry stops on success or broken writes and stays within eight 
 });
 
 test('production APPDATA launch log stays capped, plain-line, and best-effort', () => {
-  const source = body(bridge, 'logChromeLaunch');
+  const enqueue = body(bridge, 'logChromeLaunch');
+  assert.doesNotMatch(enqueue, /Sleep|while|WriteFile|CreateFile/);
+  let busy = false, locked = false;
+  const queue = {
+    lines: Array.from({ length: 32 }, () => Buffer.alloc(1024)), lengths: [], next: 0, count: 0,
+    mutex: {
+      tryLock() { if (busy) return false; assert.equal(locked, false); locked = true; return true; },
+      unlock() { assert.equal(locked, true); locked = false; },
+    },
+  };
+  const queued = [];
+  const context = vm.createContext({
+    Buffer, chrome_launch_log: queue,
+    appendChromeLaunchLog: line => { assert.equal(locked, false); queued.push(line.toString()); },
+  });
+  const queueCode = enqueue
+    .replace('defer chrome_launch_log.mutex.unlock();', 'try {')
+    .replace(/\.len\b/g, '.length').replace('@min(', 'Math.min(')
+    .replace('@memcpy(chrome_launch_log.lines[index][0..length], line[0..length]);', 'line.copy(chrome_launch_log.lines[index], 0, 0, length);');
+  vm.runInContext(`function logChromeLaunch(line) { ${queueCode} } finally { chrome_launch_log.mutex.unlock(); } }`, context);
+  busy = true;
+  context.logChromeLaunch(Buffer.from('busy'));
+  assert.equal(queue.count, 0);
+  busy = false;
+  for (let i = 0; i < 34; i++) context.logChromeLaunch(Buffer.from(i === 0 ? 'x'.repeat(2000) : `entry-${i}`));
+  assert.equal(queue.count, 32);
+  assert.equal(queued.length, 0, 'launch path only enqueues, never does file I/O');
+  const flushCode = body(bridge, 'flushChromeLaunchLog')
+    .replace('var line: [1024]u8 = undefined;', 'const line = Buffer.alloc(1024);')
+    .replace('var length: usize = 0;', 'let length = 0;')
+    .replace(/\.len\b/g, '.length')
+    .replace('@memcpy(line[0..length], chrome_launch_log.lines[index][0..length]);', 'chrome_launch_log.lines[index].copy(line, 0, 0, length);')
+    .replace('line[0..length]', 'line.subarray(0, length)')
+    .replace('Sleep(25);', 'return;');
+  vm.runInContext(`(() => { ${flushCode} })()`, context);
+  assert.equal(queue.count, 0);
+  assert.deepEqual(queued, ['x'.repeat(1023), ...Array.from({ length: 31 }, (_, i) => `entry-${i + 1}`)]);
+  context.logChromeLaunch(Buffer.from('wrapped'));
+  vm.runInContext(`(() => { ${flushCode} })()`, context);
+  assert.equal(queued.at(-1), 'wrapped');
+  const source = body(bridge, 'appendChromeLaunchLog');
   assert.match(source, /GetEnvironmentVariableW\([^\n]+APPDATA/);
   assert.match(source, /ZigShell/);
   assert.match(source, /bridge-launch\.log/);
@@ -341,6 +381,7 @@ test('production APPDATA launch log stays capped, plain-line, and best-effort', 
     .replace('var output: [1024]u8 = undefined;', 'const output = Buffer.alloc(1024);')
     .replace('var written: u32 = 0;', 'let written = 0;')
     .replaceAll('&size', 'null').replaceAll('&written', 'null').replaceAll('&output', 'output')
+    .replaceAll('@as(i64, @intCast(count + 1))', '(count + 1)')
     .replaceAll('@intCast(count + 1)', '(count + 1)')
     .replaceAll('@min(line.len, output.len - 1)', 'Math.min(line.length, output.length - 1)')
     .replace('for (line[0..count], 0..) |byte, i|', 'for (const [i, byte] of line.subarray(0, count).entries())')

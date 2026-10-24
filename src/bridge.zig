@@ -146,6 +146,89 @@ const SpinMutex = struct {
     }
 };
 
+var chrome_replies = struct {
+    mutex: SpinMutex = .{},
+    expected_id: u32 = 1,
+    extension_loaded: bool = false,
+    theme_replied: bool = false,
+}{};
+
+var chrome_launch_log = struct {
+    mutex: SpinMutex = .{},
+    lines: [32][1024]u8 = undefined,
+    lengths: [32]usize = undefined,
+    next: usize = 0,
+    count: usize = 0,
+}{};
+
+extern "kernel32" fn SetEndOfFile(hFile: win.HANDLE) callconv(.winapi) BOOL;
+
+fn logChromeLaunch(line: []const u8) void {
+    if (!chrome_launch_log.mutex.tryLock()) return;
+    defer chrome_launch_log.mutex.unlock();
+    if (chrome_launch_log.count == chrome_launch_log.lines.len) return;
+    const index = (chrome_launch_log.next + chrome_launch_log.count) % chrome_launch_log.lines.len;
+    const length = @min(line.len, chrome_launch_log.lines[index].len - 1);
+    @memcpy(chrome_launch_log.lines[index][0..length], line[0..length]);
+    chrome_launch_log.lengths[index] = length;
+    chrome_launch_log.count += 1;
+}
+
+fn flushChromeLaunchLog() void {
+    var line: [1024]u8 = undefined;
+    while (true) {
+        var length: usize = 0;
+        if (chrome_launch_log.mutex.tryLock()) {
+            if (chrome_launch_log.count > 0) {
+                const index = chrome_launch_log.next;
+                length = chrome_launch_log.lengths[index];
+                @memcpy(line[0..length], chrome_launch_log.lines[index][0..length]);
+                chrome_launch_log.next = (index + 1) % chrome_launch_log.lines.len;
+                chrome_launch_log.count -= 1;
+            }
+            chrome_launch_log.mutex.unlock();
+        }
+        if (length > 0) {
+            appendChromeLaunchLog(line[0..length]);
+        } else {
+            Sleep(25);
+        }
+    }
+}
+
+fn appendChromeLaunchLog(line: []const u8) void {
+    var path: [32768]u16 = undefined;
+    const length = win.GetEnvironmentVariableW(std.unicode.utf8ToUtf16LeStringLiteral("APPDATA"), &path, path.len);
+    if (length == 0 or length >= path.len) return;
+    const folder = std.unicode.utf8ToUtf16LeStringLiteral("\\ZigShell");
+    const suffix = std.unicode.utf8ToUtf16LeStringLiteral("\\bridge-launch.log");
+    if (length + folder.len + suffix.len + 1 > path.len) return;
+    @memcpy(path[length..][0..folder.len], folder);
+    path[length + folder.len] = 0;
+    _ = win.CreateDirectoryW(@ptrCast(&path), null);
+    @memcpy(path[length + folder.len ..][0..suffix.len], suffix);
+    path[length + folder.len + suffix.len] = 0;
+    const file = win.CreateFileW(@ptrCast(&path), GENERIC_WRITE, FILE_SHARE_READ, null, win.OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    if (file == null or file == win.INVALID_HANDLE_VALUE_PTR) return;
+    defer _ = win.CloseHandle(file);
+    var size: i64 = 0;
+    if (win.GetFileSizeEx(file, &size) == 0) return;
+    var output: [1024]u8 = undefined;
+    const count = @min(line.len, output.len - 1);
+    for (line[0..count], 0..) |byte, i| {
+        output[i] = if (byte == '\r' or byte == '\n' or byte == 0) ' ' else byte;
+    }
+    output[count] = '\n';
+    if (size > 64 * 1024 - @as(i64, @intCast(count + 1))) {
+        if (win.SetFilePointerEx(file, 0, null, 0) == 0) return;
+        if (SetEndOfFile(file) == 0) return;
+    } else {
+        if (win.SetFilePointerEx(file, 0, null, 2) == 0) return;
+    }
+    var written: u32 = 0;
+    _ = win.WriteFile(file, &output, @intCast(count + 1), &written, null);
+}
+
 fn appendChromeArgument(command: *std.array_list.Managed(u8), arg: []const u8) !void {
     try command.append('"');
     var slashes: usize = 0;
@@ -206,6 +289,38 @@ fn chromeLoadUnpackedFailed(reply: []const u8) bool {
     return id == .integer and id.integer == 1 and parsed.value.object.contains("error");
 }
 
+fn chromeLoadUnpackedReplyId(reply: []const u8) ?u32 {
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, reply, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    if (!parsed.value.object.contains("result") and !parsed.value.object.contains("error")) return null;
+    const id = parsed.value.object.get("id") orelse return null;
+    if (id != .integer or id.integer <= 0 or id.integer > std.math.maxInt(u32)) return null;
+    return @intCast(id.integer);
+}
+
+fn routeChromeReply(reply: []const u8) void {
+    const id = chromeLoadUnpackedReplyId(reply) orelse return;
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, reply, .{}) catch return;
+    defer parsed.deinit();
+    while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
+    if (id == 2) {
+        chrome_replies.theme_replied = true;
+    } else if (id <= chrome_replies.expected_id and !parsed.value.object.contains("error")) {
+        chrome_replies.extension_loaded = true;
+    }
+    chrome_replies.mutex.unlock();
+    var line: [256]u8 = undefined;
+    logChromeLaunch(std.fmt.bufPrint(&line, "CDP reply id={d} {s}", .{ id, reply[0..@min(reply.len, 200)] }) catch return);
+}
+
+fn chromeExtensionNeedsRetry() bool {
+    while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
+    const retry = !chrome_replies.extension_loaded;
+    chrome_replies.mutex.unlock();
+    return retry;
+}
+
 fn drainChromePipe(pipe: windows.HANDLE) void {
     defer _ = CloseHandle(pipe);
     var buffer: [4096]u8 = undefined;
@@ -217,6 +332,7 @@ fn drainChromePipe(pipe: windows.HANDLE) void {
         if (ReadFile(pipe, &buffer, buffer.len, &read, null) == 0 or read == 0) return;
         for (buffer[0..read]) |byte| {
             if (byte == 0) {
+                if (!discard) routeChromeReply(message.items);
                 if (!discard and chromeLoadUnpackedFailed(message.items)) {
                     std.debug.print("Chrome Extensions.loadUnpacked failed (CDP id 1).\n", .{});
                 }
@@ -240,6 +356,41 @@ fn sendChromeExtension(allocator: std.mem.Allocator, pipe: windows.HANDLE, id: u
     const message = try chromeLoadUnpackedMessage(allocator, id, path);
     defer allocator.free(message);
     try writeAll(pipe, message);
+}
+
+fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, extension: []const u8, theme: []const u8) void {
+    while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
+    chrome_replies.expected_id = 1;
+    chrome_replies.extension_loaded = false;
+    chrome_replies.theme_replied = theme.len == 0;
+    chrome_replies.mutex.unlock();
+    load: {
+        logChromeLaunch("CDP attempt id=1");
+        sendChromeExtension(allocator, pipe, 1, extension) catch break :load;
+        logChromeLaunch("CDP attempt id=2");
+        sendChromeExtension(allocator, pipe, 2, theme) catch break :load;
+        for (0..8) |attempt| {
+            if (attempt > 0 and chromeExtensionNeedsRetry()) {
+                const id: u32 = @intCast(attempt + 2);
+                while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
+                chrome_replies.expected_id = id;
+                chrome_replies.mutex.unlock();
+                var line: [64]u8 = undefined;
+                logChromeLaunch(std.fmt.bufPrint(&line, "CDP attempt id={d}", .{ id }) catch "CDP attempt");
+                sendChromeExtension(allocator, pipe, id, extension) catch break;
+            }
+            var finished = false;
+            for (0..30) |_| {
+                while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
+                finished = chrome_replies.extension_loaded and chrome_replies.theme_replied;
+                chrome_replies.mutex.unlock();
+                if (finished) break;
+                Sleep(25);
+            }
+            if (finished) break;
+        }
+    }
+    logChromeLaunch(if (chromeExtensionNeedsRetry()) "extension not-loaded" else "extension loaded");
 }
 
 fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
@@ -276,8 +427,15 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
     var reserved2 = chromePipeReserved2(@intFromPtr(child_read), @intFromPtr(child_write));
     si.cbReserved2 = @intCast(reserved2.len);
     si.lpReserved2 = &reserved2;
-    var pi: win.PROCESS_INFORMATION = undefined;
-    if (win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi) == 0) return error.ChromeLaunchFailed;
+    var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
+    if (std.Thread.spawn(.{}, flushChromeLaunchLog, .{})) |logger| {
+        logger.detach();
+    } else |_| {}
+    var launch_line: [4096]u8 = undefined;
+    logChromeLaunch(std.fmt.bufPrint(&launch_line, "launch exe={s}", .{exe}) catch "launch exe=<too long>");
+    const created = win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
+    logChromeLaunch(std.fmt.bufPrint(&launch_line, "CreateProcessW result={d} pid={d}", .{ created, pi.dwProcessId }) catch "CreateProcessW result=<unknown>");
+    if (created == 0) return error.ChromeLaunchFailed;
     defer _ = win.CloseHandle(pi.hProcess);
     _ = win.CloseHandle(pi.hThread);
     _ = win.CloseHandle(child_read);
@@ -289,8 +447,7 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         return error.ChromePipeReaderFailed;
     };
     reader.detach();
-    sendChromeExtension(allocator, parent_write.?, 1, extension) catch {};
-    sendChromeExtension(allocator, parent_write.?, 2, theme) catch {};
+    loadChromeExtensions(allocator, parent_write.?, extension, theme);
     _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
 }
 
