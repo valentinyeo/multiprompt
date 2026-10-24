@@ -40,9 +40,99 @@ test('the production Windows quoting algorithm preserves spaces, quotes and trai
   ]) assert.equal(quoteArgument(arg), expected);
   const builder = body(bridge, 'buildChromeLaunchCommand');
   assert.match(builder, /appendChromeArgument\(&command, exe\)/);
-  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging --remote-debugging-io-pipes=\{d\},\{d\}/);
-  assert.match(builder, /\.\{ read_handle, write_handle \}/);
+  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging/);
+  const assertNoIoPipes = source => assert.doesNotMatch(source, /--remote-debugging-io-pipes/);
+  assertNoIoPipes(builder);
+  assert.throws(() => assertNoIoPipes(`${builder} --remote-debugging-io-pipes=123,456`));
   assert.match(builder, /for \(args\) \|arg\|[\s\S]*appendChromeArgument\(&command, arg\)/);
+});
+
+test('the production CRT fd table packs count, flags and unaligned pointer-width handles', () => {
+  const code = body(bridge, 'chromePipeReserved2')
+    .replace(/var buffer: \[[^\n]+ = undefined;/, 'const buffer = Buffer.alloc(4 + 5 * (1 + handleBytes));')
+    .replace('std.mem.writeInt(u32, buffer[0..4], 5, .little);', 'buffer.writeUInt32LE(5, 0);')
+    .replace('@memset(buffer[4..9], 0);', 'buffer.fill(0, 4, 9);')
+    .replace('[_]usize{', '[')
+    .replace('write_handle };', 'write_handle ];')
+    .replaceAll('@intFromPtr(INVALID_HANDLE_VALUE)', 'invalidHandle')
+    .replaceAll('@sizeOf(usize)', 'handleBytes')
+    .replace('for (handles, 0..) |handle, i|', 'for (const [i, handle] of handles.entries())')
+    .replace('std.mem.writeInt(usize, buffer[offset..][0..handleBytes], handle, .little);', 'writeHandle(buffer, handle, offset);');
+  for (const handleBytes of [4, 8]) {
+    const invalidHandle = (1n << BigInt(handleBytes * 8)) - 1n;
+    const read_handle = handleBytes === 4 ? 0x12345678n : 0x8877665544332211n;
+    const write_handle = handleBytes === 4 ? 0x76543210n : 0xffeeddccbbaa0099n;
+    const packed = vm.runInNewContext(`(() => { ${code} })()`, {
+      Buffer, handleBytes, invalidHandle, read_handle, write_handle,
+      writeHandle: (buffer, handle, offset) => handleBytes === 4 ? buffer.writeUInt32LE(Number(handle), offset) : buffer.writeBigUInt64LE(handle, offset),
+    });
+    assert.equal(packed.length, 4 + 5 * (1 + handleBytes));
+    assert.deepEqual([...packed.subarray(0, 4)], [5, 0, 0, 0]);
+    assert.deepEqual([...packed.subarray(4, 9)], [0, 0, 0, 9, 9]);
+    [invalidHandle, invalidHandle, invalidHandle, read_handle, write_handle].forEach((handle, fd) => {
+      for (let byte = 0; byte < handleBytes; byte++) {
+        assert.equal(packed[9 + fd * handleBytes + byte], Number((handle >> BigInt(byte * 8)) & 255n));
+      }
+    });
+  }
+  assert.match(bridge, /test "IGSH-738 Chrome reserved2 packs CRT flags and unaligned fd 3 and 4 handles"/);
+});
+
+function loadUnpackedFailed(reply) {
+  const wrap = value => {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const entries = new Map(Object.entries(value).map(([key, item]) => [key, wrap(item)]));
+      return { kind: 'object', object: { get: key => entries.get(key), contains: key => entries.has(key) } };
+    }
+    return { kind: Number.isInteger(value) ? 'integer' : value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value, integer: value };
+  };
+  const code = body(bridge, 'chromeLoadUnpackedFailed')
+    .replace(/const parsed = std\.json\.parseFromSlice[^\n]+/, 'let parsed; try { parsed = { value: wrap(JSON.parse(reply)) }; } catch { return false; }')
+    .replace('defer parsed.deinit();', '')
+    .replace('parsed.value != .object', "parsed.value.kind !== 'object'")
+    .replace('orelse return false', '; if (id === undefined) return false')
+    .replace('id == .integer', "id.kind === 'integer'")
+    .replaceAll(' and ', ' && ');
+  return vm.runInNewContext(`(() => { ${code} })()`, { reply, wrap });
+}
+
+test('the production reply classifier accepts only id 1 errors', () => {
+  assert.equal(loadUnpackedFailed('{"id":1,"error":{"message":"denied"}}'), true);
+  for (const reply of ['{"id":1,"result":{}}', '{"id":2,"error":{}}', '{"error":{}}', '{"id":"1","error":{}}', 'null', '[]', 'invalid']) {
+    assert.equal(loadUnpackedFailed(reply), false, reply);
+  }
+});
+
+test('the production drain handles split/coalesced frames and keeps draining after errors or oversized frames', () => {
+  const code = body(bridge, 'drainChromePipe')
+    .replace('defer _ = CloseHandle(pipe);', '')
+    .replace('var buffer: [4096]u8 = undefined;', 'const buffer = Buffer.alloc(4096);')
+    .replace('var message = std.array_list.Managed(u8).init(std.heap.page_allocator);', '')
+    .replace('defer message.deinit();', '')
+    .replace('var discard = false;', 'let discard = false;')
+    .replace(/var read: u32 = 0;\s*if \(ReadFile[^\n]+/, 'const chunk = chunks.shift(); if (!chunk) return; const read = chunk.length; chunk.copy(buffer);')
+    .replace('for (buffer[0..read]) |byte|', 'for (const byte of buffer.subarray(0, read))')
+    .replace('!discard and ', '!discard && ')
+    .replace('std.debug.print("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n", .{});', 'stderr.push("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n");')
+    .replace('message.items.len', 'message.items.length')
+    .replace(/message.append\(byte\) catch \{\s*discard = true;\s*\};/, 'try { message.append(byte); } catch { discard = true; }');
+  const failure = '{"id":1,"error":{"message":"denied"}}';
+  const frames = `{"id":2,"error":{}}\0${failure}\0{"id":1,"result":{}}\0`;
+  for (const chunks of [[Buffer.from(frames)], [...Buffer.from(frames)].map(byte => Buffer.from([byte]))]) {
+    const stderr = [];
+    const message = { items: [], append(byte) { this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
+    vm.runInNewContext(`(() => { ${code} })()`, { Buffer, chunks, message, stderr, max_native_message: 128, chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()) });
+    assert.deepEqual(stderr, ['Chrome Extensions.loadUnpacked failed (CDP id 1).\n']);
+    assert.equal(chunks.length, 0);
+  }
+  for (const failAppend of [false, true]) {
+    const chunks = [Buffer.from(`${'x'.repeat(129)}\0${failure}\0`)];
+    const stderr = [];
+    const message = { items: [], append(byte) { if (failAppend && byte === 120) throw Error('allocation failed'); this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
+    vm.runInNewContext(`(() => { ${code} })()`, { Buffer, chunks, message, stderr, max_native_message: 128, chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()) });
+    assert.equal(stderr.length, 1);
+    assert.equal(chunks.length, 0);
+  }
 });
 
 test('production loadUnpacked framing sends distinct NUL-delimited main and theme JSON messages', () => {
@@ -85,7 +175,9 @@ test('pipe holder bypasses CLI deadlines and owns both pipes until the Chrome pr
   assert.match(launch, /CreatePipe\(&parent_read, &child_write, &sa, 0\)/);
   assert.match(launch, /SetHandleInformation\(parent_write, 1, 0\)/);
   assert.match(launch, /SetHandleInformation\(parent_read, 1, 0\)/);
-  assert.match(launch, /@intFromPtr\(child_read\), @intFromPtr\(child_write\)/);
+  assert.match(launch, /var reserved2 = chromePipeReserved2\(@intFromPtr\(child_read\), @intFromPtr\(child_write\)\)/);
+  assert.match(launch, /si\.cbReserved2 = @intCast\(reserved2\.len\)/);
+  assert.match(launch, /si\.lpReserved2 = &reserved2/);
   assert.match(launch, /CreateProcessW\(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000/);
   assert.match(launch, /drainChromePipe, \.\{parent_read\.\?\}/);
   assert.match(launch, /sendChromeExtension\(allocator, parent_write\.\?, 1, extension\)/);
