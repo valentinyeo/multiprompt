@@ -1627,18 +1627,6 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
     return null;
 }
 
-fn groupRailRect(header_left: i32, header_y: i32, header_h: i32, last_bottom: i32, scroll: i32, width: i32) RECT {
-    return .{ .left = header_left, .top = header_y + header_h - scroll, .right = header_left + width, .bottom = last_bottom - scroll };
-}
-
-fn splitGroupRail(rail: RECT, excluded_top: i32, excluded_bottom: i32) [2]RECT {
-    var before = rail;
-    before.bottom = std.math.clamp(excluded_top, rail.top, rail.bottom);
-    var after = rail;
-    after.top = std.math.clamp(excluded_bottom, before.bottom, rail.bottom);
-    return .{ before, after };
-}
-
 pub fn paintSidebar(hdc: HANDLE) void {
     var canvas = @import("smooth.zig").Canvas.init(hdc);
     defer canvas.deinit();
@@ -1764,13 +1752,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (row.kind == .header) {
                 const gidx = row.gidx;
                 if (gidx >= app_state.group_count) continue;
-                const base_header_bg: DWORD = customColorOr("header_bg", if (app_state.g_light_theme) RGB(232, 232, 232) else if (app_state.g_edge_gray_theme) RGB(60, 60, 60) else if (app_state.g_mid_theme) RGB(80, 80, 80) else RGB(28, 28, 28));
-                const header_bg: DWORD = tintColor(base_header_bg, displayedGroupColor(gidx), 3, 10);
-                const hdr_brush = CreateSolidBrush(header_bg);
-                var hdr_rc = RECT{ .left = column.left, .top = y, .right = column.right, .bottom = y + GROUP_HEADER_H };
-                _ = FillRect(hdc, &hdr_rc, hdr_brush);
-                _ = DeleteObject(hdr_brush);
-
                 _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220)));
 
                 if (app_state.g_sidebar_collapsed) {
@@ -1779,16 +1760,13 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var chev_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + GROUP_HEADER_H };
                     _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                 } else {
-                    _ = SelectObject(hdc, font_title);
-                    const chev: LPCWSTR = if (app_state.groups[gidx].collapsed) L("\u{25B8}") else L("\u{25BE}");
-                    var chev_rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.left + uiScaled(28), .bottom = y + GROUP_HEADER_H };
-                    _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER);
-
-                    var name_rc = RECT{ .left = column.left + uiScaled(32), .top = y, .right = column.right - uiScaled(8), .bottom = y + GROUP_HEADER_H };
+                    _ = SelectObject(hdc, font_subtitle);
+                    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(98, 102, 109)));
+                    var name_rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + GROUP_HEADER_H };
                     if (app_state.groups[gidx].name_len > 0) {
-                        _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | 0x8000);
+                        _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else {
-                        _ = DrawTextW(hdc, L("(unnamed group)"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("(unnamed group)"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     }
                 }
                 continue;
@@ -2135,28 +2113,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
         }
 
         const content_end_logical: i32 = if (row_count == 0) 0 else (rows_arr[row_count - 1].y + rowTotalHeight(rows_arr[row_count - 1]));
-        if (!app_state.g_sidebar_collapsed) {
-            for (rows_arr[0..row_count], 0..) |row, ri| {
-                if (row.kind != .header) continue;
-                var bottom = row.y + GROUP_HEADER_H;
-                for (rows_arr[ri + 1 .. row_count]) |member| {
-                    if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
-                    bottom = member.y + tabRowH();
-                }
-                const brush = CreateSolidBrush(displayedGroupColor(row.gidx));
-                var rail = groupRailRect(column.left, row.y, GROUP_HEADER_H, bottom, app_state.g_sidebar_scroll, uiScaled(7) - uiScaled(4));
-                for (rows_arr[ri + 1 .. row_count]) |member| {
-                    if (member.kind != .tab or tabGroupId(member.shell_idx) != app_state.groups[row.gidx].id) break;
-                    if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;
-                    var segments = splitGroupRail(rail, member.y - app_state.g_sidebar_scroll, member.y + tabRowH() - app_state.g_sidebar_scroll);
-                    if (segments[0].top < segments[0].bottom) _ = FillRect(hdc, &segments[0], brush);
-                    rail = segments[1];
-                }
-                if (rail.top < rail.bottom) _ = FillRect(hdc, &rail, brush);
-                _ = DeleteObject(brush);
-            }
-        }
-
         const btns_y: i32 = content_end_logical + 4 - app_state.g_sidebar_scroll;
         if (!app_state.g_hide_sidebar) {
             _ = SelectObject(hdc, font_subtitle);
@@ -4775,52 +4731,4 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(removeTabOrSelectionFromGroup(1));
     try std.testing.expectEqual(other_home, app_state.shells[0].group_id);
     try std.testing.expectEqual(@as(u32, 0), app_state.shells[0].starred_group_id);
-}
-
-test "IGSH-591 group rail segments exclude whole highlighted rows without tails" {
-    for ([_]i32{ -120, 0, 75 }) |scroll| {
-        const rail = RECT{ .left = 12, .top = 8 - scroll, .right = 15, .bottom = 112 - scroll };
-        for ([_][2]i32{ .{ -20, 0 }, .{ 8, 36 }, .{ 36, 74 }, .{ 74, 112 }, .{ 8, 112 }, .{ 110, 130 }, .{ 120, 150 } }) |excluded| {
-            const top = excluded[0] - scroll;
-            const bottom = excluded[1] - scroll;
-            const segments = splitGroupRail(rail, top, bottom);
-            var visible_height: i32 = 0;
-            for (segments) |segment| {
-                try std.testing.expectEqual(rail.left, segment.left);
-                try std.testing.expectEqual(rail.right, segment.right);
-                try std.testing.expect(segment.top >= rail.top and segment.bottom <= rail.bottom);
-                try std.testing.expect(segment.top <= segment.bottom);
-                try std.testing.expect(segment.top == segment.bottom or segment.bottom <= top or segment.top >= bottom);
-                visible_height += segment.bottom - segment.top;
-            }
-            const excluded_height = @max(0, @min(rail.bottom, bottom) - @max(rail.top, top));
-            try std.testing.expectEqual(rail.bottom - rail.top - excluded_height, visible_height);
-        }
-        const first = splitGroupRail(rail, 36 - scroll, 74 - scroll);
-        const second = splitGroupRail(first[1], 74 - scroll, 112 - scroll);
-        try std.testing.expectEqual(36 - scroll, first[0].bottom);
-        try std.testing.expectEqual(second[0].top, second[0].bottom);
-        try std.testing.expectEqual(second[1].top, second[1].bottom);
-    }
-}
-
-test "IGSH-591 rail starts below the header at the header left edge" {
-    for ([_]i32{ -120, 0, 75 }) |scroll| {
-        for ([_]i32{ 0, 8, 27 }) |left| {
-            for ([_]i32{ 3, 4, 6 }) |width| {
-                const first = groupRailRect(left, 8, 28, 112, scroll, width);
-                try std.testing.expectEqual(left, first.left);
-                try std.testing.expectEqual(left + width, first.right);
-                try std.testing.expectEqual(@as(i32, 36) - scroll, first.top);
-                try std.testing.expectEqual(@as(i32, 112) - scroll, first.bottom);
-                const second = groupRailRect(left, 112, 28, 216, scroll, width);
-                try std.testing.expectEqual(left, second.left);
-                try std.testing.expectEqual(@as(i32, 140) - scroll, second.top);
-                try std.testing.expectEqual(@as(i32, 216) - scroll, second.bottom);
-                try std.testing.expect(first.bottom < second.top);
-                const empty = groupRailRect(left, 216, 28, 244, scroll, width);
-                try std.testing.expectEqual(empty.top, empty.bottom);
-            }
-        }
-    }
 }

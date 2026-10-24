@@ -578,106 +578,119 @@ public static class GroupRailProof {
     static int Distance(System.Drawing.Color a, System.Drawing.Color b) {
         return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
     }
-    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int selected) {
+    static bool TextPixel(System.Drawing.Color color) { return color.R > 210 && color.G > 210 && color.B > 210; }
+    static int TextLeft(System.Drawing.Bitmap image, int left, int right, int top, int height) {
+        for (int x = left; x < right; x++)
+            for (int y = top; y < top + height; y++)
+                if (TextPixel(image.GetPixel(x, y))) return x;
+        return -1;
+    }
+    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, bool hidePills, bool collapsed) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int clientLeft = origin.X - frame.Left;
             int left = clientLeft + S(8, dpi, scale);
-            int referenceX = clientLeft + S(220, dpi, scale) - S(44, dpi, scale);
-            int scanRight = left + S(10, dpi, scale);
-            int width = S(7, dpi, scale) - S(4, dpi, scale);
-            var rail = System.Drawing.Color.FromArgb(145, 149, 157);
-            var header = System.Drawing.Color.FromArgb(63, 64, 66);
-            int top = -1;
-            int searchTop = origin.Y - frame.Top + S(8, dpi, scale);
-            for (int y = searchTop; y < searchTop + S(180, dpi, scale); y++) {
-                if (Distance(image.GetPixel(referenceX, y), header) <= 2) { top = y; break; }
-            }
-            if (top < 0) throw new InvalidOperationException("group-rail gray header fill not found");
+            int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale) / 2;
+            int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34);
             int headerHeight = 28, rowHeight = S(38, dpi, scale);
-            int firstRow = top + headerHeight;
-            int secondHeader = firstRow + 2 * rowHeight;
-            int secondRow = secondHeader + headerHeight;
-            int groupBottom = secondRow + 2 * rowHeight;
-            int rowTop = firstRow + selected * rowHeight, rowBottom = rowTop + rowHeight;
-            var highlight = image.GetPixel(referenceX, (rowTop + rowBottom) / 2);
-            if (highlight.B <= highlight.R + 10) throw new InvalidOperationException("group-rail expected a visible blue selected highlight");
-            int headerPixels = 0, headerMismatch = 0, unselectedPixels = 0, selectedMismatch = 0, selectedRail = 0, strayPixels = 0;
-            bool leftEdge = true, groupsSeparate = true;
-            var railXs = new List<int>();
-            var headerXs = new List<int>();
+            int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
+            int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
+            var background = image.GetPixel(clientLeft + S(2, dpi, scale), top);
+            var muted = System.Drawing.Color.FromArgb(98, 102, 109);
+            var rail = System.Drawing.Color.FromArgb(145, 149, 157);
+            int fillMismatch = 0, railPixels = 0, brightHeaderPixels = 0, largestPrefixGap = 0;
+            var nameXs = new List<int>();
+            var sessionXs = new List<int>();
+            bool flushLeft = true;
             for (int group = 0; group < 2; group++) {
                 int headerTop = group == 0 ? top : secondHeader;
+                foreach (int y in new int[] { headerTop, headerTop + headerHeight - 1 })
+                    for (int x = clientLeft; x < clientLeft + S(220, dpi, scale) - 1; x++)
+                        if (Distance(image.GetPixel(x, y), background) > 3) fillMismatch++;
+                int nameLeft = -1;
+                var headerBackground = image.GetPixel(right - S(8, dpi, scale), headerTop + headerHeight / 2);
+                int blankColumns = 0;
+                bool seenInk = false;
+                for (int x = left; x < right - S(8, dpi, scale); x++) {
+                    bool columnInk = false;
+                    for (int y = headerTop + 1; y < headerTop + headerHeight - 1; y++) {
+                        var pixel = image.GetPixel(x, y);
+                        if (Distance(pixel, headerBackground) > 18) columnInk = true;
+                        if (TextPixel(pixel)) brightHeaderPixels++;
+                        if (Distance(pixel, muted) <= 16 && Distance(pixel, headerBackground) > 18 && nameLeft < 0) nameLeft = x;
+                    }
+                    if (columnInk) {
+                        if (seenInk) largestPrefixGap = Math.Max(largestPrefixGap, blankColumns);
+                        seenInk = true;
+                        blankColumns = 0;
+                    } else if (seenInk) blankColumns++;
+                }
                 int memberTop = headerTop + headerHeight;
-                int headerLeft = -1;
-                for (int x = clientLeft; x < scanRight; x++) {
-                    if (Distance(image.GetPixel(x, headerTop + headerHeight / 2), header) <= 2) { headerLeft = x; break; }
+                int sessionLeft = -1;
+                if (group != 0 || !collapsed) {
+                    int textStart = left + S(12, dpi, scale) + S(16, dpi, scale) + S(8, dpi, scale);
+                    sessionLeft = TextLeft(image, textStart, right - S(44, dpi, scale), memberTop, rowHeight);
+                    int normalizedSessionLeft = sessionLeft - S(16, dpi, scale) - S(8, dpi, scale);
+                    flushLeft = flushLeft && sessionLeft >= 0 && nameLeft >= 0 && Math.Abs(nameLeft - normalizedSessionLeft) <= Math.Max(3, S(3, dpi, scale));
+                    for (int y = memberTop; y < memberTop + 2 * rowHeight; y++)
+                        for (int x = clientLeft; x < left + S(10, dpi, scale); x++)
+                            if (Distance(image.GetPixel(x, y), rail) <= 2) railPixels++;
+                } else {
+                    flushLeft = flushLeft && nameLeft >= 0 && Math.Abs(nameLeft - (left + S(12, dpi, scale))) <= Math.Max(3, S(3, dpi, scale));
                 }
-                if (headerLeft < 0 || Distance(image.GetPixel(referenceX, headerTop), header) > 2) throw new InvalidOperationException("group-rail adjacent header fill not found");
-                int unselectedTop = memberTop + (group == 0 ? 1 - selected : 0) * rowHeight;
-                int railLeft = -1, railRight = -1;
-                for (int x = clientLeft; x < scanRight; x++) {
-                    if (Distance(image.GetPixel(x, unselectedTop + rowHeight / 2), rail) <= 2) {
-                        if (railLeft < 0) railLeft = x;
-                        railRight = x + 1;
-                    }
-                }
-                if (railLeft < 0 || railRight - railLeft != width) throw new InvalidOperationException("group-rail missing full-width gray unselected rail");
-                leftEdge = leftEdge && railLeft == headerLeft;
-                railXs.Add(railLeft);
-                headerXs.Add(headerLeft);
-                for (int x = railLeft; x < railRight; x++) {
-                    for (int y = memberTop; y < memberTop + 2 * rowHeight; y++) {
-                        if (group == 0 && y >= rowTop && y < rowBottom) continue;
-                        if (Distance(image.GetPixel(x, y), rail) <= 2) unselectedPixels++;
-                        else throw new InvalidOperationException("group-rail missing continuous gray unselected rail");
-                    }
-                }
-                for (int x = clientLeft; x < scanRight; x++) {
-                    for (int y = headerTop; y < memberTop; y++) {
-                        var actual = image.GetPixel(x, y);
-                        var expected = image.GetPixel(referenceX, y);
-                        bool railPixel = Distance(actual, rail) <= 2 && Distance(actual, expected) > 3;
-                        if (railPixel) headerPixels++;
-                        if (x >= headerLeft && Distance(actual, expected) > 3) headerMismatch++;
-                        if (group == 1 && railPixel) groupsSeparate = false;
-                    }
-                }
+                nameXs.Add(nameLeft);
+                sessionXs.Add(sessionLeft);
             }
-            for (int x = left + S(4, dpi, scale); x < left + S(7, dpi, scale); x++) {
-                for (int y = rowTop + 3; y < rowBottom - 3; y++) {
-                    if (Distance(image.GetPixel(x, y), image.GetPixel(referenceX, y)) > 3) selectedMismatch++;
-                }
-            }
-            for (int x = clientLeft; x < scanRight; x++) {
-                for (int y = rowTop; y < rowBottom; y++) {
-                    if (Distance(image.GetPixel(x, y), rail) <= 2) selectedRail++;
-                }
-                for (int y = groupBottom; y < groupBottom + 24 + 2 * rowHeight; y++) {
-                    if (Distance(image.GetPixel(x, y), rail) <= 2) strayPixels++;
-                }
-            }
-            for (int x = railXs[1]; x < railXs[1] + width; x++) {
-                if (Distance(image.GetPixel(x, secondRow - 1), header) > 3 || Distance(image.GetPixel(x, secondRow), rail) > 2) groupsSeparate = false;
-                if (Distance(image.GetPixel(x, groupBottom - 1), rail) > 2 || Distance(image.GetPixel(x, groupBottom), rail) <= 2) groupsSeparate = false;
-            }
-            proof["leftEdge"] = leftEdge;
-            proof["headerClear"] = headerPixels == 0 && headerMismatch == 0;
-            proof["groupsSeparate"] = groupsSeparate;
-            proof["selectedClear"] = selectedMismatch == 0 && selectedRail == 0;
-            proof["strayClear"] = strayPixels == 0;
-            proof["selectedMismatch"] = selectedMismatch;
-            proof["selectedRailPixels"] = selectedRail;
-            proof["strayPixels"] = strayPixels;
-            proof["headerPixels"] = headerPixels;
-            proof["headerMismatch"] = headerMismatch;
-            proof["unselectedPixels"] = unselectedPixels;
-            proof["railX"] = railXs.ToArray();
-            proof["headerX"] = headerXs.ToArray();
+            proof["noFill"] = fillMismatch == 0;
+            proof["noRail"] = railPixels == 0;
+            proof["flushLeft"] = flushLeft && brightHeaderPixels == 0 && largestPrefixGap < S(8, dpi, scale);
+            proof["fillMismatch"] = fillMismatch;
+            proof["railPixels"] = railPixels;
+            proof["brightHeaderPixels"] = brightHeaderPixels;
+            proof["largestPrefixGap"] = largestPrefixGap;
+            proof["nameX"] = nameXs.ToArray();
+            proof["sessionTextX"] = sessionXs.ToArray();
+            proof["sessionIconInset"] = S(16, dpi, scale) + S(8, dpi, scale);
             proof["headerTops"] = new int[] { top, secondHeader };
-            proof["selectedRect"] = new int[] { left, rowTop, scanRight, rowBottom };
-            proof["belowGroupRect"] = new int[] { left, groupBottom, scanRight, groupBottom + 24 + 2 * rowHeight };
-            proof["highlightColor"] = new int[] { highlight.R, highlight.G, highlight.B };
+            proof["headerHeight"] = headerHeight;
+            proof["rowHeight"] = rowHeight;
+            proof["sidebarRect"] = new int[] { clientLeft, top, clientLeft + S(220, dpi, scale) - 1, groupBottom };
+            proof["railSearchX"] = new int[] { clientLeft, left + S(10, dpi, scale) };
+            proof["background"] = new int[] { background.R, background.G, background.B };
+        }
+        return proof;
+    }
+    static bool SameRow(System.Drawing.Bitmap baseline, System.Drawing.Bitmap image, int x, int firstY, int secondY, int width, int height) {
+        int ink = 0;
+        for (int dx = 0; dx < width; dx++) {
+            for (int dy = 0; dy < height; dy++) {
+                var original = baseline.GetPixel(x + dx, firstY + dy);
+                bool expected = original.R > 245 && original.G > 245 && original.B > 245;
+                bool actual = TextPixel(image.GetPixel(x + dx, secondY + dy));
+                if (expected) ink++;
+                if (expected && !actual) return false;
+                if (original.R < 100 && original.G < 100 && original.B < 100 && actual) return false;
+            }
+        }
+        return ink > 5;
+    }
+    public static Dictionary<string, object> Toggle(string before, string hidden, string after, int textX, int firstRow, int rowHeight, int scanTop, int scanBottom, uint dpi, int scale) {
+        var proof = new Dictionary<string, object>();
+        using (var baseline = new System.Drawing.Bitmap(before))
+        using (var collapsed = new System.Drawing.Bitmap(hidden))
+        using (var restored = new System.Drawing.Bitmap(after)) {
+            int hiddenMatches = 0, restoredMatches = 0;
+            for (int member = 0; member < 2; member++) {
+                int memberTop = firstRow + member * rowHeight;
+                for (int y = scanTop; y <= scanBottom - rowHeight; y++)
+                    if (SameRow(baseline, collapsed, textX, memberTop, y, S(90, dpi, scale), rowHeight)) hiddenMatches++;
+                if (SameRow(baseline, restored, textX, memberTop, memberTop, S(90, dpi, scale), rowHeight)) restoredMatches++;
+            }
+            proof["hiddenMemberMatches"] = hiddenMatches;
+            proof["restoredMemberMatches"] = restoredMatches;
+            proof["membersDisappearAndReturn"] = hiddenMatches == 0 && restoredMatches == 2;
+            proof["textRect"] = new int[] { textX, firstRow, textX + S(90, dpi, scale), firstRow + 2 * rowHeight };
+            proof["scanY"] = new int[] { scanTop, scanBottom };
         }
         return proof;
     }
@@ -692,7 +705,7 @@ public static class PaneLayoutProof {
         return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
     }
     public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Rect client,
-        VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale) {
+        VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale, bool hidePills) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int ox = frame.Left, oy = frame.Top;
@@ -752,27 +765,21 @@ public static class PaneLayoutProof {
             proof["gapRect"] = new int[] { gapLeft, client.Top, browser.Left, client.Bottom };
             proof["gripPixels"] = gripPixels;
             Require(forbidden == 0 && gapLeft > right + border, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
+            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + 28;
+            int rowBottom = rowTop + S(38, dpi, scale);
             var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
-            int railX = -1, railTop = -1, railBottom = -1, longestRail = 0;
-            for (int x = sidebarLeft; x < sidebarLeft + S(36, dpi, scale); x++) {
-                int run = 0;
-                for (int y = client.Top + S(20, dpi, scale); y < client.Top + S(220, dpi, scale); y++) {
-                    if (Distance(pixel(x, y), railColor) <= 2) run++; else run = 0;
-                    if (run > longestRail) { longestRail = run; railX = x; railBottom = y + 1; railTop = y + 1 - run; }
-                }
-            }
-            Require(longestRail == S(38, dpi, scale) && railX == sidebarLeft, "group-line-found", "expected a left-aligned member-only rail, longest vertical group-color run=" + longestRail);
-            int railRight = railX + 1;
-            while (railRight < sidebarLeft + S(40, dpi, scale) && Distance(pixel(railRight, (railTop + railBottom) / 2), railColor) <= 2) railRight++;
-            int rowTop = railTop, rowBottom = railBottom;
+            int railPixels = 0;
+            for (int x = sidebarLeft; x < sidebarLeft + S(10, dpi, scale); x++)
+                for (int y = rowTop; y < rowBottom; y++)
+                    if (Distance(pixel(x, y), railColor) <= 2) railPixels++;
+            Require(railPixels == 0, "group-line-absent", "unexpected group rail pixels=" + railPixels);
             var rowBackground = pixel(sidebarRight - S(45, dpi, scale), (rowTop + rowBottom) / 2);
             var cardBackground = pixel(sidebarLeft + S(2, dpi, scale), (rowTop + rowBottom) / 2);
-            var sidebarBackground = pixel(sidebarRight - S(45, dpi, scale), railBottom + S(2, dpi, scale));
+            var sidebarBackground = pixel(sidebarRight - S(45, dpi, scale), rowBottom + S(2, dpi, scale));
             string backgroundColors = " rowBackground=" + rowBackground + " cardBackground=" + cardBackground + " sidebarBackground=" + sidebarBackground;
-            var railPixelColor = pixel(railX, (rowTop + rowBottom) / 2);
             var firstIconColor = System.Drawing.Color.Empty;
             int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1, iconPixels = 0;
-            for (int x = railRight; x < sidebarLeft + S(34, dpi, scale); x++) {
+            for (int x = sidebarLeft; x < sidebarLeft + S(34, dpi, scale); x++) {
                 for (int y = rowTop + S(4, dpi, scale); y < rowBottom - S(4, dpi, scale); y++) {
                     var color = pixel(x, y);
                     if (Distance(color, rowBackground) <= 16 || Distance(color, cardBackground) <= 16 || Distance(color, sidebarBackground) <= 16) continue;
@@ -782,10 +789,11 @@ public static class PaneLayoutProof {
                 }
             }
             Require(iconPixels >= S(16, dpi, scale) && maxY - minY >= S(8, dpi, scale), "row-icon-found", "No visible CMD icon pixels in the first grouped row" + backgroundColors);
-            proof["railRect"] = new int[] { railX, railTop, railRight, railBottom };
+            proof["railPixels"] = railPixels;
+            proof["memberRect"] = new int[] { sidebarLeft, rowTop, sidebarRight, rowBottom };
             proof["iconPixelBounds"] = new int[] { minX, minY, maxX + 1, maxY + 1 };
             proof["iconPixels"] = iconPixels;
-            Require(railRight + S(4, dpi, scale) <= minX, "group-line-clears-icon", "railRight=" + railRight + " iconLeft=" + minX + " railColor=" + railPixelColor + " firstIconColor=" + firstIconColor + backgroundColors);
+            Require(sidebarLeft + S(12, dpi, scale) <= minX, "group-content-inset", "contentLeft=" + sidebarLeft + " iconLeft=" + minX + " firstIconColor=" + firstIconColor + backgroundColors);
         }
         return proof;
     }
@@ -3340,11 +3348,10 @@ try {
             $scale = 100
             if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
             $dpi = [VerifyNative]::GetDpiForWindow($script:window)
-            $leftEdge = $true
-            $headerClear = $true
-            $groupsSeparate = $true
-            $selectedClear = $true
-            $strayClear = $true
+            $hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills
+            $noFill = $true
+            $noRail = $true
+            $flushLeft = $true
             foreach ($selected in @(0, 1)) {
                 Press @(0x11, (0x31 + $selected)) ('Ctrl+' + ($selected + 1) + ': select grouped session')
                 Wait-Until { (Read-Session).active_tab -eq $selected } 'grouped selection persisted'
@@ -3353,22 +3360,59 @@ try {
                 $frame = New-Object VerifyNative+Rect
                 $origin = New-Object VerifyNative+Point
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'group-rail native geometry unavailable' }
-                $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $selected)
+                $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $hidePills, $false)
                 Save-Json @{ pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; session = Read-Session; tag = $env:RELEASE_TAG; version = $ExpectedVersion } ($shot + '.json')
-                $leftEdge = $leftEdge -and $proof['leftEdge']
-                $headerClear = $headerClear -and $proof['headerClear']
-                $groupsSeparate = $groupsSeparate -and $proof['groupsSeparate']
-                $selectedClear = $selectedClear -and $proof['selectedClear']
-                $strayClear = $strayClear -and $proof['strayClear']
+                $noFill = $noFill -and $proof['noFill']
+                $noRail = $noRail -and $proof['noRail']
+                $flushLeft = $flushLeft -and $proof['flushLeft']
                 $result.checks += @{ name = $shot; pixels = $proof }
             }
+            if ($noFill) { Write-Host 'sidebar-headline no-fill PASS' } else { Write-Host 'sidebar-headline no-fill FAIL' }
+            if ($noRail) { Write-Host 'sidebar-headline no-rail PASS' } else { Write-Host 'sidebar-headline no-rail FAIL' }
+            if ($flushLeft) { Write-Host 'sidebar-headline flush-left PASS' } else { Write-Host 'sidebar-headline flush-left FAIL' }
+            $clickToggle = $false
+            try {
+                $beforeToggle = Read-Session
+                $membership = ($beforeToggle.tabs | ForEach-Object { [string]$_.shell_id + ':' + [string]$_.group_id }) -join ','
+                $clickX = [int]$proof['nameX'][0] + 4 + $frame.Left - $origin.X
+                if ($proof['nameX'][0] -lt 0) { $clickX = [int]([long]20 * $dpi * $scale / 9600) }
+                $clickY = [int]$proof['headerTops'][0] + 14 + $frame.Top - $origin.Y
+                Doctor
+                Record 'Click the first group headline to hide its member sessions'
+                [VerifyNative]::ClickClient($script:window, $clickX, $clickY)
+                Wait-Until {
+                    $state = Read-Session
+                    $savedGroup = @($state.groups | Where-Object { $_.id -eq $group.id })
+                    $savedGroup.Count -eq 1 -and $savedGroup[0].PSObject.Properties['collapsed'] -and $savedGroup[0].collapsed
+                } 'headline click persisted the existing group collapsed memory'
+                Snapshot 'group-rail-collapsed'
+                $hidden = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-collapsed.png'), $frame, $origin, $dpi, $scale, $hidePills, $true)
+                Save-Json @{ pixels = $hidden; session = Read-Session; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-collapsed.json'
+                Doctor
+                Record 'Click the same headline to restore its member sessions'
+                [VerifyNative]::ClickClient($script:window, $clickX, $clickY)
+                Wait-Until {
+                    $state = Read-Session
+                    $savedGroup = @($state.groups | Where-Object { $_.id -eq $group.id })
+                    $savedGroup.Count -eq 1 -and (-not $savedGroup[0].PSObject.Properties['collapsed'] -or -not $savedGroup[0].collapsed)
+                } 'headline click persisted expanded group memory'
+                Snapshot 'group-rail-restored'
+                $restored = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-restored.png'), $frame, $origin, $dpi, $scale, $hidePills, $false)
+                $firstRow = [int]$proof['headerTops'][0] + [int]$proof['headerHeight']
+                $scanBottom = [int]$proof['sidebarRect'][3] + 24 + 2 * [int]$proof['rowHeight']
+                $toggle = [GroupRailProof]::Toggle((Join-Path $Evidence 'group-rail-selected-1.png'), (Join-Path $Evidence 'group-rail-collapsed.png'), (Join-Path $Evidence 'group-rail-restored.png'), [int]$proof['sessionTextX'][0], $firstRow, [int]$proof['rowHeight'], [int]$proof['headerTops'][0], $scanBottom, $dpi, $scale)
+                $state = Read-Session
+                $afterMembership = ($state.tabs | ForEach-Object { [string]$_.shell_id + ':' + [string]$_.group_id }) -join ','
+                $clickToggle = $toggle['membersDisappearAndReturn'] -and $membership -ceq $afterMembership -and @($state.tabs).Count -eq 6 -and @($state.groups).Count -eq 2
+                Save-Json @{ pixels = $restored; toggle = $toggle; clickToggle = $clickToggle; before = $beforeToggle; session = $state; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-restored.json'
+                $result.checks += @{ name = 'sidebar-headline-click-toggle'; passed = $clickToggle; pixels = $toggle }
+            } catch {
+                Write-Host 'sidebar-headline click-toggle FAIL'
+                throw
+            }
             Snapshot 'after'
-            if ($leftEdge) { Write-Host 'group-rail left-edge PASS' } else { Write-Host 'group-rail left-edge FAIL' }
-            if ($headerClear) { Write-Host 'group-rail header-clear PASS' } else { Write-Host 'group-rail header-clear FAIL' }
-            if ($groupsSeparate) { Write-Host 'group-rail groups-separate PASS' } else { Write-Host 'group-rail groups-separate FAIL' }
-            if ($selectedClear) { Write-Host 'group-rail selected-clear PASS' } else { Write-Host 'group-rail selected-clear FAIL' }
-            if ($strayClear) { Write-Host 'group-rail stray-clear PASS' } else { Write-Host 'group-rail stray-clear FAIL' }
-            if (-not $leftEdge -or -not $headerClear -or -not $groupsSeparate -or -not $selectedClear -or -not $strayClear) { throw 'group-rail pixel assertions failed' }
+            if ($clickToggle) { Write-Host 'sidebar-headline click-toggle PASS' } else { Write-Host 'sidebar-headline click-toggle FAIL' }
+            if (-not $noFill -or -not $noRail -or -not $flushLeft -or -not $clickToggle) { throw 'sidebar-headline assertions failed' }
         }
         'pane-layout' {
             Select-Theme 'dark' 'pane-layout-dark'
@@ -3391,7 +3435,7 @@ try {
                 $state = Read-Session
                 @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'cmd' -and
                     (-not $state.tabs[1].PSObject.Properties['group_id'] -or $state.tabs[1].group_id -eq 0)
-            } 'second CMD selected while grouped rail stays fully visible'
+            } 'second CMD selected while grouped member stays fully visible'
             $consoleTab = (Read-Session).active_tab
             $consoleShellId = (Read-Session).tabs[$consoleTab].shell_id
             $script:browserShellId = $consoleShellId
@@ -3427,9 +3471,10 @@ try {
             if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
             $dpi = [VerifyNative]::GetDpiForWindow($script:window)
             Save-Json @{ frame = $frame; client = $client; console = $consoleRect; browser = $browserRect; consoleHwnd = $console.ToInt64(); browserHwnd = $browser.ToInt64(); dpi = $dpi; scale = $scale; session = $state } 'pane-layout-rects.json'
-            $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale)
+            $hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills
+            $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $hidePills)
             Save-Json $proof 'pane-layout-pixels.json'
-            $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-found', 'row-icon-found', 'group-line-clears-icon'); pixels = $proof }
+            $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-absent', 'row-icon-found', 'group-content-inset'); pixels = $proof }
             Snapshot 'after'
         }
         'browser-switch-speed' {
