@@ -40,7 +40,7 @@ test('the production Windows quoting algorithm preserves spaces, quotes and trai
   ]) assert.equal(quoteArgument(arg), expected);
   const builder = body(bridge, 'buildChromeLaunchCommand');
   assert.match(builder, /appendChromeArgument\(&command, exe\)/);
-  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging --enable-logging=stderr --v=1/);
+  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging/);
   const assertNoIoPipes = source => assert.doesNotMatch(source, /--remote-debugging-io-pipes/);
   assertNoIoPipes(builder);
   assert.throws(() => assertNoIoPipes(`${builder} --remote-debugging-io-pipes=123,456`));
@@ -110,28 +110,20 @@ function drainReplies(chunks, onReply = () => {}, failAppend = false) {
     .replace('var message = std.array_list.Managed(u8).init(std.heap.page_allocator);', '')
     .replace('defer message.deinit();', '')
     .replace('var discard = false;', 'let discard = false;')
-    .replace(/var read: u32 = 0;\s*const result = ReadFile[^\n]+/, 'const chunk = chunks.shift(); const read = chunk ? chunk.length : 0; const result = chunk ? 1 : 0; if (chunk) chunk.copy(buffer);')
-    .replace('const last_error = if (result == 0) GetLastError() else 0;', 'const last_error = result == 0 ? GetLastError() : 0;')
-    .replace('var line: [128]u8 = undefined;', '')
-    .replace(/std\.fmt\.bufPrint\(&line, ("[^"\n]+"), \.\{ ([^\n]+) \}\) catch "[^"]*"/, 'format($1, [$2])')
-    .replaceAll(' or ', ' || ')
+    .replace(/var read: u32 = 0;\s*if \(ReadFile[^\n]+/, 'const chunk = chunks.shift(); if (!chunk) return; const read = chunk.length; chunk.copy(buffer);')
     .replace('for (buffer[0..read]) |byte|', 'for (const byte of buffer.subarray(0, read))')
     .replace('!discard and ', '!discard && ')
     .replace('std.debug.print("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n", .{});', 'stderr.push("Chrome Extensions.loadUnpacked failed (CDP id 1).\\n");')
     .replace('message.items.len', 'message.items.length')
     .replace(/message.append\(byte\) catch \{\s*discard = true;\s*\};/, 'try { message.append(byte); } catch { discard = true; }');
-  const stderr = [], logs = [];
+  const stderr = [];
   const message = { items: [], append(byte) { if (failAppend && byte === 120) throw Error('allocation failed'); this.items.push(byte); }, clearRetainingCapacity() { this.items = []; } };
   vm.runInNewContext(`(() => { ${code} })()`, {
     Buffer, chunks, message, stderr, max_native_message: 128,
-    GetLastError: () => 109,
-    logChromeLaunch: line => logs.push(line),
-    format: (template, values) => values.reduce((text, value) => text.replace(/\{d\}/, String(value)), template),
     chromeLoadUnpackedFailed: bytes => loadUnpackedFailed(Buffer.from(bytes).toString()),
     routeChromeReply: bytes => onReply(Buffer.from(bytes).toString()),
   });
   assert.equal(chunks.length, 0);
-  assert.deepEqual(logs, ['chrome pipe reader start', 'chrome pipe reader return ReadFile=0 error=109']);
   return stderr;
 }
 
@@ -381,7 +373,7 @@ test('production retry bounds a silent live Chrome to 120 seconds and throttles 
   assert.equal(delayed.logs.at(-1), 'extension not-loaded');
 });
 
-function chromeLaunchRuntime(reply = () => null, failedOutput = '') {
+function chromeLaunchRuntime(reply = () => null) {
   const attempts = [], events = [], handles = [], pipes = [];
   let current;
   const runtime = chromeRuntime((tick, context) => {
@@ -407,12 +399,6 @@ function chromeLaunchRuntime(reply = () => null, failedOutput = '') {
   const send = context.sendChromeExtension;
   Object.assign(context, {
     exe: 'chrome.exe', extension: 'extension', theme: 'theme', allocator: { free() {} }, chrome_args: { items: ['--profile-directory=Default'] },
-    STARTF_USESTDHANDLES: 0x100, INVALID_HANDLE_VALUE: -1,
-    openChromeLaunchOutput(suffix, sa) {
-      assert.equal(sa.bInheritHandle, 1);
-      assert.match(suffix, /^\\chrome-launch-(out|err)\.log$/);
-      return failedOutput === 'both' || suffix.includes(failedOutput || 'never') ? null : handle(suffix);
-    },
     createPipe(assign, sa) {
       assert.equal(sa.bInheritHandle, 1);
       const read = handle('read'), write = handle('write');
@@ -456,19 +442,6 @@ function chromeLaunchRuntime(reply = () => null, failedOutput = '') {
       assert.equal(inherit, 1);
       assert.equal(flags, 0x08000000);
       assert.deepEqual(Object.keys(pi), [], 'each attempt gets fresh zeroed PROCESS_INFORMATION');
-      if (failedOutput) {
-        assert.equal(si.dwFlags, 0);
-        assert.equal(si.hStdInput, undefined);
-        assert.equal(si.hStdOutput, undefined);
-        assert.equal(si.hStdError, undefined);
-      } else {
-        assert.equal(si.dwFlags, 0x100);
-        assert.equal(si.hStdInput, -1);
-        assert.equal(si.hStdOutput.kind, '\\chrome-launch-out.log');
-        assert.equal(si.hStdError.kind, '\\chrome-launch-err.log');
-        assert.equal(si.hStdOutput.closed, false);
-        assert.equal(si.hStdError.closed, false);
-      }
       assert.equal(si.lpReserved2.read.closed, false);
       assert.equal(si.lpReserved2.write.closed, false);
       pi.hProcess = handle('process');
@@ -507,16 +480,13 @@ function chromeLaunchRuntime(reply = () => null, failedOutput = '') {
     .replace(/win.CreatePipe\(&(\w+), &(\w+), &sa, 0\)/g, 'createPipe((read, write) => { $1 = read; $2 = write; }, sa)')
     .replace(/return error\.(\w+);/g, 'throw Error("$1");')
     .replace(/var (\w+) = std.mem.zeroes\(win.\w+\);/g, 'const $1 = {};')
-    .replace('si.cb = @sizeOf(win.STARTUPINFOW);', 'si.cb = 104; si.dwFlags = 0;')
+    .replace('si.cb = @sizeOf(win.STARTUPINFOW);', 'si.cb = 104;')
     .replaceAll('@intFromPtr(child_read)', 'child_read').replaceAll('@intFromPtr(child_write)', 'child_write')
     .replace('var reserved2 =', 'const reserved2 =').replaceAll('@intCast(reserved2.len)', 'reserved2.len')
     .replaceAll('&reserved2', 'reserved2').replaceAll('&si, &pi', 'si, pi')
     .replaceAll('std.unicode.utf8ToUtf16LeAllocZ', 'utf16')
-    .replace(/var (launch_line|command_line): \[\d+\]u8 = undefined;/g, '')
-    .replace('command[0..@min(command.len, 900)]', 'command.slice(0, 900)')
-    .replaceAll('std.unicode.utf8ToUtf16LeStringLiteral', '')
-    .replaceAll('), &sa)', '), sa)')
-    .replace(/std.fmt.bufPrint\(&(?:launch_line|command_line), ("[^"\n]+"), \.\{\s*([^\n]+?)\s*\}\) catch "[^"]*"/g, 'format($1, [$2])')
+    .replace(/var launch_line: \[4096\]u8 = undefined;/, '')
+    .replace(/std.fmt.bufPrint\(&launch_line, ("[^"\n]+"), \.\{\s*([^\n]+?)\s*\}\) catch "[^"]*"/g, 'format($1, [$2])')
     .replace(/const reader = std.Thread.spawn\([\s\S]+?\n        \};/, 'const reader = spawnReader(parent_read);')
     .replaceAll('parent_write.?', 'parent_write').replaceAll('pi.hProcess.?', 'pi.hProcess')
     .replace('if (attempt == 0) 3000 else 110_000', '(attempt == 0 ? 3000 : 110000)')
@@ -524,8 +494,6 @@ function chromeLaunchRuntime(reply = () => null, failedOutput = '') {
     .replace('for (0..2) |attempt| {', 'for (let attempt = 0; attempt < 2; attempt++) { const deferred = []; try {');
   code = `${code.slice(0, code.lastIndexOf('}'))} } finally { while (deferred.length) deferred.pop()(); } }`;
   assert.doesNotThrow(() => vm.runInContext(`(() => { ${code} })()`, context), code);
-  assert.equal(handles.filter(handle => handle.kind.startsWith('\\chrome-launch-')).every(handle => handle.closed), true);
-  assert.equal(runtime.logs.filter(line => line === 'chrome command=chrome.exe --profile-directory=Default').length, attempts.length);
   return { ...runtime, attempts, events };
 }
 
@@ -565,18 +533,6 @@ test('a first production launch that answers is retained and never retried, even
     assert.deepEqual(runtime.events.filter(([event]) => ['terminate', 'pause', 'join', 'detach', 'wait'].includes(event)), [['detach', process], ['wait', process]]);
     assert.equal(runtime.logs.includes('launch retry after no extension reply'), false);
     assert.equal(runtime.state.theme_replied, false);
-  }
-});
-
-test('Chrome output capture is append-only and file-open failure retains the original startup flags', () => {
-  const output = body(bridge, 'openChromeLaunchOutput');
-  assert.match(output, /GetEnvironmentVariableW\([^\n]+APPDATA/);
-  assert.match(output, /ZigShell/);
-  assert.match(output, /CreateFileW\([^\n]+FILE_APPEND_DATA, FILE_SHARE_READ, sa, win.OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null\)/);
-  assert.match(output, /return if \(file == win.INVALID_HANDLE_VALUE_PTR\) null else file/);
-  for (const failedOutput of ['out', 'err', 'both']) {
-    const runtime = chromeLaunchRuntime((_attempt, tick) => tick === 1 ? '{"id":1,"result":{}}' : null, failedOutput);
-    assert.equal(runtime.attempts.length, 1);
   }
 });
 

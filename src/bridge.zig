@@ -24,8 +24,6 @@ const BOOL = i32;
 const INVALID_HANDLE_VALUE: windows.HANDLE = @ptrFromInt(std.math.maxInt(usize));
 const GENERIC_READ: windows.DWORD = 0x80000000;
 const GENERIC_WRITE: windows.DWORD = 0x40000000;
-const FILE_APPEND_DATA: windows.DWORD = 0x00000004;
-const STARTF_USESTDHANDLES: windows.DWORD = 0x00000100;
 const FILE_SHARE_READ: windows.DWORD = 0x00000001;
 const OPEN_EXISTING: windows.DWORD = 3;
 const CREATE_ALWAYS: windows.DWORD = 2;
@@ -253,7 +251,7 @@ fn buildChromeLaunchCommand(allocator: std.mem.Allocator, exe: []const u8, args:
     var command = std.array_list.Managed(u8).init(allocator);
     errdefer command.deinit();
     try appendChromeArgument(&command, exe);
-    try command.appendSlice(" --remote-debugging-pipe --enable-unsafe-extension-debugging --enable-logging=stderr --v=1");
+    try command.appendSlice(" --remote-debugging-pipe --enable-unsafe-extension-debugging");
     for (args) |arg| {
         try command.append(' ');
         try appendChromeArgument(&command, arg);
@@ -326,7 +324,6 @@ fn chromeExtensionNeedsRetry() bool {
 }
 
 fn drainChromePipe(pipe: windows.HANDLE) void {
-    logChromeLaunch("chrome pipe reader start");
     defer _ = CloseHandle(pipe);
     var buffer: [4096]u8 = undefined;
     var message = std.array_list.Managed(u8).init(std.heap.page_allocator);
@@ -334,13 +331,7 @@ fn drainChromePipe(pipe: windows.HANDLE) void {
     var discard = false;
     while (true) {
         var read: u32 = 0;
-        const result = ReadFile(pipe, &buffer, buffer.len, &read, null);
-        if (result == 0 or read == 0) {
-            const last_error = if (result == 0) GetLastError() else 0;
-            var line: [128]u8 = undefined;
-            logChromeLaunch(std.fmt.bufPrint(&line, "chrome pipe reader return ReadFile={d} error={d}", .{ result, last_error }) catch "chrome pipe reader return");
-            return;
-        }
+        if (ReadFile(pipe, &buffer, buffer.len, &read, null) == 0 or read == 0) return;
         for (buffer[0..read]) |byte| {
             if (byte == 0) {
                 if (!discard) routeChromeReply(message.items);
@@ -408,21 +399,6 @@ fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, proc
     return replied;
 }
 
-fn openChromeLaunchOutput(suffix: []const u16, sa: *win.SECURITY_ATTRIBUTES) win.HANDLE {
-    var path: [32768]u16 = undefined;
-    const length = win.GetEnvironmentVariableW(std.unicode.utf8ToUtf16LeStringLiteral("APPDATA"), &path, path.len);
-    if (length == 0 or length >= path.len) return null;
-    const folder = std.unicode.utf8ToUtf16LeStringLiteral("\\ZigShell");
-    if (length + folder.len + suffix.len + 1 > path.len) return null;
-    @memcpy(path[length..][0..folder.len], folder);
-    path[length + folder.len] = 0;
-    _ = win.CreateDirectoryW(@ptrCast(&path), null);
-    @memcpy(path[length + folder.len ..][0..suffix.len], suffix);
-    path[length + folder.len + suffix.len] = 0;
-    const file = win.CreateFileW(@ptrCast(&path), FILE_APPEND_DATA, FILE_SHARE_READ, sa, win.OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-    return if (file == win.INVALID_HANDLE_VALUE_PTR) null else file;
-}
-
 fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
     const exe = args.next() orelse badArgs("chrome-launch");
     const extension = args.next() orelse badArgs("chrome-launch");
@@ -456,8 +432,6 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         if (win.SetHandleInformation(parent_write, 1, 0) == 0 or win.SetHandleInformation(parent_read, 1, 0) == 0) return error.ChromePipeInheritanceFailed;
         const command = try buildChromeLaunchCommand(allocator, exe, chrome_args.items);
         defer allocator.free(command);
-        var command_line: [1024]u8 = undefined;
-        logChromeLaunch(std.fmt.bufPrint(&command_line, "chrome command={s}", .{ command[0..@min(command.len, 900)] }) catch "chrome command=<unknown>");
         const command_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, command);
         defer allocator.free(command_w);
         const exe_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, exe);
@@ -468,19 +442,9 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         si.cbReserved2 = @intCast(reserved2.len);
         si.lpReserved2 = &reserved2;
         var pi = std.mem.zeroes(win.PROCESS_INFORMATION);
-        const chrome_stdout = openChromeLaunchOutput(std.unicode.utf8ToUtf16LeStringLiteral("\\chrome-launch-out.log"), &sa);
-        const chrome_stderr = openChromeLaunchOutput(std.unicode.utf8ToUtf16LeStringLiteral("\\chrome-launch-err.log"), &sa);
-        if (chrome_stdout != null and chrome_stderr != null) {
-            si.dwFlags |= STARTF_USESTDHANDLES;
-            si.hStdInput = INVALID_HANDLE_VALUE;
-            si.hStdOutput = chrome_stdout;
-            si.hStdError = chrome_stderr;
-        }
         var launch_line: [4096]u8 = undefined;
         logChromeLaunch(std.fmt.bufPrint(&launch_line, "launch exe={s}", .{exe}) catch "launch exe=<too long>");
         const created = win.CreateProcessW(exe_w.ptr, command_w.ptr, null, null, 1, 0x08000000, null, null, &si, &pi);
-        if (chrome_stdout != null) _ = win.CloseHandle(chrome_stdout);
-        if (chrome_stderr != null) _ = win.CloseHandle(chrome_stderr);
         logChromeLaunch(std.fmt.bufPrint(&launch_line, "CreateProcessW result={d} pid={d}", .{ created, pi.dwProcessId }) catch "CreateProcessW result=<unknown>");
         if (created == 0) return error.ChromeLaunchFailed;
         defer _ = win.CloseHandle(pi.hProcess);
@@ -529,8 +493,6 @@ test "IGSH-738 Chrome command preserves Windows arguments without io-pipes" {
     try std.testing.expectEqualStrings("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", parsed.next().?);
     try std.testing.expectEqualStrings("--remote-debugging-pipe", parsed.next().?);
     try std.testing.expectEqualStrings("--enable-unsafe-extension-debugging", parsed.next().?);
-    try std.testing.expectEqualStrings("--enable-logging=stderr", parsed.next().?);
-    try std.testing.expectEqualStrings("--v=1", parsed.next().?);
     try std.testing.expect(std.mem.indexOf(u8, command, "--remote-debugging-io-pipes") == null);
     for (args) |arg| try std.testing.expectEqualStrings(arg, parsed.next().?);
     try std.testing.expect(parsed.next() == null);
