@@ -4072,6 +4072,10 @@ try {
             $stableRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $stableToken))).TrimEnd('\')
             if (Test-Path -LiteralPath $stableRoot) { throw 'Branded Chrome own profile must start empty' }
             [IO.File]::AppendAllText($optIn, $stableWorkspaceId + "`n")
+            Wait-Until {
+                [VerifyNative]::BringToForeground($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'main window foreground before the cold branded Chrome workspace browser opens'
             $script:browserShellId = (Read-Inbox).active_shell_id
             $stableProof = Open-WorkspaceBrowser 'stable-cold-own'
             if ($stableProof.userDataDir -ine $stableRoot) { throw 'Branded Chrome pane used the wrong own profile' }
