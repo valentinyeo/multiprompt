@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.859", .items = &.{
+        .{ .text = "Messages with unconfirmed delivery no longer reappear in the message box and double the next message.", .ticket = "IGSH-720" },
+    } },
     .{ .ver = "0.28.858", .items = &.{
         .{ .text = "Opening a browser pane or switching to it with Alt+Q now puts keyboard focus inside the page instead of the browser toolbar.", .ticket = "IGSH-724" },
         .{ .text = "Update cards now show what changed before you restart.", .ticket = "IGSH-728" },
