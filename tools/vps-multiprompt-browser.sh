@@ -108,6 +108,7 @@ CDP_HELP
       key) echo 'usage: zsb key <combo>' ;;
       cursor) echo 'usage: zsb cursor [on|off|move X Y|click X Y]' ;;
       profile-clone) echo 'usage: zsb profile-clone <src> <dst>' ;;
+      chrome-launch) echo 'usage: zsb chrome-launch <exe> <extension> <theme> [args...] (internal; the app runs it on Windows)' ;;
       create-pane-window) echo 'usage: zsb create-pane-window <url> [--app] [--bounds L T W H]' ;;
       theme) echo 'usage: zsb theme <name>' ;;
       protect-window) echo 'usage: zsb protect-window [--shell-id N] [--owner-pid N]' ;;
