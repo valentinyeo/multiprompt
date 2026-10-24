@@ -1284,7 +1284,7 @@ test "chatLatestAgentReply returns only the reply after the last prompt" {
 
 pub fn chatDeliveryPending(shell_id: u32) bool {
     for (app_state.g_chat_outbox.items) |entry| {
-        if (!entry.channel_sent or entry.state == .not_sent) continue;
+        if (!entry.channel_sent) continue;
         const idx = @import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
         if (app_state.shells[idx].shell_id == shell_id) return true;
     }
