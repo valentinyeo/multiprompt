@@ -255,6 +255,8 @@ test('master remote failures do not publish', { skip: process.platform === 'win3
 test('packaging includes extension contents, excludes current themes and covers every asset', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'dist'));
+  fs.writeFileSync(path.join(f.dir, 'src/changelog.zig'), '.{ .ver = "1.2.3", .items = &.{\n        .{ .text = "Updates show what changed.", .ticket = "IGSH-728" },\n    } },\n');
+  execFileSync(process.execPath, [path.join(root, 'tools/release-notes.mjs'), 'src/changelog.zig', tag, 'dist/release-notes.json'], { cwd: f.dir });
   fs.mkdirSync(path.join(f.dir, 'extension/themes/current'), { recursive: true });
   fs.writeFileSync(path.join(f.dir, 'extension/themes/current/private.txt'), 'excluded');
   fs.writeFileSync(path.join(f.dir, 'extension/themes/kept.json'), '{}');
@@ -269,6 +271,7 @@ test('packaging includes extension contents, excludes current themes and covers 
   assert.match(entries, /themes\/kept.json/);
   assert.doesNotMatch(entries, /themes\/current/);
   const sums = fs.readFileSync(path.join(f.dir, 'dist/SHA256SUMS.txt'), 'utf8');
-  assert.equal(sums.trim().split('\n').length, 5);
+  assert.equal(sums.trim().split('\n').length, 6);
+  assert.match(sums, /^[a-f0-9]{64}  release-notes\.json$/m);
   execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: path.join(f.dir, 'dist') });
 });
