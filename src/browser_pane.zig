@@ -989,9 +989,8 @@ fn appendPaneLaunchFallbackBounds(params: []u16, pos: *usize) void {
 }
 
 fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, launch_idx: ?u32) void {
-    var params: [2048]u16 = std.mem.zeroes([2048]u16);
+    var params: [4096]u16 = std.mem.zeroes([4096]u16);
     var pos: usize = 0;
-    appendBrowserWideAscii(&params, &pos, "--silent-debugger-extension-api ");
     const user_data_dir = browserUserDataDir();
     var own_dir_buf: [1024]u8 = undefined;
     const own_token = if (launch_idx) |li| browserProfileToken(li) else "";
@@ -1000,10 +999,25 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         showHeaderNoticeAscii("Isolated browser profile path is unavailable", 5000, true);
         return;
     }
+    const chrome_bridge = native_chrome and app_state.g_browser_engine == .chrome and browser_own_profile.isToken(own_token);
+    const extension_path = edgeExtensionPath();
+    if (chrome_bridge) {
+        appendBrowserWideAscii(&params, &pos, "chrome-launch \"");
+        appendBrowserWideAscii(&params, &pos, browserExePath());
+        appendBrowserWideAscii(&params, &pos, "\" \"");
+        appendBrowserWideAscii(&params, &pos, extension_path);
+        appendBrowserWideAscii(&params, &pos, "\" \"");
+        if (extension_path.len > 0) {
+            appendBrowserWideAscii(&params, &pos, extension_path);
+            appendBrowserWideAscii(&params, &pos, "\\themes\\");
+            appendBrowserWideAscii(&params, &pos, currentThemeToken());
+        }
+        appendBrowserWideAscii(&params, &pos, "\" ");
+    }
+    appendBrowserWideAscii(&params, &pos, "--silent-debugger-extension-api ");
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
     appendBrowserWideAscii(&params, &pos, launch_dir);
     appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode ");
-    const extension_path = edgeExtensionPath();
     if (extension_path.len > 0) {
         appendBrowserWideAscii(&params, &pos, "--load-extension=\"");
         appendEdgeExtensionLoadPaths(&params, &pos, extension_path);
@@ -1050,7 +1064,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     params[@min(pos, params.len - 1)] = 0;
     var exe_w: [320]u16 = std.mem.zeroes([320]u16);
     var epos: usize = 0;
-    appendBrowserWideAscii(&exe_w, &epos, browserExePath());
+    appendBrowserWideAscii(&exe_w, &epos, if (chrome_bridge) bridgeExePath() else browserExePath());
     exe_w[@min(epos, exe_w.len - 1)] = 0;
     if (verboseLoggingEnabled()) debugLog2("[browser] exe=", browserExePath());
     var nonce: [40]u16 = @splat(0);
@@ -1059,7 +1073,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         const len = @min(std.mem.indexOf(u8, title, "</title>") orelse 0, nonce.len - 1);
         for (title[0..len], 0..) |c, i| nonce[i] = c;
     }
-    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd }) catch return;
+    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd, chrome_bridge }) catch return;
     thread.detach();
 }
 
@@ -1080,7 +1094,7 @@ fn browserLaunchEvent(_: HANDLE, _: DWORD, hwnd: HANDLE, object: i32, child: i32
     _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: HANDLE) void {
+fn browserLaunchWorker(exe: [320]u16, params: [4096]u16, nonce: [40]u16, owner: HANDLE, chrome_bridge: bool) void {
     const win = @import("win32.zig");
     const co = CoInitializeEx(null, COINIT_APARTMENTTHREADED);
     defer if (co >= 0) CoUninitialize();
@@ -1091,7 +1105,25 @@ fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: 
     defer {
         if (hook != null) _ = win.UnhookWinEvent(hook);
     }
-    _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, if (nonce[0] != 0) SW_HIDE else SW_SHOWNOACTIVATE);
+    if (chrome_bridge) {
+        var command: [WIN32_COMMAND_LINE_CAP]u16 = @splat(0);
+        const exe_text = std.mem.sliceTo(&exe, 0);
+        const params_text = std.mem.sliceTo(&params, 0);
+        command[0] = '"';
+        @memcpy(command[1 .. 1 + exe_text.len], exe_text);
+        command[1 + exe_text.len] = '"';
+        command[2 + exe_text.len] = ' ';
+        @memcpy(command[3 + exe_text.len .. 3 + exe_text.len + params_text.len], params_text);
+        var si = std.mem.zeroes(STARTUPINFOW);
+        si.cb = @sizeOf(STARTUPINFOW);
+        var pi: PROCESS_INFORMATION = undefined;
+        if (CreateProcessW(@ptrCast(&exe), @ptrCast(&command), null, null, 0, 0x08000008, null, null, &si, &pi) != 0) {
+            _ = CloseHandle(pi.hThread);
+            _ = CloseHandle(pi.hProcess);
+        }
+    } else {
+        _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, if (nonce[0] != 0) SW_HIDE else SW_SHOWNOACTIVATE);
+    }
     if (hook == null) return;
     const until = GetTickCount64() + 6000;
     while (GetTickCount64() < until and launch_guard_window == null) {

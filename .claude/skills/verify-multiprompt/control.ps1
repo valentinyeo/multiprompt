@@ -4004,6 +4004,47 @@ try {
             $result.checks += @{ name = 'browser-own-profile opted-in'; userDataDir = $ownProof.userDataDir; token = $ownToken }
             $result.checks += @{ name = 'browser-own-profile shared-untouched'; entries = $sharedAfter.Count }
             $result.checks += @{ name = 'browser-own-profile restored'; userDataDir = $restoredProof.userDataDir }
+            $stableChrome = @(
+                (Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'Google/Chrome/Application/chrome.exe')
+            ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if (-not $stableChrome) { throw 'Branded Chrome stable is required for own-profile verification' }
+            $stableVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($stableChrome)
+            if ($stableVersion.ProductName -cne 'Google Chrome' -or $stableVersion.ProductMajorPart -lt 137) { throw 'Own-profile regression requires branded Google Chrome 137 or newer' }
+            Record 'Switch the app to branded Chrome stable; Chrome for Testing cannot prove the extension bootstrap regression'
+            [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $stableChrome)
+            Restart-SessionRestore 'stable-chrome-switch' $false
+            $null = Assert-WorkspaceBrowser 'stable-existing-own' $ownRoot $ownWorkspace
+            Press @(0x11, 0x4E) 'Ctrl+N: create a cold branded Chrome workspace'
+            Wait-Until {
+                $script:stableSession = Read-Session
+                $state = Read-Inbox
+                if ($null -eq $script:stableSession -or $null -eq $state) { return $false }
+                $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+                $script:stableSession.workspace_count -eq $before + 2 -and $selected.Count -eq 1 -and
+                    $selected[0].ws -eq $script:stableSession.active_workspace -and $selected[0].ws -ne $ownWorkspace
+            } 'branded Chrome workspace persisted'
+            $stableWorkspace = $script:stableSession.active_workspace
+            $stableWorkspaceId = $script:stableSession.workspaces[$stableWorkspace].wid
+            $stableToken = Get-OwnProfileToken $stableWorkspaceId
+            $stableRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $stableToken))).TrimEnd('\')
+            if (Test-Path -LiteralPath $stableRoot) { throw 'Branded Chrome own profile must start empty' }
+            [IO.File]::AppendAllText($optIn, $stableWorkspaceId + "`n")
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            $stableProof = Open-WorkspaceBrowser 'stable-cold-own'
+            if ($stableProof.userDataDir -ine $stableRoot) { throw 'Branded Chrome pane used the wrong own profile' }
+            $stableProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $stableProof.pid)
+            if ($stableProcess.ExecutablePath -ine $stableChrome) { throw 'Cold own pane is not branded Chrome stable' }
+            $holder = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $stableProcess.ParentProcessId)
+            if ([IO.Path]::GetFileName($holder.ExecutablePath) -ine 'zigshell-bridge.exe' -or $holder.CommandLine -notmatch 'chrome-launch') { throw 'Branded Chrome has no persistent bridge pipe holder' }
+            Wait-OwnProfilePipe $stableToken 'stable-cold-own'
+            $stablePane = Read-BrowserPane
+            if ($stablePane.browser_window_id -le 0) { throw 'Branded Chrome own pane did not resolve a window id' }
+            Save-Json @{ executable = $stableChrome; product = $stableVersion.ProductName; version = $stableVersion.ProductVersion; browser = $stableProof; holderPid = $holder.ProcessId; token = $stableToken; windowId = $stablePane.browser_window_id } 'browser-own-profile-stable.json'
+            Restart-SessionRestore 'stable-own-restart' $false
+            Wait-OwnProfilePipe $stableToken 'stable-restored-own'
+            $null = Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace
+            $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
             Snapshot 'after'
         }
         'status-card' {

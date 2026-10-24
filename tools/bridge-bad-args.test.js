@@ -32,6 +32,9 @@ const unknownCommands = [
 ];
 
 const cases = [
+  ['chrome-launch'],
+  ['chrome-launch', 'chrome.exe'],
+  ['chrome-launch', 'chrome.exe', 'extension'],
   ['profile-clone'],
   ['profile-clone', 'source'],
   ['profile-clone', 'source', 'destination', 'extra'],
