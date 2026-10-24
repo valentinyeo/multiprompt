@@ -128,3 +128,163 @@ test('IGSH-760 composer paint contract rejects the shipped direct-paint path', (
   assert.notEqual(broken.status, 0);
   assert.match(broken.stderr, /composer clears the visible text area/);
 });
+
+function typingFixture() {
+  const frames = Array.from({ length: 61 }, (_, index) => {
+    const width = 180;
+    const height = 32;
+    const pixels = Buffer.alloc(width * height * 4, 32);
+    for (let y = 8; y < 24; y++) for (let x = 4; x < 48 + Math.floor(index / 3) * 4; x++) {
+      if (x % 5 > 2) continue;
+      const offset = (y * width + x) * 4;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 220;
+    }
+    if (index % 2) for (let y = 8; y < 24; y++) {
+      const offset = (y * width + 50 + Math.floor(index / 3) * 4) * 4;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 220;
+    }
+    return { timeMs: index * 20, image: { width, height, pixels } };
+  });
+  return { frames, metadata: { typingStartMs: 0, typingEndMs: 1200, inkRect: { left: 4, top: 4, right: 40, bottom: 28 }, rowRect: { left: 4, top: 4, right: 176, bottom: 28 } } };
+}
+
+test('IGSH-760 steady growing text and a blinking caret pass with measured ink/background evidence', async () => {
+  const { evaluateTypingFrames, typingThresholds } = await import('./chat-composer-text-proof.mjs');
+  const { frames, metadata: typingMetadata } = typingFixture();
+  const summary = evaluateTypingFrames(frames, typingMetadata);
+  assert.equal(summary.name, 'IGSH-760 typing frames steady');
+  assert.equal(summary.passed, true);
+  assert.equal(summary.frames, 61);
+  assert.equal(summary.inkSeries.min, summary.inkSeries.max);
+  assert.ok(summary.inkSeries.min > typingThresholds.minInk);
+  assert.ok(summary.rowInkSeries.max > summary.rowInkSeries.min);
+  assert.equal(summary.settledBackground, 0x202020);
+  assert.equal(summary.mismatchedFrames.length, 0);
+  assert.deepEqual(typingThresholds, { minFrames: 30, minDurationMs: 1000, maxGapMs: 100, minInk: 20, minInkRatio: 0.8, inkContrast: 24, maxColorDelta: 2 });
+});
+
+test('IGSH-760 broken double-paint frames fail even when every later frame settles correctly', async () => {
+  const { evaluateTypingFrames } = await import('./chat-composer-text-proof.mjs');
+  for (const region of ['all', 'prefix', 'trailing']) {
+    const { frames, metadata: typingMetadata } = typingFixture();
+    const sample = frames[40].image;
+    for (let y = 4; y < 28; y++) for (let x = region === 'trailing' ? 40 : 4; x < (region === 'prefix' ? 40 : 176); x++) {
+      const offset = (y * sample.width + x) * 4;
+      sample.pixels[offset] = sample.pixels[offset + 1] = sample.pixels[offset + 2] = 32;
+    }
+    const summary = evaluateTypingFrames(frames, typingMetadata);
+    assert.equal(summary.passed, false, region);
+    assert.equal(summary.samplingPassed, true);
+    assert.equal(summary.mismatchedFrames.length, 1);
+    assert.equal(summary.mismatchedFrames[0].index, 40);
+    assert.deepEqual(summary.mismatchedFrames[0].reasons, ['ink-drop']);
+  }
+});
+
+test('IGSH-760 row background and border changes fail independently, with a two-channel-level tolerance', async () => {
+  const { evaluateTypingFrames } = await import('./chat-composer-text-proof.mjs');
+  for (const change of [2, 3, 223]) for (const region of ['background', 'border']) {
+    const { frames, metadata: typingMetadata } = typingFixture();
+    const sample = frames[20].image;
+    if (region === 'border') sample.pixels[(sample.width + 1) * 4] += change;
+    else for (let y = 4; y < 28; y++) for (let x = 4; x < 176; x++) {
+      const offset = (y * sample.width + x) * 4;
+      if (sample.pixels[offset] === 32) sample.pixels[offset] += change;
+    }
+    const summary = evaluateTypingFrames(frames, typingMetadata);
+    assert.equal(summary.passed, change <= 2, `${region} delta ${change}`);
+    if (change > 2) assert.ok(summary.mismatchedFrames[0].reasons.includes(region === 'border' ? 'border-background' : 'row-background'));
+  }
+});
+
+test('IGSH-760 rejects blank, short, stalled or non-typing captures and malformed geometry', async () => {
+  const { evaluateTypingFrames } = await import('./chat-composer-text-proof.mjs');
+  const { frames, metadata: typingMetadata } = typingFixture();
+  for (const samples of [frames.slice(0, 29), frames.slice(10), frames.slice(0, 50), frames.filter((_, index) => index < 10 || index > 20), frames.map(frame => ({ ...frame, timeMs: 0 }))]) {
+    assert.equal(evaluateTypingFrames(samples, typingMetadata).passed, false);
+  }
+  assert.equal(evaluateTypingFrames(frames, { ...typingMetadata, typingEndMs: 900 }).passed, false);
+  assert.equal(evaluateTypingFrames(frames, { ...typingMetadata, typingStartMs: 2000, typingEndMs: 4000 }).passed, false);
+  assert.throws(() => evaluateTypingFrames([], typingMetadata), /Missing typing frames/);
+  assert.throws(() => evaluateTypingFrames(frames, { ...typingMetadata, inkRect: { ...typingMetadata.inkRect, right: 181 } }), /rectangle/);
+  for (const frame of frames) frame.image.pixels.fill(32);
+  assert.equal(evaluateTypingFrames(frames, typingMetadata).passed, false);
+});
+
+test('IGSH-760 capture is concurrent screen BitBlt during owned keyboard input, not a forced settled repaint', () => {
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const capture = control.slice(control.indexOf('    public static Dictionary<string, object> ComposerTypingFrames('), control.indexOf('    public static int[] ReadSwitchScreenPatch('));
+  for (const token of ['GetAncestor(composer, 2) != owner', 'GetForegroundWindow() != owner', 'GetFocusedWindow(owner) != composer', 'Text(text.Substring(0, 12))', 'new Thread(', 'BitBlt(target, 0, 0, width, height, screen, crop.Left, crop.Top, 0x00CC0020)', 'finalFrame = stop.WaitOne(2)', 'if (finalFrame) break', 'sampler.Start()', 'Text(text.Substring(12))', 'stop.Set(); sampler.Join()', 'EditText(composer) != text']) assert.ok(capture.includes(token), token);
+  assert.doesNotMatch(capture.replace(/"[^"\n]*"/g, ''), /DwmFlush\(|PrintWindow\(|SendMessage|WM_PAINT/);
+  assert.ok(capture.indexOf('sampler.Start()') < capture.indexOf('Text(text.Substring(12))'));
+  assert.ok(capture.indexOf('Text(text.Substring(12))') < capture.indexOf('stop.Set(); sampler.Join()'));
+  const journey = control.slice(control.indexOf("        'chat-composer-text' {"), control.indexOf("        'chat-code-font' {"));
+  for (const token of ["name = 'IGSH-760 typing frames steady'", "Assert-ChatTyping $sentence 'composer-typing-burst' {", '[VerifyNative]::ComposerTypingFrames(', "Save-Json $burst 'composer-typing.json'", '$Evidence --typing', '$typingCheck[$property.Name] = $property.Value', 'if (-not $typingCheck.passed)']) assert.ok(journey.includes(token), token);
+  assert.ok(journey.indexOf('if (-not $typingCheck.passed)') < journey.indexOf('if (-not $composerCheck.passed)'));
+  const feature = read('.claude/skills/verify-multiprompt/features/chat-composer-text.md');
+  for (const token of ['IGSH-760 typing frames steady', 'v0.28.860', '0.8', 'mismatchedFrames', '30']) assert.ok(feature.includes(token), token);
+});
+
+test('IGSH-760 CLI remeasures burst BMPs and writes a failing summary/exit status for the red control', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-typing-oracle-'));
+  const { frames, metadata: typingMetadata } = typingFixture();
+  const writeFrame = index => {
+    const sample = frames[index].image;
+    const header = Buffer.alloc(54);
+    header.write('BM');
+    header.writeUInt32LE(54 + sample.pixels.length, 2);
+    header.writeUInt32LE(54, 10);
+    header.writeUInt32LE(40, 14);
+    header.writeInt32LE(sample.width, 18);
+    header.writeInt32LE(-sample.height, 22);
+    header.writeUInt16LE(1, 26);
+    header.writeUInt16LE(32, 28);
+    fs.writeFileSync(path.join(directory, `composer-typing-${String(index).padStart(4, '0')}.bmp`), Buffer.concat([header, sample.pixels]));
+  };
+  const run = () => spawnSync(process.execPath, [path.join(__dirname, 'chat-composer-text-proof.mjs'), directory, '--typing'], { encoding: 'utf8', timeout: 10000 });
+  const summaryFile = path.join(directory, 'composer-typing-summary.json');
+  try {
+    fs.writeFileSync(path.join(directory, 'composer-typing.json'), '\uFEFF' + JSON.stringify({ ...typingMetadata, timesMs: frames.map(frame => frame.timeMs) }));
+    frames.forEach((_, index) => writeFrame(index));
+    const green = run();
+    assert.equal(green.status, 0, green.stdout + green.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(summaryFile)).passed, true);
+    frames[20].image.pixels.fill(32);
+    writeFrame(20);
+    const red = run();
+    assert.equal(red.status, 1, red.stdout + red.stderr);
+    const summary = JSON.parse(fs.readFileSync(summaryFile));
+    assert.equal(summary.name, 'IGSH-760 typing frames steady');
+    assert.equal(summary.passed, false);
+    assert.equal(summary.samplingPassed, true);
+    assert.equal(summary.mismatchedFrames[0].index, 20);
+    assert.equal(summary.inkSeries.min, 0);
+    fs.unlinkSync(path.join(directory, 'composer-typing-0020.bmp'));
+    assert.equal(run().status, 1);
+    assert.match(JSON.parse(fs.readFileSync(summaryFile)).error, /ENOENT/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-760 ink loss boundary accepts at least eighty percent and rejects one pixel below the boundary', async () => {
+  const { evaluateTypingFrames } = await import('./chat-composer-text-proof.mjs');
+  for (const extraLoss of [0, 1]) {
+    const { frames, metadata: typingMetadata } = typingFixture();
+    const baseline = frames.at(-1).image;
+    const inkOffsets = [];
+    const rect = typingMetadata.inkRect;
+    for (let y = rect.top; y < rect.bottom; y++) for (let x = rect.left; x < rect.right; x++) {
+      const offset = (y * baseline.width + x) * 4;
+      if (baseline.pixels[offset] !== 32) inkOffsets.push(offset);
+    }
+    const sample = frames[20].image;
+    const remaining = Math.ceil(inkOffsets.length * 0.8) - extraLoss;
+    for (const offset of inkOffsets.slice(remaining)) sample.pixels[offset] = sample.pixels[offset + 1] = sample.pixels[offset + 2] = 32;
+    const summary = evaluateTypingFrames(frames, typingMetadata);
+    assert.equal(summary.passed, extraLoss === 0);
+    if (extraLoss) assert.ok(summary.mismatchedFrames[0].inkRatio < 0.8);
+  }
+});
