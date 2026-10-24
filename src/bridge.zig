@@ -358,36 +358,35 @@ fn sendChromeExtension(allocator: std.mem.Allocator, pipe: windows.HANDLE, id: u
     try writeAll(pipe, message);
 }
 
-fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, extension: []const u8, theme: []const u8) void {
+fn loadChromeExtensions(allocator: std.mem.Allocator, pipe: windows.HANDLE, process: windows.HANDLE, extension: []const u8, theme: []const u8) void {
     while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
     chrome_replies.expected_id = 1;
     chrome_replies.extension_loaded = false;
     chrome_replies.theme_replied = theme.len == 0;
     chrome_replies.mutex.unlock();
+    const deadline = GetTickCount64() + 120_000;
     load: {
         logChromeLaunch("CDP attempt id=1");
         sendChromeExtension(allocator, pipe, 1, extension) catch break :load;
         logChromeLaunch("CDP attempt id=2");
         sendChromeExtension(allocator, pipe, 2, theme) catch break :load;
-        for (0..8) |attempt| {
-            if (attempt > 0 and chromeExtensionNeedsRetry()) {
+        for (0..60) |attempt| {
+            if (!chromeExtensionNeedsRetry() or win.WaitForSingleObject(process, 0) == 0 or GetTickCount64() >= deadline) break;
+            if (attempt > 0) {
                 const id: u32 = @intCast(attempt + 2);
                 while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
                 chrome_replies.expected_id = id;
                 chrome_replies.mutex.unlock();
-                var line: [64]u8 = undefined;
-                logChromeLaunch(std.fmt.bufPrint(&line, "CDP attempt id={d}", .{ id }) catch "CDP attempt");
+                if (attempt < 8 or (attempt + 1) % 10 == 0) {
+                    var line: [64]u8 = undefined;
+                    logChromeLaunch(std.fmt.bufPrint(&line, "CDP attempt id={d}", .{ id }) catch "CDP attempt");
+                }
                 sendChromeExtension(allocator, pipe, id, extension) catch break;
             }
-            var finished = false;
-            for (0..30) |_| {
-                while (!chrome_replies.mutex.tryLock()) std.atomic.spinLoopHint();
-                finished = chrome_replies.extension_loaded and chrome_replies.theme_replied;
-                chrome_replies.mutex.unlock();
-                if (finished) break;
+            for (0..80) |_| {
+                if (!chromeExtensionNeedsRetry() or GetTickCount64() >= deadline) break :load;
                 Sleep(25);
             }
-            if (finished) break;
         }
     }
     logChromeLaunch(if (chromeExtensionNeedsRetry()) "extension not-loaded" else "extension loaded");
@@ -447,7 +446,7 @@ fn runChromeLaunch(allocator: std.mem.Allocator, args: *std.process.Args.Iterato
         return error.ChromePipeReaderFailed;
     };
     reader.detach();
-    loadChromeExtensions(allocator, parent_write.?, extension, theme);
+    loadChromeExtensions(allocator, parent_write.?, pi.hProcess, extension, theme);
     _ = win.WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
 }
 

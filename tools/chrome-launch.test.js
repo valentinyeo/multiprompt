@@ -208,7 +208,7 @@ test('only native Chrome own profiles use a detached bridge while adoption remai
   assert.doesNotMatch(identity + body(pane, 'enumBrowserAdopt'), /parent[Pp]id|GetCurrentProcessId/);
 });
 
-function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
+function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme', exitTick = Infinity) {
   const state = { expected_id: 1, extension_loaded: false, theme_replied: false };
   let locked = false;
   state.mutex = {
@@ -217,8 +217,16 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
   };
   const sent = [], logs = [];
   let ticks = 0;
+  const process = {};
   const context = vm.createContext({
-    chrome_replies: state, allocator: null, pipe: null, extension: 'extension', theme,
+    chrome_replies: state, allocator: null, pipe: null, process, extension: 'extension', theme,
+    win: { WaitForSingleObject(handle, timeout) {
+      assert.equal(handle, process);
+      assert.equal(timeout, 0);
+      assert.equal(locked, false);
+      return ticks >= exitTick ? 0 : 258;
+    } },
+    GetTickCount64: () => ticks * 25,
     parse: text => {
       const value = JSON.parse(text);
       return { value: { kind: value && !Array.isArray(value) && typeof value === 'object' ? 'object' : 'other', object: {
@@ -237,7 +245,7 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
   });
   for (const [name, args] of [
     ['chromeLoadUnpackedReplyId', 'reply'], ['routeChromeReply', 'reply'],
-    ['chromeExtensionNeedsRetry', ''], ['loadChromeExtensions', 'allocator, pipe, extension, theme'],
+    ['chromeExtensionNeedsRetry', ''], ['loadChromeExtensions', 'allocator, pipe, process, extension, theme'],
   ]) {
     const code = body(bridge, name)
       .replace(/const parsed = std\.json\.parseFromSlice[^\n]+catch return(?: (null|false))?;/g, 'let parsed; try { parsed = parse(reply); } catch { return $1; }')
@@ -253,18 +261,19 @@ function chromeRuntime(onTick = () => {}, failId = 0, theme = 'theme') {
       .replace(/var (\w+): \[\d+\]u8 = undefined;/g, '')
       .replace(/std\.fmt\.bufPrint\(&\w+, ("[^"\n]+"), \.\{ ([^\n]+) \}\) catch (?:return|"[^"]*")/g, 'format($1, [$2])')
       .replaceAll('reply[0..@min(reply.len, 200)]', 'reply.slice(0, 200)')
-      .replace('for (0..8) |attempt|', 'for (let attempt = 0; attempt < 8; attempt++)')
-      .replace('for (0..30) |_|', 'for (let tick = 0; tick < 30; tick++)')
+      .replace(/for \(0\.\.(\d+)\) \|(\w+)\|/g, (_match, count, index) => `for (let ${index} = 0; ${index} < ${count}; ${index}++)`)
+      .replaceAll('120_000', '120000')
       .replace('const id: u32 = @intCast(attempt + 2);', 'const id = attempt + 2;')
       .replace(/sendChromeExtension\(([^\n]+)\) catch break :load;/g, 'try { sendChromeExtension($1); } catch { break load; }')
       .replace(/sendChromeExtension\(([^\n]+)\) catch break;/g, 'try { sendChromeExtension($1); } catch { break; }')
+      .replaceAll('break :load;', 'break load;')
       .replaceAll('theme.len', 'theme.length')
       .replaceAll('var finished =', 'let finished =')
       .replaceAll(' and ', ' && ').replaceAll(' or ', ' || ')
       .replace(/logChromeLaunch\(if \(chromeExtensionNeedsRetry\(\)\) ("[^"]+") else ("[^"]+")\);/, 'logChromeLaunch(chromeExtensionNeedsRetry() ? $1 : $2);');
     assert.doesNotThrow(() => vm.runInContext(`function ${name}(${args}) { ${code} }`, context, { filename: name }), `${name}: ${code}`);
   }
-  return { state, sent, logs, context, run() { context.loadChromeExtensions(null, null, 'extension', theme); return ticks; } };
+  return { state, sent, logs, context, run() { context.loadChromeExtensions(null, null, process, 'extension', theme); return ticks; } };
 }
 
 test('production reply routing retains current and late successes, ignores events, and routes complete frames once', () => {
@@ -297,17 +306,17 @@ test('production reply routing retains current and late successes, ignores event
   assert.equal(logs.at(-1).length, 'CDP reply id=3 '.length + 200);
 });
 
-test('production retry stops on success or broken writes and stays within eight attempts and six seconds', () => {
-  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, extension, theme\)/);
+test('production retry stops on extension success without waiting for the theme, or on broken writes', () => {
+  assert.match(body(bridge, 'runChromeLaunch'), /loadChromeExtensions\(allocator, parent_write\.\?, pi\.hProcess, extension, theme\)/);
   for (const first of ['error', 'silence', 'late']) {
     const runtime = chromeRuntime((tick, context) => {
       if (tick === 1) {
         context.routeChromeReply('{"id":2,"result":{}}');
         if (first === 'error') context.routeChromeReply('{"id":1,"error":{}}');
       }
-      if (tick === 31) context.routeChromeReply(`{"id":${first === 'late' ? 1 : 3},"result":{}}`);
+      if (tick === 81) context.routeChromeReply(`{"id":${first === 'late' ? 1 : 3},"result":{}}`);
     });
-    assert.equal(runtime.run(), 31);
+    assert.equal(runtime.run(), 81);
     assert.deepEqual(runtime.sent, [[1, 'extension'], [2, 'theme'], [3, 'extension']]);
     assert.equal(runtime.logs.at(-1), 'extension loaded');
   }
@@ -316,18 +325,52 @@ test('production retry stops on success or broken writes and stays within eight 
       if (tick === 1) context.routeChromeReply('{"id":1,"result":{}}');
       if (tick === themeTick) context.routeChromeReply('{"id":2,"error":{}}');
     });
-    assert.equal(runtime.run(), themeTick || 240);
+    assert.equal(runtime.run(), 1);
     assert.deepEqual(runtime.sent, [[1, 'extension'], [2, 'theme']]);
+    assert.equal(runtime.state.theme_replied, themeTick === 1);
+    if (themeTick !== 1) runtime.context.routeChromeReply('{"id":2,"error":{}}');
+    assert.equal(runtime.state.theme_replied, true);
+    assert.equal(runtime.logs.includes('extension loaded'), true);
   }
-  const silent = chromeRuntime();
-  assert.equal(silent.run(), 240);
-  assert.deepEqual(silent.sent.map(([id]) => id), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  assert.equal(silent.logs.at(-1), 'extension not-loaded');
   for (const id of [1, 2, 3]) {
     const broken = chromeRuntime(() => {}, id);
-    assert.equal(broken.run(), id === 3 ? 30 : 0);
+    assert.equal(broken.run(), id === 3 ? 80 : 0);
     assert.equal(broken.logs.at(-1), 'extension not-loaded');
   }
+});
+
+test('production retry keeps silent live Chrome pending until a reply at 30 seconds', () => {
+  for (const replyId of [1, 16]) {
+    const runtime = chromeRuntime((tick, context) => {
+      if (tick === 1200) context.routeChromeReply(`{"id":${replyId},"result":{}}`);
+    });
+    assert.equal(runtime.run(), 1200);
+    assert.equal(runtime.state.extension_loaded, true);
+    assert.equal(runtime.state.theme_replied, false);
+    assert.deepEqual(runtime.sent.map(([id]) => id), Array.from({ length: 16 }, (_, i) => i + 1));
+    assert.equal(runtime.logs.at(-1), 'extension loaded');
+  }
+});
+
+test('production retry stops when the Chrome process exits, including before the first retry', () => {
+  for (const exitTick of [0, 1, 320]) {
+    const runtime = chromeRuntime(() => {}, 0, 'theme', exitTick);
+    assert.equal(runtime.run(), Math.ceil(exitTick / 80) * 80);
+    assert.deepEqual(runtime.sent.map(([id]) => id), Array.from({ length: Math.max(2, Math.ceil(exitTick / 80) + 1) }, (_, i) => i + 1));
+    assert.equal(runtime.state.extension_loaded, false);
+    assert.equal(runtime.logs.at(-1), 'extension not-loaded');
+  }
+});
+
+test('production retry bounds a silent live Chrome to 120 seconds and throttles attempt logs', () => {
+  const silent = chromeRuntime();
+  assert.equal(silent.run() * 25, 120000);
+  assert.deepEqual(silent.sent.map(([id]) => id), Array.from({ length: 61 }, (_, i) => i + 1));
+  assert.deepEqual(silent.logs, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 21, 31, 41, 51, 61].map(id => `CDP attempt id=${id}`).concat('extension not-loaded'));
+  const delayed = chromeRuntime((_tick, context) => { context.GetTickCount64 = () => 120000; });
+  assert.equal(delayed.run(), 1);
+  assert.deepEqual(delayed.sent, [[1, 'extension'], [2, 'theme']]);
+  assert.equal(delayed.logs.at(-1), 'extension not-loaded');
 });
 
 test('production APPDATA launch log stays capped, plain-line, and best-effort', () => {
