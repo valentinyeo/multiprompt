@@ -1932,7 +1932,7 @@ test "IGSH-760 typing presents completed smooth frames without native inline pai
         Spy.guarded = guarded;
         _ = SetWindowTextW(edit, L("seed"));
         _ = SendMessageW(edit, 0x00B1, 4, 4);
-        _ = SetFocus(edit);
+        _ = app_state.FocusNative.SetFocus(edit);
         _ = InvalidateRect(edit, null, 1);
         _ = w.UpdateWindow(edit);
         Spy.paints = 0;
