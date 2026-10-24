@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.858", .items = &.{
+        .{ .text = "Opening a browser pane or switching to it with Alt+Q now puts keyboard focus inside the page instead of the browser toolbar.", .ticket = "IGSH-724" },
+        .{ .text = "Update cards now show what changed before you restart.", .ticket = "IGSH-728" },
+    } },
     .{ .ver = "0.28.857", .items = &.{
         .{ .text = "Browser panes recover reliably when switching between workspaces with separate browser profiles.", .ticket = "IGSH-726" },
         .{ .text = "Browser panes in shared-profile workspaces reconnect correctly after restarting from a workspace with its own browser profile.", .ticket = "IGSH-726" },
