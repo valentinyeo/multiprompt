@@ -1042,6 +1042,7 @@ $job = $null
 $warmupJob = $null
 $warmup = $null
 $switchNativeRegistry = $null
+$switchExtensionRoot = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -1703,9 +1704,9 @@ function Get-PaneUserDataDir([IntPtr]$Browser) {
     [void][VerifyNative]::GetWindowThreadProcessId($Browser, [ref]$browserPid)
     if ($browserPid -eq 0) { throw 'Docked pane has no browser process' }
     $line = (Get-CimInstance Win32_Process -Filter "ProcessId = $browserPid").CommandLine
-    $match = [regex]::Match($line, '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))')
+    $match = [regex]::Match($line, '(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir=(?:"([^"]+)"|(\S+)))')
     if (-not $match.Success) { throw 'Docked pane browser has no user data directory' }
-    $dir = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    $dir = @(1, 2, 3 | Where-Object { $match.Groups[$_].Success } | ForEach-Object { $match.Groups[$_].Value })[0]
     return @{ pid = $browserPid; hwnd = $Browser.ToInt64(); commandLine = $line; userDataDir = [IO.Path]::GetFullPath($dir).TrimEnd('\') }
 }
 
@@ -1898,11 +1899,16 @@ try {
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
-    $env:USERPROFILE = Join-Path $scratch 'profile'
-    $env:HOME = $env:USERPROFILE
+    if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
+    $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
-        New-Item -ItemType Directory -Force (Split-Path $extension) | Out-Null
+        $extensionRoot = [IO.Path]::GetFullPath((Split-Path $extension))
+        $extensionRootExisted = Test-Path -LiteralPath $extensionRoot
+        if (-not $extensionRootExisted) {
+            New-Item -ItemType Directory -Path $extensionRoot | Out-Null
+            $switchExtensionRoot = (Resolve-Path -LiteralPath $extensionRoot).Path
+        }
         Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
         $manifestPath = Join-Path $extension 'manifest.json'
         $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
@@ -4009,6 +4015,87 @@ try {
             $result.checks += @{ name = 'browser-own-profile opted-in'; userDataDir = $ownProof.userDataDir; token = $ownToken }
             $result.checks += @{ name = 'browser-own-profile shared-untouched'; entries = $sharedAfter.Count }
             $result.checks += @{ name = 'browser-own-profile restored'; userDataDir = $restoredProof.userDataDir }
+            $stableChrome = @(
+                (Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'Google/Chrome/Application/chrome.exe')
+            ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if (-not $stableChrome) { throw 'Branded Chrome stable is required for own-profile verification' }
+            $stableVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($stableChrome)
+            if ($stableVersion.ProductName -cne 'Google Chrome' -or $stableVersion.ProductMajorPart -lt 137) { throw 'Own-profile regression requires branded Google Chrome 137 or newer' }
+            Record 'Switch the app to branded Chrome stable; Chrome for Testing cannot prove the extension bootstrap regression'
+            [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $stableChrome)
+            Press @(0x12, 0x32) 'Alt+2: keep the own workspace inactive during stable warm-up'
+            $null = Assert-WorkspaceBrowser 'shared-stable-warmup' $sharedRoot 0
+            $existingOwn = Get-Process -Id $restoredProof.pid
+            & taskkill.exe /PID $existingOwn.Id /T /F
+            if (-not $existingOwn.WaitForExit(10000)) { throw 'Existing own-profile browser did not exit before stable warm-up' }
+            $existingOwn.Dispose()
+            $stableWarmupLog = Join-Path $config 'bridge-launch.log'
+            $stableWarmupLogStart = if (Test-Path -LiteralPath $stableWarmupLog) { @(Get-Content -LiteralPath $stableWarmupLog).Count } else { 0 }
+            $stableWarmupClock = [Diagnostics.Stopwatch]::StartNew()
+            $stableWarmup = Start-Process -FilePath (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe') -ArgumentList ('chrome-launch "' + $stableChrome + '" "' + $extension + '" "' + (Join-Path $extension 'themes/dark') + '" "--user-data-dir=' + $ownRoot + '" "--no-first-run" "--no-default-browser-check" "--new-window" "data:text/html,<title>ZSPANE-WARM</title>"') -PassThru
+            try {
+                Wait-Until {
+                    if ($stableWarmup.HasExited) { throw 'Stable warm-up bridge exited before loading the extension' }
+                    (Test-Path -LiteralPath $stableWarmupLog) -and
+                        @(Get-Content -LiteralPath $stableWarmupLog | Select-Object -Skip $stableWarmupLogStart | Where-Object { $_ -ceq 'extension loaded' }).Count -gt 0
+                } 'branded Chrome own-profile warm-up loaded the extension' 60
+                Wait-Until {
+                    [VerifyNative]::BringToForeground($script:window)
+                    [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+                } 'main window foreground after stable warm-up'
+                Press @(0x12, (0x32 + $ownWorkspace)) 'Return to the own workspace before the stable restart'
+                $null = Assert-WorkspaceBrowser 'own-stable-warmup-return' $ownRoot $ownWorkspace
+            } finally {
+                $stableWarmupChrome = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $stableWarmup.Id) | Where-Object { $_.ExecutablePath -ieq $stableChrome } | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+                if (-not $stableWarmup.HasExited) {
+                    & taskkill.exe /PID $stableWarmup.Id /T /F
+                }
+                foreach ($browser in $stableWarmupChrome) {
+                    if (-not $browser.WaitForExit(10000)) { throw 'Stable warm-up Chrome did not exit' }
+                    $browser.Dispose()
+                }
+                if (-not $stableWarmup.WaitForExit(10000)) { throw 'Stable warm-up bridge did not exit' }
+                $stableWarmup.Dispose()
+                $stableWarmupClock.Stop()
+            }
+            $result.checks += @{ name = 'browser-own-profile stable-warmup'; seconds = $stableWarmupClock.Elapsed.TotalSeconds }
+            Restart-SessionRestore 'stable-chrome-switch' $false
+            $null = Assert-WorkspaceBrowser 'stable-existing-own' $ownRoot $ownWorkspace
+            Press @(0x11, 0x4E) 'Ctrl+N: create a cold branded Chrome workspace'
+            Wait-Until {
+                $script:stableSession = Read-Session
+                $state = Read-Inbox
+                if ($null -eq $script:stableSession -or $null -eq $state) { return $false }
+                $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+                $script:stableSession.workspace_count -eq $before + 2 -and $selected.Count -eq 1 -and
+                    $selected[0].ws -eq $script:stableSession.active_workspace -and $selected[0].ws -ne $ownWorkspace
+            } 'branded Chrome workspace persisted'
+            $stableWorkspace = $script:stableSession.active_workspace
+            $stableWorkspaceId = $script:stableSession.workspaces[$stableWorkspace].wid
+            $stableToken = Get-OwnProfileToken $stableWorkspaceId
+            $stableRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $stableToken))).TrimEnd('\')
+            if (Test-Path -LiteralPath $stableRoot) { throw 'Branded Chrome own profile must start empty' }
+            [IO.File]::AppendAllText($optIn, $stableWorkspaceId + "`n")
+            Wait-Until {
+                [VerifyNative]::BringToForeground($script:window)
+                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+            } 'main window foreground before the cold branded Chrome workspace browser opens'
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            $stableProof = Open-WorkspaceBrowser 'stable-cold-own'
+            if ($stableProof.userDataDir -ine $stableRoot) { throw 'Branded Chrome pane used the wrong own profile' }
+            $stableProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $stableProof.pid)
+            if ($stableProcess.ExecutablePath -ine $stableChrome) { throw 'Cold own pane is not branded Chrome stable' }
+            $holder = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $stableProcess.ParentProcessId)
+            if ([IO.Path]::GetFileName($holder.ExecutablePath) -ine 'zigshell-bridge.exe' -or $holder.CommandLine -notmatch 'chrome-launch') { throw 'Branded Chrome has no persistent bridge pipe holder' }
+            Wait-OwnProfilePipe $stableToken 'stable-cold-own'
+            $stablePane = Read-BrowserPane
+            if ($stablePane.browser_window_id -le 0) { throw 'Branded Chrome own pane did not resolve a window id' }
+            Save-Json @{ executable = $stableChrome; product = $stableVersion.ProductName; version = $stableVersion.ProductVersion; browser = $stableProof; holderPid = $holder.ProcessId; token = $stableToken; windowId = $stablePane.browser_window_id } 'browser-own-profile-stable.json'
+            Restart-SessionRestore 'stable-own-restart' $false
+            Wait-OwnProfilePipe $stableToken 'stable-restored-own'
+            $null = Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace
+            $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
             Snapshot 'after'
         }
         'status-card' {
@@ -4126,6 +4213,10 @@ try {
                     Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
                     $switchNativeRegistry = $null
                 }
+                if ($null -ne $switchExtensionRoot) {
+                    Remove-Item -LiteralPath $switchExtensionRoot -Recurse -Force
+                    $switchExtensionRoot = $null
+                }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
@@ -4164,3 +4255,4 @@ try {
 }
 if ($result.status -ne 'passed') { throw ('Verification failed: ' + ($result | ConvertTo-Json -Depth 8 -Compress)) }
 Write-Output "VERIFIED $Feature with real input and retained evidence"
+exit 0

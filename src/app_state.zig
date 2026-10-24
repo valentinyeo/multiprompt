@@ -2389,6 +2389,7 @@ pub const BrowserResolveInflight = struct {
 
 pub var g_browser_resolve_inflight: [16]BrowserResolveInflight = [_]BrowserResolveInflight{.{}} ** 16;
 pub const BROWSER_RESOLVE_STALE_MS: u64 = 10_000;
+pub const BROWSER_RESOLVE_RETRY_BUDGET_MS: u64 = 120_000;
 
 pub const CancelledBrowserLaunch = struct {
     nonce: [40]u8 = std.mem.zeroes([40]u8),

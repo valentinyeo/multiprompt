@@ -9,7 +9,7 @@ const bridge = fs.readFileSync(path.join(root, 'src/bridge.zig'), 'utf8');
 const wrapper = fs.readFileSync(path.join(root, 'tools/vps-multiprompt-browser.sh'), 'utf8');
 const alias = fs.readFileSync(path.join(root, 'tools/vps-zsb.sh'), 'utf8');
 const worker = source.match(/fn zsbWorkerThread\([^]*?\n}\n/)[0];
-const localHelp = ['native', 'profile-clone', 'create-pane-window', 'theme', 'protect-window', 'manifest'];
+const localHelp = ['native', 'profile-clone', 'chrome-launch', 'create-pane-window', 'theme', 'protect-window', 'manifest'];
 
 function wrapperVerbs() {
   const help = wrapper.slice(wrapper.indexOf('print_help()'), wrapper.indexOf('\nif [ "$#" -eq 0 ]'));

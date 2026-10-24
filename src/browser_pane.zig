@@ -149,6 +149,7 @@ const ReadFile = @import("win32.zig").ReadFile;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
 const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const Sleep = @import("win32.zig").Sleep;
 const SECURITY_ATTRIBUTES = @import("win32.zig").SECURITY_ATTRIBUTES;
 const EnumWindows = @import("win32.zig").EnumWindows;
 const SendMessageW = @import("win32.zig").SendMessageW;
@@ -243,6 +244,7 @@ const BrowserAdoptCtx = @import("app_state.zig").BrowserAdoptCtx;
 const BrowserResolveJob = @import("app_state.zig").BrowserResolveJob;
 const BrowserResolveInflight = @import("app_state.zig").BrowserResolveInflight;
 const BROWSER_RESOLVE_STALE_MS = @import("app_state.zig").BROWSER_RESOLVE_STALE_MS;
+const BROWSER_RESOLVE_RETRY_BUDGET_MS = @import("app_state.zig").BROWSER_RESOLVE_RETRY_BUDGET_MS;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
 const browser_onscreen = @import("browser_onscreen.zig");
 const BROWSER_CRASH_RELAUNCH_DELAY_MS = @import("app_state.zig").BROWSER_CRASH_RELAUNCH_DELAY_MS;
@@ -989,9 +991,8 @@ fn appendPaneLaunchFallbackBounds(params: []u16, pos: *usize) void {
 }
 
 fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, launch_idx: ?u32) void {
-    var params: [2048]u16 = std.mem.zeroes([2048]u16);
+    var params: [4096]u16 = std.mem.zeroes([4096]u16);
     var pos: usize = 0;
-    appendBrowserWideAscii(&params, &pos, "--silent-debugger-extension-api ");
     const user_data_dir = browserUserDataDir();
     var own_dir_buf: [1024]u8 = undefined;
     const own_token = if (launch_idx) |li| browserProfileToken(li) else "";
@@ -1000,10 +1001,25 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         showHeaderNoticeAscii("Isolated browser profile path is unavailable", 5000, true);
         return;
     }
+    const chrome_bridge = native_chrome and app_state.g_browser_engine == .chrome and browser_own_profile.isToken(own_token);
+    const extension_path = edgeExtensionPath();
+    if (chrome_bridge) {
+        appendBrowserWideAscii(&params, &pos, "chrome-launch \"");
+        appendBrowserWideAscii(&params, &pos, browserExePath());
+        appendBrowserWideAscii(&params, &pos, "\" \"");
+        appendBrowserWideAscii(&params, &pos, extension_path);
+        appendBrowserWideAscii(&params, &pos, "\" \"");
+        if (extension_path.len > 0) {
+            appendBrowserWideAscii(&params, &pos, extension_path);
+            appendBrowserWideAscii(&params, &pos, "\\themes\\");
+            appendBrowserWideAscii(&params, &pos, currentThemeToken());
+        }
+        appendBrowserWideAscii(&params, &pos, "\" ");
+    }
+    appendBrowserWideAscii(&params, &pos, "--silent-debugger-extension-api ");
     appendBrowserWideAscii(&params, &pos, "--user-data-dir=\"");
     appendBrowserWideAscii(&params, &pos, launch_dir);
     appendBrowserWideAscii(&params, &pos, "\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --disable-notifications --disable-background-mode ");
-    const extension_path = edgeExtensionPath();
     if (extension_path.len > 0) {
         appendBrowserWideAscii(&params, &pos, "--load-extension=\"");
         appendEdgeExtensionLoadPaths(&params, &pos, extension_path);
@@ -1050,7 +1066,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     params[@min(pos, params.len - 1)] = 0;
     var exe_w: [320]u16 = std.mem.zeroes([320]u16);
     var epos: usize = 0;
-    appendBrowserWideAscii(&exe_w, &epos, browserExePath());
+    appendBrowserWideAscii(&exe_w, &epos, if (chrome_bridge) bridgeExePath() else browserExePath());
     exe_w[@min(epos, exe_w.len - 1)] = 0;
     if (verboseLoggingEnabled()) debugLog2("[browser] exe=", browserExePath());
     var nonce: [40]u16 = @splat(0);
@@ -1059,7 +1075,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
         const len = @min(std.mem.indexOf(u8, title, "</title>") orelse 0, nonce.len - 1);
         for (title[0..len], 0..) |c, i| nonce[i] = c;
     }
-    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd }) catch return;
+    const thread = std.Thread.spawn(.{}, browserLaunchWorker, .{ exe_w, params, nonce, app_state.g_main_hwnd, chrome_bridge }) catch return;
     thread.detach();
 }
 
@@ -1080,7 +1096,7 @@ fn browserLaunchEvent(_: HANDLE, _: DWORD, hwnd: HANDLE, object: i32, child: i32
     _ = SetWindowPos(hwnd, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: HANDLE) void {
+fn browserLaunchWorker(exe: [320]u16, params: [4096]u16, nonce: [40]u16, owner: HANDLE, chrome_bridge: bool) void {
     const win = @import("win32.zig");
     const co = CoInitializeEx(null, COINIT_APARTMENTTHREADED);
     defer if (co >= 0) CoUninitialize();
@@ -1091,7 +1107,25 @@ fn browserLaunchWorker(exe: [320]u16, params: [2048]u16, nonce: [40]u16, owner: 
     defer {
         if (hook != null) _ = win.UnhookWinEvent(hook);
     }
-    _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, if (nonce[0] != 0) SW_HIDE else SW_SHOWNOACTIVATE);
+    if (chrome_bridge) {
+        var command: [WIN32_COMMAND_LINE_CAP]u16 = @splat(0);
+        const exe_text = std.mem.sliceTo(&exe, 0);
+        const params_text = std.mem.sliceTo(&params, 0);
+        command[0] = '"';
+        @memcpy(command[1 .. 1 + exe_text.len], exe_text);
+        command[1 + exe_text.len] = '"';
+        command[2 + exe_text.len] = ' ';
+        @memcpy(command[3 + exe_text.len .. 3 + exe_text.len + params_text.len], params_text);
+        var si = std.mem.zeroes(STARTUPINFOW);
+        si.cb = @sizeOf(STARTUPINFOW);
+        var pi: PROCESS_INFORMATION = undefined;
+        if (CreateProcessW(@ptrCast(&exe), @ptrCast(&command), null, null, 0, 0x08000008, null, null, &si, &pi) != 0) {
+            _ = CloseHandle(pi.hThread);
+            _ = CloseHandle(pi.hProcess);
+        }
+    } else {
+        _ = ShellExecuteW(null, L("open"), @ptrCast(&exe), @ptrCast(&params), null, if (nonce[0] != 0) SW_HIDE else SW_SHOWNOACTIVATE);
+    }
     if (hook == null) return;
     const until = GetTickCount64() + 6000;
     while (GetTickCount64() < until and launch_guard_window == null) {
@@ -2297,13 +2331,62 @@ pub fn startBrowserWindowResolve(idx: u32) void {
     app_state.g_browser_resolve_inflight[slot] = .{ .shell_id = shell_id, .started = now, .nonce = job.nonce, .nonce_len = nonce_len };
 }
 
+fn browserResolveBeforeDeadline(now: u64, deadline: u64) bool {
+    return now < deadline;
+}
+
+fn browserResolveRetryInterval(attempt: u32) u64 {
+    return if (attempt < 4) 250 else 1000;
+}
+
+test "IGSH-738 browser resolve asks quickly first, then backs off" {
+    try std.testing.expectEqual(@as(u64, 250), browserResolveRetryInterval(0));
+    try std.testing.expectEqual(@as(u64, 250), browserResolveRetryInterval(3));
+    try std.testing.expectEqual(@as(u64, 1000), browserResolveRetryInterval(4));
+    try std.testing.expectEqual(@as(u64, 1000), browserResolveRetryInterval(120));
+}
+
+test "IGSH-738 browser resolve retries stop at the budget" {
+    const started: u64 = 1000;
+    const deadline = started + BROWSER_RESOLVE_RETRY_BUDGET_MS;
+    try std.testing.expect(browserResolveBeforeDeadline(started, deadline));
+    try std.testing.expect(browserResolveBeforeDeadline(deadline - 1, deadline));
+    try std.testing.expect(!browserResolveBeforeDeadline(deadline, deadline));
+    try std.testing.expect(!browserResolveBeforeDeadline(deadline + 1, deadline));
+}
+
 fn browserWindowResolveWorker(job: *BrowserResolveJob) void {
     crash_recorder.guardThread();
     browser_command_profile = job.profile;
-    const resolved = if (job.nonce_len > 0)
-        resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
-    else
-        resolveBrowserWindowIdForShell(job.shell_id);
+    const deadline = GetTickCount64() + BROWSER_RESOLVE_RETRY_BUDGET_MS;
+    var resolved: ?i64 = null;
+    var attempt: u32 = 0;
+    while (browserResolveBeforeDeadline(GetTickCount64(), deadline)) {
+        if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
+            std.heap.page_allocator.destroy(job);
+            return;
+        }
+        resolved = if (job.nonce_len > 0)
+            resolveBrowserWindowIdMatching(job.nonce[0..job.nonce_len], job.shell_id)
+        else
+            resolveBrowserWindowIdForShell(job.shell_id);
+        if (resolved != null) break;
+        for (&app_state.g_browser_resolve_inflight) |*entry| {
+            if (entry.shell_id == job.shell_id and std.mem.eql(u8, entry.nonce[0..entry.nonce_len], job.nonce[0..job.nonce_len])) {
+                entry.started = GetTickCount64();
+                break;
+            }
+        }
+        const now = GetTickCount64();
+        if (!browserResolveBeforeDeadline(now, deadline)) break;
+        const interval = browserResolveRetryInterval(attempt);
+        attempt += 1;
+        Sleep(@intCast(@min(interval, deadline - now)));
+    }
+    if (app_state.g_app_closing or app_state.g_account_locked or findShellById(job.shell_id) == null) {
+        std.heap.page_allocator.destroy(job);
+        return;
+    }
     job.window_id = resolved orelse 0;
     if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_RESOLVED, 0, @bitCast(@intFromPtr(job))) == 0)
         std.heap.page_allocator.destroy(job);
@@ -2784,7 +2867,10 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     @memcpy(app_state.shells[idx].browser_bind_nonce[0..nonce_slice.len], nonce_slice);
     app_state.shells[idx].browser_bind_nonce_len = @intCast(nonce_slice.len);
     publishInboxState();
-    app_state.g_browser_adopt_deadline = now + 6000;
+    app_state.g_browser_adopt_deadline = if (app_state.shells[idx].browser_native and app_state.g_browser_engine == .chrome and browserProfileToken(idx).len > 0)
+        now + BROWSER_PLACEHOLDER_NOT_OPEN_MS
+    else
+        now + 6000;
     browserTraceN("launchBrowserForShell idx=", idx);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch nonce=", nonce_slice);
     if (verboseLoggingEnabled()) debugLog2("[browser] launch profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
