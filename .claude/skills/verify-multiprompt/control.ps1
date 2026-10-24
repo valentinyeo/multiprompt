@@ -1670,9 +1670,9 @@ function Get-PaneUserDataDir([IntPtr]$Browser) {
     [void][VerifyNative]::GetWindowThreadProcessId($Browser, [ref]$browserPid)
     if ($browserPid -eq 0) { throw 'Docked pane has no browser process' }
     $line = (Get-CimInstance Win32_Process -Filter "ProcessId = $browserPid").CommandLine
-    $match = [regex]::Match($line, '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))')
+    $match = [regex]::Match($line, '(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir=(?:"([^"]+)"|(\S+)))')
     if (-not $match.Success) { throw 'Docked pane browser has no user data directory' }
-    $dir = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    $dir = @(1, 2, 3 | Where-Object { $match.Groups[$_].Success } | ForEach-Object { $match.Groups[$_].Value })[0]
     return @{ pid = $browserPid; hwnd = $Browser.ToInt64(); commandLine = $line; userDataDir = [IO.Path]::GetFullPath($dir).TrimEnd('\') }
 }
 
