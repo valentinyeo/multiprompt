@@ -3959,6 +3959,12 @@ try {
                     (Test-Path -LiteralPath $stableWarmupLog) -and
                         @(Get-Content -LiteralPath $stableWarmupLog | Select-Object -Skip $stableWarmupLogStart | Where-Object { $_ -ceq 'extension loaded' }).Count -gt 0
                 } 'branded Chrome own-profile warm-up loaded the extension' 60
+                Wait-Until {
+                    [VerifyNative]::BringToForeground($script:window)
+                    [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
+                } 'main window foreground after stable warm-up'
+                Press @(0x12, (0x32 + $ownWorkspace)) 'Return to the own workspace before the stable restart'
+                $null = Assert-WorkspaceBrowser 'own-stable-warmup-return' $ownRoot $ownWorkspace
             } finally {
                 $stableWarmupChrome = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $stableWarmup.Id) | Where-Object { $_.ExecutablePath -ieq $stableChrome } | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
                 if (-not $stableWarmup.HasExited) {
@@ -3973,12 +3979,6 @@ try {
                 $stableWarmupClock.Stop()
             }
             $result.checks += @{ name = 'browser-own-profile stable-warmup'; seconds = $stableWarmupClock.Elapsed.TotalSeconds }
-            Wait-Until {
-                [VerifyNative]::BringToForeground($script:window)
-                [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-            } 'main window foreground after stable warm-up'
-            Press @(0x12, (0x32 + $ownWorkspace)) 'Return to the own workspace before the stable restart'
-            Wait-Until { (Read-Session).active_workspace -eq $ownWorkspace } 'own workspace selection persisted after stable warm-up'
             Restart-SessionRestore 'stable-chrome-switch' $false
             $null = Assert-WorkspaceBrowser 'stable-existing-own' $ownRoot $ownWorkspace
             Press @(0x11, 0x4E) 'Ctrl+N: create a cold branded Chrome workspace'
