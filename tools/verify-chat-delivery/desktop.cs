@@ -118,5 +118,17 @@ public static class ChatDeliveryDesktop {
         input.Data.Mouse.Data = unchecked((uint)delta);
         if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Transcript wheel input failed");
     }
+    public static void PressOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript)) throw new InvalidOperationException("Transcript click ownership mismatch");
+        var point = new Point { X = x, Y = y };
+        if (!ClientToScreen(transcript, ref point) || WindowFromPoint(point) != transcript) throw new InvalidOperationException("Click target is not the owned transcript");
+        if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Transcript pointer move failed");
+        var inputs = new Input[2];
+        inputs[0].Data.Mouse.Flags = 2;
+        inputs[1].Data.Mouse.Flags = 4;
+        if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
+    }
     public static void Type(ushort key) { Chord(new[] { (int)key }); }
 }

@@ -253,6 +253,36 @@ function Assert-FullHistory([string]$Stage) {
     [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $transcript, -12000)
     Start-Sleep -Milliseconds 100
     Shot "full-history-$Stage-last"
+    $scrollUi = Wait-For 'scroll ui at the newest message' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d) box=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+        if ($m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0' -and [int]$m[$m.Count - 1].Groups[2].Value -gt 0) { $m[$m.Count - 1] }
+    }
+    $wheelStart = (Read-Shared "$settings/debug.log").Length
+    $actions.Add(@{case=$plan.name; input='one wheel notch up'; delta=120})
+    [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $transcript, 120)
+    $notch = Wait-For 'wheel notch distance logged' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($wheelStart), '\[chat\] wheel delta=120 moved=(\d+) scale_px=(\d+)')
+        if ($m.Count -gt 0) { $m[$m.Count - 1] }
+    }
+    $moved = [int]$notch.Groups[1].Value
+    $browserNotch = [int]$notch.Groups[2].Value
+    if ($moved -lt $browserNotch) { throw "IGSH-869 wheel notch moved $moved px, below the browser notch of $browserNotch px" }
+    $up = Wait-For 'scroll to newest button visible after wheel up' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($wheelStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=1 box=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+        if ($m.Count -gt 0) { $m[$m.Count - 1] }
+    }
+    Shot "full-history-$Stage-button"
+    $clickX = [int](([int]$up.Groups[3].Value + [int]$up.Groups[5].Value) / 2)
+    $clickY = [int](([int]$up.Groups[4].Value + [int]$up.Groups[6].Value) / 2)
+    $jumpStart = (Read-Shared "$settings/debug.log").Length
+    $actions.Add(@{case=$plan.name; input='click scroll to newest button'; x=$clickX; y=$clickY})
+    [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, $transcript, $clickX, $clickY)
+    [void](Wait-For 'one click on the button returns to the newest message' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($jumpStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=0')
+        $m.Count -gt 0
+    })
+    Shot "full-history-$Stage-jumped"
+    Save @{stage=$Stage; wheel_notch_px=$moved; browser_notch_px=$browserNotch; thumb_height=[int]$scrollUi.Groups[2].Value; button_click=@($clickX, $clickY)} "$caseDir/$Stage-scroll-ui.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"

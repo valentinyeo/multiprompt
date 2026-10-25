@@ -5,6 +5,7 @@
 - A long session opens with all 50 known user/assistant messages in order, not just its recent tail.
 - The same 50 messages remain available after a normal owned-app restart with the same profile and app-written cache.
 - All 24 tool blocks reach layout but remain invisible under the existing messages-only policy.
+- Chat View shows a thin scrollbar and, once scrolled up, a round down-arrow button; one wheel notch moves at least as far as a browser notch, and one click on the button returns to the newest message.
 
 ## How to get to it (user POV)
 
