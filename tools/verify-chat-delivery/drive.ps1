@@ -193,6 +193,11 @@ function Assert-FullHistory([string]$Stage) {
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+    Press @(0x24) 'Home: first transcript message'
+    Shot "full-history-$Stage-first"
+    Press @(0x23) 'End: last transcript message'
+    Shot "full-history-$Stage-last"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
     Save @{stage=$Stage; blocks=74; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
