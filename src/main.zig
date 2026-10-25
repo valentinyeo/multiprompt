@@ -1,3 +1,4 @@
+const list_input = @import("list_input.zig");
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const launch_cache = @import("launch_cache.zig");
@@ -2192,7 +2193,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 return 0;
             }
-            if (app_state.g_search_active and (wp & MK_LBUTTON) == 0) {
+            if (app_state.g_search_active and (wp & MK_LBUTTON) == 0 and list_input.palette.hover()) {
                 if (searchResultRowAtClientPoint(GET_X(lp), GET_Y(lp))) |hovered_row| {
                     if (hovered_row != app_state.g_search_sel and !paletteRowIsHeader(app_state.g_search_results[hovered_row])) {
                         app_state.g_search_sel = hovered_row;
@@ -3580,6 +3581,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
+            if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
                     if (app_state.g_url_picker_count > 0) app_state.g_url_picker_sel = if (app_state.g_url_picker_sel == 0) app_state.g_url_picker_count - 1 else app_state.g_url_picker_sel - 1;
@@ -3686,6 +3688,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
+            list_input.palette.keyboard();
             if (wp == 1 and foregroundIsOurs()) {
                 app_state.g_focus_authorized_hwnd = hwnd;
                 app_state.g_focus_authorized_until = GetTickCount64() + 1500;
@@ -4029,6 +4032,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CHAR => {
+            list_input.palette.keyboard();
             if (app_state.g_search_ws_sort_mode) return 0;
             if (app_state.g_search_rename_input_mode and app_state.g_search_rename_select_all) {
                 app_state.g_search_len = 0;
@@ -4054,6 +4058,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_BACKSPACE => {
+            list_input.palette.keyboard();
             app_state.g_search_snippet_delete_confirm = null;
             if (app_state.g_search_rename_input_mode) {
                 if (wp == 2 or app_state.g_search_rename_select_all) {
@@ -4195,6 +4200,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_MOVE => {
+            list_input.palette.keyboard();
             if (app_state.g_search_result_count > 0) {
                 switch (wp) {
                     0 => {
@@ -8458,4 +8464,167 @@ test "IGSH-820 pinned tab refuses close-all atomically" {
 
 test "IGSH-820 pinned tab refuses Inbox archive" {
     try expectPinnedActionRefused(.inbox_archive);
+}
+
+test "IGSH-836 palette keyboard survives stationary hover and real movement or click takes over" {
+    const w = @import("win32.zig");
+    const Cursor = struct {
+        extern "user32" fn SetCursorPos(i32, i32) callconv(WINAPI) i32;
+    };
+    var original_cursor: w.POINT = undefined;
+    try std.testing.expect(w.GetCursorPos(&original_cursor) != 0);
+    defer _ = Cursor.SetCursorPos(original_cursor.x, original_cursor.y);
+    const saved_input = list_input.palette;
+    defer list_input.palette = saved_input;
+    const saved = .{
+        .g_main_hwnd = app_state.g_main_hwnd,
+        .g_account_locked = app_state.g_account_locked,
+        .shell_count = app_state.shell_count,
+        .g_front_period = app_state.g_front_period,
+        .g_search_active = app_state.g_search_active,
+        .g_search_from_inbox = app_state.g_search_from_inbox,
+        .g_search_results = app_state.g_search_results,
+        .g_search_result_count = app_state.g_search_result_count,
+        .g_search_sel = app_state.g_search_sel,
+        .g_search_scroll = app_state.g_search_scroll,
+        .g_search_len = app_state.g_search_len,
+        .g_search_workspace_delete_confirm = app_state.g_search_workspace_delete_confirm,
+        .g_search_snippet_delete_confirm = app_state.g_search_snippet_delete_confirm,
+        .g_wssort_dragging = app_state.g_wssort_dragging,
+        .g_hide_sidebar = app_state.g_hide_sidebar,
+        .g_inbox_active = app_state.g_inbox_active,
+        .g_all_sessions_active = app_state.g_all_sessions_active,
+        .g_url_picker_active = app_state.g_url_picker_active,
+        .g_browser_url_mode = app_state.g_browser_url_mode,
+        .g_search_workspace_mode = app_state.g_search_workspace_mode,
+        .g_search_workspace_delete_mode = app_state.g_search_workspace_delete_mode,
+        .g_search_ws_sort_mode = app_state.g_search_ws_sort_mode,
+        .g_search_ws_move_mode = app_state.g_search_ws_move_mode,
+        .g_search_group_move_mode = app_state.g_search_group_move_mode,
+        .g_search_skills_mode = app_state.g_search_skills_mode,
+        .g_search_tabctx_mode = app_state.g_search_tabctx_mode,
+        .g_search_groupctx_mode = app_state.g_search_groupctx_mode,
+        .g_search_remind_input_mode = app_state.g_search_remind_input_mode,
+        .g_search_rename_input_mode = app_state.g_search_rename_input_mode,
+        .g_search_remind_preset_mode = app_state.g_search_remind_preset_mode,
+        .g_search_ws_snoozed_mode = app_state.g_search_ws_snoozed_mode,
+        .g_search_reminders_mode = app_state.g_search_reminders_mode,
+        .g_search_session_overview_mode = app_state.g_search_session_overview_mode,
+        .g_search_openall_host_mode = app_state.g_search_openall_host_mode,
+        .g_search_snippet_mode = app_state.g_search_snippet_mode,
+        .g_search_theme_mode = app_state.g_search_theme_mode,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.g_main_hwnd;
+        app_state.g_account_locked = saved.g_account_locked;
+        app_state.shell_count = saved.shell_count;
+        app_state.g_front_period = saved.g_front_period;
+        app_state.g_search_active = saved.g_search_active;
+        app_state.g_search_from_inbox = saved.g_search_from_inbox;
+        app_state.g_search_results = saved.g_search_results;
+        app_state.g_search_result_count = saved.g_search_result_count;
+        app_state.g_search_sel = saved.g_search_sel;
+        app_state.g_search_scroll = saved.g_search_scroll;
+        app_state.g_search_len = saved.g_search_len;
+        app_state.g_search_workspace_delete_confirm = saved.g_search_workspace_delete_confirm;
+        app_state.g_search_snippet_delete_confirm = saved.g_search_snippet_delete_confirm;
+        app_state.g_wssort_dragging = saved.g_wssort_dragging;
+        app_state.g_hide_sidebar = saved.g_hide_sidebar;
+        app_state.g_inbox_active = saved.g_inbox_active;
+        app_state.g_all_sessions_active = saved.g_all_sessions_active;
+        app_state.g_url_picker_active = saved.g_url_picker_active;
+        app_state.g_browser_url_mode = saved.g_browser_url_mode;
+        app_state.g_search_workspace_mode = saved.g_search_workspace_mode;
+        app_state.g_search_workspace_delete_mode = saved.g_search_workspace_delete_mode;
+        app_state.g_search_ws_sort_mode = saved.g_search_ws_sort_mode;
+        app_state.g_search_ws_move_mode = saved.g_search_ws_move_mode;
+        app_state.g_search_group_move_mode = saved.g_search_group_move_mode;
+        app_state.g_search_skills_mode = saved.g_search_skills_mode;
+        app_state.g_search_tabctx_mode = saved.g_search_tabctx_mode;
+        app_state.g_search_groupctx_mode = saved.g_search_groupctx_mode;
+        app_state.g_search_remind_input_mode = saved.g_search_remind_input_mode;
+        app_state.g_search_rename_input_mode = saved.g_search_rename_input_mode;
+        app_state.g_search_remind_preset_mode = saved.g_search_remind_preset_mode;
+        app_state.g_search_ws_snoozed_mode = saved.g_search_ws_snoozed_mode;
+        app_state.g_search_reminders_mode = saved.g_search_reminders_mode;
+        app_state.g_search_session_overview_mode = saved.g_search_session_overview_mode;
+        app_state.g_search_openall_host_mode = saved.g_search_openall_host_mode;
+        app_state.g_search_snippet_mode = saved.g_search_snippet_mode;
+        app_state.g_search_theme_mode = saved.g_search_theme_mode;
+    }
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1000, 700, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_account_locked = false;
+    app_state.shell_count = 0;
+    app_state.g_search_active = true;
+    app_state.g_search_from_inbox = false;
+    app_state.g_wssort_dragging = false;
+    app_state.g_hide_sidebar = true;
+    app_state.g_inbox_active = false;
+    app_state.g_all_sessions_active = false;
+    app_state.g_url_picker_active = false;
+    app_state.g_browser_url_mode = false;
+    app_state.g_search_workspace_mode = false;
+    app_state.g_search_workspace_delete_mode = false;
+    app_state.g_search_ws_sort_mode = false;
+    app_state.g_search_ws_move_mode = false;
+    app_state.g_search_group_move_mode = false;
+    app_state.g_search_skills_mode = false;
+    app_state.g_search_tabctx_mode = false;
+    app_state.g_search_groupctx_mode = false;
+    app_state.g_search_remind_input_mode = false;
+    app_state.g_search_rename_input_mode = false;
+    app_state.g_search_remind_preset_mode = false;
+    app_state.g_search_ws_snoozed_mode = false;
+    app_state.g_search_reminders_mode = false;
+    app_state.g_search_session_overview_mode = false;
+    app_state.g_search_openall_host_mode = false;
+    app_state.g_search_snippet_mode = false;
+    app_state.g_search_theme_mode = true;
+    app_state.g_search_len = 0;
+    app_state.g_search_sel = 0;
+    app_state.g_search_scroll = 0;
+    app_state.g_search_result_count = 3;
+    app_state.g_search_results[0] = SEARCH_THEME_MENU_OFFSET;
+    app_state.g_search_results[1] = SEARCH_THEME_BACK_OFFSET;
+    app_state.g_search_results[2] = SEARCH_THEME_BACK_OFFSET;
+    const x = @divFloor(1000 - @import("drawing.zig").searchOverlayW(), 2) + 20;
+    const y = @divFloor(700 - (searchInputH() + 3 * searchRowH()), 3) + searchInputH() + @divFloor(searchRowH(), 2);
+    const lp: LPARAM = @intCast((y << 16) | x);
+    var point = w.POINT{ .x = x, .y = y };
+    try std.testing.expect(w.ClientToScreen(hwnd, &point) != 0);
+    try std.testing.expect(Cursor.SetCursorPos(point.x, point.y) != 0);
+    list_input.palette.keyboard();
+    try std.testing.expectEqual(@as(?u32, 0), searchResultRowAtClientPoint(x, y));
+    _ = wndProc(hwnd, WM_KEYDOWN, 0x28, 0);
+    var message: w.MSG = undefined;
+    try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_MOVE, WM_APP_SEARCH_MOVE, 1) != 0);
+    _ = wndProc(hwnd, message.message, message.wParam, message.lParam);
+    for (0..3) |_| _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    for (1..3) |delta| {
+        try std.testing.expect(Cursor.SetCursorPos(point.x + @as(i32, @intCast(delta)), point.y) != 0);
+        _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp + @as(LPARAM, @intCast(delta)));
+        try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    }
+    try std.testing.expect(Cursor.SetCursorPos(point.x + 3, point.y) != 0);
+    _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_search_sel);
+    _ = wndProc(hwnd, WM_APP_SEARCH_MOVE, 1, 0);
+    _ = wndProc(hwnd, WM_APP_SEARCH_MOVE, 1, 0);
+    app_state.g_search_scroll = 1;
+    _ = InvalidateRect(hwnd, null, 0);
+    _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_search_sel);
+    _ = wndProc(hwnd, WM_LBUTTONDOWN, 0, lp + 3);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) != 0);
+    app_state.g_search_scroll = 0;
+    _ = wndProc(hwnd, WM_KEYDOWN, 0x0D, 0);
+    _ = wndProc(hwnd, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_search_sel);
+    try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) != 0);
+    _ = wndProc(hwnd, message.message, message.wParam, message.lParam);
+    try std.testing.expect(!app_state.g_search_theme_mode);
 }
