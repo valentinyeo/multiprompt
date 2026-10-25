@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.873", .items = &.{
+        .{ .text = "Chat View loads the whole conversation without making other windows wait or interrupting what you are reading.", .ticket = "IGSH-815" },
+        .{ .text = "Press Escape while dictating to discard the recording without changing your draft.", .ticket = "IGSH-846" },
+    } },
     .{ .ver = "0.28.872", .items = &.{
         .{ .text = "Reopened chats remember where you stopped reading and show one NEW line above unread messages, or say when the earlier position is unknown.", .ticket = "IGSH-814" },
     } },
