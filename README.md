@@ -6,6 +6,12 @@ multiprompt does not draw a terminal. Each tab hosts a real native console windo
 
 Website: https://multiprompt.dev
 
+## Shipping
+
+Owner pull requests merge themselves once every check on the head commit is
+green, and a successful Tests run on `master` stamps the next patch version
+and publishes the release with no release pull request.
+
 ## Why
 
 Windows Terminal costs about 30 to 50 MB per window. A raw console costs 2 to 3 MB. With ten agent shells open, the difference adds up.
