@@ -35,7 +35,7 @@ function harness() {
   const functions = [
     fn(read('drawing'), 'uiScaled'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
-    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
+    fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks').replace('    refreshBrowserControlMaskColor(layout);\n', ''), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));

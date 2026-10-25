@@ -50,7 +50,7 @@ function launchDecision(source, app_state, idx) {
 
 function pollDecision(source, app_state, foreground = true) {
   const calls = [];
-  runDecision(body(source, 'pollBrowserUrlTick'),
+  runDecision(body(source, 'pollBrowserUrlTick').replace('    if (browser_control_mask_color == null and activeBrowserEdgeMasksAllowed()) {\n        if (calcBrowserLayout()) |layout| refreshBrowserControlMaskColor(layout);\n    }\n', ''),
     'if (app_state.active_shell', '    if (app_state.g_browser_url_poll_pending)', {
       app_state, IsIconic: () => false, foregroundIsOurs: () => foreground,
       TIMER_BROWSER_URL_POLL: 13,
