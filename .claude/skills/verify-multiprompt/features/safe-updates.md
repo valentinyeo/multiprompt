@@ -5,6 +5,7 @@
 Signed-manifest verification, background staging, explicit and cold apply, helper retirement, bundle rollback and launch-argument preservation.
 
 - Plain update-card notes show newest changes across skipped versions.
+- Background checks run every five minutes, so a release reaches an open app quickly (IGSH-838).
 
 ## How to get to it (user POV)
 
