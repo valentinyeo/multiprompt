@@ -467,6 +467,21 @@ public static class VerifyNative {
         }
         throw new InvalidOperationException("No painted user message bubble in transcript");
     }
+    public static Dictionary<string, object> MenuLook(IntPtr menu) {
+        Rect rect;
+        if (!GetWindowRect(menu, out rect)) throw new InvalidOperationException("Menu rectangle unavailable");
+        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+        using (var pixels = new System.Drawing.Bitmap(width, height))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
+            Func<int, int, string> hex = (x, y) => (pixels.GetPixel(x, y).ToArgb() & 0xFFFFFF).ToString("X6");
+            return new Dictionary<string, object> {
+                { "width", width }, { "height", height },
+                { "fill", hex(width - 8, height - 6) }, { "corner", hex(0, 0) },
+                { "leftEdge", hex(0, height / 2) }, { "rightEdge", hex(width - 1, height / 2) }
+            };
+        }
+    }
     public static Point[] SelectTranscriptText(IntPtr hwnd, uint pid, IntPtr owner) {
         Point bubble = MessageBubblePoint(hwnd);
         Rect rect;
@@ -3453,6 +3468,12 @@ try {
                             if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
                             $menuCheck.items = 'Reply,Copy'
                             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                            Start-Sleep -Milliseconds 300
+                            $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+                            $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
+                            $menuCheck.look = $menuLook
+                            if ($menuLook.corner -eq $menuLook.fill) { throw ('IGSH-892: message menu corner pixel ' + $menuLook.corner + ' equals the fill, so the menu is square') }
+                            if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
                             Snapshot 'message-menu'
                             Press @(0x1B) 'Esc: dismiss message menu'
                             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'

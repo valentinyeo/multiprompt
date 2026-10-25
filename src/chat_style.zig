@@ -51,6 +51,14 @@ pub fn bubbleColors(bg: u32) BubbleColors {
     if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
     return .{ .user = shift(bg, -26), .agent = shift(bg, -11), .injected = 0xF7E6D6 };
 }
+pub const MenuLook = struct { fill: u32, hover: u32 };
+pub const MENU_ROW_HEIGHT = 32;
+pub const MENU_ROW_INSET = 4;
+pub const MENU_ROW_RADIUS = 10;
+pub fn menuLook(bg: u32) MenuLook {
+    const bubbles = bubbleColors(bg);
+    return .{ .fill = bubbles.agent, .hover = bubbles.user };
+}
 pub fn bubbleWidth(width: i32, natural: i32, pad: i32) i32 {
     return std.math.clamp(natural + 2 * pad, 1, bubbleMaxWidth(width));
 }
@@ -164,6 +172,15 @@ test "bubble colours derive from the theme background" {
     try std.testing.expect(light.agent > light.user);
     try std.testing.expectEqual(@as(u32, 0xFFFFFF), shift(0xF0F0F0, 99));
     try std.testing.expectEqual(@as(u32, 0), shift(0x050505, -99));
+}
+test "IGSH-892 right-click menus use the chat bubble fill with a lighter hover row" {
+    inline for (.{ 0x000000, 0x1E1E1E, 0xFFFFFF, 0xF0F0F0 }) |bg| {
+        const look = menuLook(bg);
+        try std.testing.expectEqual(bubbleColors(bg).agent, look.fill);
+        try std.testing.expectEqual(bubbleColors(bg).user, look.hover);
+        try std.testing.expect(look.fill != look.hover);
+        try std.testing.expect(look.fill != bg);
+    }
 }
 test "bubble geometry: 60 percent cap for both roles, pill corners, argb order" {
     try std.testing.expectEqual(@as(i32, 576), bubbleMaxWidth(960));
