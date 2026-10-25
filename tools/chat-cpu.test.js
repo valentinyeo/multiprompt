@@ -36,41 +36,56 @@ fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 var g_chat_fetch_mutex: HANDLE = null;
-var g_chat_priority_reservation: HANDLE = null;
 var g_chat_fetch_busy = false;
 var g_usage_launch_mutex: HANDLE = null;
 var selected: usize = 0;
-var foreground: usize = 0;
 var owner: ?usize = null;
-var priority_refs: usize = 0;
 var launch_refs: usize = 0;
 var spawned: usize = 0;
 var last_error: u32 = 0;
 var collector_running = false;
 const usage_telemetry_mode = struct { fn isRunning() bool { return collector_running; } };
-const Slot = struct { worker: HANDLE = null, priority: HANDLE = null, busy: bool = false, launch: HANDLE = null };
+const Slot = struct { worker: HANDLE = null, busy: bool = false, launch: HANDLE = null, requested: HANDLE = null, served: HANDLE = null, seen: HANDLE = null };
 var slots: [6]Slot = @splat(.{});
 fn select(i: usize) void {
-    slots[selected] = .{ .worker = g_chat_fetch_mutex, .priority = g_chat_priority_reservation, .busy = g_chat_fetch_busy, .launch = g_usage_launch_mutex };
+    slots[selected].worker = g_chat_fetch_mutex; slots[selected].busy = g_chat_fetch_busy; slots[selected].launch = g_usage_launch_mutex;
     selected = i;
     const slot = slots[i];
-    g_chat_fetch_mutex = slot.worker; g_chat_priority_reservation = slot.priority;
+    g_chat_fetch_mutex = slot.worker; g_main_hwnd = @ptrFromInt(i + 1);
     g_chat_fetch_busy = slot.busy; g_usage_launch_mutex = slot.launch;
 }
-fn foregroundIsOurs() bool { return selected == foreground; }
+var g_main_hwnd: HANDLE = @ptrFromInt(1);
+var now: u64 = 100;
+const WM_TIMER = 0x113;
+const TIMER_CHAT_REFRESH = 27;
+fn GetTickCount64() u64 { return now; }
+fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
+const TestWin = struct {
+    const LPARAM = isize;
+    const BOOL = i32;
+    const WINAPI: std.builtin.CallingConvention = .c;
+    fn property(hwnd: HANDLE, name: [*:0]const u16) *HANDLE {
+        const slot = &slots[@intFromPtr(hwnd) - 1];
+        const text = std.mem.span(name);
+        if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Pending"))) return &slot.requested;
+        if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Served"))) return &slot.served;
+        return &slot.seen;
+    }
+    fn GetPropW(hwnd: HANDLE, name: [*:0]const u16) HANDLE { return property(hwnd, name).*; }
+    fn SetPropW(hwnd: HANDLE, name: [*:0]const u16, value: HANDLE) i32 { property(hwnd, name).* = value; return 1; }
+    fn EnumWindows(callback: *const fn (HANDLE, LPARAM) callconv(WINAPI) BOOL, param: LPARAM) BOOL {
+        for (0..slots.len) |i| if (callback(@ptrFromInt(i + 1), param) == 0) return 0;
+        return 1;
+    }
+};
 fn CreateMutexW(_: ?*anyopaque, _: i32, name: [*:0]const u16) HANDLE {
     const text = std.mem.span(name);
-    if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Priority"))) { priority_refs += 1; return @ptrFromInt(2); }
     if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Launch"))) {
         last_error = if (launch_refs > 0) 183 else 0;
         launch_refs += 1; return @ptrFromInt(3);
     }
     std.debug.assert(std.mem.eql(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Local\\\\MultipromptChatTranscriptWorker")));
     return @ptrFromInt(1);
-}
-fn OpenMutexW(_: u32, _: i32, _: [*:0]const u16) HANDLE {
-    if (priority_refs == 0) return null;
-    priority_refs += 1; return @ptrFromInt(2);
 }
 fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
     std.debug.assert(timeout == 0);
@@ -79,7 +94,6 @@ fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
 }
 fn ReleaseMutex(_: HANDLE) i32 { std.debug.assert(owner.? == selected); owner = null; return 1; }
 fn CloseHandle(h: HANDLE) i32 {
-    if (h == @as(HANDLE, @ptrFromInt(2))) priority_refs -= 1;
     if (h == @as(HANDLE, @ptrFromInt(3))) launch_refs -= 1;
     return 1;
 }
@@ -92,20 +106,28 @@ fn ShellExecuteW(_: HANDLE, _: [*:0]const u16, _: [*:0]const u16, flag: [*:0]con
 }
 `;
 const scheduleChecks = `
-test "one worker across six windows, queued foreground precedes idle background, no recursive UI mutex acquisition" {
+test "one worker across six windows gives pending windows turns before reacquiring even in the same tick" {
     select(0);
     try std.testing.expect(chatFetchAcquire());
     for (1..6) |i| { select(i); try std.testing.expect(!chatFetchAcquire()); }
-    foreground = 2;
-    select(2); try std.testing.expect(!chatFetchAcquire());
-    try std.testing.expect(priority_refs > 0);
     select(0); chatFetchRelease();
-    select(3); try std.testing.expect(!chatFetchAcquire()); // foreground is queued
-    select(2); try std.testing.expect(chatFetchAcquire());
-    try std.testing.expect(!chatFetchAcquire()); // another tab in this process cannot recurse
-    chatFetchRelease();
-    foreground = 5;
-    select(2); try std.testing.expect(chatFetchAcquire()); // idle work once the reservation is released
+    try std.testing.expect(!chatFetchAcquire());
+    for (0..20) |_| {
+        for (1..6) |i| {
+            select(i);
+            try std.testing.expect(chatFetchAcquire());
+            try std.testing.expect(!chatFetchAcquire());
+            chatFetchRelease();
+            try std.testing.expect(!chatFetchAcquire());
+        }
+        select(0);
+        try std.testing.expect(chatFetchAcquire());
+        chatFetchRelease();
+        try std.testing.expect(!chatFetchAcquire());
+    }
+    now += 3002;
+    select(5);
+    try std.testing.expect(chatFetchAcquire());
     chatFetchRelease();
     try std.testing.expect(owner == null);
 }
@@ -117,15 +139,20 @@ test "simultaneous window startup launches just one child before its collector m
 }
 `;
 
+function schedulingFunctions() {
+  const turn = source.slice(source.indexOf('const ChatFetchTurn = struct {'), source.indexOf('fn chatFetchOldest('));
+  return (turn + ['chatFetchOldest', 'chatFetchAcquire', 'chatFetchRelease'].map(n => body(source, n)).join('\n')).replaceAll('@import("win32.zig")', 'TestWin');
+}
+
 test('production cross-window scheduling and telemetry launch reservation execute with nonblocking Win32 ownership', () => {
-  const code = scheduling + ['chatFetchAcquire', 'chatFetchRelease', 'ensureUsageTelemetryCollector'].map(n => body(source, n)).join('\n') + scheduleChecks;
+  const code = scheduling + schedulingFunctions() + body(source, 'ensureUsageTelemetryCollector') + scheduleChecks;
   const result = run(code);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 test('singleton startup oracle rejects the actual 706 check-then-spawn race', () => {
   const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
   assert.equal(old.status, 0);
-  const code = scheduling + ['chatFetchAcquire', 'chatFetchRelease'].map(n => body(source, n)).join('\n') + body(old.stdout, 'ensureUsageTelemetryCollector') + scheduleChecks;
+  const code = scheduling + schedulingFunctions() + body(old.stdout, 'ensureUsageTelemetryCollector') + scheduleChecks;
   const result = run(code);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 1, found 6/);

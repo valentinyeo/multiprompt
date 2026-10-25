@@ -258,6 +258,7 @@ fn jump() void {
     }
     if (model.needsOlder(hit.offset, entry.history.start) or hit.offset >= entry.history.offset) {
         entry.before = if (model.needsOlder(hit.offset, entry.history.start)) entry.history.start else 0;
+        entry.show_older = entry.before > 0;
         if (entry.failures == 0) entry.next = 0;
         app_state.g_chat_scrolled_up = true;
         session.chatFileRequest(session.chatFileIdentity());
@@ -302,6 +303,7 @@ fn jump() void {
     }
     if (hit.role == .tool and entry.history.start > 0) {
         entry.before = entry.history.start;
+        entry.show_older = true;
         entry.next = 0;
         session.chatFileRequest(session.chatFileIdentity());
         return;
