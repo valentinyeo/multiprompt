@@ -2274,6 +2274,8 @@ test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {
     try std.testing.expect(!@hasField(SavedTab, "locked"));
     try std.testing.expect(!@hasField(app_state.Shell, "chat_view_lock"));
     try std.testing.expect(!@hasField(SavedTab, "chat_view_lock"));
+}
+
 test "IGSH-814 saved read marker round trip restores each chat and legacy defaults" {
     const saved_count = app_state.shell_count;
     const saved_shell = app_state.shells[0];
