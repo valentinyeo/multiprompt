@@ -54,9 +54,10 @@ test('Windows behavioral update tests are required by CI', () => {
   assert.match(build, /runs-on: ubuntu-latest/);
   assert.match(build, /arch: \[arm64, x64\]/);
   assert.match(build, /if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all\n/);
-  const releaseBuild = read('.github/workflows/release.yml').match(/run: (zig build -Dtarget=.+)/)[1]
+  const releaseBuild = read('.github/workflows/release.yml').match(/zig build -Dtarget=.+/)[0]
     .replace('${{ matrix.target }}', 'x86_64-windows-gnu')
-    .replace("${{ github.event_name != 'pull_request' }}", 'true');
+    .replace("${{ github.event_name != 'pull_request' }}", 'true')
+    .replace(/ -Dversion="\$\{TAG#v\}"/, '');
   assert.ok(build.includes(`run: ${releaseBuild} --summary all\n`));
   assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
   assert.match(build, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-\$\{\{ matrix.arch \}\}-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);

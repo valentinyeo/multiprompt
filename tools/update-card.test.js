@@ -41,7 +41,7 @@ test('update card wiring: poll on timer and activate, card paint, hit test, thre
 });
 
 test('changelog entry for the current version is public bullets without private tracker links', () => {
-  const ver = /const APP_VERSION = "([^"]+)"/.exec(main)[1];
+  const ver = /const APP_VERSION = build_config\.app_version orelse "([^"]+)"/.exec(main)[1];
   const at = main.indexOf(`.ver = "${ver}"`);
   assert.ok(at > 0);
   const entry = main.slice(at, main.indexOf('\n    } },', at));

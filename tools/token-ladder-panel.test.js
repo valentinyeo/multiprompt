@@ -31,6 +31,6 @@ test("Token Ladder commands exist on all three surfaces", () => {
 test("Token Ladder rows are excluded from generic palette rows, marked current, and versioned", () => {
   assert.equal((source.match(/!is_ladder and result_idx >=/g) || []).length, 4);
   assert.match(source, /g_ai_pace\.ladder_override == 1/);
-  assert.match(source, /APP_VERSION = "0\.28\.\d+"/);
+  assert.match(source, /APP_VERSION = build_config\.app_version orelse "0\.28\.\d+"/);
   assert.match(source, /\.ver = "0\.28\.687"[\s\S]{0,700}\.items = &\.\{/);
 });

@@ -5,14 +5,15 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { releaseVersion } from './release-version.mjs';
+import { releaseVersion, nextReleaseTag } from './release-version.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
 const tag = 'v1.2.3';
 const changelog = '.{ .ver = "1.2.3" },\n.{ .ver = "1.2.2" },\n';
-const script = name => {
-  const block = workflow.match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          [^\\n]*\\n|\\n)+)`));
+const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+const script = (name, source = workflow) => {
+  const block = source.match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          [^\\n]*\\n|\\n)+)`));
   assert(block, `Missing workflow script: ${name}`);
   return block[1].split('\n').map(line => line.slice(10)).join('\n');
 };
@@ -29,7 +30,8 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  fs.copyFileSync(path.join(root, 'tools/release-version.mjs'), path.join(dir, 'tools/release-version.mjs'));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
   const sha = git('rev-parse', 'HEAD');
@@ -45,12 +47,13 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'run') { console.log(JSON.stringify([{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }])); process.exit(0); }
 if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
 if (args[1] !== 'create') process.exit(2);
 execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
-    run: (name, env = {}) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name)], { cwd: dir, encoding: 'utf8',
+    run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
         TAG: tag, BUILT_SHA: sha, REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
     calls: () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)),
@@ -284,7 +287,7 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
   assert.match(result.stdout, /ADMISSION VERIFIED/);
 });
 
-test('automatic release only stamps a tested master and reuses signed release jobs', () => {
+test('automatic release only tags a tested master and reuses signed release jobs', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(auto, /workflows: \[Tests\]/);
   assert.match(auto, /branches: \[master\]/);
@@ -293,9 +296,80 @@ test('automatic release only stamps a tested master and reuses signed release jo
   assert.match(auto, /\[ "\$sha" != "\$TESTED_SHA" \]/);
   assert.match(auto, /git tag --points-at HEAD/);
   assert.match(auto, /\[skip release\]/);
-  assert.match(auto, /stampTree\(files\)/);
-  assert.match(auto, /git push --atomic origin HEAD:refs\/heads\/master "refs\/tags\/\$RELEASE_TAG"/);
+  assert.match(auto, /node tools\/release-version\.mjs --next "\$\(git describe --tags --abbrev=0\)"/);
+  assert.match(auto, /git tag "\$RELEASE_TAG" HEAD/);
+  assert.deepEqual(auto.split('\n').filter(line => /\bgit push\b/.test(line)).map(line => line.trim()), ['git push origin "refs/tags/$RELEASE_TAG"']);
+  assert.doesNotMatch(auto, /git (?:commit|add|config)|stampTree|fs\.(?:writeFileSync|unlinkSync)|HEAD:refs\/heads\/master/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
   assert.doesNotMatch(auto, /zig build|gh pr create|gh release create/);
   assert.deepEqual([...auto.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+});
+
+test('next release increments the latest tag rather than the source version', () => {
+  assert.equal(nextReleaseTag('v0.28.869'), 'v0.28.870');
+  assert.equal(nextReleaseTag('v1.9.999'), 'v1.9.1000');
+  assert.equal(nextReleaseTag('v1.2.9007199254740993'), 'v1.2.9007199254740994');
+  for (const previous of ['', '1.2.3', 'v01.2.3', 'v1.2', 'v1.2.3-beta', 'v1.2.3\n', 'v1.2.3;bad']) assert.throws(() => nextReleaseTag(previous), /Invalid previous release tag/);
+  const cli = spawnSync(process.execPath, [path.join(root, 'tools/release-version.mjs'), '--next', 'v1.2.8'], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout.trim(), 'v1.2.9');
+});
+
+test('release resolves a build-input tag even when source history has an older version', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  f.git('tag', 'v1.2.9');
+  const result = f.run('Resolve release version and commit', { REQUESTED_TAG: 'v1.2.9' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), `tag=v1.2.9\nsha=${f.sha}\n`);
+  for (const requested of ['1.2.9', 'v01.2.9', 'v1.2.9;bad', 'v1.2.9\nother']) assert.notEqual(f.run('Resolve release version and commit', { REQUESTED_TAG: requested }).status, 0);
+});
+
+test('release builds inject the tag, stage matching notes and reject wrong embedded versions', { skip: process.platform === 'win32' }, t => {
+  const build = script('Build');
+  assert.match(build, /node tools\/version-stamp\.mjs build "\$TAG"/);
+  assert.match(build, /zig build -Dtarget=\$\{\{ matrix.target \}\} -Drelease=\$\{\{ github.event_name != 'pull_request' \}\} -Dversion="\$\{TAG#v\}"/);
+  assert.match(script('Publish plain versioned update notes'), /node tools\/version-stamp\.mjs build "\$TAG"\nnode tools\/release-notes\.mjs/);
+  const check = build.match(/<<'NODE'\n([\s\S]*?)\nNODE/)[1];
+  const f = fixture(t);
+  fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
+  for (const [bytes, accepted] of [['junk MPVERSION=1.2.9; tail', true], ['MPVERSION=1.2.3;', false], ['', false], ['MPVERSION=1.2.9;MPVERSION=1.2.3;', false]]) {
+    fs.writeFileSync(path.join(f.dir, 'zig-out/bin/multiprompt.exe'), bytes);
+    const result = spawnSync(process.execPath, ['--input-type=module', '-', 'v1.2.9'], { input: check, cwd: f.dir, encoding: 'utf8' });
+    assert.equal(result.status === 0, accepted, result.stderr);
+  }
+});
+
+test('auto-release pushes only a tag on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  f.git('tag', 'v1.2.8');
+  f.git('commit', '--allow-empty', '-m', 'tested improvement');
+  const tested = f.git('rev-parse', 'HEAD');
+  f.git('push', 'origin', 'master');
+  fs.writeFileSync(path.join(f.remote, 'hooks/update'), '#!/bin/sh\ncase "$1" in refs/heads/*) exit 1;; esac\n', { mode: 0o755 });
+  const env = { GITHUB_EVENT_NAME: 'workflow_run', TESTED_SHA: tested };
+  const admitted = f.run('Require a tested unreleased master head', env, auto);
+  assert.equal(admitted.status, 0, admitted.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), 'ready=true\n');
+  const result = f.run('Tag the tested master commit', env, auto);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.git('rev-parse', 'HEAD'), tested);
+  assert.equal(f.git('diff', 'HEAD', '--', 'src', 'changelog.d'), '');
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
+  assert.match(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), /tag=v1.2.9\n/);
+  fs.unlinkSync(path.join(f.dir, 'output'));
+  assert.equal(f.run('Require a tested unreleased master head', env, auto).status, 0);
+  assert.equal(fs.existsSync(path.join(f.dir, 'output')), false);
+});
+
+for (const reason of ['stale', 'skip', 'untested-dispatch', 'tested-dispatch']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  if (reason === 'skip') f.git('commit', '--allow-empty', '-m', 'maintenance [skip release]');
+  const result = f.run('Require a tested unreleased master head', {
+    GITHUB_EVENT_NAME: reason.endsWith('dispatch') ? 'workflow_dispatch' : 'workflow_run',
+    TESTED_SHA: reason === 'stale' ? '0'.repeat(40) : f.git('rev-parse', 'HEAD'),
+    TEST_CONCLUSION: reason === 'untested-dispatch' ? 'failure' : 'success',
+  }, auto);
+  assert.equal(result.status, reason === 'untested-dispatch' ? 1 : 0, result.stderr);
+  assert.equal(fs.existsSync(path.join(f.dir, 'output')), reason === 'tested-dispatch');
 });

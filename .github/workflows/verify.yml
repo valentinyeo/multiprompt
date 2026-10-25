@@ -224,7 +224,7 @@ jobs:
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $source = Get-Content src/main.zig -Raw
-            if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Version not found' }
+            if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
             $version = $Matches[1]
           }
           $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -326,7 +326,7 @@ jobs:
           New-Item -ItemType Directory -Force evidence/negative | Out-Null
           Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-source/zig-out/bin/
           $source = Get-Content negative-source/src/main.zig -Raw
-          if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Negative control version missing' }
+          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Negative control version missing' }
           $version = $Matches[1]
           $exe = "$pwd/negative-source/zig-out/bin/multiprompt.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()

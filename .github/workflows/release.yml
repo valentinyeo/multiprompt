@@ -40,12 +40,17 @@ jobs:
         env:
           REQUESTED_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
+          set -euo pipefail
           sha=$(git rev-parse HEAD)
           if [ -n "$REQUESTED_TAG" ] && git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
             sha=$(git rev-parse "refs/tags/$REQUESTED_TAG^{commit}")
           fi
           git show "$sha:src/changelog.zig" > "$RUNNER_TEMP/changelog.zig"
-          tag=$(node tools/release-version.mjs "$RUNNER_TEMP/changelog.zig" "$REQUESTED_TAG")
+          tag=$(node tools/release-version.mjs "$RUNNER_TEMP/changelog.zig")
+          if [ -n "$REQUESTED_TAG" ]; then
+            [[ "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            tag=$REQUESTED_TAG
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
@@ -68,8 +73,21 @@ jobs:
         run: |
           curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }}
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          node tools/version-stamp.mjs build "$TAG"
+          zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
+          node --input-type=module - "$TAG" <<'NODE'
+          import fs from 'node:fs';
+          const expected = process.argv[2].slice(1);
+          const versions = [...fs.readFileSync('zig-out/bin/multiprompt.exe').toString('latin1').matchAll(/MPVERSION=(\d+\.\d+\.\d+);/g)].map(match => match[1]);
+          if (versions.length === 0 || versions.some(version => version !== expected)) throw new Error('Executable embedded version does not match release tag');
+          NODE
       - name: Package
         run: |
           mkdir dist
@@ -97,10 +115,15 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
       - name: Publish plain versioned update notes
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
+        run: |
+          node tools/version-stamp.mjs build "$TAG"
+          node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { stampTree, fixHint } from './version-stamp.mjs';
+import { stampTree, buildChangelog, classifyTrees, fixHint } from './version-stamp.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
@@ -350,4 +350,56 @@ test('release fails when an existing PR is closed without merging', { skip: proc
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Release PR closed without merging: https:\/\/example\.invalid\/pr\/2/);
   assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
+});
+
+test('build options preserve the source default and feed both app channels and their marker', () => {
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const fallback = source.match(/^pub const APP_VERSION = build_config\.app_version orelse "(\d+\.\d+\.\d+)";$/m)?.[1];
+  assert.ok(fallback);
+  assert.equal(fallback, fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8').match(/\.ver = "([^"]+)"/)[1]);
+  assert.match(build, /const app_version = b\.option\(\[\]const u8, "version", "Override the embedded app version"\);/);
+  for (const [options, module] of [['stable_opts', 'exe'], ['dev_opts', 'dev_exe']]) {
+    assert.ok(build.includes(`${options}.addOption(?[]const u8, "app_version", app_version);`));
+    assert.ok(build.includes(`${module}.root_module.addOptions("build_config", ${options});`));
+  }
+  const bench = fs.readFileSync(path.join(root, 'tools/chat-table-bench/build.zig'), 'utf8');
+  assert.ok(bench.includes('options.addOption(?[]const u8, "app_version", null);'));
+  assert.match(source, /export const mp_version_marker[^\n]*"MPVERSION=" \+\+ APP_VERSION \+\+ ";"/);
+  const entries = fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8');
+  assert.match(entries, /var entries = SOURCE_CHANGELOG;\n    if \(@import\("build_config"\)\.app_version != null and entries.len > 0\) @field\(entries\[0\], "ver"\) = APP_VERSION;/);
+  assert.match(entries, /CHANGELOG.len == 0 or !std.mem.eql\(u8, CHANGELOG\[0\].ver, APP_VERSION\)/);
+});
+
+test('stamp and admission preserve the build fallback without allowing a version hand bump', () => {
+  const files = { ...base(), 'changelog.d/DEMO-2-new.md': 'A useful improvement.\n' };
+  const configured = { ...files, 'src/main.zig': main.replace('= "', '= build_config.app_version orelse "') };
+  assert.equal(classifyTrees(files, configured, ['src/main.zig']), 'CODE');
+  assert.equal(classifyTrees(configured, { ...configured, 'src/main.zig': configured['src/main.zig'].replace('735', '736') }, ['src/main.zig']), 'HAND_EDIT');
+  const stamp = stampTree(configured);
+  assert.equal(stamp.files['src/main.zig'], configured['src/main.zig'].replace('735', '736'));
+  assert.equal(classifyTrees(configured, stamp.files, ['src/main.zig', 'src/changelog.zig', ...stamp.removed]), 'STAMP');
+});
+
+test('build changelog uses the tag and fragments without changing source defaults or consuming fragments', t => {
+  const files = { ...base(), 'changelog.d/DEMO-2-new.md': 'A useful improvement.\n' };
+  const saved = structuredClone(files);
+  const generated = buildChangelog(files, 'v0.28.900');
+  assert.match(generated, /\.ver = "0\.28\.900"/);
+  assert.match(generated, /A useful improvement/);
+  assert.deepEqual(files, saved);
+  assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
+  assert.match(buildChangelog(base(), 'v0.28.900'), /Updates include the latest improvements/);
+  assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
+  for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
+  const r = repo(t, files);
+  const result = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'src/main.zig'), 'utf8'), main);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-2-new.md'), 'utf8'), files['changelog.d/DEMO-2-new.md']);
+  assert.equal(r.git('diff', '--name-only'), 'src/changelog.zig');
+  const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
 });

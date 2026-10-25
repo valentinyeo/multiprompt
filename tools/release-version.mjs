@@ -9,9 +9,15 @@ export function releaseVersion(changelog, requestedTag = '') {
   return tag;
 }
 
+export function nextReleaseTag(previousTag) {
+  const version = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(previousTag);
+  if (!version) throw new Error('Invalid previous release tag');
+  return `v${version[1]}.${version[2]}.${BigInt(version[3]) + 1n}`;
+}
+
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try {
-    console.log(releaseVersion(fs.readFileSync(process.argv[2] || 'src/changelog.zig', 'utf8'), process.argv[3]));
+    console.log(process.argv[2] === '--next' ? nextReleaseTag(process.argv[3]) : releaseVersion(fs.readFileSync(process.argv[2] || 'src/changelog.zig', 'utf8'), process.argv[3]));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
