@@ -587,7 +587,7 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
     defer _ = w.DeleteObject(brush);
     for ([_]u32{ 100, 150 }) |scale| {
         app_state.g_ui_scale = scale;
-        const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(28) };
+        const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(32) };
         for ([_]bool{ false, true }) |enabled| {
             _ = w.FillRect(dc, &area, brush);
             paintChatButton(dc, rc, enabled, .send);
@@ -597,12 +597,13 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
             var y = rc.top;
             while (y < rc.top + uiScaled(4)) : (y += 1) {
                 var x = rc.left;
-                while (x < rc.left + uiScaled(4)) : (x += 1) {
+                while (x < rc.left + @divTrunc(rc.bottom - rc.top, 2)) : (x += 1) {
                     const pixel = w.GetPixel(dc, x, y);
                     if (pixel != fill and pixel != background and pixel != 0xffffffff) blended += 1;
                 }
             }
             try std.testing.expect(blended > 0);
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.right, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.bottom));
         }

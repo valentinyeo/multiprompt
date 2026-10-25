@@ -113,7 +113,9 @@ ${fn(browser, 'browserSplitPermilleForActiveShell')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatDictationBarVisible() bool { return false; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
-fn chatWorkingIndicatorH() i32 { return uiScaled(18); }
+var test_permission_visible = false;
+fn chatPermissionVisible() bool { return test_permission_visible; }
+${fn(layout, 'chatWorkingIndicatorH')}
 fn chatNewMessagesHeight() i32 { return 0; }
 var test_stop_visible = false;
 var test_composer_text = false;
@@ -296,10 +298,11 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
             reserved = docked;
             for ([_]bool{false, true}) |full_width| {
                 shells[0].full_width = full_width;
-                for ([_]usize{0, 1, 2, 3, 4, 5}) |variant| {
+                for (0..12) |variant| {
                     const reply_len = variant % 2;
-                    test_stop_visible = variant >= 2;
-                    test_composer_text = variant >= 4;
+                    test_permission_visible = variant >= 6;
+                    test_stop_visible = variant % 6 >= 2 and !test_permission_visible;
+                    test_composer_text = variant % 6 >= 4;
                     g_chat_reply_len = reply_len;
                     g_chat_composer_extra_h = if (reply_len > 0) uiScaled(80) else 0;
                     const primary = activePaneRects(test_client).primary;
@@ -307,13 +310,20 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
                     const inner = RECT{ .left = primary.left + edge, .top = primary.top + edge, .right = primary.right - edge, .bottom = primary.bottom - edge };
                     const c = chatViewLayout();
                     const title = RECT{ .left = c.transcript.left, .top = threadTitleTop(), .right = threadTitleBandRightFor(test_client.right), .bottom = threadTitleTop() + threadTitleHeight() };
-                    for ([_]RECT{c.composer_card, c.transcript, title, c.composer, c.send_btn, c.attach_btn, c.stop_btn}) |rect| {
+                    for ([_]RECT{c.composer_card, c.transcript, title, c.composer, c.send_btn, c.attach_btn, c.mic_btn, c.stop_btn}) |rect| {
                         try std.testing.expect(rect.left >= inner.left);
                         try std.testing.expect(rect.top >= inner.top);
                         try std.testing.expect(rect.right <= inner.right);
                         try std.testing.expect(rect.bottom <= inner.bottom);
                         try std.testing.expect(rect.right >= rect.left and rect.bottom >= rect.top);
                     }
+                    try std.testing.expectEqual(uiScaled(14) + (if (test_permission_visible) uiScaled(36) else @as(i32, 0)), c.composer_card.top - c.transcript.bottom);
+                    try std.testing.expectEqual(uiScaled(32), c.mic_btn.right - c.mic_btn.left);
+                    try std.testing.expectEqual(uiScaled(32), c.mic_btn.bottom - c.mic_btn.top);
+                    try std.testing.expect(!intersects(c.mic_btn, c.composer));
+                    try std.testing.expect(!intersects(c.mic_btn, c.attach_btn));
+                    try std.testing.expect(!intersects(c.mic_btn, c.send_btn) or !c.send_shown);
+                    try std.testing.expect(!intersects(c.mic_btn, c.stop_btn) or !c.stop_shown);
                     try std.testing.expect(!intersects(c.composer, c.stop_btn) or !c.stop_shown);
                     try std.testing.expect(!intersects(c.composer, c.send_btn) or !c.send_shown);
                 }
@@ -324,6 +334,7 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
     g_chat_composer_extra_h = 0;
     g_chat_active = false;
     test_stop_visible = false;
+    test_permission_visible = false;
     test_composer_text = false;
     reserved = false;
     shells[0].full_width = false;
@@ -424,6 +435,8 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     for (const [name, mutate] of [
+      ['removed working strip', text => text.replace('return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return if (chatPermissionVisible()) uiScaled(36) else uiScaled(18);')],
+      ['microphone overlap', text => text.replace('.right = slots.left - uiScaled(12),', '.right = mic_btn.right,')],
       ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],
       ['corner displacement', text => text.replace('moveBrowserEdgeMask(side, rc.left, rc.top,', 'moveBrowserEdgeMask(side, rc.left + 1, rc.top,')],
       ['old splitter origin', text => text.replace('x - pane.left - @divTrunc(style.paneGap(), 2)', 'x - SIDEBAR_W()')],

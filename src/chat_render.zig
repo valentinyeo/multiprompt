@@ -2996,7 +2996,7 @@ fn chatTranscriptCopyAt(x: i32, y: i32) ?usize {
     return if (pointInRect(button, x, y)) index else null;
 }
 
-test "Chat View code paints token colors and copy hit testing respects scroll and avatar headers" {
+test "Chat View code paints token colors and copy hit testing respects scroll without sender headers" {
     const screen = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, screen);
     const dc = CreateCompatibleDC(screen) orelse return error.TestUnexpectedResult;
@@ -3032,11 +3032,15 @@ test "Chat View code paints token colors and copy hit testing respects scroll an
     app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = uiScaled(100), .right = uiScaled(320), .bottom = uiScaled(300) };
     app_state.g_chat_scroll_y = uiScaled(50);
     var panel = app_state.g_chat_layout_rects[0];
-    panel.top = panel.top - app_state.g_chat_scroll_y + uiScaled(CHAT_AGENT_HEADER_H);
+    panel.top -= app_state.g_chat_scroll_y;
     const button = chat_code.copyButton(panel, uiScaled(CHAT_CODE_PAD), uiScaled(64), uiScaled(22));
     try std.testing.expectEqual(@as(?usize, 0), chatTranscriptCopyAt(button.left + 1, button.top + 1));
     try std.testing.expect(chatTranscriptCopyAt(1, uiScaled(55)) == null);
-    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.bottom + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left - 1, button.top + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.right, button.top + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.top - 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.bottom) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.top + uiScaled(CHAT_AGENT_HEADER_H) + 1) == null);
 }
 
 pub fn chatCopyLatestCode() void {
