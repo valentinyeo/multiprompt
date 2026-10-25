@@ -1,3 +1,4 @@
+const list_input = @import("list_input.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const draft_model = @import("chat_drafts.zig");
@@ -828,6 +829,7 @@ fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
         },
         0x0021 => return 3,
         WM_MOUSEMOVE => {
+            if (!list_input.skills.hover()) return 0;
             var client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client);
             if (GET_Y(lp) < 0 or GET_Y(lp) >= client.bottom - uiScaled(30)) return 0;
@@ -881,6 +883,7 @@ fn chatAcRememberSelection() void {
 }
 
 fn chatAcMove(amount: i32) void {
+    list_input.skills.keyboard();
     if (app_state.g_chat_ac.count == 0) return;
     const total: i32 = @intCast(app_state.g_chat_ac.count);
     app_state.g_chat_ac.sel = @intCast(@mod(@as(i32, @intCast(app_state.g_chat_ac.sel)) + amount, total));
@@ -1063,6 +1066,7 @@ fn chatAcOnComposerChanged() void {
         app_state.g_chat_ac.query_len = 0;
         app_state.g_chat_ac.selected_len = 0;
     }
+    if (!app_state.g_chat_ac.open) list_input.skills.keyboard();
     app_state.g_chat_ac.open = true;
     app_state.g_chat_ac.slot = index;
     app_state.g_chat_ac.token = token;
@@ -1267,6 +1271,7 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
 }
 
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
+    if (app_state.g_chat_ac.open and (msg == WM_KEYDOWN or msg == 0x0102)) list_input.skills.keyboard();
     const down = @as(i16, @bitCast(@as(u16, 0x8000)));
     if (chatDictationKey(msg, wp, lp, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0)) return 0;
     if (msg == WM_KEYDOWN and wp == 0x41 and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
@@ -2266,4 +2271,105 @@ test "IGSH-812 text arrives only when dictation finishes" {
 
 test "IGSH-812 typing is never blocked while listening" {
     try testChatDictation(.typing);
+}
+
+test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
+    const w = @import("win32.zig");
+    const Cursor = struct {
+        extern "user32" fn SetCursorPos(i32, i32) callconv(WINAPI) i32;
+    };
+    var original_cursor: w.POINT = undefined;
+    try std.testing.expect(w.GetCursorPos(&original_cursor) != 0);
+    defer _ = Cursor.SetCursorPos(original_cursor.x, original_cursor.y);
+    const saved_input = list_input.skills;
+    defer list_input.skills = saved_input;
+    const saved = .{
+        .g_main_hwnd = app_state.g_main_hwnd,
+        .g_chat_composer_hwnd = app_state.g_chat_composer_hwnd,
+        .g_chat_composer_orig_proc = app_state.g_chat_composer_orig_proc,
+        .g_chat_ac_hwnd = app_state.g_chat_ac_hwnd,
+        .g_chat_ac = app_state.g_chat_ac,
+        .g_chat_active = app_state.g_chat_active,
+        .g_restoring = app_state.g_restoring,
+        .shell_count = app_state.shell_count,
+        .g_chat_ac_mru = app_state.g_chat_ac_mru,
+        .g_chat_ac_mru_count = app_state.g_chat_ac_mru_count,
+        .g_chat_skill_name_len = app_state.g_chat_skill_name_len,
+        .g_chat_skill_body_len = app_state.g_chat_skill_body_len,
+        .g_chat_ac_dialog_len = app_state.g_chat_ac_dialog_len,
+        .g_chat_ac_tab_accepted = app_state.g_chat_ac_tab_accepted,
+        .entries = app_state.g_chat_ac_slots[0].entries[0..3].*,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.g_main_hwnd;
+        app_state.g_chat_composer_hwnd = saved.g_chat_composer_hwnd;
+        app_state.g_chat_composer_orig_proc = saved.g_chat_composer_orig_proc;
+        app_state.g_chat_ac_hwnd = saved.g_chat_ac_hwnd;
+        app_state.g_chat_ac = saved.g_chat_ac;
+        app_state.g_chat_active = saved.g_chat_active;
+        app_state.g_restoring = saved.g_restoring;
+        app_state.shell_count = saved.shell_count;
+        app_state.g_chat_ac_mru = saved.g_chat_ac_mru;
+        app_state.g_chat_ac_mru_count = saved.g_chat_ac_mru_count;
+        app_state.g_chat_skill_name_len = saved.g_chat_skill_name_len;
+        app_state.g_chat_skill_body_len = saved.g_chat_skill_body_len;
+        app_state.g_chat_ac_dialog_len = saved.g_chat_ac_dialog_len;
+        app_state.g_chat_ac_tab_accepted = saved.g_chat_ac_tab_accepted;
+        app_state.g_chat_ac_slots[0].entries[0..3].* = saved.entries;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 800, 600, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("/"), WS_CHILD | ES_MULTILINE, 0, 300, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    const popup = CreateWindowExW(0, L("STATIC"), L(""), WS_CHILD, 0, 0, 600, 3 * uiScaled(32) + uiScaled(30), parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(popup);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    app_state.g_chat_ac_hwnd = popup;
+    app_state.g_chat_active = false;
+    app_state.g_restoring = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{ .open = true, .count = 3, .token = .{ .mode = .slash, .start = 0, .end = 1 } };
+    for ([_][]const u8{ "zero", "one", "two" }, 0..) |name, i| {
+        app_state.g_chat_ac.idx[i] = @intCast(i);
+        app_state.g_chat_ac_slots[0].entries[i] = .{ .kind = 'S', .name = name, .hint = "", .desc = "" };
+    }
+    const x: i32 = 20;
+    const y = @divFloor(uiScaled(32), 2);
+    const lp: LPARAM = @intCast((y << 16) | x);
+    var point = w.POINT{ .x = x, .y = y };
+    try std.testing.expect(w.ClientToScreen(popup, &point) != 0);
+    try std.testing.expect(Cursor.SetCursorPos(point.x, point.y) != 0);
+    list_input.skills.keyboard();
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    for (0..3) |_| _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_ac.sel);
+    for (1..3) |delta| {
+        try std.testing.expect(Cursor.SetCursorPos(point.x + @as(i32, @intCast(delta)), point.y) != 0);
+        _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + @as(LPARAM, @intCast(delta)));
+        try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_ac.sel);
+    }
+    try std.testing.expect(Cursor.SetCursorPos(point.x + 3, point.y) != 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_ac.sel);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    app_state.g_chat_ac.top = 1;
+    _ = InvalidateRect(popup, null, 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    try std.testing.expectEqual(@as(usize, 2), app_state.g_chat_ac.sel);
+    _ = chatAcWndProc(popup, WM_LBUTTONDOWN, 0, lp + 3);
+    var text: [32]u16 = undefined;
+    var n = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
+    _ = SetWindowTextW(edit, L("/"));
+    app_state.g_chat_ac.open = true;
+    app_state.g_chat_ac.top = 0;
+    app_state.g_chat_ac.sel = 0;
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x28, 0);
+    _ = chatAcWndProc(popup, WM_MOUSEMOVE, 0, lp + 3);
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 0);
+    n = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
 }

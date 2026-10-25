@@ -8,6 +8,7 @@ IGSH-760: typing must not flash blank text or a different background between key
 - Default-on DirectWrite glyph painting at `EM_POSFROMCHAR` client positions, including wrapped lines, vertical scrolling, tabs and selection text in the system highlight foreground.
 - `IGSH_731=0` restores the native EDIT text and its previous foreground. The switch is independent of `IGSH_610`.
 - Native desktop tests paint the production composer into a memory DC at every combination of UI scale 100/125/150 and DPI 96/120/144, with system font smoothing disabled. For the same sentence and font, DirectWrite must have at least 25% fewer hard edges than the native EDIT rollback.
+- The `/` skill list keeps the keyboard-selected row while the pointer rests; only a real pointer move of three pixels or more hands the selection over, and a click selects the row under the pointer (IGSH-836).
 - Live `IGSH-760 typing frames steady` captures the actual visible composer during keyboard typing, not a forced repaint. It requires at least 30 frames spanning the typing, with no transient ink loss or row/border background change.
 - Live `IGSH-731 composer edges` requires at least 100 measured edges, partial-coverage pixels and `hardEdgeFraction < 0.18`, with system font smoothing OFF. Missing text, wrong rectangles and enabled smoothing fail.
 
