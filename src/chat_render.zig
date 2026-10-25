@@ -4263,8 +4263,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_MOUSEMOVE => {
-            if (chatScrollUiMouseMove(hwnd, GET_Y(lp))) return 0;
             if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
+            if (chatScrollUiMouseMove(hwnd, GET_Y(lp))) return 0;
             var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
             _ = TrackMouseEvent(&tracking);
             if (app_state.g_chat_sel_dragging) {
@@ -4346,13 +4346,13 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONUP => {
-            if (chatScrollUiMouseUp(hwnd)) return 0;
             if (chat_table_drag != null) {
                 _ = chatTableMouseMove(hwnd, GET_X(lp));
                 chat_table_drag = null;
                 _ = ReleaseCapture();
                 return 0;
             }
+            if (chatScrollUiMouseUp(hwnd)) return 0;
             if (app_state.g_chat_sel_dragging) {
                 app_state.g_chat_sel_dragging = false;
                 _ = ReleaseCapture();
