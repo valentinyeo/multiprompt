@@ -4,6 +4,7 @@ run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' ||
 on:
   push:
     branches: [master]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       feature:
