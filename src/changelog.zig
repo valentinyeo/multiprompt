@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.872", .items = &.{
+        .{ .text = "Reopened chats remember where you stopped reading and show one NEW line above unread messages, or say when the earlier position is unknown.", .ticket = "IGSH-814" },
+    } },
     .{ .ver = "0.28.871", .items = &.{
         .{ .text = "Switching focus with Alt+Q no longer draws an outline around chat, browser or shell panes.", .ticket = "IGSH-807" },
         .{ .text = "Focus-switching checks now handle owned windows reliably and measure the current pane layout.", .ticket = "IGSH-807" },
