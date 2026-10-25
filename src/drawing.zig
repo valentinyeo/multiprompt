@@ -998,7 +998,7 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
     const text = if (shell.ssh_reconnect.phase == .ended)
         "Session ended"
     else if (shell.ssh_reconnect.noticeReason(now, shell.disconnected)) |reason|
-        std.fmt.bufPrint(&buf, "{s} disconnected: {s} - Ctrl+Shift+R to reconnect", .{ if (shell.locked) "Locked session" else if (shell.pinned_top) "Pinned session" else "Session", reason }) catch "Reconnecting..."
+        std.fmt.bufPrint(&buf, "{s} disconnected: {s} - Ctrl+Shift+R to reconnect", .{ if (shell.pinned_top) "Pinned session" else "Session", reason }) catch "Reconnecting..."
     else if (shell.ssh_reconnect.phase == .reconnecting)
         "Reconnecting..."
     else

@@ -154,12 +154,6 @@ const SEARCH_VOICE_MODE_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_
 const SEARCH_ETA_NUMBERS_OFFSET = @import("app_state.zig").SEARCH_ETA_NUMBERS_OFFSET;
 const SEARCH_ETA_PROGRESS_OFFSET = @import("app_state.zig").SEARCH_ETA_PROGRESS_OFFSET;
 const SEARCH_ETA_ACCURACY_OFFSET = @import("app_state.zig").SEARCH_ETA_ACCURACY_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
-const SEARCH_TABCTX_VIEW_CHAT = @import("app_state.zig").SEARCH_TABCTX_VIEW_CHAT;
-const SEARCH_TABCTX_VIEW_SHELL = @import("app_state.zig").SEARCH_TABCTX_VIEW_SHELL;
-const SEARCH_TABCTX_VIEW_CLEAR = @import("app_state.zig").SEARCH_TABCTX_VIEW_CLEAR;
 const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
 const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
 const SEARCH_VOICE_ALWAYS_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_ON_OFFSET;
@@ -202,7 +196,6 @@ const SEARCH_BROWSER_SHOTURL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_SH
 const SEARCH_PIN_TOP_OFFSET = @import("app_state.zig").SEARCH_PIN_TOP_OFFSET;
 const SEARCH_UNARCHIVE_HIDDEN_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_HIDDEN_OFFSET;
 const SEARCH_UNARCHIVE_UNATTACHED_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_UNATTACHED_OFFSET;
-const SEARCH_LOCK_SESSION_OFFSET = @import("app_state.zig").SEARCH_LOCK_SESSION_OFFSET;
 const SEARCH_BROWSER_ENGINE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_ENGINE_OFFSET;
 const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
 const SEARCH_USAGE_LOGIN_INNE_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_INNE_OFFSET;
@@ -229,7 +222,6 @@ const SEARCH_TABCTX_ARCHIVE = @import("app_state.zig").SEARCH_TABCTX_ARCHIVE;
 const SEARCH_TABCTX_BROWSER = @import("app_state.zig").SEARCH_TABCTX_BROWSER;
 const SEARCH_TABCTX_END_TMUX = @import("app_state.zig").SEARCH_TABCTX_END_TMUX;
 const SEARCH_TABCTX_PIN_TOP = @import("app_state.zig").SEARCH_TABCTX_PIN_TOP;
-const SEARCH_TABCTX_LOCK = @import("app_state.zig").SEARCH_TABCTX_LOCK;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
@@ -297,6 +289,7 @@ const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
 const browserPaneActive = @import("browser_pane.zig").browserPaneActive;
 const activeShellHasShotUrlPane = @import("browser_pane.zig").activeShellHasShotUrlPane;
 const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
+const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
 const chatOutboxCountForShell = @import("chat_send.zig").chatOutboxCountForShell;
 const chatEchoCountNotSentForShell = @import("chat_send.zig").chatEchoCountNotSentForShell;
 const chatEchoCountDeliveredForShell = @import("chat_send.zig").chatEchoCountDeliveredForShell;
@@ -544,9 +537,6 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
-    if (target == SEARCH_TABCTX_VIEW_CHAT) return "always chat view for this session";
-    if (target == SEARCH_TABCTX_VIEW_SHELL) return "always shell view for this session";
-    if (target == SEARCH_TABCTX_VIEW_CLEAR) return "clear always view for this session";
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
     if (target == SEARCH_TABCTX_START_SESSION) return "start new session";
@@ -563,7 +553,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
             SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "keep alive: on" else "keep alive: off",
             SEARCH_TABCTX_PIN_TOP => if (tab != null and tab.?.pinned_top) "unpin from top" else "pin to top",
-            SEARCH_TABCTX_LOCK => if (tab != null and tab.?.locked) "unlock session" else "lock session",
             SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "keep tab awake: on" else "keep tab awake: off",
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
@@ -707,9 +696,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_ETA_NUMBERS_OFFSET => "eta countdown numbers",
         SEARCH_ETA_PROGRESS_OFFSET => "eta progress line",
         SEARCH_ETA_ACCURACY_OFFSET => "estimate accuracy",
-        SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET => "always chat view for this session",
-        SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET => "always shell view for this session",
-        SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET => "clear always view for this session",
         SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET => "chat view on everywhere",
         SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET => "chat view off everywhere",
         SEARCH_VOICE_STOP_OFFSET => "voice stop speaking mute",
@@ -768,6 +754,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
+        SEARCH_CHAT_DICTATION_OFFSET => "chat view dictation microphone speech start stop ctrl d",
         SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
         SEARCH_CHAT_COPY_SELECTION_OFFSET => "chat view copy selection ctrl c",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
@@ -810,7 +797,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_ARCHIVED_VIEW_OFFSET => "archived sessions",
         SEARCH_BROWSER_SHOTURL_OFFSET => "browser screenshot tab link in shell",
         SEARCH_PIN_TOP_OFFSET => "pin tab to top",
-        SEARCH_LOCK_SESSION_OFFSET => "lock session",
         SEARCH_UNARCHIVE_HIDDEN_OFFSET => "restore workspace waiting sessions",
         SEARCH_UNARCHIVE_UNATTACHED_OFFSET => "restore disconnected workspace sessions",
         SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account",
@@ -1058,12 +1044,12 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
-        SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_LOCK_SESSION_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
+        SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
         SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET, SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET, SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2130,14 +2116,6 @@ pub fn updateSearchResults() void {
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const tc_locked = if (tc_idx) |ti| app_state.shells[ti].locked else false;
-            const lock_str: []const u8 = if (tc_locked) "Unlock Session" else "Lock Session";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ lock_str, "lock", "locked", "unlock", "protect", "prevent close" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_LOCK;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
             const tc_kaw = if (tc_idx) |ti| app_state.shells[ti].keep_awake else false;
             const kaw_str: []const u8 = if (tc_kaw) "Keep Tab Awake: On" else "Keep Tab Awake: Off";
             if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -2208,24 +2186,6 @@ pub fn updateSearchResults() void {
             (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always Chat View for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_CHAT;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always shell view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_SHELL;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear Always view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_VIEW_CLEAR;
             app_state.g_search_result_count += 1;
         }
         if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -2902,6 +2862,12 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DICTATION_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Attach File", "attach file", "pdf", "zip", "log", "document", "image", "upload image", "add image", "picture", "photo", "screenshot", "ctrl v", "drop", "drag" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_ATTACH_OFFSET;
@@ -3383,27 +3349,6 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always Chat View for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Always shell view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear Always view for this session", app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
@@ -3781,23 +3726,6 @@ pub fn updateSearchResults() void {
         }
         if (show_pin_top and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PIN_TOP_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
-    if (app_state.active_shell < app_state.shell_count) {
-        var show_lock = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const lock_labels = [_][]const u8{ "lock session", "unlock session", "protect session", "locked", "prevent close" };
-            for (lock_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_lock = true;
-                    break;
-                }
-            }
-        }
-        if (show_lock and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_LOCK_SESSION_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }

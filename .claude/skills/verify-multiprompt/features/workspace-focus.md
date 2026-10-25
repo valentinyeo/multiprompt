@@ -11,7 +11,7 @@ Return to a workspace and resume typing in its Chat View typing box or shell wit
 
 ## How to get to it (user POV)
 
-Use Ctrl+K `workspace switcher` to show workspace pills, Ctrl+K `clear always view for this session` to unlock the test session, Alt+C for Chat View or the shell, Ctrl+N to create workspace 2, Alt+2 for workspace 1, and Alt+Right / Alt+Left or the pills to switch away and back.
+Use Ctrl+K `workspace switcher` to show workspace pills, Ctrl+K `chat view off everywhere` to establish the shell baseline, Alt+C for Chat View or the shell, Ctrl+N to create workspace 2, Alt+2 for workspace 1, and Alt+Right / Alt+Left or the pills to switch away and back.
 
 ## Driving it with control.ps1
 
@@ -24,7 +24,7 @@ Every input requires Doctor's executable/window ownership check and the owned ap
 | 1 | Launch isolated single-window CMD | Check executable hash/version before launch; owned main HWND and initialized shell publication within 60 s; foreground frame within 20 s; Doctor passes. |
 | 2 | Read baseline | Initial saved CMD within 60 s; first workspace selected; saved tab identity, Chat View off and owned console foreground within 20 s. |
 | 3 | Show switcher if hidden | Ctrl+K: new debug-log suffix reports initialized empty palette and native GUI-thread focus is exactly the owned frame within 20 s. Type `workspace switcher`: processed query length and selected target 6213 within 20 s before Enter. Saved explicit `hide_pills:false`, visible expanded sidebar within 20 s. Capture `pills-ready.png`. |
-| 4 | Unlock per-session Chat View | Ctrl+K and query readiness as above, target 6466 for `clear always view for this session`; Enter; saved state has neither `chat_view_mode` nor a test-session `chat_view_lock`, and the owned CMD console is restored within 20 s. |
+| 4 | Reset to shell view | Ctrl+K and query readiness as above, target 6347 for `chat view off everywhere`; Enter; saved state has neither `chat_view_mode` nor a test-session `chat_view_lock`, the test session has absent/false `cv`, and the owned CMD console is restored within 20 s. |
 | 5 | Enable Chat View if off | Saved session `cv:true` within 20 s; visible owned native Edit child within 30 s. |
 | 6 | Foreground initial Chat View frame | Setup only: restore/foreground frame; exact frame foreground and original owned Edit HWND focused within 20 s each. Later Press calls still foreground the frame before each chord; readiness readers and Type-Text do not set focus. |
 | 7 | Type `before-` | Original Edit focused from step 6; exact original Edit text within 20 s, with a 1 s timeout per WM_GETTEXT; capture `action.png`. |
@@ -53,7 +53,7 @@ The source contracts check switcher setup, pill visibility/layout guards, readin
 
 - Workspace pills are hidden by default. Never infer their presence from the workspace count or title. A click at the absent pill's coordinates can collapse RECENTS instead of switching workspaces.
 - The first stored workspace follows Starred: its pill center is client `(49,17)`, and the second is `(78,17)` at the guarded default layout. Snoozed pills invalidate that index-to-coordinate mapping.
-- Clear Always view removes the session lock without forcing a view; the later Alt+C can therefore return to the shell. Per-session Chat View omits `chat_view_mode` from saved state; an off session can omit `cv`. A saved active index alone does not prove the console or typing box is input-ready.
+- Off Everywhere switches every session to shell once, without locking subsequent Alt+C toggles. Per-session Chat View omits `chat_view_mode` from saved state; an off session can omit `cv`. A saved active index alone does not prove the console or typing box is input-ready.
 - The custom-drawn palette has no native Edit or custom UIA focus provider. Its readiness requires both foreground HWND and GetGUIThreadInfo hwndFocus to equal the owned frame, not the UIA proxy's NativeWindowHandle. Snapshots retain both native and UIA observations in `*.focus.json`; the check never moves focus.
 - Console staging uses its native Document TextPattern, not the unsupported Edit ValuePattern. Chat View continues to use the original Edit HWND's bounded WM_GETTEXT.
 - This is local CMD/Chat View coverage, not an account, agent, browser, SSH, sync or relaunch journey. Readiness waits only observe restoration; Press still foregrounds the frame before chords. Require the Windows result, not a stronger no-setter claim.

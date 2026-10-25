@@ -32,9 +32,8 @@ const chat_style = @import("chat_style.zig");
 const app_state = @This();
 const HANDLE = ?usize;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
-const ViewLock = @import("chat_view.zig").Lock;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, chat_view_lock: ViewLock = .none }{ .{}, .{} };
+var shells = [_]struct { pid: u32 = 42, full_width: bool = false, full_width_pending_console_resize: bool = false, pinned_top: bool = false }{ .{}, .{} };
 var active_shell: u32 = 0;
 var shell_count: u32 = 2;
 var g_chat_active = false;
@@ -78,14 +77,14 @@ test "production reading column and full width stay inside the shared pane" {
     }
 }
 test "ISSUE-440 production toggle changes only width and saves twice" {
-    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
+    for ([_]bool{ false, true }) |pinned| {
         for ([_]bool{ false, true }) |remembered| {
-            g_chat_active = chatViewShouldShowForTab(remembered, lock);
+            g_chat_active = chatViewShouldShowForTab(remembered);
             const chat = g_chat_active;
             shells[0].full_width = false;
             shells[0].full_width_pending_console_resize = false;
             shells[1].full_width_pending_console_resize = false;
-            shells[0].chat_view_lock = lock;
+            shells[0].pinned_top = pinned;
             shells[1].full_width = true;
             resizes = 0;
             saves = 0;
@@ -101,7 +100,7 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
             try std.testing.expectEqual(@as(usize, 2), saves);
             try std.testing.expectEqual(@as(usize, 2), layouts);
             try std.testing.expectEqual(chat, g_chat_active);
-            try std.testing.expectEqual(lock, shells[0].chat_view_lock);
+            try std.testing.expectEqual(pinned, shells[0].pinned_top);
             try std.testing.expect(shells[1].full_width);
         }
     }
@@ -147,7 +146,7 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   assert.match(palette, /showActiveShellAfterOverlay\(\);[^]*WM_APP_TOGGLE_FULLWIDTH/);
   assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_view_lock\s*=/);
   const restore = body(source, 'restoreBrowserStateFromSavedTab');
-  for (const field of ['chat_view_on = tab.cv', 'chat_view_lock = tab.chat_view_lock', 'full_width = tab.fw']) assert.ok(restore.includes(field));
+  for (const field of ['chat_view_on = tab.cv', 'full_width = tab.fw']) assert.ok(restore.includes(field));
   const close = body(source, 'closeChatView');
   assert.match(close, /if \(ISSUE_440_FULL_WIDTH_CHAT and shells\[active_shell\]\.full_width_pending_console_resize\)/);
   assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);

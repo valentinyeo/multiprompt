@@ -756,8 +756,9 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(focus, /if \(\$initial.hide_pills\) \{\s*Focus-Palette 'workspace switcher' 6213\s*Press @\(0x0D\) 'Enter: show workspace switcher'/);
   assert.ok(focus.indexOf("'workspace switcher shown and saved'") < focus.indexOf("Press @(0x11, 0x4E) 'Ctrl+N:"));
   assert.match(focus, /Snapshot 'pills-ready'/);
-  assert.match(focus, /Focus-Palette 'clear always view for this session' 6466/);
+  assert.match(focus, /Focus-Palette 'chat view off everywhere' 6347/);
   assert.match(focus, /-not \$state\.PSObject\.Properties\['chat_view_mode'\] -and -not \$state\.tabs\[\$initialTab\]\.PSObject\.Properties\['chat_view_lock'\]/);
+  assert.ok(focus.includes("-not ($state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv)"));
   for (const text of [pills, focus]) {
     assert.match(text, /PSObject.Properties\['hide_pills'\] -and -not \$state.hide_pills/);
     for (const field of ['hide_sidebar', 'sidebar_collapsed']) {
@@ -794,12 +795,20 @@ function assertsFocusJourneyReadiness(source) {
   assert.equal((focus.match(/name = 'workspace-focus-/g) || []).length, 4);
 }
 
+test('IGSH-820 shell baseline uses a live one-shot palette command', () => {
+  assert.match(read('src/app_state.zig'), /SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET: usize = 6347;/);
+  assert.match(read('src/command_palette.zig'), /asciiContainsQueryInsensitive\("Chat View off everywhere"[\s\S]*?g_search_results\[app_state\.g_search_result_count\] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;/);
+  assert.match(read('src/main.zig'), /setEverywhere\(app_state\.shells\[0\.\.app_state\.shell_count\], target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET\)[\s\S]*?applySessionView\(\);\s*saveSession\(\);/);
+});
+
 test('IGSH-522: hidden pills are shown through the palette and every focus transition waits for real input readiness', () => {
   assertsFocusJourneyReadiness(control);
   for (const [before, after] of [
     ["Focus-Palette 'workspace switcher' 6213", "Palette 'workspace switcher'"],
-    ["Focus-Palette 'clear always view for this session' 6466", "Focus-Palette 'per tab' 6345"],
+    ["Focus-Palette 'chat view off everywhere' 6347", "Palette 'chat view off everywhere'"],
+    ["Focus-Palette 'chat view off everywhere' 6347", "Focus-Palette 'chat view off everywhere' 0"],
     ["-and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']", ''],
+    ["-not ($state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv)", '$true'],
     ["$state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills", '$true'],
     ["Wait-WorkspaceSurface $second $secondTab $false", 'Start-Sleep -Milliseconds 250'],
     ["Wait-ConsoleText 'echo workspace-focus-shell-pill'", ''],

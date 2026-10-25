@@ -89,7 +89,7 @@ test('keyboard, palette, context, F1 and wiki expose the same favorite action', 
 test('favorite marker is one small dot everywhere', async () => {
   assert.doesNotMatch(source, /drawFavoriteStar/);
   assert.match(source, /FAVORITE_DOT_D: i32 = 6/);
-  const draw = between('fn drawFavoriteDot(', 'fn drawSessionLockIcon(');
+  const draw = between('fn drawFavoriteDot(', 'fn paintAllSessions(');
   assert.ok(draw.includes('drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));'));
   assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 5);
   const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');

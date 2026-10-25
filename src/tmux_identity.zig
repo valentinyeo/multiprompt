@@ -42,11 +42,11 @@ test "restore dedupe keeps newest full record and name, separating hosts and emp
         tmux_session_len: usize = 8,
         last_viewed: u64 = 0,
         name: []const u8,
-        locked: bool = false,
+        pinned_top: bool = false,
     };
     var tabs = [_]Tab{
         .{ .name = "secondary Growth Bot", .last_viewed = 10 },
-        .{ .name = "Meta Klaviyo Connection", .last_viewed = 30, .locked = true },
+        .{ .name = "Meta Klaviyo Connection", .last_viewed = 30, .pinned_top = true },
         .{ .name = "other host", .tmux_host = 1 },
         .{ .name = "local", .tmux_session_len = 0 },
         .{ .name = "local 2", .tmux_session_len = 0 },
@@ -59,7 +59,7 @@ test "restore dedupe keeps newest full record and name, separating hosts and emp
         if (i == 0 or i == 1 or i == 5) {
             try std.testing.expectEqual(@as(usize, 1), winner);
             try std.testing.expectEqualStrings("Meta Klaviyo Connection", tabs[winner].name);
-            try std.testing.expect(tabs[winner].locked);
+            try std.testing.expect(tabs[winner].pinned_top);
         } else try std.testing.expectEqual(i, winner);
     }
     try std.testing.expectEqual(@as(usize, 4), kept);

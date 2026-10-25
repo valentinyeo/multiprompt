@@ -6,7 +6,7 @@ Measure the sidebar status card on all three pages after real Ctrl+Shift+G press
 
 - `one-line-overview`: page 1 (Overview) is a single line with a state dot, the active host's CPU load, each account's week used and the overall label.
 - `one-line-vps`: page 2 (VPS) is a single line with a state dot, host label, CPU load, RAM free and state label. Without a VPS workspace it shows the Overview line, as before.
-- `one-line-ai`: page 3 (AI) is a single line with the burn chip (CL or CX in the burned account's colour), week used per account (CL and CX) and the time to the next weekly reset.
+- `one-line-ai`: page 3 (AI) is a single line with the burn label (CL or CX), week used per account (CL and CX) and the time to the next weekly reset, all in white directly on the sidebar background, with no fill, border or colour.
 - `hover-details`: while the mouse is over the card, the full numbers of the current page appear in a card directly above it and hide when the mouse leaves. The AI page shows each account's weekly reset day and local time, countdown, pending bonus reset and pace.
 - `page-cycle`: Ctrl+Shift+G and a click still cycle the three pages; the app saves the page in `sidebar-status-card.txt`.
 
@@ -27,7 +27,8 @@ Preconditions:
 - **Measure.** Move the mouse away from the card. For each page, capture `status-card-<n>.png`, then scan the window screenshot upward from the client bottom at client x = 14 px (scaled by DPI), inside the card left padding. The first colour change from the window background is the card's bottom border; the first change from the card fill above it is the top border. The height is the inclusive border-to-border span in device pixels divided by DPI / 96.
 - **Cycle.** Between pages press real Ctrl+Shift+G through SendInput and wait until the app writes the next page number to `%APPDATA%\ZigShell\sidebar-status-card.txt`.
 - **Hover.** Move the real mouse onto the card bottom, capture `hover.png`, then move it away and capture `after.png`. The hover view is a screenshot only, not asserted.
-- **Proof.** `result.json` has `"statusCard": {"heights": [h1, h2, h3]}` in 100% pixels and `status-card.json` keeps the scan rows and colours. The journey fails when any height is above 30 or below 20.
+- **Plain AI page.** Page 3 has no frame to measure. The same column is scanned 40 px up from the client bottom and must stay within 8 of the bottom pixel (no fill or border). White text is checked by eye in the screenshot, since ClearType fringes rule out a pixel colour test.
+- **Proof.** `result.json` has `"statusCard": {"heights": [h1, h2]}` in 100% pixels for pages 1 and 2, and `status-card.json` keeps the scan rows, colours and the page 3 `edge` (null). The journey fails when any height is above 30 or below 20, or page 3 shows a frame or fill.
 
 ## Gotchas
 

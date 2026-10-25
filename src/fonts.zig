@@ -234,7 +234,7 @@ pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, rese
     return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = hover, .ink = themes.themeConsoleFg(), .icons = icons });
 }
 
-fn messageMenuIconFont() w.HANDLE {
+pub fn messageMenuIconFont() w.HANDLE {
     const font = w.CreateFontW(-16, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe Fluent Icons"));
     const dc = w.GetDC(null);
     defer _ = w.ReleaseDC(null, dc);

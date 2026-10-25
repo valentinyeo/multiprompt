@@ -206,7 +206,7 @@ pub const TabTransfer = extern struct {
     group_color: u8,
     group_collapsed: u8,
     pinned_top: u8,
-    locked: u8,
+    reserved_lock: u8,
     favorite: u8,
     last_used: u64,
     input: u64 = 0,
@@ -263,12 +263,10 @@ pub const Shell = struct {
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
-    locked: bool = false,
     console_inflight: bool = false,
     launch_failed: bool = false,
     disconnected: bool = false,
     chat_view_on: bool = false,
-    chat_view_lock: @import("chat_view.zig").Lock = .none,
     chat_todo_open: bool = false,
     chat_todo_scroll: i32 = 0,
     cached_cwd: [512]u8,
@@ -373,7 +371,6 @@ pub const empty_shell = Shell{
     .inbox_excluded = false,
     .keep_alive = false,
     .pinned_top = false,
-    .locked = false,
     .cached_cwd = std.mem.zeroes([512]u8),
     .cached_cwd_len = 0,
     .ram_mb = 0,
@@ -402,7 +399,6 @@ pub const SIDEBAR_W_MAX: i32 = 500;
 pub var g_sidebar_collapsed: bool = false;
 pub var g_hide_sidebar: bool = false;
 pub var g_hide_pills: bool = true;
-pub var g_locked_section_collapsed: bool = false;
 pub var g_pinned_section_collapsed: bool = false;
 pub var g_recents_section_collapsed: bool = false;
 pub var g_tab_sort_auto: bool = true;
@@ -1322,9 +1318,6 @@ pub const SEARCH_VOICE_MODE_OFF_OFFSET: usize = 6341;
 pub const SEARCH_ETA_NUMBERS_OFFSET: usize = 6342;
 pub const SEARCH_ETA_PROGRESS_OFFSET: usize = 6343;
 pub const SEARCH_ETA_ACCURACY_OFFSET: usize = 6344;
-pub const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET: usize = 6464;
-pub const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET: usize = 6465;
-pub const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET: usize = 6466;
 pub const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET: usize = 6346;
 pub const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET: usize = 6347;
 pub const SEARCH_VOICE_ALWAYS_ON_OFFSET: usize = 6349;
@@ -1377,7 +1370,6 @@ pub const SEARCH_BROWSER_SHOTURL_OFFSET: usize = 6292;
 pub const SEARCH_PIN_TOP_OFFSET: usize = 6293;
 pub const SEARCH_UNARCHIVE_HIDDEN_OFFSET: usize = 6294;
 pub const SEARCH_UNARCHIVE_UNATTACHED_OFFSET: usize = 6295;
-pub const SEARCH_LOCK_SESSION_OFFSET: usize = 6296;
 pub const SEARCH_BROWSER_ENGINE_OFFSET: usize = 6297;
 pub const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;
 pub const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;
@@ -1404,7 +1396,6 @@ pub const SEARCH_TABCTX_ARCHIVE: usize = 7110;
 pub const SEARCH_TABCTX_BROWSER: usize = 7111;
 pub const SEARCH_TABCTX_END_TMUX: usize = 7112;
 pub const SEARCH_TABCTX_PIN_TOP: usize = 7113;
-pub const SEARCH_TABCTX_LOCK: usize = 7114;
 pub const SEARCH_TABCTX_KEEPAWAKE: usize = 7115;
 pub const SEARCH_TABCTX_INBOX_EXCLUDE: usize = 7116;
 pub const SEARCH_TABCTX_CHAT_RESET: usize = 7117;
@@ -1415,9 +1406,6 @@ pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
 pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
 pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
-pub const SEARCH_TABCTX_VIEW_CHAT: usize = 7185;
-pub const SEARCH_TABCTX_VIEW_SHELL: usize = 7186;
-pub const SEARCH_TABCTX_VIEW_CLEAR: usize = 7187;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
 pub const SEARCH_ADDFAVICON_OFFSET: usize = 9000;
@@ -1677,7 +1665,6 @@ pub var g_adopt_tmux_len: u32 = 0;
 pub var g_adopt_name_source: NameSource = .default;
 pub var g_adopt_muted: bool = false;
 pub var g_adopt_pinned_top: bool = false;
-pub var g_adopt_locked: bool = false;
 pub var g_adopt_favorite: bool = false;
 pub var g_adopt_last_used: u64 = 0;
 pub var g_adopt_input: u64 = 0;
@@ -2015,7 +2002,6 @@ pub const SavedTab = struct {
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
-    locked: bool = false,
     favicon_path: [512]u8,
     favicon_path_len: u32,
     group_id: u32,
@@ -2045,7 +2031,6 @@ pub const SavedTab = struct {
     kaw: bool = false,
     cv: bool = false,
     cso: bool = false,
-    chat_view_lock: @import("chat_view.zig").Lock = .none,
     fw: bool = false,
 };
 
@@ -2199,7 +2184,6 @@ pub const ReminderEntry = struct {
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
-    locked: bool = false,
 };
 pub var g_reminders: [MAX_REMINDERS]ReminderEntry = std.mem.zeroes([MAX_REMINDERS]ReminderEntry);
 pub var g_reminder_count: u32 = 0;
@@ -2466,6 +2450,7 @@ pub const ChatViewLayout = struct {
     composer: RECT,
     send_btn: RECT,
     attach_btn: RECT,
+    mic_btn: RECT,
     stop_btn: RECT,
     send_shown: bool,
     stop_shown: bool,
@@ -2620,6 +2605,7 @@ pub const WM_APP_CHAT_IMAGE_READY: u32 = WM_APP + 196;
 pub const WM_APP_CHAT_ATTACH: u32 = WM_APP + 197;
 pub const WM_APP_CHAT_ATTACH_FAILED: u32 = WM_APP + 198;
 pub const SEARCH_CHAT_ATTACH_OFFSET: usize = 6372;
+pub const SEARCH_CHAT_DICTATION_OFFSET: usize = 6468;
 
 pub const GdipImgApi = struct {
     bitmap_from_file: *const fn ([*:0]const u16, *HANDLE) callconv(WINAPI) GpStatus,

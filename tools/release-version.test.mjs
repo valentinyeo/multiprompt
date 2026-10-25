@@ -80,8 +80,10 @@ test('CLI reads files and fails closed', t => {
   assert.equal(run(`${file}-missing`).status, 1);
 });
 
-test('workflow preserves all triggers, both architectures, immutable builds and version concurrency', () => {
-  assert.match(workflow, /push:\n    branches: \[master\]\n    tags: \['v\*'\]/);
+test('workflow preserves tag and manual triggers with reusable release, both architectures, immutable builds and version concurrency', () => {
+  assert.match(workflow, /push:\n    tags: \['v\*'\]/);
+  assert.doesNotMatch(workflow, /branches: \[master\]/);
+  assert.match(workflow, /workflow_call:[\s\S]*tag:[\s\S]*type: string/);
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
   assert.match(workflow, /permissions:\n  contents: write/);
@@ -274,4 +276,26 @@ test('packaging includes extension contents, excludes current themes and covers 
   assert.equal(sums.trim().split('\n').length, 6);
   assert.match(sums, /^[a-f0-9]{64}  release-notes\.json$/m);
   execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: path.join(f.dir, 'dist') });
+});
+
+test('automatic admission fixtures reject unsafe heads', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync('bash', ['tools/automerge-admit.test.sh'], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ADMISSION VERIFIED/);
+});
+
+test('automatic release only stamps a tested master and reuses signed release jobs', () => {
+  const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+  assert.match(auto, /workflows: \[Tests\]/);
+  assert.match(auto, /branches: \[master\]/);
+  assert.match(auto, /github.event.workflow_run.conclusion == 'success'/);
+  assert.match(auto, /github.event.workflow_run.head_repository.full_name == github.repository/);
+  assert.match(auto, /\[ "\$sha" != "\$TESTED_SHA" \]/);
+  assert.match(auto, /git tag --points-at HEAD/);
+  assert.match(auto, /\[skip release\]/);
+  assert.match(auto, /stampTree\(files\)/);
+  assert.match(auto, /git push --atomic origin HEAD:refs\/heads\/master "refs\/tags\/\$RELEASE_TAG"/);
+  assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
+  assert.doesNotMatch(auto, /zig build|gh pr create|gh release create/);
+  assert.deepEqual([...auto.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
 });

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -545,6 +545,24 @@ public static class VerifyNative {
                 }
             }
             return count;
+        }
+    }
+    public static int[] DictationMicPixels(IntPtr owner, int[] rect, bool active, string output) {
+        Point origin = new Point();
+        if (!ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Missing microphone origin");
+        Point center = new Point { X = origin.X + (rect[0] + rect[2]) / 2, Y = origin.Y + (rect[1] + rect[3]) / 2 };
+        if (WindowFromPoint(center) != owner) throw new InvalidOperationException("Microphone is not in the owned frame");
+        using (var pixels = new System.Drawing.Bitmap(rect[2] - rect[0], rect[3] - rect[1])) {
+            using (var graphics = System.Drawing.Graphics.FromImage(pixels)) graphics.CopyFromScreen(origin.X + rect[0], origin.Y + rect[1], 0, 0, pixels.Size);
+            pixels.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+            int fill = 0, ink = 0;
+            for (int y = 0; y < pixels.Height; y++) for (int x = 0; x < pixels.Width; x++) {
+                var c = pixels.GetPixel(x, y);
+                if (c.R == 63 && c.G == 83 && c.B == 113) fill++;
+                int r = active ? 80 : 137, g = active ? 150 : 146, b = active ? 255 : 164;
+                if (Math.Abs(c.R - r) <= 15 && Math.Abs(c.G - g) <= 15 && Math.Abs(c.B - b) <= 15) ink++;
+            }
+            return new int[] { fill, ink, pixels.Width * pixels.Height };
         }
     }
     public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {
@@ -1272,7 +1290,7 @@ function Read-Inbox {
     return $null
 }
 
-function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step) {
+function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step, [bool]$Pinned = $true) {
     Wait-Until {
         $state = Read-Session
         if ($null -eq $state -or @($state.tabs).Count -ne 3 -or $state.active_tab -ne $Active) { return $false }
@@ -1281,8 +1299,10 @@ function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step) {
             $on = $state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv -eq $true
             if ($on -ne $Views[$i]) { return $false }
         }
-        $state.tabs[2].PSObject.Properties['chat_view_lock'] -and $state.tabs[2].chat_view_lock -ceq 'shell'
-    } "app-written views and shell lock: $Step"
+        if (@($state.tabs | Where-Object { $_.PSObject.Properties['chat_view_lock'] -or $_.PSObject.Properties['locked'] }).Count -ne 0) { throw 'Removed session locks were saved again' }
+        $pin = $state.tabs[2].PSObject.Properties['pinned_top'] -and $state.tabs[2].pinned_top -eq $true
+        $pin -eq $Pinned
+    } "app-written views and pin: $Step"
     Wait-Until {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
         $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
@@ -1956,6 +1976,34 @@ function Measure-StatusCard([string]$Name) {
     }
 }
 
+function Measure-PlainStatusCard([string]$Name) {
+    $frame = New-Object VerifyNative+Rect
+    $client = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'status-card native geometry unavailable' }
+    $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+    $scale = $dpi / 96.0
+    $offsetX = $origin.X - $frame.Left
+    $offsetY = $origin.Y - $frame.Top
+    $x = $offsetX + [int][Math]::Round(14 * $scale)
+    $bottom = $offsetY + $client.Bottom - 1
+    $top = $bottom - [int][Math]::Round(40 * $scale)
+    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
+    try {
+        $background = $image.GetPixel($x, $bottom)
+        $edge = $null
+        for ($y = $bottom; $y -ge $top; $y--) {
+            $pixel = $image.GetPixel($x, $y)
+            if ([Math]::Max([Math]::Abs($pixel.R - $background.R), [Math]::Max([Math]::Abs($pixel.G - $background.G), [Math]::Abs($pixel.B - $background.B))) -gt 8) { $edge = $y; break }
+        }
+    } finally { $image.Dispose() }
+    return [ordered]@{
+        screenshot = $Name + '.png'; x = $x; top = $top; bottom = $bottom; background = @($background.R, $background.G, $background.B)
+        edge = $edge; dpi = $dpi
+    }
+}
+
 function Sidebar-Luminance([string]$Name) {
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
     try {
@@ -1999,6 +2047,40 @@ function Restart-ChatView([int]$ShellCount) {
     Doctor
 }
 
+function Get-DictationMic([IntPtr]$Composer) {
+    $state = Read-Session
+    if ($null -eq $state -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Dictation geometry requires the isolated default UI scale' }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen) { throw 'Dictation requires the owned visible transcript' }
+    $transcriptHandle = [IntPtr]$transcript.Current.NativeWindowHandle
+    if ([VerifyNative]::Class($Composer) -cne 'Edit' -or [VerifyNative]::GetAncestor($Composer, 2) -ne $script:window -or
+        [VerifyNative]::GetAncestor($transcriptHandle, 2) -ne $script:window) { throw 'Dictation composer/transcript ownership mismatch' }
+    $edit = New-Object VerifyNative+Rect
+    $thread = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($Composer, [ref]$edit) -or -not [VerifyNative]::GetWindowRect($transcriptHandle, [ref]$thread) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Dictation geometry unavailable' }
+    $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+    $size = [int][Math]::Floor(32 * $scale)
+    $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
+    $left = $thread.Right - $origin.X - $margin - $size
+    $top = $edit.Top - $origin.Y - [Math]::Floor(12 * $scale) + $margin
+    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must be at the far right, outside the native Edit' }
+    return ,([int[]]@($left, $top, ($left + $size), ($top + $size)))
+}
+
+function Assert-DictationMic([int[]]$Rect, [bool]$Active, [string]$Step) {
+    Wait-Until {
+        [void][VerifyNative]::DwmFlush()
+        $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
+        $pixels[1] -ge 3 -and $(if ($Active) { $pixels[0] -gt $pixels[2] / 2 } else { $pixels[0] -eq 0 })
+    } ("IGSH-812 visible microphone active=$Active at $Step") -Seconds 2 -PollMilliseconds 20
+    $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
+    Save-Json @{ active = $Active; rect = $Rect; fillPixels = $pixels[0]; glyphPixels = $pixels[1]; area = $pixels[2] } ($Step + '-mic.json')
+}
+
 function Wait-ChatFocus([string]$Class, [string]$Step) {
     Wait-Until {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -2031,7 +2113,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
@@ -2080,6 +2162,14 @@ try {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         Copy-Item $paletteUsageFixture (Join-Path $config 'palette-usage.tsv')
+    }
+    $env:MULTIPROMPT_DICTATION_FIXTURE = $null
+    if ($Feature -eq 'chat-dictation') {
+        $fixture = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-812')).Path
+        $audioHash = (Get-FileHash (Join-Path $fixture 'goforward.pcm') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($audioHash -cne 'f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71') { throw 'Recorded dictation PCM checksum mismatch' }
+        $env:MULTIPROMPT_DICTATION_FIXTURE = $fixture
+        $result.dictationBoundary = @{ audio = 'recorded CMUSphinx goforward.pcm'; sha256 = $audioHash; provider = 'offline provider-format response replay, not live Deepgram recognition'; microphoneHardware = $false }
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -2221,53 +2311,68 @@ try {
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count -and $state.active_tab -eq $count - 1 } "user-created CMD session $count"
             }
             Snapshot 'sessions-created'
-            Focus-Palette 'always shell view for this session' 6465
-            Snapshot 'lock-action'
-            Press @(0x0D) 'Enter: Always shell view for this session on session 3'
-            Wait-ChatViews @($false, $false, $false) 2 'locked-shell'
+            Focus-Palette 'pin to top' 6293
+            Snapshot 'pin-action'
+            Press @(0x0D) 'Enter: Pin to Top on session 3'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'
+            Press @(0x11, 0x57) 'Ctrl+W: refuse closing the pinned session'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'
+            Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'
+            Press @(0x12, 0x43) 'Alt+C: pinned session can return to shell'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-toggle-shell'
             Focus-Palette 'chat view on everywhere' 6346
             Snapshot 'action'
             Press @(0x0D) 'Enter: Chat View on everywhere once'
-            Wait-ChatViews @($true, $true, $false) 2 'on-everywhere'
+            Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'
             Press @(0x11, 0x31) 'Ctrl+1: show session 1 in Chat View'
-            Wait-ChatViews @($true, $true, $false) 0 'session-1-chat'
+            Wait-ChatViews @($true, $true, $true) 0 'session-1-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'
             Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'
-            Wait-ChatViews @($false, $true, $false) 0 'session-1-toggled'
+            Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'
             Press @(0x11, 0x32) 'Ctrl+2: show session 2 in Chat View'
-            Wait-ChatViews @($false, $true, $false) 1 'session-2-chat'
+            Wait-ChatViews @($false, $true, $true) 1 'session-2-chat'
             Press @(0x11, 0x31) 'Ctrl+1: return to session 1 without forcing Chat View'
-            Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'
+            Wait-ChatViews @($false, $true, $true) 0 'toggle-sticks'
             Focus-Palette 'chat view off everywhere' 6347
             Snapshot 'off-action'
             Press @(0x0D) 'Enter: Chat View off everywhere once'
             Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'
-            Press @(0x11, 0x33) 'Ctrl+3: shell-locked session stays in shell'
-            Wait-ChatViews @($false, $false, $false) 2 'locked-after-off'
+            Press @(0x11, 0x33) 'Ctrl+3: pinned session follows Off Everywhere'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-after-off'
+            Focus-Palette 'unpin from top' 6293
+            Press @(0x0D) 'Enter: unpin before normal app close for restart'
+            Wait-ChatViews @($false, $false, $false) 2 'unpinned-before-restart' $false
             Restart-ChatView 3
             Save-Json (Read-Session) 'restart-before-input.session.json'
             Press @(0x11, 0x31) 'Ctrl+1: restored first session'
-            Wait-ChatViews @($false, $false, $false) 0 'restart-session-1'
+            Wait-ChatViews @($false, $false, $false) 0 'restart-session-1' $false
             Press @(0x11, 0x32) 'Ctrl+2: restored second session'
-            Wait-ChatViews @($false, $false, $false) 1 'restart-session-2'
-            Press @(0x11, 0x33) 'Ctrl+3: restored shell lock'
-            Wait-ChatViews @($false, $false, $false) 2 'restart-session-3'
+            Wait-ChatViews @($false, $false, $false) 1 'restart-session-2' $false
+            Press @(0x11, 0x33) 'Ctrl+3: restored third session'
+            Wait-ChatViews @($false, $false, $false) 2 'restart-session-3' $false
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Focus-Palette 'chat view on everywhere' 6346
-            Press @(0x1B) 'Esc: close known positive palette query'
-            $start = ((Get-Content $log -Raw) -join '').Length
-            Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
-            Wait-Until {
-                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
-                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-            } 'empty palette ready for removed-command query'
-            Type-Text 'chat view per tab'
-            Wait-Until {
-                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=17 count=0 target=0(?:\r?\n|$)'
-            } 'removed per-tab command has zero palette rows'
-            Snapshot 'per-tab-absent'
-            Press @(0x1B) 'Esc: close empty palette'
-            Wait-ChatViews @($false, $false, $false) 2 'after'
-            $result.checks += @{ name = 'chat-view-everywhere-once'; unlockedOn = @(0, 1); skippedShellLock = 2; laterToggleSticks = $true; offEverywhere = $true; restartViewsAndLock = $true; removedPerTabRowCount = 0; entry = 'Ctrl+K, Ctrl+1/2/3 and Alt+C' }
+            foreach ($query in @('chat view per tab', 'lock session', 'always chat view for this session', 'always shell view for this session', 'clear always view for this session')) {
+                Focus-Palette 'chat view on everywhere' 6346
+                Press @(0x1B) 'Esc: close known positive palette query'
+                $start = ((Get-Content $log -Raw) -join '').Length
+                Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
+                Wait-Until {
+                    ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
+                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+                } 'empty palette ready for removed-command query'
+                Type-Text $query
+                Wait-Until {
+                    ((Get-Content $log -Raw) -join '').Substring($start) -match ("\[palette\] ready chars=" + $query.Length + " count=0 target=0(?:\r?\n|$)")
+                } "removed command has zero palette rows: $query"
+                Snapshot ('absent-' + $query.Replace(' ', '-'))
+                Press @(0x1B) 'Esc: close empty palette'
+            }
+            Wait-ChatViews @($false, $false, $false) 2 'after' $false
+            $result.checks += @{ name = 'chat-view-everywhere-once'; allOn = @(0, 1, 2); pinnedToggleWorks = $true; pinnedCloseRefused = $true; laterToggleSticks = $true; offEverywhere = $true; restartViews = $true; removedCommands = 5; entry = 'Ctrl+K, Ctrl+W, Ctrl+1/2/3 and Alt+C' }
         }
         'chat-focus' {
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'Offline CMD session proves typing focus, not agent delivery' }
@@ -2323,6 +2428,78 @@ try {
             $light = Sidebar-Luminance 'after'
             if ($light -lt $dark + 60) { throw "Visible sidebar did not become light: $dark -> $light" }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
+        }
+        'chat-dictation' {
+            Select-Theme 'dark' 'dictation-dark'
+            Press @(0x12, 0x43) 'Alt+C: open Chat View for dictation'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv
+            } 'isolated CMD session saved in Chat View'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
+            } 'owned visible composer after Alt+C'
+            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
+            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
+            [VerifyNative]::BringToForeground($script:window)
+            Record 'Click the owned composer to recover typing focus from the hidden console'
+            [VerifyNative]::ClickClient($handle, 8, 8)
+            Wait-ChatFocus 'Edit' 'dictation-composer'
+            $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $handle = [IntPtr]$composer.Current.NativeWindowHandle
+            if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Dictation requires the owned composer' }
+            $mic = Get-DictationMic $handle
+            Assert-DictationMic $mic $false 'dictation-idle'
+            Snapshot 'before'
+            $auditPath = Join-Path $scratch 'roaming/ZigShell/dictation-audit.log'
+            $iteration = 0
+            foreach ($stop in @('enter', 'ctrl-d', 'mic-click')) {
+                if ([VerifyNative]::EditText($handle) -cne '') { throw 'Dictation case must start with an empty message box' }
+                Press @(0x11, 0x44) 'Ctrl+D: start composer dictation'
+                $iteration++
+                Wait-Until {
+                    (Test-Path $auditPath) -and @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                Assert-DictationMic $mic $true ($stop + '-listening')
+                $typed = 'typing-' + $stop
+                Type-Text $typed
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
+                if ([VerifyNative]::GetFocusedWindow($script:window) -ne $handle) { throw 'Dictation stole native composer typing focus' }
+                Assert-DictationMic $mic $true ($stop + '-typed-listening')
+                Snapshot ($stop + '-listening')
+                if ($stop -ceq 'enter') { Snapshot 'action' }
+                Doctor
+                Assert-Foreground
+                Record ('Stop dictation with ' + $stop)
+                $immediate = [Diagnostics.Stopwatch]::StartNew()
+                switch ($stop) {
+                    'enter' { [VerifyNative]::Chord(@(0x0D)) }
+                    'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }
+                    'mic-click' { [VerifyNative]::ClickClient($script:window, [int](($mic[0] + $mic[2]) / 2), [int](($mic[1] + $mic[3]) / 2)) }
+                }
+                $expected = $typed + ' Go forward ten meters.'
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1 -PollMilliseconds 10
+                $elapsed = $immediate.ElapsedMilliseconds
+                if ($elapsed -gt 1000) { throw "IGSH-812 transcript was not immediate: $elapsed ms" }
+                Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); expected = $expected; elapsedMilliseconds = $elapsed; handle = $handle.ToInt64(); pid = $process.Id } ($stop + '.text.json')
+                Assert-DictationMic $mic $false ($stop + '-stopped')
+                $audit = @(Get-Content $auditPath)
+                foreach ($stage in @('audio-bytes\t89160', 'fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
+                    if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $iteration) { throw "IGSH-812 missing production transcription stage $stage" }
+                }
+                Snapshot ($stop + '-delivered')
+                $result.checks += @{ name = ('dictation-' + $stop); passed = $true; typedWhileListening = $typed; WM_GETTEXT = [VerifyNative]::EditText($handle); elapsedMilliseconds = $elapsed; activeMicPixels = $true; idleMicPixels = $true }
+                if ($stop -cne 'mic-click') {
+                    Press @(0x11, 0x41) 'Ctrl+A: select the verified dictation draft'
+                    Press @(0x08) 'Backspace: clear the draft through normal keyboard input'
+                    Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'composer cleared for next independent stop case'
+                }
+            }
+            if ($result.checks.Count -ne 3) { throw 'IGSH-812 requires all three dictation stop cases' }
+            Snapshot 'after'
         }
         'chat-tables' {
             $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'
@@ -2924,12 +3101,13 @@ try {
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'clear always view for this session' 6466
-            Press @(0x0D) 'Enter: clear Always view for the test session'
+            Focus-Palette 'chat view off everywhere' 6347
+            Press @(0x0D) 'Enter: reset Chat View to shell for the test session'
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']
-            } 'unlocked per-session Chat View saved'
+                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock'] -and
+                    -not ($state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv)
+            } 'shell baseline without removed Chat View state saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
@@ -3922,9 +4100,13 @@ try {
                     $sampleCount = $timings[$mode].samples_ms.Count
                     if ($mode -eq 'chat_browser_off') {
                         $gapCase.phase = 'chat-setup'
-                        Focus-Palette 'clear always view for this session' 6466
-                        Press @(0x0D) 'Enter: clear Always view for the switch test session'
-                        Wait-Until { -not (Read-Session).PSObject.Properties['chat_view_mode'] } 'per-session Chat View mode saved'
+                        Focus-Palette 'chat view off everywhere' 6347
+                        Press @(0x0D) 'Enter: reset both switch test sessions to shell'
+                        Wait-Until {
+                            $state = Read-Session
+                            $null -ne $state -and @($state.tabs).Count -eq 2 -and -not $state.PSObject.Properties['chat_view_mode'] -and
+                                @($state.tabs | Where-Object { ($_.PSObject.Properties['cv'] -and $_.cv) -or $_.PSObject.Properties['chat_view_lock'] }).Count -eq 0
+                        } 'both switch test sessions saved in shell view without removed locks'
                         foreach ($tab in @(0, 1)) {
                             Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $false
@@ -4532,6 +4714,12 @@ try {
                 }
                 $shot = 'status-card-' + ($page + 1)
                 Snapshot $shot
+                if ($page -eq 2) {
+                    $plain = Measure-PlainStatusCard $shot
+                    $plain.page = 3
+                    $pages += $plain
+                    continue
+                }
                 $measure = Measure-StatusCard $shot
                 $measure.page = $page + 1
                 $pages += $measure
@@ -4553,7 +4741,8 @@ try {
             foreach ($height in $heights) {
                 if ($height -gt 30 -or $height -lt 20) { throw ('status-card: card height ' + $height + ' outside 20..30; heights ' + ($heights -join ', ')) }
             }
-            $result.checks += @{ name = 'status-card'; heights = $heights; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
+            if ($null -ne $plain.edge) { throw ('status-card: AI page draws a frame or fill at y=' + $plain.edge + ' in status-card-3.png') }
+            $result.checks += @{ name = 'status-card'; heights = $heights; aiPagePlain = $true; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
         }
         'command-palette' {
             Palette 'interface'

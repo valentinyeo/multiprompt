@@ -219,7 +219,6 @@ pub fn parseAdoptArgs() void {
             }
 
             if (cur < len and (haystack[cur] == '0' or haystack[cur] == '1')) {
-                app_state.g_adopt_locked = haystack[cur] == '1';
                 cur += 1;
                 while (cur < len and haystack[cur] == ' ') cur += 1;
             }
