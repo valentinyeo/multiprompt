@@ -24,11 +24,12 @@ test "chat column centers within the available pane and caps at 960" {
     }
 }
 
-pub fn bubbleMaxWidth(width: i32) i32 {
-    return @intCast(@max(1, @divTrunc(@as(i64, @max(1, width)) * 6, 10)));
+pub fn bubbleMaxWidth(width: i32, narrow_width: i32) i32 {
+    const percent: i64 = if (width <= narrow_width) 9 else 6;
+    return @intCast(@max(1, @divTrunc(@as(i64, @max(1, width)) * percent, 10)));
 }
-pub fn agentBubbleWidth(width: i32) i32 {
-    return bubbleMaxWidth(width);
+pub fn agentBubbleWidth(width: i32, narrow_width: i32) i32 {
+    return bubbleMaxWidth(width, narrow_width);
 }
 pub fn cornerRadius(w: i32, h: i32, want: i32) i32 {
     return @max(0, @min(want, @divTrunc(@min(w, h), 2)));
@@ -51,8 +52,8 @@ pub fn bubbleColors(bg: u32) BubbleColors {
     if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
     return .{ .user = shift(bg, -26), .agent = shift(bg, -11), .injected = 0xF7E6D6 };
 }
-pub fn bubbleWidth(width: i32, natural: i32, pad: i32) i32 {
-    return std.math.clamp(natural + 2 * pad, 1, bubbleMaxWidth(width));
+pub fn bubbleWidth(width: i32, natural: i32, pad: i32, narrow_width: i32) i32 {
+    return std.math.clamp(natural + 2 * pad, 1, bubbleMaxWidth(width, narrow_width));
 }
 pub fn headerHeight(_: md.Block, _: i32) i32 {
     return 0;
@@ -118,12 +119,12 @@ pub fn markScreenMessages(blocks: []md.Block) void {
 
 test "user bubbles stay right aligned and cannot exceed the reader width" {
     for ([_]i32{ 1, 24, 200, 800, 1600 }) |width| {
-        const bubble = bubbleWidth(width, 10000, 12);
+        const bubble = bubbleWidth(width, 10000, 12, 720);
         try std.testing.expect(bubble <= width);
         try std.testing.expect(width - bubble >= 0);
-        try std.testing.expect(bubble <= bubbleMaxWidth(width));
+        try std.testing.expect(bubble <= bubbleMaxWidth(width, 720));
     }
-    try std.testing.expectEqual(@as(i32, 74), bubbleWidth(800, 50, 12));
+    try std.testing.expectEqual(@as(i32, 74), bubbleWidth(800, 50, 12, 720));
 }
 test "IGSH-849 assistant headers reserve no space" {
     var block = md.Block{ .start = 0, .len = 1, .role = .prose, .first = true };
@@ -166,8 +167,8 @@ test "bubble colours derive from the theme background" {
     try std.testing.expectEqual(@as(u32, 0), shift(0x050505, -99));
 }
 test "bubble geometry: 60 percent cap for both roles, pill corners, argb order" {
-    try std.testing.expectEqual(@as(i32, 576), bubbleMaxWidth(960));
-    try std.testing.expectEqual(@as(i32, 576), agentBubbleWidth(960));
+    try std.testing.expectEqual(@as(i32, 576), bubbleMaxWidth(960, 720));
+    try std.testing.expectEqual(@as(i32, 576), agentBubbleWidth(960, 720));
     try std.testing.expectEqual(@as(i32, 18), cornerRadius(300, 100, 18));
     try std.testing.expectEqual(@as(i32, 14), cornerRadius(300, 28, 18));
     try std.testing.expectEqual(@as(i32, 0), cornerRadius(0, 0, 18));

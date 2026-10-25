@@ -16,6 +16,11 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
+      chat_width_proof:
+        description: Capture wide and narrow message geometry with the chat-messages-only journey
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - '**'
@@ -153,6 +158,7 @@ jobs:
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
+      CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -163,7 +169,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
+        run: node --test tools/chat-width-proof.test.mjs tools/verify-multiprompt.test.js tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
       - name: Check auto-revert decision contracts
         run: node --test tools/auto-revert-master.test.js
       - name: Check unread divider contracts
@@ -321,20 +327,20 @@ jobs:
           node tools/chat-composer-text-proof.mjs evidence --native
           if ($nativeExit -ne 0 -or $LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests or edge proof failed' }
       - name: Run messages-only native layout regressions
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         run: zig build test-main --summary all
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'

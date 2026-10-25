@@ -86,10 +86,21 @@ test "IGSH-898 narrow messages expand while wide messages retain the 60 percent 
     for ([_]i32{1, 40, 300, 550, 600, 720, 721, 960, 1440}) |width| {
         const percent: i32 = if (width <= 720) 9 else 6;
         const cap = @max(1, @divTrunc(width * percent, 10));
-        try std.testing.expectEqual(cap, chat_style.bubbleMaxWidth(width));
-        try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width));
-        try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12));
+        try std.testing.expectEqual(cap, chat_style.bubbleMaxWidth(width, 720));
+        try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width, 720));
+        try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12, 720));
         try std.testing.expect(width - cap >= 0);
+    }
+}
+test "IGSH-898 narrow breakpoint follows display scale" {
+    for ([_]i32{100, 150, 200}) |dpi| {
+        for ([_]i32{550, 960, 1920}) |logical| {
+            const width = @divTrunc(logical * dpi, 100);
+            const narrow = @divTrunc(720 * dpi, 100);
+            const cap = @divTrunc(width * @as(i32, if (logical == 550) 9 else 6), 10);
+            try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width, narrow));
+            try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12, narrow));
+        }
     }
 }
 test "ISSUE-440 production toggle changes only width and saves twice" {
@@ -150,7 +161,15 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const unbounded = run(toggle(source), content(source).replace('uiScaled(960)', 'slot.right - slot.left'));
     assert.notEqual(unbounded.status, 0);
     assert.match(unbounded.stderr, /production reading column[^]*FAIL/);
-    console.log('ISSUE-440 old console reset and IGSH-873 unbounded column rejected');
+    const styleFile = path.join(dir, 'chat_style.zig');
+    const style = fs.readFileSync(styleFile, 'utf8');
+    const oldStyle = style.replace('if (width <= narrow_width) 9 else 6', 'if (width <= narrow_width) 6 else 6');
+    assert.notEqual(oldStyle, style);
+    fs.writeFileSync(styleFile, oldStyle);
+    const thin = run(toggle(source));
+    assert.notEqual(thin.status, 0);
+    assert.match(thin.stderr, /IGSH-898 narrow messages[^]*FAIL/);
+    console.log('IGSH-898 old narrow 60 percent bubbles rejected; geometry passed');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
