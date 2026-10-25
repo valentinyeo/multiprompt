@@ -2302,10 +2302,13 @@ try {
             Press @(0x0D) 'Enter: Pin to Top on session 3'
             Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'
             Press @(0x11, 0x57) 'Ctrl+W: refuse closing the pinned session'
-            Snapshot 'pinned-close-refused'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'
             Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
             Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'
             Press @(0x12, 0x43) 'Alt+C: pinned session can return to shell'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
             Wait-ChatViews @($false, $false, $false) 2 'pinned-toggle-shell'
             Focus-Palette 'chat view on everywhere' 6346
             Snapshot 'action'
@@ -2313,6 +2316,7 @@ try {
             Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'
             Press @(0x11, 0x32) 'Ctrl+2: show session 1 in Chat View'
             Wait-ChatViews @($true, $true, $true) 0 'session-1-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'
             Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'
             Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'
             Press @(0x11, 0x33) 'Ctrl+3: show session 2 in Chat View'
@@ -3083,12 +3087,13 @@ try {
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'clear always view for this session' 6466
-            Press @(0x0D) 'Enter: clear Always view for the test session'
+            Focus-Palette 'chat view off everywhere' 6347
+            Press @(0x0D) 'Enter: reset Chat View to shell for the test session'
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']
-            } 'unlocked per-session Chat View saved'
+                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock'] -and
+                    -not ($state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv)
+            } 'shell baseline without removed Chat View state saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
@@ -3906,9 +3911,13 @@ try {
                     $sampleCount = $timings[$mode].samples_ms.Count
                     if ($mode -eq 'chat_browser_off') {
                         $gapCase.phase = 'chat-setup'
-                        Focus-Palette 'clear always view for this session' 6466
-                        Press @(0x0D) 'Enter: clear Always view for the switch test session'
-                        Wait-Until { -not (Read-Session).PSObject.Properties['chat_view_mode'] } 'per-session Chat View mode saved'
+                        Focus-Palette 'chat view off everywhere' 6347
+                        Press @(0x0D) 'Enter: reset both switch test sessions to shell'
+                        Wait-Until {
+                            $state = Read-Session
+                            $null -ne $state -and @($state.tabs).Count -eq 2 -and -not $state.PSObject.Properties['chat_view_mode'] -and
+                                @($state.tabs | Where-Object { ($_.PSObject.Properties['cv'] -and $_.cv) -or $_.PSObject.Properties['chat_view_lock'] }).Count -eq 0
+                        } 'both switch test sessions saved in shell view without removed locks'
                         foreach ($tab in @(0, 1)) {
                             Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $false

@@ -60,15 +60,25 @@ function journeyContract(source, restartSource = restart) {
     "Focus-Palette 'tab order' 6217", "'manual tab order saved before creating sessions'",
     "Focus-Palette 'new cmd' 2000", "Focus-Palette 'pin to top' 6293",
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'",
-    "Press @(0x11, 0x57)", "Snapshot 'pinned-close-refused'",
+    "Press @(0x11, 0x57)", "Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'",
+    "Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'",
+    '$toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)',
     "Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'",
+    "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'",
+    "Press @(0x12, 0x43) 'Alt+C: pinned session can return to shell'",
+    '$toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)',
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-toggle-shell'",
     "Focus-Palette 'chat view on everywhere' 6346", "Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'",
-    "Press @(0x11, 0x32)", "Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'",
+    "Press @(0x11, 0x32)",
+    "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'",
+    "Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'",
+    "Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'",
     "Press @(0x11, 0x33)", "Wait-ChatViews @($false, $true, $true) 1 'session-2-chat'",
     "Press @(0x11, 0x32)", "Wait-ChatViews @($false, $true, $true) 0 'toggle-sticks'",
     "Focus-Palette 'chat view off everywhere' 6347", "Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'",
-    "Press @(0x11, 0x31)", "Focus-Palette 'unpin from top' 6293", 'Restart-ChatView 3',
+    "Press @(0x11, 0x31)", "Wait-ChatViews @($false, $false, $false) 2 'pinned-after-off'",
+    "Focus-Palette 'unpin from top' 6293",
+    "Wait-ChatViews @($false, $false, $false) 2 'unpinned-before-restart' $false", 'Restart-ChatView 3',
     "Wait-ChatViews @($false, $false, $false) 0 'restart-session-1' $false",
     "Wait-ChatViews @($false, $false, $false) 1 'restart-session-2' $false",
     "Wait-ChatViews @($false, $false, $false) 2 'restart-session-3' $false",
@@ -84,15 +94,33 @@ function journeyContract(source, restartSource = restart) {
   }
   for (const token of ['$process.CloseMainWindow()', '$process.WaitForExit(10000)', '$job.Stop()', '$stopped.ActiveProcesses -ne 0', '$job.Start($Exe, $scratch,', 'Doctor']) assert.ok(restartSource.includes(token), token);
   assert.match(restartSource, /Wait-Until \{\s+Doctor\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'restarted app foreground'\s+Doctor/);
+  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = (\d+)/)[1]);
+  const waits = [...source.matchAll(/AddMilliseconds\((\d+)\)/g)];
+  assert.equal(waits.length, 2);
+  for (const wait of waits) assert.ok(Number(wait[1]) > debounce);
   assert.doesNotMatch(source, /Set-Content|WriteAllText|WriteAllBytes|PostMessage|SetEnvironmentVariable/);
 }
 
 test('IGSH-820 Windows journey checks pinned toggles, refused Ctrl+W, all views and removed commands', () => {
   journeyContract(journey);
-  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", '$query.Length + " count=0 target=0', "Focus-Palette 'unpin from top' 6293"]) assert.throws(() => journeyContract(journey.replace(step, '')));
+  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", "Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'", '$query.Length + " count=0 target=0', "Focus-Palette 'unpin from top' 6293"]) assert.throws(() => journeyContract(journey.replace(step, '')));
+  assert.throws(() => journeyContract(journey.replaceAll('AddMilliseconds(1600)', 'AddMilliseconds(100)')));
+  assert.throws(() => journeyContract(journey.replace("@($false, $false, $false) 2 'pinned-toggle-shell'", "@($false, $false, $false) 0 'pinned-toggle-shell'")));
   assert.throws(() => journeyContract(journey, restart.replace('$stopped.ActiveProcesses -ne 0', '$false')));
   const wait = driver.slice(driver.indexOf('function Wait-ChatViews('), driver.indexOf('function Read-BrowserPane'));
-  for (const required of ['Read-Session', '@($state.tabs).Count -ne 3', '$state.active_tab -ne $Active', '$on -ne $Views[$i]', "PSObject.Properties['chat_view_lock']", "PSObject.Properties['locked']", '$pin -eq $Pinned', "ClassNameProperty, 'ZigShellChatTranscript'", '$visible -eq [int]$Views[$Active]', 'Save-Json (Read-Session)', 'Snapshot $Step']) assert.ok(wait.includes(required), required);
+  for (const required of ['Read-Session', '@($state.tabs).Count -ne 3', '$state.active_tab -ne $Active', '$on -ne $Views[$i]', "PSObject.Properties['chat_view_lock']", "PSObject.Properties['locked']", "$state.tabs[2].PSObject.Properties['pinned_top']", '$pin -eq $Pinned', "ClassNameProperty, 'ZigShellChatTranscript'", '$visible -eq [int]$Views[$Active]', 'Save-Json (Read-Session)', 'Snapshot $Step']) assert.ok(wait.includes(required), required);
+});
+
+test('IGSH-820 pinned view expectations follow serialized shell order and the debounced Alt+C route', () => {
+  const session = read('src/session.zig');
+  const save = session.slice(session.indexOf('pub fn saveSessionTo('), session.indexOf('pub fn saveSession('));
+  assert.match(save, /for \(0\.\.app_state\.shell_count\) \|i\|/);
+  assert.match(save, /if \(i == app_state\.active_shell[^\n]*active_tab = written_tabs;/);
+  assert.match(save, /if \(app_state\.shells\[i\]\.pinned_top\)/);
+  assert.match(save, /if \(app_state\.shells\[i\]\.chat_view_on and/);
+  const shortcuts = read('src/shortcuts.zig');
+  assert.match(shortcuts, /kb\.vkCode == 0x43[\s\S]*?claimBrowserTogglePress\(true, kb\.time, &app_state\.g_chat_toggle_chord_held, &app_state\.g_chat_toggle_last_event_time\)[\s\S]*?PostMessageW\(app_state\.g_main_hwnd, WM_APP_CHAT_TOGGLE, 0, 0\)/);
+  assert.match(read('src/main.zig'), /WM_APP_CHAT_TOGGLE => \{\s*toggleChatView\(\);/);
 });
 
 test('IGSH-820 native refused-action tests, maps and existing Windows journey are wired', () => {
