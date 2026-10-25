@@ -57,4 +57,3 @@ def queue_replay(source, size):
     if len(QUEUE_CACHE) > 256:
         del QUEUE_CACHE[next(iter(QUEUE_CACHE))]
     return state
-
