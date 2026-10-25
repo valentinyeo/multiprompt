@@ -2100,8 +2100,11 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     try std.testing.expect(chatNewMessagesRect() == null);
 }
 
-fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing }) !void {
+fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply }) !void {
     const w = @import("win32.zig");
+    const saved_shell_draft = shell_draft;
+    defer shell_draft = saved_shell_draft;
+    shell_draft = .{};
     const Engine = struct {
         fn toggle() void {
             if (app_state.g_dictation_recording.load(.acquire)) {
@@ -2216,7 +2219,20 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         try std.testing.expectEqualSlices(u16, std.mem.span(L("typed more")), text[0..@intCast(n)]);
         try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
     }
-    if (action == .ctrl_start or action == .mic_start or action == .typing) return;
+    if (action == .reply) {
+        const typed = std.mem.span(L("typed"));
+        const incoming = std.mem.span(L("older shell draft"));
+        shell_draft = .{ .shell_id = 7, .known = true, .shell_hash = chat_shell_sync.draftHash(std.mem.span(L("other"))), .synced_hash = chat_shell_sync.draftHash(typed) };
+        var status: chat_transcript.Status = .{ .draft_known = true, .draft_len = incoming.len };
+        @memcpy(status.draft[0..incoming.len], incoming);
+        chatShellDraftPull(7, &status);
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, typed, text[0..@intCast(n)]);
+        try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+        try std.testing.expect(app_state.g_dictation_running.load(.acquire));
+        try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    }
+    if (action == .ctrl_start or action == .mic_start or action == .typing or action == .reply) return;
     if (action == .enter_stop) {
         _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
         var message: w.MSG = undefined;
@@ -2241,6 +2257,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
         const after = GetWindowTextW(edit, &text, text.len);
         try std.testing.expectEqualSlices(u16, std.mem.span(L("typed! spoken")), text[0..@intCast(after)]);
+        try std.testing.expect(shell_draft.edit_pending);
         try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
     }
 }
@@ -2271,6 +2288,10 @@ test "IGSH-812 text arrives only when dictation finishes" {
 
 test "IGSH-812 typing is never blocked while listening" {
     try testChatDictation(.typing);
+}
+
+test "IGSH-885 a reply arriving while dictating leaves the draft and the recording alone" {
+    try testChatDictation(.reply);
 }
 
 test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
