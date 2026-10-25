@@ -829,6 +829,7 @@ fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
         },
         0x0021 => return 3,
         WM_MOUSEMOVE => {
+            if (!list_input.skills.hover()) return 0;
             var client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client);
             if (GET_Y(lp) < 0 or GET_Y(lp) >= client.bottom - uiScaled(30)) return 0;
