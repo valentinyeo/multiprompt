@@ -1580,8 +1580,6 @@ function Snapshot([string]$Name) {
 
 function Assert-Foreground {
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
-        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
-        [void][VerifyNative]::SetForegroundWindow($script:window)
         $foreground = [VerifyNative]::GetForegroundWindow()
         $root = [VerifyNative]::GetAncestor($foreground, 2)
         $rootOwner = [VerifyNative]::GetAncestor($foreground, 3)
@@ -1596,8 +1594,8 @@ function Assert-Foreground {
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
-    Assert-Foreground
     [void][VerifyNative]::SetForegroundWindow($script:window)
+    Assert-Foreground
     Record $Label
     Assert-Foreground
     [VerifyNative]::Chord($Keys)
