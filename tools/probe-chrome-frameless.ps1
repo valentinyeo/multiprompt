@@ -194,7 +194,7 @@ function Corner-Clicks($stage) {
         $alive = [FrameProbe]::IsWindow([IntPtr]::new([Convert]::ToInt64($stage.hwnd.Substring(2), 16)))
         $events = if ($alive) { @(Evaluate 'window.probeClicks') } else { @() }
         $records += @{ corner=$corner; x=$point.x; y=$point.y; windowUnderPoint=(Hex-Handle $root); windowSurvived=$alive; deliveredToPage=($events.Count -gt $before); events=$events }
-        if (-not $alive) { throw 'Physical corner click closed Chrome' }
+        if (-not $alive) { break }
     }
     return $records
 }
@@ -217,7 +217,7 @@ try {
     }
     $version = (Get-Item $exe).VersionInfo
     $result.browser = @{ path=$exe; productName=$version.ProductName; fileVersion=$version.FileVersion; productVersion=$version.ProductVersion; brandedGoogleChrome=($version.ProductName -eq 'Google Chrome'); installationFailure=$installFailure; cdp=$null }
-    Write-Host ($result.browser | ConvertTo-Json -Compress)
+    Write-Host "Browser: $($version.ProductName) $($version.ProductVersion) at $exe"
     $httpPort = Free-Port
     $debugPort = Free-Port
     $server = [FrameProbe]::Serve($httpPort)
@@ -252,7 +252,6 @@ try {
     $result.stripCall = @{ previousStyle=('0x{0:X8}' -f ($previous.ToInt64() -band 0xffffffffL)); requestedStyle=('0x{0:X8}' -f $newStyle); setLastError=$setError; frameChanged=$frameChanged; immediatelyReadStyle=('0x{0:X8}' -f (Style $handle)) }
     Start-Sleep -Milliseconds 700
     $after = Snapshot 'after-strip'
-    $after.cornerClicks = @(Corner-Clicks $after)
     $result.stages += $after
     Cdp 'Page.navigate' @{ url="$baseUrl/second" } | Out-Null
     Wait-Page '/second'
@@ -267,10 +266,10 @@ try {
     Wait-Page '/third'
     Start-Sleep -Milliseconds 500
     $clicked = Snapshot 'after-link-click'
-    $clicked.cornerClicks = @(Corner-Clicks $clicked)
     $result.stages += $clicked
     $result.navigation += @{ method='normal anchor click via CDP mouse input, not Page.navigate or location assignment'; from='/second'; to='/third'; sameHwnd=($clicked.hwnd -eq $direct.hwnd); oldHwndStillExists=[FrameProbe]::IsWindow($handle); stylesStillStripped=($clicked.strippedBits -eq '0x00000000'); style=$clicked.style; hwnd=$clicked.hwnd }
-    $result.verdict = @{ recreatedOnNavigation=(@($result.navigation | Where-Object { -not $_.sameHwnd }).Count -gt 0); stylesRetainedOnBothNavigations=(@($result.navigation | Where-Object { -not $_.stylesStillStripped }).Count -eq 0); cornersClickableAfterStrip=(@($after.cornerClicks | Where-Object { -not $_.deliveredToPage }).Count -eq 0); resizableEdgeAfterStrip=$after.resizableByHitTest; draggableAfterStrip=$after.draggableByHitTest; visibility='See before/after corner screenshots; requires visual inspection rather than inference from GWL_STYLE' }
+    $clicked.cornerClicks = @(Corner-Clicks $clicked)
+    $result.verdict = @{ recreatedOnNavigation=(@($result.navigation | Where-Object { -not $_.sameHwnd }).Count -gt 0); stylesRetainedOnBothNavigations=(@($result.navigation | Where-Object { -not $_.stylesStillStripped }).Count -eq 0); cornersClickableAfterStrip=(@($clicked.cornerClicks | Where-Object { -not $_.deliveredToPage }).Count -eq 0); cornerClickStage=$clicked.label; cornerClickClosedWindow=(@($clicked.cornerClicks | Where-Object { -not $_.windowSurvived }).Count -gt 0); resizableEdgeAfterStrip=$after.resizableByHitTest; draggableAfterStrip=$after.draggableByHitTest; visibility='See before/after corner screenshots; requires visual inspection rather than inference from GWL_STYLE' }
     $result.status = 'complete'
 } catch {
     $result.status = 'error'
