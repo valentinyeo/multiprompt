@@ -29,6 +29,7 @@ var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const Key = struct { shell_id: u32 = 7, host: u8 = 0, tmux: [64]u8 = @splat(0) };
 var shells = [_]struct { kind: enum { tmux, local, ssh } = .tmux }{.{}};
+var clean_chat: bool = false;
 var shell_count: u32 = 1;
 var test_key: Key = .{};
 const g_chat_history_channels = [_]u8{ 0, 0, 0 };

@@ -49,6 +49,7 @@ var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
 var g_chat_active = true;
+var clean_chat: bool = false;
 var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
