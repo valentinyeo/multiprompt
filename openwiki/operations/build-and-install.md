@@ -21,7 +21,7 @@ After the release PR merges, GitHub Actions cross-builds x64 and ARM64 and publi
 
 ## Automatic desktop updates
 
-The window appears without waiting for GitHub. Checks and downloads run in the background at launch and every three hours. Only an already staged, verified release can install at cold launch before tabs restore, and only when no other workspace window is running.
+The window appears without waiting for GitHub. Checks and downloads run in the background at launch and every five minutes. Only an already staged, verified release can install at cold launch before tabs restore, and only when no other workspace window is running.
 
 Updates accept stable releases published by `github-actions[bot]` in `valentinyeo/multiprompt`. The embedded Ed25519 public key must verify the detached `SHA256SUMS.txt.sig` before any checksums are trusted. Native ARM64 or x64 app and bridge executables and the extension ZIP must match the signed manifest exactly. Authenticode policy remains additional: a signed installation requires a valid update signature from the same publisher.
 

@@ -69,13 +69,76 @@ for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'",
   assert.ok(driver.includes(input), `real input: ${input}`);
 }
 function foregroundInputContract(source) {
+  const guard = source.slice(source.indexOf('function Assert-Foreground {'), source.indexOf('function Wait-Foreground {'));
+  const wait = source.slice(source.indexOf('function Wait-Foreground {'), source.indexOf('function Press('));
   const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
-  assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
-  assert.match(press, /\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  const type = source.slice(source.indexOf('function Type-Text('), source.indexOf('function Click-WorkspacePill('));
+  for (const pattern of [
+    /for \(\$attempt = 0; \$attempt -lt 5; \$attempt\+\+\)/,
+    /\$foreground = \[VerifyNative\]::GetForegroundWindow\(\)/,
+    /\$root = \[VerifyNative\]::GetAncestor\(\$foreground, 2\)/,
+    /\$rootOwner = \[VerifyNative\]::GetAncestor\(\$foreground, 3\)/,
+    /\[uint32\]\$foregroundOwner = 0/,
+    /GetWindowThreadProcessId\(\$rootOwner, \[ref\]\$foregroundOwner\)/,
+    /if \(\$foreground -ne \[IntPtr\]::Zero -and \$root -ne \[IntPtr\]::Zero -and \$rootOwner -ne \[IntPtr\]::Zero -and\s*\(\$root -eq \$script:window -or \$foregroundOwner -eq \$process.Id\)\) \{ return \}/,
+    /if \(\$attempt -lt 4\) \{ Start-Sleep -Milliseconds 100 \}/,
+    /throw 'Refusing input: owned app is not foreground'/,
+  ]) assert.match(guard, pattern);
+  assert.equal((guard.match(/\breturn\b/g) || []).length, 1);
+  assert.equal((guard.match(/\bfor\s*\(/g) || []).length, 1);
+  assert.deepEqual([...guard.matchAll(/\[VerifyNative\]::(\w+)\(/g)].map(match => match[1]), [
+    'GetForegroundWindow', 'GetAncestor', 'GetAncestor', 'GetWindowThreadProcessId',
+  ]);
+  assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
+  assert.match(wait, /^function Wait-Foreground \{\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
+  assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
+  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
+  assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.equal((press.match(/::Chord\(/g) || []).length, 1);
+  assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
+  assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
+  assert.equal((type.match(/::Text\(/g) || []).length, 1);
+  assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
 }
+
 foregroundInputContract(driver);
 assert.throws(() => foregroundInputContract(driver.replaceAll('[void][VerifyNative]::SetForegroundWindow($script:window)', '')));
-assert.throws(() => foregroundInputContract(driver.replace('    Assert-Foreground\n    Record $Label', '    Record $Label')));
+assert.throws(() => foregroundInputContract(driver.replace('        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '    [void][VerifyNative]::SetForegroundWindow($script:window)')));
+for (const [before, after] of [
+  ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
+  ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
+  ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '        try { Assert-Foreground; return } catch {}\n        [void][VerifyNative]::SetForegroundWindow($script:window)'],
+  ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', ''],
+  ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
+  ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
+  ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
+  ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+  ['$attempt -lt 50', '$true'],
+  ['$attempt -lt 49', '$true'],
+  ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
+  ['    Assert-Foreground\n}\n\nfunction Press(', '    return\n}\n\nfunction Press('],
+  ['        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n', ''],
+  ['    Wait-Foreground\n', ''],
+  ['    Record $Label\n    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    Record $Label\n    [VerifyNative]::Chord($Keys)\n    Assert-Foreground'],
+  ['$attempt -lt 5', '$true'],
+  ['$attempt -lt 4', '$true'],
+  ['Start-Sleep -Milliseconds 100', 'Start-Sleep -Seconds 100'],
+  ['GetAncestor($foreground, 3)', 'GetAncestor($foreground, 2)'],
+  ['GetWindowThreadProcessId($rootOwner, [ref]$foregroundOwner)', 'GetWindowThreadProcessId($foreground, [ref]$foregroundOwner)'],
+  ['$foreground -ne [IntPtr]::Zero -and', ''],
+  ['$root -ne [IntPtr]::Zero -and', ''],
+  ['$rootOwner -ne [IntPtr]::Zero -and', ''],
+  ['$root -eq $script:window -or $foregroundOwner -eq $process.Id', '$true'],
+  ["throw 'Refusing input: owned app is not foreground'", 'return'],
+  ['    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)'],
+  ['    Assert-Foreground\n    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)'],
+]) {
+  const broken = driver.replaceAll(before, after);
+  assert.notEqual(broken, driver, before);
+  assert.throws(() => foregroundInputContract(broken), assert.AssertionError, before);
+}
 function shiftedShortcutTimingContract(source) {
   const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));
   assert.ok(Number.isFinite(debounce) && debounce > 0, 'production browser shortcut debounce exists');
@@ -108,9 +171,10 @@ function browserForegroundContract(source) {
   }
   assert.match(source, /function Open-BrowserPane\([^\n]*\) \{\s*Palette 'open browser'\s*Press @\(0x0D\) 'Enter: Open Browser Pane'\s*\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s*Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s*return \$pane\s*\}/);
   assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
-  assert.match(source, /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/);
+  foregroundInputContract(source);
   for (const name of ['Press', 'Type-Text']) {
-    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*(?:Wait-Until \\{[^}]*\\} '[^']*'\\s*)?Assert-Foreground\\s*Record`));
+    const precondition = name === 'Press' ? 'Wait-Foreground' : 'Assert-Foreground';
+    assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*${precondition}\\s*Record`));
   }
 }
 browserForegroundContract(driver);
@@ -122,10 +186,12 @@ for (const [before, after] of [
   ['    Focus-BrowserPaneOwner $Step $pane.browser_connection_id\n', ''],
   ["            Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id\n", ''],
   ["throw 'Refusing input: owned app is not foreground'", 'return'],
-  ['    Assert-Foreground\n    Record $Label', '    Record $Label'],
+  ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '    [void][VerifyNative]::SetForegroundWindow($script:window)'],
+  ['    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)'],
+  ['    Assert-Foreground\n    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)'],
 ]) assert.throws(() => browserForegroundContract(driver.replace(before, after)), `reject foreground regression: ${before}`);
 const activation = '    [void][VerifyNative]::SetForegroundWindow($script:window)\n';
-const earlyActivation = driver.replace(activation, '').replace('function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n', `function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n${activation}`);
+const earlyActivation = driver.replace('    Record "Activate main window after browser-pane-stuck ${Step} docking"\n' + activation, '    Record "Activate main window after browser-pane-stuck ${Step} docking"\n').replace('function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n', `function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {\n${activation}`);
 assert.throws(() => browserForegroundContract(earlyActivation), 'activation before docking repeats the original race');
 function scratchCleanupContract(source) {
   assert.ok(source.includes('$script:scratchLinks = @()'), 'reparse evidence starts with an empty list');

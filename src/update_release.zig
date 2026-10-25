@@ -5,7 +5,7 @@ const update_check = @import("update_check.zig");
 const APP_VERSION = @import("main.zig").APP_VERSION;
 
 pub const IGSH_246 = true;
-const interval_ms = 3 * 60 * 60 * 1000;
+const interval_ms = 5 * 60 * 1000;
 pub const WM_RESPONSIVE = 0x85F4;
 var launch_args: []const []const u8 = &.{};
 var last_check: u64 = 0;

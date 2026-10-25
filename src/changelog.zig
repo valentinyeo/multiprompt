@@ -53,6 +53,10 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.870", .items = &.{
+        .{ .text = "Chat View now loads every message in long sessions, including after reopening the app.", .ticket = "IGSH-815" },
+        .{ .text = "Keyboard selection stays in command and skill lists until you move the mouse.", .ticket = "IGSH-836" },
+    } },
     .{ .ver = "0.28.869", .items = &.{
         .{ .text = "Pin to Top now prevents closing or archiving a session until you unpin it, without adding an icon to the tab.", .ticket = "IGSH-820" },
         .{ .text = "Session locking and per-session Always view commands are removed; Chat View toggles work on every tab.", .ticket = "IGSH-820" },

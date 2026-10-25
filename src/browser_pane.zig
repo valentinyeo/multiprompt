@@ -252,7 +252,6 @@ const BROWSER_HUNG_MISS_LIMIT = @import("app_state.zig").BROWSER_HUNG_MISS_LIMIT
 const BROWSER_PLACEHOLDER_NOT_OPEN_MS = @import("app_state.zig").BROWSER_PLACEHOLDER_NOT_OPEN_MS;
 const BrowserPlaceholder = @import("app_state.zig").BrowserPlaceholder;
 const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
-const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const invalidateSidebar = @import("window_layout.zig").invalidateSidebar;
@@ -4108,9 +4107,6 @@ pub fn paintBrowserSplitter(hdc: HANDLE) void {
     _ = DeleteObject(br);
 }
 
-fn paneFocusBorderW() i32 {
-    return uiScaled(1);
-}
 fn paneFocusRingPad() i32 {
     return uiScaled(6);
 }
@@ -4119,9 +4115,6 @@ fn paneFocusContentGap() i32 {
 }
 pub fn paneFocusInset() i32 {
     return paneFocusRingPad() + paneFocusContentGap();
-}
-fn paneFocusCornerR() i32 {
-    return uiScaled(8);
 }
 
 pub fn paneRingState() u8 {
@@ -4137,59 +4130,6 @@ pub fn paneRingRepaintNeeded(last: *u8, state: u8) bool {
 
 pub fn activePaneBorderOn() bool {
     return browserPaneActive() and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native;
-}
-
-pub fn paintActivePaneBorder(hdc: HANDLE) void {
-    if (app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or app_state.g_snippet_create_active or (app_state.g_search_active and !paletteAnchoredBesideBrowser())) return;
-    if (!foregroundIsOurs()) return;
-    if (chatViewOwnsInput() and !(activePaneBorderOn() and activeBrowserHasForegroundFocus())) {
-        if (!browserSlotReserved()) return;
-        var rc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_main_hwnd, &rc);
-        const slot = @import("window_layout.zig").activePaneRects(rc).primary;
-        const pad = paneFocusRingPad();
-        const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
-        const old_pen = SelectObject(hdc, pen);
-        const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        _ = @import("smooth.zig").drawRoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
-        _ = SelectObject(hdc, old_brush);
-        _ = SelectObject(hdc, old_pen);
-        _ = DeleteObject(pen);
-        return;
-    }
-    if (!activePaneBorderOn()) return;
-    const layout = calcBrowserLayout() orelse return;
-    const pad = paneFocusRingPad();
-    const browser_focused = activeBrowserHasForegroundFocus();
-    const slot = if (browser_focused) RECT{
-        .left = layout.browser_x,
-        .top = layout.browser_y,
-        .right = layout.browser_x + layout.browser_w,
-        .bottom = layout.browser_y + layout.browser_h,
-    } else blk: {
-        var rc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_main_hwnd, &rc);
-        break :blk @import("window_layout.zig").activePaneRects(rc).primary;
-    };
-    const pen = CreatePen(0, paneFocusBorderW(), paneFocusRingColor());
-    const old_pen = SelectObject(hdc, pen);
-    const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    _ = @import("smooth.zig").drawRoundRect(hdc, slot.left + pad, slot.top + pad, slot.right - pad, slot.bottom - pad, paneFocusCornerR(), paneFocusCornerR());
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(pen);
-}
-
-fn paneFocusRingColor() DWORD {
-    if (app_state.g_multiprompt_theme) return multipromptColorOr("focus_ring", RGB(81, 80, 132));
-    return if (app_state.g_light_theme) RGB(175, 175, 175) else if (app_state.g_amoled_theme) RGB(70, 70, 70) else RGB(95, 95, 95);
-}
-
-fn paneRingBottomLineOnMask() bool {
-    if (app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or app_state.g_snippet_create_active or (app_state.g_search_active and !paletteAnchoredBesideBrowser())) return false;
-    if (!activePaneBorderOn()) return false;
-    if (!foregroundIsOurs()) return false;
-    return activeBrowserHasForegroundFocus();
 }
 
 pub fn invalidateBrowserBottomMask() void {
@@ -4665,16 +4605,6 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
                 if (border_brush != null) {
                     for (lines) |line| _ = FillRect(hdc, &line, border_brush);
                     _ = DeleteObject(border_brush);
-                }
-            }
-            if (side == .bottom and paneRingBottomLineOnMask()) {
-                const ring_width = paneFocusBorderW();
-                var line_rc = RECT{ .left = 0, .top = paneFocusContentGap() + bw - ring_width, .right = rc.right, .bottom = paneFocusContentGap() + bw };
-                if (line_rc.top < 0) line_rc.top = 0;
-                const lb = CreateSolidBrush(paneFocusRingColor());
-                if (lb != null) {
-                    _ = FillRect(hdc, &line_rc, lb);
-                    _ = DeleteObject(lb);
                 }
             }
             return 0;

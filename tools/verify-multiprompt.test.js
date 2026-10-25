@@ -230,10 +230,272 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.doesNotMatch(transport, /Start-Process|Invoke-Expression|PostMessage/);
 });
 
+function assertsOwnedInput(source) {
+  const guard = source.slice(source.indexOf('function Assert-Foreground {'), source.indexOf('function Wait-Foreground {'));
+  const wait = source.slice(source.indexOf('function Wait-Foreground {'), source.indexOf('function Press('));
+  const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
+  const type = source.slice(source.indexOf('function Type-Text('), source.indexOf('function Click-WorkspacePill('));
+  for (const pattern of [
+    /for \(\$attempt = 0; \$attempt -lt 5; \$attempt\+\+\)/,
+    /\$foreground = \[VerifyNative\]::GetForegroundWindow\(\)/,
+    /\$root = \[VerifyNative\]::GetAncestor\(\$foreground, 2\)/,
+    /\$rootOwner = \[VerifyNative\]::GetAncestor\(\$foreground, 3\)/,
+    /\[uint32\]\$foregroundOwner = 0/,
+    /GetWindowThreadProcessId\(\$rootOwner, \[ref\]\$foregroundOwner\)/,
+    /if \(\$foreground -ne \[IntPtr\]::Zero -and \$root -ne \[IntPtr\]::Zero -and \$rootOwner -ne \[IntPtr\]::Zero -and\s*\(\$root -eq \$script:window -or \$foregroundOwner -eq \$process.Id\)\) \{ return \}/,
+    /if \(\$attempt -lt 4\) \{ Start-Sleep -Milliseconds 100 \}/,
+    /throw 'Refusing input: owned app is not foreground'/,
+  ]) assert.match(guard, pattern);
+  assert.equal((guard.match(/\breturn\b/g) || []).length, 1);
+  assert.equal((guard.match(/\bfor\s*\(/g) || []).length, 1);
+  assert.deepEqual([...guard.matchAll(/\[VerifyNative\]::(\w+)\(/g)].map(match => match[1]), [
+    'GetForegroundWindow', 'GetAncestor', 'GetAncestor', 'GetWindowThreadProcessId',
+  ]);
+  assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
+  assert.match(wait, /^function Wait-Foreground \{\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
+  assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
+  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
+  assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assert.equal((press.match(/::Chord\(/g) || []).length, 1);
+  assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
+  assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
+  assert.equal((type.match(/::Text\(/g) || []).length, 1);
+  assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
+}
+
+test('IGSH-807: foreground ownership is bounded, refuses foreign input and is rechecked at injection', () => {
+  assertsOwnedInput(control);
+  for (const [before, after] of [
+    ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
+    ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
+    ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '        try { Assert-Foreground; return } catch {}\n        [void][VerifyNative]::SetForegroundWindow($script:window)'],
+    ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', ''],
+    ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
+    ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
+    ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
+    ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ['$attempt -lt 50', '$true'],
+    ['$attempt -lt 49', '$true'],
+    ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
+    ['    Assert-Foreground\n}\n\nfunction Press(', '    return\n}\n\nfunction Press('],
+    ['        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n', ''],
+    ['    Wait-Foreground\n', ''],
+    ['    Record $Label\n    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    Record $Label\n    [VerifyNative]::Chord($Keys)\n    Assert-Foreground'],
+    ['$attempt -lt 5', '$true'],
+    ['$attempt -lt 4', '$true'],
+    ['Start-Sleep -Milliseconds 100', 'Start-Sleep -Seconds 100'],
+    ['GetAncestor($foreground, 3)', 'GetAncestor($foreground, 2)'],
+    ['GetWindowThreadProcessId($rootOwner, [ref]$foregroundOwner)', 'GetWindowThreadProcessId($foreground, [ref]$foregroundOwner)'],
+    ['$foreground -ne [IntPtr]::Zero -and', ''],
+    ['$root -ne [IntPtr]::Zero -and', ''],
+    ['$rootOwner -ne [IntPtr]::Zero -and', ''],
+    ['$root -eq $script:window -or $foregroundOwner -eq $process.Id', '$true'],
+    ["throw 'Refusing input: owned app is not foreground'", 'return'],
+    ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '    [void][VerifyNative]::SetForegroundWindow($script:window)'],
+    ['    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)'],
+    ['    Assert-Foreground\n    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)'],
+  ]) {
+    const broken = control.replaceAll(before, after);
+    assert.notEqual(broken, control, before);
+    assert.throws(() => assertsOwnedInput(broken), assert.AssertionError, before);
+  }
+});
+
+test('IGSH-807: real PowerShell helpers accept owned roots and bound transient or foreign focus without injecting', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh807-foreground-'));
+  const helpers = control.slice(control.indexOf('function Assert-Foreground {'), control.indexOf('function Click-WorkspacePill('));
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+public static class VerifyNative {
+    public static IntPtr Foreground = new IntPtr(10), Root = new IntPtr(10), RootOwner = new IntPtr(10);
+    public static uint Owner = 42;
+    public static int Reads, Chords, Texts, Activations, Allows, RecoverOnActivation;
+    public static bool LoseOnActivation;
+    public static IntPtr GetForegroundWindow() { Reads++; return Foreground; }
+    public static IntPtr GetAncestor(IntPtr hwnd, uint flags) { return flags == 2 ? Root : RootOwner; }
+    public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid) { pid = Owner; return 1; }
+    public static bool AllowSetForegroundWindow(uint pid) { Allows++; return true; }
+    public static bool SetForegroundWindow(IntPtr hwnd) {
+        Activations++;
+        if (LoseOnActivation) Foreign();
+        if (RecoverOnActivation > 0 && Activations >= RecoverOnActivation) { Foreground = Root = RootOwner = hwnd; Owner = 42; }
+        return true;
+    }
+    public static void Chord(int[] keys) { Chords++; }
+    public static void Text(string text) { Texts++; }
+    public static void Foreign() { Foreground = new IntPtr(99); Root = new IntPtr(99); RootOwner = new IntPtr(99); Owner = 99; }
+}
+'@
+$script:window = [IntPtr]10
+$process = [pscustomobject]@{ Id = 42 }
+$script:recover = $false
+$script:loseOnRecord = $false
+$script:sleeps = 0
+function Doctor {}
+function Record($Label) { if ($script:loseOnRecord) { [VerifyNative]::Foreign() } }
+function Start-Sleep([int]$Milliseconds) {
+    if ($Milliseconds -ne 100) { throw 'Wrong retry interval' }
+    $script:sleeps++
+    if ($script:recover) { [VerifyNative]::Owner = 42 }
+}
+${helpers}
+function Reset {
+    [VerifyNative]::Foreground = [IntPtr]10; [VerifyNative]::Root = [IntPtr]10; [VerifyNative]::RootOwner = [IntPtr]10
+    [VerifyNative]::Owner = 42; [VerifyNative]::Reads = 0; [VerifyNative]::Chords = 0; [VerifyNative]::Texts = 0; [VerifyNative]::Activations = 0; [VerifyNative]::Allows = 0; [VerifyNative]::RecoverOnActivation = 0
+    [VerifyNative]::LoseOnActivation = $false; $script:loseOnRecord = $false; $script:recover = $false; $script:sleeps = 0
+}
+function Require($Ok, $Message) { if (-not $Ok) { throw $Message } }
+function Refuses([scriptblock]$Action) {
+    $refused = $false
+    try { & $Action } catch {
+        if ($_.Exception.Message -cne 'Refusing input: owned app is not foreground') { throw }
+        $refused = $true
+    }
+    Require $refused 'Foreign input accepted'
+    Require ([VerifyNative]::Chords -eq 0 -and [VerifyNative]::Texts -eq 0) 'Foreign input injected'
+}
+Reset
+Press @(0x12, 0x43) 'owned main'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 1 -and [VerifyNative]::Allows -eq 1) 'Owned main input failed'
+Reset
+[VerifyNative]::Owner = 99
+Assert-Foreground
+Require ([VerifyNative]::Reads -eq 1) 'Owned GA_ROOT was rejected'
+Reset
+[VerifyNative]::Foreground = [IntPtr]20; [VerifyNative]::Root = [IntPtr]20
+Assert-Foreground
+Require ([VerifyNative]::Reads -eq 1) 'App-process root owner was rejected'
+Reset
+[VerifyNative]::Foreign(); $script:recover = $true
+Assert-Foreground
+Require ([VerifyNative]::Reads -eq 2 -and $script:sleeps -eq 1) 'Transient foreground did not recover within bound'
+Reset
+[VerifyNative]::Foreign()
+Refuses { Press @(0x41) 'foreign' }
+Require ([VerifyNative]::Reads -eq 255 -and $script:sleeps -eq 253 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Foreign refusal did not respect retry or activation boundary'
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Press @(0x41) 'recovered on second activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2 -and $script:sleeps -eq 5) 'Press did not retry foreground activation'
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 50
+Press @(0x41) 'recovered on last activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50 -and $script:sleeps -eq 245) 'Press did not allow the last bounded activation'
+foreach ($field in @('Foreground', 'Root', 'RootOwner')) {
+    Reset
+    if ($field -eq 'Foreground') { [VerifyNative]::Foreground = [IntPtr]::Zero }
+    if ($field -eq 'Root') { [VerifyNative]::Root = [IntPtr]::Zero }
+    if ($field -eq 'RootOwner') { [VerifyNative]::RootOwner = [IntPtr]::Zero }
+    Refuses { Assert-Foreground }
+    Require ([VerifyNative]::Reads -eq 5) 'Null HWND bypassed bounded ownership checks'
+}
+Reset
+[VerifyNative]::LoseOnActivation = $true
+Refuses { Press @(0x41) 'lost on activation' }
+Reset
+$script:loseOnRecord = $true
+Refuses { Press @(0x41) 'lost before chord' }
+Reset
+$script:loseOnRecord = $true
+Refuses { Type-Text 'lost before text' }
+Reset
+Type-Text 'owned text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
+Write-Host 'IGSH-807 owned foreground and bounded retry behaviour passed'
+`;
+  try {
+    const file = path.join(dir, 'foreground.ps1');
+    fs.writeFileSync(file, script);
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /IGSH-807 owned foreground and bounded retry behaviour passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function assertsPaneFocusGeometry(source, workflowText) {
+  const focus = source.slice(source.indexOf("            foreach ($theme in @('dark', 'multiprompt'"), source.indexOf("            Select-Theme 'dark' 'pane-layout-final-dark'"));
+  assert.match(focus, /foreach \(\$theme in @\('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system'\)\)/);
+  assert.match(focus, /foreach \(\$view in @\('shell', 'chat'\)\)/);
+  assert.match(focus, /foreach \(\$cycle in @\(1, 2\)\)/);
+  for (const required of [
+    'Wait-ConsoleText $command', "(Get-Content $marker -Raw).Trim() -ceq $step",
+    "(Get-Content $returnMarker -Raw).Trim() -ceq 'returned'",
+    "'Alt+Q selected the owned browser'", "'Refusing browser probe outside the Alt+Q-selected pane'",
+    "('IGSH807 keys ' + $pageKeys + ' ')", "'browser page received the exact next key'",
+    "'Browser input changed the chat draft'", "'Alt+Q lost the chat draft'",
+    "[VerifyNative]::EditText($composer) -ceq ($draft + '-returned')",
+    '$focusProofs += @{ theme = $theme; view = $view; cycle = $cycle; pageKeys = $pageKeys; pixels = $pixels }',
+    "Save-Json $focusProofs 'focus-ring-proof.json'",
+    "if (@($focusProofs | Where-Object { $_.pixels.mismatches -ne 0 }).Count -ne 0) { throw 'IGSH-807 focus ring pixels differ from the unfocused surface' }",
+  ]) assert.ok(focus.includes(required), required);
+  assert.doesNotMatch(focus, /SetForegroundWindow|FocusOwnedWindow|BringToForeground/);
+  const pane = source.slice(source.indexOf("        'pane-layout' {"), source.indexOf("        'browser-switch-speed' {"));
+  for (const match of pane.matchAll(/^([ \t]*)\[VerifyNative\]::(?:Chord|Text)\(/gm)) {
+    assert.match(pane.slice(0, match.index), /Assert-Foreground\r?\n$/);
+  }
+  const final = pane.slice(pane.indexOf("            Select-Theme 'dark' 'pane-layout-final-dark'"), pane.indexOf("            Save-Json $proof 'pane-layout-pixels.json'"));
+  const maskCapture = pane.slice(pane.indexOf("                Press @(0x11, 0x32) 'Ctrl+2: restore original console"), pane.indexOf('                $maskColors.themes[$theme].pixels ='));
+  for (const capture of [final, maskCapture]) {
+    assert.match(capture, /Wait-WorkspaceSurface \$initial.active_workspace \$consoleTab \$false/);
+    for (const required of [
+      'GetForegroundWindow() -ne $console', 'PaneWindow($script:window) -ne $browser',
+      "GetProp($browser, 'ZigShellPaneOwner') -ne $script:window", 'IsZoomed($script:window)',
+      '$frame = New-Object VerifyNative+Rect', '$client = New-Object VerifyNative+Rect',
+      '$consoleRect = New-Object VerifyNative+Rect', '$browserRect = New-Object VerifyNative+Rect',
+      '$origin = New-Object VerifyNative+Point', 'GetWindowRect($script:window, [ref]$frame)',
+      'GetClientRect($script:window, [ref]$client)', 'ClientToScreen($script:window, [ref]$origin)',
+      'GetWindowRect($console, [ref]$consoleRect)', 'GetWindowRect($browser, [ref]$browserRect)',
+      '$client.Left += $origin.X; $client.Right += $origin.X; $client.Top += $origin.Y; $client.Bottom += $origin.Y',
+      '$state = Read-Session', '$state.tabs[$consoleTab].shell_id -ne $consoleShellId',
+      "$state.tabs[$consoleTab].PSObject.Properties['cv'] -and $state.tabs[$consoleTab].cv",
+      '$scale = 100', "if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }",
+      '$dpi = [VerifyNative]::GetDpiForWindow($script:window)',
+      "$hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills",
+    ]) assert.ok(capture.includes(required), required);
+    assert.ok(capture.indexOf('$dpi =') < capture.indexOf('Snapshot '));
+    assert.doesNotMatch(capture, /\$console =|\$browser =/);
+  }
+  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills\)/);
+  assert.match(final, /Fresh console UIA and HWND identity\/bounds disagree/);
+  for (const required of [
+    "'9618091700e09f5958a48390449dc5067874d5dd'",
+    "$red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface'",
+    '$proofList.Count -ne 28 -or $withoutRing -ne 0',
+    'if ([int]$proof.pixels.mismatches -le 0) { $withoutRing++ }',
+  ]) assert.ok(workflowText.includes(required), required);
+}
+
+test('IGSH-807: every raw injection is owned, all focus proofs remain strict and final/mask geometry is fresh', () => {
+  assertsPaneFocusGeometry(control, workflow);
+  for (const required of [
+    "'dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system'", "@('shell', 'chat')", '@(1, 2)',
+    '$_.pixels.mismatches -ne 0', 'GetForegroundWindow() -ne $console',
+    'GetWindowRect($console, [ref]$consoleRect)', 'GetWindowRect($browser, [ref]$browserRect)',
+    '$client = New-Object VerifyNative+Rect', 'GetClientRect($script:window, [ref]$client)',
+    'ClientToScreen($script:window, [ref]$origin)', '$dpi = [VerifyNative]::GetDpiForWindow($script:window)',
+    '$state.tabs[$consoleTab].shell_id -ne $consoleShellId',
+  ]) {
+    const broken = control.replaceAll(required, '');
+    assert.notEqual(broken, control, required);
+    assert.throws(() => assertsPaneFocusGeometry(broken, workflow), assert.AssertionError, required);
+  }
+  const unguarded = control.replaceAll('                        Assert-Foreground\n                        [VerifyNative]::Chord', '                        [VerifyNative]::Chord');
+  assert.notEqual(unguarded, control);
+  assert.throws(() => assertsPaneFocusGeometry(unguarded, workflow), assert.AssertionError);
+  for (const required of ['$proofList.Count -ne 28 -or $withoutRing -ne 0', "$red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface'"]) {
+    assert.throws(() => assertsPaneFocusGeometry(control, workflow.replace(required, '$false')), assert.AssertionError);
+  }
+});
+
 test('docked native browser handoff retains identity, visibility and strict foreign-input guards', () => {
-  const guard = control.slice(control.indexOf('function Assert-Foreground {'), control.indexOf('function Press('));
   const handoff = control.slice(control.indexOf('function Focus-BrowserPaneOwner('), control.indexOf('function Assert-ConnectedPaneStaysVisible('));
-  const refusesForeign = /function Assert-Foreground \{\s*if \(\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -ne \$script:window\) \{ throw 'Refusing input: owned app is not foreground' \}\s*\}/;
   const dockedOwner = /\$pane.browser_state -eq 'connected' -and\s*\$pane.browser_connection_id -eq \$ConnectionId -and \[VerifyNative\]::PaneVisible\(\$script:window\)/;
   const waitsBeforeActivation = /Wait-Until \{[\s\S]*\} "browser-pane-stuck \$\{Step\}: docked pane ready for main-window activation" 25\s*Doctor\s*Record[^\n]*\n\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/;
   const verifiesForeground = /Wait-Until \{ \[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window \} "browser-pane-stuck \$\{Step\}: main window is foreground" 5/;
@@ -242,8 +504,7 @@ test('docked native browser handoff retains identity, visibility and strict fore
     assert.throws(() => assert.match(handoff.replace(pattern, ''), pattern));
   }
   assert.match(handoff, /Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id/);
-  assert.match(guard, refusesForeign);
-  assert.throws(() => assert.match(guard.replace(refusesForeign, ''), refusesForeign));
+  assertsOwnedInput(control);
 });
 
 test('G2: discovery, creation and repeat use saved names and identical arguments', () => {
@@ -281,7 +542,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllBytes[\s\S]*?\.request.bin/);
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
-  assert.match(control, /function Press[^\n]*\n\s+Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+  assertsOwnedInput(control);
   assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
@@ -764,8 +1025,7 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     assert.doesNotMatch(publication, /installHook|BringToForeground|Start-Sleep/);
     assert.match(restart, /Wait-Until \{\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} "\$Stage relaunched window foreground before input"\s+Wait-Until \{\s+\$process.Refresh\(\)\s+\$script:window = \$process.MainWindowHandle\s+\$state = Read-Inbox\s+\$trace = \(\(Get-Content \$log -Raw\) -join ''\).Substring\(\$logStart\)\s+\$script:window -ne \[IntPtr\]::Zero -and \$null -ne \$state -and\s+\$state.hwnd -eq \$script:window.ToInt64\(\).ToString\(\) -and @\(\$state.shells\).Count -gt 0 -and\s+\$trace -match 'launch step=browser' -and \$trace -match 'installHook: KEYBOARD_LL installed'\s+\} "\$Stage relaunch owns its published state after session restore" 60\s+Doctor/);
     assert.doesNotMatch(restart, /Assert-Foreground/);
-    const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Type-Text('));
-    assert.match(press, /Doctor\s+Wait-Until \{\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+\[VerifyNative\]::GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window\s+\} 'owned app foreground for keyboard input'\s+Assert-Foreground\s+Record \$Label\s+\[VerifyNative\]::Chord\(\$Keys\)/);
+    assertsOwnedInput(driver);
     assert.match(driver, /SetForegroundWindow\(\$script:window\)\s+Wait-Until[^\n]+ 'foreground main window'/);
     assert.match(driver, /try \{ Snapshot 'failure' \} catch/);
     assert.match(driver, /Save-Json \$focus \(\$Name \+ '.focus.json'\)/);
