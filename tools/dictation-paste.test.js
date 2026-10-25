@@ -124,7 +124,7 @@ test("IGSH-846 recording Escape discards audio and never delivers a transcript",
   assert.match(ready.slice(discard, ready.indexOf('if (was_voice_listening and')), /return;/,
     "even a late result must not reach any composer, shell or clipboard delivery");
   const toggle = functionBody("toggleDictation", "pasteClipboardToShellDirect");
-  assert.match(toggle, /g_dictation_cancelled\.store\(false, \.release\);[\s\S]{0,240}?g_dictation_recording\.store\(true, \.release\)/);
+  assert.match(toggle, /g_dictation_cancelled\.store\(false, \.release\);\s*g_dictation_recording\.store\(true, \.release\)/);
 });
 
 test("IGSH-846 cancellation preserves an existing draft and restores the idle mic", () => {

@@ -1620,9 +1620,6 @@ pub var g_shot_paste_count: usize = 0;
 
 pub var g_dictation_recording = std.atomic.Value(bool).init(false);
 pub var g_dictation_running = std.atomic.Value(bool).init(false);
-pub var g_dictation_start_tick: u64 = 0;
-pub var g_dictation_level = std.atomic.Value(u32).init(0);
-pub var g_dictation_send_on_ready: bool = false;
 pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_cancelled = std.atomic.Value(bool).init(false);
 pub var g_dictation_escape_held: bool = false;
