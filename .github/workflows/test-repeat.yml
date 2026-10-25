@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: A tools/*.test.js path
+        description: A tools/*.test.js path or IGSH-816 CLEAN
         required: true
         default: tools/bridge-profile-pipes.test.js
         type: string
@@ -40,8 +40,8 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const { TEST, COUNT, GITHUB_OUTPUT } = process.env;
-          if (!/^tools\/[a-zA-Z0-9._-]+\.test\.js$/.test(TEST) || !fs.statSync(TEST).isFile()) {
-            throw new Error('test must name an existing tools/*.test.js file');
+          if (TEST !== 'IGSH-816 CLEAN' && (!/^tools\/[a-zA-Z0-9._-]+\.test\.js$/.test(TEST) || !fs.statSync(TEST).isFile())) {
+            throw new Error('test must name an existing tools/*.test.js file or IGSH-816 CLEAN');
           }
           if (!/^(?:[1-9]|1[0-9]|20)$/.test(COUNT)) {
             throw new Error('count must be an integer from 1 to 20');
@@ -80,8 +80,10 @@ jobs:
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Build test executables
+        if: inputs.test != 'IGSH-816 CLEAN'
         run: zig build --summary all
       - name: Run selected test
+        if: inputs.test != 'IGSH-816 CLEAN'
         env:
           TEST: ${{ inputs.test }}
         shell: pwsh
@@ -90,3 +92,13 @@ jobs:
           $env:ZIG_EXE = (Get-Command zig).Source
           node --test $env:TEST
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run desktop tests with inherited render state
+        if: inputs.test == 'IGSH-816 CLEAN'
+        run: zig build test-main --summary all -Dcpu=x86_64_v3
+      - name: Run CLEAN chat pixel tests
+        if: inputs.test == 'IGSH-816 CLEAN' && !cancelled()
+        shell: bash
+        run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+      - name: Require every CLEAN pixel test
+        if: inputs.test == 'IGSH-816 CLEAN' && always()
+        run: node tools/check-clean-chat-output.mjs clean-chat-output.log

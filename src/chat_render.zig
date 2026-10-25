@@ -5041,6 +5041,10 @@ const CleanChatScene = enum {
 };
 
 fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
+    try std.testing.expect(@import("fonts.zig").register());
+    defer @import("fonts.zig").unregister();
+    @import("drawing.zig").resetFontCache();
+    defer @import("drawing.zig").resetFontCache();
     const w = @import("win32.zig");
     const old_clean = app_state.clean_chat;
     const old_theme = app_state.g_light_theme;
