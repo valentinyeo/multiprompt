@@ -47,7 +47,7 @@ fn chatRelayout(client_width: i32) void {
                 if (g_chat_echo_layout_count >= g_chat_echo_layout.len) break;
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
-                var rc = chatMeasureEchoRect(hdc, e.text, width, y);
+                var rc = chatMeasureEchoRect(hdc, e.text, width, y, true);
                 rc.left += g_chat_content_left;
                 rc.right += g_chat_content_left;
                 g_chat_echo_layout[g_chat_echo_layout_count] = rc;
