@@ -6,6 +6,8 @@ on:
     types: [completed]
     branches: [master]
   workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
 
 permissions:
   contents: write
@@ -18,6 +20,7 @@ concurrency:
 jobs:
   tag:
     if: >-
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -29,32 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: master
           fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Require a tested unreleased master commit
-        id: admit
+      - name: Tag the newest green master commit
+        id: tag
         env:
           GH_TOKEN: ${{ github.token }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: bash tools/auto-release-admit.sh "$TESTED_SHA" "$GITHUB_EVENT_NAME" >> "$GITHUB_OUTPUT"
-      - name: Tag the tested master commit
-        id: tag
-        if: steps.admit.outputs.ready == 'true'
-        env:
-          RELEASE_TAG: ${{ steps.admit.outputs.tag }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          set -euo pipefail
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            echo "$RELEASE_TAG already exists; refusing to move it" >&2
-            exit 1
-          fi
-          git tag "$RELEASE_TAG" "$TESTED_SHA"
-          git push origin "refs/tags/$RELEASE_TAG"
-          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+        run: bash tools/auto-release-admit.sh >> "$GITHUB_OUTPUT"
 
   release:
     needs: tag
