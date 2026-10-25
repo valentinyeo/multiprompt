@@ -1290,11 +1290,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_hover_link = null;
     app_state.g_chat_sel_transcript_focus = false;
     chatSelectionClear();
-    const reused = chat_layout_snapshot.restore(cached);
-    if (verboseLoggingEnabled()) {
-        var buf: [96]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&buf, "[switch] layout reused {d} of {d} blocks", .{ reused, app_state.g_chat_block_count }) catch "[switch] layout reused");
-    }
+    _ = chat_layout_snapshot.restore(cached);
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_block_count == 0) chatFileRequest(chatFileIdentity());
