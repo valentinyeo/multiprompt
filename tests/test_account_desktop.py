@@ -236,13 +236,13 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (reply.cancelled)', function(MAIN, 'handleLayoutReply'))
 
     def test_version_matches_window_titles(self):
-        self.assertRegex(MAIN, r'const APP_VERSION = "[^"\n]+"')
+        self.assertRegex(MAIN, r'const APP_VERSION = build_config\.app_version orelse "[^"\n]+"')
         self.assertIn('L("multiprompt v" ++ APP_VERSION ++ " [DEV]")', MAIN)
         self.assertIn('L("multiprompt v" ++ APP_VERSION)', MAIN)
 
     def test_version_matches_latest_changelog(self):
         def version(source):
-            match = re.search(r'const APP_VERSION = "(\d+\.\d+\.\d+)";', source)
+            match = re.search(r'const APP_VERSION = build_config\.app_version orelse "(\d+\.\d+\.\d+)";', source)
             return match[1] if match else None
         current = version(MAIN)
         self.assertIsNotNone(current)

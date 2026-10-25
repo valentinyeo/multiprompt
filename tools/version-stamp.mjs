@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
-const versionLine = /^pub const APP_VERSION = "(\d+)\.(\d+)\.(\d+)";$/m;
-const changelogStart = 'pub const CHANGELOG = [_]ChangelogEntry{';
+const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
+const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
 
 export function plainChange(line) {
@@ -29,12 +29,13 @@ export function checkFragments(base, head, changed) {
   }
 }
 
-export function stampTree(files) {
+export function stampTree(files, requestedVersion) {
   const removed = Object.keys(files).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md').sort();
   if (!removed.length) return null;
   const current = files[mainPath]?.match(versionLine);
   if (!current) throw new Error('Expected one APP_VERSION line in src/main.zig');
-  const version = `${current[1]}.${current[2]}.${BigInt(current[3]) + 1n}`;
+  const version = requestedVersion ?? `${current[1]}.${current[2]}.${BigInt(current[3]) + 1n}`;
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Invalid build version');
   const tickets = [];
   const bullets = [];
   const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
@@ -45,10 +46,10 @@ export function stampTree(files) {
     if (!tickets.includes(match[1])) tickets.push(match[1]);
     bullets.push(...lines.map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
   }
-  if (!files[changelogPath]?.includes(changelogStart)) throw new Error('Missing CHANGELOG in src/changelog.zig');
+  if (!changelogStart.test(files[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
   const result = { ...files };
-  result[mainPath] = files[mainPath].replace(versionLine, `pub const APP_VERSION = "${version}";`);
-  result[changelogPath] = files[changelogPath].replace(changelogStart, () => `${changelogStart}\n    .{ .ver = "${version}", .items = &.{\n${bullets.join('\n')}\n    } },`);
+  result[mainPath] = files[mainPath].replace(versionLine, line => line.replace(/"[^"]+"/, `"${version}"`));
+  result[changelogPath] = files[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${version}", .items = &.{\n${bullets.join('\n')}\n    } },`);
   for (const file of removed) delete result[file];
   return { version, tickets, files: result, removed };
 }
@@ -64,10 +65,21 @@ export function classifyTrees(base, head, changed) {
     const paths = new Set([...Object.keys(stamp.files), ...Object.keys(head)]);
     if ([...paths].every(file => stamp.files[file] === head[file])) return 'STAMP';
   }
-  const lines = (tree, file, pattern) => (tree[file] || '').split(/\r?\n/).filter(line => pattern.test(line));
+  const lines = (tree, file, pattern) => (tree[file] || '').split(/\r?\n/).filter(line => pattern.test(line)).map(line => line.replace(/^(pub const APP_VERSION = )build_config\.app_version orelse ("\d+\.\d+\.\d+";)$/, '$1$2'));
   if (JSON.stringify(lines(base, mainPath, /\bAPP_VERSION\s*=/)) !== JSON.stringify(lines(head, mainPath, /\bAPP_VERSION\s*=/)) ||
       JSON.stringify(lines(base, changelogPath, /\.ver = /)) !== JSON.stringify(lines(head, changelogPath, /\.ver = /))) return 'HAND_EDIT';
   return 'CODE';
+}
+
+export function buildChangelog(files, tag) {
+  if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw new Error('Invalid release tag');
+  const version = tag.slice(1);
+  if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) return files[changelogPath];
+  const tree = { ...files };
+  if (!Object.keys(tree).some(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    tree['changelog.d/IGSH-834-maintenance.md'] = 'Updates include the latest improvements.\n';
+  }
+  return stampTree(tree, version).files[changelogPath];
 }
 
 function git(args, cwd, timeout) {
@@ -182,8 +194,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const [command, base, head, ...extra] = process.argv.slice(2);
     if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
-    else if (command === 'release' && !base) await release();
-    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | release');
+    else if (command === 'build' && base && !head) {
+      fs.writeFileSync(changelogPath, buildChangelog(readTree('HEAD'), base));
+    } else if (command === 'release' && !base) await release();
+    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | build <tag> | release');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

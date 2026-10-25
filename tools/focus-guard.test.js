@@ -74,7 +74,7 @@ test('asynchronous screenshot focus authority is granted only after applying a u
 });
 
 test('versions, screenshot and user focus shortcuts remain wired without new palette actions', () => {
-  assert.match(source, /const APP_VERSION = "\d+\.\d+\.\d+"/);
+  assert.match(source, /const APP_VERSION = build_config\.app_version orelse "\d+\.\d+\.\d+"/);
   assert.match(source, /L\("multiprompt v" \+\+ APP_VERSION \+\+ " \[DEV\]"\) else L\("multiprompt v" \+\+ APP_VERSION\)/);
   assert.doesNotMatch(source, /L\("multiprompt v\d/);
   assert.match(source, /kb\.vkCode == 0x53[^]*?WM_APP_BROWSER_SHOTURL/);

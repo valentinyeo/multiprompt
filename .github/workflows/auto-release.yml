@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      tag: ${{ steps.stamp.outputs.tag }}
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -61,37 +61,19 @@ jobs:
                 | sort_by(.databaseId) | last | .status == "completed" and .conclusion == "success"'
           fi
           echo 'ready=true' >> "$GITHUB_OUTPUT"
-      - name: Stamp patch version and tag master atomically
-        id: stamp
+      - name: Tag the tested master commit
+        id: tag
         if: steps.admit.outputs.ready == 'true'
         run: |
           set -euo pipefail
-          RELEASE_TAG=$(node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { stampTree } from './tools/version-stamp.mjs';
-          import { releaseVersion } from './tools/release-version.mjs';
-          const files = Object.fromEntries(['src/main.zig', 'src/changelog.zig', ...fs.readdirSync('changelog.d').filter(name => name !== 'README.md').map(name => `changelog.d/${name}`)].map(file => [file, fs.readFileSync(file, 'utf8')]));
-          if (`v${files['src/main.zig'].match(/^pub const APP_VERSION = "([^"]+)";/m)?.[1]}` !== releaseVersion(files['src/changelog.zig'])) throw new Error('App and changelog versions disagree');
-          if (!Object.keys(files).some(file => file.startsWith('changelog.d/'))) files['changelog.d/IGSH-834-maintenance.md'] = 'Updates include the latest improvements.\n';
-          const stamp = stampTree(files);
-          for (const file of ['src/main.zig', 'src/changelog.zig']) fs.writeFileSync(file, stamp.files[file]);
-          for (const file of stamp.removed) if (fs.existsSync(file)) fs.unlinkSync(file);
-          const tag = `v${stamp.version}`;
-          if (releaseVersion(stamp.files['src/changelog.zig'], tag) !== tag) throw new Error('Stamped version mismatch');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
-          console.log(tag);
-          NODE
-          )
+          RELEASE_TAG=$(node tools/release-version.mjs --next "$(git describe --tags --abbrev=0)")
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             echo "$RELEASE_TAG already exists; refusing to move it" >&2
             exit 1
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- src/main.zig src/changelog.zig changelog.d
-          git commit -m "$RELEASE_TAG: automatic patch release [skip release]"
-          git tag "$RELEASE_TAG"
-          git push --atomic origin HEAD:refs/heads/master "refs/tags/$RELEASE_TAG"
+          git tag "$RELEASE_TAG" HEAD
+          git push origin "refs/tags/$RELEASE_TAG"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   release:
     needs: tag

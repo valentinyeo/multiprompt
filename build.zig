@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
+    const app_version = b.option([]const u8, "version", "Override the embedded app version");
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
@@ -50,6 +51,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("iphlpapi", .{});
     exe.root_module.linkSystemLibrary("advapi32", .{});
     const stable_opts = b.addOptions();
+    stable_opts.addOption(?[]const u8, "app_version", app_version);
     stable_opts.addOption(bool, "is_dev", false);
     exe.root_module.addOptions("build_config", stable_opts);
 
@@ -95,6 +97,7 @@ pub fn build(b: *std.Build) void {
     dev_exe.root_module.linkSystemLibrary("iphlpapi", .{});
     dev_exe.root_module.linkSystemLibrary("advapi32", .{});
     const dev_opts = b.addOptions();
+    dev_opts.addOption(?[]const u8, "app_version", app_version);
     dev_opts.addOption(bool, "is_dev", true);
     dev_exe.root_module.addOptions("build_config", dev_opts);
     b.installArtifact(dev_exe);

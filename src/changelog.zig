@@ -52,7 +52,13 @@ const ChangelogEntry = struct {
     ticket: []const u8 = "",
     items: []const ChangelogBullet = &.{},
 };
-pub const CHANGELOG = [_]ChangelogEntry{
+pub const CHANGELOG = blk: {
+    var entries = SOURCE_CHANGELOG;
+    if (@import("build_config").app_version != null and entries.len > 0) @field(entries[0], "ver") = APP_VERSION;
+    break :blk entries;
+};
+
+const SOURCE_CHANGELOG = [_]ChangelogEntry{
     .{ .ver = "0.28.874", .items = &.{
         .{ .text = "Window buttons no longer overlap, and the black title bar stays black when the browser uses a different theme.", .ticket = "IGSH-845" },
     } },
