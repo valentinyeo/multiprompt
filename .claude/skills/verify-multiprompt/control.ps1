@@ -2377,6 +2377,17 @@ try {
                 $state = Read-Session
                 $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv
             } 'isolated CMD session saved in Chat View'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
+            } 'owned visible composer after Alt+C'
+            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
+            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
+            [VerifyNative]::BringToForeground($script:window)
+            Record 'Click the owned composer to recover typing focus from the hidden console'
+            [VerifyNative]::ClickClient($handle, 8, 8)
             Wait-ChatFocus 'Edit' 'dictation-composer'
             $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
             $handle = [IntPtr]$composer.Current.NativeWindowHandle
