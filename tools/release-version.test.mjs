@@ -306,7 +306,7 @@ test('automatic release only tags a tested master and reuses signed release jobs
   assert.match(auto, /fetch-tags: true/);
   assert.match(auto, /bash tools\/auto-release-admit\.sh >> "\$GITHUB_OUTPUT"/);
   const admit = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
-  assert.match(admit, /node tools\/release-version\.mjs --next "\$\(git describe --tags --abbrev=0 "\$sha"\)"/);
+  assert.match(admit, /node tools\/release-version\.mjs --next "\$last_tag"/);
   assert.match(admit, /git tag "\$release_tag" "\$sha"/);
   assert.deepEqual(admit.split('\n').filter(line => /\bgit push\b/.test(line)).map(line => line.trim()), ['git push origin "refs/tags/$release_tag" >&2']);
   assert.doesNotMatch(auto, /git (?:commit|add|config)|stampTree|fs\.(?:writeFileSync|unlinkSync)|HEAD:refs\/heads\/master/);

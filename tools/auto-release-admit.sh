@@ -28,7 +28,7 @@ for sha in $commits; do
         | sort_by(.databaseId) | last | .status == "completed" and .conclusion == "success"' <<< "$runs" >/dev/null; then
         continue
     fi
-    release_tag=$(node tools/release-version.mjs --next "$(git describe --tags --abbrev=0 "$sha")")
+    release_tag=$(node tools/release-version.mjs --next "$last_tag")
     if git show-ref --verify --quiet "refs/tags/$release_tag"; then
         echo "$release_tag already exists; refusing to move it" >&2
         exit 1
