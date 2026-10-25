@@ -247,6 +247,21 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     _ = DeleteObject(glyph_font);
 }
 
+fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
+    const active = @import("chat_composer.zig").chat_dictation_state != .idle;
+    const ink = if (active) customColorOr("accent", RGB(80, 150, 255)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
+    if (active) fillRoundRectAA(hdc, rc, uiScaled(8), customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
+    const font = @import("fonts.zig").messageMenuIconFont();
+    const old_font = SelectObject(hdc, font);
+    defer {
+        _ = SelectObject(hdc, old_font);
+        _ = DeleteObject(font);
+    }
+    _ = SetTextColor(hdc, ink);
+    var text_rc = rc;
+    _ = DrawTextW(hdc, L("\u{E720}"), -1, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+}
+
 pub fn chatSurfaceRadius() i32 {
     return uiScaled(CHAT_BUBBLE_RADIUS);
 }
@@ -407,6 +422,7 @@ pub fn paintChatView(hdc: HANDLE) void {
     if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
     if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
     paintChatAttachButton(hdc, layout.attach_btn);
+    paintChatMicButton(hdc, layout.mic_btn);
     logChatButtons(layout);
     if (@import("chat_composer.zig").chatNewMessagesRect()) |pill| {
         paintChatSurface(hdc, pill, app_state.g_chat_input_color, card_border, uiScaled(13));

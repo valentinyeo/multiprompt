@@ -208,6 +208,46 @@ fn chatComposerMaxEditH() i32 {
     return chatComposerBaseEditH() * CHAT_COMPOSER_MAX_LINES;
 }
 
+pub const DictationState = enum { idle, listening, finishing };
+pub var chat_dictation_state: DictationState = .idle;
+var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
+
+pub fn chatDictationSync() void {
+    const next: DictationState = if (app_state.g_dictation_draft_owner_len == 0 or !app_state.g_dictation_running.load(.acquire))
+        .idle
+    else if (app_state.g_dictation_recording.load(.acquire))
+        .listening
+    else
+        .finishing;
+    if (next == chat_dictation_state) return;
+    chat_dictation_state = next;
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub fn chatDictationToggle() void {
+    chat_dictation_engine_toggle();
+    chatDictationSync();
+}
+
+fn chatDictationKey(msg: UINT, wp: WPARAM, lp: LPARAM, ctrl: bool, shift: bool, alt: bool) bool {
+    if (msg == WM_KEYDOWN and wp == 0x44 and ctrl and !shift and !alt) {
+        if ((lp & 0x40000000) == 0) chatDictationToggle();
+        return true;
+    }
+    if (msg == 0x0102 and wp == 0x04 and ctrl and !shift and !alt) return true;
+    if (msg == 0x0102 and wp == 0x0D and !shift and chat_dictation_state == .listening) {
+        chatDictationToggle();
+        return true;
+    }
+    return false;
+}
+
+pub fn chatDictationClick(x: i32, y: i32) bool {
+    if (!chatViewOwnsInput() or !pointInRect(chatViewLayout().mic_btn, x, y)) return false;
+    chatDictationToggle();
+    return true;
+}
+
 pub fn chatViewLayout() ChatViewLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
@@ -228,7 +268,15 @@ pub fn chatViewLayout() ChatViewLayout {
     };
     const send_size = uiScaled(32);
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
-    const slots = chatSendSlots(composer_card, send_size, send_margin, uiScaled(6), @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
+    const mic_btn = RECT{
+        .left = composer_card.right - send_margin - send_size,
+        .top = composer_card.top + chatReplyBarH() + send_margin,
+        .right = composer_card.right - send_margin,
+        .bottom = composer_card.top + chatReplyBarH() + send_margin + send_size,
+    };
+    var action_card = composer_card;
+    action_card.right = mic_btn.left - uiScaled(6) + send_margin;
+    const slots = chatSendSlots(action_card, send_size, send_margin, uiScaled(6), @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
     const send_btn = slots.send;
     const attach_btn = RECT{
         .left = composer_card.left + send_margin,
@@ -254,6 +302,7 @@ pub fn chatViewLayout() ChatViewLayout {
         },
         .send_btn = send_btn,
         .attach_btn = attach_btn,
+        .mic_btn = mic_btn,
         .stop_btn = slots.stop,
         .send_shown = slots.send_shown,
         .stop_shown = slots.stop_shown,
@@ -427,7 +476,7 @@ pub fn chatComposerOwnsKey(wp: WPARAM, vkCode: DWORD, ctrl: bool, alt: bool, fla
     if (vkCode == 0x70 or vkCode == 0x71) return false;
     if (!ctrl) return true;
     return switch (vkCode) {
-        0x41, 0x43, 0x56, 0x58, 0x59, 0x5A => true,
+        0x41, 0x43, 0x44, 0x56, 0x58, 0x59, 0x5A => true,
         0xBF => true,
         0x25, 0x27 => true,
         0x08, 0x2E => true,
@@ -463,6 +512,7 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (layout.stop_shown and pointInRect(layout.stop_btn, x, y)) return 5;
     if (layout.send_shown and pointInRect(layout.send_btn, x, y)) return 3;
     if (pointInRect(layout.attach_btn, x, y)) return 4;
+    if (pointInRect(layout.mic_btn, x, y)) return 10;
     if (@import("window_layout.zig").chatPermissionVisible()) {
         for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
             if (@import("window_layout.zig").chatPermissionRect(action)) |rc| {
@@ -1217,6 +1267,8 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
 }
 
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    if (chatDictationKey(msg, wp, lp, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0)) return 0;
     if (msg == WM_KEYDOWN and wp == 0x41 and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
         _ = SendMessageW(hwnd, 0x00B1, 0, -1);
         return 0;
@@ -1770,6 +1822,7 @@ pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
     } else {
         return;
     }
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) chatDraftNoteEdit();
     chatDraftLoad(id);
     chat_drafts.append(id, text) catch return;
     if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) and app_state.g_chat_composer_hwnd != null) {
@@ -2047,4 +2100,177 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     try std.testing.expectEqualDeep(layout.transcript, chatViewLayout().transcript);
     app_state.g_chat_scrolled_up = false;
     try std.testing.expect(chatNewMessagesRect() == null);
+}
+
+fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing }) !void {
+    const w = @import("win32.zig");
+    const Engine = struct {
+        fn toggle() void {
+            if (app_state.g_dictation_recording.load(.acquire)) {
+                app_state.g_dictation_recording.store(false, .release);
+            } else if (!app_state.g_dictation_running.load(.acquire)) {
+                app_state.g_dictation_recording.store(true, .release);
+                app_state.g_dictation_running.store(true, .release);
+                const id = chatDraftKeyForShell(0, &app_state.g_dictation_draft_owner);
+                app_state.g_dictation_draft_owner_len = id.len;
+            }
+        }
+    };
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .edit = app_state.g_chat_composer_hwnd,
+        .original = app_state.g_chat_composer_orig_proc,
+        .chat = app_state.g_chat_active,
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .drafts = chat_drafts,
+        .owner = app_state.g_chat_draft_owner,
+        .owner_len = app_state.g_chat_draft_owner_len,
+        .dirty = app_state.g_chat_draft_dirty,
+        .dictation_owner = app_state.g_dictation_draft_owner,
+        .dictation_owner_len = app_state.g_dictation_draft_owner_len,
+        .state = chat_dictation_state,
+        .toggle = chat_dictation_engine_toggle,
+        .running = app_state.g_dictation_running.load(.acquire),
+        .recording = app_state.g_dictation_recording.load(.acquire),
+        .voice = app_state.g_voice_listening_active.load(.acquire),
+    };
+    defer {
+        chat_drafts.deinit();
+        chat_drafts = saved.drafts;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_composer_hwnd = saved.edit;
+        app_state.g_chat_composer_orig_proc = saved.original;
+        app_state.g_chat_active = saved.chat;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_draft_owner = saved.owner;
+        app_state.g_chat_draft_owner_len = saved.owner_len;
+        app_state.g_chat_draft_dirty = saved.dirty;
+        app_state.g_dictation_draft_owner = saved.dictation_owner;
+        app_state.g_dictation_draft_owner_len = saved.dictation_owner_len;
+        chat_dictation_state = saved.state;
+        chat_dictation_engine_toggle = saved.toggle;
+        app_state.g_dictation_running.store(saved.running, .release);
+        app_state.g_dictation_recording.store(saved.recording, .release);
+        app_state.g_voice_listening_active.store(saved.voice, .release);
+    }
+    chat_drafts = draft_model.Store.init(std.testing.allocator);
+    var previous_appdata: [32768]u16 = undefined;
+    const appdata_len = w.GetEnvironmentVariableW(L("APPDATA"), &previous_appdata, previous_appdata.len);
+    defer _ = w.SetEnvironmentVariableW(L("APPDATA"), if (appdata_len > 0 and appdata_len < previous_appdata.len) @ptrCast(&previous_appdata) else null);
+    try std.testing.expect(w.SetEnvironmentVariableW(L("APPDATA"), null) != 0);
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].chat_id = 812;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_chat_draft_dirty = false;
+    app_state.g_dictation_draft_owner_len = 0;
+    app_state.g_dictation_running.store(false, .release);
+    app_state.g_dictation_recording.store(false, .release);
+    app_state.g_voice_listening_active.store(false, .release);
+    chat_dictation_state = .idle;
+    chat_dictation_engine_toggle = Engine.toggle;
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1200, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("typed"), WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL, 0, 0, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    const id = chatDraftKeyForShell(0, &app_state.g_chat_draft_owner);
+    app_state.g_chat_draft_owner_len = id.len;
+    try chat_drafts.set(id, std.mem.span(L("typed")), false);
+    try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x44, true, false, 0));
+    try std.testing.expect(!chatDictationKey(WM_KEYDOWN, 0x44, 0, true, true, false));
+    try std.testing.expect(!chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, true));
+    try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
+    if (action == .mic_start or action == .mic_stop) {
+        const layout = chatViewLayout();
+        try std.testing.expect(layout.mic_btn.left > layout.send_btn.right);
+        try std.testing.expect(layout.mic_btn.left > layout.composer.right);
+        try std.testing.expect(!chatDictationClick(layout.mic_btn.right, layout.mic_btn.top));
+        try std.testing.expect(chatDictationClick(layout.mic_btn.left, layout.mic_btn.top));
+    } else {
+        try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
+    }
+    try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0x40000000, true, false, false));
+    try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    var text: [64]u16 = undefined;
+    if (action == .transcript) {
+        app_state.g_dictation_transcript_len = 6;
+        @memcpy(app_state.g_dictation_transcript[0..6], std.mem.span(L("spoken")));
+        app_state.g_dictation_error_len = 0;
+        const listening = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed")), text[0..@intCast(listening)]);
+    }
+    if (action == .typing) {
+        _ = SendMessageW(edit, 0x00B1, 5, 5);
+        for (" more") |character| {
+            _ = chatComposerSubclassCore(edit, 0x0102, character, 1);
+        }
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed more")), text[0..@intCast(n)]);
+        try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    }
+    if (action == .ctrl_start or action == .mic_start or action == .typing) return;
+    if (action == .enter_stop) {
+        _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+        var message: w.MSG = undefined;
+        try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
+    } else if (action == .mic_stop) {
+        const rc = chatViewLayout().mic_btn;
+        try std.testing.expect(chatDictationClick(rc.left, rc.top));
+    } else {
+        try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
+    }
+    try std.testing.expectEqual(DictationState.finishing, chat_dictation_state);
+    try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_running.load(.acquire));
+    const before = GetWindowTextW(edit, &text, text.len);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("typed")), text[0..@intCast(before)]);
+    if (action == .transcript) {
+        _ = SendMessageW(edit, 0x00B1, 5, 5);
+        _ = chatComposerSubclassCore(edit, 0x0102, '!', 1);
+        app_state.g_main_hwnd = null;
+        app_state.g_chat_active = false;
+        @import("voice.zig").handleDictationReady();
+        try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
+        const after = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, std.mem.span(L("typed! spoken")), text[0..@intCast(after)]);
+        try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
+    }
+}
+
+test "IGSH-812 Ctrl+D starts dictation" {
+    try testChatDictation(.ctrl_start);
+}
+
+test "IGSH-812 Ctrl+D stops dictation" {
+    try testChatDictation(.ctrl_stop);
+}
+
+test "IGSH-812 Enter stops dictation without sending" {
+    try testChatDictation(.enter_stop);
+}
+
+test "IGSH-812 mic click starts dictation" {
+    try testChatDictation(.mic_start);
+}
+
+test "IGSH-812 mic click stops dictation" {
+    try testChatDictation(.mic_stop);
+}
+
+test "IGSH-812 text arrives only when dictation finishes" {
+    try testChatDictation(.transcript);
+}
+
+test "IGSH-812 typing is never blocked while listening" {
+    try testChatDictation(.typing);
 }

@@ -1839,6 +1839,8 @@ test "dictation verification ignores TUI framing and requires new console text" 
 }
 
 pub fn handleDictationReady() void {
+    @import("chat_composer.zig").chatDictationSync();
+    defer @import("chat_composer.zig").chatDictationSync();
     app_state.g_dictation_running.store(false, .release);
     var text_copy: [8192]u16 = undefined;
     var text_len: usize = 0;
@@ -1960,6 +1962,7 @@ pub fn handleDictationReady() void {
 }
 
 pub fn toggleDictation() void {
+    defer @import("chat_composer.zig").chatDictationSync();
     if (app_state.g_voice_mode_active and app_state.g_voice_always_listen and !app_state.g_voice_mic_failed and app_state.g_voice_mic_run.load(.acquire)) {
         showHeaderNoticeAscii("Voice Mode is already listening", 3000, false);
         return;

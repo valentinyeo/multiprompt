@@ -1044,6 +1044,7 @@ const WM_APP_CHAT_IMAGE_READY = @import("app_state.zig").WM_APP_CHAT_IMAGE_READY
 const WM_APP_CHAT_ATTACH = @import("app_state.zig").WM_APP_CHAT_ATTACH;
 const WM_APP_CHAT_ATTACH_FAILED = @import("app_state.zig").WM_APP_CHAT_ATTACH_FAILED;
 const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
+const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
 const chatImageReady = @import("chat_render.zig").chatImageReady;
 const chatAttachErrorText = @import("chat_render.zig").chatAttachErrorText;
 const chatAttachPick = @import("chat_render.zig").chatAttachPick;
@@ -1652,6 +1653,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetCapture(hwnd);
                     return 0;
                 }
+                if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
                 switch (chatButtonAt(mx, my)) {
                     3 => _ = PostMessageW(hwnd, WM_APP_CHAT_SEND, 0, 0),
                     4 => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
@@ -4541,6 +4543,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     chatCopyLatestCode();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CHAT_DICTATION_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_composer.zig").chatDictationToggle();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

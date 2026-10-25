@@ -348,6 +348,7 @@ const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchored
 const chatDraftHasForShell = @import("chat_composer.zig").chatDraftHasForShell;
 const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
 const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
+const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
 const invalidateSidebar = @import("window_layout.zig").invalidateSidebar;
 const SHORTCUT_ROWS = @import("shortcuts.zig").SHORTCUT_ROWS;
 const drawAscii = @import("drawing.zig").drawAscii;
@@ -2298,7 +2299,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_find = result_idx == SEARCH_CHAT_FIND_OFFSET;
                     const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
-                    const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET;
+                    const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
@@ -3246,10 +3247,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var attach_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Attach File"), -1, &attach_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (result_idx == SEARCH_CHAT_DICTATION_OFFSET) L("Chat View: Toggle Dictation") else L("Chat View: Attach File"), -1, &attach_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                         _ = SelectObject(hdc, font_subtitle);
                         var attach_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+V"), -1, &attach_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (result_idx == SEARCH_CHAT_DICTATION_OFFSET) L("Ctrl+D") else L("Ctrl+V"), -1, &attach_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_copy_sel) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
