@@ -2132,7 +2132,7 @@ try {
     foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
-    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
+    if ($Feature -in @('browser-switch-speed', 'browser-own-profile', 'title-bar')) {
         $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
     }
@@ -2174,8 +2174,6 @@ try {
         Save-Json @{ extensionId = $extensionId; version = $manifest.version; installed = $true; executable = $chrome; configuration = 'chrome-exe.txt + browser-engine.txt' } 'switch-extension.json'
     }
     if ($Feature -eq 'title-bar') {
-        $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned caption Chrome executable unavailable' }
         $edge = $chrome
         $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
         $config = Join-Path $env:APPDATA 'ZigShell'
