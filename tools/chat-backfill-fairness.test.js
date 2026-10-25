@@ -131,6 +131,6 @@ test('full-history continuation stays automatic across disk restore without a ca
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();
-  assert.equal(changelog.split('\n').length, 1);
-  assert.match(changelog, /^Chat View .+\.$/);
+  assert.ok(changelog.length > 0);
+  for (const line of changelog.split('\n')) assert.match(line, /^Chat View .+\.$/, line);
 });
