@@ -2,12 +2,20 @@ name: Release
 
 on:
   push:
-    branches: [master]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
         description: Release tag to create, for example v0.28.712
+        required: true
+
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      MULTIPROMPT_RELEASE_SIGNING_KEY:
         required: true
 
 permissions:
@@ -30,10 +38,10 @@ jobs:
       - name: Resolve release version and commit
         id: version
         env:
-          REQUESTED_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          REQUESTED_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           sha=$(git rev-parse HEAD)
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
+          if [ -n "$REQUESTED_TAG" ] && git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
             sha=$(git rev-parse "refs/tags/$REQUESTED_TAG^{commit}")
           fi
           git show "$sha:src/changelog.zig" > "$RUNNER_TEMP/changelog.zig"
