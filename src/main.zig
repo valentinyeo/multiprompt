@@ -7750,6 +7750,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = KillTimer(hwnd, TIMER_BROWSER_SETTLE);
             _ = KillTimer(hwnd, TIMER_BROWSER_URL_POLL);
             _ = KillTimer(hwnd, TIMER_BROWSER_EDGE_MASK_RAISE);
+            _ = @import("chat_session.zig").chatReadMark(false);
             logSessionAudit("WM_CLOSE:entry-before-save");
             commitRename();
             chatDraftFlush();
@@ -7800,7 +7801,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         0x0016 => {
-            if (wp != 0) chatDraftFlush();
+            if (wp != 0) {
+                _ = @import("chat_session.zig").chatReadMark(false);
+                chatDraftFlush();
+                saveSession();
+            }
             return 0;
         },
         WM_DESTROY => {

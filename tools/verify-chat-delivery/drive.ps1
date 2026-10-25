@@ -48,7 +48,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -77,6 +77,10 @@ function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
     if ($Chat) { Doctor $true }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing keyboard input: owned app is not foreground' }
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input=$Label; keys=$Keys})
+    if ($Label.StartsWith('Alt+C:')) {
+        if (Get-Variable toggleReady -Scope Script -ErrorAction SilentlyContinue) { [void](Wait-For 'existing Alt+C debounce elapsed' { [DateTime]::UtcNow -ge $script:toggleReady }) }
+        $script:toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+    }
     [ChatDeliveryDesktop]::Chord($Keys)
     Start-Sleep -Milliseconds 100
 }
@@ -132,6 +136,43 @@ function Require-NewMessages([int]$Count, [int]$Visible, [int]$Up, [string]$Name
     $current = Wait-For $Name { $v = New-MessageState $LogStart; if ($v -and $v.count -eq $Count -and $v.visible -eq $Visible -and $v.up -eq $Up) { $v } }
     $actions.Add(@{case=$plan.name; input=$Name; state=$current})
     $current
+}
+function Divider-State([int]$LogStart = 0) {
+    $log = Read-Shared "$settings/debug.log"
+    if ($log.Length -le $LogStart) { return $null }
+    $frames = [regex]::Matches($log.Substring($LogStart), '\[chat\] unread divider count=(\d) marker=(\d+) index=(\d+) unknown=(\d) y=(-?\d+) message_y=(-?\d+) scroll=(-?\d+) message=(\d+) offset=(\d+) line_y=(-?\d+)')
+    if ($frames.Count -eq 0) { return $null }
+    $g = $frames[$frames.Count - 1].Groups
+    @{count=[int]$g[1].Value; marker=$g[2].Value; index=[int]$g[3].Value; unknown=[int]$g[4].Value; y=[int]$g[5].Value; messageY=[int]$g[6].Value; scroll=[int]$g[7].Value; message=$g[8].Value; offset=[long]$g[9].Value; lineY=[int]$g[10].Value}
+}
+function Require-Divider([int]$Count, [int]$Unknown, [string]$Name, [int]$LogStart) {
+    $frame = Wait-For $Name { $v = Divider-State $LogStart; if ($v -and $v.count -eq $Count -and $v.unknown -eq $Unknown) { $v } }
+    $actions.Add(@{case=$plan.name; input=$Name; state=$frame})
+    $frame
+}
+function Bind-Transcript {
+    $script:composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $script:views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
+    Doctor $true
+}
+function Restart-OwnedApp {
+    Doctor
+    [void]$app.CloseMainWindow()
+    if (-not $app.WaitForExit(10000)) { throw 'Owned app did not close normally for restart' }
+    $stopped = $job.Stop()
+    Save $stopped "$caseDir/restart-process-tree.json"
+    if ($stopped.ActiveProcesses -ne 0) { throw 'Restart left owned processes running' }
+    $job.Dispose()
+    $script:job = [VerifyJob]::new()
+    $script:app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
+    $script:main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'restarted app published saved tmux tab' { Test-Path "$settings/inbox-default.json" })
+    [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+    Doctor
 }
 function Scroll-Transcript([int]$Delta) {
     Doctor
@@ -404,6 +445,61 @@ foreach ($plan in $plans) {
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Doctor $true
             $observation.newMessages = @{passed=$true; transitions=@('arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival')}
+            $readSource = (Read-Shared $transcript) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 1
+            $readId = [string]$readSource.message.id
+            Press @(0x12, 0x43) 'Alt+C: leave the read chat' $true
+            $savedMarker = [string](Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs[0].last_read_message_id
+            if (-not $savedMarker -or $savedMarker -eq '0') { throw 'Leaving chat did not save its read message anchor' }
+            Copy-Item "$settings/session.json" "$caseDir/session-read-anchor.json"
+            $unreadOffset = (Get-Item -LiteralPath $transcript).Length
+            Shell-Input 'messages' '2'
+            $unreadSource = @((Read-Shared $transcript) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+            $firstUnreadId = [string]$unreadSource[$unreadSource.Count - 2].message.id
+            Restart-OwnedApp
+            if ([string](Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs[0].last_read_message_id -cne $savedMarker) { throw 'Restart lost the saved read anchor' }
+            Press @(0x11, 0x31) 'Ctrl+1: select the restarted chat'
+            $dividerLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x12, 0x43) 'Alt+C: reopen chat after offline arrivals'
+            Bind-Transcript
+            $divider = Require-Divider 1 0 'one divider on reopen' $dividerLogStart
+            if ($divider.marker -cne $savedMarker -or $divider.offset -ne $unreadOffset -or $divider.y -ge $divider.messageY) { throw 'Divider is not above the first unread source message' }
+            [void](Wait-For 'resynced app cache contains first unread source ID' { (Read-Shared $cache.FullName).Contains($firstUnreadId) })
+            Copy-Item $cache.FullName "$caseDir/app-cache-reopened.jsonl"
+            Copy-Item "$settings/session.json" "$caseDir/session-reopened.json"
+            $bounds = $views[0].Current.BoundingRectangle
+            $dividerProof = @{marker=$savedMarker; readId=$readId; firstUnreadId=$firstUnreadId; unreadOffset=$unreadOffset; reopened=$divider; transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
+            Shot 'unread-divider-reopened'
+            $gapLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'forget-message' $readId
+            $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart
+            if ($dividerProof.gap.marker -cne $savedMarker) { throw 'History gap overwrote the saved anchor' }
+            [void](Wait-For 'resynced cache no longer contains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and -not $bytes.Contains($readId) })
+            Copy-Item $cache.FullName "$caseDir/app-cache-gap.jsonl"
+            Shot 'unread-divider-gap'
+            $bottomLogStart = Scroll-Transcript -30000
+            $dividerProof.bottom = Require-Divider 0 0 'bottom clears the divider' $bottomLogStart
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Press @(0x12, 0x43) 'Alt+C: close the fully read chat' $true
+            $sendOffset = (Get-Item -LiteralPath $transcript).Length
+            Shell-Input 'messages' '1'
+            $dividerLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x12, 0x43) 'Alt+C: reopen before sending'
+            Bind-Transcript
+            $beforeSend = Require-Divider 1 0 'divider exists before sending' $dividerLogStart
+            if ($beforeSend.offset -ne $sendOffset) { throw 'Second reopen picked the wrong unread message' }
+            Clear-Composer
+            Type-Composer 'read reply'
+            $sendLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x0D) 'Enter: sending clears the unread divider' $true
+            $dividerProof.sent = Require-Divider 0 0 'sending clears the divider' $sendLogStart
+            Press @(0x12, 0x43) 'Alt+C: leave after sending' $true
+            $allReadLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x12, 0x43) 'Alt+C: reopen with everything read'
+            Bind-Transcript
+            $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
+            Shot 'unread-divider-all-read'
+            Save $dividerProof "$caseDir/unread-divider.json"
+            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-clear', 'send-clear', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts

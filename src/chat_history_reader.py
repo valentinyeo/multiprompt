@@ -639,8 +639,8 @@ def conversation_rows(event, agent, offset=0, search=False):
         text = conversation_event(text_event, agent)
         if text:
             text["segment"] = start
-            if rows or not text["id"]:
-                text["id"] = f"{text['id']}:text:{offset}:{start}"
+            if rows and text["id"]:
+                text["id"] = f"{text['id']}:text:{start}"
             rows.append(text)
         rows.extend(tools)
         start = index + 1

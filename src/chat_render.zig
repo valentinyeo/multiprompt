@@ -1698,6 +1698,9 @@ pub fn chatRelayout(client_width: i32) void {
     const width = @max(1, content.right - content.left);
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     chat_style.bubblePositions(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count]);
+    const boundary = @import("chat_session.zig").chatReadBoundary();
+    if (!std.meta.eql(boundary, app_state.g_chat_read_boundary)) app_state.g_chat_layout_reuse = 0;
+    app_state.g_chat_read_boundary = boundary;
     var reuse = @min(app_state.g_chat_layout_reuse, app_state.g_chat_block_count);
     app_state.g_chat_img_pass +%= 1;
     const first_img_block = chatImgFirstBlock(buf);
@@ -1725,6 +1728,10 @@ pub fn chatRelayout(client_width: i32) void {
             app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = y, .right = 0, .bottom = y };
             chatImgStoreLayout(i, .{});
             continue;
+        }
+        if (boundary.index == i) {
+            app_state.g_chat_read_divider_y = y;
+            y += uiScaled(28);
         }
         y += chatBlockGapBefore(has_previous, app_state.g_chat_blocks[i].role, app_state.g_chat_blocks[i].first, app_state.g_chat_bubble_pos[i]);
         has_previous = true;
@@ -1782,6 +1789,12 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
     const had_messages = app_state.g_chat_new_messages.count() != 0;
     app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
+    if (!app_state.g_chat_scrolled_up and @import("chat_session.zig").chatReadMark(true)) {
+        var client: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+        chatRelayout(client.right);
+        app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h;
+    }
     chatNewMessagesChanged(had_messages);
 }
 
@@ -4040,6 +4053,43 @@ fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR) void {
     _ = SelectObject(hdc, old_font);
 }
 
+fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
+    const boundary = app_state.g_chat_read_boundary;
+    if (verboseLoggingEnabled()) {
+        var log: [256]u8 = undefined;
+        const marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+        const index = boundary.index orelse 0;
+        debugLog(std.fmt.bufPrint(&log, "[chat] unread divider count={d} marker={d} index={d} unknown={d} y={d} message_y={d} scroll={d} message={d} offset={d} line_y={d}", .{
+            @intFromBool(boundary.index != null), marker, index, @intFromBool(boundary.unknown),
+            app_state.g_chat_read_divider_y, if (boundary.index != null) app_state.g_chat_layout_rects[index].top else 0,
+            app_state.g_chat_scroll_y, if (boundary.index != null) app_state.g_chat_blocks[index].message_id else 0,
+            if (boundary.index != null) app_state.g_chat_blocks[index].source_offset else 0,
+            app_state.g_chat_read_divider_y + uiScaled(14),
+        }) catch "[chat] unread divider");
+    }
+    if (boundary.index == null) return;
+    const top = app_state.g_chat_read_divider_y - app_state.g_chat_scroll_y;
+    const old = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, old);
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const color = customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198));
+    _ = SetTextColor(hdc, color);
+    var label = RECT{ .left = uiScaled(16), .top = top, .right = width - uiScaled(16), .bottom = top + uiScaled(28) };
+    if (boundary.unknown) {
+        _ = chatDrawText(hdc, L("Earlier read position is unknown"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        return;
+    }
+    const center = @divTrunc(width, 2);
+    const brush = CreateSolidBrush(color);
+    defer _ = DeleteObject(brush);
+    const y = top + uiScaled(14);
+    var left = RECT{ .left = uiScaled(16), .top = y, .right = center - uiScaled(24), .bottom = y + 1 };
+    var right = RECT{ .left = center + uiScaled(24), .top = y, .right = width - uiScaled(16), .bottom = y + 1 };
+    _ = FillRect(hdc, &left, brush);
+    _ = FillRect(hdc, &right, brush);
+    _ = chatDrawText(hdc, L("NEW"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+}
+
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -4113,6 +4163,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                         _ = DeleteObject(mark);
                     }
                 }
+                chatPaintReadDivider(mem_dc, w);
                 for (0..app_state.g_chat_echo_layout_count) |i| {
                     var rc = app_state.g_chat_echo_layout[i];
                     rc.top -= app_state.g_chat_scroll_y;
@@ -5350,4 +5401,45 @@ test "IGSH-813 pill click jumps to newest and clears through the scroll owner" {
     try std.testing.expectEqual(chatMaxScroll(), app_state.g_chat_scroll_y);
     try std.testing.expect(!app_state.g_chat_scrolled_up);
     try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+}
+
+test "IGSH-814 painter leaves all-read chats unchanged and paints one unread line" {
+    const saved_boundary = app_state.g_chat_read_boundary;
+    const saved_y = app_state.g_chat_read_divider_y;
+    const saved_scroll = app_state.g_chat_scroll_y;
+    defer {
+        app_state.g_chat_read_boundary = saved_boundary;
+        app_state.g_chat_read_divider_y = saved_y;
+        app_state.g_chat_scroll_y = saved_scroll;
+    }
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = 400, .height = -80 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = @import("win32.zig").CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old);
+    const Flush = struct {
+        extern "gdi32" fn GdiFlush() callconv(WINAPI) @import("win32.zig").BOOL;
+    };
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. 400 * 80 * 4];
+    @memset(pixels, 24);
+    const before = try std.testing.allocator.dupe(u8, pixels);
+    defer std.testing.allocator.free(before);
+    const blocks = [_]ChatBlock{
+        .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 },
+        .{ .start = 1, .len = 1, .role = .prose, .first = true, .message_id = 22 },
+    };
+    app_state.g_chat_read_divider_y = 0;
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_read_boundary = chat_history.unreadBoundary(&blocks, 22);
+    chatPaintReadDivider(dc, 400);
+    _ = Flush.GdiFlush();
+    try std.testing.expectEqualSlices(u8, before, pixels);
+    app_state.g_chat_read_boundary = chat_history.unreadBoundary(&blocks, 11);
+    try std.testing.expectEqual(@as(?usize, 1), app_state.g_chat_read_boundary.index);
+    chatPaintReadDivider(dc, 400);
+    _ = Flush.GdiFlush();
+    try std.testing.expect(!std.mem.eql(u8, before, pixels));
 }

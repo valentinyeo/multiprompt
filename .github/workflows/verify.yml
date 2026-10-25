@@ -39,6 +39,7 @@ on:
       - tools/chat-messages-only-proof.mjs
       - tools/chat-messages-only-proof.test.mjs
       - tools/chat-messages-only-proof.test.js
+      - tools/chat-unread-divider.test.js
       - tools/chat-code-font-proof.mjs
       - tools/chat-code-font-proof.test.js
       - tools/chat-composer-text-proof.mjs

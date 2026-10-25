@@ -46,7 +46,7 @@ pub const History = struct {
         return result;
     }
 
-    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64) !void {
+    fn appendMessage(self: *History, a: std.mem.Allocator, bytes: []const u8, role: md.Role, stamp: []const u8, source_offset: u64, source_end: u64, segment: u64, id: []const u8) !void {
         const start = self.text.items.len;
         const first_block = self.blocks.items.len;
         const max_blocks = 1 + std.mem.count(u8, bytes, "\n");
@@ -59,6 +59,7 @@ pub const History = struct {
         const recorded = style.timestamp(stamp);
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
         for (self.blocks.items[first_block..]) |*block| {
+            block.message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &self.sid), id);
             block.source_offset = source_offset;
             block.source_end = source_end;
             block.segment = segment;
@@ -142,12 +143,12 @@ pub const History = struct {
                 continue;
             }
             if (std.mem.eql(u8, m.role, "tool")) {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
                 message.clearRetainingCapacity();
                 last_id.clearRetainingCapacity();
                 if (m.text.len == 0) continue;
                 const tool_text_start = self.text.items.len;
-                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment);
+                try self.appendMessage(a, m.text, .tool, m.timestamp, m.offset, m.end, m.segment, m.id);
                 const index = self.blocks.items.len - 1;
                 var block = &self.blocks.items[index];
                 block.tool_status = std.meta.stringToEnum(md.ToolStatus, m.status orelse "running") orelse .running;
@@ -173,7 +174,7 @@ pub const History = struct {
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
                 message.clearRetainingCapacity();
                 source_offset = m.offset;
                 segment = m.segment;
@@ -189,7 +190,7 @@ pub const History = struct {
             try last_id.appendSlice(a, m.id);
             last_role = role;
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
         var pending = tools.valueIterator();
         while (pending.next()) |tool| {
             if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {
@@ -1411,10 +1412,32 @@ test "IGSH-813 prepending a loaded older page never counts its messages" {
 }
 
 test "IGSH-815 tail reconciliation retains prepended rows through cache restart and deltas" {
+pub const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+
+pub fn unreadBoundary(blocks: []const md.Block, marker: u64) ReadBoundary {
+    if (marker == 0 or blocks.len == 0) return .{};
+    var last: ?usize = null;
+    for (blocks, 0..) |block, i| {
+        if (block.role != .tool and block.message_id == marker) last = i;
+    }
+    if (last) |read| {
+        for (blocks[read + 1 ..], read + 1..) |block, i| {
+            if (block.role != .tool and block.first and block.message_id != marker) return .{ .index = i };
+        }
+        return .{};
+    }
+    for (blocks, 0..) |block, i| {
+        if (block.role != .tool) return .{ .index = i, .unknown = true };
+    }
+    return .{};
+}
+
+test "IGSH-814 history gap never guesses from offsets and resync keeps the message anchor" {
     const a = std.testing.allocator;
     const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
     var h: History = .{};
     defer h.deinit(a);
+<<<<<<< HEAD
     const tail = "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t1\t\ttail\t100\n" ++
         "{\"role\":\"assistant\",\"text\":\"last\",\"offset\":100,\"end\":200}\n@@MP_END@@\n";
     try h.apply(a, tail, 1, key);
@@ -1442,4 +1465,34 @@ test "IGSH-815 tail reconciliation retains prepended rows through cache restart 
         try std.testing.expectEqual(@as(usize, 1), history.blocks.items.len);
         try std.testing.expectEqual(@as(u64, 100), history.start);
     }
+=======
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"read\",\"text\":\"# Read\\n\\nAlready read\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"unread\",\"text\":\"# New\\n\\nUnread reply\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    const marker = h.blocks.items[0].message_id;
+    try std.testing.expect(marker != 0);
+    const boundary = unreadBoundary(h.blocks.items, marker);
+    try std.testing.expect(!boundary.unknown);
+    try std.testing.expectEqual(@as(?usize, 2), boundary.index);
+    const encoded = try h.encode(a, key);
+    defer a.free(encoded);
+    var resynced = try History.decode(a, encoded, key);
+    defer resynced.deinit(a);
+    for (resynced.blocks.items) |*block| block.source_offset += 900;
+    try std.testing.expectEqualDeep(boundary, unreadBoundary(resynced.blocks.items, marker));
+    const gap = unreadBoundary(h.blocks.items[2..], marker);
+    try std.testing.expect(gap.unknown);
+    try std.testing.expectEqual(@as(?usize, 0), gap.index);
+}
+
+test "IGSH-814 all read and legacy chats never draw a divider" {
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 },
+        .{ .start = 1, .len = 1, .role = .code, .message_id = 11 },
+        .{ .start = 2, .len = 1, .role = .tool },
+    };
+    try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(&blocks, 11));
+    try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(&blocks, 0));
+    try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(&.{}, 11));
+>>>>>>> 1cf4b8c7 (IGSH-814: Remember the first unread chat message)
 }

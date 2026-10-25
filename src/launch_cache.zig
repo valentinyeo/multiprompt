@@ -92,6 +92,7 @@ pub fn restore() void {
         if (state.next_shell_id != 0 and row.id >= state.next_shell_id) state.next_shell_id = row.id +% 1;
         cached_ids[i] = row.id;
         shell.chat_id = row.chat_id;
+        shell.last_read_message_id = row.last_read_message_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
         shell.group_id = row.group_id;
@@ -238,6 +239,7 @@ pub fn save() void {
     for (state.shells[0..state.shell_count], 0..) |shell, i| rows[i] = .{
         .id = shell.shell_id,
         .chat_id = shell.chat_id,
+        .last_read_message_id = shell.last_read_message_id,
         .name = state.shells[i].name[0..shell.name_len],
         .kind = @intFromEnum(shell.kind),
         .workspace = shell.workspace,

@@ -5,6 +5,7 @@ pub const MAX_BYTES = 1024 * 1024;
 pub const Row = struct {
     id: u32,
     chat_id: u64 = 0,
+    last_read_message_id: u64 = 0,
     name: []const u16,
     kind: u8 = 0,
     workspace: u8 = 0,
@@ -165,4 +166,21 @@ test "IGSH-816 CLEAN launch snapshot round trips both modes and legacy defaults 
     const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}]}")) orelse return error.TestUnexpectedResult;
     defer legacy.deinit();
     try std.testing.expect(!legacy.value.clean_chat);
+}
+
+test "IGSH-814 launch snapshot preserves the saved read anchor per chat" {
+    const a = std.testing.allocator;
+    const rows = [_]Row{
+        .{ .id = 1, .name = &.{}, .last_read_message_id = std.math.maxInt(u64) },
+        .{ .id = 2, .name = &.{}, .last_read_message_id = 42 },
+    };
+    const bytes = try encode(a, .{ .active = 1, .rows = &rows });
+    defer a.free(bytes);
+    const parsed = (try decode(a, bytes)).?;
+    defer parsed.deinit();
+    try std.testing.expectEqual(std.math.maxInt(u64), parsed.value.rows[0].last_read_message_id);
+    try std.testing.expectEqual(@as(u64, 42), parsed.value.rows[1].last_read_message_id);
+    const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}]}")).?;
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(u64, 0), legacy.value.rows[0].last_read_message_id);
 }

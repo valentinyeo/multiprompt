@@ -454,6 +454,8 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
+    app_state.g_chat_read_open_pending = false;
+    _ = @import("chat_session.zig").chatReadMark(true);
     app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;
     chatOutboxTick();
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
