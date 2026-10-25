@@ -939,15 +939,6 @@ fn paintAiPaceBar(hdc: HANDLE, left: i32, top: i32, right: i32, goal: AiPaceGoal
     }
 }
 
-fn aiPaceNextWeeklyReset(now: u64) ?u64 {
-    const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
-    var resets = [_]u64{0} ** app_state.g_ai_pace.goals.len;
-    for (app_state.g_ai_pace.goals[0..goal_count], 0..) |goal, slot| {
-        if (goal.available and goal.has_weekly_reset) resets[slot] = goal.weekly_reset_filetime;
-    }
-    return status_line.earliestReset(now, resets[0..goal_count]);
-}
-
 fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: DWORD, mono: ?DWORD) i32 {
     const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
     var x = start_x;
@@ -977,23 +968,11 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
 
     var x = inner_left;
     _ = SetTextColor(hdc, text);
-    if (app_state.g_ai_pace.from_ladder) {
-        const chip_text: []const u8 = if (app_state.g_ai_pace.ladder_mode == 2) "CX" else "CL";
-        x = drawAsciiRun(hdc, chip_text, x, rect.top, rect.bottom, inner_right) + uiScaled(8);
-    } else {
+    if (!app_state.g_ai_pace.from_ladder) {
         x = drawAsciiRun(hdc, "AI", x, rect.top, rect.bottom, inner_right) + uiScaled(8);
     }
 
-    var limit = inner_right;
-    const now = nowFileTime();
-    if (aiPaceNextWeeklyReset(now)) |reset| {
-        var reset_buf: [16]u8 = undefined;
-        const reset_text = status_line.formatResetHours(&reset_buf, now, reset);
-        var reset_rc = RECT{ .left = @max(x, inner_right - asciiTextWidth(hdc, reset_text)), .top = rect.top, .right = inner_right, .bottom = rect.bottom };
-        drawAscii(hdc, reset_text, &reset_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
-        limit = reset_rc.left - uiScaled(6);
-    }
-
+    const limit = inner_right;
     if (app_state.g_ai_pace.goal_count == 0) {
         if (!app_state.g_ai_pace.available) {
             _ = drawAsciiRun(hdc, "CONNECTING", x, rect.top, rect.bottom, limit);
@@ -1014,30 +993,7 @@ fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_su
     _ = SelectObject(hdc, font_title);
     _ = SetTextColor(hdc, bright);
     var header_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(5), .right = inner_right, .bottom = rect.top + uiScaled(25) };
-    if (app_state.g_ai_pace.from_ladder) {
-        drawAscii(hdc, "BURN", &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        const chip_w = uiScaled(112);
-        const chip_color: DWORD = if (app_state.g_ai_pace.ladder_mode == 2)
-            (if (app_state.g_light_theme) RGB(20, 125, 86) else RGB(70, 190, 140))
-        else
-            (if (app_state.g_light_theme) RGB(175, 82, 52) else RGB(224, 125, 91));
-        var chip = RECT{ .left = inner_right - chip_w, .top = rect.top + uiScaled(6), .right = inner_right, .bottom = rect.top + uiScaled(24) };
-        const chip_brush = CreateSolidBrush(chip_color);
-        _ = FillRect(hdc, &chip, chip_brush);
-        _ = DeleteObject(chip_brush);
-        var chip_buf: [40]u8 = undefined;
-        const chip_text = std.fmt.bufPrint(&chip_buf, "{s} | {s}", .{
-            if (app_state.g_ai_pace.ladder_mode == 2) "CODEX" else "CLAUDE",
-            switch (app_state.g_ai_pace.ladder_override) {
-                1 => "claude",
-                2 => "codex",
-                else => "auto",
-            },
-        }) catch "BURN";
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(20, 22, 26));
-        drawAscii(hdc, chip_text, &chip, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_CENTER | DT_END_ELLIPSIS);
-    } else {
+    if (!app_state.g_ai_pace.from_ladder) {
         drawAscii(hdc, "TODAY'S AI | 3/3", &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 
@@ -1335,7 +1291,7 @@ fn paintSidebarCombinedDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_
     var urgent_progress_buf: [20]u8 = undefined;
     const urgent_progress = formatAiPacePercent(&urgent_progress_buf, urgent.progress_tenths);
     const urgent_text = if (urgent.has_daily_goal and app_state.g_ai_pace.from_ladder)
-        std.fmt.bufPrint(&urgent_buf, "Burn {s}: {s} of week used", .{ if (app_state.g_ai_pace.ladder_mode == 2) "Codex" else "Claude", urgent_progress }) catch "Burn plan"
+        std.fmt.bufPrint(&urgent_buf, "{s}: {s} of week used", .{ aiPaceProviderLabel(&urgent), urgent_progress }) catch "Use AI this week"
     else if (urgent.has_daily_goal)
         std.fmt.bufPrint(&urgent_buf, "{s}: {s} today", .{ aiPaceProviderLabel(&urgent), urgent_progress }) catch "Use AI today"
     else
