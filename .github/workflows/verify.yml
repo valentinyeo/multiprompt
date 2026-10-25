@@ -331,6 +331,47 @@ jobs:
           $cleanup = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
           $global:LASTEXITCODE = 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        with:
+          persist-credentials: false
+          ref: 9618091700e09f5958a48390449dc5067874d5dd
+          path: negative-focus-source
+      - name: Build IGSH-807 pre-fix focus-ring control
+        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        working-directory: negative-focus-source
+        run: zig build
+      - name: Require visible pre-fix focus rings with unchanged input cycling
+        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence/focus-negative | Out-Null
+          $revision = (git -C negative-focus-source rev-parse HEAD).Trim()
+          if ($revision -ne '9618091700e09f5958a48390449dc5067874d5dd') { throw 'Wrong focus negative-control revision' }
+          $source = Get-Content negative-focus-source/src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Focus control version missing' }
+          $version = $Matches[1]
+          $exe = "$pwd/negative-focus-source/zig-out/bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ revision = $revision; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/focus-negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature pane-layout -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/focus-negative"
+          } catch {
+            Write-Host "Focus negative control returned: $_"
+          }
+          $red = Get-Content evidence/focus-negative/result.json -Raw | ConvertFrom-Json
+          if ($red.status -ne 'failed' -or $red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface') { throw 'Pre-fix control did not fail specifically on focus-ring pixels after input cycling' }
+          if (-not $red.scratchRemoved -or $red.cleanup -ne 'owned process tree stopped; scratch copied to evidence/data then removed') { throw 'Focus control cleanup failed' }
+          $tree = Get-Content evidence/focus-negative/process-tree.json -Raw | ConvertFrom-Json
+          if ($tree.activeAfterStop -ne 0) { throw 'Focus control left owned processes' }
+          $proofs = Get-Content evidence/focus-negative/focus-ring-proof.json -Raw | ConvertFrom-Json
+          $proofList = @($proofs)
+          [int]$withoutRing = 0
+          foreach ($proof in $proofList) { if ([int]$proof.pixels.mismatches -le 0) { $withoutRing++ } }
+          Write-Host "focus-negative proofs=$($proofList.Count) withoutRing=$withoutRing"
+          if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
+          $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
         shell: powershell

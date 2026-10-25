@@ -993,7 +993,6 @@ const browserPlaceholderRect = @import("browser_pane.zig").browserPlaceholderRec
 const paintBrowserPlaceholder = @import("browser_pane.zig").paintBrowserPlaceholder;
 const paintBrowserSplitter = @import("browser_pane.zig").paintBrowserSplitter;
 const activePaneBorderOn = @import("browser_pane.zig").activePaneBorderOn;
-const paintActivePaneBorder = @import("browser_pane.zig").paintActivePaneBorder;
 const invalidateBrowserBottomMask = @import("browser_pane.zig").invalidateBrowserBottomMask;
 const browserChromeForegroundAllowed = @import("browser_pane.zig").browserChromeForegroundAllowed;
 const browserChromeCanStayVisible = @import("browser_pane.zig").browserChromeCanStayVisible;
@@ -1590,7 +1589,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
-            paintActivePaneBorder(mem_dc);
             canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);
