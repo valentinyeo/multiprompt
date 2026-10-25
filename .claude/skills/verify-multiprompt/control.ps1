@@ -2543,6 +2543,48 @@ try {
                 }
             }
             if ($result.checks.Count -ne 3) { throw 'IGSH-812 requires all three dictation stop cases' }
+            $draft = [VerifyNative]::EditText($handle)
+            Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'
+            $iteration++
+            Wait-Until {
+                @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+            } 'IGSH-846 cancellation recording reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+            Assert-DictationMic $mic $true 'escape-listening'
+            Type-Text ' keep this'
+            $draft += ' keep this'
+            Wait-Until { [VerifyNative]::EditText($handle) -ceq $draft } 'IGSH-846 draft includes typing during recording'
+            Press @(0x1B, 0x1B) 'Escape with a repeated keydown: discard the recording once'
+            Wait-Until {
+                $audit = @(Get-Content $auditPath)
+                @($audit | Where-Object { $_ -match '\tcancel\t0$' }).Count -eq 1 -and
+                    @($audit | Where-Object { $_ -match '\taudio-bytes\t89160$' }).Count -eq $iteration
+            } 'IGSH-846 cancellation stopped the capture worker' -Seconds 2 -PollMilliseconds 20
+            Assert-DictationMic $mic $false 'escape-cancelled'
+            if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 Escape changed the existing draft' }
+            Snapshot 'escape-cancelled'
+            $result.checks += @{ name = 'dictation-escape'; passed = $true; WM_GETTEXT = $draft; idleMicPixels = $true }
+            $delivered = $iteration - 1
+            Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'
+            $iteration++
+            Wait-Until {
+                @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+            } 'IGSH-846 a new recording starts after cancellation' -Seconds 2 -PollMilliseconds 20
+            Assert-DictationMic $mic $true 'escape-restarted'
+            if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 cancelled transcript arrived late' }
+            $audit = @(Get-Content $auditPath)
+            foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
+                if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $delivered) { throw "IGSH-846 cancelled recording reached transcription or delivery: $stage" }
+            }
+            Press @(0x0D) 'Enter: transcribe only the restarted recording'
+            $expected = $draft + ' Go forward ten meters.'
+            Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-846 restarted recording delivers exactly once' -Seconds 1 -PollMilliseconds 10
+            Assert-DictationMic $mic $false 'escape-restart-stopped'
+            $audit = @(Get-Content $auditPath)
+            foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
+                if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne ($delivered + 1)) { throw "IGSH-846 restarted recording did not deliver exactly once: $stage" }
+            }
+            Save-Json @{ preservedDraft = $draft; WM_GETTEXT = [VerifyNative]::EditText($handle); audit = $audit } 'escape-restart.text.json'
+            $result.checks += @{ name = 'dictation-escape-restart'; passed = $true; WM_GETTEXT = [VerifyNative]::EditText($handle); idleMicPixels = $true }
             Snapshot 'after'
         }
         'chat-tables' {
