@@ -180,9 +180,10 @@ function Assert-FullHistory([string]$Stage) {
     if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
     Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text through the palette'
     [void](Wait-For 'owned command palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    $actions.Add(@{case=$plan.name; input='type palette query'; text='chat view select all'})
-    foreach ($letter in 'chat view select all'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For 'select all transcript palette command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=19 count=1 target=\d+' })
+    $query = 'chat view select all'
+    $actions.Add(@{case=$plan.name; input='type palette query'; text=$query})
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'select all transcript palette command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
     Press @(0x0D) 'Enter: select every rendered message'
     Press @(0x11, 0x43) 'Ctrl+C: copy all rendered messages'
     $copied = [Windows.Forms.Clipboard]::GetText()
