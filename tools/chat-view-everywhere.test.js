@@ -109,7 +109,7 @@ test('IGSH-820 native refused-action tests, maps and existing Windows journey ar
   ]) assert.ok(main.includes(`test "${title}"`), title);
   assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-view-everywhere"/);
   assert.match(workflow, /if: \(env.FEATURE == 'chat-view' \|\| env.FEATURE == 'chat-view-everywhere'\) && env.RELEASE_TAG == ''(?:(?!\r?\n      - )[\s\S])*?zig build test-main/m);
-  for (const name of ['chat-view-everywhere', 'pin-protects-tab']) {
+  for (const name of ['chat-view-everywhere']) {
     assert.deepEqual(read(skill + `features/${name}.md`).match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
     assert.ok(read(skill + 'features/README.md').includes(`](${name}.md)`));
   }

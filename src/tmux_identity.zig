@@ -42,7 +42,7 @@ test "restore dedupe keeps newest full record and name, separating hosts and emp
         tmux_session_len: usize = 8,
         last_viewed: u64 = 0,
         name: []const u8,
-        locked: bool = false,
+        pinned_top: bool = false,
     };
     var tabs = [_]Tab{
         .{ .name = "secondary Growth Bot", .last_viewed = 10 },
