@@ -101,7 +101,7 @@ test "restart preserves all random id bits" {
     @memcpy(json_buf[0..header.len], header);
     var pos: usize = header.len;
     const i = 1;
-` + save.slice(start, end) + `
+` + save.slice(start, end).replaceAll("catch return false", "catch return error.TestUnexpectedResult") + `
     @memcpy(json_buf[pos..][0..3], "}]}");
     pos += 3;
     var parsed = try json_reader.parse(std.testing.allocator, json_buf[0..pos]);
