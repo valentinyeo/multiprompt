@@ -129,6 +129,7 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
+    name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || format('verify ({0})', matrix.feature) }}
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.feature == 'browser-switch-speed' && 60 || 30 }}

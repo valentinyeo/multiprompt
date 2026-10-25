@@ -83,6 +83,10 @@ function main() {
     git('commit', '-m', `Revert "${subject}"`, '-m', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`);
     git('-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', `HEAD:refs/heads/${branch}`);
     pullRequest = execFileSync('gh', ['pr', 'create', '--repo', repository, '--base', 'master', '--head', branch, '--title', `Revert ${subject}`, '--body', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`], { encoding: 'utf8' }).trimEnd();
+    for (const workflow of ['gitleaks.yml', 'no-comments.yml', 'test.yml']) {
+      execFileSync('gh', ['workflow', 'run', workflow, '--repo', repository, '--ref', branch], { encoding: 'utf8' });
+    }
+    execFileSync('gh', ['workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance'], { encoding: 'utf8' });
     execFileSync('gh', ['pr', 'merge', pullRequest, '--repo', repository, '--auto', '--squash'], { encoding: 'utf8' });
   } catch (error) {
     notify(`Auto-revert could not prepare or enable squash auto-merge for ${decision.sha}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);

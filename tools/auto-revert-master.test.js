@@ -50,6 +50,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
       if (command === 'gh') {
         if (args[0] === 'pr' && args[1] === 'create') return `https://github.com/${repository}/pull/351\n`;
         if (args[0] === 'pr' && args[1] === 'merge') return '';
+        if (args[0] === 'workflow' && args[1] === 'run') return '';
         assert.equal(args[0], 'api');
         if (args.includes('POST')) return JSON.stringify({ number: 1 });
         if (args[1].includes('/jobs?')) return JSON.stringify([{ jobs: input.jobs }]);
@@ -179,6 +180,30 @@ test('red workflow path reverts exactly one merge on the run-id branch, opens a 
   assert.equal(result.process.exitCode, 1);
 });
 
+test('revert PR dispatches exactly the required workflows on its branch after creation and before auto-merge', () => {
+  const input = fixture();
+  const result = runtime(input, 'workflow_run');
+  const branch = `auto-revert/${input.run.id}`;
+  const dispatches = result.calls.filter(call => call[0] === 'gh' && call[1] === 'workflow' && call[2] === 'run');
+  assert.deepEqual(dispatches, [
+    ['gh', 'workflow', 'run', 'gitleaks.yml', '--repo', repository, '--ref', branch],
+    ['gh', 'workflow', 'run', 'no-comments.yml', '--repo', repository, '--ref', branch],
+    ['gh', 'workflow', 'run', 'test.yml', '--repo', repository, '--ref', branch],
+    ['gh', 'workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance'],
+  ]);
+  const create = result.calls.findIndex(call => call[1] === 'pr' && call[2] === 'create');
+  const merge = result.calls.findIndex(call => call[1] === 'pr' && call[2] === 'merge');
+  assert.ok(create >= 0 && merge > create);
+  for (const dispatch of dispatches) {
+    const index = result.calls.indexOf(dispatch);
+    assert.ok(index > create && index < merge);
+  }
+  const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
+  assert.deepEqual(required, ['no-comments', 'secret-scan', 'test', 'verify (appearance)']);
+  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
+  assert.match(workflow, /\n  actions: write\n/);
+});
+
 test('a delayed red workflow creates its revert branch from the failing head, not newer master', () => {
   const input = fixture();
   input.commits.unshift(commit(newer, 'IGSH-999: later unrelated change'));
@@ -216,7 +241,11 @@ test('ticket-less red workflow opens an issue but never reverts or pushes', () =
 for (const [name, failure, blocked] of [
   ['revert branch creation failure', 'checkout', ['revert', 'commit', 'push', 'create', 'merge']],
   ['ruleset-rejected branch push', 'push', ['create', 'merge']],
-  ['PR creation failure', 'create', ['merge']],
+  ['PR creation failure', 'create', ['run', 'merge']],
+  ['secret scan dispatch failure', 'gitleaks.yml', ['no-comments.yml', 'test.yml', 'verify.yml', 'merge']],
+  ['no-comments dispatch failure', 'no-comments.yml', ['test.yml', 'verify.yml', 'merge']],
+  ['test dispatch failure', 'test.yml', ['verify.yml', 'merge']],
+  ['appearance dispatch failure', 'verify.yml', ['merge']],
   ['squash auto-merge enabling failure', 'merge', []],
 ]) test(`${name} opens an issue with exact command output and fails closed without retrying`, () => {
   const result = runtime(fixture(), 'workflow_run', failure);
@@ -250,4 +279,9 @@ test('PR smoke, full master matrix and the release tag trigger stay wired', () =
   assert.ok(matrices[1].includes('remind-me'));
   assert.match(verify, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
+});
+
+test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
+  const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
+  assert.match(verify, /^  verify:\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
