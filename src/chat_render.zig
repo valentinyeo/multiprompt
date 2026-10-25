@@ -2855,7 +2855,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
         .user, .injected => {
             const status_h = if (block.time[0] != 0 or block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
             const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
-            fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
+            fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (app_state.clean_chat) RGB(255, 0, 0) else if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
