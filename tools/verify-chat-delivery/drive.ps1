@@ -480,6 +480,12 @@ foreach ($plan in $plans) {
             $bounds = $views[0].Current.BoundingRectangle
             $dividerProof = @{marker=$savedMarker; readId=$readId; firstUnreadId=$firstUnreadId; unreadOffset=$unreadOffset; reopened=$divider; transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
             Shot 'unread-divider-reopened'
+            $pinLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '3'
+            $pinned = Wait-For 'arrival while at the bottom keeps the view pinned to the newest message' { $v = Divider-State $pinLogStart; if ($v -and $v.scroll -gt $divider.scroll) { $v } }
+            [void](Require-NewMessages 0 0 0 'arrival at the bottom never shows the pill or scrolls up' $pinLogStart)
+            $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
+            Shot 'pinned-after-arrival'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
             $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart
