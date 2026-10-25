@@ -5036,6 +5036,7 @@ test "IGSH-759 tool rows have no layout paint targets or hit area through stream
 
 const CleanChatScene = enum {
     blank, receipt, timestamp, sending, queued, waiting, not_sent, unconfirmed,
+    queued_bubble, sending_bubble, shell_bubble,
     retry, remove, shell_queue, injected_queue, model, context, todo_summary,
     todo_done, todo_working, todo_pending, todo_chevron, empty, missing, loading,
     failed, tool, tool_detail, tool_diff, user, injected, prose, code, table,
@@ -5112,6 +5113,18 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             entry.write_started = scene == .unconfirmed;
             app_state.shells[0].disconnected = scene == .waiting;
             chatPaintEchoStatus(dc, entry, .{ .left = 0, .top = 0, .right = width, .bottom = 24 });
+        },
+        .queued_bubble, .sending_bubble, .shell_bubble => {
+            const rc = chatMeasureEchoRect(dc, text, width, 0);
+            if (scene == .shell_bubble) {
+                var row: chat_shell_sync.Row = .{ .len = text.len };
+                @memcpy(row.text[0..text.len], text);
+                chatPaintShellRow(dc, &row, rc);
+            } else {
+                entry.state = if (scene == .queued_bubble) .delivered else .sending;
+                chatPaintEcho(dc, entry, rc, 0);
+            }
+            crop.bottom = rc.bottom - (if (clean) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
         },
         .retry, .remove => {
             const rc = chatMeasureEchoRect(dc, text, width, 0);
@@ -5222,8 +5235,36 @@ test "IGSH-816 CLEAN hides Sending status pixels" {
     try expectCleanChatRowHidden(.sending);
 }
 
-test "IGSH-816 CLEAN hides outbox Queued in Claude chip pixels" {
-    try expectCleanChatRowHidden(.queued);
+test "IGSH-872 queued bubbles are half opacity and shell queues use the same rendering" {
+    const full = try cleanChatPixels(.sending_bubble, true);
+    defer std.testing.allocator.free(full);
+    const queued = try cleanChatPixels(.queued_bubble, true);
+    defer std.testing.allocator.free(queued);
+    const shell = try cleanChatPixels(.shell_bubble, true);
+    defer std.testing.allocator.free(shell);
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    var changed: usize = 0;
+    for (full, queued, blank) |normal, dimmed, background| {
+        if (normal != background) changed += 1;
+        for ([_]u5{ 0, 8, 16 }) |shift| {
+            const expected: i32 = @intCast((((normal >> shift) & 255) + ((background >> shift) & 255)) / 2);
+            const actual: i32 = @intCast((dimmed >> shift) & 255);
+            try std.testing.expect(@abs(actual - expected) <= 1);
+        }
+    }
+    try std.testing.expect(changed > 0);
+    try std.testing.expectEqualSlices(u32, queued, shell);
+}
+
+test "IGSH-872 queued caption is absent with CLEAN on and off" {
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    for ([_]bool{ false, true }) |clean| {
+        const queued = try cleanChatPixels(.queued, clean);
+        defer std.testing.allocator.free(queued);
+        try std.testing.expectEqualSlices(u32, blank, queued);
+    }
 }
 
 test "IGSH-816 CLEAN hides Waiting for connection status pixels" {
