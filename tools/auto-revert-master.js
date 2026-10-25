@@ -92,10 +92,10 @@ function main() {
   const ticket = decision.ticket || commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0].match(/\bIGSH-\d+\b/)?.[0] || 'Unknown ticket';
   const notify = detail => {
     const title = `${ticket}: master verify failure (run ${runId})`;
-    const body = `${marker}\n\n${detail}\n\nFailed journeys/jobs: ${failing}\n\nRun: ${run.html_url}\nHead: ${run.head_sha}\n\nHypertask notification unavailable: this workflow uses only GITHUB_TOKEN, which cannot authenticate to the board. Manually reopen ${ticket} and post the failing journeys above. No board write was attempted.`;
+    const body = `${marker}\n\n${detail}\n\nFailed journeys/jobs: ${failing}\n\nRun: ${run.html_url}\nHead: ${run.head_sha}\n\nThe board ticket was not reopened by this run. Manually reopen ${ticket} and post the failing journeys above.`;
     const existing = api(`repos/${repository}/issues?state=all&per_page=100`, '--paginate', '--slurp').flat().find(issue => !issue.pull_request && issue.body?.split('\n').includes(marker));
     if (!existing) api(`repos/${repository}/issues`, '-X', 'POST', '-f', `title=${title}`, '-f', `body=${body}`);
-    console.error('::error::Hypertask notification unavailable; GitHub issue records the cause and required manual ticket reopening.');
+    console.error('::error::Board ticket not reopened; the GitHub issue records the cause and the required manual reopening.');
     process.exitCode = 1;
   };
   if (decision.action === 'skip') {
@@ -128,7 +128,11 @@ function main() {
     notify(`Auto-revert could not prepare or enable squash auto-merge for ${decision.sha}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);
     throw error;
   }
-  notify(`Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled. Failed journeys: ${decision.journeys.join(', ')}.`);
+  try {
+    execFileSync('node', ['tools/auto-revert-board.js', ticket, run.html_url, decision.journeys.join(', ')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    notify(`Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled, but the board ticket was not reopened: ${error.stderr?.toString().trim() || error.message}`);
+  }
 }
 
 module.exports = { decide };

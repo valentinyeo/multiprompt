@@ -74,6 +74,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
         if (args[1].includes('/issues?')) return JSON.stringify([[]]);
         return JSON.stringify(input.run);
       }
+      if (command === 'node') return '';
       assert.equal(command, 'git');
       if (args[0] === 'log') return input.commits.map(commit => `${commit.sha}\0${commit.parents.map(parent => parent.sha).join(' ')}\0${commit.commit.message}\n\0`).join('');
       if (args[0] === 'rev-parse') return input.commits[0].sha;
@@ -184,8 +185,7 @@ test('only newly failing journeys are blamed when master was already red', () =>
   const result = runtime(input, 'workflow_run');
   const create = result.calls.find(call => call[1] === 'pr' && call[2] === 'create');
   assert.ok(create.includes(`This reverts commit ${sha}.\n\nAuto-Revert-Run: ${input.run.id}\nFailed journeys: session-restore\nVerify run: ${input.run.html_url}`));
-  const issue = result.calls.find(call => call.includes('POST'));
-  assert.ok(issue.some(arg => arg.includes('verify (chat-focus)')));
+  assert.deepEqual(result.calls.find(call => call[0] === 'node'), ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore']);
 });
 
 test('a journey that last passed on an older commit than the parent is not blamed on the head', () => {
@@ -365,12 +365,25 @@ test('red workflow path reverts exactly one merge on the run-id branch, opens a 
   assert.deepEqual(result.calls[create], ['gh', 'pr', 'create', '--repo', repository, '--base', 'master', '--head', branch, '--title', `Revert ${input.commits[0].commit.message}`, '--body', body]);
   const merge = result.calls.findIndex(call => call[1] === 'pr' && call[2] === 'merge');
   assert.deepEqual(result.calls[merge], ['gh', 'pr', 'merge', `https://github.com/${repository}/pull/351`, '--repo', repository, '--auto', '--squash']);
-  const issue = result.calls.findIndex(call => call.includes('POST'));
-  assert.ok(checkout >= 0 && checkout < revert && revert < commit && commit < push && push < create && create < merge && merge < issue);
-  assert.ok(result.calls[issue].some(arg => arg.includes('Manually reopen IGSH-812')));
-  assert.ok(result.calls[issue].some(arg => arg.includes('verify (session-restore)')));
-  assert.ok(result.calls[issue].some(arg => arg.includes('squash auto-merge enabled')));
+  const board = result.calls.findIndex(call => call[0] === 'node');
+  assert.ok(checkout >= 0 && checkout < revert && revert < commit && commit < push && push < create && create < merge && merge < board);
+  assert.deepEqual(result.calls[board], ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore, chat-focus']);
+  assert.equal(result.calls.filter(call => call.includes('POST')).length, 0);
+  assert.equal(result.process.exitCode, 0);
+});
+
+test('a failed board reopen after the revert pull request opens an issue naming the ticket and fails the job', () => {
+  const input = fixture();
+  const result = runtime(input, 'workflow_run', 'tools/auto-revert-board.js');
+  const issue = result.calls.find(call => call.includes('POST'));
+  assert.ok(issue.some(arg => arg.includes('Manually reopen IGSH-812')));
+  assert.ok(issue.some(arg => arg.includes('the board ticket was not reopened')));
   assert.equal(result.process.exitCode, 1);
+});
+
+test('a dry run never touches the board', () => {
+  const result = runtime(fixture(), 'workflow_dispatch');
+  assert.ok(result.calls.every(call => call[0] !== 'node'));
 });
 
 test('revert PR dispatches exactly the required workflows on its branch after creation and before auto-merge', () => {

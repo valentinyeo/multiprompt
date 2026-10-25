@@ -1,107 +1,117 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
-const os = require('node:os');
-const { execFileSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'revert-board-'));
-  const input = {
-    pulls: [[{ head: { ref: 'auto-revert/40229944919' }, user: { login: 'github-actions[bot]' }, title: 'Revert IGSH-837: IGSH-837 red proof', body: `This reverts commit ${'a'.repeat(40)}.\n\nAuto-Revert-Run: 40229944919\nFailed journeys: appearance\n`, merged_at: null, state: 'open' }]],
-    run: { id: 40229944919, path: '.github/workflows/verify.yml', event: 'push', head_branch: 'master', head_sha: 'a'.repeat(40), status: 'completed', conclusion: 'failure', repository: { full_name: 'valentinyeo/multiprompt' }, head_repository: { full_name: 'valentinyeo/multiprompt' } },
-    section: 'Done', comments: [], calls: [],
-  };
-  const state = path.join(root, 'state.json');
-  fs.writeFileSync(state, JSON.stringify(input));
-  const command = path.join(root, 'fake-command');
-  fs.writeFileSync(command, `#!/usr/bin/env node
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-const file = process.env.BOARD_FIXTURE;
-const data = JSON.parse(fs.readFileSync(file));
-data.calls.push(args);
-let result;
-if (args[0] === 'api') result = args[1].includes('/pulls?') ? data.pulls : data.run;
-else if (args[0] === 'task' && args[1] === 'get') result = { success: true, tasks: [{ section: data.section }] };
-else if (args[0] === 'task' && args[1] === 'move') { data.section = args[args.indexOf('--section') + 1]; result = { success: true }; }
-else if (args[0] === 'comment' && args[1] === 'list') {
-  if (data.brokenPage) result = { success: true, comments: [], has_more: true };
-  else if (data.secondPage && !args.includes('--cursor')) result = { success: true, comments: [], has_more: true, nextCursor: 'next' };
-  else result = { success: true, comments: data.comments, has_more: false, total: data.comments.length };
-} else if (args[0] === 'comment' && args[1] === 'add') {
-  if (data.failComment) { process.stderr.write('board unavailable'); process.exit(1); }
-  data.comments.push({ text: args[args.indexOf('--text') + 1] }); result = { success: true };
-} else throw new Error('Unexpected command: ' + args.join(' '));
-fs.writeFileSync(file, JSON.stringify(data));
-process.stdout.write(JSON.stringify(result));
-`, { mode: 0o700 });
-  fs.symlinkSync(command, path.join(root, 'gh'));
-  return {
-    run: () => execFileSync(process.execPath, [path.join(__dirname, 'auto-revert-board.js')], { env: { ...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`, CEO_HT: command, BOARD_FIXTURE: state }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
-    read: () => JSON.parse(fs.readFileSync(state)),
-    update: change => { const data = JSON.parse(fs.readFileSync(state)); change(data); fs.writeFileSync(state, JSON.stringify(data)); },
-    close: () => fs.rmSync(root, { recursive: true, force: true }),
-  };
+const runUrl = 'https://github.com/valentinyeo/multiprompt/actions/runs/40229944919';
+const secret = 'board-credential-for-test';
+
+async function fakeBoard(t, initial = {}) {
+  const state = { section: 'Done', comments: [], calls: [], pages: false, failComment: false, ...initial };
+  const sections = [{ id: 1, section_title: 'Todo' }, { id: 2, section_title: 'Done' }];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      const url = new URL(req.url, 'http://board.test');
+      const body = raw ? JSON.parse(raw) : null;
+      state.calls.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body, auth: req.headers.authorization });
+      const reply = (status, json) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(json)); };
+      if (req.headers.authorization !== `Bearer ${secret}`) return reply(401, { success: false });
+      if (req.method === 'GET' && url.pathname === '/tasks') return reply(200, { success: true, tasks: [{ ticketNumber: url.searchParams.get('ticket_number'), section: state.section, boardId: 2060 }] });
+      if (req.method === 'GET' && url.pathname === '/projects/2060/sections') return reply(200, { success: true, sections });
+      if (req.method === 'POST' && url.pathname === '/tasks/update') { state.section = sections.find(section => section.id === body.sectionId).section_title; return reply(200, { success: true }); }
+      if (req.method === 'GET' && url.pathname === '/comments') {
+        if (state.pages && !url.searchParams.get('cursor')) return reply(200, { success: true, comments: [], has_more: true, nextCursor: 'next' });
+        return reply(200, { success: true, comments: state.comments, has_more: false, nextCursor: null });
+      }
+      if (req.method === 'POST' && url.pathname === '/comments') {
+        if (state.failComment) return reply(500, { success: false });
+        state.comments.push({ text: body.text, kind: body.kind });
+        return reply(200, { success: true });
+      }
+      return reply(404, { success: false });
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const run = (args = ['IGSH-837', runUrl, 'appearance'], env = {}) => new Promise((resolve, reject) => {
+    execFile(process.execPath, [path.join(__dirname, 'auto-revert-board.js'), ...args], { env: { PATH: process.env.PATH, HYPERTASK_AGENT_TOKEN: secret, HYPERTASK_API_BASE: base, ...env }, encoding: 'utf8' }, (error, stdout, stderr) => error ? reject(Object.assign(error, { stderr })) : resolve(stdout));
+  });
+  return { state, run };
 }
 
-test('real auto-revert reopens Done and posts the failed journey once across retries', t => {
-  const f = fixture(); t.after(f.close);
-  f.run(); f.run();
-  const data = f.read();
-  assert.equal(data.section, 'Todo');
-  assert.equal(data.comments.length, 1);
-  assert.match(data.comments[0].text, /appearance/);
-  assert.match(data.comments[0].text, /40229944919/);
-  const call = data.calls.find(args => args[1] === 'add');
-  assert.equal(call[call.indexOf('--kind') + 1], 'qa');
-  assert.ok(call.includes('--improve'));
+test('a Done ticket moves to Todo with one comment and a retry posts no second comment', async t => {
+  const board = await fakeBoard(t);
+  assert.match(await board.run(), /reopened/);
+  assert.match(await board.run(), /already reopened/);
+  assert.equal(board.state.section, 'Todo');
+  assert.equal(board.state.comments.length, 1);
+  assert.equal(board.state.comments[0].kind, 'qa');
+  assert.match(board.state.comments[0].text, /appearance/);
+  assert.ok(board.state.comments[0].text.includes(runUrl));
+  assert.equal(board.state.calls.filter(call => call.path === '/tasks/update').length, 1);
 });
 
-for (const section of ['Doing', 'AI Review', 'Todo']) test(`active ${section} work stays owned`, t => {
-  const f = fixture(); t.after(f.close);
-  f.update(d => { d.section = section; }); f.run();
-  assert.equal(f.read().section, section);
-  assert.equal(f.read().comments.length, 1);
+for (const section of ['Doing', 'AI Review', 'Todo']) test(`active ${section} work stays where it is`, async t => {
+  const board = await fakeBoard(t, { section });
+  await board.run();
+  assert.equal(board.state.section, section);
+  assert.equal(board.state.comments.length, 1);
+  assert.equal(board.state.calls.filter(call => call.path === '/tasks/update').length, 0);
 });
 
-test('comment failure retries after the successful reopen', t => {
-  const f = fixture(); t.after(f.close);
-  f.update(d => { d.failComment = true; });
-  assert.throws(f.run); assert.equal(f.read().section, 'Todo');
-  f.update(d => { d.failComment = false; }); f.run();
-  assert.equal(f.read().comments.length, 1);
+test('a comment failure after the move is retried without moving again', async t => {
+  const board = await fakeBoard(t, { failComment: true });
+  await assert.rejects(board.run());
+  assert.equal(board.state.section, 'Todo');
+  board.state.failComment = false;
+  await board.run();
+  assert.equal(board.state.comments.length, 1);
+  assert.equal(board.state.calls.filter(call => call.path === '/tasks/update').length, 1);
 });
 
-test('existing comment on later page prevents a duplicate', t => {
-  const f = fixture(); t.after(f.close); f.run();
-  f.update(d => { d.secondPage = true; }); f.run();
-  assert.equal(f.read().comments.length, 1);
+test('an existing comment on a later page prevents a duplicate', async t => {
+  const board = await fakeBoard(t);
+  await board.run();
+  board.state.pages = true;
+  assert.match(await board.run(), /already reopened/);
+  assert.equal(board.state.comments.length, 1);
+  assert.ok(board.state.calls.some(call => call.path === '/comments' && call.query.cursor === 'next'));
 });
 
-test('incomplete board comment history fails closed', t => {
-  const f = fixture(); t.after(f.close);
-  f.update(d => { d.brokenPage = true; });
-  assert.throws(f.run);
-  assert.equal(f.read().comments.length, 0);
+test('a wrong credential fails without changing the board and never prints it', async t => {
+  const board = await fakeBoard(t);
+  await assert.rejects(board.run(undefined, { HYPERTASK_AGENT_TOKEN: 'wrong-credential' }), error => {
+    assert.ok(!error.stderr.includes('wrong-credential'));
+    return /failed with status 401/.test(error.stderr);
+  });
+  assert.equal(board.state.section, 'Done');
+  assert.equal(board.state.comments.length, 0);
 });
 
-for (const [name, change] of [
-  ['human-authored pull', d => { d.pulls[0][0].user.login = 'someone'; }],
-  ['closed unmerged revert', d => { d.pulls[0][0].state = 'closed'; }],
-  ['wrong workflow', d => { d.run.path = '.github/workflows/test.yml'; }],
-  ['wrong repository', d => { d.run.head_repository.full_name = 'someone/fork'; }],
-  ['successful run', d => { d.run.conclusion = 'success'; }],
-  ['wrong target', d => { d.run.head_sha = 'b'.repeat(40); }],
-  ['wrong run marker', d => { d.pulls[0][0].body = d.pulls[0][0].body.replace('40229944919', '40229944918'); }],
-]) test(`${name} cannot reopen tickets`, t => {
-  const f = fixture(); t.after(f.close); f.update(change); f.run();
-  assert.equal(f.read().section, 'Done'); assert.equal(f.read().comments.length, 0);
+test('a missing credential or bad arguments fail before any board call', async t => {
+  const board = await fakeBoard(t);
+  await assert.rejects(board.run(undefined, { HYPERTASK_AGENT_TOKEN: '' }), error => /HYPERTASK_AGENT_TOKEN is not set/.test(error.stderr));
+  await assert.rejects(board.run(['not-a-ticket', runUrl, 'appearance']), error => /Usage/.test(error.stderr));
+  await assert.rejects(board.run(['IGSH-837', 'https://example.com/run', 'appearance']), error => /Usage/.test(error.stderr));
+  assert.equal(board.state.calls.length, 0);
 });
 
-test('cancelled master run with a validated bot rollback reopens the task', t => {
-  const f = fixture(); t.after(f.close);
-  f.update(d => { d.run.conclusion = 'cancelled'; }); f.run();
-  assert.equal(f.read().section, 'Todo');
-  assert.equal(f.read().comments.length, 1);
+test('the workflow gives the board step only its own agent secret and GitHub calls use the job token', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'auto-revert-master.yml'), 'utf8');
+  assert.match(workflow, /HYPERTASK_AGENT_TOKEN: \$\{\{ secrets\.HYPERTASK_AGENT_TOKEN \}\}/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.ok(!/secrets\.(?!HYPERTASK_AGENT_TOKEN\b)/.test(workflow));
+  assert.ok(!/valentinyeo\//.test(workflow));
+});
+
+test('no poller, timer or unit file is left in the repository', () => {
+  const root = path.join(__dirname, '..');
+  assert.ok(!fs.existsSync(path.join(root, 'tools', 'systemd')));
+  const docs = fs.readFileSync(path.join(root, 'openwiki', 'operations', 'build-and-install.md'), 'utf8');
+  assert.ok(!/multiprompt-revert-board|systemctl/.test(docs));
 });
