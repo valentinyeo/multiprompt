@@ -571,6 +571,8 @@ pub extern "user32" fn BeginPaint(HANDLE, *PAINTSTRUCT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn EndPaint(HANDLE, *const PAINTSTRUCT) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDC(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetWindowDC(HANDLE) callconv(WINAPI) HANDLE;
+pub const PW_RENDERFULLCONTENT: UINT = 0x00000002;
+pub extern "user32" fn PrintWindow(HANDLE, HANDLE, UINT) callconv(WINAPI) BOOL;
 pub extern "user32" fn ReleaseDC(HANDLE, HANDLE) callconv(WINAPI) i32;
 pub extern "user32" fn ShowScrollBar(HANDLE, i32, BOOL) callconv(WINAPI) BOOL;
 pub const SB_VERT: i32 = 1;
