@@ -206,7 +206,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
   assert.match(journey, /\$_.OwningProcess -eq \$process.Id/);
-  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\)\) \{\s*sendZsbWorkspaceResponse/);
+  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\) or std\.mem\.eql\(u8, argv\[0\], "session-status"\)\) \{\s*sendZsbWorkspaceResponse/);
   assert.match(bridge, /zsbSessionOpen\(args, out, @import\("console.zig"\)\.spawnBackgroundTmuxSession, saveSession\)/);
 });
 
@@ -534,6 +534,21 @@ test('G2: optional save fields and failed SSH preservation match app persistence
   assert.match(journey, /\$result.sshBoundary.observed = \$script:sshFailure/);
   assert.match(journey, /\$result.sshBoundary.tabRemoved = \$false/);
   assert.match(read('src/console.zig'), /markSshTabDisconnected: preserving SSH\/tmux tab for automatic reconnect/);
+});
+
+test('failed SSH status must match the created tab and exact logged nonzero exit code', () => {
+  function requiresFailureStatus(source) {
+    assert.match(source, /Invoke-Zsb @\('session-status', '--tab', \[string\]\$created.tab\) \$script:zsbPort 'session-status-failed'/);
+    assert.match(source, /\$status.tab -ne \$created.tab/);
+    assert.match(source, /\$status.state -cne 'disconnected'/);
+    assert.match(source, /-not \$status.PSObject.Properties\['exit_code'\]/);
+    assert.match(source, /\$status.exit_code -ne \$script:sshFailure.exitCode/);
+    assert.match(source, /name = 'session-status-failed-attach'/);
+  }
+  requiresFailureStatus(journey);
+  for (const required of ["'session-status'", "$status.tab -ne $created.tab", "$status.state -cne 'disconnected'", "$status.exit_code -ne $script:sshFailure.exitCode"]) {
+    assert.throws(() => requiresFailureStatus(journey.replace(required, '$false')));
+  }
 });
 
 test('G2: evidence is retained without seeding app state or bypassing cleanup', () => {

@@ -39,7 +39,7 @@ function cli(argv, port) {
   });
 }
 
-async function bridge(run, reply = { ok: true, created: true, tab: 42 }) {
+async function bridge(run, reply = { ok: true, created: true, tab: 42, state: 'connecting' }) {
   const requests = [];
   const sockets = new Set();
   const server = net.createServer(socket => {
@@ -73,11 +73,16 @@ test('global and per-command help document workspace commands without session co
   assert.equal(help.code, 0);
   assert.match(help.stdout, /workspace-list/);
   assert.match(help.stdout, /session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE/);
-  for (const command of ['workspace-list', 'session-open']) {
+  assert.match(help.stdout, /session-status --tab ID/);
+  for (const command of ['workspace-list', 'session-open', 'session-status']) {
     const result = await cli([command, '--help'], 1);
     assert.equal(result.code, 0);
     assert.match(result.stdout, new RegExp(`usage: zsb ${command}`));
     if (command === 'session-open') assert.match(result.stdout, /background/);
+    if (command === 'session-status') assert.match(result.stdout, /connecting.*connected.*disconnected/);
+    const short = await cli([command, '-h'], 1);
+    assert.equal(short.code, 0);
+    assert.equal(short.stdout, result.stdout);
   }
 });
 
@@ -96,12 +101,55 @@ test('workspace-list sends a session-independent app request and preserves the c
   }, reply);
 });
 
+for (const reply of [
+  { ok: true, tab: 42, state: 'connecting' },
+  { ok: true, tab: 42, state: 'connected' },
+  { ok: true, tab: 42, state: 'disconnected', exit_code: 255 },
+  { ok: false, error: 'unknown_tab' },
+]) {
+  test(`session-status preserves ${reply.state || reply.error} over the workspace wire without session context`, async () => {
+    await bridge(async (port, requests) => {
+      const result = await cli(['session-status', '--tab', '42'], port);
+      assert.equal(result.code, reply.ok ? 0 : 1, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), reply);
+      assert.deepEqual(requests.map(decoded), [['session-status', '--tab', '42']]);
+      assert.doesNotMatch(result.stderr, /extension|browser pane/);
+    }, reply);
+  });
+}
+
+test('session-status rejects missing duplicate unknown extra and nonnumeric tab arguments before transport', async () => {
+  await bridge(async (port, requests) => {
+    const invalidArgs = [
+      ['session-status'], ['session-status', '--tab'], ['session-status', '--unknown', '42'],
+      ['session-status', '--tab', '42', 'extra'], ['session-status', '--tab', '42', '--tab', '43'],
+      ...['', '0', '-1', '+1', ' 42', '42 ', '1_0', '1.0', '0x2a', '4294967296', '４２', '42\x1f'].map(tab => ['session-status', '--tab', tab]),
+    ];
+    for (const invalid of invalidArgs) {
+      const result = await cli(invalid, port);
+      assert.equal(result.code, 1);
+      assert.equal(JSON.parse(result.stdout).error, 'bad_args');
+    }
+    assert.equal(requests.length, 0);
+  });
+});
+
+test('session-status accepts the existing shell ID type boundaries', async () => {
+  await bridge(async (port, requests) => {
+    for (const tab of ['1', '4294967295']) {
+      const result = await cli(['session-status', '--tab', tab], port);
+      assert.equal(result.code, 0, result.stderr);
+    }
+    assert.deepEqual(requests.map(decoded), [['session-status', '--tab', '1'], ['session-status', '--tab', '4294967295']]);
+  });
+});
+
 test('session-open preserves whitespace quotes Unicode and flag ordering without activation', async () => {
   const reordered = ['session-open', '--name', 'Agent "🧪" \\ tab', '--tmux', 'runner-7.alpha_2', '--host', 'remote-2', '--group', 'Ops team', '--workspace', 'Research lab'];
   await bridge(async (port, requests) => {
     const result = await cli(reordered, port);
     assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { ok: true, created: true, tab: 42 });
+    assert.deepEqual(JSON.parse(result.stdout), { ok: true, created: true, tab: 42, state: 'connecting' });
     assert.deepEqual(requests.map(decoded), [reordered]);
     assert.ok(!decoded(requests[0]).includes('--activate'));
   });
@@ -111,9 +159,9 @@ test('session-open preserves existing replies with the tab workspace, even when 
   await bridge(async (port, requests) => {
     const result = await cli(args, port);
     assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { ok: true, existing: true, tab: 42, workspace: 'Home' });
+    assert.deepEqual(JSON.parse(result.stdout), { ok: true, existing: true, tab: 42, workspace: 'Home', state: 'disconnected', exit_code: 255 });
     assert.deepEqual(decoded(requests[0]), args);
-  }, { ok: true, existing: true, tab: 42, workspace: 'Home' });
+  }, { ok: true, existing: true, tab: 42, workspace: 'Home', state: 'disconnected', exit_code: 255 });
 });
 
 test('workspace commands reject missing duplicate unknown and extra arguments before contacting the bridge', async () => {
@@ -240,7 +288,7 @@ test('documentation and changelog cover both commands and their safety contract'
 test('changed code contains no removable comments and the comment oracle rejects a positive control', async () => {
   const { tokenize } = await import('./strip-comments.mjs');
   assert.equal(tokenize('const x = 1; // forbidden\n', 'javascript').comments.length, 1);
-  const files = ['build.zig', 'src/app_state.zig', 'src/browser_bridge.zig', 'src/console.zig', 'src/main.zig', 'src/win32.zig', 'tools/vps-multiprompt-browser.sh', 'tools/zsb-session-open.test.js'];
+  const files = ['build.zig', 'src/app_state.zig', 'src/browser_bridge.zig', 'src/console.zig', 'src/ssh_reconnect.zig', 'src/main.zig', 'src/win32.zig', 'tools/vps-multiprompt-browser.sh', 'tools/zsb-session-open.test.js'];
   for (const file of files) {
     const language = file.endsWith('.zig') ? 'zig' : file.endsWith('.sh') ? 'shell' : 'javascript';
     const comments = tokenize(fs.readFileSync(path.join(root, file), 'utf8'), language).comments.filter(c => !c.reason);

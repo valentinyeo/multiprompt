@@ -48,8 +48,13 @@ print_help() {
         ;;
       navigate) echo 'usage: zsb navigate <url> [--new-tab]  (reuses only the untouched agent-created target; otherwise opens a background tab; --new-tab always creates; --activate is ignored)' ;;
       workspace-list) echo 'usage: zsb workspace-list (JSON workspaces, groups, tabs and host names; no session context needed)' ;;
+      session-status) echo 'usage: zsb session-status --tab <id>'
+        echo '  Reports connecting, connected after a live tmux attachment, or disconnected with exit_code.'
+        echo '  An unknown exit code is 4294967295; an unknown tab returns unknown_tab.'
+        ;;
       session-open) echo 'usage: zsb session-open --workspace <name> --group <name> --host <host name> --tmux <session> --name <tab title>'
         echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
+        echo '  Replies include state; created:true is not proof of connection. Use session-status --tab <id>.'
         echo '  --tmux accepts 1-63 letters, digits, hyphens, underscores or dots.'
         echo '  --name accepts 1-63 UTF-16 units, without control characters.'
         echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
@@ -126,6 +131,7 @@ Commands and flags:
   workspace-list                    List workspaces, groups, tabs and host names as JSON
   session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE
                                     Attach a remote tmux tab in the background, idempotently
+  session-status --tab ID            Report connection state and exit_code when disconnected
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -191,7 +197,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "session-status" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -478,6 +484,12 @@ except ValueError:
 if args[0] == "workspace-list":
     if len(args) != 1:
         fail("bad_args", "usage: zsb workspace-list")
+elif args[0] == "session-status":
+    try:
+        if len(args) != 3 or args[1] != "--tab" or not args[2].isascii() or not args[2].isdigit() or not 0 < int(args[2]) <= 0xffffffff:
+            raise ValueError()
+    except ValueError:
+        fail("bad_args", "usage: zsb session-status --tab <positive tab id>")
 elif args[0] == "session-open":
     flags = {"--workspace", "--group", "--host", "--tmux", "--name"}
     values = {}
@@ -596,7 +608,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "session-status"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

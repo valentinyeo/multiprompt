@@ -3082,7 +3082,7 @@ try {
             $result.checks += @{ name = 'favorites-keeps-muted-starred'; starred_group_id = $favoritesGroupId; tab = $tabIndex; muted = $true }
         }
         'session-open' {
-            $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; only background tab creation and idempotency are verified'; observed = 'pending'; tabRemoved = $null }
+            $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; background tab creation, idempotency and failed connection status are verified'; observed = 'pending'; tabRemoved = $null }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
             $initial = Read-Session
             if (@($initial.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' }).Count -ne 0) { throw 'verify-1 already exists before the journey' }
@@ -3164,6 +3164,9 @@ try {
                 return $true
             } 'observed failed SSH attach for the created tab' 60
             $result.sshBoundary.observed = $script:sshFailure
+            $status = Invoke-Zsb @('session-status', '--tab', [string]$created.tab) $script:zsbPort 'session-status-failed'
+            if ($status.tab -ne $created.tab -or $status.state -cne 'disconnected' -or -not $status.PSObject.Properties['exit_code'] -or $status.exit_code -ne $script:sshFailure.exitCode) { throw 'session-status did not report disconnected with the logged SSH exit code' }
+            $result.checks += @{ name = 'session-status-failed-attach'; tab = $created.tab; status = $status; loggedExitCode = $script:sshFailure.exitCode }
             Wait-Until $assertSaved 'failed SSH tab preserved in saved state with unchanged active tab and foreground'
             $result.sshBoundary.tabRemoved = $false
             Save-Json $script:sessionOpenSaved 'session-after.json'
