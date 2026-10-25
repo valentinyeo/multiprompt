@@ -24,6 +24,8 @@ const ChatBlock = chat_markdown.Block;
 const HANDLE = ?*anyopaque;
 const RECT = chat_history.Rect;
 const ChatImgItem = struct { dummy: u8 = 0 };
+const ChatLayoutSnapshot = struct { rects: []RECT, images: []u8 };
+const chat_layout_snapshot = struct { fn save() void {} fn restore(_: anytype) usize { return 0; } };
 const CHAT_MAX_BLOCKS = 256;
 const TIMER_CHAT_REFRESH = 27;
 const Shell = struct {

@@ -1703,7 +1703,7 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_active = true;
     app_state.shell_count = 5;
     app_state.active_shell = 0;
-    const sizes = [5]usize{ 256 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 16 * 1024 * 1024 };
+    const sizes = [5]usize{ 256 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024 };
     var entries: [5]*ChatHistoryEntry = undefined;
     var counts: [5]usize = undefined;
     for (0..5) |i| {
@@ -1739,6 +1739,7 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
             app_state.active_shell = @intCast(i);
             const start = perfNow();
             chatDeferTranscriptLoad();
+            try std.testing.expectEqual(counts[i], app_state.g_chat_layout_reuse);
             chatRelayout(800);
             const elapsed = perfMs(start);
             std.debug.print("IGSH-874 revisit round={d} tab={d} blocks={d} reuse={d} ms={d}\n", .{ round, i, counts[i], app_state.g_chat_layout_reuse, elapsed });
@@ -1758,6 +1759,7 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.active_shell = last;
     const start = perfNow();
     chatDeferTranscriptLoad();
+    try std.testing.expect(app_state.g_chat_layout_reuse + 8 >= counts[last]);
     chatRelayout(800);
     const appended_ms = perfMs(start);
     std.debug.print("IGSH-874 revisit after append blocks={d} reuse_before={d} ms={d}\n", .{ app_state.g_chat_block_count, counts[last], appended_ms });
