@@ -1,0 +1,1 @@
+One-shot master red proof for the auto-revert workflow. The auto-revert removes this file.
