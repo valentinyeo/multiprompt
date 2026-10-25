@@ -4572,20 +4572,35 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
             _ = GetClientRect(hwnd, &rc);
             const side = browserEdgeMaskSideForHwnd(hwnd) orelse .right;
             if (browserMaskCorner(side) != null) return 0;
+            const style = @import("window_layout.zig");
+            const bw = style.chatSurfaceBorderW();
+            const radius = style.chatSurfaceRadius();
+            var frame_rc = rc;
             var chrome_rc = rc;
             if (side == .controls) {
+                frame_rc.top = rc.bottom;
                 chrome_rc.top = rc.bottom;
                 if (calcBrowserLayout()) |layout| {
                     var browser_origin = POINT{ .x = layout.browser_x, .y = layout.browser_y };
                     var mask_rect: RECT = undefined;
-                    if (ClientToScreen(app_state.g_main_hwnd, &browser_origin) != 0 and GetWindowRect(hwnd, &mask_rect) != 0)
-                        chrome_rc.top = std.math.clamp(browser_origin.y - mask_rect.top, 0, rc.bottom);
+                    if (ClientToScreen(app_state.g_main_hwnd, &browser_origin) != 0 and GetWindowRect(hwnd, &mask_rect) != 0) {
+                        frame_rc.top = std.math.clamp(browser_origin.y - mask_rect.top, 0, rc.bottom);
+                        chrome_rc.top = @min(rc.bottom, frame_rc.top + uiScaled(3) + bw);
+                        chrome_rc.right = @max(0, rc.right - uiScaled(2) - uiScaled(8) - bw);
+                    }
                 }
             }
             const br = CreateSolidBrush(if (side == .controls) @import("themes.zig").themeTitleBarBg() else browserEdgeMaskColor(side));
             if (br != null) {
                 _ = FillRect(hdc, &rc, br);
                 _ = DeleteObject(br);
+            }
+            if (side == .controls and frame_rc.top < frame_rc.bottom) {
+                const frame_brush = CreateSolidBrush(browserEdgeMaskFrameColor());
+                if (frame_brush != null) {
+                    _ = FillRect(hdc, &frame_rc, frame_brush);
+                    _ = DeleteObject(frame_brush);
+                }
             }
             if (side == .controls and chrome_rc.top < chrome_rc.bottom) {
                 const chrome_brush = CreateSolidBrush(browserEdgeMaskColor(side));
@@ -4594,9 +4609,6 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
                     _ = DeleteObject(chrome_brush);
                 }
             }
-            const style = @import("window_layout.zig");
-            const bw = style.chatSurfaceBorderW();
-            const radius = style.chatSurfaceRadius();
             const border_rc: ?RECT = switch (side) {
                 .left => .{ .left = rc.right - bw, .top = uiScaled(3) + radius, .right = rc.right, .bottom = rc.bottom - browserEdgeBottomMaskH() - radius },
                 .right => .{ .left = 0, .top = uiScaled(3) + radius, .right = bw, .bottom = rc.bottom - browserEdgeBottomMaskH() - radius },
@@ -4613,7 +4625,7 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
             }
             if (side == .controls) {
                 const right = rc.right - uiScaled(2) - uiScaled(8);
-                const top = chrome_rc.top + uiScaled(3);
+                const top = frame_rc.top + uiScaled(3);
                 const lines = [_]RECT{
                     .{ .left = 0, .top = top, .right = right - radius, .bottom = top + bw },
                     .{ .left = right - bw, .top = top + radius, .right = right, .bottom = rc.bottom },
