@@ -878,8 +878,9 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
     const header_h = chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H));
     if (block.kind == .table) {
         const pad = uiScaled(CHAT_CODE_PAD);
-        _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, width - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
-        return .{ .left = 0, .top = y, .right = width, .bottom = y + header_h + flow_h + 2 * pad };
+        const bubble_w = chat_style.agentBubbleWidth(width);
+        _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
+        return .{ .left = 0, .top = y, .right = bubble_w, .bottom = y + header_h + flow_h + 2 * pad };
     }
     switch (block.role) {
         .user, .injected => {
@@ -939,8 +940,9 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
         },
         .code => {
             const pad = uiScaled(CHAT_CODE_PAD);
-            _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = width - 2 * pad, .bottom = 0 }, false, null, disp.start, &flow_h);
-            return .{ .left = 0, .top = y, .right = width, .bottom = y + header_h + flow_h + 2 * pad + uiScaled(CHAT_CODE_HEADER) };
+            const bubble_w = chat_style.agentBubbleWidth(width);
+            _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
+            return .{ .left = 0, .top = y, .right = bubble_w, .bottom = y + header_h + flow_h + 2 * pad + uiScaled(CHAT_CODE_HEADER) };
         },
     }
 }
@@ -1517,6 +1519,26 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     reply.first = true;
     const headed = chatMeasureBlockRect(dc, text, reply, .single, 320, 0, null);
     try std.testing.expectEqual(@as(i32, 0), headed.bottom - plain.bottom);
+    for ([_]i32{ 160, 480, 960, 1440 }) |width| {
+        const cap = @divTrunc(width * 6, 10);
+        const user_rc = chatMeasureBlockRect(dc, text, user, .single, width, 0, null);
+        try std.testing.expectEqual(width, user_rc.right);
+        try std.testing.expect(user_rc.right - user_rc.left <= cap);
+        for ([_]ChatBlockRole{ .prose, .code }) |role| {
+            var assistant = reply;
+            assistant.role = role;
+            const agent_rc = chatMeasureBlockRect(dc, text, assistant, .single, width, 0, null);
+            try std.testing.expectEqual(@as(i32, 0), agent_rc.left);
+            try std.testing.expectEqual(cap, agent_rc.right);
+        }
+        const table_text = std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| 1 | 2 |");
+        var table = reply;
+        table.kind = .table;
+        table.len = table_text.len;
+        const table_rc = chatMeasureBlockRect(dc, table_text, table, .single, width, 0, null);
+        try std.testing.expectEqual(@as(i32, 0), table_rc.left);
+        try std.testing.expectEqual(cap, table_rc.right);
+    }
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);

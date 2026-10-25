@@ -1,55 +1,34 @@
 const std = @import("std");
 const md = @import("chat_markdown.zig");
 
-pub fn readingColumn(pane_width: i32, split_permille: u16, scaled_min_width: i32) struct { left: i32, width: i32 } {
+pub fn readingColumn(pane_width: i32, scaled_max_width: i32) struct { left: i32, width: i32 } {
     const pane = @max(0, pane_width);
-    const share: i32 = @intCast(@divTrunc(@as(i64, pane) * @min(split_permille, 1000), 1000));
-    const width = @min(pane, @max(share, @max(0, scaled_min_width)));
+    const width = @min(pane, @max(0, scaled_max_width));
     return .{ .left = @divTrunc(pane - width, 2), .width = width };
 }
 
-pub fn contentColumn(pane_left: i32, pane_width: i32, browser_reserved: bool, split_permille: u16, scaled_min_width: i32, inset: i32) struct { left: i32, width: i32 } {
-    const pane = @max(0, pane_width);
-    if (browser_reserved) {
-        const pad = @min(@max(0, inset), @divTrunc(pane, 2));
-        return .{ .left = pane_left + pad, .width = pane - 2 * pad };
-    }
-    const reading = readingColumn(pane, split_permille, scaled_min_width);
+pub fn contentColumn(pane_left: i32, pane_width: i32, scaled_max_width: i32) struct { left: i32, width: i32 } {
+    const reading = readingColumn(pane_width, scaled_max_width);
     return .{ .left = pane_left + reading.left, .width = reading.width };
 }
 
-test "docked browser chat uses the whole pane with 707 insets" {
-    const col = contentColumn(240, 600, true, 330, 760, 10);
-    try std.testing.expectEqual(@as(i32, 250), col.left);
-    try std.testing.expectEqual(@as(i32, 580), col.width);
-}
-test "pending browser reserves the same rect before its HWND is visible" {
-    const pending = contentColumn(240, 600, true, 330, 760, 10);
-    const docked = contentColumn(240, 600, true, 330, 760, 10);
-    try std.testing.expectEqual(docked, pending);
-    try std.testing.expect(pending.left + pending.width <= 840);
-}
-test "only a browserless tab centers its reading column" {
-    const col = contentColumn(220, 1700, false, 330, 760, 10);
-    try std.testing.expectEqual(@as(i32, 690), col.left);
-    try std.testing.expectEqual(@as(i32, 760), col.width);
-}
-test "narrow chat columns stay inside the available pane" {
-    for ([_]i32{ 0, 1, 12, 40, 300, 600 }) |width| {
-        for ([_]bool{ false, true }) |browser| {
-            const col = contentColumn(220, width, browser, 330, 760, 10);
-            try std.testing.expect(col.left >= 220);
-            try std.testing.expect(col.width >= 0);
-            try std.testing.expect(col.left + col.width <= 220 + width);
-        }
+test "chat column centers within the available pane and caps at 960" {
+    const wide = contentColumn(220, 1700, 960);
+    try std.testing.expectEqual(@as(i32, 590), wide.left);
+    try std.testing.expectEqual(@as(i32, 960), wide.width);
+    for ([_]i32{ 0, 1, 12, 40, 300, 600, 960, 1700 }) |width| {
+        const col = contentColumn(220, width, 960);
+        try std.testing.expectEqual(@min(width, 960), col.width);
+        try std.testing.expectEqual(220 + @divTrunc(width - col.width, 2), col.left);
+        try std.testing.expect(col.left + col.width <= 220 + width);
     }
 }
 
 pub fn bubbleMaxWidth(width: i32) i32 {
-    return @max(1, @divTrunc(@max(1, width) * 7, 10));
+    return @intCast(@max(1, @divTrunc(@as(i64, @max(1, width)) * 6, 10)));
 }
 pub fn agentBubbleWidth(width: i32) i32 {
-    return @max(1, width);
+    return bubbleMaxWidth(width);
 }
 pub fn cornerRadius(w: i32, h: i32, want: i32) i32 {
     return @max(0, @min(want, @divTrunc(@min(w, h), 2)));
@@ -186,9 +165,9 @@ test "bubble colours derive from the theme background" {
     try std.testing.expectEqual(@as(u32, 0xFFFFFF), shift(0xF0F0F0, 99));
     try std.testing.expectEqual(@as(u32, 0), shift(0x050505, -99));
 }
-test "bubble geometry: 70 percent user cap, pill corners, argb order" {
-    try std.testing.expectEqual(@as(i32, 672), bubbleMaxWidth(960));
-    try std.testing.expectEqual(@as(i32, 960), agentBubbleWidth(960));
+test "bubble geometry: 60 percent cap for both roles, pill corners, argb order" {
+    try std.testing.expectEqual(@as(i32, 576), bubbleMaxWidth(960));
+    try std.testing.expectEqual(@as(i32, 576), agentBubbleWidth(960));
     try std.testing.expectEqual(@as(i32, 18), cornerRadius(300, 100, 18));
     try std.testing.expectEqual(@as(i32, 14), cornerRadius(300, 28, 18));
     try std.testing.expectEqual(@as(i32, 0), cornerRadius(0, 0, 18));
@@ -244,41 +223,35 @@ test "injected bubbles use readable blue fills and reserve no agent header" {
     try std.testing.expectEqual(BubblePos.single, positions[0]);
 }
 
-test "reading column uses the tab split share above the comfortable minimum" {
-    const minimum = readingColumn(1690, 350, 760);
-    try std.testing.expectEqual(@as(i32, 760), minimum.width);
-    try std.testing.expectEqual(@as(i32, 465), minimum.left);
-    const share = readingColumn(3000, 350, 760);
-    try std.testing.expectEqual(@as(i32, 1050), share.width);
-    try std.testing.expectEqual(@as(i32, 975), share.left);
-    const custom = readingColumn(1690, 600, 760);
-    try std.testing.expectEqual(@as(i32, 1014), custom.width);
-    try std.testing.expectEqual(@as(i32, 338), custom.left);
+test "reading column caps wide panes at the configured maximum" {
+    for ([_]i32{ 1690, 2000, 3000, 4000 }) |width| {
+        const col = readingColumn(width, 960);
+        try std.testing.expectEqual(@as(i32, 960), col.width);
+        try std.testing.expectEqual(@divTrunc(width - 960, 2), col.left);
+    }
 }
 
-test "reading column clamps to narrow panes and scales the minimum" {
+test "reading column clamps to narrow panes and scales the maximum" {
     for ([_]i32{ 0, 1, 400, 759, 760 }) |pane| {
-        const col = readingColumn(pane, 350, 760);
+        const col = readingColumn(pane, 760);
         try std.testing.expectEqual(pane, col.width);
         try std.testing.expectEqual(@as(i32, 0), col.left);
     }
-    const scaled = readingColumn(1690, 350, 1140);
+    const scaled = readingColumn(1690, 1140);
     try std.testing.expectEqual(@as(i32, 1140), scaled.width);
     try std.testing.expectEqual(@as(i32, 275), scaled.left);
-    try std.testing.expectEqual(@as(i32, 900), readingColumn(900, 350, 1140).width);
+    try std.testing.expectEqual(@as(i32, 900), readingColumn(900, 1140).width);
 }
 
 test "reading column recomputes centered bounds on resize and stays inside the pane" {
     for ([_]i32{ -1, 0, 1, 759, 760, 761, 1691, 3000, std.math.maxInt(i32) }) |pane| {
-        for ([_]u16{ 0, 50, 350, 600, 950, 1000, 65535 }) |split| {
-            const col = readingColumn(pane, split, 760);
-            try std.testing.expect(col.width >= 0 and col.width <= @max(0, pane));
-            try std.testing.expect(col.left >= 0 and col.left + col.width <= @max(0, pane));
-            try std.testing.expect(@max(0, pane) - col.width - 2 * col.left <= 1);
-        }
+        const col = readingColumn(pane, 760);
+        try std.testing.expect(col.width >= 0 and col.width <= @max(0, pane));
+        try std.testing.expect(col.left >= 0 and col.left + col.width <= @max(0, pane));
+        try std.testing.expect(@max(0, pane) - col.width - 2 * col.left <= 1);
     }
-    try std.testing.expectEqual(@as(i32, 760), readingColumn(2000, 350, 760).width);
-    try std.testing.expectEqual(@as(i32, 1400), readingColumn(4000, 350, 760).width);
+    try std.testing.expectEqual(@as(i32, 760), readingColumn(2000, 760).width);
+    try std.testing.expectEqual(@as(i32, 760), readingColumn(4000, 760).width);
 }
 
 pub fn statusHeight(known: bool, expanded: bool, count: usize, available: i32, header_h: i32, row_h: i32) i32 {

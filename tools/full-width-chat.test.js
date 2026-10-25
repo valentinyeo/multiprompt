@@ -23,7 +23,7 @@ function toggle(text) {
 
 function content(text) {
   const layout = body(text, 'chatViewLayout');
-  return layout.slice(layout.indexOf('    const full_width ='), layout.indexOf('    const content_top ='));
+  return layout.slice(layout.indexOf('    const content ='), layout.indexOf('    const content_top ='));
 }
 
 function harness(handler, geometry = content(source)) {
@@ -62,24 +62,33 @@ fn chatColumn(width: i32) struct { left: i32, width: i32 } {
 ${geometry}
     return .{ .left = left, .width = right - left };
 }
-test "production reading column and full width stay inside the shared pane" {
+test "production reading column caps at 960 and stays centered inside the shared pane" {
     for ([_]i32{100, 150}) |dpi| {
         scale = dpi;
         for ([_]bool{false, true}) |docked| {
             browser = docked;
-            for ([_]i32{0, 40, 600, 1700}) |width| {
+            for ([_]i32{0, 1, 40, 600, 960, 961, 1700, 3000}) |width| {
                 shells[0].full_width = true;
                 const full = chatColumn(width);
-                try std.testing.expectEqual(@as(i32, 220), full.left);
-                try std.testing.expectEqual(width, full.width);
+                const want = @min(width, uiScaled(960));
+                try std.testing.expectEqual(220 + @divTrunc(width - want, 2), full.left);
+                try std.testing.expectEqual(want, full.width);
                 shells[0].full_width = false;
                 const normal = chatColumn(width);
-                const want = @min(width, @max(@divTrunc(width * 350, 1000), uiScaled(760)));
                 try std.testing.expectEqual(want, normal.width);
                 try std.testing.expectEqual(220 + @divTrunc(width - want, 2), normal.left);
                 try std.testing.expect(normal.left >= full.left and normal.left + normal.width <= full.left + full.width);
             }
         }
+    }
+}
+test "IGSH-873 both bubble types cap at 60 percent of the column" {
+    for ([_]i32{1, 40, 300, 600, 960, 1440}) |width| {
+        const cap = @max(1, @divTrunc(width * 6, 10));
+        try std.testing.expectEqual(cap, chat_style.bubbleMaxWidth(width));
+        try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width));
+        try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12));
+        try std.testing.expect(width - cap >= 0);
     }
 }
 test "ISSUE-440 production toggle changes only width and saves twice" {
@@ -137,11 +146,10 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const old = run(oldHandler);
     assert.notEqual(old.status, 0);
     assert.match(old.stderr, /production toggle[^]*FAIL/);
-    const deadToggle = content(source).replace('if (full_width) slot.right - slot.left else uiScaled(760)', 'uiScaled(760)');
-    const dead = run(toggle(source), deadToggle.replace(/    const full_width =[^\n]+\n/, ''));
-    assert.notEqual(dead.status, 0);
-    assert.match(dead.stderr, /production reading column[^]*FAIL/);
-    console.log('ISSUE-440 old console reset and dead width toggle rejected');
+    const unbounded = run(toggle(source), content(source).replace('uiScaled(960)', 'slot.right - slot.left'));
+    assert.notEqual(unbounded.status, 0);
+    assert.match(unbounded.stderr, /production reading column[^]*FAIL/);
+    console.log('ISSUE-440 old console reset and IGSH-873 unbounded column rejected');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
