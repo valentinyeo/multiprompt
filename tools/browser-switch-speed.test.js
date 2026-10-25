@@ -491,6 +491,7 @@ test('new measurement code adds no removable code comments', async () => {
 });
 
 function assertsRealBridge(driver, yaml) {
+  yaml = yaml.slice(yaml.indexOf('\n  verify:\n'));
   const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",

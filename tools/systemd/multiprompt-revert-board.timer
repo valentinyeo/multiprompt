@@ -1,0 +1,10 @@
+[Unit]
+Description=Check automatic desktop rollbacks
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=2min
+Unit=multiprompt-revert-board.service
+
+[Install]
+WantedBy=timers.target

@@ -361,7 +361,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Send Claude's Queued Message Now\"", .b = "Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Edit Queued Messages\"", .b = "Presses Claude's Up key so its queued messages come back into the prompt box, where Chat View shows and edits them too", .header = false },
     .{ .a = "Ctrl+X then Ctrl+S in Chat View", .b = "Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S)", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now; Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
     .{ .a = "Alt+V", .b = "Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View", .header = false },
     .{ .a = "Ctrl+K Voice: Always Listening On/Off", .b = "Keep the mic on to talk over replies, or return to taking turns", .header = false },

@@ -190,7 +190,7 @@ test('lightweight workflows cancel superseded PRs, verify also cancels supersede
   }
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}$/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
