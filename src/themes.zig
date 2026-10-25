@@ -496,7 +496,6 @@ pub fn multipromptColorOr(comptime field: []const u8, fallback: DWORD) DWORD {
     if (std.mem.eql(u8, field, "tab_bg")) return RGB(25, 26, 27);
     if (std.mem.eql(u8, field, "search_bg")) return RGB(25, 26, 27);
     if (std.mem.eql(u8, field, "search_border")) return RGB(35, 37, 42);
-    if (std.mem.eql(u8, field, "focus_ring")) return RGB(81, 80, 132);
     if (std.mem.eql(u8, field, "browser_cover")) return RGB(0, 0, 0);
     if (std.mem.eql(u8, field, "tab_text")) return RGB(208, 214, 224);
     if (std.mem.eql(u8, field, "tab_text_dim")) return RGB(98, 102, 109);

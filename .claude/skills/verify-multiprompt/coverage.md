@@ -4,6 +4,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| IGSH-807 | Alt+Q retains chat/browser/shell input routing without a pane focus outline in any theme. | pane-layout | journey extended, not run | Paired GitHub Windows runs: pinned pre-fix `9618091700e09f5958a48390449dc5067874d5dd` must fail on margin pixels after input cycles; fixed build must pass with matching reviewed screenshots. No local execution; see GATES.md. |
 | IGSH-717 | Selecting message text and pressing Enter quotes only that selection. | chat-view (`selection-enter-reply`) | branch drag failed; fix awaiting rerun | Run against v0.28.851 as a negative control and the branch on GitHub Windows; first require visible selection, then a nonempty partial quote, focused composer, no send, and inspect both selection screenshots. |
 | IGSH-725 | Docked browser panes keep their native monitor scale when opened or restored. | browser-pane-locked | journey extended, not yet run | Run the branch on GitHub Windows and inspect launch/restart DPI evidence; mixed-DPI hardware must confirm visual sharpness and tab switching. |
 | IGSH-716 | Restart focuses the chat box; Alt+Q and Alt+M restore typing with Find open or no browser pane. | chat-focus | journey added, not yet run | Run against v0.28.848 as a negative control and the branch on GitHub Windows; inspect UIA values, focused elements and screenshots. |
