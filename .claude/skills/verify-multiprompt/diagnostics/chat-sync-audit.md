@@ -17,6 +17,7 @@ Verify missing-message diagnostics without connecting to private sessions or fil
 - `unsettled-line`: recheck unmatched lines after a short settling wait before reporting them.
 - `background-task-status`: Claude background-command, idle-compaction, monitor and still-running status lines are excluded.
 - `wrapped-background-task` (IGSH-735): a background task status row whose quoted command wraps past the pane edge is excluded even when the closing suffix lands on the next row and tmux does not join it; real replies starting with the same words remain auditable.
+- `indented-tool-row` (IGSH-808): a nested pane row keeps its indentation, so an output continuation that starts with ">" is not read as the prompt box; real top-level prompts stay auditable.
 - `scrollback-above-question`: lines above the newest question in Chat View's first screen load on scroll up and are not reported.
 - Existing audit fixtures also cover renderer drift, cold-tail evidence, thinking, tools and pending deliveries.
 
