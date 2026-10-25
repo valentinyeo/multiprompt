@@ -69,14 +69,15 @@ test "IGSH-496 corners are antialiased premultiplied background and border at 10
         const radius = @divTrunc(@import("app_state.zig").CHAT_BUBBLE_RADIUS * scale, 100);
         for ([_]u32{ 0x00272625, 0x00fafafa, 0 }) |background| {
             const paint = Paint{ .radius = radius, .border = @divTrunc(scale, 100), .background = background, .border_color = 0x00372d29, .inset_x = 0, .inset_y = 0 };
-            var buffer: [36]u32 = undefined;
-            const pixels = buffer[0..@intCast(radius * radius)];
+            const pixels = try std.testing.allocator.alloc(u32, @intCast(radius * radius));
+            defer std.testing.allocator.free(pixels);
             render(pixels, .top_left, paint);
             const bg = 0xff000000 | ((background & 255) << 16) | (background & 0xff00) | ((background >> 16) & 255);
             try std.testing.expectEqual(bg, pixels[0]);
             try std.testing.expectEqual(@as(u32, 0), pixels[pixels.len - 1]);
             var partial = false;
-            var without_border: [36]u32 = undefined;
+            const without_border = try std.testing.allocator.alloc(u32, pixels.len);
+            defer std.testing.allocator.free(without_border);
             var unbordered = paint;
             unbordered.border = 0;
             render(without_border[0..pixels.len], .top_left, unbordered);
@@ -105,8 +106,8 @@ test "IGSH-496 frame-aware corner windows land exactly on all browser rect corne
             try std.testing.expectEqual(if (bottom) browser.bottom else browser.top, if (bottom) rc.bottom else rc.top);
             const width: usize = @intCast(rc.right - rc.left);
             const height: usize = @intCast(rc.bottom - rc.top);
-            var buffer: [18 * 18]u32 = undefined;
-            const pixels = buffer[0 .. width * height];
+            const pixels = try std.testing.allocator.alloc(u32, width * height);
+            defer std.testing.allocator.free(pixels);
             render(pixels, corner, paint);
             const outer_x = if (right) width - 1 else 0;
             const outer_y = if (bottom) height - 1 else 0;

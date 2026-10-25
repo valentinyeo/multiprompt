@@ -87,6 +87,7 @@ test('production corner geometry and alpha rasterizer execute at both scales', (
     fs.writeFileSync(path.join(dir, 'win32.zig'), 'pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };');
     const radius = source('app_state.zig').match(/pub const CHAT_BUBBLE_RADIUS[^;]+;/);
     assert.ok(radius);
+    assert.match(radius[0], /CHAT_BUBBLE_RADIUS = 20;/);
     fs.writeFileSync(path.join(dir, 'app_state.zig'), radius[0]);
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', path.join(dir, 'browser_corners.zig')], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
