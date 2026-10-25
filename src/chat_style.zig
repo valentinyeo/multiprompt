@@ -75,8 +75,8 @@ pub fn bubbleColors(bg: u32) BubbleColors {
 pub fn bubbleWidth(width: i32, natural: i32, pad: i32) i32 {
     return std.math.clamp(natural + 2 * pad, 1, bubbleMaxWidth(width));
 }
-pub fn headerHeight(block: md.Block, scaled_height: i32) i32 {
-    return if (block.role != .user and block.role != .injected and block.role != .tool and block.first) scaled_height else 0;
+pub fn headerHeight(_: md.Block, _: i32) i32 {
+    return 0;
 }
 pub fn timestamp(iso: []const u8) struct { time: [5]u16, zone: [6]u16 } {
     var result: @TypeOf(timestamp("")) = .{ .time = @splat(0), .zone = @splat(0) };
@@ -146,9 +146,9 @@ test "user bubbles stay right aligned and cannot exceed the reader width" {
     }
     try std.testing.expectEqual(@as(i32, 74), bubbleWidth(800, 50, 12));
 }
-test "only the first assistant block reserves an avatar header" {
+test "IGSH-849 assistant headers reserve no space" {
     var block = md.Block{ .start = 0, .len = 1, .role = .prose, .first = true };
-    try std.testing.expectEqual(@as(i32, 28), headerHeight(block, 28));
+    try std.testing.expectEqual(@as(i32, 0), headerHeight(block, 28));
     block.first = false;
     try std.testing.expectEqual(@as(i32, 0), headerHeight(block, 28));
     block.first = true;

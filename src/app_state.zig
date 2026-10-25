@@ -1620,6 +1620,10 @@ pub var g_shot_paste_count: usize = 0;
 
 pub var g_dictation_recording = std.atomic.Value(bool).init(false);
 pub var g_dictation_running = std.atomic.Value(bool).init(false);
+pub var g_dictation_start_tick: u64 = 0;
+pub var g_dictation_level = std.atomic.Value(u32).init(0);
+pub var g_dictation_cancelled: bool = false;
+pub var g_dictation_send_on_ready: bool = false;
 pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
@@ -2566,7 +2570,7 @@ pub var g_chat_prepend_pending = false;
 pub const ChatHit = struct { x: i32, y: i32, char: ?*usize = null, find: ?struct { position: usize, y: *i32 } = null };
 
 pub const CHAT_BUBBLE_PAD = 12;
-pub const CHAT_BUBBLE_RADIUS = 4;
+pub const CHAT_BUBBLE_RADIUS = 20;
 pub const CHAT_PARA_GAP = 8;
 pub const CHAT_AGENT_PAD_X = 12;
 pub const CHAT_AGENT_PAD_Y = 10;

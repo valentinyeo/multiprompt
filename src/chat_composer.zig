@@ -222,6 +222,15 @@ pub fn chatDictationSync() void {
         .finishing;
     if (next == chat_dictation_state) return;
     chat_dictation_state = next;
+    if (app_state.g_main_hwnd != null) {
+        if (next == .listening) {
+            _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_DICTATION, 100, null);
+        } else {
+            _ = KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_DICTATION);
+        }
+    }
+    layoutChatControls();
+    if (next != .listening and chatViewOwnsInput() and GetFocus() == app_state.g_main_hwnd and app_state.g_chat_composer_hwnd != null) _ = SetFocus(app_state.g_chat_composer_hwnd);
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
@@ -243,8 +252,37 @@ fn chatDictationKey(msg: UINT, wp: WPARAM, lp: LPARAM, ctrl: bool, shift: bool, 
     return false;
 }
 
+pub fn chatDictationBarVisible() bool {
+    return app_state.g_chat_active and app_state.g_dictation_recording.load(.acquire) and
+        app_state.g_dictation_draft_owner_len > 0 and
+        std.mem.eql(u8, app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+}
+
+pub fn chatDictationRects() struct { stop: RECT, meter: RECT, send: RECT } {
+    const card = chatViewLayout().composer_card;
+    const gap = @min(uiScaled(16), @divTrunc(card.right - card.left, 8));
+    const side = @divTrunc(card.right - card.left - 2 * gap, 4);
+    return .{
+        .stop = .{ .left = card.left, .top = card.top, .right = card.left + side, .bottom = card.bottom },
+        .meter = .{ .left = card.left + side + gap, .top = card.top, .right = card.right - side - gap, .bottom = card.bottom },
+        .send = .{ .left = card.right - side, .top = card.top, .right = card.right, .bottom = card.bottom },
+    };
+}
+
 pub fn chatDictationClick(x: i32, y: i32) bool {
-    if (!chatViewOwnsInput() or !pointInRect(chatViewLayout().mic_btn, x, y)) return false;
+    if (!chatViewOwnsInput()) return false;
+    if (chatDictationBarVisible()) {
+        const bar = chatDictationRects();
+        if (pointInRect(bar.send, x, y)) {
+            app_state.g_dictation_send_on_ready = true;
+            chatDictationToggle();
+        } else if (pointInRect(bar.stop, x, y)) {
+            app_state.g_dictation_send_on_ready = false;
+            chatDictationToggle();
+        } else return pointInRect(bar.meter, x, y);
+        return true;
+    }
+    if (!pointInRect(chatViewLayout().mic_btn, x, y)) return false;
     chatDictationToggle();
     return true;
 }
@@ -253,7 +291,7 @@ pub fn chatViewLayout() ChatViewLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const gap = uiScaled(14);
-    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
+    const composer_h = if (chatDictationBarVisible()) uiScaled(60) else chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
     const slot = @import("window_layout.zig").activePaneContentRect(rc);
     const full_width = app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
     const content = chat_style.contentColumn(slot.left, slot.right - slot.left, false, browserSplitPermilleForActiveShell(), if (full_width) slot.right - slot.left else uiScaled(760), 0);
@@ -458,7 +496,7 @@ pub fn chatViewOwnsInput() bool {
 }
 
 pub fn chatComposerFocusAllowed() bool {
-    if (app_state.g_chat_find_open) return false;
+    if (app_state.g_chat_find_open or chatDictationBarVisible()) return false;
     if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) altqLog("composer_block pending={} handoff_left={} chat_owns={} fg={X}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_chat_browser_handoff_until -| GetTickCount64(), chatViewOwnsInput(), altqPtr(GetForegroundWindow()) });
     if (app_state.g_native_browser_focus_pending_shell_id != 0 or GetTickCount64() < app_state.g_chat_browser_handoff_until) return false;
     return chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and app_state.g_edit_hwnd == null and GetForegroundWindow() == app_state.g_main_hwnd;
@@ -506,6 +544,7 @@ pub fn postPaletteToggle() void {
 pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (!app_state.g_chat_active) return 0;
     const layout = chatViewLayout();
+    if (chatDictationBarVisible() and pointInRect(layout.composer_card, x, y)) return 0;
     if (chatNewMessagesRect()) |pill| {
         if (pointInRect(pill, x, y)) return if (x >= pill.right - uiScaled(28)) 11 else 10;
     }
@@ -651,6 +690,10 @@ pub fn layoutChatControls() void {
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
         chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
     }
+    const recording = chatDictationBarVisible();
+    if (recording and GetFocus() == app_state.g_chat_composer_hwnd) _ = SetFocus(app_state.g_main_hwnd);
+    if (chatViewOwnsInput()) _ = ShowWindow(app_state.g_chat_composer_hwnd, if (recording) SW_HIDE else SW_SHOW);
+    if (recording) chatAcClose();
     chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
     _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);
     chatAcLayout();
@@ -1189,6 +1232,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_dictation_running.load(.acquire)) {
+        @import("voice.zig").cancelDictation();
+        return 0;
+    }
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
         clearChatReply();
@@ -1492,9 +1539,9 @@ pub fn openChatView() void {
     chatDeferTranscriptLoad();
     layoutChatControls();
     _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
-    _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
+    _ = ShowWindow(app_state.g_chat_composer_hwnd, if (chatDictationBarVisible()) SW_HIDE else SW_SHOW);
     _ = SetForegroundWindow(app_state.g_main_hwnd);
-    _ = SetFocus(app_state.g_chat_composer_hwnd);
+    _ = SetFocus(if (chatDictationBarVisible()) app_state.g_main_hwnd else app_state.g_chat_composer_hwnd);
     for (&app_state.g_voice_deferred_text) |*pending| {
         if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
             insertTextIntoChatComposer(pending.text[0..pending.len]);
@@ -2134,6 +2181,8 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         .running = app_state.g_dictation_running.load(.acquire),
         .recording = app_state.g_dictation_recording.load(.acquire),
         .voice = app_state.g_voice_listening_active.load(.acquire),
+        .cancelled = app_state.g_dictation_cancelled,
+        .send_on_ready = app_state.g_dictation_send_on_ready,
     };
     defer {
         chat_drafts.deinit();
@@ -2155,6 +2204,8 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         app_state.g_dictation_running.store(saved.running, .release);
         app_state.g_dictation_recording.store(saved.recording, .release);
         app_state.g_voice_listening_active.store(saved.voice, .release);
+        app_state.g_dictation_cancelled = saved.cancelled;
+        app_state.g_dictation_send_on_ready = saved.send_on_ready;
     }
     chat_drafts = draft_model.Store.init(std.testing.allocator);
     var previous_appdata: [32768]u16 = undefined;
@@ -2171,6 +2222,8 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
     app_state.g_dictation_running.store(false, .release);
     app_state.g_dictation_recording.store(false, .release);
     app_state.g_voice_listening_active.store(false, .release);
+    app_state.g_dictation_cancelled = false;
+    app_state.g_dictation_send_on_ready = false;
     chat_dictation_state = .idle;
     chat_dictation_engine_toggle = Engine.toggle;
     const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1200, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
@@ -2223,7 +2276,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         var message: w.MSG = undefined;
         try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
     } else if (action == .mic_stop) {
-        const rc = chatViewLayout().mic_btn;
+        const rc = chatDictationRects().stop;
         try std.testing.expect(chatDictationClick(rc.left, rc.top));
     } else {
         try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));

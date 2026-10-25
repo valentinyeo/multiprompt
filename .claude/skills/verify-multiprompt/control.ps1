@@ -552,6 +552,34 @@ public static class VerifyNative {
             return count;
         }
     }
+    public static int[] DictationBarPixels(IntPtr owner, int[] bar, string output) {
+        Point origin = new Point();
+        if (!ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Missing bar origin");
+        Point center = new Point { X = origin.X + (bar[0] + bar[7]) / 2, Y = origin.Y + (bar[1] + bar[3]) / 2 };
+        if (WindowFromPoint(center) != owner) throw new InvalidOperationException("Recording bar is not owned visible pixels");
+        int width = bar[7] - bar[0], height = bar[3] - bar[1];
+        int[] counts = new int[5];
+        using (var pixels = new System.Drawing.Bitmap(width, height))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            graphics.CopyFromScreen(origin.X + bar[0], origin.Y + bar[1], 0, 0, pixels.Size);
+            pixels.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                var c = pixels.GetPixel(x, y);
+                int clientX = x + bar[0];
+                bool dark = c.R == 42 && c.G == 42 && c.B == 44;
+                if (clientX < bar[2]) {
+                    if (dark) counts[0]++;
+                    if (c.R == 255 && c.G == 255 && c.B == 255) counts[3]++;
+                } else if (clientX >= bar[4] && clientX < bar[5]) {
+                    if (dark) counts[1]++;
+                } else if (clientX >= bar[6]) {
+                    if (c.R == 250 && c.G == 250 && c.B == 250) counts[2]++;
+                    if (c.R == 16 && c.G == 16 && c.B == 16) counts[4]++;
+                }
+            }
+        }
+        return counts;
+    }
     public static int[] DictationMicPixels(IntPtr owner, int[] rect, bool active, string output) {
         Point origin = new Point();
         if (!ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Missing microphone origin");
@@ -2443,74 +2471,84 @@ try {
         }
         'chat-dictation' {
             Select-Theme 'dark' 'dictation-dark'
+            Type-Text 'echo A quieter chat view with rounded messages. && echo Dictation can stop into a draft or send.'
+            Press @(0x0D) 'Enter: populate the real console-backed conversation'
             Press @(0x12, 0x43) 'Alt+C: open Chat View for dictation'
-            Wait-Until {
-                $state = Read-Session
-                $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv
-            } 'isolated CMD session saved in Chat View'
-            Wait-Until {
-                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
-                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
-                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
-            } 'owned visible composer after Alt+C'
-            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
-            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
-            [VerifyNative]::BringToForeground($script:window)
-            Record 'Click the owned composer to recover typing focus from the hidden console'
-            [VerifyNative]::ClickClient($handle, 8, 8)
             Wait-ChatFocus 'Edit' 'dictation-composer'
             $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
             $handle = [IntPtr]$composer.Current.NativeWindowHandle
             if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Dictation requires the owned composer' }
-            $mic = Get-DictationMic $handle
-            Assert-DictationMic $mic $false 'dictation-idle'
-            Snapshot 'before'
             $auditPath = Join-Path $scratch 'roaming/ZigShell/dictation-audit.log'
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $outbox = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
             $iteration = 0
-            foreach ($stop in @('enter', 'ctrl-d', 'mic-click')) {
-                if ([VerifyNative]::EditText($handle) -cne '') { throw 'Dictation case must start with an empty message box' }
-                Press @(0x11, 0x44) 'Ctrl+D: start composer dictation'
-                $iteration++
+            Snapshot 'before'
+            foreach ($size in @(@(1000, 650), @(1400, 900))) {
+                [void][VerifyNative]::MoveWindow($script:window, 10, 10, $size[0], $size[1], $true)
+                $sizeName = [string]$size[0] + 'x' + [string]$size[1]
                 Wait-Until {
-                    (Test-Path $auditPath) -and @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
-                } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
-                Assert-DictationMic $mic $true ($stop + '-listening')
-                $typed = 'typing-' + $stop
-                Type-Text $typed
-                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
-                if ([VerifyNative]::GetFocusedWindow($script:window) -ne $handle) { throw 'Dictation stole native composer typing focus' }
-                Assert-DictationMic $mic $true ($stop + '-typed-listening')
-                Snapshot ($stop + '-listening')
-                if ($stop -ceq 'enter') { Snapshot 'action' }
-                Doctor
-                Assert-Foreground
-                Record ('Stop dictation with ' + $stop)
-                $immediate = [Diagnostics.Stopwatch]::StartNew()
-                switch ($stop) {
-                    'enter' { [VerifyNative]::Chord(@(0x0D)) }
-                    'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }
-                    'mic-click' { [VerifyNative]::ClickClient($script:window, [int](($mic[0] + $mic[2]) / 2), [int](($mic[1] + $mic[3]) / 2)) }
-                }
-                $expected = $typed + ' Go forward ten meters.'
-                Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1 -PollMilliseconds 10
-                $elapsed = $immediate.ElapsedMilliseconds
-                if ($elapsed -gt 1000) { throw "IGSH-812 transcript was not immediate: $elapsed ms" }
-                Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); expected = $expected; elapsedMilliseconds = $elapsed; handle = $handle.ToInt64(); pid = $process.Id } ($stop + '.text.json')
-                Assert-DictationMic $mic $false ($stop + '-stopped')
-                $audit = @(Get-Content $auditPath)
-                foreach ($stage in @('audio-bytes\t89160', 'fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
-                    if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $iteration) { throw "IGSH-812 missing production transcription stage $stage" }
-                }
-                Snapshot ($stop + '-delivered')
-                $result.checks += @{ name = ('dictation-' + $stop); passed = $true; typedWhileListening = $typed; WM_GETTEXT = [VerifyNative]::EditText($handle); elapsedMilliseconds = $elapsed; activeMicPixels = $true; idleMicPixels = $true }
-                if ($stop -cne 'mic-click') {
-                    Press @(0x11, 0x41) 'Ctrl+A: select the verified dictation draft'
-                    Press @(0x08) 'Backspace: clear the draft through normal keyboard input'
-                    Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'composer cleared for next independent stop case'
+                    $frame = New-Object VerifyNative+Rect
+                    [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -and ($frame.Right - $frame.Left) -eq $size[0] -and ($frame.Bottom - $frame.Top) -eq $size[1]
+                } 'requested window size applied'
+                Snapshot ('clean-chat-' + $sizeName)
+                foreach ($stop in @('enter', 'ctrl-d', 'mic-click', 'arrow', 'escape')) {
+                    [VerifyNative]::ClickClient($handle, 8, 8)
+                    Wait-ChatFocus 'Edit' ($sizeName + '-' + $stop + '-focused')
+                    Press @(0x11, 0x41) 'Ctrl+A: select the preceding draft'
+                    Press @(0x08) 'Backspace: clear the preceding draft'
+                    Type-Text 'echo'
+                    Wait-Until { [VerifyNative]::EditText($handle) -ceq 'echo' } 'preserve an existing draft across dictation'
+                    $oldBars = @([regex]::Matches((Get-Content $log -Raw), '\[chat\] dictation bar ')).Count
+                    $oldSent = if (Test-Path $outbox) { @([regex]::Matches((Get-Content $outbox -Raw), '"t":"echo Go forward ten meters\."')).Count } else { 0 }
+                    Press @(0x11, 0x44) 'Ctrl+D: start composer dictation'
+                    $iteration++
+                    Wait-Until {
+                        (Test-Path $auditPath) -and @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                    } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                    Wait-Until {
+                        $bars = @([regex]::Matches((Get-Content $log -Raw), '\[chat\] dictation bar (-?\d+),(-?\d+),(-?\d+),(-?\d+) meter=(-?\d+),(-?\d+) send=(-?\d+),(-?\d+)'))
+                        if ($bars.Count -le $oldBars) { return $false }
+                        $script:dictationBar = [int[]]@(1..8 | ForEach-Object { [int]$bars[-1].Groups[$_].Value })
+                        -not [VerifyNative]::IsWindowVisible($handle)
+                    } 'three-control recording row replaces the native message box'
+                    $bar = $script:dictationBar
+                    $side = $bar[2] - $bar[0]
+                    $middle = $bar[5] - $bar[4]
+                    if ([Math]::Abs($middle - 2 * $side) -gt 3 -or ($bar[7] - $bar[6]) -ne $side -or $bar[4] -le $bar[2] -or $bar[6] -le $bar[5]) { throw 'Dictation controls must share a 1:2:1 row with gaps' }
+                    $step = $sizeName + '-' + $stop
+                    Wait-Until {
+                        [void][VerifyNative]::DwmFlush()
+                        $pixels = [VerifyNative]::DictationBarPixels($script:window, $bar, (Join-Path $Evidence ($step + '-bar.png')))
+                        $height = $bar[3] - $bar[1]
+                        $pixels[0] -gt $side * $height / 2 -and $pixels[1] -gt $middle * $height / 2 -and $pixels[2] -gt $side * $height / 2 -and $pixels[3] -gt 20 -and $pixels[4] -gt 10
+                    } 'dark stop and timer pills, white square, light send pill and black arrow are photographed'
+                    Snapshot ('dictation-bar-' + $step)
+                    if ($stop -ceq 'enter' -and $size[0] -eq 1000) { Snapshot 'action' }
+                    Doctor
+                    Assert-Foreground
+                    $immediate = [Diagnostics.Stopwatch]::StartNew()
+                    switch ($stop) {
+                        'enter' { [VerifyNative]::Chord(@(0x0D)) }
+                        'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }
+                        'mic-click' { [VerifyNative]::ClickClient($script:window, [int](($bar[0] + $bar[2]) / 2), [int](($bar[1] + $bar[3]) / 2)) }
+                        'arrow' { [VerifyNative]::ClickClient($script:window, [int](($bar[6] + $bar[7]) / 2), [int](($bar[1] + $bar[3]) / 2)) }
+                        'escape' { [VerifyNative]::Chord(@(0x1B)) }
+                    }
+                    $expected = if ($stop -eq 'escape') { 'echo' } elseif ($stop -eq 'arrow') { '' } else { 'echo Go forward ten meters.' }
+                    Wait-Until { [VerifyNative]::IsWindowVisible($handle) -and [VerifyNative]::EditText($handle) -ceq $expected } 'bar is gone and the expected draft is restored without another input' -Seconds 1 -PollMilliseconds 10
+                    $elapsed = $immediate.ElapsedMilliseconds
+                    if ($elapsed -gt 1000) { throw "Dictation result was not immediate: $elapsed ms" }
+                    if ($stop -eq 'escape') {
+                        Wait-Until { @(Get-Content $auditPath | Where-Object { $_ -match '\tcancelled\t0$' }).Count -eq $(if ($size[0] -eq 1000) { 1 } else { 2 }) } 'Escape discards the eventual transcript'
+                    }
+                    $sent = if (Test-Path $outbox) { @([regex]::Matches((Get-Content $outbox -Raw), '"t":"echo Go forward ten meters\."')).Count } else { 0 }
+                    if ($sent -ne $oldSent + $(if ($stop -eq 'arrow') { 1 } else { 0 })) { throw 'Only the arrow may enqueue the dictated message for sending' }
+                    Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); expected = $expected; elapsedMilliseconds = $elapsed; rect = $bar; sent = $sent; pid = $process.Id } ($step + '.text.json')
+                    Snapshot ('clean-chat-' + $step)
+                    $result.checks += @{ name = ('dictation-' + $stop); size = $sizeName; passed = $true; WM_GETTEXT = [VerifyNative]::EditText($handle); elapsedMilliseconds = $elapsed }
                 }
             }
-            if ($result.checks.Count -ne 3) { throw 'IGSH-812 requires all three dictation stop cases' }
+            if ($result.checks.Count -ne 10) { throw 'IGSH-849 requires five stop/cancel methods at both sizes' }
             Snapshot 'after'
         }
         'chat-tables' {

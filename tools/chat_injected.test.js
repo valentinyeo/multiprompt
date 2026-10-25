@@ -40,7 +40,7 @@ const DT_END_ELLIPSIS: u32 = 32;
 const DT_RIGHT: u32 = 64;
 const TRANSPARENT = 1;
 const CHAT_BUBBLE_PAD = 12;
-const CHAT_BUBBLE_RADIUS = 4;
+const CHAT_BUBBLE_RADIUS = 20;
 const CHAT_STATUS_H = 18;
 const CHAT_AGENT_HEADER_H = 22;
 const CHAT_AGENT_PAD_X = 12;
@@ -132,11 +132,11 @@ test "injected production paint metadata geometry and user-send matching" {
         try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width));
         chatPaintBlock(0, text[0..message.len], injected, .single, injected_rc);
         try std.testing.expectEqual(@as(u32, 0xFF1E2F4F), chat_style.argb(fill));
-        try std.testing.expectEqual(@as(i32, 4), radius);
+        try std.testing.expectEqual(@as(i32, 20), radius);
         try std.testing.expectEqual(injected_rc.bottom - CHAT_STATUS_H, filled.bottom);
         try std.testing.expectEqual(@as(usize, 0), headers);
         try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("scope & tests"), drawn[0..drawn_len]);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7 · 17:32 UTC"), metadata[0..metadata_len]);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
     }
     bg = 0xFFFFFF;
     g_light_theme = true;
@@ -146,7 +146,7 @@ test "injected production paint metadata geometry and user-send matching" {
     chatPaintTime(0, injected, .{}, true, true);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
     chatPaintTime(0, user, .{}, true, true);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("17:32 UTC ✓✓ Read"), metadata[0..metadata_len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("✓✓ Read"), metadata[0..metadata_len]);
 
 }
 test "ISSUE-270 production folded and open diff rows fill the card without wrapping" {
