@@ -113,7 +113,7 @@ jobs:
         shell: bash
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
-        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Sweep real zsb.exe command help
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
@@ -389,7 +389,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
-        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Test cross-origin zsb frame input and eval
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
