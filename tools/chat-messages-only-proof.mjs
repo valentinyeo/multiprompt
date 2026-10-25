@@ -46,6 +46,8 @@ export function evaluate(root, complete) {
   assert.equal(new Set(tools.map(row => row.id)).size, 12);
   const measured = compareTranscript(readBmp(path.join(root, 'messages-only-before-tools.bmp')), readBmp(path.join(root, 'messages-only-after-tools.bmp')), observation.transcript);
   if (complete) {
+    assert.equal(observation.newMessages?.passed, true, 'IGSH-813 new-message journey must complete');
+    assert.deepEqual(observation.newMessages.transitions, ['arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival']);
     const cleanup = json('cleanup.json');
     assert.equal(cleanup.remaining_owned_processes, 0);
     assert.equal(cleanup.evidence_preserved, true);
@@ -57,7 +59,7 @@ export function evaluate(root, complete) {
     assert.equal(doctor.version, build.version);
     assert.ok(doctor.chat && doctor.tmux && doctor.pid > 0 && doctor.composer > 0);
     assert.deepEqual(doctor.focus, [doctor.hwnd, doctor.composer]);
-    for (const file of ['messages-only-before-tools.png', 'messages-only-after-tools.png', 'messages-only-final.png']) {
+    for (const file of ['messages-only-before-tools.png', 'messages-only-after-tools.png', 'messages-only-final.png', 'new-messages-visible.png', 'new-messages-dismissed.png', 'new-messages-jumped.png']) {
       const bytes = fs.readFileSync(path.join(root, file));
       assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
       assert.ok(bytes.length > 10000);

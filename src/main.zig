@@ -1657,6 +1657,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     4 => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
                     5 => _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell),
                     9 => @import("chat_composer.zig").clearChatReply(),
+                    10 => @import("chat_render.zig").chatJumpToNewest(),
+                    11 => @import("chat_composer.zig").chatNewMessagesDismiss(),
                     6...8 => |button| _ = @import("chat_send.zig").chatPermissionAnswer(app_state.active_shell, @enumFromInt(button - 6)),
                     else => if (chatComposerFocusAllowed()) {
                         _ = SetFocus(app_state.g_chat_composer_hwnd);

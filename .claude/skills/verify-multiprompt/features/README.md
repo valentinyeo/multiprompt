@@ -30,6 +30,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [New messages below the fold](chat-new-messages.md): the existing `chat-messages-only` journey also exercises unread arrivals, retained counts, dismissal, bottom reset and clicking the centered pill; GitHub Windows execution is pending.
+
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
 
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.

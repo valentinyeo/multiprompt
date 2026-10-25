@@ -60,3 +60,23 @@ test('messages-only verification drives the real transcript and retains a requir
   assert.match(render, /if \(app_state.g_chat_blocks\[i\].role == .tool\) \{\s+app_state.g_chat_layout_rects\[i\] = .\{ .left = 0, .top = y, .right = 0, .bottom = y \};\s+chatImgStoreLayout\(i, .\{\}\);\s+continue;/);
   assert.match(render, /for \(first\.\.app_state.g_chat_block_count\) \|i\| \{\s+if \(app_state.g_chat_blocks\[i\].role == .tool\) continue;/);
 });
+
+
+test('IGSH-813 extends the existing Windows journey through every new-message transition', () => {
+  const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  for (const transition of ['arrival at bottom stays clear', 'loaded messages do not count', 'two new arrivals while reading', 'scrolling retains count', 'close hides and retains count', 'dismissed arrivals retain hidden count', 'reaching bottom resets count', 'pill jumps and clears count']) {
+    assert.ok(driver.includes(transition), transition);
+  }
+  assert.match(driver, /Click-NewMessages \$true/);
+  assert.match(driver, /Click-NewMessages \$false/);
+  assert.match(driver, /pillOrigin.Y -lt \$bounds.Bottom/);
+  const oracle = read('tools/chat-messages-only-proof.mjs');
+  assert.match(oracle, /assert.equal\(observation.newMessages\?\.passed, true/);
+  for (const shot of ['new-messages-visible', 'new-messages-dismissed', 'new-messages-jumped']) {
+    assert.ok(driver.includes("Shot '" + shot + "'"));
+    assert.ok(oracle.includes(shot + '.png'));
+  }
+  const map = read('.claude/skills/verify-multiprompt/features/chat-new-messages.md');
+  assert.match(map, /feature=chat-messages-only/);
+});
