@@ -6,7 +6,7 @@ const session = fs.readFileSync('src/chat_session.zig', 'utf8');
 const history = fs.readFileSync('src/chat_history.zig', 'utf8');
 const state = fs.readFileSync('src/app_state.zig', 'utf8');
 
-const ENTRY_LINE = /^Chat View .+\.$/;
+const ENTRY_LINE = /^Chat View [^.]+\.$/;
 
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
