@@ -41,7 +41,7 @@ pub fn save() void {
     }
     var first_image = keep;
     for (app_state.g_chat_img_count[0..keep], 0..) |n, index| {
-        if (n > 0) {
+        if (n > 0 or (index >= app_state.g_chat_img_first_block and app_state.g_chat_blocks[index].image_count > 0)) {
             first_image = index;
             break;
         }
