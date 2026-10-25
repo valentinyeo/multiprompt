@@ -176,14 +176,15 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
 });
 
-test('lightweight workflows cancel superseded PRs but never master pushes or dispatches', () => {
-  for (const file of ['gitleaks', 'no-comments', 'docs-site', 'verify']) {
+test('lightweight workflows cancel superseded PRs, verify also cancels superseded master pushes, never tags or dispatches', () => {
+  for (const file of ['gitleaks', 'no-comments', 'docs-site']) {
     const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
     assert.match(text, /^  pull_request:/m, file);
-    assert.match(text, file === 'verify'
-      ? /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m
-      : /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
+    assert.match(text, /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
   }
+  const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(verify, /^  pull_request:/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
