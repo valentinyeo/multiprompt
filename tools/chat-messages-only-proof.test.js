@@ -141,9 +141,10 @@ test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and t
   const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
   const map = read('.claude/skills/verify-multiprompt/features/chat-messages-only.md');
   for (const file of ['clean-chat-on.png', 'clean-chat-on.bmp', 'clean-chat-off.png', 'clean-chat-off.bmp']) assert.ok(map.includes(file), file);
-  for (const step of ['Ctrl+K', '`clean chat`', 'Enter without an arrow-key selection step', '--tools-only', '--complete', 'background-only', 'working/permission', 'identical', 'off-mode', 'changelog.d/IGSH-816-clean-chat.md']) assert.ok(map.toLowerCase().includes(step.toLowerCase()), step);
+  for (const step of ['Ctrl+K', '`clean chat`', 'Enter without an arrow-key selection step', '--tools-only', '--complete', 'background-only', 'working/permission', 'identical', 'off-mode', ['changelog.d', 'IGSH-816-clean-chat.md'].join('/')]) assert.ok(map.toLowerCase().includes(step.toLowerCase()), step);
   const gates = [...map.matchAll(/^(\d+)\. (.+)$/gm)];
   assert.deepEqual(gates.map(([, number]) => Number(number)), Array.from({ length: gates.length }, (_, i) => i + 1));
   assert.equal(gates.length, 10);
-  assert.match(read('changelog.d/IGSH-816-clean-chat.md'), /Choose CLEAN chat[\s\S]*keeping messages and the working indicator/);
+  const { readChangelogEntry } = require('./changelog-entry.js');
+  assert.match(readChangelogEntry('IGSH-816'), /Choose CLEAN chat[\s\S]*keeping messages and the working indicator/);
 });
