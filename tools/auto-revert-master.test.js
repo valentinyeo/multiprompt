@@ -68,6 +68,12 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
   return { calls, output: output.join('\n'), process };
 }
 
+test('real master run-name verify full master is accepted', () => {
+  const input = fixture();
+  input.run.name = 'verify full master';
+  assert.equal(decide(input).action, 'revert');
+});
+
 test('failing master merge chooses its exact head, first parent and failing journey names', () => {
   assert.deepEqual(decide(fixture()), {
     action: 'revert', sha, mainline: 1, ticket: 'IGSH-812',
