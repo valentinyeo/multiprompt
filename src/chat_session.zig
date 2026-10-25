@@ -476,7 +476,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
     app_state.g_chat_file_request_id +%= 1;
     var log_buf: [96]u8 = undefined;
-    debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d}", .{ key.shell_id, entry.history.offset }) catch "[chat] transcript request");
+    debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d} before={d}", .{ key.shell_id, entry.history.offset, entry.before }) catch "[chat] transcript request");
     const thread = std.Thread.spawn(.{}, chatFileFetchThread, .{ entry, entry.key, app_state.g_chat_file_request_id, entry.loading_disk }) catch {
         entry.pending = false;
         if (!load_disk) chatFetchRelease();
@@ -844,6 +844,9 @@ pub fn chatFileOnReady() void {
                 entry.history.newMessages(history)
             else
                 0;
+            const before = if (disk or history.start < entry.history.start or
+                (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
+                    !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {
                 entry.history.updateCursor(history);
                 entry.history.revision = history.revision;
@@ -871,13 +874,13 @@ pub fn chatFileOnReady() void {
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
                 chatNewMessagesChanged(had_messages);
             }
-            entry.before = history.start;
+            entry.before = before;
             if (!disk and !history.more and history.start == 0) entry.loaded_ms = @intCast(GetTickCount64());
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk or history.start > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -1109,9 +1112,10 @@ pub fn chatRefreshAfterFontChange() void {
 }
 
 pub fn chatDeferTranscriptLoad() void {
+    if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
     if (@import("launch_cache.zig").pending and @import("launch_cache.zig").queue.next <= 2) return;
     @import("chat_find_ui.zig").close(false);
-    if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_layout_reuse = 0;
     const cached = chatHistoryEntry(chatCacheIdentity());
@@ -1155,7 +1159,6 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_block_count == 0) chatFileRequest(chatFileIdentity());
-    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
 }
 
 pub fn chatSwitchDidPaint() void {
