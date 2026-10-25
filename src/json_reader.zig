@@ -161,8 +161,8 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         count += 1;
     }
     for (array(field(root, "tabs"))) |saved| {
-        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or
-            (string(field(saved, "tmux_session")) orelse "").len != 0) continue;
+        const target = string(field(saved, "tmux_session")) orelse "";
+        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or target.len != 0) continue;
         const index = restoredSessionTab(root, tabs[0..count], uint(saved, "shell_id")) orelse continue;
         const tab = &tabs[index];
         if (tab.group_id == 0) tab.group_id = @truncate(uint(saved, "group_id"));
@@ -181,8 +181,8 @@ pub fn restoredSessionTab(root: std.json.Value, tabs: anytype, id: u64) ?usize {
     }
     for (array(field(root, "tabs"))) |saved| {
         if (uint(saved, "shell_id") != id) continue;
-        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or
-            (string(field(saved, "tmux_session")) orelse "").len != 0) continue;
+        const target = string(field(saved, "tmux_session")) orelse "";
+        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or target.len != 0) continue;
         var name: [64]u16 = undefined;
         const len = copyWide(saved, "name", &name);
         if (len == 0) continue;
