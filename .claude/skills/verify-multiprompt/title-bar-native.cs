@@ -16,6 +16,9 @@ public static class CaptionProof {
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetDpiForSystem();
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out Rect rect, uint size);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettings(string device, int mode, IntPtr settings);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettings(IntPtr settings, uint flags);
+    static byte[] originalDisplay;
     static byte[] source;
     static int originalRelative, recommendedIndex;
     static bool originalKnown;
@@ -33,6 +36,20 @@ public static class CaptionProof {
     }
     public static void SetDpi(int dpi) {
         Require(SetThreadDpiAwarenessContext(new IntPtr(-4)) != IntPtr.Zero, "per-monitor awareness unavailable");
+        IntPtr settings = Marshal.AllocHGlobal(220);
+        try {
+            for (int i = 0; i < 220; i++) Marshal.WriteByte(settings, i, 0);
+            Marshal.WriteInt16(settings, 68, 220);
+            Require(EnumDisplaySettings(null, -1, settings), "current display mode unavailable");
+            originalDisplay = new byte[220];
+            Marshal.Copy(settings, originalDisplay, 0, 220);
+            if (Marshal.ReadInt32(settings, 172) < 1920 || Marshal.ReadInt32(settings, 176) < 1080) {
+                Marshal.WriteInt32(settings, 72, 0x180000);
+                Marshal.WriteInt32(settings, 172, 1920);
+                Marshal.WriteInt32(settings, 176, 1080);
+                Require(ChangeDisplaySettings(settings, 0) == 0, "1920x1080 disposable display mode unavailable");
+            }
+        } finally { Marshal.FreeHGlobal(settings); }
         uint paths, modes;
         Require(GetDisplayConfigBufferSizes(2, out paths, out modes) == 0 && paths > 0, "display paths unavailable");
         IntPtr path = Marshal.AllocHGlobal((int)paths * 72), mode = Marshal.AllocHGlobal((int)modes * 64);
@@ -61,7 +78,18 @@ public static class CaptionProof {
             Require(DisplayConfigSetDeviceInfo(packet) == 0, "monitor DPI change failed");
         } finally { Marshal.FreeHGlobal(packet); }
     }
-    public static void RestoreDpi() { if (originalKnown) SetRelative(originalRelative); }
+    public static void RestoreDpi() {
+        try { if (originalKnown) SetRelative(originalRelative); }
+        finally {
+            if (originalDisplay != null) {
+                IntPtr settings = Marshal.AllocHGlobal(originalDisplay.Length);
+                try {
+                    Marshal.Copy(originalDisplay, 0, settings, originalDisplay.Length);
+                    Require(ChangeDisplaySettings(settings, 0) == 0, "original display mode restore failed");
+                } finally { Marshal.FreeHGlobal(settings); }
+            }
+        }
+    }
     public static int[] Geometry(IntPtr hwnd) {
         Rect frame, buttons;
         Point client = new Point();
@@ -89,9 +117,11 @@ public static class CaptionProof {
         using (var actual = new Bitmap(actualPath)) {
             Require(reference.Size == actual.Size && left >= 0 && top >= 0 && right <= actual.Width && bottom <= actual.Height && bottom > top, "invalid caption capture bounds");
             int start = -1, minY = bottom, maxY = top, area = 0;
-            for (int x = left; x <= right; x++) {
+            int glyphTop = top + (int)Math.Ceiling(2 * scale);
+            int glyphRight = right - (int)Math.Ceiling(2 * scale);
+            for (int x = left; x <= glyphRight; x++) {
                 bool occupied = false;
-                for (int y = top; x < right && y < bottom; y++) {
+                for (int y = glyphTop; x < glyphRight && y < bottom; y++) {
                     if (Bright(reference.GetPixel(x, y)) <= 8) continue;
                     occupied = true; minY = Math.Min(minY, y); maxY = Math.Max(maxY, y); area++;
                 }
@@ -123,6 +153,24 @@ public static class CaptionProof {
             Color apron = actual.GetPixel(sampleX - geometry[0], apronTop - geometry[1]);
             Color chrome = actual.GetPixel(maskRect[0] - (int)Math.Ceiling(4 * scale) - geometry[0], browser[1] + (int)(12 * scale) - geometry[1]);
             Color interior = actual.GetPixel(sampleX - geometry[0], browser[1] + (int)(12 * scale) - geometry[1]);
+            int framePixels = 0, frameMismatches = 0;
+            int referenceX = maskRect[0] - (int)Math.Ceiling(4 * scale);
+            int referenceY = maskRect[3] + (int)Math.Ceiling(8 * scale);
+            for (int y = browser[1]; y < browser[1] + (int)(3 * scale); y++) {
+                Color expected = actual.GetPixel(referenceX - geometry[0], y - geometry[1]);
+                for (int x = maskRect[0]; x < browser[2] - (int)Math.Ceiling(24 * scale); x++) {
+                    framePixels++;
+                    if (Delta(expected, actual.GetPixel(x - geometry[0], y - geometry[1])) > 8) frameMismatches++;
+                }
+            }
+            for (int x = browser[2] - (int)(6 * scale); x < Math.Min(maskRect[2], geometry[2]); x++) {
+                Color expected = actual.GetPixel(x - geometry[0], referenceY - geometry[1]);
+                for (int y = browser[1] + (int)Math.Ceiling(20 * scale); y < maskRect[3]; y++) {
+                    framePixels++;
+                    if (Delta(expected, actual.GetPixel(x - geometry[0], y - geometry[1])) > 8) frameMismatches++;
+                }
+            }
+            proof["framePixels"] = framePixels; proof["frameMismatches"] = frameMismatches;
             proof["captionRect"] = new int[] { left, top, right, bottom };
             proof["glyphBoundsAndAreas"] = glyphs;
             proof["captionMismatches"] = mismatches; proof["nonBlackBackgroundPixels"] = nonBlack; proof["greyBandPixels"] = greyBandPixels;
@@ -136,6 +184,9 @@ public static class CaptionProof {
             proof["tolerance"] = 8; proof["geometry"] = geometry; proof["browserRect"] = browser; proof["maskRects"] = masks;
         }
         return proof;
+    }
+    public static void CheckFrame(Dictionary<string, object> proof) {
+        Require((int)proof["framePixels"] > 0 && (int)proof["frameMismatches"] == 0, "IGSH-858 controls cover overlaps the surrounding browser frame");
     }
     public static void Check(Dictionary<string, object> proof) {
         var glyphs = (List<int[]>)proof["glyphBoundsAndAreas"];

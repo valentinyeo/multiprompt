@@ -26,7 +26,7 @@ test('IGSH-845 dispatch uses six real monitor DPI and Chrome theme cases with se
 
 test('IGSH-845 compares app caption against the same native set in both window modes after live theme changes', () => {
   assert.match(journey, /foreach \(\$mode in @\('restored', 'maximized'\)\)/);
-  assert.match(journey, /foreach \(\$theme in @\('light', 'amoled'\)\)/);
+  assert.match(journey, /foreach \(\$theme in @\('dark', 'light', 'amoled'\)\)/);
   assert.match(journey, /PaneWindow\(\$script:window\) -ne \$browser/);
   assert.match(journey, /Save-Json \$proofs 'caption-pixels.json'/);
   assert.match(native, /glyphs.Count == 3/);
@@ -49,4 +49,31 @@ test('IGSH-845 the identical pixel oracle rejects added faint duplicate glyphs a
   assert.match(journey, /try \{ \[CaptionProof\]::Check\(\$negative\) \} catch/);
   assert.match(journey, /if \(-not \$rejected\) \{ throw/);
   assert.match(journey, /Exception.Message -notmatch 'caption doubled-pixel signature or non-black band'/);
+});
+
+test('IGSH-858 frame proof compares top and right bands with adjacent unobscured frame pixels in every theme', () => {
+  assert.match(native, /referenceX = maskRect\[0\] -/);
+  assert.match(native, /referenceY = maskRect\[3\] \+/);
+  assert.match(native, /frameMismatches"\] == 0/);
+  assert.match(journey, /CaptionProof\]::CheckFrame\(\$proof.pixels\)/);
+});
+
+test('IGSH-858 real 150 percent scale has enough logical desktop space and restores the runner display', () => {
+  assert.match(native, /Marshal.WriteInt32\(settings, 172, 1920\)/);
+  assert.match(native, /Marshal.WriteInt32\(settings, 176, 1080\)/);
+  assert.match(native, /ChangeDisplaySettings\(settings, 0\) == 0/);
+  assert.match(native, /Marshal.Copy\(originalDisplay, 0, settings, originalDisplay.Length\)/);
+});
+
+test('IGSH-858 native glyph counting excludes the DWM outline but pixel comparison retains it', () => {
+  assert.match(native, /glyphTop = top \+ \(int\)Math.Ceiling\(2 \* scale\)/);
+  assert.match(native, /glyphRight = right - \(int\)Math.Ceiling\(2 \* scale\)/);
+  assert.match(native, /for \(int y = top; y < bottom; y\+\+\) \{[\s\S]*?for \(int x = left; x < right; x\+\+\)/);
+});
+
+test('IGSH-858 captures the same genuinely activated native caption before and after docking', () => {
+  assert.equal((journey.match(/ClickClient\(\$script:window, 100, -10\)/g) || []).length, 2);
+  const pane = read('src/browser_pane.zig');
+  const refresh = pane.slice(pane.indexOf('pub fn refreshBrowserEdgeMasks()'), pane.indexOf('pub fn armBrowserEdgeMaskRaise()'));
+  assert.match(refresh, /positionBrowserEdgeMasks\(layout\);\n    raiseBrowserEdgeMasksZOrderOnly\(\);/);
 });
