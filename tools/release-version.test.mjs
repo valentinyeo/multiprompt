@@ -11,7 +11,6 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
 const tag = 'v1.2.3';
 const changelog = '.{ .ver = "1.2.3" },\n.{ .ver = "1.2.2" },\n';
-const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
 const script = (name, source = workflow) => {
   const block = source.match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          [^\\n]*\\n|\\n)+)`));
   assert(block, `Missing workflow script: ${name}`);
@@ -30,7 +29,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  for (const file of ['release-version.mjs', 'version-stamp.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
@@ -47,7 +46,11 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
-if (args[0] === 'run') { console.log(JSON.stringify([{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }])); process.exit(0); }
+if (args[0] === 'run') {
+  const sha = args[args.indexOf('--commit') + 1];
+  console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
+  process.exit(0);
+}
 if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
 if (args[1] !== 'create') process.exit(2);
 execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
@@ -56,6 +59,9 @@ execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/t
     run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
         TAG: tag, BUILT_SHA: sha, REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
+    admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
+        GH_LOG: log, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
     calls: () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)),
   };
 }
@@ -287,11 +293,6 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
   assert.match(result.stdout, /ADMISSION VERIFIED/);
 });
 
-test('automatic release admission fixtures', { skip: process.platform === 'win32' }, () => {
-  const result = spawnSync(process.execPath, ['--test', 'tools/auto-release-admit.test.js'], { cwd: root, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-});
-
 test('automatic release only tags a tested master and reuses signed release jobs', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(auto, /workflows: \[Tests\]/);
@@ -355,30 +356,36 @@ test('auto-release pushes only a tag on the tested commit under a branch-rejecti
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   fs.writeFileSync(path.join(f.remote, 'hooks/update'), '#!/bin/sh\ncase "$1" in refs/heads/*) exit 1;; esac\n', { mode: 0o755 });
-  const env = { GITHUB_EVENT_NAME: 'workflow_run', TESTED_SHA: tested };
-  const admitted = f.run('Require a tested unreleased master head', env, auto);
-  assert.equal(admitted.status, 0, admitted.stderr);
-  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), 'ready=true\n');
-  const result = f.run('Tag the tested master commit', env, auto);
+  const result = f.admit();
   assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `tag=v1.2.9\nsha=${tested}\n`);
   assert.equal(f.git('rev-parse', 'HEAD'), tested);
   assert.equal(f.git('diff', 'HEAD', '--', 'src', 'changelog.d'), '');
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
-  assert.match(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), /tag=v1.2.9\n/);
-  fs.unlinkSync(path.join(f.dir, 'output'));
-  assert.equal(f.run('Require a tested unreleased master head', env, auto).status, 0);
-  assert.equal(fs.existsSync(path.join(f.dir, 'output')), false);
+  assert.deepEqual(f.calls(), [[
+    'run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master',
+    '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion',
+  ]]);
+  const second = f.admit();
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(second.stdout, '');
 });
 
-for (const reason of ['stale', 'skip', 'untested-dispatch', 'tested-dispatch']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
+for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
-  if (reason === 'skip') f.git('commit', '--allow-empty', '-m', 'maintenance [skip release]');
-  const result = f.run('Require a tested unreleased master head', {
-    GITHUB_EVENT_NAME: reason.endsWith('dispatch') ? 'workflow_dispatch' : 'workflow_run',
-    TESTED_SHA: reason === 'stale' ? '0'.repeat(40) : f.git('rev-parse', 'HEAD'),
-    TEST_CONCLUSION: reason === 'untested-dispatch' ? 'failure' : 'success',
-  }, auto);
-  assert.equal(result.status, reason === 'untested-dispatch' ? 1 : 0, result.stderr);
-  assert.equal(fs.existsSync(path.join(f.dir, 'output')), reason === 'tested-dispatch');
+  f.git('tag', 'v1.2.8');
+  f.git('commit', '--allow-empty', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
+  const tested = f.git('rev-parse', 'HEAD');
+  f.git('push', 'origin', 'master');
+  const result = f.admit({ TEST_CONCLUSION: reason === 'red' ? 'failure' : 'success' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, reason === 'green' ? `tag=v1.2.9\nsha=${tested}\n` : '');
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
+  if (reason === 'green') {
+    assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
+  } else {
+    assert.equal(f.git('tag', '--list', 'v1.2.9'), '');
+    assert.equal(f.git('--git-dir', f.remote, 'tag', '--list', 'v1.2.9'), '');
+  }
 });
