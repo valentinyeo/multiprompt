@@ -5239,6 +5239,7 @@ const CleanChatScene = enum {
     tool_detail,
     tool_diff,
     user,
+    user_read,
     injected,
     prose,
     code,
@@ -5391,6 +5392,20 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
                 block.diff_len = text.len;
                 crop.top = uiScaled(28);
             }
+            const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            chatPaintBlock(dc, text, block, .single, rc);
+        },
+        .user_read => {
+            app_state.shells[0].chat_id = 1;
+            block.stamp_ms = 12345;
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &key_buf);
+            var confirmed = app_state.ChatConfirmedEcho{ .key_len = @intCast(key.len), .stamp_ms = block.stamp_ms };
+            @memcpy(confirmed.key[0..key.len], key);
+            const kept = app_state.g_chat_confirmed.items.len;
+            defer app_state.g_chat_confirmed.shrinkRetainingCapacity(kept);
+            try app_state.g_chat_confirmed.append(std.heap.page_allocator, confirmed);
+            try std.testing.expect(chatEchoBlockConfirmed(text, block));
             const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
             chatPaintBlock(dc, text, block, .single, rc);
         },
@@ -5558,6 +5573,17 @@ test "IGSH-849 timestamps are absent and CLEAN still hides read ticks" {
     defer std.testing.allocator.free(timestamp);
     try std.testing.expect(!std.mem.eql(u32, off, on));
     try std.testing.expectEqualSlices(u32, timestamp, on);
+}
+
+test "IGSH-883 a confirmed sent message shows no Read line and keeps the bubble height" {
+    const off = try cleanChatPixels(.user_read, false);
+    defer std.testing.allocator.free(off);
+    const on = try cleanChatPixels(.user_read, true);
+    defer std.testing.allocator.free(on);
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    try std.testing.expect(!std.mem.eql(u32, blank, off));
+    try std.testing.expectEqualSlices(u32, on, off);
 }
 
 test "IGSH-816 CLEAN preserves message markdown code tables and attribution pixels" {
