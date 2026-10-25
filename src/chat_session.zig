@@ -1113,6 +1113,7 @@ pub fn chatRefreshAfterFontChange() void {
 }
 
 pub fn chatReadBoundary() chat_history.ReadBoundary {
+    if (!app_state.g_chat_active) return .{};
     if (app_state.active_shell >= app_state.shell_count or !app_state.g_chat_blocks_from_file or
         app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return .{};
     return chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.shells[app_state.active_shell].last_read_message_id);
