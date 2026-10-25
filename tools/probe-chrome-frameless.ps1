@@ -92,7 +92,7 @@ function Cdp($method, $parameters = @{}) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
     $cancel = [Threading.CancellationTokenSource]::new(15000)
     try {
-        $ws.SendAsync([ArraySegment[byte]]::new($bytes), [Net.WebSockets.WebSocketMessageType]::Text, $true, $cancel.Token).GetAwaiter().GetResult()
+        $ws.SendAsync([ArraySegment[byte]]::new($bytes), [Net.WebSockets.WebSocketMessageType]::Text, $true, $cancel.Token).GetAwaiter().GetResult() | Out-Null
         do {
             $stream = [IO.MemoryStream]::new()
             do {
@@ -134,15 +134,15 @@ function Snapshot($label) {
     if (-not [FrameProbe]::GetWindowRect($handle, [ref]$rect)) { throw 'GetWindowRect failed' }
     $style = Style $handle
     $points = [ordered]@{
-        topLeftCorner = @($rect.Left + 20, $rect.Top + 20)
-        topRightCorner = @($rect.Right - 20, $rect.Top + 20)
-        formerCloseButton = @($rect.Right - 25, $rect.Top + 18)
-        top = @([int](($rect.Left + $rect.Right) / 2), $rect.Top + 1)
-        left = @($rect.Left + 1, [int](($rect.Top + $rect.Bottom) / 2))
-        right = @($rect.Right - 2, [int](($rect.Top + $rect.Bottom) / 2))
-        bottom = @([int](($rect.Left + $rect.Right) / 2), $rect.Bottom - 2)
-        bottomRight = @($rect.Right - 2, $rect.Bottom - 2)
-        caption = @($rect.Left + 150, $rect.Top + 18)
+        topLeftCorner = @(($rect.Left + 20), ($rect.Top + 20))
+        topRightCorner = @(($rect.Right - 20), ($rect.Top + 20))
+        formerCloseButton = @(($rect.Right - 25), ($rect.Top + 18))
+        top = @([int](($rect.Left + $rect.Right) / 2), ($rect.Top + 1))
+        left = @(($rect.Left + 1), [int](($rect.Top + $rect.Bottom) / 2))
+        right = @(($rect.Right - 2), [int](($rect.Top + $rect.Bottom) / 2))
+        bottom = @([int](($rect.Left + $rect.Right) / 2), ($rect.Bottom - 2))
+        bottomRight = @(($rect.Right - 2), ($rect.Bottom - 2))
+        caption = @(($rect.Left + 150), ($rect.Top + 18))
     }
     $hits = [ordered]@{}
     $hitNames = @{ '-2'='HTERROR'; '-1'='HTTRANSPARENT'; '0'='HTNOWHERE'; '1'='HTCLIENT'; '2'='HTCAPTION'; '3'='HTSYSMENU'; '8'='HTMINBUTTON'; '9'='HTMAXBUTTON'; '10'='HTLEFT'; '11'='HTRIGHT'; '12'='HTTOP'; '13'='HTTOPLEFT'; '14'='HTTOPRIGHT'; '15'='HTBOTTOM'; '16'='HTBOTTOMLEFT'; '17'='HTBOTTOMRIGHT'; '20'='HTCLOSE' }
@@ -232,7 +232,7 @@ try {
     if (-not $target) { throw 'Chrome CDP page did not start' }
     $ws = [Net.WebSockets.ClientWebSocket]::new()
     $cancel = [Threading.CancellationTokenSource]::new(15000)
-    try { $ws.ConnectAsync([uri]$target.webSocketDebuggerUrl, $cancel.Token).GetAwaiter().GetResult() } finally { $cancel.Dispose() }
+    try { $ws.ConnectAsync([uri]$target.webSocketDebuggerUrl, $cancel.Token).GetAwaiter().GetResult() | Out-Null } finally { $cancel.Dispose() }
     $result.browser.cdp = Cdp 'Browser.getVersion'
     Cdp 'Page.enable' | Out-Null
     Wait-Page '/first'
