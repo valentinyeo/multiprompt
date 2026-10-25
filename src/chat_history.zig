@@ -445,9 +445,9 @@ pub const History = struct {
             return;
         }
         if (!append and !prepend and mode != null and !self.restore_full and self.rows.items.len > 0 and
-            inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest > self.start)
+            inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest > self.start and oldest <= self.offset)
         {
-            if (oldest > self.offset or end < self.offset) return error.InvalidHistory;
+            if (end < self.offset) return error.InvalidHistory;
             var prefix: usize = 0;
             var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
             while (previous.next()) |line| {
