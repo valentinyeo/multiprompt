@@ -17,6 +17,7 @@ pub const State = struct {
     awaiting_probe: bool = false,
     create_session: bool = false,
     healthy_attach: bool = false,
+    exit_code: u32 = std.math.maxInt(u32),
     ever_healthy: bool = false,
     restored_session: bool = false,
     creating_session: bool = false,
@@ -439,4 +440,14 @@ test "ISSUE-511 creating sessions stay protected after failed creation respawn" 
         try std.testing.expect(!state.observeGone(true, false, 1000));
         try std.testing.expect(state.observeGone(true, false, 2000));
     }
+}
+
+test "session status retains the failed exit through retry and clears it after attachment" {
+    var state: State = .{};
+    state.exit_code = 255;
+    state.lost(0, 0);
+    state.start();
+    try std.testing.expectEqual(@as(u32, 255), state.exit_code);
+    state.ok();
+    try std.testing.expectEqual(std.math.maxInt(u32), state.exit_code);
 }

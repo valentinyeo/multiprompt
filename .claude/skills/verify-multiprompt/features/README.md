@@ -47,7 +47,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
-- [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, with failed SSH explicitly outside remote verification.
+- [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.

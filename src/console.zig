@@ -2278,6 +2278,10 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (app_state.shells[idx].ssh_reconnect.phase == .closed or app_state.shells[idx].ssh_reconnect.phase == .ended) return;
     const state_changed = !app_state.shells[idx].disconnected;
     app_state.shells[idx].ssh_reconnect.confirmDisconnect(GetTickCount64(), "console-missing", app_state.shells[idx].process != null and shellProcessAliveForRead(idx));
+    var exit_code: DWORD = 0;
+    if (app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0 and exit_code != STILL_ACTIVE) {
+        app_state.shells[idx].ssh_reconnect.exit_code = exit_code;
+    }
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);

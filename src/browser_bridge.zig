@@ -1294,17 +1294,17 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         return;
     }
     const remote_verbs = [_][]const u8{
-        "activate",         "active-tab",     "back",          "browser-drop-gesture",
-        "cdp",              "click",          "close-tab",     "console",
-        "cursor",           "doctor",         "emulate",       "eval",
-        "extension-reload", "find",           "forward",       "frames",
-        "get-text",         "insert",         "key",           "links",
-        "navigate",         "open",           "pane-info",     "reload",
-        "reset",            "resolve-window", "routing-audit", "screenshot",
-        "script",           "session-open",   "shoturl",       "sidebar",
-        "snapshot",         "status",         "tab",           "tabs",
-        "text",             "type",           "url",           "version",
-        "workspace-list",
+        "activate",         "active-tab",     "back",           "browser-drop-gesture",
+        "cdp",              "click",          "close-tab",      "console",
+        "cursor",           "doctor",         "emulate",        "eval",
+        "extension-reload", "find",           "forward",        "frames",
+        "get-text",         "insert",         "key",            "links",
+        "navigate",         "open",           "pane-info",      "reload",
+        "reset",            "resolve-window", "routing-audit",  "screenshot",
+        "script",           "session-open",   "session-status", "shoturl",
+        "sidebar",          "snapshot",       "status",         "tab",
+        "tabs",             "text",           "type",           "url",
+        "version",          "workspace-list",
     };
     var remote_allowed = false;
     for (remote_verbs) |remote_verb| {
@@ -1328,7 +1328,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
-    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open")) {
+    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status")) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
@@ -1958,6 +1958,58 @@ fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
     return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4] };
 }
 
+fn parseZsbSessionStatusArgs(argv: []const []const u8) !u32 {
+    if (argv.len != 3 or !std.mem.eql(u8, argv[0], "session-status") or !std.mem.eql(u8, argv[1], "--tab") or argv[2].len == 0) return error.BadArgs;
+    for (argv[2]) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+    const tab = std.fmt.parseInt(u32, argv[2], 10) catch return error.BadArgs;
+    if (tab == 0) return error.BadArgs;
+    return tab;
+}
+
+const ZsbSessionState = enum { connecting, connected, disconnected };
+
+fn zsbSessionState(shell: *const app_state.Shell, process_code: ?u32) ZsbSessionState {
+    if (process_code) |code| if (code != @import("win32.zig").STILL_ACTIVE) return .disconnected;
+    if (shell.launch_failed) return .disconnected;
+    return switch (shell.ssh_reconnect.phase) {
+        .disconnected, .ended, .closed => .disconnected,
+        .reconnecting => .connecting,
+        .connected => if (shell.disconnected)
+            .disconnected
+        else if (!shell.console_inflight and shell.ssh_reconnect.healthy_attach and process_code == @import("win32.zig").STILL_ACTIVE)
+            .connected
+        else
+            .connecting,
+    };
+}
+
+fn zsbAppendSessionState(out: []u8, pos: *usize, shell: *const app_state.Shell) bool {
+    var code: DWORD = 0;
+    const process_code: ?u32 = if (shell.process != null and GetExitCodeProcess(shell.process, &code) != 0) code else null;
+    const state = zsbSessionState(shell, process_code);
+    if (!appendAsciiBuf(out, pos, ",\"state\":")) return false;
+    if (!zsbAppendJsonString(out, pos, @tagName(state))) return false;
+    if (state == .disconnected) {
+        const exit_code = if (process_code != null and process_code.? != @import("win32.zig").STILL_ACTIVE) process_code.? else shell.ssh_reconnect.exit_code;
+        var first = false;
+        if (!diagJsonU64Field(out, pos, &first, "exit_code", exit_code)) return false;
+    }
+    return true;
+}
+
+fn zsbSessionStatus(argv: []const []const u8, out: []u8) usize {
+    const tab = parseZsbSessionStatusArgs(argv) catch return zsbWorkspaceError(out, "bad_args");
+    for (app_state.shells[0..app_state.shell_count]) |*shell| {
+        if (shell.shell_id != tab) continue;
+        const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"tab\":{d}", .{tab}) catch return 0;
+        var pos = text.len;
+        if (!zsbAppendSessionState(out, &pos, shell)) return 0;
+        if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
+        return pos;
+    }
+    return zsbWorkspaceError(out, "unknown_tab");
+}
+
 fn zsbWorkspaceError(out: []u8, code: []const u8) usize {
     const text = std.fmt.bufPrint(out, "{{\"ok\":false,\"error\":\"{s}\"}}\n", .{code}) catch return 0;
     return text.len;
@@ -2076,6 +2128,7 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
         var pos = text.len;
         var ws_buf: [32]u8 = undefined;
         if (!zsbAppendJsonString(out, &pos, workspaceDisplayName(shell.workspace, &ws_buf))) return 0;
+        if (!zsbAppendSessionState(out, &pos, shell)) return 0;
         if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
         return pos;
     }
@@ -2086,8 +2139,11 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
     shell.name[shell.name_len] = 0;
     shell.name_source = .manual;
     persist();
-    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"created\":true,\"tab\":{d}}}\n", .{shell.shell_id}) catch return 0;
-    return text.len;
+    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"created\":true,\"tab\":{d}", .{shell.shell_id}) catch return 0;
+    var pos = text.len;
+    if (!zsbAppendSessionState(out, &pos, shell)) return 0;
+    if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
+    return pos;
 }
 
 pub fn handleZsbWorkspaceRequest() void {
@@ -2100,6 +2156,8 @@ pub fn handleZsbWorkspaceRequest() void {
     const out = &app_state.g_zsb_workspace_response;
     var len = if (std.mem.eql(u8, args[0], "workspace-list"))
         if (args.len == 1) zsbWorkspaceList(out) else zsbWorkspaceError(out, "bad_args")
+    else if (std.mem.eql(u8, args[0], "session-status"))
+        zsbSessionStatus(args, out)
     else
         zsbSessionOpen(args, out, @import("console.zig").spawnBackgroundTmuxSession, saveSession);
     if (len == 0) len = zsbWorkspaceError(out, "response_too_large");
@@ -2250,6 +2308,89 @@ const ZsbWorkspaceTest = struct {
 
 const zsb_workspace_test_args = [_][]const u8{ "session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", "runner-7", "--name", "Agent 🧪" };
 
+test "session-status parses positive tab IDs and rejects malformed arguments" {
+    try std.testing.expectEqual(@as(u32, 42), try parseZsbSessionStatusArgs(&.{ "session-status", "--tab", "42" }));
+    try std.testing.expectEqual(std.math.maxInt(u32), try parseZsbSessionStatusArgs(&.{ "session-status", "--tab", "4294967295" }));
+    for ([_][]const u8{ "", "0", "-1", "+1", " 42", "42 ", "1_0", "1.0", "0x2a", "4294967296", "４２", "42\x1f" }) |bad| {
+        try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{ "session-status", "--tab", bad }));
+    }
+    try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{}));
+    try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{ "session-status", "--tab" }));
+    try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{ "session-status", "--unknown", "42" }));
+    try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{ "session-open", "--tab", "42" }));
+    try std.testing.expectError(error.BadArgs, parseZsbSessionStatusArgs(&.{ "session-status", "--tab", "42", "--tab", "43" }));
+}
+
+test "session state requires live transport and confirmed attachment rather than default connected phase" {
+    var shell = app_state.empty_shell;
+    shell.kind = .tmux;
+    const live = @import("win32.zig").STILL_ACTIVE;
+    try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, null));
+    try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, live));
+    shell.ssh_reconnect.ok();
+    try std.testing.expectEqual(ZsbSessionState.connected, zsbSessionState(&shell, live));
+    try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, null));
+    for ([_]u32{ 0, 1, 255, 0xC0000139 }) |code| {
+        try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, code));
+    }
+    shell.console_inflight = true;
+    try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, live));
+    shell.console_inflight = false;
+    shell.disconnected = true;
+    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+    shell.ssh_reconnect.lost(0, 0);
+    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+    shell.ssh_reconnect.start();
+    try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, live));
+    shell.ssh_reconnect.end();
+    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+    shell.ssh_reconnect.close();
+    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+    shell = app_state.empty_shell;
+    shell.ssh_reconnect.ok();
+    for ([_]@import("ssh_reconnect.zig").Phase{ .disconnected, .ended, .closed }) |phase| {
+        shell.ssh_reconnect.phase = phase;
+        try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+    }
+    shell.ssh_reconnect.phase = .connected;
+    shell.launch_failed = true;
+    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
+}
+
+test "session-status and repeated session-open expose the same state and retained exit code" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    var out: [4096]u8 = undefined;
+    _ = zsbSessionOpen(&zsb_workspace_test_args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    const args = [_][]const u8{ "session-status", "--tab", "42" };
+    var len = zsbSessionStatus(&args, &out);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"tab\":42,\"state\":\"connecting\"}\n", out[0..len]);
+    const shell = &app_state.shells[1];
+    shell.process = @import("win32.zig").GetCurrentProcess();
+    shell.ssh_reconnect.ok();
+    len = zsbSessionStatus(&args, &out);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"tab\":42,\"state\":\"connected\"}\n", out[0..len]);
+    len = zsbSessionOpen(&zsb_workspace_test_args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\",\"state\":\"connected\"}\n", out[0..len]);
+    shell.process = null;
+    shell.disconnected = true;
+    shell.ssh_reconnect.lost(0, 0);
+    shell.ssh_reconnect.exit_code = 255;
+    len = zsbSessionStatus(&args, &out);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"tab\":42,\"state\":\"disconnected\",\"exit_code\":255}\n", out[0..len]);
+    len = zsbSessionOpen(&zsb_workspace_test_args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\",\"state\":\"disconnected\",\"exit_code\":255}\n", out[0..len]);
+    shell.ssh_reconnect.start();
+    len = zsbSessionStatus(&args, &out);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"tab\":42,\"state\":\"connecting\"}\n", out[0..len]);
+    len = zsbSessionStatus(&.{ "session-status", "--tab", "99" }, &out);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", out[0..len]);
+    len = zsbSessionStatus(&.{ "session-status", "--tab", "bad" }, &out);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", out[0..len]);
+    try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
+    try std.testing.expectEqual(@as(usize, 1), ZsbWorkspaceTest.saves);
+}
+
 test "session-open parses reordered flags and rejects missing duplicate and unknown flags" {
     const parsed = try parseZsbSessionOpenArgs(&zsb_workspace_test_args);
     try std.testing.expectEqualStrings("Research", parsed.workspace);
@@ -2290,7 +2431,7 @@ test "session-open is idempotent and never changes active tab workspace or group
     const active_id = app_state.shells[app_state.active_shell].shell_id;
     const active_ws = app_state.g_active_workspace;
     const first = zsbSessionOpen(&zsb_workspace_test_args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"created\":true,\"tab\":42}\n", out[0..first]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"created\":true,\"tab\":42,\"state\":\"connecting\"}\n", out[0..first]);
     try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
     try std.testing.expectEqual(@as(u32, 7), app_state.shells[1].group_id);
     try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].workspace);
@@ -2308,7 +2449,7 @@ test "session-open is idempotent and never changes active tab workspace or group
     var repeated = zsb_workspace_test_args;
     repeated[10] = "Do not rename";
     const second = zsbSessionOpen(&repeated, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\"}\n", out[0..second]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\",\"state\":\"connecting\"}\n", out[0..second]);
     try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 1), ZsbWorkspaceTest.saves);
     try std.testing.expectEqual(active_id, app_state.shells[app_state.active_shell].shell_id);
@@ -2333,7 +2474,7 @@ test "session-open returns existing across workspaces without changing tabs or a
     args[10] = "Do not rename or move";
     ZsbWorkspaceTest.fail_spawn = true;
     const len = zsbSessionOpen(&args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\"}\n", out[0..len]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"existing\":true,\"tab\":42,\"workspace\":\"Research\",\"state\":\"connecting\"}\n", out[0..len]);
     try std.testing.expectEqual(count, app_state.shell_count);
     try std.testing.expectEqual(active_shell, app_state.active_shell);
     try std.testing.expectEqual(active_workspace, app_state.g_active_workspace);
@@ -2359,7 +2500,7 @@ test "session-open separates identical session names on different hosts" {
     var args = zsb_workspace_test_args;
     args[6] = "remote-2";
     const len = zsbSessionOpen(&args, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
-    try std.testing.expectEqualStrings("{\"ok\":true,\"created\":true,\"tab\":43}\n", out[0..len]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"created\":true,\"tab\":43,\"state\":\"connecting\"}\n", out[0..len]);
     try std.testing.expectEqual(@as(u32, 3), app_state.shell_count);
     try std.testing.expectEqual(@as(u8, 0), app_state.shells[1].tmux_host);
     try std.testing.expectEqual(@as(u8, 1), app_state.shells[2].tmux_host);
