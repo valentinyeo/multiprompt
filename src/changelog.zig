@@ -59,6 +59,16 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.877", .items = &.{
+        .{ .text = "Broken updates reopen their task automatically, with the failed check listed.", .ticket = "IGSH-837" },
+        .{ .text = "New versions publish within half an hour even when several changes land close together.", .ticket = "IGSH-853" },
+        .{ .text = "Closing the app, quitting and Restart to update work again when a session is pinned; pinned sessions come back next time.", .ticket = "IGSH-856" },
+        .{ .text = "The browser window-button cover now stays inside its surrounding frame.", .ticket = "IGSH-858" },
+        .{ .text = "The usage line no longer shows the burn label or the hours until reset.", .ticket = "IGSH-860" },
+        .{ .text = "Dictation no longer replaces the message box on desktop; it keeps the normal box while you speak.", .ticket = "IGSH-865" },
+        .{ .text = "Wrapped background task notices no longer trigger false missing-chat reports.", .ticket = "IGSH-867" },
+        .{ .text = "Chat replies keep updating during long sessions.", .ticket = "IGSH-870" },
+    } },
     .{ .ver = "0.28.876", .items = &.{
         .{ .text = "Chat View checks now use the bundled fonts consistently.", .ticket = "IGSH-854" },
     } },
