@@ -28,6 +28,8 @@ public static class ChatDeliveryDesktop {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref Gui info);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr capacity, StringBuilder text, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
@@ -104,6 +106,16 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 2;
         inputs[2].Data.Mouse.Flags = 4;
         if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
+    public static void WheelOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int delta) {
+        Rect rect;
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Transcript wheel ownership mismatch");
+        if (!SetCursorPos((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2)) throw new InvalidOperationException("Transcript pointer move failed");
+        var input = new Input { Type = 0 };
+        input.Data.Mouse.Flags = 0x0800;
+        input.Data.Mouse.Data = unchecked((uint)delta);
+        if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Transcript wheel input failed");
     }
     public static void Type(ushort key) { Chord(new[] { (int)key }); }
 }

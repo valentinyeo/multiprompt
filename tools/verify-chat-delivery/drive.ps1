@@ -202,11 +202,13 @@ function Assert-FullHistory([string]$Stage) {
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
     $transcript = [IntPtr]$views[0].Current.NativeWindowHandle
-    [void](Wait-For 'owned transcript focus before first message screenshot' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) })
-    Press @(0x24) 'Home: first transcript message'
+    $actions.Add(@{case=$plan.name; input='wheel to first transcript message'})
+    [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $transcript, 12000)
+    Start-Sleep -Milliseconds 100
     Shot "full-history-$Stage-first"
-    [void](Wait-For 'owned transcript focus before last message screenshot' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) })
-    Press @(0x23) 'End: last transcript message'
+    $actions.Add(@{case=$plan.name; input='wheel to last transcript message'})
+    [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $transcript, -12000)
+    Start-Sleep -Milliseconds 100
     Shot "full-history-$Stage-last"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
