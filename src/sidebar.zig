@@ -1784,7 +1784,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const i: usize = row.shell_idx;
 
             if (i == app_state.active_shell and LOOK_UNIFIED) {
-                const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 62, 104) else tintColor(sidebar_bg, RGB(120, 160, 255), 1, 6);
+                const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
                 const hl_brush = CreateSolidBrush(hl);
                 const hl_pen = CreatePen(0, 1, customColorOr("overlay_border", hl));
                 const ob = SelectObject(hdc, hl_brush);
