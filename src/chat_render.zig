@@ -954,7 +954,7 @@ fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32) RECT 
     const bubble_w = chat_style.bubbleWidth(width, calc.right, pad);
     var flow_h: i32 = 0;
     _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null);
-    const bubble_h = flow_h + 2 * pad + (if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
+    const bubble_h = flow_h + 2 * pad + uiScaled(CHAT_STATUS_H);
     return .{ .left = width - bubble_w, .top = y, .right = width, .bottom = y + bubble_h };
 }
 
@@ -1632,16 +1632,14 @@ fn chatShellSyncBuild() void {
 fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) void {
     const text = row.slice();
     _ = SetBkMode(hdc, TRANSPARENT);
-    const status_h = if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H);
-    const sender_h = if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - sender_h };
+    const status_h = uiScaled(CHAT_STATUS_H);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h * @as(i32, if (row.injected) 2 else 1) };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
     if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true, false);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null);
-    if (app_state.clean_chat) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
@@ -1746,7 +1744,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureEchoRect(hdc, e.text, width, y);
-                if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
+                if (chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -2773,7 +2771,7 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
             len += zone.len;
         }
     }
-    if (!app_state.clean_chat and confirmed and block.role == .user) {
+    if (confirmed and block.role == .user) {
         const mark = std.unicode.utf8ToUtf16LeStringLiteral("\u{2713}\u{2713} Read");
         if (len > 0) {
             label[len] = ' ';
@@ -2801,7 +2799,6 @@ fn chatPaintAgentHeader(hdc: HANDLE, block: ChatBlock, rc: RECT) void {
 }
 
 fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT) void {
-    if (app_state.clean_chat and block.role == .tool) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     var rc = source_rc;
     if (block.role != .user and block.role != .injected and block.role != .tool and block.first) {
@@ -2899,16 +2896,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const actions = chat_echo.pendingActions(e.state);
-    const status_h = if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H);
-    const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) - (if (actions.send_again) uiScaled(26) else @as(i32, 0)) };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
-    if (!app_state.clean_chat and actions.send_again) {
+    if (actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
         defer _ = SelectObject(hdc, old);
         for ([_]bool{ false, true }) |remove| {
@@ -2930,7 +2925,6 @@ fn chatStatusRowRect(bubble: RECT) RECT {
 }
 
 fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
-    if (app_state.clean_chat) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     const color: DWORD = switch (e.state) {
@@ -3155,7 +3149,6 @@ fn chatEchoAt(x: i32, y: i32) ?u64 {
 }
 
 fn chatEchoRetryAt(x: i32, y: i32) bool {
-    if (app_state.clean_chat) return false;
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
@@ -3176,7 +3169,6 @@ fn chatEchoRetryAt(x: i32, y: i32) bool {
 }
 
 fn chatEchoRetryHover(x: i32, y: i32) bool {
-    if (app_state.clean_chat) return false;
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
@@ -3819,7 +3811,6 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
 }
 
 pub fn chatStatusHeight(available: i32) i32 {
-    if (app_state.clean_chat) return 0;
     const entry = chatHistoryEntry(chatFileIdentity()) orelse return 0;
     return chat_style.statusHeight(entry.history.status.known(), app_state.shells[app_state.active_shell].chat_todo_open, entry.history.status.total, available, uiScaled(28), uiScaled(24));
 }
@@ -3841,7 +3832,6 @@ pub fn chatToggleTodos() void {
 }
 
 fn chatPaintStatus(hdc: HANDLE, status: *const chat_transcript.Status, rc: RECT, brush: HANDLE) void {
-    if (app_state.clean_chat) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     const font = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, font);
@@ -4009,7 +3999,6 @@ pub fn chatTableWheel(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
 }
 
 fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR) void {
-    if (app_state.clean_chat) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     const old_font = SelectObject(hdc, chatMetadataFont());
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
