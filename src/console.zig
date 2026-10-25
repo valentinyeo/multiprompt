@@ -2021,6 +2021,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 
     const saved_wake_id = app_state.shells[idx].wake_id;
     const saved_chat_id = app_state.shells[idx].chat_id;
+    const saved_read_message_id = app_state.shells[idx].last_read_message_id;
     const saved_sync_owned = app_state.shells[idx].sync_owned;
     const saved_name = app_state.shells[idx].name;
     const saved_name_len = app_state.shells[idx].name_len;
@@ -2124,6 +2125,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (app_state.shells[idx].hwnd != null) _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
     app_state.shells[idx] = .{
         .chat_id = saved_chat_id,
+        .last_read_message_id = saved_read_message_id,
         .wake_id = saved_wake_id,
         .sync_owned = saved_sync_owned,
         .console_inflight = true,
@@ -2609,6 +2611,7 @@ pub fn switchToShell(idx: u32) void {
         _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     if (defer_browser) hideBrowserFloatingChrome() else if (app_state.active_shell < app_state.shell_count) hideActiveBrowser();
     if (idx != prev) app_state.g_front_period.selected = null;
+    if (idx != prev) _ = @import("chat_session.zig").chatReadMark(false);
     app_state.active_shell = idx;
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
     if (defer_browser and defer_native_browser) @import("browser_pane.zig").revealPaintedChatBrowser();

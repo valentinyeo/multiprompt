@@ -22,6 +22,7 @@ pub const Block = struct {
     stamp_ms: i64 = 0,
     tool_status: ToolStatus = .running,
     tool_id: u64 = 0,
+    message_id: u64 = 0,
     detail_start: usize = 0,
     detail_len: usize = 0,
     diff_start: usize = 0,

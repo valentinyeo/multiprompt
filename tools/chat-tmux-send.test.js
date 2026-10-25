@@ -12,6 +12,12 @@ function body(name) {
 }
 const prelude = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const Entry = struct {
     state: enum { queued, sending, delivered, not_sent } = .queued,
@@ -176,7 +182,7 @@ function execute(disabled = false) {
       }
     ` : prelude;
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, `const ISSUE_349_TMUX_SEND = ${!disabled};\n` + checks + functions);
+    fs.writeFileSync(file, (`const ISSUE_349_TMUX_SEND = ${!disabled};\n` + checks + functions).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

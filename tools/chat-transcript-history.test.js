@@ -27,7 +27,7 @@ const ChatImgItem = struct { dummy: u8 = 0 };
 const CHAT_MAX_BLOCKS = 256;
 const TIMER_CHAT_REFRESH = 27;
 const Shell = struct {
-  shell_id: u32 = 0, kind: enum { tmux, cmd } = .tmux, tmux_host: u8 = 0, ai_agent: u8 = 1,
+  last_read_message_id: u64 = 0, shell_id: u32 = 0, kind: enum { tmux, cmd } = .tmux, tmux_host: u8 = 0, ai_agent: u8 = 1,
   claude_sid: [40]u8 = @splat(0), claude_sid_len: u32 = 0,
   claude_cwd: [192]u8 = @splat(0), claude_cwd_len: u32 = 0,
   tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
@@ -93,6 +93,12 @@ var g_chat_scroll_y: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
+var g_chat_read_open_pending = false;
+var g_chat_read_open_ready = false;
+var g_chat_read_boundary: chat_history.ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+fn chatReadMark(_: bool) bool { return false; }
+fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }
 var g_chat_echo_layout_count: usize = 0;
 var request_count: usize = 0;
 var capture_count: usize = 0;
@@ -403,7 +409,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases);
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -582,8 +588,8 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), fixturePrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support);
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), (fixturePrelude + entry +
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

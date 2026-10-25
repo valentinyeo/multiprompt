@@ -60,8 +60,14 @@ function browserHarness(ownsWindow) {
 
 function nativeHarness(dir) {
   const file = path.join(dir, 'transport.zig');
-  fs.writeFileSync(file, String.raw`
+  fs.writeFileSync(file, (String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 ${section(bridge, 'const version =', 'const max_native_message')}
 const browser_request_attempts: u32 = 4;
 var g_profile_token: []const u8 = "";
@@ -125,7 +131,7 @@ fn runCli(allocator: std.mem.Allocator, argv: anytype) !void {
     '    if (' + section(bridge, 'std.mem.eql(u8, command, "text") or', '    } else if (std.mem.eql(u8, command, "links"))') +
     '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "type")', '    } else if (std.mem.eql(u8, command, "insert"))') +
     '    } else if (' + section(bridge, 'std.mem.eql(u8, command, "eval") or', '    } else if (std.mem.eql(u8, command, "key"))') +
-    '    } else return error.InvalidArguments;\n}\n');
+    '    } else return error.InvalidArguments;\n}\n').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   const executable = path.join(dir, process.platform === 'win32' ? 'transport.exe' : 'transport');
   const zig = process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig'));
   const config = path.join(dir, 'bridge-config.zig');

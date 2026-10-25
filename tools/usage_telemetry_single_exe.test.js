@@ -116,7 +116,13 @@ test('singleton and stop control execute production functions with a Win32 call 
       }
     }`;
     const file = path.join(dir, 'mode.zig');
-    fs.writeFileSync(file, mode.slice(0, start) + mock + mode.slice(end));
+    fs.writeFileSync(file, (`const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+` + (mode.slice(0, start) + mock + mode.slice(end))).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     runZig(file);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

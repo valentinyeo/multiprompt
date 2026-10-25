@@ -135,6 +135,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.bnat = !boolFalse(obj, "bnat");
         tab.shell_id = @intCast(@min(uint(obj, "shell_id"), std.math.maxInt(u32)));
         tab.chat_id = uint(obj, "chat_id");
+        tab.last_read_message_id = uint(obj, "last_read_message_id");
         tab.wake_id = @intCast(@min(uint(obj, "wake_id"), std.math.maxInt(u32)));
         tab.pid = @truncate(uint(obj, "pid"));
         tab.group_id = @truncate(uint(obj, "group_id"));

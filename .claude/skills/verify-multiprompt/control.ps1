@@ -1935,7 +1935,7 @@ function Open-WorkspaceBrowser([string]$Step) {
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot, [string]$SavedTheme = $Theme) {
-    Palette 'themes'
+    Focus-Palette 'themes' 4000
     Press @(0x0D) 'Enter: Themes...'
     Type-Text $Theme
     Snapshot $ActionShot

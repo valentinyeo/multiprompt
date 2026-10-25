@@ -935,3 +935,15 @@ test "IGSH-600 tombstones survive rebase held edits apply and equality" {
     defer parsed.deinit();
     try std.testing.expect(equal(rebased, parsed.value));
 }
+
+test "IGSH-814 resync retains each matching chat read anchor" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cache = "{\"tabs\":[{\"kind\":\"tmux\",\"tmux_host\":0,\"tmux_session\":\"one\",\"last_read_message_id\":\"18446744073709551615\"},{\"kind\":\"tmux\",\"tmux_host\":1,\"tmux_session\":\"two\",\"last_read_message_id\":\"42\"}]}";
+    const restored = (try restoreCache(a, cache, initial)).?;
+    const parsed = try @import("json_reader.zig").parse(a, restored);
+    const tabs = @import("json_reader.zig").array(@import("json_reader.zig").field(parsed.value, "tabs"));
+    try std.testing.expectEqual(std.math.maxInt(u64), @import("json_reader.zig").uint(tabs[0], "last_read_message_id"));
+    try std.testing.expectEqual(@as(u64, 42), @import("json_reader.zig").uint(tabs[1], "last_read_message_id"));
+}

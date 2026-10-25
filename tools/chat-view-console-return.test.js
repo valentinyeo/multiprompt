@@ -30,9 +30,15 @@ function toggle(text) {
 function harness(source) {
   const production = names.map(name => fn(source, name)).join('\n\n')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
+    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").applyBlackConsoleBackground', 'applyBlackConsoleBackground');
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
 const app_state = @This();
 const HANDLE = ?usize;
 const BOOL = i32;
@@ -79,6 +85,7 @@ fn debugLog(_: []const u8) void {}
 fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
+fn chatReadMark(_: bool) bool { return false; }
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn KillTimer(_: HANDLE, _: usize) BOOL { return 1; }
@@ -184,7 +191,7 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   try {
     copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, harness(source));
+    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);

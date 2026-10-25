@@ -14,6 +14,12 @@ function body(text, name) {
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const chat_switch = @import("chat_switch.zig");
 const chat_transcript = @import("chat_transcript.zig");
@@ -223,7 +229,7 @@ function run(mode, control = false) {
     const names = ['chatArmSendVerify', 'chatVerifyClear', 'chatPromptStillInInputBox', 'chatSendVerifyTick', 'chatSendVerifyDelayMs',
       'chatInputRowHoldsPrompt', 'chatInputBoxShowsUnsentPrompt', 'chatOutboxIndexById', 'chatOutboxFindSending', 'chatEchoMarkNotSent', 'sendTextToShellVerifiedAt', 'chatSendViaConsole'];
     const initial = (control && mode === 'identity' ? old : source).match(/^var next_shell_id: u32 = [^;]+;/m)[0];
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + initial + '\n' + names.map(n => body(replaced.includes(n) ? old : source, n)).join('\n') + acceptance);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + initial + '\n' + names.map(n => body(replaced.includes(n) ? old : source, n)).join('\n') + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', `correctness ${mode}:`], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

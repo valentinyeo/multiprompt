@@ -1275,7 +1275,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.869";
+pub const APP_VERSION = "0.28.871";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -7748,6 +7748,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = KillTimer(hwnd, TIMER_BROWSER_SETTLE);
             _ = KillTimer(hwnd, TIMER_BROWSER_URL_POLL);
             _ = KillTimer(hwnd, TIMER_BROWSER_EDGE_MASK_RAISE);
+            _ = @import("chat_session.zig").chatReadMark(false);
             logSessionAudit("WM_CLOSE:entry-before-save");
             commitRename();
             chatDraftFlush();
@@ -7798,7 +7799,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         0x0016 => {
-            if (wp != 0) chatDraftFlush();
+            if (wp != 0) {
+                _ = @import("chat_session.zig").chatReadMark(false);
+                chatDraftFlush();
+                saveSession();
+            }
             return 0;
         },
         WM_DESTROY => {

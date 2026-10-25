@@ -23,7 +23,7 @@ function windowPosBranch() {
 function zig(code, filter) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue521-'));
   try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), code);
+    fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
@@ -34,6 +34,12 @@ function zig(code, filter) {
 
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
 const LONG = i32;

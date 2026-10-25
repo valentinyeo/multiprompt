@@ -17,7 +17,7 @@ function execute(t, code, modules = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-outbox-key-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   copyZig(modules, dir);
-  fs.writeFileSync(path.join(dir, 'test.zig'), code);
+  fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
@@ -26,11 +26,18 @@ function execute(t, code, modules = []) {
 
 const keys = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const CHAT_OUTBOX_KEY_CAP = 192;
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
     shell_id: u32 = 1,
     chat_id: u64 = 0,
+    last_read_message_id: u64 = 0,
     kind: ShellKind = .cmd,
     name: [64]u16 = @splat(0),
     name_len: u32 = 0,
@@ -94,7 +101,7 @@ test "restart preserves all random id bits" {
     @memcpy(json_buf[0..header.len], header);
     var pos: usize = header.len;
     const i = 1;
-` + save.slice(start, end) + `
+` + save.slice(start, end).replaceAll("catch return false", "catch return error.TestUnexpectedResult") + `
     @memcpy(json_buf[pos..][0..3], "}]}");
     pos += 3;
     var parsed = try json_reader.parse(std.testing.allocator, json_buf[0..pos]);
