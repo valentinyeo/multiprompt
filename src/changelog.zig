@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.863", .items = &.{
+        .{ .text = "Session groups now use quiet, uncluttered headlines that you can click to hide or show their sessions.", .ticket = "IGSH-766" },
+    } },
     .{ .ver = "0.28.862", .items = &.{
         .{ .text = "The message box no longer flickers while you type.", .ticket = "IGSH-760" },
     } },
