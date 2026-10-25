@@ -561,6 +561,26 @@ class ChatSyncAuditTest(unittest.TestCase):
         candidates = audit.pane_candidates('\n'.join(messages + [''] * 8) + '\n')
         self.assertEqual([item['text'] for item in candidates], [text[2:] for text in messages])
 
+    def test_igsh867_wrapped_background_task_suffix_is_not_chat(self):
+        message = 'The neutral assistant summary is ready'
+        for suffix, continuation in [('still running in', 'background'),
+                                     ('still running', 'in background'),
+                                     ('still', 'running in background')]:
+            with self.subTest(suffix=suffix):
+                capture = ['● Task "neutral release check" ' + suffix,
+                           '  ' + continuation, '● ' + message] + [''] * 8
+                candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+                self.assertEqual([item['text'] for item in candidates], [message])
+                self.assertEqual([item['pane_line'] for item in candidates], [3])
+
+    def test_igsh867_wrapped_task_conversation_remains_chat(self):
+        for prefix in ('● ', '❯ '):
+            with self.subTest(prefix=prefix):
+                text = 'Task "neutral release check" still running in'
+                capture = [prefix + text, '  background; I will investigate'] + [''] * 8
+                candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+                self.assertEqual([item['text'] for item in candidates], [text])
+
     def test_IGSH_735_wrapped_background_task_row_is_not_chat(self):
         capture = ['● Task "while pgrep -f "cut the Windows RAM" >/dev/null; do sleep 30; done; echo',
                    'done" still running in background'] + [''] * 8
