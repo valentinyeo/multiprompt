@@ -97,7 +97,16 @@ test('IGSH-820 Windows journey checks pinned toggles, refused Ctrl+W, all views 
 
 test('IGSH-820 native refused-action tests, maps and existing Windows journey are wired', () => {
   const main = read('src/main.zig');
-  for (const action of ['close', 'Ctrl+W', 'archive', 'end session', 'group close atomically', 'workspace close atomically', 'close-all atomically', 'Inbox archive']) assert.ok(main.includes(`test "IGSH-820 pinned tab refuses ${action}"`), action);
+  for (const title of [
+    'IGSH-820 pinned tab refuses close',
+    'IGSH-820 pinned tab refuses Ctrl+W',
+    'IGSH-820 pinned tab refuses archive',
+    'IGSH-820 pinned tab refuses end session',
+    'IGSH-820 pinned tab refuses group close atomically',
+    'IGSH-820 pinned tab refuses workspace close atomically',
+    'IGSH-820 pinned tab refuses close-all atomically',
+    'IGSH-820 pinned tab refuses Inbox archive',
+  ]) assert.ok(main.includes(`test "${title}"`), title);
   assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-view-everywhere"/);
   assert.match(workflow, /if: \(env.FEATURE == 'chat-view' \|\| env.FEATURE == 'chat-view-everywhere'\) && env.RELEASE_TAG == ''(?:(?!\r?\n      - )[\s\S])*?zig build test-main/m);
   for (const name of ['chat-view-everywhere', 'pin-protects-tab']) {
