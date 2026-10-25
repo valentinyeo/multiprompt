@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.864", .items = &.{
+        .{ .text = "Remote-session notification setup instructions use the installed notifier so activity and completion reach the app.", .ticket = "IGSH-789" },
+    } },
     .{ .ver = "0.28.863", .items = &.{
         .{ .text = "Session groups now use quiet, uncluttered headlines that you can click to hide or show their sessions.", .ticket = "IGSH-766" },
     } },
