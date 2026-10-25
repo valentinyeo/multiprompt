@@ -1,0 +1,103 @@
+name: auto-release
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.stamp.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: master
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Require a tested unreleased master head
+        id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ] && [ "$sha" != "$TESTED_SHA" ]; then
+            echo 'master has moved past the tested commit; skipping'
+            exit 0
+          fi
+          if git log -1 --pretty=%B | grep -Fq -e '[skip release]' -e '[release skip]'; then
+            echo 'commit asks for no release; skipping'
+            exit 0
+          fi
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo 'commit is already tagged; skipping'
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            gh run list -R "$GITHUB_REPOSITORY" -w test.yml -b master --commit "$sha" --limit 100 \
+              --json databaseId,event,status,conclusion | jq -e '
+                map(select(.event == "push" or .event == "workflow_dispatch"))
+                | sort_by(.databaseId) | last | .status == "completed" and .conclusion == "success"'
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - name: Stamp patch version and tag master atomically
+        id: stamp
+        if: steps.admit.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          RELEASE_TAG=$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { stampTree } from './tools/version-stamp.mjs';
+          import { releaseVersion } from './tools/release-version.mjs';
+          const files = Object.fromEntries(['src/main.zig', 'src/changelog.zig', ...fs.readdirSync('changelog.d').filter(name => name !== 'README.md').map(name => `changelog.d/${name}`)].map(file => [file, fs.readFileSync(file, 'utf8')]));
+          if (`v${files['src/main.zig'].match(/^pub const APP_VERSION = "([^"]+)";/m)?.[1]}` !== releaseVersion(files['src/changelog.zig'])) throw new Error('App and changelog versions disagree');
+          if (!Object.keys(files).some(file => file.startsWith('changelog.d/'))) files['changelog.d/IGSH-834-maintenance.md'] = 'Updates include the latest improvements.\n';
+          const stamp = stampTree(files);
+          for (const file of ['src/main.zig', 'src/changelog.zig']) fs.writeFileSync(file, stamp.files[file]);
+          for (const file of stamp.removed) if (fs.existsSync(file)) fs.unlinkSync(file);
+          const tag = `v${stamp.version}`;
+          if (releaseVersion(stamp.files['src/changelog.zig'], tag) !== tag) throw new Error('Stamped version mismatch');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
+          console.log(tag);
+          NODE
+          )
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "$RELEASE_TAG already exists; refusing to move it" >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- src/main.zig src/changelog.zig changelog.d
+          git commit -m "$RELEASE_TAG: automatic patch release [skip release]"
+          git tag "$RELEASE_TAG"
+          git push --atomic origin HEAD:refs/heads/master "refs/tags/$RELEASE_TAG"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets:
+      MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
