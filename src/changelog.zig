@@ -53,6 +53,11 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.871", .items = &.{
+        .{ .text = "Switching focus with Alt+Q no longer draws an outline around chat, browser or shell panes.", .ticket = "IGSH-807" },
+        .{ .text = "Focus-switching checks now handle owned windows reliably and measure the current pane layout.", .ticket = "IGSH-807" },
+        .{ .text = "New versions reach an open app within minutes instead of hours.", .ticket = "IGSH-838" },
+    } },
     .{ .ver = "0.28.870", .items = &.{
         .{ .text = "Chat View now loads every message in long sessions, including after reopening the app.", .ticket = "IGSH-815" },
         .{ .text = "Keyboard selection stays in command and skill lists until you move the mouse.", .ticket = "IGSH-836" },
