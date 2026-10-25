@@ -110,14 +110,13 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        shell: bash
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
       - name: Run CLEAN chat pixel tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
         shell: bash
         run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
-        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Sweep real zsb.exe command help
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
@@ -401,16 +400,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y wine64 winetricks xvfb
+          export PATH="/usr/lib/x86_64-linux-gnu/wine:$PATH"
+          echo /usr/lib/x86_64-linux-gnu/wine >> "$GITHUB_PATH"
           xvfb-run -a winetricks -q gdiplus
       - name: Run CLEAN chat pixel tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
         env:
           WINEPREFIX: ${{ runner.temp }}/clean-chat-wine
           WINEDEBUG: '-all'
           WINEDLLOVERRIDES: gdiplus=n
         run: xvfb-run -a zig build test-clean-chat --summary all -Dtarget=x86_64-windows-gnu -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
-        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Test cross-origin zsb frame input and eval
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
