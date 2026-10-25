@@ -268,6 +268,13 @@ def shell():
     if op == "messages" and len(ARGS) == 2:
         for i in range(int(ARGS[1])):
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
+    if op == "history":
+        for i in range(24):
+            fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
+            identity = "history-" + str(i)
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * 12000, is_error=False)]))
         return 0
     if op == "activity":
         descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]

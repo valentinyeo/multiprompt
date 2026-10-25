@@ -133,3 +133,7 @@ A change that alters a mapped feature updates its map and this table in the same
 | IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and a pinned pre-fix red control | chat-messages-only | Run results and screenshot review are recorded in GATES.md; no local builds or tests |
 
 | IGSH-766 | Quiet group headlines without fills, rails or chevrons; headline clicks hide and restore members with saved collapse state. | group-rail | journey updated; GitHub Windows execution pending | This pass uses source checks only; run the identical driver on v0.28.861 for no-fill/no-rail/flush-left failures, then the branch for all four sidebar-headline markers. |
+
+## IGSH-815 full-session history
+
+`chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. Red/green GitHub evidence pending; no live Claude session is claimed.

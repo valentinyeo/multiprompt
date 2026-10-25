@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -14,7 +14,7 @@ $Ssh = (Resolve-Path $Ssh).Path
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Start-Transcript "$Evidence/driver.log"
-Add-Type -AssemblyName System.Drawing, UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -26,6 +26,7 @@ $plans = @(
     @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
+if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -164,6 +165,38 @@ function Clear-Composer {
     $length = ([ChatDeliveryDesktop]::Text($composer)).Length
     for ($i = 0; $i -lt $length; $i++) { Press @(0x08) 'Backspace: clear composer' $true }
 }
+function Assert-FullHistory([string]$Stage) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    $complete = Step 'all session rows reach the renderer' {
+        Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
+        $log = (Read-Shared "$settings/debug.log").Substring($offset)
+        $frames = [regex]::Matches($log, '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq 74
+    }
+    if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
+    $view = [IntPtr]$views[0].Current.NativeWindowHandle
+    if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Transcript focus ownership mismatch' }
+    Press @(0x11, 0x41) 'Ctrl+A: select all rendered messages'
+    Press @(0x11, 0x43) 'Ctrl+C: copy all rendered messages'
+    $copied = [Windows.Forms.Clipboard]::GetText()
+    [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
+    $actual = @([regex]::Matches($copied, 'IGSH815 (?:user|assistant) \d+') | ForEach-Object { $_.Value })
+    $expected = @(0..23 | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
+    if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
+    Press @(0x1B) 'Esc: clear transcript selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)
+    Press @(0x24) 'Home: show first session messages'
+    Shot "full-history-$Stage-first"
+    Press @(0x23) 'End: show last session messages'
+    Shot "full-history-$Stage-last"
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Doctor $true
+    Save @{stage=$Stage; blocks=74; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
+}
 foreach ($plan in $plans) {
     $caseDir = "$Evidence/$($plan.name)"
     New-Item -ItemType Directory -Force $caseDir | Out-Null
@@ -176,7 +209,8 @@ foreach ($plan in $plans) {
     $composer = [IntPtr]::Zero
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isActivity = $plan.name -eq 'messages-only'
-    $hasTranscript = $isQueue -or $isActivity
+    $isHistory = $plan.name -eq 'full-history'
+    $hasTranscript = $isQueue -or $isActivity -or $isHistory
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -210,6 +244,7 @@ foreach ($plan in $plans) {
         }
         Save $standIn "$state/state.json"
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
@@ -226,7 +261,23 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isActivity) {
+        if ($isHistory) {
+            Assert-FullHistory 'open'
+            Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
+            $actions.Add(@{case=$plan.name; input='close and restart the owned app with the same profile'})
+            if (-not $app.CloseMainWindow()) { throw 'Owned app refused normal close' }
+            [void](Wait-For 'owned app closed normally' { $app.HasExited })
+            $stopped = $job.Stop()
+            Save $stopped "$caseDir/restart-process-tree.json"
+            $job.Dispose()
+            $job = [VerifyJob]::new()
+            $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
+            $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+            [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+            $composer = Wait-For 'restored native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+            [void](Wait-For 'restored composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
+            Assert-FullHistory 'restart'
+        } elseif ($isActivity) {
             if (-not (Step 'initial-transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)) { throw 'Initial transcript was not read' }
             $cache = Wait-For 'app-written message cache' {
                 @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains('The fake session is ready.') }) | Select-Object -First 1
@@ -431,7 +482,9 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
-if ($Feature -eq 'chat-messages-only') {
+if ($Feature -eq 'chat-full-history') {
+    & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
+} elseif ($Feature -eq 'chat-messages-only') {
     & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --complete
 } else {
     & node "$PSScriptRoot/check-evidence.js" $Evidence
