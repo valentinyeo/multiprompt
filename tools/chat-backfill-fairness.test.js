@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { readChangelogEntry } = require('./changelog-entry');
 const session = fs.readFileSync('src/chat_session.zig', 'utf8');
 const history = fs.readFileSync('src/chat_history.zig', 'utf8');
 const state = fs.readFileSync('src/app_state.zig', 'utf8');
@@ -129,7 +130,7 @@ test('full-history continuation stays automatic across disk restore without a ca
   assert.match(ready, /if \(disk or entry.before > 0\) @as\(u64, 0\)/);
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
-  const changelog = fs.readFileSync('changelog.d/IGSH-815-fair-backfill.md', 'utf8').trim();
+  const changelog = readChangelogEntry('IGSH-815').trim();
   assert.equal(changelog.split('\n').length, 1);
   assert.match(changelog, /^Chat View .+\.$/);
 });

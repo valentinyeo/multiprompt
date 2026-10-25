@@ -55,10 +55,10 @@ fn select(i: usize) void {
     g_chat_fetch_busy = slot.busy; g_usage_launch_mutex = slot.launch;
 }
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
-var now: u64 = 100;
+var scheduler_tick: u64 = 100;
 const WM_TIMER = 0x113;
 const TIMER_CHAT_REFRESH = 27;
-fn GetTickCount64() u64 { return now; }
+fn GetTickCount64() u64 { return scheduler_tick; }
 fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
 const TestWin = struct {
     const LPARAM = isize;
@@ -125,7 +125,7 @@ test "one worker across six windows gives pending windows turns before reacquiri
         chatFetchRelease();
         try std.testing.expect(!chatFetchAcquire());
     }
-    now += 3002;
+    scheduler_tick += 3002;
     select(5);
     try std.testing.expect(chatFetchAcquire());
     chatFetchRelease();
