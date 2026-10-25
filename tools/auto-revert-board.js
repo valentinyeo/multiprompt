@@ -21,7 +21,7 @@ function main() {
     const journeys = body.match(/^Failed journeys: ([a-z-]+(?:, [a-z-]+)*)$/m)?.[1];
     if (!sha || !journeys || !body.split('\n').includes(`Auto-Revert-Run: ${runId}`)) continue;
     const run = command('gh', ['api', `repos/${repository}/actions/runs/${runId}`]);
-    if (String(run.id) !== runId || run.path !== '.github/workflows/verify.yml' || run.event !== 'push' || run.head_branch !== 'master' || run.head_sha !== sha || run.status !== 'completed' || run.conclusion !== 'failure' || run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) continue;
+    if (String(run.id) !== runId || run.path !== '.github/workflows/verify.yml' || run.event !== 'push' || run.head_branch !== 'master' || run.head_sha !== sha || run.status !== 'completed' || !['failure', 'cancelled'].includes(run.conclusion) || run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) continue;
     const tasks = ht(['task', 'get', ticket]).tasks;
     if (tasks?.length !== 1 || !['Todo', 'Doing', 'AI Review', 'Done'].includes(tasks[0].section)) throw new Error(`Unexpected board task: ${ticket}`);
     const url = `https://github.com/${repository}/actions/runs/${runId}`;

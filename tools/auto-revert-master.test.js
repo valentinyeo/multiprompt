@@ -486,7 +486,7 @@ test('verify journey jobs keep the plain name the ruleset and revert parser read
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  const guard = "          if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }";
+  const guard = "          if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }";
   const contract = source => {
     assert.doesNotMatch(source, /^(?:<{7}|={7}|>{7})(?:\s|$)/m);
     assert.deepEqual(source.split('\n').filter(line => line.includes('IGSH-837 deliberate red master proof')), [guard]);
@@ -499,10 +499,10 @@ test('controlled red proof requires the marker on appearance master pushes and e
     verify.replace(" -and $env:GITHUB_REF -eq 'refs/heads/master'", ''),
     verify.replace("$env:GITHUB_EVENT_NAME -eq 'push'", "$env:GITHUB_EVENT_NAME -eq 'pull_request'"),
     verify.replace("$env:FEATURE -eq 'appearance' -and ", ''),
-    verify.replace(" -and $env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof')", ''),
+    verify.replace(" -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof')", ''),
     verify.replace(" -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')", ''),
     verify.replace('          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}\n', ''),
-    verify.replace("$env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof')", "'${{ github.event.head_commit.message }}'.Contains('IGSH-837 red proof')"),
+    verify.replace("$env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof')", "'${{ github.event.head_commit.message }}'.Contains('IGSH-837 red proof')"),
     verify.replace(guard, guard + '\n' + guard),
   ]) assert.throws(() => contract(broken), assert.AssertionError);
 });
