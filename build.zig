@@ -212,6 +212,8 @@ pub fn build(b: *std.Build) void {
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&pane_spacing_tests.step);
     vps_test_step.dependOn(&pane_spacing_tests.step);
+    const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
+    vps_test_step.dependOn(&automerge_admit_tests.step);
     const chat_reader_tests = b.addSystemCommand(&.{ "python3", "tools/chat-history-reader-test.py" });
     vps_test_step.dependOn(&chat_reader_tests.step);
     const chat_settle_tests = b.addSystemCommand(&.{ "python3", "tools/chat-settle-test.py" });

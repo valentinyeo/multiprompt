@@ -234,7 +234,9 @@ test('build, CI, installer and documentation use the stamp contract', () => {
   assert.ok(install.includes('releases/tags/$release'));
   assert.ok(install.indexOf('receipt.mjs') < install.indexOf('Rename-Item'));
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
-  assert.match(release, /branches: \[master\]/);
+  assert.match(release, /push:\n    tags: \['v\*'\]/);
+  assert.doesNotMatch(release, /branches: \[master\]/);
+  assert.match(release, /workflow_call:[\s\S]*?tag:[\s\S]*?type: string/);
   assert.match(release, /node tools\/release-version\.mjs/);
   assert.ok(fs.readFileSync(path.join(root, 'tools/gates/no-version-bump.mjs'), 'utf8').includes(fixHint));
   const readme = fs.readFileSync(path.join(root, 'changelog.d/README.md'), 'utf8');
