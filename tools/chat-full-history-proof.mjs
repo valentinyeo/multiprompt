@@ -23,11 +23,9 @@ try {
       assert.equal(copied.indexOf(message, at + message.length), -1, `${stage}: duplicated ${message}`);
       offset = at + message.length;
     }
-    for (const edge of ['first', 'last']) {
-      const bytes = fs.readFileSync(path.join(root, `full-history-${stage}-${edge}.png`));
-      assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-      assert.ok(bytes.length > 10000);
-    }
+    const bytes = fs.readFileSync(path.join(root, `full-history-${stage}.png`));
+    assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.ok(bytes.length > 10000);
   }
   const build = json('build.json');
   const doctor = json('full-history/doctor.json');

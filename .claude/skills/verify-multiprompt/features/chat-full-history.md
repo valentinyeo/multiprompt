@@ -8,7 +8,7 @@
 
 ## How to get to it (user POV)
 
-Select the session with Ctrl+1 and open Chat View with Alt+C. Home shows its first messages; End shows its last messages. No scroll-to-load action is needed.
+Select the session with Ctrl+1 and open Chat View with Alt+C. No scroll-to-load action is needed. Ctrl+K, `chat view select all`, followed by Ctrl+C copies the complete conversation.
 
 ## Driving it with control.ps1
 
@@ -16,9 +16,9 @@ Dispatch `gh workflow run verify.yml --ref ceo/IGSH-815 -f feature=chat-full-his
 
 The existing delivery boundary creates its own ordinary Claude transcript: two initial messages, then 24 user/assistant pairs interleaved with large synthetic tool results. The source exceeds the reader's tail window. The harness seeds only its documented isolated remote tab and agent boundary, never the app's message cache.
 
-On open, Ctrl+0 requires the production renderer to lay out 74 blocks. Ownership-checked transcript focus followed by genuine Ctrl+A and Ctrl+C must copy all 50 messages exactly once in source order. Capture Home/End screenshots only after this assertion, so scrolling cannot repair a failing open. Close the owned app normally, stop its owned descendants, restart the identical executable/profile, and repeat the identical count, copy and screenshot assertions.
+On open, Ctrl+0 requires the production renderer to lay out 74 blocks. Ownership-checked visible transcript identity followed by genuine Ctrl+K, `chat view select all`, Enter and Ctrl+C must copy all 50 messages exactly once in source order. Capture the visible transcript after this assertion; no scroll input may repair a failing open. Close the owned app normally, stop its owned descendants, restart the identical executable/profile, and repeat the identical count, copy and screenshot assertions.
 
-`tools/chat-full-history-proof.mjs` independently compares the copied text against the retained source transcript, checks both measured stages, build/Doctor identity and zero-process cleanup. Inspect the first/last screenshots, copied text, debug log, `result.json`, `cleanup.json`, and the cache retained before restart.
+`tools/chat-full-history-proof.mjs` independently compares the copied text against the retained source transcript, checks both measured stages, build/Doctor identity and zero-process cleanup. Inspect the open/restart screenshots, copied text, debug log, `result.json`, `cleanup.json`, and the cache retained before restart.
 
 The red run must execute this journey with the app source unchanged from origin/master at fada2dbdb0e7892e92d0ae3244a548804b41b249. An `IGSH-815 incomplete session at open` failure with successful Doctor/cleanup is the expected red, not build or launch failure. Run the same journey on the fixed branch for green and record both run URLs in the PR.
 

@@ -178,21 +178,20 @@ function Assert-FullHistory([string]$Stage) {
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
     if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-    $view = [IntPtr]$views[0].Current.NativeWindowHandle
-    if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Transcript focus ownership mismatch' }
-    Press @(0x11, 0x41) 'Ctrl+A: select all rendered messages'
+    Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text through the palette'
+    [void](Wait-For 'owned command palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    $actions.Add(@{case=$plan.name; input='type palette query'; text='chat view select all'})
+    foreach ($letter in 'chat view select all'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'select all transcript palette command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=19 count=1 target=\d+' })
+    Press @(0x0D) 'Enter: select every rendered message'
     Press @(0x11, 0x43) 'Ctrl+C: copy all rendered messages'
     $copied = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
     $actual = @([regex]::Matches($copied, 'IGSH815 (?:user|assistant) \d+') | ForEach-Object { $_.Value })
     $expected = @(0..23 | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
+    Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
-    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)
-    Press @(0x24) 'Home: show first session messages'
-    Shot "full-history-$Stage-first"
-    Press @(0x23) 'End: show last session messages'
-    Shot "full-history-$Stage-last"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
     Save @{stage=$Stage; blocks=74; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
