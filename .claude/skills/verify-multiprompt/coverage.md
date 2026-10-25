@@ -112,7 +112,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | palette-order | not run in this pass; added afterwards by IGSH-612 with its own GitHub runs | — |
 | remind-me | not run in this pass; added by IGSH-702 | — |
 | group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
-| pane-layout | 39871210688, v0.28.821 | passed |
+| pane-layout | 39871210688, v0.28.821 | passed before IGSH-810 mask assertions; dark/light/amoled mask journey not yet run |
 | chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
 | chat-tables | 39871210688, v0.28.821 | passed |
 | sessions | 39871210688, v0.28.821 | failed: focus stays on frame after rename; `real console command wrote file` |
