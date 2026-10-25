@@ -299,8 +299,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
     .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
     .{ .a = "Alt+X", .b = "Archive tmux session; close non-tmux tab (press twice; also on inbox rows)", .header = false },
-    .{ .a = "Ctrl+D in Chat View", .b = "Start/stop dictation; Enter stops recording into the composer", .header = false },
-    .{ .a = "Ctrl+Shift+Space / Enter", .b = "Start/stop dictation; Enter is stop-only while recording", .header = false },
+    .{ .a = "Ctrl+D in Chat View", .b = "Start/stop dictation; Enter stops recording into the composer; Escape discards the recording", .header = false },
+    .{ .a = "Ctrl+Shift+Space / Enter", .b = "Start/stop dictation; Enter is stop-only while recording; Escape discards the recording", .header = false },
     .{ .a = "Spawn / Windows", .b = "", .header = true },
     .{ .a = "Ctrl+Shift+1 ... 5", .b = "New CMD / TMUX / VPS / PowerShell", .header = false },
     .{ .a = "Ctrl+N", .b = "New multiprompt window", .header = false },
@@ -584,6 +584,18 @@ test "Chat View windows toggle the palette on plain Ctrl+K without the hook" {
     try std.testing.expect(!paletteAcceptsChar(0x7F));
 }
 
+fn queueDictationCancelFromEscape() bool {
+    if (!app_state.g_dictation_recording.load(.acquire)) return false;
+    if (app_state.g_dictation_cancelled.cmpxchgStrong(false, true, .acq_rel, .acquire) == null) {
+        if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_TOGGLE, 1, 0) == 0) {
+            app_state.g_dictation_cancelled.store(false, .release);
+            return false;
+        }
+    }
+    app_state.g_dictation_escape_held = true;
+    return true;
+}
+
 fn queueDictationStopFromEnter() bool {
     if (!app_state.g_dictation_recording.load(.acquire)) return false;
     if (app_state.g_dictation_enter_stop_queued.cmpxchgStrong(false, true, .acq_rel, .acquire) == null) {
@@ -604,6 +616,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
+        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
+            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
+            return 1;
+        }
+        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
+        {
+            return 1;
+        }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
         app_state.g_focus_user_action_tick = 0;

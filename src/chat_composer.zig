@@ -2181,7 +2181,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         .running = app_state.g_dictation_running.load(.acquire),
         .recording = app_state.g_dictation_recording.load(.acquire),
         .voice = app_state.g_voice_listening_active.load(.acquire),
-        .cancelled = app_state.g_dictation_cancelled,
+        .cancelled = app_state.g_dictation_cancelled.load(.acquire),
         .send_on_ready = app_state.g_dictation_send_on_ready,
     };
     defer {
@@ -2204,7 +2204,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         app_state.g_dictation_running.store(saved.running, .release);
         app_state.g_dictation_recording.store(saved.recording, .release);
         app_state.g_voice_listening_active.store(saved.voice, .release);
-        app_state.g_dictation_cancelled = saved.cancelled;
+        app_state.g_dictation_cancelled.store(saved.cancelled, .release);
         app_state.g_dictation_send_on_ready = saved.send_on_ready;
     }
     chat_drafts = draft_model.Store.init(std.testing.allocator);
@@ -2222,7 +2222,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
     app_state.g_dictation_running.store(false, .release);
     app_state.g_dictation_recording.store(false, .release);
     app_state.g_voice_listening_active.store(false, .release);
-    app_state.g_dictation_cancelled = false;
+    app_state.g_dictation_cancelled.store(false, .release);
     app_state.g_dictation_send_on_ready = false;
     chat_dictation_state = .idle;
     chat_dictation_engine_toggle = Engine.toggle;

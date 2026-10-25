@@ -12,7 +12,7 @@ updated: 2026-10-03
 
 Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. The Full list below is generated from it by `node tools/shortcuts-doc.mjs`. Every new user-facing function ships with a shortcut (when sensible), a Ctrl+K entry, and an F1 row; regenerate the Full list after changing those rows.
 
-- Ctrl+Shift+Space: Inside multiprompt, start/stop dictation. From another app, bring multiprompt to the front (global hotkey).
+- Ctrl+Shift+Space: Inside multiprompt, start/stop dictation. Escape while recording discards it without changing your draft. Ctrl+K has `Chat View: Toggle Dictation`. From another app, bring multiprompt to the front (global hotkey).
 - Ctrl+Shift+S: Screenshot the active browser-pane tab, upload it, and insert its link followed by exactly one space. Works from multiprompt, Chat View, and the focused docked Chrome/Edge pane through the native hook and bridge, independently of Chrome's shortcut binding. Ctrl+K has `Browser: Screenshot → Chat View / Shell`; F1 lists the chord. In Chat View the composer receives focus with the caret after the space, including extension-menu screenshots and Ctrl+V image attachments. An inactive target receives the link without changing tabs or stealing focus; another foreground application and modal editors keep their focus.
 - Chrome extension screenshot shortcuts: extension 1.0.62 suggests Ctrl+Shift+S and retains Alt+Shift+S. Both commands and the extension context menu use the same capture/upload/paste transaction. Chrome can leave a conflicting suggested key unbound, and unpacked reloads preserve old bindings: assign it manually at `chrome://extensions/shortcuts` if needed. The app-owned Ctrl+Shift+S path still works while a bound multiprompt pane or the app is foreground; this is not a global shortcut for unrelated Chrome windows.
 - + button / Ctrl+V in Chat View: The round + at the left of the composer opens a picker for any file, including png, jpg, jpeg, gif or webp images; Ctrl+V with a picture on the clipboard does the same. Drop files onto the composer or chat, or copy files in Explorer and paste with Ctrl+V. Up to 10 images attach one after another in their original order. Other files (up to 10, at most 200 MB each) are copied over the session's ssh to `~/.multiprompt/uploads/<session>/` on the server, and their server path is inserted at the caret; only server sessions can receive files. Your original files are kept. The image is uploaded to screencast2 (same upload as Ctrl+Shift+S, 10 MB limit) and its link is inserted at the caret with the caret placed after it. Ctrl+K has `Chat View: Attach File`. Image links in any message (https links ending in .png, .jpg, .jpeg, .gif or .webp, or screencast2.com/<id>.png) show as a rounded thumbnail under the text, up to 320 px wide; click one to open it in the browser pane. Thumbnails are cached in `%APPDATA%\ZigShell\imgcache`.
@@ -173,8 +173,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
 | Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
-| Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer |
-| Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording |
+| Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
+| Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 
 ### Spawn / Windows
 

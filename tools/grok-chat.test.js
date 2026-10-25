@@ -14,7 +14,6 @@ function body(source, name) {
 function requires(text, ...snippets) {
   for (const snippet of snippets) assert.ok(text.includes(snippet), `missing ${snippet}`);
 }
-// Each negative control changes only source text in memory: no builds or test copies.
 function gate(name, check, file, before, after = 'REMOVED') {
   test(`IGSH-849 ${name}`, () => {
     check(sources);
@@ -74,15 +73,15 @@ gate('arrow stops then sends only after transcription to the original active tab
 
 gate('Escape cancels even the eventual transcript and cannot send', s => {
   const hook = body(s.shortcuts, 'keyboardHookProc');
-  assert.match(hook, /kb.vkCode == 0x1B and app_state.g_dictation_running.load\(.acquire\)\) \{\s*_ = PostMessageW\(app_state.g_main_hwnd, WM_APP_DICTATION_TOGGLE, 1, 0\);/);
-  requires(s.main, 'if (wp == 1) @import("voice.zig").cancelDictation() else toggleDictation()');
+  assert.match(hook, /kb\.vkCode == 0x1B[\s\S]{0,240}queueDictationCancelFromEscape\(\)\)/);
+  requires(s.main, 'if (wp == 1) {', 'cancelDictation();', 'toggleDictation();');
   requires(body(s.chat_composer, 'chatComposerSubclassProc'), 'wp == 0x1B and app_state.g_dictation_running', 'cancelDictation()');
-  requires(body(s.voice, 'cancelDictation'), 'g_dictation_cancelled = true', 'g_dictation_send_on_ready = false', 'g_dictation_recording.store(false, .release)', 'chatDictationSync()');
+  requires(body(s.voice, 'cancelDictation'), 'g_dictation_cancelled.store(true, .release)', 'g_dictation_send_on_ready = false', 'g_dictation_recording.store(false, .release)', 'chatDictationSync()');
   const ready = body(s.voice, 'handleDictationReady');
-  const discard = ready.indexOf('if (app_state.g_dictation_cancelled)');
+  const discard = ready.indexOf('if (app_state.g_dictation_cancelled.load(.acquire))');
   assert.ok(discard >= 0 && discard < ready.indexOf('rememberLastPasteText(transcript)'));
   requires(ready.slice(discard, ready.indexOf('rememberLastPasteText(transcript)')), 'g_dictation_draft_owner_len = 0', 'dictationAudit("cancelled", 0)', 'return;');
-}, 'voice', 'g_dictation_cancelled = true');
+}, 'voice', 'g_dictation_cancelled.store(true, .release)');
 
 gate('bar disappears on stop, cancel, errors and completion; other tabs keep their composer', s => {
   requires(body(s.chat_composer, 'chatDictationBarVisible'), 'g_dictation_recording.load(.acquire)', 'std.mem.eql(u8, app_state.g_dictation_draft_owner', 'app_state.g_chat_draft_owner');
@@ -97,8 +96,6 @@ gate('progress/working strip is neither painted nor reserved; permissions retain
   requires(body(s.chat_composer, 'chatViewLayout'), 'composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight()');
 }, 'window_layout', 'return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return uiScaled(22);');
 
-// These three controls were already absent on the supplied base. Assert their
-// continued absence honestly, with a reintroduction negative control for each.
 for (const [label, token] of [['Archive', 'chatArchiveButton'], ['Remind me', 'chatRemindButton'], ['Wait', 'chatWaitButton']]) {
   gate(`${label} control has no paint, hit target or reserved slot`, s => {
     const ui = [body(s.window_layout, 'paintChatView'), body(s.chat_composer, 'chatButtonAt'), body(s.chat_composer, 'chatViewLayout')].join('\n');

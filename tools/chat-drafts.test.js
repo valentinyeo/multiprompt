@@ -134,6 +134,7 @@ test('ISSUE-498 dictation started in A completes in A while B is active', () => 
 var g_chat_active = true;
 var g_dictation_draft_owner: [192]u8 = undefined;
 var g_dictation_draft_owner_len: usize = 0;
+var g_dictation_cancelled = std.atomic.Value(bool).init(false);
 fn dictationAudit(_: []const u8, _: usize) void {}
 fn insertTextIntoChatComposer(value: []const u16) void { var b: [16400]u16 = @splat(0); @memcpy(b[0..value.len], value); edit(@ptrCast(&b)); }
 fn begin() void {

@@ -1730,6 +1730,10 @@ fn dictationWorkerThread() void {
     const audio_len = captureDictationPcm(audio);
     app_state.g_dictation_capturing.store(false, .release);
     dictationAudit("audio-bytes", audio_len);
+    if (app_state.g_dictation_cancelled.load(.acquire)) {
+        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
+        return;
+    }
     if (audio_len < 1600) {
         dictationSetErrorAscii("Dictation failed: no audio captured");
         if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
@@ -1890,6 +1894,18 @@ test "dictation verification ignores TUI framing and requires new console text" 
     try std.testing.expectEqual(false, dictationOutputShowsNewText(normalized[0..normalized_len], normalized[0..normalized_len], &spoken));
 }
 
+pub fn cancelDictation() void {
+    if (!app_state.g_dictation_running.load(.acquire)) return;
+    app_state.g_dictation_cancelled.store(true, .release);
+    app_state.g_dictation_send_on_ready = false;
+    app_state.g_dictation_recording.store(false, .release);
+    app_state.g_dictation_level.store(0, .release);
+    app_state.g_dictation_draft_owner_len = 0;
+    @import("chat_composer.zig").chatDictationSync();
+    dictationAudit("cancel", 0);
+    showHeaderNoticeAscii("Dictation cancelled", 2200, false);
+}
+
 pub fn handleDictationReady() void {
     @import("chat_composer.zig").chatDictationSync();
     defer @import("chat_composer.zig").chatDictationSync();
@@ -1919,13 +1935,13 @@ pub fn handleDictationReady() void {
     app_state.g_voice_listening_active.store(false, .release);
     const discard_legacy = app_state.g_voice_legacy_discard;
     app_state.g_voice_legacy_discard = false;
-    if (app_state.g_dictation_cancelled) {
-        app_state.g_dictation_cancelled = false;
-        app_state.g_dictation_draft_owner_len = 0;
+    if (app_state.g_dictation_cancelled.load(.acquire)) {
         if (was_voice_listening) {
             app_state.g_voice_state = .idle;
             invalidateChatHeader();
         }
+        app_state.g_dictation_cancelled.store(false, .release);
+        app_state.g_dictation_draft_owner_len = 0;
         dictationAudit("cancelled", 0);
         return;
     }
@@ -2032,16 +2048,6 @@ pub fn handleDictationReady() void {
     }
 }
 
-pub fn cancelDictation() void {
-    if (!app_state.g_dictation_running.load(.acquire)) return;
-    app_state.g_dictation_cancelled = true;
-    app_state.g_dictation_send_on_ready = false;
-    app_state.g_dictation_recording.store(false, .release);
-    app_state.g_dictation_level.store(0, .release);
-    @import("chat_composer.zig").chatDictationSync();
-    showHeaderNoticeAscii("Dictation cancelled", 2000, false);
-}
-
 pub fn toggleDictation() void {
     defer @import("chat_composer.zig").chatDictationSync();
     if (app_state.g_voice_mode_active and app_state.g_voice_always_listen and !app_state.g_voice_mic_failed and app_state.g_voice_mic_run.load(.acquire)) {
@@ -2084,7 +2090,7 @@ pub fn toggleDictation() void {
     }
     app_state.g_dictation_start_tick = GetTickCount64();
     app_state.g_dictation_level.store(0, .release);
-    app_state.g_dictation_cancelled = false;
+    app_state.g_dictation_cancelled.store(false, .release);
     app_state.g_dictation_send_on_ready = false;
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);
