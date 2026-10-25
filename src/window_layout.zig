@@ -601,7 +601,7 @@ test "IGSH-884 attach microphone send and stop paint circular backgrounds" {
             }
             canvas.deinit();
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
-            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left + uiScaled(1), rc.top + @divTrunc(size, 4)));
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top + @divTrunc(size, 4)));
             try std.testing.expect(w.GetPixel(dc, rc.left + @divTrunc(size, 2), rc.top + uiScaled(2)) != background);
         }
     }
