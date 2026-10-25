@@ -16,7 +16,7 @@ const transport = control.slice(control.indexOf('function Invoke-Zsb('), control
 function evaluateConcurrencyGroup(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|==|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|==|!=|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -46,15 +46,17 @@ function evaluateConcurrencyGroup(template, context) {
       }
       assert.ok(token, 'missing concurrency operand');
       if (token.startsWith("'")) return () => token.slice(1, -1).replace(/''/g, "'");
-      assert.match(token, /^(github\.(workflow|ref|event_name)|inputs\.[a-z_]+)$/);
+      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+)$/);
       const [object, key] = token.split('.');
       return () => context[object]?.[key] ?? '';
     }
     function equality() {
       let left = primary();
-      while (take('==')) {
+      for (;;) {
+        const negate = take('!=');
+        if (!negate && !take('==')) break;
         const previous = left, right = primary();
-        left = () => String(previous()).toLowerCase() === String(right()).toLowerCase();
+        left = () => (String(previous()).toLowerCase() === String(right()).toLowerCase()) !== negate;
       }
       return left;
     }
@@ -84,6 +86,8 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   const evaluate = expression => evaluateConcurrencyGroup('${{ ' + expression + ' }}', {});
   assert.equal(evaluate("'a' == 'A' && format('{0}-{1}', 'it''s', 'ok') || 'wrong'"), "it's-ok");
   assert.equal(evaluate("'kept' || '' && 'wrong'"), 'kept');
+  assert.equal(evaluate("'1' != '2' && 'differs' || 'same'"), 'differs');
+  assert.equal(evaluate("'1' != '1' && 'differs' || 'same'"), 'same');
   assert.equal(evaluate("'kept' || format('{0}')"), 'kept');
   assert.equal(evaluate("'' && format('{0}') || 'fallback'"), 'fallback');
   assert.throws(() => evaluate('unknown'), assert.AssertionError);
@@ -97,8 +101,8 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(group, 'workflow concurrency group exists');
   assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}\r?$/m);
   assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
-  const context = (event, feature, tag = '') => ({
-    github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event },
+  const context = (event, feature, tag = '', attempt = '1') => ({
+    github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event, run_attempt: attempt, sha: 'abc123' },
     inputs: { feature, tag },
   });
   const dispatch = (feature, tag) => evaluateConcurrencyGroup(group[1], context('workflow_dispatch', feature, tag));
@@ -111,6 +115,9 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
       current.inputs = inputs;
       assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}`);
     }
+    const first = evaluateConcurrencyGroup(group[1], context(event));
+    const rerun = evaluateConcurrencyGroup(group[1], context(event, undefined, '', '2'));
+    assert.notEqual(rerun, first, `${event} reruns leave the group a new push cancels`);
   }
 });
 
