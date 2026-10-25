@@ -98,3 +98,10 @@ for (const [name, change] of [
   const f = fixture(); t.after(f.close); f.update(change); f.run();
   assert.equal(f.read().section, 'Done'); assert.equal(f.read().comments.length, 0);
 });
+
+test('cancelled master run with a validated bot rollback reopens the task', t => {
+  const f = fixture(); t.after(f.close);
+  f.update(d => { d.run.conclusion = 'cancelled'; }); f.run();
+  assert.equal(f.read().section, 'Todo');
+  assert.equal(f.read().comments.length, 1);
+});
