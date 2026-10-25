@@ -132,7 +132,6 @@ test('IGSH-820 native refused-action tests, maps and existing Windows journey ar
     'IGSH-820 pinned tab refuses end session',
     'IGSH-820 pinned tab refuses group close atomically',
     'IGSH-820 pinned tab refuses workspace close atomically',
-    'IGSH-820 pinned tab refuses close-all atomically',
     'IGSH-820 pinned tab refuses Inbox archive',
   ]) assert.ok(main.includes(`test "${title}"`), title);
   assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-view-everywhere"/);

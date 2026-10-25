@@ -908,6 +908,13 @@ pub fn rejectPinnedSessionClose(i: usize) bool {
     return true;
 }
 
+pub fn anyPinnedSession() bool {
+    for (0..app_state.shell_count) |i| {
+        if (app_state.shells[i].pinned_top) return true;
+    }
+    return false;
+}
+
 pub fn rejectPinnedCloseAll() bool {
     for (0..app_state.shell_count) |i| {
         if (rejectPinnedSessionClose(i)) return true;
