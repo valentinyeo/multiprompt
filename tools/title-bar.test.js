@@ -57,3 +57,10 @@ test('IGSH-858 frame proof compares top and right bands with adjacent unobscured
   assert.match(native, /frameMismatches"\] == 0/);
   assert.match(journey, /CaptionProof\]::CheckFrame\(\$proof.pixels\)/);
 });
+
+test('IGSH-858 real 150 percent scale has enough logical desktop space and restores the runner display', () => {
+  assert.match(native, /Marshal.WriteInt32\(settings, 172, 1920\)/);
+  assert.match(native, /Marshal.WriteInt32\(settings, 176, 1080\)/);
+  assert.match(native, /ChangeDisplaySettings\(settings, 0\) == 0/);
+  assert.match(native, /Marshal.Copy\(originalDisplay, 0, settings, originalDisplay.Length\)/);
+});

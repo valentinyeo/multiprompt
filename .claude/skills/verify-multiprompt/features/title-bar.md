@@ -12,7 +12,7 @@ Open the app, dock a browser pane, then use the Themes palette to pick AMOLED an
 
 ## Driving it with control.ps1
 
-`verify.yml` dispatches six isolated jobs: actual monitor DPI 96, 120 and 144 (100%, 125%, 150%), each with pinned real Chrome for Testing in light and dark. The helper changes the disposable runner display with DisplayConfig, requires one active display and confirms `GetDpiForWindow` equals the requested DPI. Unsupported display/DPI changes fail; synthetic DPI messages, image resizing and app UI scale are not substitutes. Original monitor scaling is restored during cleanup.
+`verify.yml` dispatches six isolated jobs: actual monitor DPI 96, 120 and 144 (100%, 125%, 150%), each with pinned real Chrome for Testing in light and dark. The helper first raises undersized disposable displays to 1920×1080, allowing real 150% scaling above the Windows minimum logical desktop size. It restores both resolution and scaling during cleanup. The helper changes scaling with DisplayConfig, requires one active display and confirms `GetDpiForWindow` equals the requested DPI. Unsupported display/DPI changes fail; synthetic DPI messages, image resizing and app UI scale are not substitutes. Original monitor scaling is restored during cleanup.
 
 Only the browser's isolated profile is seeded, selecting Chrome's light/dark colour scheme. Dark also uses Chrome's process-level dark-mode switch. App themes are always selected through the real Themes palette. Chrome runs without the extension so app theme changes cannot silently make the browser match. The browser's own frame pixels must independently prove the requested theme: light channels at least 160; dark channels between 16 and 100. Page-content colour is never a reference.
 

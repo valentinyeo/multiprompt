@@ -16,6 +16,9 @@ public static class CaptionProof {
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetDpiForSystem();
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out Rect rect, uint size);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettings(string device, int mode, IntPtr settings);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettings(IntPtr settings, uint flags);
+    static byte[] originalDisplay;
     static byte[] source;
     static int originalRelative, recommendedIndex;
     static bool originalKnown;
@@ -33,6 +36,20 @@ public static class CaptionProof {
     }
     public static void SetDpi(int dpi) {
         Require(SetThreadDpiAwarenessContext(new IntPtr(-4)) != IntPtr.Zero, "per-monitor awareness unavailable");
+        IntPtr settings = Marshal.AllocHGlobal(220);
+        try {
+            for (int i = 0; i < 220; i++) Marshal.WriteByte(settings, i, 0);
+            Marshal.WriteInt16(settings, 68, 220);
+            Require(EnumDisplaySettings(null, -1, settings), "current display mode unavailable");
+            originalDisplay = new byte[220];
+            Marshal.Copy(settings, originalDisplay, 0, 220);
+            if (Marshal.ReadInt32(settings, 172) < 1920 || Marshal.ReadInt32(settings, 176) < 1080) {
+                Marshal.WriteInt32(settings, 72, 0x180000);
+                Marshal.WriteInt32(settings, 172, 1920);
+                Marshal.WriteInt32(settings, 176, 1080);
+                Require(ChangeDisplaySettings(settings, 0) == 0, "1920x1080 disposable display mode unavailable");
+            }
+        } finally { Marshal.FreeHGlobal(settings); }
         uint paths, modes;
         Require(GetDisplayConfigBufferSizes(2, out paths, out modes) == 0 && paths > 0, "display paths unavailable");
         IntPtr path = Marshal.AllocHGlobal((int)paths * 72), mode = Marshal.AllocHGlobal((int)modes * 64);
@@ -61,7 +78,18 @@ public static class CaptionProof {
             Require(DisplayConfigSetDeviceInfo(packet) == 0, "monitor DPI change failed");
         } finally { Marshal.FreeHGlobal(packet); }
     }
-    public static void RestoreDpi() { if (originalKnown) SetRelative(originalRelative); }
+    public static void RestoreDpi() {
+        try { if (originalKnown) SetRelative(originalRelative); }
+        finally {
+            if (originalDisplay != null) {
+                IntPtr settings = Marshal.AllocHGlobal(originalDisplay.Length);
+                try {
+                    Marshal.Copy(originalDisplay, 0, settings, originalDisplay.Length);
+                    Require(ChangeDisplaySettings(settings, 0) == 0, "original display mode restore failed");
+                } finally { Marshal.FreeHGlobal(settings); }
+            }
+        }
+    }
     public static int[] Geometry(IntPtr hwnd) {
         Rect frame, buttons;
         Point client = new Point();
