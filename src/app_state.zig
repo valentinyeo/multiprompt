@@ -2516,8 +2516,29 @@ pub var g_chat_bench_first_paint: bool = false;
 pub var g_chat_bench_content_paint: bool = false;
 pub const TIMER_CHAT_BENCH: usize = 0xB311;
 
+pub const ChatLayoutImages = struct {
+    index: usize,
+    count: u8,
+    items: [chat_image.MAX_PER_BLOCK]ChatImgItem,
+};
+pub const ChatLayoutSnapshot = struct {
+    revision: u64,
+    generation: u64,
+    inode: u64,
+    start: u64,
+    text_len: usize,
+    width: i32,
+    scale: i32,
+    font_pt: i32,
+    boundary: chat_history.ReadBoundary,
+    img_first_block: usize,
+    read_divider_y: i32,
+    rects: []RECT,
+    images: []ChatLayoutImages,
+};
 pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
+    layout: ?ChatLayoutSnapshot = null,
     generation: u64 = 0,
     history: chat_history.History = .{},
     backfill: chat_history.Backfill = .{},
@@ -2543,6 +2564,13 @@ pub const ChatHistoryEntry = struct {
     next: u64 = 0,
     ready: std.atomic.Value(bool) = .init(false),
     result: ?chat_history.History = null,
+
+    pub fn clearLayout(self: *ChatHistoryEntry) void {
+        const snapshot = self.layout orelse return;
+        std.heap.page_allocator.free(snapshot.rects);
+        std.heap.page_allocator.free(snapshot.images);
+        self.layout = null;
+    }
 };
 pub var g_chat_received: chat_markdown.BlockCache = .{};
 pub var g_chat_tables: chat_markdown.TableCache = .{};
