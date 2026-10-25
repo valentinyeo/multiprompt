@@ -250,7 +250,9 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
 fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
     const active = @import("chat_composer.zig").chat_dictation_state != .idle;
     const ink = if (active) customColorOr("accent", RGB(80, 150, 255)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
-    if (active) fillRoundRectAA(hdc, rc, uiScaled(8), customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
+    const base = app_state.g_chat_input_color;
+    const fill = if (active) customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)) else @import("chat_style.zig").shift(base, if (@import("chat_style.zig").isDark(base)) 22 else -14);
+    fillRoundRectAA(hdc, rc, @divTrunc(rc.bottom - rc.top, 2), fill);
     const font = @import("fonts.zig").messageMenuIconFont();
     const old_font = SelectObject(hdc, font);
     defer {
@@ -463,6 +465,10 @@ fn logChatButtons(layout: @import("app_state.zig").ChatViewLayout) void {
     chat_buttons_logged = now;
     var log: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] composer card {d},{d},{d},{d} size={d}", .{ card.left, card.top, card.right, card.bottom, send.right - send.left }) catch "");
+    for ([_]struct { name: []const u8, rect: RECT }{ .{ .name = "attach", .rect = layout.attach_btn }, .{ .name = "mic", .rect = layout.mic_btn } }) |button| {
+        const rect = button.rect;
+        debugLog(std.fmt.bufPrint(&log, "[chat] {s} rect {d},{d},{d},{d}", .{ button.name, rect.left, rect.top, rect.right, rect.bottom }) catch "");
+    }
     if (layout.send_shown) debugLog(std.fmt.bufPrint(&log, "[chat] send rect {d},{d},{d},{d}", .{ send.left, send.top, send.right, send.bottom }) catch "");
     if (layout.stop_shown) debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ stop.left, stop.top, stop.right, stop.bottom }) catch "");
 }

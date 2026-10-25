@@ -270,9 +270,9 @@ pub fn chatViewLayout() ChatViewLayout {
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const mic_btn = RECT{
         .left = composer_card.right - send_margin - send_size,
-        .top = composer_card.top + chatReplyBarH() + send_margin,
+        .top = composer_card.bottom - send_margin - send_size,
         .right = composer_card.right - send_margin,
-        .bottom = composer_card.top + chatReplyBarH() + send_margin + send_size,
+        .bottom = composer_card.bottom - send_margin,
     };
     var action_card = composer_card;
     action_card.right = mic_btn.left - uiScaled(6) + send_margin;

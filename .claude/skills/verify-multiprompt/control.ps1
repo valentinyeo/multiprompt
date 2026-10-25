@@ -3514,7 +3514,7 @@ try {
             $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $stopPrefix = Join-Path $scratch 'local-route-working'
             $readStopFrame = {
-                $frame = @{ card = $null; size = 0; send = $null; stop = $null; anyStop = $null }
+                $frame = @{ card = $null; size = 0; send = $null; stop = $null; attach = $null; mic = $null; anyStop = $null }
                 if (-not (Test-Path $debugLog)) { return $frame }
                 foreach ($line in @((Get-Content $debugLog -Raw) -split "`r?`n")) {
                     if ($line -match '\[chat\] composer card (-?\d+),(-?\d+),(-?\d+),(-?\d+) size=(\d+)') {
@@ -3522,6 +3522,10 @@ try {
                         $frame.size = [int]$Matches[5]
                         $frame.send = $null
                         $frame.stop = $null
+                        $frame.attach = $null
+                        $frame.mic = $null
+                    } elseif ($line -match '\[chat\] (attach|mic) rect (-?\d+),(-?\d+),(-?\d+),(-?\d+)') {
+                        $frame[$Matches[1]] = @([int]$Matches[2], [int]$Matches[3], [int]$Matches[4], [int]$Matches[5])
                     } elseif ($line -match '\[chat\] send rect (-?\d+),(-?\d+),(-?\d+),(-?\d+)') {
                         $frame.send = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4])
                     } elseif ($line -match '\[chat\] stop rect (-?\d+),(-?\d+),(-?\d+),(-?\d+)') {
@@ -3584,6 +3588,39 @@ try {
                 if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
                 Snapshot 'stop-in-box'
                 Snapshot 'grey-buttons'
+                $buttonsCheck = @{ name = 'round-bottom-composer-buttons'; passed = $false; frames = @() }
+                $result.checks += $buttonsCheck
+                foreach ($lines in @(1, 6)) {
+                    if ($lines -eq 6) {
+                        for ($line = 2; $line -le 6; $line++) {
+                            Press @(0x10, 0x0D) 'Shift+Enter: grow the owned draft without sending'
+                            Type-Text ('Draft line ' + $line)
+                        }
+                    }
+                    Wait-Until {
+                        $frame = & $readStopFrame
+                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -ne $frame.stop -and
+                        ($lines -eq 1 -or $frame.card[1] -lt $typed.card[1] - 2 * $frame.size)
+                    } 'all four composer buttons painted at the requested draft height'
+                    $frame = & $readStopFrame
+                    foreach ($name in @('attach', 'mic', 'send', 'stop')) {
+                        $rect = $frame[$name]
+                        if ($rect[3] -ne $frame.send[3] -or $rect[1] -ne $frame.send[1] -or
+                            ($rect[2] - $rect[0]) -ne $frame.size -or ($rect[3] - $rect[1]) -ne $frame.size) {
+                            throw ('Composer button is not equally sized and bottom-aligned: ' + $name)
+                        }
+                    }
+                    $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                    if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Multiline proof lost the owned composer' }
+                    $draft = [VerifyNative]::EditText($composerHandle)
+                    if (@($draft -split "`r?`n").Count -ne $lines) { throw 'Owned composer does not contain the requested number of draft lines' }
+                    Snapshot ('composer-' + $lines + '-line')
+                    $buttonsCheck.frames += @{ lines = $lines; layout = $frame; draft = $draft }
+                }
+                $buttonsCheck.passed = $true
+                Press @(0x11, 0x41) 'Ctrl+A: select the multiline proof draft'
+                Press @(0x08) 'Backspace: restore the earlier single-line proof state'
+                Type-Text 'x'
                 Press @(0x1B) 'Esc: stop the working agent from the composer'
                 Wait-Until {
                     $stdin = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
