@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.869", .items = &.{
+        .{ .text = "Pin to Top now prevents closing or archiving a session until you unpin it, without adding an icon to the tab.", .ticket = "IGSH-820" },
+        .{ .text = "Session locking and per-session Always view commands are removed; Chat View toggles work on every tab.", .ticket = "IGSH-820" },
+        .{ .text = "Updates arrive automatically after verified improvements are ready.", .ticket = "IGSH-834" },
+        .{ .text = "Messages already delivered in the conversation no longer stay marked as queued.", .ticket = "IGSH-835" },
+    } },
     .{ .ver = "0.28.868", .items = &.{
         .{ .text = "Press Ctrl+D or click the microphone in Chat View to dictate, then press Enter, Ctrl+D, or the microphone again to put your words in the message box.", .ticket = "IGSH-812" },
     } },
