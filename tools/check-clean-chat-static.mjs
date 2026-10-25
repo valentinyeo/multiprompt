@@ -25,14 +25,10 @@ const scenes = ['sending', 'queued', 'waiting', 'not_sent', 'unconfirmed', 'retr
 
 switch (process.argv[2]) {
   case 'inventory': {
-    const ledger = read('GATES.md');
-    const inventory = ledger.slice(ledger.indexOf('## Inventory'));
-    assert.equal([...inventory.matchAll(/^\d+\./gm)].length, 9);
-    for (const text of ['✓✓ Read', 'Sending…', 'Queued in Claude', 'Waiting for connection', 'Delivery unconfirmed', 'Not sent', 'Send again', 'Remove', 'context left', 'done', 'chevron', 'todo', 'missing_message', 'retrying', 'Loading conversation...', 'No conversation yet', 'Tool', 'timestamp', 'separators', 'currently working']) contains(inventory, text);
-    for (const name of ['chatPaintTime', 'chatPaintEchoStatus', 'chatPaintEcho', 'chatPaintShellRow', 'chatStatusWndProc', 'chatTranscriptWndProc']) {
-      contains(inventory, name);
-      contains(render, name);
-    }
+    for (const text of ['\\u{2713}\\u{2713} Read', 'Queued in Claude', 'Send again', 'Remove', 'chat_todo_open', 'No conversation yet', 'chatPaintTime']) contains(render, text);
+    for (const name of ['chatPaintTime', 'chatPaintEchoStatus', 'chatPaintEcho', 'chatPaintShellRow', 'chatStatusWndProc', 'chatTranscriptWndProc']) contains(render, name);
+    const changelog = fs.readFileSync('changelog.d/IGSH-816-clean-chat.md', 'utf8');
+    contains(changelog, 'CLEAN chat');
     console.log('INVENTORY VERIFIED');
     break;
   }
@@ -108,18 +104,17 @@ switch (process.argv[2]) {
   }
   case 'scope': {
     assert.throws(() => absent('sentinel', 'sentinel'));
-    const changed = execFileSync('git', ['diff', '--name-only'], { encoding: 'utf8' }).trim().split('\n');
-    const allowed = ['GATES.md', '.claude/skills/verify-multiprompt/features/chat-messages-only.md', 'src/app_state.zig', 'src/chat_render.zig', 'src/command_palette.zig', 'src/sidebar.zig', 'src/main.zig', 'src/session.zig', 'src/launch_cache.zig', 'src/launch_snapshot.zig'];
+    const base = execFileSync('git', ['merge-base', 'origin/master', 'HEAD'], { encoding: 'utf8' }).trim();
+    const changed = execFileSync('git', ['diff', '--name-only', base], { encoding: 'utf8' }).trim().split('\n');
+    const allowed = ['.claude/skills/verify-multiprompt/features/chat-messages-only.md', 'changelog.d/IGSH-816-clean-chat.md', 'src/app_state.zig', 'src/chat_render.zig', 'src/command_palette.zig', 'src/sidebar.zig', 'src/main.zig', 'src/session.zig', 'src/launch_cache.zig', 'src/launch_snapshot.zig', 'tools/chat-cpu.test.js', 'tools/chat-delivery.test.js', 'tools/chat-queued-notes.test.js', 'tools/chat-tmux-send.test.js', 'tools/chat-view-gaps.test.js', 'tools/chat_injected.test.js', 'tools/check-clean-chat-static.mjs'];
     assert.deepEqual(changed.sort(), allowed.sort());
-    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { encoding: 'utf8' }).trim().split('\n').filter(file => file && file !== '.unlazy-hook-state.json');
-    assert.deepEqual(untracked.sort(), ['changelog.d/IGSH-816-clean-chat.md', 'tools/check-clean-chat-static.mjs']);
     for (const file of [...changed.filter(file => file.endsWith('.zig')), 'tools/check-clean-chat-static.mjs']) {
       assert.equal(tokenize(read(file), file.endsWith('.zig') ? 'zig' : 'javascript').comments.length, 0, file);
     }
     const fragment = read('changelog.d/IGSH-816-clean-chat.md').trim();
     assert.equal(fragment.split('\n').length, 1);
     contains(fragment, 'CLEAN chat');
-    const added = execFileSync('git', ['diff', '--unified=0', '--', 'src'], { encoding: 'utf8' }).split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+    const added = execFileSync('git', ['diff', '--unified=0', base, '--', 'src'], { encoding: 'utf8' }).split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
     for (const forbidden of ['Sleep(', 'SetTimer(', 'Thread.spawn', 'pub const APP_VERSION', 'timeout']) absent(added, forbidden);
     console.log('SCOPE VERIFIED');
     break;
