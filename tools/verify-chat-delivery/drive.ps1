@@ -174,6 +174,14 @@ function Assert-FullHistory([string]$Stage) {
         $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq 74
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
+    $pollOffset = (Read-Shared "$settings/debug.log").Length
+    [void](Wait-For 'normal transcript poll completes after full history loads' {
+        (Read-Shared "$settings/debug.log").Substring($pollOffset) -match '(?s)\[chat\] transcript request shell=(\d+) offset=\d+ before=0.*?\[chat\] transcript load shell=\1 ok'
+    })
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Press @(0x11, 0x30) 'Ctrl+0: measure every session row after polling'
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne 74) { throw "IGSH-815 session rows lost after polling at $Stage" }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -193,14 +201,16 @@ function Assert-FullHistory([string]$Stage) {
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
-    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+    $transcript = [IntPtr]$views[0].Current.NativeWindowHandle
+    [void](Wait-For 'owned transcript focus before first message screenshot' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) })
     Press @(0x24) 'Home: first transcript message'
     Shot "full-history-$Stage-first"
+    [void](Wait-For 'owned transcript focus before last message screenshot' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) })
     Press @(0x23) 'End: last transcript message'
     Shot "full-history-$Stage-last"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
-    Save @{stage=$Stage; blocks=74; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
+    Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 foreach ($plan in $plans) {
     $caseDir = "$Evidence/$($plan.name)"

@@ -16,6 +16,7 @@ try {
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
     assert.equal(measured.messages, messages.length);
     assert.equal(measured.blocks, messages.length + 24);
+    assert.equal(measured.polled, true);
     let offset = 0;
     for (const message of messages) {
       const at = copied.indexOf(message, offset);
@@ -26,6 +27,7 @@ try {
     const bytes = fs.readFileSync(path.join(root, `full-history-${stage}.png`));
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(bytes.length > 10000);
+    assert.notDeepEqual(fs.readFileSync(path.join(root, `full-history-${stage}-first.png`)), fs.readFileSync(path.join(root, `full-history-${stage}-last.png`)), `${stage}: first and last screenshots must differ`);
     for (const edge of ['first', 'last']) {
       const bytes = fs.readFileSync(path.join(root, `full-history-${stage}-${edge}.png`));
       assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
