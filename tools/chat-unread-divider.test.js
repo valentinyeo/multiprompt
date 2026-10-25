@@ -52,14 +52,17 @@ test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live hist
   const model = read('src/chat_session.zig');
   assert.match(model, /!disk and !history.more\) app_state.g_chat_read_open_ready = true/);
   assert.match(model, /const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready/);
-  assert.match(model, /!app_state.g_chat_active or app_state.g_chat_read_open_pending/);
+  assert.match(model, /!app_state.g_chat_active or app_state.g_chat_read_open_pending or \(bottom and app_state.g_chat_read_hold\)/);
+  assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells\[app_state.active_shell\].last_read_message_id != 0;\s+app_state.g_chat_read_open_pending = false;/);
+  assert.match(read('src/chat_send.zig'), /g_chat_read_hold = false;/);
+  assert.match(read('src/chat_render.zig'), /app_state.g_chat_read_hold = false;\s+app_state.g_chat_scroll_y = new_y;/);
   assert.match(model, /if \(!refreshed and !restore_read\) return/);
   assert.match(model, /restore_read or \(!app_state.g_chat_read_open_pending and !previous_boundary.unknown and app_state.g_chat_read_boundary.unknown\)/);
   assert.match(model, /read <= previous\.\?/);
   assert.match(read('src/chat_composer.zig'), /chatReadMark\(false\)/);
   assert.match(read('src/console.zig'), /if \(idx != prev\) _ = @import\("chat_session.zig"\).chatReadMark\(false\)/);
   assert.match(read('src/main.zig'), /chatReadMark\(false\);\s+logSessionAudit\("WM_CLOSE/);
-  assert.match(read('src/chat_send.zig'), /g_chat_read_open_pending = false;\s+app_state.g_chat_read_open_ready = true;\s+_ = @import\("chat_session.zig"\).chatReadMark\(true\)/);
+  assert.match(read('src/chat_send.zig'), /g_chat_read_open_pending = false;\s+app_state.g_chat_read_hold = false;\s+app_state.g_chat_read_open_ready = true;\s+_ = @import\("chat_session.zig"\).chatReadMark\(true\)/);
   const render = read('src/chat_render.zig');
   assert.match(render, /!app_state.g_chat_scrolled_up and @import\("chat_session.zig"\).chatReadMark\(true\)/);
   assert.match(render, /g_chat_new_messages.atBottom\(app_state.g_chat_scrolled_up\)/);
@@ -75,7 +78,7 @@ test('IGSH-814 existing messages-only recipe exercises real reopen, restart, gap
   const driver = read('tools/verify-chat-delivery/drive.ps1');
   const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Read-Shared('));
   assert.ok(press.indexOf("existing Alt+C debounce elapsed") < press.indexOf('    Doctor'), 'ownership is checked after the debounce, immediately before input');
-  for (const phrase of ['leave the read chat', "Shell-Input 'messages' '2'", 'Restart-OwnedApp', 'reopen chat after offline arrivals', "Shell-Input 'forget-message' $readId", 'bottom clears the divider', 'sending clears the divider', 'all-read reopen has no divider']) assert.ok(driver.includes(phrase), phrase);
+  for (const phrase of ['leave the read chat', "Shell-Input 'messages' '2'", 'Restart-OwnedApp', 'reopen chat after offline arrivals', 'reopened long chat lands at the newest message', 'long chat holds 200 more messages', "Shell-Input 'forget-message' $readId", 'bottom clears the divider', 'sending clears the divider', 'all-read reopen has no divider']) assert.ok(driver.includes(phrase), phrase);
   assert.match(driver, /Copy-Item \$cache.FullName "\$caseDir\/app-cache-reopened.jsonl"/);
   assert.match(driver, /Copy-Item "\$settings\/session.json" "\$caseDir\/session-read-anchor.json"/);
   assert.match(driver, /Require-Divider 1 0 'one divider on reopen'/);

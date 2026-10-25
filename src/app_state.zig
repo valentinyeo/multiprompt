@@ -1154,6 +1154,7 @@ pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
 pub var g_chat_read_open_pending = false;
 pub var g_chat_read_open_ready = false;
+pub var g_chat_read_hold = false;
 pub var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 pub var g_chat_read_divider_y: i32 = 0;
 pub var g_chat_new_messages: chat_history.NewMessages = .{};
