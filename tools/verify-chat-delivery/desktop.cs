@@ -106,6 +106,7 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 2;
         inputs[2].Data.Mouse.Flags = 4;
         if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
+    }
     public static void WheelOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int delta) {
         Rect rect;
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
