@@ -83,6 +83,10 @@ test('IGSH-813 extends the existing Windows journey through every new-message tr
 });
 
 function assertScrollJourney(driver, desktop, boundary) {
+  for (const [, value] of driver.matchAll(/Scroll-Transcript\s+(-?\d+)/g)) {
+    const delta = Number(value);
+    assert.ok(delta !== 0 && delta >= -32768 && delta <= 32767 && delta % 120 === 0, `whole wheel notch required: ${value}`);
+  }
   assert.doesNotMatch(driver, /Stop-Process|taskkill|PostMessage|SetFocus|SetWindowText|::Click|::Activate|Invoke-Expression/);
   assert.match(driver, /\$observedStates = \[regex\]::Matches\(\$log.Substring\(\$LogStart\),/);
   assert.match(driver, /\$v = New-MessageState \$LogStart; if \(\$v -and \$v.count -eq \$Count -and \$v.visible -eq \$Visible -and \$v.up -eq \$Up\)/);
@@ -121,6 +125,9 @@ test('IGSH-813 wheel journey requires overflow and fresh strict app-log states w
   const desktop = read('tools/verify-chat-delivery/desktop.cs');
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assertScrollJourney(driver, desktop, boundary);
+  for (const delta of [0, 300, 32768]) {
+    assert.throws(() => assertScrollJourney(driver.replace('Scroll-Transcript -120', `Scroll-Transcript ${delta}`), desktop, boundary), /whole wheel notch required/);
+  }
   for (const [source, before, after] of [
     [0, '$log.Substring($LogStart)', '$log'],
     [0, '$v.count -eq $Count', '$true'],
