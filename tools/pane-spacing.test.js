@@ -33,7 +33,7 @@ function declaration(name) {
 function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
-    fn(read('drawing'), 'uiScaled'), fn(sidebar, 'groupRailRect'),
+    fn(read('drawing'), 'uiScaled'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusBorderW', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks'), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'), fn(browser, 'paintActivePaneBorder'), fn(browser, 'activePaneBorderOn'), fn(browser, 'paneFocusCornerR'), fn(browser, 'paneFocusRingColor'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
@@ -306,34 +306,6 @@ test "IGSH-549 splitter paint is a bounded grip in the gap, never touching a rin
     }
     reserved = false;
     test_browser_focused = false;
-}
-test "IGSH-549 sidebar group rail has its own column before every row icon" {
-    for ([_]u32{100, 125, 150}) |scale| {
-        g_ui_scale = scale;
-        const column = activePaneRects(test_client).sidebar;
-        const row = .{ .y = uiScaled(40) };
-        const bottom = uiScaled(120);
-        ${statement(sidebar, 'var rail = groupRailRect').replace('var rail', 'const rail')}
-        try std.testing.expectEqual(column.left, rail.left);
-        try std.testing.expectEqual(row.y + GROUP_HEADER_H - g_sidebar_scroll, rail.top);
-        try std.testing.expectEqual(bottom - g_sidebar_scroll, rail.bottom);
-        try std.testing.expectEqual(uiScaled(7) - uiScaled(4), rail.right - rail.left);
-        const y = row.y + uiScaled(24);
-        ${statement(sidebar, 'const fav_size: i32 =')}
-        ${statement(sidebar, 'const left_pad: i32 =')}
-        const favicon = RECT{ .left = left_pad, .top = y, .right = left_pad + fav_size, .bottom = y + fav_size };
-        for ([_]bool{false, true}) |has_favicon| {
-            var text_left: i32 = if (has_favicon) left_pad + fav_size + 8 else left_pad;
-            for (0..3) |_| {
-                ${statement(sidebar, 'var ag_sb_rc = RECT').replace('var ag_sb_rc', 'const ag_sb_rc')}
-                try std.testing.expect(!intersects(rail, ag_sb_rc));
-                try std.testing.expect(rail.right < ag_sb_rc.left);
-                text_left += 18;
-            }
-        }
-        try std.testing.expect(!intersects(rail, favicon));
-        try std.testing.expect(rail.right < favicon.left);
-    }
 }
 test "IGSH-549 Chat View content stays inside the focus border" {
     g_chat_active = true;

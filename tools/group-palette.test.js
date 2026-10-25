@@ -39,11 +39,9 @@ function harness() {
   const reminderRead = reminders.slice(reminders.indexOf('        e.group_id = @intCast(json_reader.uint'), reminders.indexOf('        e.pinned_top ='));
   const migration = block(session, 'for (json_reader.array(json_reader.field(json, "groups")))');
   const saving = block(session, 'if (app_state.groups[gi].color_set)');
-  const railStart = sidebar.lastIndexOf('        if (!app_state.g_sidebar_collapsed) {', sidebar.indexOf('for (rows_arr[0..row_count], 0..) |row, ri|'));
-  const rails = block(sidebar.slice(railStart), 'if (!app_state.g_sidebar_collapsed)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'groupRailRect'), fn(sidebar, 'splitGroupRail'), fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
+  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
   return `const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
@@ -169,23 +167,14 @@ const Row = struct { kind: enum { header, tab, section }, gidx: u32 = 0, shell_i
 const GROUP_HEADER_H = 24;
 var g_sidebar_collapsed = false;
 var g_sidebar_scroll: i32 = 5;
-var rail_rects: [16]RECT = undefined;
-var rail_count: usize = 0;
 fn uiScaled(px: i32) i32 { return px; }
 fn tabRowH() i32 { return 38; }
 ${fn(read('inbox'), 'writeUintTo')}
 fn appendJsonEscapedWide(buf: *const *[256]u8, pos: *usize, text: []const u16) void { for (text) |wc| { buf.*[pos.*] = @intCast(wc); pos.* += 1; } }
 fn CreateSolidBrush(_: DWORD) HANDLE { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }
-fn FillRect(_: HANDLE, rc: *RECT, _: HANDLE) i32 { rail_rects[rail_count] = rc.*; rail_count += 1; return 1; }
-fn paintRails(rows_arr: []const Row) void {
-    const row_count = rows_arr.len;
-    const hdc: HANDLE = null;
-    const column = RECT{ .left = 8, .right = 216 };
-    ${rails}
-}
+fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
 ${production}
-${block(sidebar, 'test "IGSH-591 group rail segments exclude whole highlighted rows without tails"')}
 test "split persistence leaves minimum pane widths to the shared geometry clamp" {
     for ([_]u32{0, 40, 350, 960, 1000, 5000}) |split| {
         var buf: [256]u8 = undefined;
@@ -290,47 +279,6 @@ test "picked colors survive closed tab reopen, reminders and layout export impor
     shell_count = 1;
     g_search_len = 0;
     g_search_result_count = 0;
-}
-test "rails cover members only below each header at its left edge, excluding ungrouped rows" {
-    const saved_active = active_shell;
-    defer active_shell = saved_active;
-    group_count = 0;
-    next_group_id = 1;
-    _ = createGroup(&.{'A'});
-    _ = createGroup(&.{'B'});
-    shells[0].group_id = 1;
-    shells[1].group_id = 1;
-    shells[2].group_id = 0;
-    active_shell = 2;
-    const rows = [_]Row{
-        .{ .kind = .header, .gidx = 0, .y = 8 },
-        .{ .kind = .tab, .gidx = 0, .shell_idx = 0, .y = 32 },
-        .{ .kind = .tab, .gidx = 0, .shell_idx = 1, .y = 70 },
-        .{ .kind = .tab, .gidx = 0, .shell_idx = 2, .y = 108 },
-        .{ .kind = .header, .gidx = 1, .y = 146 },
-    };
-    paintRails(&rows);
-    try std.testing.expectEqual(@as(usize, 1), rail_count);
-    try std.testing.expectEqual(RECT{ .left = 8, .right = 11, .top = 27, .bottom = 103 }, rail_rects[0]);
-    g_sidebar_collapsed = true;
-    paintRails(&rows);
-    try std.testing.expectEqual(@as(usize, 1), rail_count);
-    g_sidebar_collapsed = false;
-    rail_count = 0;
-    active_shell = 0;
-    paintRails(&rows);
-    try std.testing.expectEqual(@as(usize, 1), rail_count);
-    try std.testing.expectEqual(RECT{ .left = 8, .right = 11, .top = 65, .bottom = 103 }, rail_rects[0]);
-    rail_count = 0;
-    active_shell = 1;
-    paintRails(&rows);
-    try std.testing.expectEqual(@as(usize, 1), rail_count);
-    try std.testing.expectEqual(RECT{ .left = 8, .right = 11, .top = 27, .bottom = 65 }, rail_rects[0]);
-    rail_count = 0;
-    shells[0].selected = true;
-    paintRails(&rows);
-    try std.testing.expectEqual(@as(usize, 0), rail_count);
-    shells[0].selected = false;
 }
 fn restore(json: std.json.Value) void {
     group_count = 0;
@@ -441,7 +389,6 @@ test('extracted production group default, migration, explicit colors and palette
     assert.equal(result.status, 0, result.stdout + result.stderr);
     console.log(result.stderr.trim());
     for (const [name, mutate] of [
-      ['rail over highlighted rows', text => text.replace('if (member.shell_idx != app_state.active_shell and !app_state.shells[member.shell_idx].selected) continue;', 'if (app_state.shell_count > 0) continue;')],
       ['empty root group rows', text => text.replace('if (app_state.g_search_len > 0) appendGroupPaletteResults();', 'appendGroupPaletteResults();')],
       ['closed tab color loss', text => text.replace('app_state.groups[idx].color_set = saved.color_set;', 'app_state.groups[idx].color_set = false;')],
       ['zero color export loss', text => text.replace('if (app_state.groups[gi].color_set)', 'if (app_state.groups[gi].color != 0)')],
@@ -471,19 +418,18 @@ test('group palette is painted and dispatched before open-ended palette bands', 
   assert.match(fn(rename, 'openGroupContextPalette'), /g_search_groupctx_mode = true/);
   assert.match(read('shortcuts'), /Right-click group \/ Ctrl\+K/);
 });
-test('group rails cover members only, starting below each header at the header left edge, but exclude complete highlighted rows', () => {
-  assert.doesNotMatch(sidebar, /gstripe_rc|stripe_rc/);
-  const start = sidebar.indexOf('for (rows_arr[0..row_count], 0..) |row, ri|');
-  const rail = sidebar.slice(start, sidebar.indexOf('const btns_y', start));
-  assert.match(rail, /row.kind != \.header/);
-  assert.match(rail, /member\.y \+ tabRowH\(\)/);
-  assert.match(rail, /tabGroupId\(member.shell_idx\) != app_state.groups\[row.gidx\].id/);
-  assert.match(rail, /groupRailRect\(column.left, row.y, GROUP_HEADER_H, bottom, app_state.g_sidebar_scroll/);
-  const rect = fn(sidebar, 'groupRailRect');
-  assert.match(rect, /\.top = header_y \+ header_h - scroll/);
-  assert.match(rect, /\.left = header_left/);
-  assert.match(rect, /\.bottom = last_bottom - scroll/);
-  assert.match(rail, /member.shell_idx != app_state.active_shell and !app_state.shells\[member.shell_idx\].selected/);
-  assert.match(rail, /splitGroupRail\(rail, member.y - app_state.g_sidebar_scroll, member.y \+ tabRowH\(\) - app_state.g_sidebar_scroll\)/);
-  assert.ok(start > sidebar.indexOf('const hl_brush'));
+test('group headers paint a plain left-aligned headline and no rail', () => {
+  assert.doesNotMatch(sidebar, /groupRailRect|splitGroupRail|gstripe_rc|stripe_rc/);
+  const headerStart = sidebar.indexOf('if (row.kind == .header) {');
+  const header = sidebar.slice(headerStart, sidebar.indexOf('if (row.kind == .inbox) {', headerStart));
+  assert.doesNotMatch(header, /FillRect/);
+  const expanded = header.slice(header.indexOf('} else {'));
+  assert.doesNotMatch(expanded, /25B8|25BE/);
+  assert.doesNotMatch(expanded, /chev_rc/);
+  assert.match(header, /SelectObject\(hdc, font_subtitle\)/);
+  assert.match(header, /name_rc = RECT\{ \.left = column\.left \+ uiScaled\(12\)/);
+  const railStart = sidebar.indexOf('const content_end_logical: i32 =');
+  const after = sidebar.slice(railStart, sidebar.indexOf('const btns_y', railStart));
+  assert.doesNotMatch(after, /FillRect/);
+  assert.ok(railStart > sidebar.indexOf('const hl_brush'));
 });
