@@ -200,3 +200,9 @@ test('old moved-master inline check produces no tag in the same green-ancestor s
   assert.equal(f.git('tag', '--list', 'v0.0.2'), '');
   selected(f.admit(), f.green);
 });
+
+test('a non-release tag between the last release and the green commit does not change the version', t => {
+  const f = fixture(t);
+  f.git('tag', 'nightly-marker', f.older);
+  selected(f.admit(), f.green);
+});
