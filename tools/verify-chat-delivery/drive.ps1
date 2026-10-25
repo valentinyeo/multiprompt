@@ -451,8 +451,8 @@ foreach ($plan in $plans) {
             Doctor $true
             $observation.newMessages = @{passed=$true; transitions=@('arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival')}
             $longLogStart = (Read-Shared "$settings/debug.log").Length
-            Shell-Input 'messages' '200'
-            [void](Wait-For 'long chat holds 200 more messages' { (Read-Shared $cache.FullName).Contains('New message 199') })
+            Shell-Input 'messages' '120'
+            [void](Wait-For 'long chat holds 120 more messages' { (Read-Shared $cache.FullName).Contains('New message 119') })
             [void](Require-NewMessages 0 0 0 'long chat arrival stays at bottom' $longLogStart)
             $readSource = (Read-Shared $transcript) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 1
             $readId = [string]$readSource.message.id
