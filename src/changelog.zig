@@ -53,6 +53,12 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.866", .items = &.{
+        .{ .text = "The browser’s window-button cover now blends into its own chrome in every theme.", .ticket = "IGSH-810" },
+        .{ .text = "See how many new messages arrived while you were reading earlier messages, then jump to the latest or dismiss the indicator.", .ticket = "IGSH-813" },
+        .{ .text = "Choose CLEAN chat in the command palette to hide read receipts, queue labels, and status clutter while keeping messages and the working indicator.", .ticket = "IGSH-816" },
+        .{ .text = "The chat copy verification no longer fails by chance before the app starts.", .ticket = "IGSH-817" },
+    } },
     .{ .ver = "0.28.865", .items = &.{
         .{ .text = "The message box no longer shows a black line beneath the input.", .ticket = "IGSH-805" },
     } },
