@@ -256,8 +256,8 @@ def fake_init():
     (process / "stat").write_text(pane + " (claude) S 1 " + pane + " " + pane + " 0 -1", encoding="utf-8")
     (process / "cmdline").write_bytes(b"claude\0")
     fake_write(dict(mode=value["mode"], box="", queue=[], suggestion=value["suggestion"]))
-    fake_event("user", message=dict(role="user", content="start the fake session"))
-    fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="The fake session is ready.")]))
+    fake_event("user", message=dict(role="user", content=("Please outline the next steps for this sample project. We need clear details and readable messages that wrap naturally within the centered chat column." if os.environ.get("IGSH_873_PROOF") == "1" else "start the fake session")))
+    fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=("The fake session is ready. Here is a sample reply with enough detail to wrap across several lines. Both sides should stay comfortably inside the chat column as the window becomes narrower." if os.environ.get("IGSH_873_PROOF") == "1" else "The fake session is ready."))]))
     return 0
 
 
