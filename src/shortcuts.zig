@@ -299,6 +299,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
     .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
     .{ .a = "Alt+X", .b = "Archive tmux session; close non-tmux tab (press twice; also on inbox rows)", .header = false },
+    .{ .a = "Ctrl+D in Chat View", .b = "Start/stop dictation; Enter stops recording into the composer", .header = false },
     .{ .a = "Ctrl+Shift+Space / Enter", .b = "Start/stop dictation; Enter is stop-only while recording", .header = false },
     .{ .a = "Spawn / Windows", .b = "", .header = true },
     .{ .a = "Ctrl+Shift+1 ... 5", .b = "New CMD / TMUX / VPS / PowerShell", .header = false },

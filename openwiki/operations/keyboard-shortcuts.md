@@ -173,6 +173,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
 | Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
+| Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording |
 
 ### Spawn / Windows

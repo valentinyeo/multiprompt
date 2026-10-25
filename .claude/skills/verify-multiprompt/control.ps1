@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -545,6 +545,24 @@ public static class VerifyNative {
                 }
             }
             return count;
+        }
+    }
+    public static int[] DictationMicPixels(IntPtr owner, int[] rect, bool active, string output) {
+        Point origin = new Point();
+        if (!ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Missing microphone origin");
+        Point center = new Point { X = origin.X + (rect[0] + rect[2]) / 2, Y = origin.Y + (rect[1] + rect[3]) / 2 };
+        if (WindowFromPoint(center) != owner) throw new InvalidOperationException("Microphone is not in the owned frame");
+        using (var pixels = new System.Drawing.Bitmap(rect[2] - rect[0], rect[3] - rect[1])) {
+            using (var graphics = System.Drawing.Graphics.FromImage(pixels)) graphics.CopyFromScreen(origin.X + rect[0], origin.Y + rect[1], 0, 0, pixels.Size);
+            pixels.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+            int fill = 0, ink = 0;
+            for (int y = 0; y < pixels.Height; y++) for (int x = 0; x < pixels.Width; x++) {
+                var c = pixels.GetPixel(x, y);
+                if (c.R == 63 && c.G == 83 && c.B == 113) fill++;
+                int r = active ? 80 : 137, g = active ? 150 : 146, b = active ? 255 : 164;
+                if (Math.Abs(c.R - r) <= 15 && Math.Abs(c.G - g) <= 15 && Math.Abs(c.B - b) <= 15) ink++;
+            }
+            return new int[] { fill, ink, pixels.Width * pixels.Height };
         }
     }
     public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {
@@ -2013,6 +2031,40 @@ function Restart-ChatView([int]$ShellCount) {
     Doctor
 }
 
+function Get-DictationMic([IntPtr]$Composer) {
+    $state = Read-Session
+    if ($null -eq $state -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Dictation geometry requires the isolated default UI scale' }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen) { throw 'Dictation requires the owned visible transcript' }
+    $transcriptHandle = [IntPtr]$transcript.Current.NativeWindowHandle
+    if ([VerifyNative]::Class($Composer) -cne 'Edit' -or [VerifyNative]::GetAncestor($Composer, 2) -ne $script:window -or
+        [VerifyNative]::GetAncestor($transcriptHandle, 2) -ne $script:window) { throw 'Dictation composer/transcript ownership mismatch' }
+    $edit = New-Object VerifyNative+Rect
+    $thread = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($Composer, [ref]$edit) -or -not [VerifyNative]::GetWindowRect($transcriptHandle, [ref]$thread) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Dictation geometry unavailable' }
+    $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+    $size = [int][Math]::Floor(32 * $scale)
+    $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
+    $left = $thread.Right - $origin.X - $margin - $size
+    $top = $edit.Top - $origin.Y - [Math]::Floor(12 * $scale) + $margin
+    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must be at the far right, outside the native Edit' }
+    return ,([int[]]@($left, $top, ($left + $size), ($top + $size)))
+}
+
+function Assert-DictationMic([int[]]$Rect, [bool]$Active, [string]$Step) {
+    Wait-Until {
+        [void][VerifyNative]::DwmFlush()
+        $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
+        $pixels[1] -ge 3 -and $(if ($Active) { $pixels[0] -gt $pixels[2] / 2 } else { $pixels[0] -eq 0 })
+    } ("IGSH-812 visible microphone active=$Active at $Step") -Seconds 2 -PollMilliseconds 20
+    $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
+    Save-Json @{ active = $Active; rect = $Rect; fillPixels = $pixels[0]; glyphPixels = $pixels[1]; area = $pixels[2] } ($Step + '-mic.json')
+}
+
 function Wait-ChatFocus([string]$Class, [string]$Step) {
     Wait-Until {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -2045,7 +2097,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
@@ -2094,6 +2146,14 @@ try {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         Copy-Item $paletteUsageFixture (Join-Path $config 'palette-usage.tsv')
+    }
+    $env:MULTIPROMPT_DICTATION_FIXTURE = $null
+    if ($Feature -eq 'chat-dictation') {
+        $fixture = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-812')).Path
+        $audioHash = (Get-FileHash (Join-Path $fixture 'goforward.pcm') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($audioHash -cne 'f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71') { throw 'Recorded dictation PCM checksum mismatch' }
+        $env:MULTIPROMPT_DICTATION_FIXTURE = $fixture
+        $result.dictationBoundary = @{ audio = 'recorded CMUSphinx goforward.pcm'; sha256 = $audioHash; provider = 'offline provider-format response replay, not live Deepgram recognition'; microphoneHardware = $false }
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -2337,6 +2397,78 @@ try {
             $light = Sidebar-Luminance 'after'
             if ($light -lt $dark + 60) { throw "Visible sidebar did not become light: $dark -> $light" }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
+        }
+        'chat-dictation' {
+            Select-Theme 'dark' 'dictation-dark'
+            Press @(0x12, 0x43) 'Alt+C: open Chat View for dictation'
+            Wait-Until {
+                $state = Read-Session
+                $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv
+            } 'isolated CMD session saved in Chat View'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $script:composerElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                $null -ne $script:composerElement -and -not $script:composerElement.Current.IsOffscreen
+            } 'owned visible composer after Alt+C'
+            $handle = [IntPtr]$script:composerElement.Current.NativeWindowHandle
+            if ($script:composerElement.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Composer is not owned by this app' }
+            [VerifyNative]::BringToForeground($script:window)
+            Record 'Click the owned composer to recover typing focus from the hidden console'
+            [VerifyNative]::ClickClient($handle, 8, 8)
+            Wait-ChatFocus 'Edit' 'dictation-composer'
+            $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
+            $handle = [IntPtr]$composer.Current.NativeWindowHandle
+            if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Dictation requires the owned composer' }
+            $mic = Get-DictationMic $handle
+            Assert-DictationMic $mic $false 'dictation-idle'
+            Snapshot 'before'
+            $auditPath = Join-Path $scratch 'roaming/ZigShell/dictation-audit.log'
+            $iteration = 0
+            foreach ($stop in @('enter', 'ctrl-d', 'mic-click')) {
+                if ([VerifyNative]::EditText($handle) -cne '') { throw 'Dictation case must start with an empty message box' }
+                Press @(0x11, 0x44) 'Ctrl+D: start composer dictation'
+                $iteration++
+                Wait-Until {
+                    (Test-Path $auditPath) -and @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                Assert-DictationMic $mic $true ($stop + '-listening')
+                $typed = 'typing-' + $stop
+                Type-Text $typed
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
+                if ([VerifyNative]::GetFocusedWindow($script:window) -ne $handle) { throw 'Dictation stole native composer typing focus' }
+                Assert-DictationMic $mic $true ($stop + '-typed-listening')
+                Snapshot ($stop + '-listening')
+                if ($stop -ceq 'enter') { Snapshot 'action' }
+                Doctor
+                Assert-Foreground
+                Record ('Stop dictation with ' + $stop)
+                $immediate = [Diagnostics.Stopwatch]::StartNew()
+                switch ($stop) {
+                    'enter' { [VerifyNative]::Chord(@(0x0D)) }
+                    'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }
+                    'mic-click' { [VerifyNative]::ClickClient($script:window, [int](($mic[0] + $mic[2]) / 2), [int](($mic[1] + $mic[3]) / 2)) }
+                }
+                $expected = $typed + ' Go forward ten meters.'
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1 -PollMilliseconds 10
+                $elapsed = $immediate.ElapsedMilliseconds
+                if ($elapsed -gt 1000) { throw "IGSH-812 transcript was not immediate: $elapsed ms" }
+                Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); expected = $expected; elapsedMilliseconds = $elapsed; handle = $handle.ToInt64(); pid = $process.Id } ($stop + '.text.json')
+                Assert-DictationMic $mic $false ($stop + '-stopped')
+                $audit = @(Get-Content $auditPath)
+                foreach ($stage in @('audio-bytes\t89160', 'fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
+                    if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $iteration) { throw "IGSH-812 missing production transcription stage $stage" }
+                }
+                Snapshot ($stop + '-delivered')
+                $result.checks += @{ name = ('dictation-' + $stop); passed = $true; typedWhileListening = $typed; WM_GETTEXT = [VerifyNative]::EditText($handle); elapsedMilliseconds = $elapsed; activeMicPixels = $true; idleMicPixels = $true }
+                if ($stop -cne 'mic-click') {
+                    Press @(0x11, 0x41) 'Ctrl+A: select the verified dictation draft'
+                    Press @(0x08) 'Backspace: clear the draft through normal keyboard input'
+                    Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'composer cleared for next independent stop case'
+                }
+            }
+            if ($result.checks.Count -ne 3) { throw 'IGSH-812 requires all three dictation stop cases' }
+            Snapshot 'after'
         }
         'chat-tables' {
             $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'

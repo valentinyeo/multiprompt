@@ -1534,7 +1534,35 @@ fn parseDeepgramTranscript(json: []const u8, out: []u8) usize {
     return deepgramTranscript(parsed.value, out);
 }
 
+fn dictationFixtureEnabled() bool {
+    var value: [520]u8 = undefined;
+    inline for (.{ .{ "GITHUB_ACTIONS", "true" }, .{ "RUNNER_OS", "Windows" }, .{ "MULTIPROMPT_NO_LOGIN", "1" } }) |entry| {
+        const n = GetEnvironmentVariableA(entry[0], &value, value.len);
+        if (n != entry[1].len or !std.mem.eql(u8, value[0..n], entry[1])) return false;
+    }
+    const n = GetEnvironmentVariableA("MULTIPROMPT_DICTATION_FIXTURE", &value, value.len);
+    return n > 0 and n < value.len;
+}
+
+fn readDictationFixture(name: []const u8, out: []u8) usize {
+    var root: [520]u8 = undefined;
+    const n = GetEnvironmentVariableA("MULTIPROMPT_DICTATION_FIXTURE", &root, root.len);
+    if (n == 0 or n >= root.len) return 0;
+    var path: [600]u8 = undefined;
+    const file = std.fmt.bufPrint(&path, "{s}\\{s}", .{ root[0..n], name }) catch return 0;
+    const handle = @import("file_io.zig").win32OpenRead(file) orelse return 0;
+    defer _ = CloseHandle(handle);
+    return @import("file_io.zig").win32ReadAll(handle, out);
+}
+
 fn captureDictationPcm(out: []u8) usize {
+    if (dictationFixtureEnabled()) {
+        const n = readDictationFixture("goforward.pcm", out);
+        dictationAudit("fixture-audio-bytes", n);
+        while (app_state.g_dictation_recording.load(.acquire)) Sleep(1);
+        return n;
+    }
+
     const event = CreateEventW(null, 0, 0, null);
     if (event == null) return 0;
     defer _ = CloseHandle(event);
@@ -1613,6 +1641,17 @@ fn captureDictationPcm(out: []u8) usize {
 }
 
 fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpResult {
+    if (dictationFixtureEnabled()) {
+        const expected = std.heap.page_allocator.alloc(u8, audio.len + 1) catch return .{};
+        defer std.heap.page_allocator.free(expected);
+        const expected_len = readDictationFixture("goforward.pcm", expected);
+        if (audio.len == 0 or !std.mem.eql(u8, audio, expected[0..expected_len])) return .{};
+        var response: [65536]u8 = undefined;
+        const n = readDictationFixture("response.json", &response);
+        dictationAudit("fixture-response-bytes", n);
+        return .{ .transcript_len = parseDeepgramTranscript(response[0..n], transcript_out), .status = 200 };
+    }
+
     var key_buf: [256]u8 = undefined;
     const key = readDeepgramApiKey(&key_buf) orelse return .{};
 
@@ -1839,6 +1878,8 @@ test "dictation verification ignores TUI framing and requires new console text" 
 }
 
 pub fn handleDictationReady() void {
+    @import("chat_composer.zig").chatDictationSync();
+    defer @import("chat_composer.zig").chatDictationSync();
     app_state.g_dictation_running.store(false, .release);
     var text_copy: [8192]u16 = undefined;
     var text_len: usize = 0;
@@ -1960,6 +2001,7 @@ pub fn handleDictationReady() void {
 }
 
 pub fn toggleDictation() void {
+    defer @import("chat_composer.zig").chatDictationSync();
     if (app_state.g_voice_mode_active and app_state.g_voice_always_listen and !app_state.g_voice_mic_failed and app_state.g_voice_mic_run.load(.acquire)) {
         showHeaderNoticeAscii("Voice Mode is already listening", 3000, false);
         return;
@@ -1976,7 +2018,7 @@ pub fn toggleDictation() void {
         return;
     }
     var key_buf: [256]u8 = undefined;
-    if (readDeepgramApiKey(&key_buf) == null) {
+    if (!dictationFixtureEnabled() and readDeepgramApiKey(&key_buf) == null) {
         showHeaderNoticeAscii("Set DEEPGRAM_API_KEY to use dictation", 5000, true);
         return;
     }
