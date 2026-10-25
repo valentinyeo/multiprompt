@@ -14,9 +14,10 @@ const fixture = () => ({
   repository,
   run: {
     id: 40195971037,
-    name: 'Verify desktop',
+    name: 'verify full master',
     path: '.github/workflows/verify.yml',
     run_attempt: 1,
+    created_at: '2026-10-24T12:00:00Z',
     event: 'push',
     status: 'completed',
     conclusion: 'failure',
@@ -25,6 +26,13 @@ const fixture = () => ({
     repository: { full_name: repository },
     head_repository: { full_name: repository },
     html_url: `https://github.com/${repository}/actions/runs/40195971037`,
+  },
+  previous: {
+    run: { id: 40195971036, run_attempt: 2, created_at: '2026-10-24T11:00:00Z', conclusion: 'success' },
+    jobs: [
+      { name: 'verify (session-restore)', conclusion: 'success' },
+      { name: 'verify (chat-focus)', conclusion: 'success' },
+    ],
   },
   commits: [commit(sha, 'IGSH-812: restore appearance (#350)', [parent, 'f'.repeat(40)]), commit(parent, 'IGSH-811: prior change', ['e'.repeat(40)])],
   jobs: [
@@ -53,7 +61,16 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
         if (args[0] === 'workflow' && args[1] === 'run') return '';
         assert.equal(args[0], 'api');
         if (args.includes('POST')) return JSON.stringify({ number: 1 });
-        if (args[1].includes('/jobs?')) return JSON.stringify([{ jobs: input.jobs }]);
+        if (args[1] === `repos/${repository}/actions/workflows/verify.yml/runs?branch=master&event=push&status=completed&per_page=30`) {
+          return JSON.stringify({ workflow_runs: input.earlierRuns || [input.run, ...(input.previous ? [input.previous.run] : [])] });
+        }
+        if (args[1].includes('/jobs?')) {
+          assert.equal(args.slice(2).join(' '), '--paginate --slurp');
+          if (args[1] === `repos/${repository}/actions/runs/${input.run.id}/attempts/${input.run.run_attempt}/jobs?per_page=100`) return JSON.stringify([{ jobs: input.jobs }]);
+          assert.ok(input.previous);
+          assert.equal(args[1], `repos/${repository}/actions/runs/${input.previous.run.id}/attempts/${input.previous.run.run_attempt}/jobs?per_page=100`);
+          return JSON.stringify(input.previous.jobs.map(job => ({ jobs: [job] })));
+        }
         if (args[1].includes('/issues?')) return JSON.stringify([[]]);
         return JSON.stringify(input.run);
       }
@@ -79,6 +96,85 @@ test('failing master merge chooses its exact head, first parent and failing jour
     action: 'revert', sha, mainline: 1, ticket: 'IGSH-812',
     journeys: ['session-restore', 'chat-focus'], marker: 'Auto-Revert-Run: 40195971037',
   });
+});
+
+test('journeys already red on the previous run skip the revert', () => {
+  const input = fixture();
+  input.previous.run.conclusion = 'failure';
+  input.previous.jobs = input.jobs;
+  assert.deepEqual(decide(input), {
+    action: 'skip',
+    reason: `Journeys already red before ${sha}: session-restore, chat-focus (run ${input.previous.run.id})`,
+  });
+  const result = runtime(input, 'workflow_run');
+  assert.match(result.output, /already red/);
+  assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
+  assert.ok(result.calls.some(call => call.includes('POST') && call.some(arg => arg.includes('Journeys already red'))));
+});
+
+test('only newly failing journeys are blamed when master was already red', () => {
+  const input = fixture();
+  input.previous.run.conclusion = 'failure';
+  input.previous.jobs[1].conclusion = 'failure';
+  assert.deepEqual(decide(input), {
+    action: 'revert', sha, mainline: 1, ticket: 'IGSH-812',
+    journeys: ['session-restore'], marker: 'Auto-Revert-Run: 40195971037',
+  });
+  const result = runtime(input, 'workflow_run');
+  const create = result.calls.find(call => call[1] === 'pr' && call[2] === 'create');
+  assert.ok(create.includes(`This reverts commit ${sha}.\n\nAuto-Revert-Run: ${input.run.id}\nFailed journeys: session-restore\nVerify run: ${input.run.html_url}`));
+  const issue = result.calls.find(call => call.includes('POST'));
+  assert.ok(issue.some(arg => arg.includes('verify (chat-focus)')));
+});
+
+test('previous failures must match exact verify job names', () => {
+  const input = fixture();
+  input.previous.run.conclusion = 'failure';
+  input.previous.jobs = [
+    { name: 'session-restore', conclusion: 'failure' },
+    { name: 'verify (chat-focus, 96, light)', conclusion: 'failure' },
+    { name: 'verify (chat-focus)', conclusion: 'cancelled' },
+  ];
+  assert.deepEqual(decide(input).journeys, ['session-restore', 'chat-focus']);
+});
+
+test('no earlier completed master verify run refuses a revert', () => {
+  const input = fixture();
+  input.previous = null;
+  assert.deepEqual(decide(input), { action: 'refuse', reason: 'No earlier completed master verify run to compare' });
+  const result = runtime(input);
+  assert.equal(result.process.exitCode, 1);
+  assert.match(result.output, /No earlier completed master verify run to compare/);
+  assert.equal(result.calls.filter(call => call[0] === 'gh' && call[2].includes('/jobs?')).length, 1);
+});
+
+test('previous selection ignores current, newer, same-time and cancelled runs', () => {
+  const input = fixture();
+  input.previous.run.conclusion = 'failure';
+  input.previous.jobs[1].conclusion = 'failure';
+  input.earlierRuns = [
+    { ...input.previous.run, id: input.run.id },
+    { ...input.previous.run, id: 40195971039, created_at: '2026-10-24T13:00:00Z' },
+    { ...input.previous.run, id: 40195971038, created_at: input.run.created_at },
+    { ...input.previous.run, id: 40195971035, created_at: '2026-10-24T11:30:00Z', conclusion: 'cancelled' },
+    input.previous.run,
+    { ...input.previous.run, id: 40195971034, created_at: '2026-10-24T10:00:00Z' },
+  ];
+  const result = runtime(input);
+  assert.equal(result.process.exitCode, 0);
+  const decision = JSON.parse(result.output);
+  assert.equal(decision.action, 'revert');
+  assert.deepEqual(decision.journeys, ['session-restore']);
+  assert.ok(result.calls.some(call => call[2] === `repos/${repository}/actions/runs/${input.previous.run.id}/attempts/2/jobs?per_page=100`));
+});
+
+test('cancelled-only earlier runs leave no comparison and refuse', () => {
+  const input = fixture();
+  input.earlierRuns = [{ ...input.previous.run, conclusion: 'cancelled' }];
+  const result = runtime(input);
+  assert.equal(result.process.exitCode, 1);
+  assert.match(result.output, /No earlier completed master verify run to compare/);
+  assert.equal(result.calls.filter(call => call[0] === 'gh' && call[2].includes('/jobs?')).length, 1);
 });
 
 test('squash merge is reverted without a mainline flag', () => {
@@ -292,19 +388,25 @@ test('verify journey jobs keep the plain name the ruleset and revert parser read
   assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
-test('controlled red proof is valid source and fails only chat-view on master pushes', () => {
+test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  const guard = "          if ($env:FEATURE -eq 'chat-view' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master') { throw 'IGSH-837 deliberate red master proof' }";
+  const guard = "          if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }";
   const contract = source => {
     assert.doesNotMatch(source, /^(?:<{7}|={7}|>{7})(?:\s|$)/m);
     assert.deepEqual(source.split('\n').filter(line => line.includes('IGSH-837 deliberate red master proof')), [guard]);
+    assert.match(source, /      - name: Validate journey and syntax\n        shell: powershell\n        env:\n          HEAD_COMMIT_MESSAGE: \$\{\{ github\.event\.head_commit\.message \}\}\n        run: \|/);
+    assert.equal(source.split('${{ github.event.head_commit.message }}').length, 2);
   };
   contract(verify);
   for (const broken of [
     verify + '\n>>>>>>> conflict\n',
     verify.replace(" -and $env:GITHUB_REF -eq 'refs/heads/master'", ''),
     verify.replace("$env:GITHUB_EVENT_NAME -eq 'push'", "$env:GITHUB_EVENT_NAME -eq 'pull_request'"),
-    verify.replace("$env:FEATURE -eq 'chat-view' -and ", ''),
+    verify.replace("$env:FEATURE -eq 'appearance' -and ", ''),
+    verify.replace(" -and $env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof')", ''),
+    verify.replace(" -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')", ''),
+    verify.replace('          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}\n', ''),
+    verify.replace("$env:HEAD_COMMIT_MESSAGE.Contains('IGSH-837 red proof')", "'${{ github.event.head_commit.message }}'.Contains('IGSH-837 red proof')"),
     verify.replace(guard, guard + '\n' + guard),
   ]) assert.throws(() => contract(broken), assert.AssertionError);
 });
