@@ -6,8 +6,7 @@ if ($browserTheme -notin @('light', 'dark') -or $targetDpi -notin @(96, 120, 144
 $previousConnection = 0
 foreach ($mode in @('restored', 'maximized')) {
     if ($previousConnection -ne 0) {
-        Palette 'close browser pane'
-        Press @(0x0D) 'Enter: close browser before native caption reference'
+        Press-CloseBrowserPane 'Alt+A: close the browser before the native caption reference'
         Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } 'browser closed before caption reference'
     }
     [void][VerifyNative]::ShowWindow($script:window, 9)
