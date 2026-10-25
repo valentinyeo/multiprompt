@@ -1559,17 +1559,27 @@ function Snapshot([string]$Name) {
 }
 
 function Assert-Foreground {
-    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { throw 'Refusing input: owned app is not foreground' }
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        $root = [VerifyNative]::GetAncestor($foreground, 2)
+        $rootOwner = [VerifyNative]::GetAncestor($foreground, 3)
+        [uint32]$foregroundOwner = 0
+        [void][VerifyNative]::GetWindowThreadProcessId($rootOwner, [ref]$foregroundOwner)
+        if ($foreground -ne [IntPtr]::Zero -and $root -ne [IntPtr]::Zero -and $rootOwner -ne [IntPtr]::Zero -and
+            ($root -eq $script:window -or $foregroundOwner -eq $process.Id)) { return }
+        if ($attempt -lt 4) { Start-Sleep -Milliseconds 100 }
+    }
+    throw 'Refusing input: owned app is not foreground'
 }
 
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
-    Wait-Until {
-        [void][VerifyNative]::SetForegroundWindow($script:window)
-        [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
-    } 'owned app foreground for keyboard input'
     Assert-Foreground
+    [void][VerifyNative]::SetForegroundWindow($script:window)
     Record $Label
+    Assert-Foreground
     [VerifyNative]::Chord($Keys)
 }
 
@@ -1577,6 +1587,7 @@ function Type-Text([string]$Text) {
     Doctor
     Assert-Foreground
     Record ('Type ' + $Text)
+    Assert-Foreground
     [VerifyNative]::Text($Text)
 }
 
@@ -3641,6 +3652,7 @@ try {
             Record 'Ctrl+L: load a local keyboard probe through the owned browser address bar'
             [VerifyNative]::FocusOwnedWindow($browser, $browserPid, $script:window)
             if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before Ctrl+L' }
+            Assert-Foreground
             [VerifyNative]::Chord(@(0x11, 0x4C))
             $browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browser)
             $omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
@@ -3651,7 +3663,9 @@ try {
                     [VerifyNative]::GetForegroundWindow() -eq $browser
             } 'verified pane native address bar has keyboard focus'
             $probeHtml = '<title>IGSH807 keys 0 </title><script>let n=0;addEventListener("keydown",e=>{if(e.key==="j"){e.preventDefault();document.title="IGSH807 keys "+(++n)+" "}})</script>'
+            Assert-Foreground
             [VerifyNative]::Text(('data:text/html,' + [Uri]::EscapeDataString($probeHtml)))
+            Assert-Foreground
             [VerifyNative]::Chord(@(0x0D))
             Wait-Until { [VerifyNative]::Title($browser).StartsWith('IGSH807 keys 0 ', [StringComparison]::Ordinal) } 'local keyboard probe loaded'
             foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system')) {
@@ -3685,12 +3699,14 @@ try {
                             Wait-ConsoleText $command
                             Doctor
                             Record 'Enter: execute focus marker in the Alt+Q-selected shell'
+                            Assert-Foreground
                             [VerifyNative]::Chord(@(0x0D))
                             Wait-Until { (Test-Path $marker) -and (Get-Content $marker -Raw).Trim() -ceq $step } 'shell focus marker content'
                         }
                         Snapshot ($step + '-input')
                         Doctor
                         Record 'Alt+Q: switch from input to browser without foreground repair'
+                        Assert-Foreground
                         [VerifyNative]::Chord(@(0x12, 0x51))
                         Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $browser -and [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -eq $script:window } 'Alt+Q selected the owned browser'
                         Doctor
@@ -3699,12 +3715,14 @@ try {
                         if ($probeTitle -notmatch '^IGSH807 keys (\d+) ') { throw ('Browser probe page is not loaded: ' + $probeTitle) }
                         [int]$pageKeys = [int]$Matches[1] + 1
                         Record 'j: prove keyboard input reaches browser content'
+                        Assert-Foreground
                         [VerifyNative]::Chord(@(0x4A))
                         Wait-Until { [VerifyNative]::Title($browser).StartsWith(('IGSH807 keys ' + $pageKeys + ' '), [StringComparison]::Ordinal) } 'browser page received the exact next key'
                         if ($view -eq 'chat' -and [VerifyNative]::EditText($composer) -cne $draft) { throw 'Browser input changed the chat draft' }
                         Snapshot ($step + '-browser')
                         Doctor
                         Record 'Alt+Q: return to input without foreground repair'
+                        Assert-Foreground
                         [VerifyNative]::Chord(@(0x12, 0x51))
                         if ($view -eq 'chat') {
                             Wait-ChatFocus 'Edit' ($step + '-returned')
@@ -3720,6 +3738,7 @@ try {
                             Wait-ConsoleText $command
                             Doctor
                             Record 'Enter: execute in returned shell without focus repair'
+                            Assert-Foreground
                             [VerifyNative]::Chord(@(0x0D))
                             Wait-Until { (Test-Path $returnMarker) -and (Get-Content $returnMarker -Raw).Trim() -ceq 'returned' } 'returned shell received input'
                         }
@@ -3732,8 +3751,11 @@ try {
                             Record 'Clear the unsent draft in the still-focused composer'
                             $cleared = $false
                             for ($attempt = 1; $attempt -le 4 -and -not $cleared; $attempt++) {
+                                Assert-Foreground
                                 [VerifyNative]::Chord(@(0x11, 0x41))
+                                Assert-Foreground
                                 [VerifyNative]::Chord(@(0x2E))
+                                Assert-Foreground
                                 [VerifyNative]::Chord(@(0x08))
                                 try { Wait-Until { [VerifyNative]::EditText($composer) -ceq '' } 'empty composer for next cycle' 4; $cleared = $true } catch { Record ('Composer clear attempt ' + $attempt + ' left: ' + [VerifyNative]::EditText($composer)) }
                             }
@@ -3757,6 +3779,30 @@ try {
             Select-Theme 'dark' 'pane-layout-final-dark'
             Press @(0x11, 0x32) 'Ctrl+2: restore console for layout evidence'
             Wait-WorkspaceSurface $initial.active_workspace $consoleTab $false
+            if ([VerifyNative]::GetForegroundWindow() -ne $console -or [VerifyNative]::PaneWindow($script:window) -ne $browser -or
+                [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window -or -not [VerifyNative]::IsZoomed($script:window)) { throw 'pane-layout lost original maximized console/browser HWNDs' }
+            $frame = New-Object VerifyNative+Rect
+            $client = New-Object VerifyNative+Rect
+            $consoleRect = New-Object VerifyNative+Rect
+            $browserRect = New-Object VerifyNative+Rect
+            $origin = New-Object VerifyNative+Point
+            if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+                -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin) -or -not [VerifyNative]::GetWindowRect($console, [ref]$consoleRect) -or
+                -not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect)) { throw 'pane-layout fresh HWND rectangles unavailable' }
+            $client.Left += $origin.X; $client.Right += $origin.X; $client.Top += $origin.Y; $client.Bottom += $origin.Y
+            $state = Read-Session
+            if ($state.tabs[$consoleTab].shell_id -ne $consoleShellId -or ($state.tabs[$consoleTab].PSObject.Properties['cv'] -and $state.tabs[$consoleTab].cv)) { throw 'pane-layout original shell view changed' }
+            $scale = 100
+            if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
+            $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            $hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills
+            $consoleElement = [System.Windows.Automation.AutomationElement]::FromHandle($console)
+            $uiaRect = $consoleElement.Current.BoundingRectangle
+            if ($consoleElement.Current.IsOffscreen -or $consoleElement.Current.ClassName -ne 'ConsoleWindowClass' -or
+                -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $consoleShellId), [StringComparison]::Ordinal) -or
+                [Math]::Abs($uiaRect.Left - $consoleRect.Left) -gt 1 -or [Math]::Abs($uiaRect.Top - $consoleRect.Top) -gt 1 -or
+                [Math]::Abs($uiaRect.Right - $consoleRect.Right) -gt 1 -or [Math]::Abs($uiaRect.Bottom - $consoleRect.Bottom) -gt 1) { throw 'Fresh console UIA and HWND identity/bounds disagree' }
+            Save-Json @{ frame = $frame; client = $client; console = $consoleRect; browser = $browserRect; consoleHwnd = $console.ToInt64(); browserHwnd = $browser.ToInt64(); dpi = $dpi; scale = $scale; session = $state } 'pane-layout-rects.json'
             Snapshot 'pane-layout'
             $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $hidePills)
             Save-Json $proof 'pane-layout-pixels.json'
@@ -3767,10 +3813,27 @@ try {
                 Write-Host "pane-layout mask-windows-$theme PASS"
                 $paintReady = [DateTime]::UtcNow.AddMilliseconds(1000)
                 Wait-Until { [DateTime]::UtcNow -ge $paintReady } ("theme repaint settled for $theme") 3
-                if (-not [VerifyNative]::IsZoomed($script:window) -or [VerifyNative]::PaneWindow($script:window) -ne $browser -or
-                    -not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect)) { throw 'pane-layout mask journey lost maximized docked browser' }
+                Press @(0x11, 0x32) 'Ctrl+2: restore original console before mask geometry'
+                Wait-WorkspaceSurface $initial.active_workspace $consoleTab $false
+                if ([VerifyNative]::GetForegroundWindow() -ne $console -or [VerifyNative]::PaneWindow($script:window) -ne $browser -or
+                    [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window -or -not [VerifyNative]::IsZoomed($script:window)) { throw 'pane-layout lost original maximized console/browser HWNDs' }
+                $frame = New-Object VerifyNative+Rect
+                $client = New-Object VerifyNative+Rect
+                $consoleRect = New-Object VerifyNative+Rect
+                $browserRect = New-Object VerifyNative+Rect
+                $origin = New-Object VerifyNative+Point
+                if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+                    -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin) -or -not [VerifyNative]::GetWindowRect($console, [ref]$consoleRect) -or
+                    -not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect)) { throw 'pane-layout fresh HWND rectangles unavailable' }
+                $client.Left += $origin.X; $client.Right += $origin.X; $client.Top += $origin.Y; $client.Bottom += $origin.Y
+                $state = Read-Session
+                if ($state.tabs[$consoleTab].shell_id -ne $consoleShellId -or ($state.tabs[$consoleTab].PSObject.Properties['cv'] -and $state.tabs[$consoleTab].cv)) { throw 'pane-layout original shell view changed' }
+                $scale = 100
+                if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
+                $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+                $hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills
                 $masks = [PaneLayoutProof]::Masks([uint32]$process.Id)
-                $maskColors.themes[$theme] = @{ masks = $masks; screenshot = "pane-layout-mask-$theme.png" }
+                $maskColors.themes[$theme] = @{ masks = $masks; screenshot = "pane-layout-mask-$theme.png"; frame = $frame; client = $client; console = $consoleRect; browser = $browserRect; dpi = $dpi; scale = $scale; hidePills = $hidePills; consoleHwnd = $console.ToInt64(); browserHwnd = $browser.ToInt64() }
                 Save-Json $maskColors 'pane-layout-mask-colours.json'
                 if ($masks.Count -ne 10) { throw "pane-layout mask-windows-$theme FAIL: masks disappeared before capture" }
                 Snapshot ("pane-layout-mask-$theme")
