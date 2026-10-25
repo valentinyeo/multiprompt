@@ -2621,7 +2621,7 @@ pub const WM_APP_CHAT_IMAGE_READY: u32 = WM_APP + 196;
 pub const WM_APP_CHAT_ATTACH: u32 = WM_APP + 197;
 pub const WM_APP_CHAT_ATTACH_FAILED: u32 = WM_APP + 198;
 pub const SEARCH_CHAT_ATTACH_OFFSET: usize = 6372;
-pub const SEARCH_CHAT_DICTATION_OFFSET: usize = 6467;
+pub const SEARCH_CHAT_DICTATION_OFFSET: usize = 6468;
 
 pub const GdipImgApi = struct {
     bitmap_from_file: *const fn ([*:0]const u16, *HANDLE) callconv(WINAPI) GpStatus,
