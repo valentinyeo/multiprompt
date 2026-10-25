@@ -157,7 +157,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
       - name: Verify responsive startup ordering and original regression controls
         run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
