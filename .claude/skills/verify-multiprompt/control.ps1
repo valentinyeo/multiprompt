@@ -661,18 +661,16 @@ public static class GroupRailProof {
         return proof;
     }
     static bool SameRow(System.Drawing.Bitmap baseline, System.Drawing.Bitmap image, int x, int firstY, int secondY, int width, int height) {
-        int ink = 0;
+        int ink = 0, changed = 0;
         for (int dx = 0; dx < width; dx++) {
             for (int dy = 0; dy < height; dy++) {
                 var original = baseline.GetPixel(x + dx, firstY + dy);
-                bool expected = original.R > 245 && original.G > 245 && original.B > 245;
-                bool actual = TextPixel(image.GetPixel(x + dx, secondY + dy));
-                if (expected) ink++;
-                if (expected && !actual) return false;
-                if (original.R < 100 && original.G < 100 && original.B < 100 && actual) return false;
+                var actual = image.GetPixel(x + dx, secondY + dy);
+                if (original.R > 210 && original.G > 210 && original.B > 210) ink++;
+                if (Math.Abs(original.R - actual.R) > 48 || Math.Abs(original.G - actual.G) > 48 || Math.Abs(original.B - actual.B) > 48) changed++;
             }
         }
-        return ink > 5;
+        return ink > 5 && changed <= 4;
     }
     public static Dictionary<string, object> Toggle(string before, string hidden, string after, int textX, int firstRow, int rowHeight, int scanTop, int scanBottom, uint dpi, int scale) {
         var proof = new Dictionary<string, object>();
