@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { runInNewContext } = require('node:vm');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const base = '.claude/skills/verify-multiprompt/';
 const control = read(base + 'control.ps1');
@@ -292,17 +293,59 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
   assert.match(timing, /field.name \+\+ "_us=\{d\}"/);
 });
 
+function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master') {
+  const expression = source.match(/^        feature: \$\{\{ (.+) \}\}$/m);
+  assert.ok(expression, 'journey matrix expression exists');
+  return runInNewContext(expression[1], {
+    github: { event_name: event, ref },
+    inputs: { feature },
+    fromJSON: JSON.parse,
+    format: (pattern, value) => pattern.replace('{0}', value),
+  }, { timeout: 1000 });
+}
+
 function assertsDispatchOnly(source) {
-  const matrix = JSON.parse(source.match(/matrix:[\s\S]+?fromJSON\('(\[[^']+\])'\)/)[1]);
-  assert.equal(matrix.includes('browser-switch-speed'), false);
+  for (const [event, feature] of [['pull_request', ''], ['push', ''], ['workflow_dispatch', 'all']]) {
+    assert.equal(journeyMatrix(source, event, feature).includes('browser-switch-speed'), false);
+  }
+  assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'browser-switch-speed'), ['browser-switch-speed']);
   assert.match(source, /workflow_dispatch:[\s\S]+feature:/);
   assert.match(source, /fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
   assert.match(source, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
 }
 
+test('PR journeys are appearance-only while master pushes and release tags retain the full matrix', () => {
+  const full = ['appearance', 'chat-dictation', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me'];
+  function contract(source) {
+    assert.match(source, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);
+    assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push'), full);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/tags/v0.28.837'), full);
+    assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
+    assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
+  }
+  contract(workflow);
+  for (const [before, after] of [
+    ["fromJSON('[\"appearance\"]')", `fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`],
+    [`fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`, "fromJSON('[\"appearance\"]')"],
+    ["(github.event_name == 'push' ||", "(github.event_name == 'pull_request' ||"],
+    ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
+    ['"appearance", "chat-dictation",', '"appearance",'],
+  ]) {
+    const broken = workflow.replace(before, after);
+    assert.notEqual(broken, workflow, before);
+    assert.throws(() => contract(broken), assert.AssertionError, before);
+  }
+});
+
 test('switch timing is dispatch-only while allowlists and artifact contracts retain it', () => {
   assertsDispatchOnly(workflow);
-  assert.throws(() => assertsDispatchOnly(workflow.replace('["appearance",', '["browser-switch-speed", "appearance",')));
+  for (const before of ['["appearance"]', '["appearance",']) {
+    const broken = workflow.replace(before, before.replace('[', '["browser-switch-speed", '));
+    assert.notEqual(broken, workflow, before);
+    assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
+  }
   assert.throws(() => assertsDispatchOnly(workflow.replace('inputs.feature))', 'inputs.other))')));
   assert.match(workflow, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
