@@ -175,7 +175,7 @@ export function evaluate(root, complete, toolsOnly = false) {
     assert.equal(observation.newMessages?.passed, true, 'IGSH-813 new-message journey must complete');
     assert.deepEqual(observation.newMessages.transitions, ['arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival']);
     assert.equal(observation.unreadDivider?.passed, true, 'IGSH-814 unread divider journey must complete');
-    assert.deepEqual(observation.unreadDivider.transitions, ['leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-clear', 'send-clear', 'all-read-absent']);
+    assert.deepEqual(observation.unreadDivider.transitions, ['leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-retain', 'send-retain', 'all-read-absent']);
     const divider = verifyUnreadDivider(root);
     if (complete) assert.equal(divider.rules, 1, 'one NEW rule in the reopened transcript');
     const cleanup = json('cleanup.json');

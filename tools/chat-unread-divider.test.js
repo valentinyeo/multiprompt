@@ -85,6 +85,10 @@ test('IGSH-814 existing messages-only recipe exercises real reopen, restart, gap
   assert.match(driver, /\$divider.offset -ne \$unreadOffset/);
   assert.match(read('.github/workflows/verify.yml'), /node --test tools\/chat-unread-divider.test.js/);
   const proof = read('tools/chat-messages-only-proof.mjs');
+  const sent = /\$observation\.unreadDivider = @\{passed=\$true; transitions=@\(([^)]*)\)/.exec(driver);
+  const accepted = /assert\.deepEqual\(observation\.unreadDivider\.transitions, \[([^\]]*)\]\)/.exec(proof);
+  assert.ok(sent && accepted, 'unread transition contract must exist in writer and reader');
+  assert.deepEqual(sent[1].match(/'[^']*'/g), accepted[1].match(/'[^']*'/g), 'update unread transition writer and reader together');
   assert.match(proof, /verifyUnreadDivider\(root\);/);
   assert.match(proof, /cache.slice\(read \+ 1\).find/);
   assert.match(proof, /dividerPixels\(image\('unread-divider-reopened'\).*1\)/);
