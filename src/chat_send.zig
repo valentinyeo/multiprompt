@@ -2745,7 +2745,15 @@ test "IGSH-564 busy tmux session still gets the queued message typed" {
 }
 
 fn chatPromptNormalizeLineEndings(text: []u16) []const u16 {
-    return text;
+    var len: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        const character = text[i];
+        text[len] = if (character == '\r') '\n' else character;
+        len += 1;
+        if (character == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
+    }
+    return text[0..len];
 }
 
 test "IGSH-895 typed prefix plus native paste preserves the draft and sends one newline per break" {
@@ -2775,6 +2783,15 @@ test "IGSH-895 typed prefix plus native paste preserves the draft and sends one 
         try std.testing.expectEqualSlices(u16, std.mem.span(case[1]), text[0..length]);
         try std.testing.expectEqualSlices(u16, std.mem.span(case[2]), chatPromptNormalizeLineEndings(text[0..length]));
     }
+    _ = w.SetWindowTextW(edit, L("before after"));
+    _ = w.SendMessageW(edit, 0x00B1, 7, 7);
+    try std.testing.expect(clipboard.setUnicodeClipboardTextWithRetry(std.mem.span(L("screenshots\r\n"))));
+    _ = w.SendMessageW(edit, 0x0302, 0, 0);
+    var middle: [256]u16 = undefined;
+    const middle_len: usize = @intCast(w.GetWindowTextW(edit, &middle, middle.len));
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("before screenshots\r\nafter")), middle[0..middle_len]);
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("before screenshots\nafter")), chatPromptNormalizeLineEndings(middle[0..middle_len]));
     var mixed = [_]u16{ 'a', '\r', '\n', '\r', '\n', 'b', '\n', 'c', '\r' };
     try std.testing.expectEqualSlices(u16, std.mem.span(L("a\n\nb\nc\n")), chatPromptNormalizeLineEndings(&mixed));
+    std.debug.print("IGSH-895 exact draft paste and canonical outgoing line endings PASS\n", .{});
 }

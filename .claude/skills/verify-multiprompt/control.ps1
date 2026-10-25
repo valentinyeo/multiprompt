@@ -2900,6 +2900,24 @@ try {
                 $result.checks += @{ name = 'IGSH-731 composer native scale and DPI'; passed = $native.passed; checks = $native.checks }
                 if (-not $native.passed) { throw 'IGSH-731 composer native painter proof failed' }
             }
+            Add-Type -AssemblyName System.Windows.Forms
+            $pasteCheck = @{ name = 'IGSH-895 exact composer paste'; passed = $false; cases = @() }
+            $result.checks += $pasteCheck
+            foreach ($trailing in @('', "`r`n")) {
+                Press @(0x11, 0x41) 'Ctrl+A: select the owned draft'
+                Press @(0x08) 'Backspace: clear before the paste check'
+                $prefix = 'I cannot send '
+                $pasted = 'screenshots https://example.invalid/image.png' + $trailing
+                Assert-ChatTyping $prefix 'paste-prefix'
+                [System.Windows.Forms.Clipboard]::SetText($pasted)
+                Press @(0x11, 0x56) 'Ctrl+V: paste clipboard text at the caret'
+                $expected = $prefix + $pasted
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'paste contains exactly typed plus clipboard text'
+                $pasteCheck.cases += @{ clipboard = $pasted; expected = $expected; actual = [VerifyNative]::EditText($handle) }
+                Snapshot ('paste-' + $trailing.Length)
+            }
+            $pasteCheck.passed = $true
+            Save-Json $pasteCheck 'composer-paste.json'
         }
         'chat-code-font' {
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'A real CMD prints a fenced code block that Chat View formats from console text; diff previews only come from an agent transcript, so their rows are proven by the branch painter image' }
