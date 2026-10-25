@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.862", .items = &.{
+        .{ .text = "The message box no longer flickers while you type.", .ticket = "IGSH-760" },
+    } },
     .{ .ver = "0.28.861", .items = &.{
         .{ .text = "Links you click in chat open in the browser pane again when the session uses its own browser profile.", .ticket = "IGSH-738" },
         .{ .text = "Chat View now shows messages without tool activity lines or green check marks.", .ticket = "IGSH-759" },
