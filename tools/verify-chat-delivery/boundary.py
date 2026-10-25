@@ -276,6 +276,7 @@ def shell():
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
             fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * 12000, is_error=False)]))
+        return 0
     if op == "forget-message" and len(ARGS) == 2:
         transcript = Path(state()["transcript"])
         rows = transcript.read_bytes().splitlines(keepends=True)
