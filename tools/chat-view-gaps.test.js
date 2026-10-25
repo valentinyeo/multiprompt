@@ -828,3 +828,78 @@ test('ISSUE-407 the find hook lets Windows translate text instead of swallowing 
   assert.match(branch, /return CallNextHookEx\(app_state\.g_hook, nCode, wp, lp\);/);
   assert.doesNotMatch(branch, /routeKey|return 1;/);
 });
+
+test('IGSH-870 large compacted sessions resume after a non-overlapping tail jump', (t) => {
+  const dir = prepare(t, 'tail-gap');
+  const fixture = path.join(dir, 'session.jsonl');
+  const script = String.raw`import importlib.util,json,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('reader',sys.argv[1])
+r=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(r)
+p=Path(sys.argv[2])
+r.resolve_response_path=lambda *args: ('claude','sid',p,None)
+def event(role,text):
+    return dict(type=role,message=dict(role=role,content=text if role=='user' else [dict(type='text',text=text)]))
+def append(*events):
+    with p.open('a') as f:
+        for e in events: f.write(json.dumps(e)+'\n')
+q=dict(id=1,codex=False,sid='sid',tmux='term-1',cwd='/work',cached_sid='',inode=0,offset=0,start=0,source_offsets=True)
+def read(before=0):
+    q['before']=before
+    wire=r.response(q)
+    f=wire.splitlines()[0].split('\t')
+    if f[13]!='older': q.update(cached_sid=f[4],inode=int(f[7]),offset=int(f[6]),mtime=int(f[11]),probe=f[12])
+    q['start']=int(f[14])
+    return wire
+append(event('user','earliest question'),dict(type='progress',padding='x'*(12*1024*1024)),event('assistant','reply before compaction'))
+initial=[read()]
+while q['start']: initial.append(read(q['start']))
+for i in range(13):
+    append(dict(type='system',subtype='compact_boundary'),dict(type='user',isCompactSummary=True,message=dict(role='user',content='summary')),
+           dict(type='progress',padding='y'*(1024*1024)))
+append(event('user','new question'),event('assistant','newest reply after compaction'))
+tail=read()
+assert tail.splitlines()[0].split('\t')[13]=='tail'
+older=[]
+while q['start']: older.append(read(q['start']))
+append(event('assistant','next live reply'))
+delta=read()
+print(json.dumps(dict(initial=initial,tail=tail,older=older,delta=delta,size=p.stat().st_size)))
+`;
+  const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const { initial, tail, older, delta, size } = JSON.parse(run.stdout);
+  assert.ok(size > 25 * 1024 * 1024);
+  const native = execute(t, 'tail-gap-apply', `
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+test "IGSH-870 newest reply survives tail gap and older pages restore all messages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "/work");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    ${initial.map(w => `try h.apply(a, ${JSON.stringify(w)}, 1, key);`).join('\n    ')}
+    try std.testing.expectEqual(@as(u64, 0), h.start);
+    const saved = try h.encode(a, key);
+    defer a.free(saved);
+    var restored = try history.History.decode(a, saved, key);
+    defer restored.deinit(a);
+    for ([_]*history.History{ &h, &restored }) |state| {
+        try state.apply(a, ${JSON.stringify(tail)}, 1, key);
+        try std.testing.expect(std.mem.indexOf(u16, state.text.items, std.unicode.utf8ToUtf16LeStringLiteral("newest reply after compaction")) != null);
+        ${older.map(w => `try state.apply(a, ${JSON.stringify(w)}, 1, key);`).join('\n        ')}
+        try std.testing.expectEqual(@as(u64, 0), state.start);
+        try state.apply(a, ${JSON.stringify(delta)}, 1, key);
+        try std.testing.expectEqual(@as(usize, 5), state.blocks.items.len);
+        for ([_][]const u8{ "earliest question", "reply before compaction", "new question", "newest reply after compaction", "next live reply" }, state.blocks.items) |text, block| {
+            const expected = try std.unicode.utf8ToUtf16LeAlloc(a, text);
+            defer a.free(expected);
+            try std.testing.expectEqualSlices(u16, expected, state.text.items[block.start..][0..block.len]);
+        }
+    }
+}
+`, ['chat_history.zig', 'chat_transcript.zig'], 'IGSH-870', ['-fno-llvm', '-fno-lld']);
+  assert.equal(native.status, 0, JSON.stringify(native));
+});
