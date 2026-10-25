@@ -23,7 +23,7 @@ function toggle(text) {
 
 function content(text) {
   const layout = body(text, 'chatViewLayout');
-  return layout.slice(layout.indexOf('    const full_width ='), layout.indexOf('    const content_top ='));
+  return layout.slice(layout.indexOf('    const content ='), layout.indexOf('    const content_top ='));
 }
 
 function harness(handler, geometry = content(source)) {
@@ -146,7 +146,10 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const old = run(oldHandler);
     assert.notEqual(old.status, 0);
     assert.match(old.stderr, /production toggle[^]*FAIL/);
-    console.log('ISSUE-440 old console reset rejected; IGSH-873 centered column verified');
+    const unbounded = run(toggle(source), content(source).replace('uiScaled(960)', 'slot.right - slot.left'));
+    assert.notEqual(unbounded.status, 0);
+    assert.match(unbounded.stderr, /production reading column[^]*FAIL/);
+    console.log('ISSUE-440 old console reset and IGSH-873 unbounded column rejected');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

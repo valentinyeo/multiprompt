@@ -255,8 +255,7 @@ pub fn chatViewLayout() ChatViewLayout {
     const gap = uiScaled(14);
     const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
     const slot = @import("window_layout.zig").activePaneContentRect(rc);
-    const full_width = app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
-    const content = chat_style.contentColumn(slot.left, slot.right - slot.left, false, browserSplitPermilleForActiveShell(), if (full_width) slot.right - slot.left else uiScaled(760), 0);
+    const content = chat_style.contentColumn(slot.left, slot.right - slot.left, uiScaled(960));
     const left = content.left;
     const right = left + content.width;
     const content_top = slot.top + threadTitleHeight();

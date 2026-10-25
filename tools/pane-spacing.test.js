@@ -382,7 +382,7 @@ test "all production pane consumers share outer margins and gaps" {
                                 try std.testing.expectEqual(inner.top + threadTitleHeight(), shell_rect.top);
                                 try std.testing.expectEqual(inner.bottom, shell_rect.bottom);
                             }
-                            const content = chat_style.contentColumn(inner.left, inner.right - inner.left, false, browserSplitPermilleForActiveShell(), if (full) inner.right - inner.left else uiScaled(760), 0);
+                            const content = chat_style.contentColumn(inner.left, inner.right - inner.left, uiScaled(960));
                             try std.testing.expectEqual(content.left, c.transcript.left);
                             try std.testing.expectEqual(content.width, c.composer_card.right - c.composer_card.left);
                             const margin = if (hidden) uiScaled(8) else burn.left;
