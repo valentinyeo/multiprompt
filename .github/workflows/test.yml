@@ -110,7 +110,11 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        shell: bash
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+      - name: Require every CLEAN pixel test
+        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Sweep real zsb.exe command help
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/zsb-help.test.js
@@ -383,7 +387,10 @@ jobs:
         run: node --test tools/zsb-cdp-script.test.js
       - name: Run server tool tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+      - name: Require every CLEAN pixel test
+        if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        run: node tools/check-clean-chat-output.mjs clean-chat-output.log
       - name: Test cross-origin zsb frame input and eval
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node --test tools/zsb-iframe.test.js
