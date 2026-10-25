@@ -584,6 +584,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + cfh.len], cfh);
         pos += cfh.len;
     }
+    if (app_state.clean_chat) {
+        const setting = ",\"clean_chat\":true";
+        @memcpy(json_buf[pos .. pos + setting.len], setting);
+        pos += setting.len;
+    }
     if (app_state.g_chat_font_pt != CHAT_FONT_DEFAULT_PT and pos + 32 < json_buf.len) {
         var cfp_buf: [32]u8 = undefined;
         const cfp = std.fmt.bufPrint(&cfp_buf, ",\"chat_font_pt\":{d}", .{app_state.g_chat_font_pt}) catch cfp_buf[0..0];
@@ -1607,6 +1612,7 @@ pub fn restoreSession() u32 {
     const console_font = json_reader.uint(json, "console_font_h");
     if (console_font >= 8 and console_font <= 40) app_state.g_console_font_override = @intCast(console_font);
     if (json == .object and json.object.contains("shell_zoom_scale")) app_state.g_console_font_override = 0;
+    app_state.clean_chat = json_reader.boolTrue(json, "clean_chat");
     const chat_font = json_reader.uint(json, "chat_font_pt");
     if (chat_font >= 10 and chat_font <= 28) app_state.g_chat_font_pt = @intCast(chat_font);
     for (0..2) |a| {

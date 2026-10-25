@@ -232,6 +232,7 @@ const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEE
 const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
 const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
 const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
@@ -2292,6 +2293,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_skills_back = result_idx == SEARCH_SKILLS_BACK_OFFSET;
                     const is_skill_row = result_idx >= SEARCH_SKILL_ROW_OFFSET and result_idx < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS;
                     const is_chat_reply = result_idx == SEARCH_CHAT_REPLY_OFFSET;
+                    const is_clean_chat = result_idx == SEARCH_CLEAN_CHAT_OFFSET;
                     const is_chat_todo = result_idx == SEARCH_CHAT_TODO_OFFSET;
                     const is_chat_find = result_idx == SEARCH_CHAT_FIND_OFFSET;
                     const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
@@ -3227,11 +3229,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var find_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_chat_todo or is_chat_tools) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var tools_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_chat_todo) L("Chat View: Toggle todo list") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));

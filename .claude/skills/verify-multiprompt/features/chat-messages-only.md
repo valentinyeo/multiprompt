@@ -9,7 +9,9 @@
 
 ## How to get to it (user POV)
 
-Open a conversation in Chat View with Alt+C. Assistant messages remain; tool activity does not appear. There is no setting or toggle.
+Open a conversation in Chat View with Alt+C. Assistant messages remain; tool activity does not appear.
+
+IGSH-816 adds the CLEAN chat view option: the Ctrl+K entry `Chat View: Toggle CLEAN chat` hides read receipts, outbox status rows (including "Queued in Claude" chips), the status footer and empty/history status lines, so only message bubbles and the working indicator remain. It is off by default, persists across restarts, has no keyboard shortcut, and leaves the view unchanged when off.
 
 ## Driving it with control.ps1
 
