@@ -27,8 +27,14 @@ test("production Zig probe executes ownership, JSON, idle rollover and canceled-
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mp-who-test-"));
   try {
     const file = path.join(dir, "probe.zig");
-    fs.writeFileSync(file, String.raw`
+    fs.writeFileSync(file, (String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const SOCKET = usize;
 const DWORD = u32;
 const LASTINPUTINFO = struct { cbSize: u32, dwTime: u32 };
@@ -172,7 +178,7 @@ test "failed post and invalid session do not fabricate ownership" {
     sendZsbWhoResponse(1, "agent-1");
     try std.testing.expectEqual(@as(usize, 0), sent_len);
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const localZig = path.join(os.homedir(), ".local", "zig-0.16.0", "zig");
     const zig = process.env.ZIG || (fs.existsSync(localZig) ? localZig : "zig");
     const run = spawnSync(zig, ["test", file], { encoding: "utf8", timeout: 120000 });

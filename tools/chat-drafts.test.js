@@ -17,7 +17,7 @@ function execute(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-drafts-'));
   try {
     if (fs.existsSync('src/chat_drafts.zig')) copyZig(['chat_drafts.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), code);
+    fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '-fllvm'], {
       cwd: dir, encoding: 'utf8', timeout: 120000,
     });
@@ -29,6 +29,12 @@ function execute(code) {
 
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const CHAT_OUTBOX_KEY_CAP = 192;
 const TIMER_CHAT_DRAFT = 1;
 const CHAT_DRAFT_SAVE_MS = 300;

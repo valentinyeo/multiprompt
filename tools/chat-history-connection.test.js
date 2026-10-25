@@ -12,6 +12,12 @@ function body(name) {
 }
 const prelude = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
 const SpinMutex = struct {
@@ -203,7 +209,7 @@ test('persistent history production transport: reuse, framing, timeout, fallback
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-connection-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryFetch'].map(body).join('\n') + checks);
+    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 5 tests passed/);

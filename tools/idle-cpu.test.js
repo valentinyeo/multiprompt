@@ -16,7 +16,7 @@ function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'idle-cpu-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, code);
+    fs.writeFileSync(file, code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally {
@@ -26,6 +26,12 @@ function run(code) {
 
 test('production placeholder schedules only its actual visible state transition', () => {
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const UINT = u32;
 const BrowserPlaceholder = enum { none, opening, not_open, failed };
 const BROWSER_PLACEHOLDER_NOT_OPEN_MS = 20_000;
@@ -44,6 +50,12 @@ test "deadline, pending launch, completed and covered states" {
 
 test('production update watcher blocks, rearms before notifying, falls back on failure and stops cleanly', () => {
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = usize;
 const WM_APP_UPDATE_CHANGED = 1201;
 var waits: []const u32 = &.{};
@@ -93,6 +105,12 @@ test "failed wait enables timer fallback" {
 
 test('production mailbox waits through unrelated changes, handles early responses and retains a deadline', () => {
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const INVALID_HANDLE_VALUE_PTR: HANDLE = @ptrFromInt(999);
 var g_chat_bench_dir: [4]u8 = .{'t', 'e', 's', 't'};
@@ -155,6 +173,12 @@ test "missing response times out and closes the subscription" {
 const popupTypes = source.slice(source.indexOf('const BrowserPopupEvidence = struct {'), source.indexOf('\nfn classifyBrowserPopup('));
 test('production foreground polling rejects impossible popups before querying foreign window metadata', () => {
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
 const LONG_PTR = isize;
@@ -210,6 +234,12 @@ test('production theme fallback wakes only for System and follows preference and
     assert.match(body(name), /syncSystemThemeTimer\(/);
   }
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const TIMER_SYSTEM_THEME = 25;
 const PowerTimerMode = enum { normal, saving, deep_idle };
@@ -252,6 +282,12 @@ test('production orphan cleanup coalesces destroy events, preserves fallback dea
   assert.match(body('browserHealthTick'), /sweepBrowserOrphans\(now\)/);
   assert.match(body('updateBrowserVisibility'), /sweepBrowserOrphans\(GetTickCount64\(\)\)/);
   run(`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const WINAPI: std.builtin.CallingConvention = .c;
 const HANDLE = ?*anyopaque;
 const DWORD = u32;

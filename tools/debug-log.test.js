@@ -19,6 +19,12 @@ function contention(withLock) {
       .replace('    while (!g_debug_log_mutex.tryLock()) Sleep(1);\n', '')
       .replace('    defer g_debug_log_mutex.unlock();\n', '');
     const fixture = `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 ${mutex}
 var g_debug_log_mutex: SpinMutex = .{};
 ${body}
@@ -68,7 +74,7 @@ test "concurrent exclusive appends retain every paint record" {
 }
 `;
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture);
+    fs.writeFileSync(file, fixture.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

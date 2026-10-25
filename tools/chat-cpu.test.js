@@ -21,12 +21,18 @@ function run(code) {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, 'const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code);
+    fs.writeFileSync(file, ('const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 const scheduling = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 var g_chat_fetch_mutex: HANDLE = null;
@@ -258,6 +264,12 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
 
 const flow = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_code = @import("chat_code.zig");
 const link_detect = @import("link_detect.zig");
 const HANDLE = usize;
@@ -466,6 +478,12 @@ test('working bar production working timer is idle-free, row-only and preserves 
     .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '');
   const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 const TIMER_CHAT_WORKING: usize = 43;

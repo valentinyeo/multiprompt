@@ -17,6 +17,12 @@ test('ISSUE-573 extracted production link routing preserves exact URLs and legac
   const source = read('src/browser_pane.zig');
   const shortcuts = read('src/shortcuts.zig');
   const production = `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 const SW_SHOW = 5;
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -173,7 +179,7 @@ test "ISSUE-573 terminal Ctrl-click eligibility preserves mode-off behavior" {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-browser-links-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, production);
+    fs.writeFileSync(file, production.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);

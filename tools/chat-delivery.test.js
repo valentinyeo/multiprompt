@@ -18,6 +18,11 @@ function declaration(name) {
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
 const chat_echo = @import("chat_echo.zig");
 const json_reader = @import("json_reader.zig");
 const chat_markdown = @import("chat_markdown.zig");
@@ -1306,7 +1311,7 @@ function runHarness(control = false) {
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

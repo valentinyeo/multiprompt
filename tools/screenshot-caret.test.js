@@ -55,12 +55,18 @@ test('production screenshot handoff takes foreground from foreign Chrome, attach
   assert.ok(start >= 0 && end > start);
   const helper = app.slice(app.indexOf('fn activateConsoleForeground('), app.indexOf('fn activeShellHasForegroundFocus('));
   const production = app.slice(start, end) + '\n' + helper;
-  const fixture = fs.readFileSync(path.join(__dirname, 'screenshot-caret-fixture.zig'), 'utf8');
+  const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+` + fs.readFileSync(path.join(__dirname, 'screenshot-caret-fixture.zig'), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-caret-'));
   try {
     const file = path.join(dir, 'test.zig');
     const run = (body) => {
-      fs.writeFileSync(file, fixture.replace("fn reset() void {", body + "\nfn reset() void {"));
+      fs.writeFileSync(file, (fixture.replace("fn reset() void {", body + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       return spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     };
     const result = run(production);

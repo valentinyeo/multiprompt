@@ -17,6 +17,12 @@ test('executed SSH capture survives ongoing transfer progress, drains output, re
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-upload-reliability-'));
   const fixture = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
 const SECURITY_ATTRIBUTES = struct { nLength: usize, lpSecurityDescriptor: HANDLE, bInheritHandle: u32 };
@@ -98,7 +104,7 @@ test "stdin partial writes refresh inactivity after each successful write" {
 `;
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture + '\n' + body('sshInputPump') + '\n' + body('sshOneShotCaptureInput'));
+    fs.writeFileSync(file, (fixture + '\n' + body('sshInputPump') + '\n' + body('sshOneShotCaptureInput')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);

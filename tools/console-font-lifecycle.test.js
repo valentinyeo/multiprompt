@@ -127,6 +127,11 @@ fn pollFonts() void {
 
 const prelude = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
 const app_state = @This();
 const switch_timing = struct {
     fn start() u64 { return 0; }
@@ -651,7 +656,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
     copyZig(['workspace_view.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, harness());
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {
       encoding: 'utf8', timeout: 120000,
     });

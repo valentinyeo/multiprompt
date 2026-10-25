@@ -29,8 +29,14 @@ pub fn ReadConsoleOutputCharacterW(_: usize, out: [*]u16, len: u32, cell: t.COOR
     let code = body('consoleCellAtScreenPoint') + '\n' + body('shellDoubleClickAtScreenPoint');
     code = code.replaceAll('@import("chat_composer.zig").toggleChatView()', 'toggleChatView()');
     if (unsafe) code = code.replace('if (!toggle.shellCellBlank(c)) return;', 'if (!toggle.shellCellBlank(c) and false) return;');
-    fs.writeFileSync(path.join(dir, 'test.zig'), `
+    fs.writeFileSync(path.join(dir, 'test.zig'), (`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 pub const HANDLE = ?usize;
 pub const DWORD = u32;
@@ -104,7 +110,7 @@ test "production refuses stale sessions, nonblank cells and failed reads" {
     try std.testing.expect(!g_chat_active);
     fail_read = false;
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

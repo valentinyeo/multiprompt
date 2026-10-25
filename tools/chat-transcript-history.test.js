@@ -588,8 +588,8 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), fixturePrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support);
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), (fixturePrelude + entry +
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

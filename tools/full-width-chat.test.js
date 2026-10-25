@@ -28,6 +28,12 @@ function content(text) {
 
 function harness(handler, geometry = content(source)) {
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_style = @import("chat_style.zig");
 const app_state = @This();
 const HANDLE = ?usize;
@@ -120,7 +126,7 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const file = path.join(dir, 'test.zig');
     const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
     function run(handler, geometry) {
-      fs.writeFileSync(file, harness(handler, geometry));
+      fs.writeFileSync(file, (harness(handler, geometry)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       return spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     }
     const result = run(toggle(source));

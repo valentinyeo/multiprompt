@@ -17,7 +17,7 @@ function execute(t, code, modules = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-outbox-key-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   copyZig(modules, dir);
-  fs.writeFileSync(path.join(dir, 'test.zig'), code);
+  fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '--cache-dir', path.join(dir, 'cache')], {
     cwd: dir, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
@@ -26,6 +26,12 @@ function execute(t, code, modules = []) {
 
 const keys = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const CHAT_OUTBOX_KEY_CAP = 192;
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {

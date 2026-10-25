@@ -17,6 +17,12 @@ function harness(production) {
   const savedTab = source.match(/const SavedTab = struct \{[\s\S]*?\n};/)[0];
   const kind = source.match(/const ShellKind = enum[^;]+;/)[0];
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
 const view = @import("chat_view.zig");
@@ -64,14 +70,14 @@ test('IGSH-820 executes production toggles and legacy shell migration', () => {
     copyZig(['json_reader.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     const production = body('toggleChatView');
-    fs.writeFileSync(file, harness(production));
+    fs.writeFileSync(file, (harness(production)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const zig = process.env.ZIG || 'zig';
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     const broken = production.replace('@import("chat_view.zig").toggle(shell);', 'shell.chat_view_on = true;');
     assert.notEqual(broken, production);
-    fs.writeFileSync(file, harness(broken));
+    fs.writeFileSync(file, (harness(broken)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0);
     assert.match(negative.stderr, /IGSH-820 user toggles[^]*FAIL/);

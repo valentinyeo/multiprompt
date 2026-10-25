@@ -21,8 +21,14 @@ test('native retry converts legacy empty tabs, reaches owning instance, and app 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-recovery-'));
   try {
     const file = path.join(dir, 'recovery.zig');
-    fs.writeFileSync(file, String.raw`
+    fs.writeFileSync(file, (String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const version = "1.0.54";
 const browser_request_attempts: u32 = 4;
 const ZSB_COMMAND_CAP = 256;
@@ -146,7 +152,7 @@ test "only bound successful empty lists are normalized; versioned empty replies 
     try std.testing.expect(zsbLooksLikeStaleBindingError("{\"ok\":false,\"error\":\"no window with tab url matching beacon\"}"));
     try std.testing.expect(!zsbLooksLikeStaleBindingError("{\"ok\":false,\"error\":\"tab 9 does not belong to multiprompt browser window 42\"}"));
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const zig = process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig'));
     const run = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(run.status, 0, run.stdout + run.stderr);

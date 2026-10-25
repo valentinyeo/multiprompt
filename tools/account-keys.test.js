@@ -138,7 +138,13 @@ test('ISSUE-451 executed production replies keep background approvals non-modal 
     assert.ok(begin >= 0 && end > begin);
     const dispatch = reply.slice(begin, end);
     assert.match(dispatch, /accountPromptDeviceKeys\(bytes, reply.job.kind == \.device_keys\)/);
-    const fixture = read('tools/account-device-keys-fixture.zig');
+    const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+` + read('tools/account-device-keys-fixture.zig');
     const deliver = `fn deliver(kind: AccountJobKind, payload: []const u8, unauthorized: bool, cancelled: bool) void {
     g_account_busy = false;
     if (kind == .decide_keys) g_account_key_prompt_active = false;
@@ -146,13 +152,13 @@ test('ISSUE-451 executed production replies keep background approvals non-modal 
     ${dispatch}
 }`;
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver).replaceAll('app_state.', ''));
+    fs.writeFileSync(file, (fixture + '\n' + (prompt + '\n' + deliver).replaceAll('app_state.', '')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
     const backgroundModal = dispatch.replace('reply.job.kind == .device_keys', 'true');
     assert.notEqual(backgroundModal, dispatch);
-    fs.writeFileSync(file, fixture + '\n' + (prompt + '\n' + deliver.replace(dispatch, backgroundModal)).replaceAll('app_state.', ''));
+    fs.writeFileSync(file, (fixture + '\n' + (prompt + '\n' + deliver.replace(dispatch, backgroundModal)).replaceAll('app_state.', '')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0);
     assert.match(negative.stderr, /background pending device replies[^]*FAIL/);
