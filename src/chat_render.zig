@@ -5276,28 +5276,32 @@ test "IGSH-816 CLEAN hides Sending status pixels" {
 }
 
 test "IGSH-872 queued bubbles are half opacity and shell queues use the same rendering" {
-    const full = try cleanChatPixels(.sending_bubble, true);
-    defer std.testing.allocator.free(full);
-    const confirmed = try cleanChatPixels(.confirmed_bubble, true);
-    defer std.testing.allocator.free(confirmed);
-    try std.testing.expectEqualSlices(u32, full, confirmed);
-    const queued = try cleanChatPixels(.queued_bubble, true);
-    defer std.testing.allocator.free(queued);
-    const shell = try cleanChatPixels(.shell_bubble, true);
-    defer std.testing.allocator.free(shell);
     const blank = try cleanChatPixels(.blank, true);
     defer std.testing.allocator.free(blank);
-    var changed: usize = 0;
-    for (full, queued, blank) |normal, dimmed, background| {
-        if (normal != background) changed += 1;
-        for ([_]u5{ 0, 8, 16 }) |shift| {
-            const expected: i32 = @intCast((((normal >> shift) & 255) + ((background >> shift) & 255)) / 2);
-            const actual: i32 = @intCast((dimmed >> shift) & 255);
-            try std.testing.expect(@abs(actual - expected) <= 1);
+    for ([_]bool{ false, true }) |clean| {
+        const full = try cleanChatPixels(.sending_bubble, clean);
+        defer std.testing.allocator.free(full);
+        if (clean) {
+            const confirmed = try cleanChatPixels(.confirmed_bubble, clean);
+            defer std.testing.allocator.free(confirmed);
+            try std.testing.expectEqualSlices(u32, full, confirmed);
         }
+        const queued = try cleanChatPixels(.queued_bubble, clean);
+        defer std.testing.allocator.free(queued);
+        const shell = try cleanChatPixels(.shell_bubble, clean);
+        defer std.testing.allocator.free(shell);
+        var changed: usize = 0;
+        for (full, queued, blank) |normal, dimmed, background| {
+            if (normal != background) changed += 1;
+            for ([_]u5{ 0, 8, 16 }) |shift| {
+                const expected: i32 = @intCast((((normal >> shift) & 255) + ((background >> shift) & 255)) / 2);
+                const actual: i32 = @intCast((dimmed >> shift) & 255);
+                try std.testing.expect(@abs(actual - expected) <= 1);
+            }
+        }
+        try std.testing.expect(changed > 0);
+        try std.testing.expectEqualSlices(u32, queued, shell);
     }
-    try std.testing.expect(changed > 0);
-    try std.testing.expectEqualSlices(u32, queued, shell);
 }
 
 test "IGSH-872 queued caption is absent with CLEAN on and off" {
