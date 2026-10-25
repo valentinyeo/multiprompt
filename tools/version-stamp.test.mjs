@@ -414,24 +414,32 @@ test('IGSH-889 picks the newest older release tag by number', () => {
 
 test('IGSH-889 a release lists only fragments added since the previous release', t => {
   const old = { 'changelog.d/DEMO-1-old.md': 'An old improvement.\n' };
-  const generated = buildChangelog({ ...base(), ...old, 'changelog.d/DEMO-2-new.md': 'A new improvement.\n' }, 'v0.28.900', old);
+  const fresh = { ...base(), ...old, 'changelog.d/DEMO-2-new.md': 'A new improvement.\n' };
+  const generated = buildChangelog(fresh, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
-  const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', old);
+  const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
   assert.match(quiet, /Updates include the latest improvements/);
   assert.doesNotMatch(quiet, /An old improvement/);
-  const edited = buildChangelog({ ...base(), 'changelog.d/DEMO-1-old.md': 'An old improvement, reworded.\n' }, 'v0.28.900', old);
-  assert.match(edited, /reworded/);
 
   const r = repo(t, { ...base(), ...old });
-  r.git('tag', 'v0.28.899');
-  r.write({ 'changelog.d/DEMO-2-new.md': 'A new improvement.\n' });
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-2-new.md': 'Second release change.\n' });
   r.commit();
-  r.git('tag', 'v0.28.900');
-  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  r.git('tag', 'v0.28.736');
+  r.write({ 'changelog.d/DEMO-3-skipped.md': 'Third release change.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.737');
+  r.write({ 'changelog.d/DEMO-4-latest.md': 'Latest release change.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.738');
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
   const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
-  assert.match(written, /A new improvement/);
   assert.doesNotMatch(written, /An old improvement/);
-  assert.equal(written.match(/\.ver = "0\.28\.900"/g).length, 1);
+  const order = ['0.28.738', '0.28.737', '0.28.736', '0.28.735'].map(v => written.indexOf(`.ver = "${v}"`));
+  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), 'one entry per release, newest first');
+  assert.match(written.slice(order[0], order[1]), /Latest release change/);
+  assert.match(written.slice(order[1], order[2]), /Third release change/);
+  assert.match(written.slice(order[2], order[3]), /Second release change/);
 });

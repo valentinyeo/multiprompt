@@ -71,16 +71,29 @@ export function classifyTrees(base, head, changed) {
   return 'CODE';
 }
 
-export function buildChangelog(files, tag, released = {}) {
+const fragmentFiles = tree => Object.fromEntries(Object.entries(tree).filter(([file]) => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md'));
+const addedSince = (current, previous) => Object.fromEntries(Object.entries(current).filter(([file, text]) => previous[file] !== text));
+
+export function buildChangelog(files, tag, history = []) {
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw new Error('Invalid release tag');
   const version = tag.slice(1);
   if (files[changelogPath]?.match(/\.ver\s*=\s*"([^"]+)"/)?.[1] === version) return files[changelogPath];
-  const tree = { ...files };
-  for (const [file, text] of Object.entries(released)) if (file.startsWith('changelog.d/') && tree[file] === text) delete tree[file];
-  if (!Object.keys(tree).some(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
-    tree['changelog.d/IGSH-834-maintenance.md'] = 'Updates include the latest improvements.\n';
+  let result = { ...files };
+  const stamp = (stepTag, fragments) => {
+    const tree = { ...result };
+    for (const file of Object.keys(fragmentFiles(tree))) delete tree[file];
+    Object.assign(tree, fragments);
+    result[changelogPath] = stampTree(tree, stepTag.slice(1)).files[changelogPath];
+  };
+  let previous = history.length ? fragmentFiles(history[0].files) : {};
+  for (const step of history.slice(1)) {
+    const added = addedSince(fragmentFiles(step.files), previous);
+    if (Object.keys(added).length) stamp(step.tag, added);
+    previous = fragmentFiles(step.files);
   }
-  return stampTree(tree, version).files[changelogPath];
+  const added = addedSince(fragmentFiles(files), previous);
+  stamp(tag, Object.keys(added).length ? added : { 'changelog.d/IGSH-834-maintenance.md': 'Updates include the latest improvements.\n' });
+  return result[changelogPath];
 }
 
 function git(args, cwd, timeout) {
@@ -93,21 +106,27 @@ function readTree(rev, cwd, remaining) {
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
 }
 
-export function previousReleaseTag(tags, tag) {
-  const parse = name => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(name)?.slice(1).map(BigInt);
-  const order = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1; return 0; };
-  const target = parse(tag);
-  const older = tags.map(name => ({ name, parts: parse(name) })).filter(item => item.parts && order(item.parts, target) < 0);
-  return older.sort((a, b) => order(b.parts, a.parts))[0]?.name ?? null;
+const tagParts = name => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(name)?.slice(1).map(BigInt) ?? null;
+export function compareTags(a, b) {
+  const x = tagParts(a);
+  const y = tagParts(b);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
 }
 
-function releasedFragments(tag) {
-  const previous = previousReleaseTag(git(['tag', '--list', 'v*']).split(/\r?\n/).filter(Boolean), tag);
-  if (!previous) {
+export function previousReleaseTag(tags, tag) {
+  return tags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags).at(-1) ?? null;
+}
+
+function releaseHistory(tag, changelog) {
+  const older = git(['tag', '--list', 'v*']).split(/\r?\n/).filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
+  if (!older.length) {
     if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') throw new Error('Shallow checkout has no release tags; fetch tags before building');
-    return {};
+    return [];
   }
-  return Object.fromEntries(Object.entries(readTree(previous)).filter(([file]) => file.startsWith('changelog.d/')));
+  const stamped = changelog.match(/\.ver\s*=\s*"(\d+\.\d+\.\d+)"/)?.[1];
+  const base = stamped ? older.findLastIndex(name => compareTags(name, `v${stamped}`) <= 0) : -1;
+  return older.slice(Math.max(base, 0)).map(name => ({ tag: name, files: readTree(name) }));
 }
 
 function check(baseRev, headRev) {
@@ -213,7 +232,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const [command, base, head, ...extra] = process.argv.slice(2);
     if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
     else if (command === 'build' && base && !head) {
-      fs.writeFileSync(changelogPath, buildChangelog(readTree('HEAD'), base, releasedFragments(base)));
+      fs.writeFileSync(changelogPath, buildChangelog(readTree('HEAD'), base, releaseHistory(base, readTree('HEAD')[changelogPath])));
     } else if (command === 'release' && !base) await release();
     else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | build <tag> | release');
   } catch (error) {
