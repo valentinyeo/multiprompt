@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -2266,7 +2266,11 @@ try {
     Doctor
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
+    $driveFeature = $Feature
     switch ($Feature) {
+        'composer-buttons' { $driveFeature = 'chat-view' }
+    }
+    switch ($driveFeature) {
         'title-bar' {
             . (Join-Path $PSScriptRoot 'title-bar.ps1')
         }
@@ -3351,163 +3355,165 @@ try {
             Save-Json $after 'session-after.json'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-view-open-close-reopen'; activeTab = $after.active_tab; tabCount = @($after.tabs).Count; savedChatView = $after.tabs[$after.active_tab].cv; entry = 'Alt+C' }
-            $menuCheck = @{ name = 'message-menu'; passed = $false; reason = 'not reached' }
-            $selectionCheck = @{ name = 'selection-enter-reply'; ticket = 'IGSH-717'; passed = $false; reason = 'not reached' }
-            $result.checks += $selectionCheck
             $greyCheck = @{ name = 'grey-buttons'; passed = $false; reason = 'not reached' }
-            $result.checks += $menuCheck
             $result.checks += $greyCheck
             $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $localAgent = Join-Path (Split-Path $Exe) 'claude.exe'
             if (-not (Test-Path $localAgent)) { throw 'Local Claude console stand-in is missing' }
-            $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
-            $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
-            $result.checks += $typedCheck
-            $result.checks += $suggestionCheck
-            $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
-            $typedPrefix = Join-Path $scratch 'local-route-typed'
-            $typedMessage = 'local route typed must stay queued'
-            try {
-                foreach ($mode in @('typed', 'suggestion')) {
-                    $beforeLocal = Read-Session
-                    Palette 'new cmd'
-                    Press @(0x0D) 'Enter: create local console for direct-route check'
-                    Wait-Until {
-                        $state = Read-Session
-                        @($state.tabs).Count -eq @($beforeLocal.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
-                    } 'new local CMD session saved'
-                    $localState = Read-Session
-                    $localTab = $localState.active_tab
-                    if ($localState.tabs[$localTab].PSObject.Properties['cv'] -and $localState.tabs[$localTab].cv) {
-                        Press @(0x12, 0x43) 'Alt+C: show new local console'
-                    }
-                    Wait-WorkspaceSurface $localState.active_workspace $localTab $false
-                    $prefix = Join-Path $scratch ('local-route-' + $mode)
-                    Type-Text ('"' + $localAgent + '" ' + $mode + ' "' + $prefix + '"')
-                    Press @(0x0D) 'Enter: launch console-backed Claude stand-in'
-                    Wait-Until {
-                        if (-not (Test-Path ($prefix + '-ready.json'))) { return $false }
-                        $script:localReady = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
-                        $script:localReady.chars.Count -eq 32 -and $script:localReady.attributes.Count -eq 32
-                    } 'stand-in rendered prompt and recorded console attributes'
-                    $ready = $script:localReady
-                    if ($ready.chars[0] -ne 0x276F -or $ready.chars[1] -ne 32) { throw 'Stand-in did not render the Claude prompt glyph and separator' }
-                    if ($mode -eq 'suggestion' -and (($ready.attributes[2] -band 0x4000) -eq 0 -or ($ready.attributes[3] -band 0xF) -ne 8)) { throw 'Real console did not retain the suggestion cursor and gray foreground' }
-                    Wait-Until {
-                        $inbox = Read-Inbox
-                        @($inbox.shells | Where-Object { $_.sid -eq $localState.tabs[$localTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
-                    } 'local claude.exe detected as Claude for the direct input route' -Seconds 45
-                    Press @(0x12, 0x43) 'Alt+C: open local agent Chat View'
-                    Wait-Until {
-                        $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                        $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
-                        $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
-                        $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle
-                    } 'owned local Chat View composer focused'
-                    $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
-                    Type-Text $message
-                    Press @(0x0D) 'Enter: send through normal Chat View outbox'
-                    if ($mode -eq 'typed') {
+            if ($Feature -eq 'chat-view') {
+                $menuCheck = @{ name = 'message-menu'; passed = $false; reason = 'not reached' }
+                $selectionCheck = @{ name = 'selection-enter-reply'; ticket = 'IGSH-717'; passed = $false; reason = 'not reached' }
+                $result.checks += $selectionCheck
+                $result.checks += $menuCheck
+                $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
+                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
+                $result.checks += $typedCheck
+                $result.checks += $suggestionCheck
+                $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
+                $typedPrefix = Join-Path $scratch 'local-route-typed'
+                $typedMessage = 'local route typed must stay queued'
+                try {
+                    foreach ($mode in @('typed', 'suggestion')) {
+                        $beforeLocal = Read-Session
+                        Palette 'new cmd'
+                        Press @(0x0D) 'Enter: create local console for direct-route check'
                         Wait-Until {
-                            if (-not (Test-Path $outboxPath)) { return $false }
-                            $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
-                            @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
-                        } 'typed prompt keeps the Chat View message queued without starting a write'
-                        $typedCheck.console = $ready
-                        Snapshot 'local-route-typed'
-                    } else {
-                        $suggestionCheck.console = $ready
+                            $state = Read-Session
+                            @($state.tabs).Count -eq @($beforeLocal.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+                        } 'new local CMD session saved'
+                        $localState = Read-Session
+                        $localTab = $localState.active_tab
+                        if ($localState.tabs[$localTab].PSObject.Properties['cv'] -and $localState.tabs[$localTab].cv) {
+                            Press @(0x12, 0x43) 'Alt+C: show new local console'
+                        }
+                        Wait-WorkspaceSurface $localState.active_workspace $localTab $false
+                        $prefix = Join-Path $scratch ('local-route-' + $mode)
+                        Type-Text ('"' + $localAgent + '" ' + $mode + ' "' + $prefix + '"')
+                        Press @(0x0D) 'Enter: launch console-backed Claude stand-in'
                         Wait-Until {
-                            $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-                            try {
-                                $buffer = New-Object IO.MemoryStream
-                                try {
-                                    $stdin.CopyTo($buffer)
-                                    $receivedBytes = $buffer.ToArray()
-                                } finally { $buffer.Dispose() }
-                            } finally { $stdin.Dispose() }
-                            $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
-                            $suggestionCheck.received = $received
-                            $received.Contains($message) -and $received.Contains("`r")
-                        } 'local suggestion prompt receives the Chat View message and Enter on stdin'
-                        $suggestionCheck.passed = $true
-                        Snapshot 'local-route-suggestion'
-                        try {
+                            if (-not (Test-Path ($prefix + '-ready.json'))) { return $false }
+                            $script:localReady = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
+                            $script:localReady.chars.Count -eq 32 -and $script:localReady.attributes.Count -eq 32
+                        } 'stand-in rendered prompt and recorded console attributes'
+                        $ready = $script:localReady
+                        if ($ready.chars[0] -ne 0x276F -or $ready.chars[1] -ne 32) { throw 'Stand-in did not render the Claude prompt glyph and separator' }
+                        if ($mode -eq 'suggestion' -and (($ready.attributes[2] -band 0x4000) -eq 0 -or ($ready.attributes[3] -band 0xF) -ne 8)) { throw 'Real console did not retain the suggestion cursor and gray foreground' }
+                        Wait-Until {
+                            $inbox = Read-Inbox
+                            @($inbox.shells | Where-Object { $_.sid -eq $localState.tabs[$localTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
+                        } 'local claude.exe detected as Claude for the direct input route' -Seconds 45
+                        Press @(0x12, 0x43) 'Alt+C: open local agent Chat View'
+                        Wait-Until {
                             $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-                            $transcripts = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $process.Id })
-                            if ($transcripts.Count -ne 1) { throw 'Expected exactly one visible owned transcript for the message menu' }
-                            $transcript = [IntPtr]$transcripts[0].Current.NativeWindowHandle
+                            $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                            $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                            $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle
+                        } 'owned local Chat View composer focused'
+                        $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
+                        Type-Text $message
+                        Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        if ($mode -eq 'typed') {
                             Wait-Until {
-                                $script:messagePoint = [VerifyNative]::MessageBubblePoint($transcript)
-                                $true
-                            } 'painted message bubble after suggestion delivery'
-                            $menuLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' }).Count
-                            Doctor
-                            Record 'Real SendInput right-click inside the owned transcript message bubble'
-                            [VerifyNative]::RightClickTranscript($transcript, $process.Id, $script:window, $script:messagePoint)
+                                if (-not (Test-Path $outboxPath)) { return $false }
+                                $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
+                                @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
+                            } 'typed prompt keeps the Chat View message queued without starting a write'
+                            $typedCheck.console = $ready
+                            Snapshot 'local-route-typed'
+                        } else {
+                            $suggestionCheck.console = $ready
                             Wait-Until {
-                                $lines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
-                                $lines.Count -gt $menuLinesBefore
-                            } 'app logged the opened message menu'
-                            $menuLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
-                            if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
-                            $menuCheck.items = 'Reply,Copy'
-                            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
-                            Snapshot 'message-menu'
-                            Press @(0x1B) 'Esc: dismiss message menu'
-                            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
-                            $menuCheck.passed = $true
-                            $menuCheck.reason = ''
-                        } catch {
-                            $menuCheck.reason = $_.Exception.Message
-                            throw
-                        }
-                        try {
-                            $quoteLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count
-                            $stdinBytesBeforeReply = (Get-Item ($prefix + '-stdin.bin')).Length
-                            Doctor
-                            Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
-                            $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
-                            Snapshot 'selection-enter-reply-selected'
-                            Wait-Until {
-                                $selectionCheck.selectionPixels = [VerifyNative]::TranscriptSelectionPixels($transcript, $selectionCheck.points)
-                                $selectionCheck.selectionPixels -ge ($selectionCheck.points[1].X - $selectionCheck.points[0].X)
-                            } 'IGSH-717 drag paints a visible transcript selection before Enter'
-                            Press @(0x0D) 'IGSH-717: Enter quotes the transcript selection instead of sending'
-                            Wait-Until {
-                                @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count -gt $quoteLinesBefore
-                            } 'IGSH-717 Enter creates a reply quote'
-                            $quoteLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' })
-                            if ($quoteLines.Count -ne $quoteLinesBefore + 1 -or $quoteLines[-1] -cnotmatch '\[chat\] reply quote chars=(\d+)$') { throw 'Expected exactly one observable quote after selection Enter' }
-                            $quoteChars = [int]$Matches[1]
-                            if ($quoteChars -le 0 -or $quoteChars -ge $message.Length) { throw 'Enter did not quote only a nonempty part of the message' }
-                            Wait-Until {
+                                $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                                try {
+                                    $buffer = New-Object IO.MemoryStream
+                                    try {
+                                        $stdin.CopyTo($buffer)
+                                        $receivedBytes = $buffer.ToArray()
+                                    } finally { $buffer.Dispose() }
+                                } finally { $stdin.Dispose() }
+                                $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
+                                $suggestionCheck.received = $received
+                                $received.Contains($message) -and $received.Contains("`r")
+                            } 'local suggestion prompt receives the Chat View message and Enter on stdin'
+                            $suggestionCheck.passed = $true
+                            Snapshot 'local-route-suggestion'
+                            try {
                                 $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                                $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
-                                $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
-                                $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle -and [VerifyNative]::EditText([IntPtr]$composer.Current.NativeWindowHandle) -ceq ''
-                            } 'IGSH-717 quote leaves the empty composer focused'
-                            Snapshot 'selection-enter-reply'
-                            if ((Get-Item ($prefix + '-stdin.bin')).Length -ne $stdinBytesBeforeReply) { throw 'Selection Enter sent input instead of only quoting' }
-                            $selectionCheck.quoteChars = $quoteChars
-                            $selectionCheck.messageChars = $message.Length
-                            $selectionCheck.passed = $true
-                            $selectionCheck.reason = ''
-                            Press @(0x1B) 'Esc: cancel the selection reply quote'
-                        } catch {
-                            $selectionCheck.reason = $_.Exception.Message
-                            throw
+                                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                                $transcripts = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $process.Id })
+                                if ($transcripts.Count -ne 1) { throw 'Expected exactly one visible owned transcript for the message menu' }
+                                $transcript = [IntPtr]$transcripts[0].Current.NativeWindowHandle
+                                Wait-Until {
+                                    $script:messagePoint = [VerifyNative]::MessageBubblePoint($transcript)
+                                    $true
+                                } 'painted message bubble after suggestion delivery'
+                                $menuLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' }).Count
+                                Doctor
+                                Record 'Real SendInput right-click inside the owned transcript message bubble'
+                                [VerifyNative]::RightClickTranscript($transcript, $process.Id, $script:window, $script:messagePoint)
+                                Wait-Until {
+                                    $lines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
+                                    $lines.Count -gt $menuLinesBefore
+                                } 'app logged the opened message menu'
+                                $menuLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
+                                if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
+                                $menuCheck.items = 'Reply,Copy'
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                                Snapshot 'message-menu'
+                                Press @(0x1B) 'Esc: dismiss message menu'
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
+                                $menuCheck.passed = $true
+                                $menuCheck.reason = ''
+                            } catch {
+                                $menuCheck.reason = $_.Exception.Message
+                                throw
+                            }
+                            try {
+                                $quoteLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count
+                                $stdinBytesBeforeReply = (Get-Item ($prefix + '-stdin.bin')).Length
+                                Doctor
+                                Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
+                                $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
+                                Snapshot 'selection-enter-reply-selected'
+                                Wait-Until {
+                                    $selectionCheck.selectionPixels = [VerifyNative]::TranscriptSelectionPixels($transcript, $selectionCheck.points)
+                                    $selectionCheck.selectionPixels -ge ($selectionCheck.points[1].X - $selectionCheck.points[0].X)
+                                } 'IGSH-717 drag paints a visible transcript selection before Enter'
+                                Press @(0x0D) 'IGSH-717: Enter quotes the transcript selection instead of sending'
+                                Wait-Until {
+                                    @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count -gt $quoteLinesBefore
+                                } 'IGSH-717 Enter creates a reply quote'
+                                $quoteLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' })
+                                if ($quoteLines.Count -ne $quoteLinesBefore + 1 -or $quoteLines[-1] -cnotmatch '\[chat\] reply quote chars=(\d+)$') { throw 'Expected exactly one observable quote after selection Enter' }
+                                $quoteChars = [int]$Matches[1]
+                                if ($quoteChars -le 0 -or $quoteChars -ge $message.Length) { throw 'Enter did not quote only a nonempty part of the message' }
+                                Wait-Until {
+                                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                                    $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                                    $composer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $editCondition)
+                                    $null -ne $composer -and $composer.Current.ProcessId -eq $process.Id -and -not $composer.Current.IsOffscreen -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -eq $composer.Current.NativeWindowHandle -and [VerifyNative]::EditText([IntPtr]$composer.Current.NativeWindowHandle) -ceq ''
+                                } 'IGSH-717 quote leaves the empty composer focused'
+                                Snapshot 'selection-enter-reply'
+                                if ((Get-Item ($prefix + '-stdin.bin')).Length -ne $stdinBytesBeforeReply) { throw 'Selection Enter sent input instead of only quoting' }
+                                $selectionCheck.quoteChars = $quoteChars
+                                $selectionCheck.messageChars = $message.Length
+                                $selectionCheck.passed = $true
+                                $selectionCheck.reason = ''
+                                Press @(0x1B) 'Esc: cancel the selection reply quote'
+                            } catch {
+                                $selectionCheck.reason = $_.Exception.Message
+                                throw
+                            }
                         }
                     }
-                }
-            } finally {
-                if ($typedCheck.ContainsKey('console')) {
-                    $typedCheck.receivedBytes = (Get-Item ($typedPrefix + '-stdin.bin')).Length
-                    $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
-                    $typedCheck.queued = @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
-                    $typedCheck.passed = $typedCheck.receivedBytes -eq 0 -and $typedCheck.queued
-                    if (-not $typedCheck.passed) { throw 'Chat View overwrote a local typed draft or stopped keeping its message queued' }
+                } finally {
+                    if ($typedCheck.ContainsKey('console')) {
+                        $typedCheck.receivedBytes = (Get-Item ($typedPrefix + '-stdin.bin')).Length
+                        $outbox = Get-Content $outboxPath -Raw | ConvertFrom-Json
+                        $typedCheck.queued = @($outbox.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -eq 1
+                        $typedCheck.passed = $typedCheck.receivedBytes -eq 0 -and $typedCheck.queued
+                        if (-not $typedCheck.passed) { throw 'Chat View overwrote a local typed draft or stopped keeping its message queued' }
+                    }
                 }
             }
             $stopCheck = @{ name = 'stop-in-box'; passed = $false; entry = 'Chat View working composer'; reason = 'not reached' }
