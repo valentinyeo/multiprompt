@@ -1394,6 +1394,7 @@ const ISpVoiceVtbl = extern struct {
 };
 pub const ISpVoice = extern struct { lpVtbl: *const ISpVoiceVtbl };
 pub extern "kernel32" fn SetHandleInformation(hObject: HANDLE, dwMask: DWORD, dwFlags: DWORD) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn GetHandleInformation(hObject: HANDLE, lpdwFlags: *DWORD) callconv(WINAPI) BOOL;
 
 pub extern "user32" fn keybd_event(u8, u8, DWORD, usize) callconv(WINAPI) void;
 pub extern "comdlg32" fn GetOpenFileNameW(*OPENFILENAMEW) callconv(WINAPI) BOOL;

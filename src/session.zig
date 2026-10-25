@@ -2312,3 +2312,29 @@ test "IGSH-814 saved read marker round trip restores each chat and legacy defaul
     try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\"}]}", &tabs));
     try std.testing.expectEqual(@as(u64, 0), tabs[0].last_read_message_id);
 }
+
+
+test "IGSH-890 cached tmux ghosts restore once and keep the selected real conversation" {
+    const a = std.testing.allocator;
+    const bytes =
+        \\{"active_shell_id":42,"active_tab":2,"starred_view":true,"tabs":[
+        \\{"kind":"tmux","name":"Guide","tmux_session":"guide-a","tmux_host":1,"shell_id":51,"workspace":1,"favorite":true,"cv":true,"chat_id":91},
+        \\{"kind":"tmux","name":"Guide","shell_id":41,"workspace":1,"favorite":true},
+        \\{"kind":"tmux","name":"Guide","shell_id":42,"workspace":1,"favorite":true}]}
+    ;
+    const old_pending = @import("launch_cache.zig").pending;
+    defer @import("launch_cache.zig").pending = old_pending;
+    @import("launch_cache.zig").pending = false;
+    for (0..4) |_| {
+        var parsed = try json_reader.parse(a, bytes);
+        defer parsed.deinit();
+        var tabs: [4]SavedTab = undefined;
+        const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+        try std.testing.expectEqual(@as(u32, 1), count);
+        try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 42));
+        try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+        try std.testing.expectEqual(@as(u64, 91), tabs[0].chat_id);
+        try std.testing.expect(tabs[0].cv);
+        try std.testing.expectEqualSlices(u8, "guide-a", tabs[0].tmux_session[0..tabs[0].tmux_session_len]);
+    }
+}

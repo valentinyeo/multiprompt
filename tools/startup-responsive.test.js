@@ -255,7 +255,9 @@ const reviewCases = [
     const tabs = init.slice(init.indexOf('        .tabs =>'), init.indexOf('        .chat =>'));
     assert.ok(tabs.indexOf('listener_status.load(.acquire)') >= 0 && tabs.indexOf('listener_status.load(.acquire)') < tabs.indexOf('launch_cache.deferred()'));
     assert.match(tabs, /\.pending => return false/);
-    assert.match(tabs, /\.failed => \{[^}]*showHeaderNoticeAscii[^}]*return true/);
+    const failed = tabs.slice(tabs.indexOf('.failed => {'), tabs.indexOf('.ready =>'));
+    assert.match(failed, /showHeaderNoticeAscii/);
+    assert.doesNotMatch(failed, /return true/);
     const listener = body(read('src/notifications.zig'), 'notifyListenerThread');
     assert.ok(listener.indexOf('g_notify_bound_port = bound_port') < listener.indexOf('listener_status.store(.ready, .release)'));
   }, '=='],
