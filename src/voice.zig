@@ -1685,14 +1685,18 @@ fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpR
     var status_size: DWORD = @sizeOf(DWORD);
     _ = WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null);
 
-    var json_buf: [65536]u8 = undefined;
+    var json_buf = std.heap.page_allocator.alloc(u8, 65536) catch return .{ .status = status };
+    defer std.heap.page_allocator.free(json_buf);
     var json_len: usize = 0;
-    while (json_len < json_buf.len) {
+    while (true) {
         var avail: DWORD = 0;
         if (WinHttpQueryDataAvailable(request, &avail) == 0 or avail == 0) break;
-        const want: DWORD = @intCast(@min(@as(usize, @intCast(avail)), json_buf.len - json_len));
+        if (json_buf.len - json_len < avail) {
+            const grown = @max(json_buf.len * 2, json_len + @as(usize, avail));
+            json_buf = std.heap.page_allocator.realloc(json_buf, grown) catch return .{ .status = status };
+        }
         var got: DWORD = 0;
-        if (WinHttpReadData(request, @ptrCast(&json_buf[json_len]), want, &got) == 0 or got == 0) break;
+        if (WinHttpReadData(request, @ptrCast(&json_buf[json_len]), avail, &got) == 0 or got == 0) break;
         json_len += @intCast(got);
     }
     return .{ .transcript_len = parseDeepgramTranscript(json_buf[0..json_len], transcript_out), .status = status };
