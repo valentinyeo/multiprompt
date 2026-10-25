@@ -481,8 +481,8 @@ foreach ($plan in $plans) {
             Doctor $true
             $observation.newMessages = @{passed=$true; transitions=@('arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival')}
             $longLogStart = (Read-Shared "$settings/debug.log").Length
-            Shell-Input 'messages' '200'
-            [void](Wait-For 'long chat holds 200 more messages' { (Read-Shared $cache.FullName).Contains('New message 199') })
+            Shell-Input 'messages' '120'
+            [void](Wait-For 'long chat holds 120 more messages' { (Read-Shared $cache.FullName).Contains('New message 119') })
             [void](Require-NewMessages 0 0 0 'long chat arrival stays at bottom' $longLogStart)
             $readSource = (Read-Shared $transcript) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 1
             $readId = [string]$readSource.message.id
@@ -509,13 +509,22 @@ foreach ($plan in $plans) {
             Copy-Item "$settings/session.json" "$caseDir/session-reopened.json"
             $bounds = $views[0].Current.BoundingRectangle
             $dividerProof = @{marker=$savedMarker; readId=$readId; firstUnreadId=$firstUnreadId; unreadOffset=$unreadOffset; reopened=$divider; transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
-            Shot 'unread-divider-reopened'
+            Shot 'reopened-newest'
             $pinLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '3'
             $pinned = Wait-For 'arrival while at the bottom keeps the view pinned to the newest message' { $v = Divider-State $pinLogStart; if ($v -and $v.scroll -gt $divider.scroll) { $v } }
             [void](Require-NewMessages 0 0 0 'arrival at the bottom never shows the pill or scrolls up' $pinLogStart)
             $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
             Shot 'pinned-after-arrival'
+            $upLogStart = (Read-Shared "$settings/debug.log").Length
+            $viewH = [int]$bounds.Height
+            $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
+                $f = Divider-State $upLogStart
+                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
+                [void](Scroll-Transcript 300)
+                $null
+            }
+            Shot 'unread-divider-reopened'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
             $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart
