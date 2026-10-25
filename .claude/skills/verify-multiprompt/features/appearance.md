@@ -28,6 +28,7 @@ Preconditions:
 - **Dark baseline.** The helper presses Ctrl+K, types `themes`, Enter, types `dark` and Enter, then Esc. The app saves `dark`. `before.png` shows the normal dark workspace, not just a palette.
 - **Light selection.** Repeat Ctrl+K, `themes`, Enter, then type `light`. `action.png` shows Light selected before Enter. Enter changes the theme; `action-selected.png` shows Light marked current. Esc closes the overlay.
 - **Result.** `after.png` shows the normal light workspace with the same app/version identity. The saved `data/roaming/ZigShell/theme-mode.txt` contains `light`.
+- **Selected session.** In the normal workspace screenshots, the selected session row has a visible neutral gray background, not a blue tint. Unread dots and status icons retain their colors. The production-color regression in `tools/pane-spacing.test.js` also checks AMOLED, Dark, Edge Gray, Mid and Light.
 - **Proof.** The helper reads that file, checks sidebar luminance increases by at least 60 on the 0–255 channel scale, and reports both readings in `result.json`. Inspect the screenshots as well; pixel brightness alone is not proof of the right UI.
 
 ## Gotchas
