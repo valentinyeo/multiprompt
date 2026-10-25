@@ -52,6 +52,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
 - [Status card](status-card.md): measure the one-line sidebar status card on all three pages after real Ctrl+Shift+G presses and capture its hover view; fail outside 20 to 30 px.
+- [Title bar](title-bar.md): native caption glyph identity and app-black caption-facing masks with mismatched Chrome themes at real 100%, 125% and 150% monitor scaling.
 - [Pane layout](pane-layout.md): preserve pane geometry and Alt+Q input routing without focus rings; compare exact margin pixels and screenshots across themes against a pinned pre-fix control.
 - [Browser pane locked](browser-pane-locked.md): real strip dragging, Win+Up and double-click cannot move or maximize the docked browser.
 - [Browser switch speed](browser-switch-speed.md) (on demand only): compare 20 Ctrl+Tab switches without panes against 20 with warm docked browsers and five freshly frozen returns in console and Chat View; fail above a 50 ms median gap.
