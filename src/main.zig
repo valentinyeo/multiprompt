@@ -8023,7 +8023,7 @@ pub fn main(init: std.process.Init) void {
         .hInstance = hInst,
         .hIcon = LoadImageW(hInst, @ptrFromInt(1), IMAGE_ICON, 256, 256, LR_DEFAULTCOLOR) orelse LoadIconW(hInst, @ptrFromInt(1)),
         .hCursor = LoadCursorW(null, @ptrFromInt(32512)),
-        .hbrBackground = CreateSolidBrush(themeSidebarBg()),
+        .hbrBackground = null,
         .lpszMenuName = null,
         .lpszClassName = L("ZigShell"),
         .hIconSm = LoadImageW(hInst, @ptrFromInt(1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR) orelse LoadIconW(hInst, @ptrFromInt(1)),

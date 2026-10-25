@@ -24,7 +24,7 @@ function body(source, name) {
 
 function guardContract(source) {
   const style = body(source, 'lockedBrowserStyle');
-  for (const flag of ['WS_CAPTION', 'WS_THICKFRAME', 'WS_BORDER', 'WS_MAXIMIZEBOX', 'WS_MINIMIZEBOX']) assert.ok(style.includes(flag));
+  for (const flag of ['WS_CAPTION', 'WS_THICKFRAME', 'WS_BORDER', 'WS_SYSMENU', 'WS_MAXIMIZEBOX', 'WS_MINIMIZEBOX']) assert.ok(style.includes(flag));
   assert.match(style, /style & ~@as\(isize,/);
   assert.match(body(source, 'browserDockWorker'), /lockedBrowserStyle\(GetWindowLongPtrW\(hwnd, GWL_STYLE\)\)/);
   const decision = body(source, 'browserDockGuardAction');
@@ -70,6 +70,7 @@ test('dock guard source contract reuses idempotent positioning and cancels on th
   guardContract(pane);
   for (const [before, after] of [
     ['fn lockedBrowserStyle(', 'fn oldBrowserStyle('],
+    [' | win.WS_SYSMENU', ''],
     [' | win.WS_MAXIMIZEBOX', ''],
     ['if (!docked) return .none;', ''],
     ['if (zoomed) return .restore;', ''],
