@@ -1150,7 +1150,7 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
     defer _ = DeleteObject(bitmap);
     const old_bitmap = SelectObject(dc, bitmap);
     defer _ = SelectObject(dc, old_bitmap);
-    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
+    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4 | 8);
     var probe: [2]u16 = .{ 0, 0 };
     if (GetWindowTextW(hwnd, &probe, 2) == 0) {
         var rc: RECT = std.mem.zeroes(RECT);

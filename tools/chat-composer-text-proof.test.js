@@ -129,6 +129,15 @@ test('IGSH-760 composer paint contract rejects the shipped direct-paint path', (
   assert.match(broken.stderr, /composer clears the visible text area/);
 });
 
+test('IGSH-805 buffered composer requests native background erasure before drawing into the new bitmap', () => {
+  const composer = read('src/chat_composer.zig');
+  const backgroundPrint = /CallWindowProcW\(app_state\.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr\(dc\), 4 \| 8\);\s*var probe:/;
+  assert.match(composer, backgroundPrint);
+  const broken = composer.replace('0x0318, @intFromPtr(dc), 4 | 8);', '0x0318, @intFromPtr(dc), 4);');
+  assert.notEqual(broken, composer);
+  assert.throws(() => assert.match(broken, backgroundPrint), assert.AssertionError);
+});
+
 function typingFixture() {
   const frames = Array.from({ length: 61 }, (_, index) => {
     const width = 180;
