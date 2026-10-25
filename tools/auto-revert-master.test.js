@@ -506,3 +506,20 @@ test('controlled red proof requires the marker on appearance master pushes and e
     verify.replace(guard, guard + '\n' + guard),
   ]) assert.throws(() => contract(broken), assert.AssertionError);
 });
+
+test('one-shot proof rejects its subject only, never an innocent commit mentioning proof in its body', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
+  const guard = workflow.split('\n').find(line => line.includes("throw 'IGSH-837 deliberate red master proof'"));
+  assert.ok(guard);
+  for (const [message, expected] of [
+    ['IGSH-859: separate reruns\n\nPreserve IGSH-837 red proof.', 0],
+    ['IGSH-837: IGSH-837 red proof\n\nControlled failure.', 1],
+    ['Revert IGSH-837: IGSH-837 red proof', 0],
+  ]) {
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', guard], {
+      env: { ...process.env, FEATURE: 'appearance', GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', HEAD_COMMIT_MESSAGE: message }, encoding: 'utf8',
+    });
+    assert.equal(result.status, expected, `${message}\n${result.stdout}\n${result.stderr}`);
+  }
+});
