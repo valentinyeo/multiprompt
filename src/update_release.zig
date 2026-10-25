@@ -234,3 +234,7 @@ extern "kernel32" fn GetCommandLineW() callconv(.winapi) [*:0]const u16;
 extern "kernel32" fn IsWow64Process2(win.HANDLE, *u16, *u16) callconv(.winapi) i32;
 
 extern "kernel32" fn GetCurrentProcess() callconv(.winapi) win.HANDLE;
+
+test "the update check runs every five minutes" {
+    try std.testing.expectEqual(@as(u64, 5 * 60 * 1000), interval_ms);
+}
