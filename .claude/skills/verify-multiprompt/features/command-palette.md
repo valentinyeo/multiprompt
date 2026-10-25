@@ -8,6 +8,7 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 - `palette-execute`: execute UI Size: Increase and save 110% app scale.
 - `update-command-idle`: search Restart to update and execute with no staged update, retaining the owned app and session.
 - `palette-reset`: navigate to UI Size: Reset and restore 100%.
+- `palette-keyboard-priority`: with the pointer parked over a row, Up and Down still move the selection and Enter runs the keyboard's row; a real move of three pixels or more hands the selection to the pointer, and a click selects the row under the pointer (IGSH-836).
 
 ## How to get to it (user POV)
 
