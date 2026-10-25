@@ -4723,6 +4723,8 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
         }
         try std.testing.expect(setUnicodeClipboardTextWithRetry(std.unicode.utf8ToUtf16LeStringLiteral("stale")));
         Timer.calls = 0;
+        Timer.fire(null, 0, 0, 0);
+        try std.testing.expectEqual(@as(usize, 0), Timer.calls);
         const timer = SetTimer(null, 0, 200, @ptrCast(@constCast(&Timer.fire)));
         defer _ = KillTimer(null, timer);
         const y: LPARAM = if (selected) 150 else 20;
