@@ -8395,7 +8395,7 @@ fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session,
     app_state.g_main_hwnd = null;
     app_state.g_cap_msg_len = 0;
     app_state.group_count = 1;
-    app_state.groups[0] = std.mem.zeroes(app_state.TabGroup);
+    app_state.groups[0] = std.mem.zeroes(@TypeOf(app_state.groups[0]));
     app_state.groups[0].id = 7;
     for (0..2) |i| {
         app_state.shells[i] = app_state.empty_shell;
@@ -8409,7 +8409,7 @@ fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session,
     const before = app_state.shells[0..2].*;
     switch (action) {
         .close => closeShell(1),
-        .ctrl_w => _ = wndProc(null, app_state.WM_APP_CLOSE, 0, 0),
+        .ctrl_w => _ = wndProc(null, WM_APP_CLOSE, 0, 0),
         .archive => archiveTabAt(1),
         .inbox_archive => try std.testing.expect(!recordInboxArchive(1)),
         .end_session => endTmuxSessionAt(1),
