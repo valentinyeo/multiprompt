@@ -11,7 +11,9 @@ const lineHeightPolicy = fontSource.match(/^pub const CHAT_LINE_HEIGHT_PERMILLE[
 function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
-  return text.slice(start, text.indexOf('\n}', start) + 2);
+  return text.slice(start, text.indexOf('\n}', start) + 2)
+    .replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary')
+    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark');
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
@@ -147,6 +149,12 @@ var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
 var fake_ui_scale: i32 = 100;
 var g_chat_layout_reuse: usize = 0;
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 var g_chat_font_pt: i32 = 13;
 var clean_chat: bool = false;
 var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);

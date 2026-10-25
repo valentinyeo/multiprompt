@@ -52,6 +52,14 @@ var g_chat_active = true;
 var clean_chat: bool = false;
 var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
+var g_chat_read_open_pending = true;
+var g_chat_read_open_ready = false;
+var read_marks: usize = 0;
+fn chatReadMark(bottom: bool) bool {
+    std.debug.assert(bottom and !g_chat_read_open_pending and g_chat_read_open_ready);
+    read_marks += 1;
+    return false;
+}
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 const ChatTmuxSendJob = struct {
     key: struct { shell_id: u32 = 1 } = .{},
@@ -223,6 +231,9 @@ fn clear() void {
     fake_loaded_ms = 0;
     history_entry.history.deinit(std.heap.page_allocator);
     g_chat_screen_working = false;
+    g_chat_read_open_pending = true;
+    g_chat_read_open_ready = false;
+    read_marks = 0;
     persist_ok = true;
     paste_ok = true;
     shells[0].activity = .idle;
@@ -950,6 +961,7 @@ test "IGSH-564 steer failed paste never presses keys and ordinary Enter does not
     clear();
     composer_text = std.unicode.utf8ToUtf16LeStringLiteral("ordinary send");
     sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), read_marks);
     try std.testing.expectEqual(@as(usize, 1), writes);
     try std.testing.expectEqual(@as(usize, 1), enters);
     try std.testing.expectEqual(@as(usize, 0), tmux_steers + direct_steers);
@@ -1274,6 +1286,7 @@ function runHarness(control = false) {
     }
     let functions = names.map(body).join('\n')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
+      .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
       .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply');
