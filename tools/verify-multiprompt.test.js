@@ -231,7 +231,8 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
 });
 
 function assertsOwnedInput(source) {
-  const guard = source.slice(source.indexOf('function Assert-Foreground {'), source.indexOf('function Press('));
+  const guard = source.slice(source.indexOf('function Assert-Foreground {'), source.indexOf('function Wait-Foreground {'));
+  const wait = source.slice(source.indexOf('function Wait-Foreground {'), source.indexOf('function Press('));
   const press = source.slice(source.indexOf('function Press('), source.indexOf('function Type-Text('));
   const type = source.slice(source.indexOf('function Type-Text('), source.indexOf('function Click-WorkspacePill('));
   for (const pattern of [
@@ -246,14 +247,17 @@ function assertsOwnedInput(source) {
     /throw 'Refusing input: owned app is not foreground'/,
   ]) assert.match(guard, pattern);
   assert.equal((guard.match(/\breturn\b/g) || []).length, 1);
+  assert.equal((guard.match(/\bfor\s*\(/g) || []).length, 1);
   assert.deepEqual([...guard.matchAll(/\[VerifyNative\]::(\w+)\(/g)].map(match => match[1]), [
     'GetForegroundWindow', 'GetAncestor', 'GetAncestor', 'GetWindowThreadProcessId',
   ]);
-  assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-Until|while\s*\(/);
-  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+Assert-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
+  assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
+  assert.match(wait, /^function Wait-Foreground \{\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
+  assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
+  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
   assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
-  assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 1);
+  assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
   assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
@@ -266,12 +270,19 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
   for (const [before, after] of [
     ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
     ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
-    ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n    Assert-Foreground', '    Assert-Foreground\n    [void][VerifyNative]::SetForegroundWindow($script:window)'],
+    ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '        try { Assert-Foreground; return } catch {}\n        [void][VerifyNative]::SetForegroundWindow($script:window)'],
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', ''],
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
     ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
     ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
     ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ['$attempt -lt 50', '$true'],
+    ['$attempt -lt 49', '$true'],
+    ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
+    ['    Assert-Foreground\n}\n\nfunction Press(', '    return\n}\n\nfunction Press('],
+    ['        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n', ''],
+    ['    Wait-Foreground\n', ''],
+    ['    Record $Label\n    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    Record $Label\n    [VerifyNative]::Chord($Keys)\n    Assert-Foreground'],
     ['$attempt -lt 5', '$true'],
     ['$attempt -lt 4', '$true'],
     ['Start-Sleep -Milliseconds 100', 'Start-Sleep -Seconds 100'],
@@ -282,7 +293,7 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
     ['$rootOwner -ne [IntPtr]::Zero -and', ''],
     ['$root -eq $script:window -or $foregroundOwner -eq $process.Id', '$true'],
     ["throw 'Refusing input: owned app is not foreground'", 'return'],
-    ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n    Assert-Foreground', '    [void][VerifyNative]::SetForegroundWindow($script:window)'],
+    ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '    [void][VerifyNative]::SetForegroundWindow($script:window)'],
     ['    Assert-Foreground\n    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)'],
     ['    Assert-Foreground\n    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)'],
   ]) {
@@ -303,12 +314,18 @@ using System;
 public static class VerifyNative {
     public static IntPtr Foreground = new IntPtr(10), Root = new IntPtr(10), RootOwner = new IntPtr(10);
     public static uint Owner = 42;
-    public static int Reads, Chords, Texts, Activations;
+    public static int Reads, Chords, Texts, Activations, Allows, RecoverOnActivation;
     public static bool LoseOnActivation;
     public static IntPtr GetForegroundWindow() { Reads++; return Foreground; }
     public static IntPtr GetAncestor(IntPtr hwnd, uint flags) { return flags == 2 ? Root : RootOwner; }
     public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid) { pid = Owner; return 1; }
-    public static bool SetForegroundWindow(IntPtr hwnd) { Activations++; if (LoseOnActivation) Foreign(); return true; }
+    public static bool AllowSetForegroundWindow(uint pid) { Allows++; return true; }
+    public static bool SetForegroundWindow(IntPtr hwnd) {
+        Activations++;
+        if (LoseOnActivation) Foreign();
+        if (RecoverOnActivation > 0 && Activations >= RecoverOnActivation) { Foreground = Root = RootOwner = hwnd; Owner = 42; }
+        return true;
+    }
     public static void Chord(int[] keys) { Chords++; }
     public static void Text(string text) { Texts++; }
     public static void Foreign() { Foreground = new IntPtr(99); Root = new IntPtr(99); RootOwner = new IntPtr(99); Owner = 99; }
@@ -329,7 +346,7 @@ function Start-Sleep([int]$Milliseconds) {
 ${helpers}
 function Reset {
     [VerifyNative]::Foreground = [IntPtr]10; [VerifyNative]::Root = [IntPtr]10; [VerifyNative]::RootOwner = [IntPtr]10
-    [VerifyNative]::Owner = 42; [VerifyNative]::Reads = 0; [VerifyNative]::Chords = 0; [VerifyNative]::Texts = 0; [VerifyNative]::Activations = 0
+    [VerifyNative]::Owner = 42; [VerifyNative]::Reads = 0; [VerifyNative]::Chords = 0; [VerifyNative]::Texts = 0; [VerifyNative]::Activations = 0; [VerifyNative]::Allows = 0; [VerifyNative]::RecoverOnActivation = 0
     [VerifyNative]::LoseOnActivation = $false; $script:loseOnRecord = $false; $script:recover = $false; $script:sleeps = 0
 }
 function Require($Ok, $Message) { if (-not $Ok) { throw $Message } }
@@ -344,7 +361,7 @@ function Refuses([scriptblock]$Action) {
 }
 Reset
 Press @(0x12, 0x43) 'owned main'
-Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 1) 'Owned main input failed'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 1 -and [VerifyNative]::Allows -eq 1) 'Owned main input failed'
 Reset
 [VerifyNative]::Owner = 99
 Assert-Foreground
@@ -360,7 +377,15 @@ Require ([VerifyNative]::Reads -eq 2 -and $script:sleeps -eq 1) 'Transient foreg
 Reset
 [VerifyNative]::Foreign()
 Refuses { Press @(0x41) 'foreign' }
-Require ([VerifyNative]::Reads -eq 5 -and $script:sleeps -eq 4 -and [VerifyNative]::Activations -eq 1) 'Foreign refusal did not respect retry or activation boundary'
+Require ([VerifyNative]::Reads -eq 255 -and $script:sleeps -eq 253 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Foreign refusal did not respect retry or activation boundary'
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Press @(0x41) 'recovered on second activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2 -and $script:sleeps -eq 5) 'Press did not retry foreground activation'
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 50
+Press @(0x41) 'recovered on last activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50 -and $script:sleeps -eq 245) 'Press did not allow the last bounded activation'
 foreach ($field in @('Foreground', 'Root', 'RootOwner')) {
     Reset
     if ($field -eq 'Foreground') { [VerifyNative]::Foreground = [IntPtr]::Zero }

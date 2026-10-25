@@ -1592,10 +1592,19 @@ function Assert-Foreground {
     throw 'Refusing input: owned app is not foreground'
 }
 
+function Wait-Foreground {
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        try { Assert-Foreground; return } catch {}
+        if ($attempt -lt 49) { Start-Sleep -Milliseconds 100 }
+    }
+    Assert-Foreground
+}
+
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
-    [void][VerifyNative]::SetForegroundWindow($script:window)
-    Assert-Foreground
+    Wait-Foreground
     Record $Label
     Assert-Foreground
     [VerifyNative]::Chord($Keys)
