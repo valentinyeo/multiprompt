@@ -1408,6 +1408,8 @@ test "IGSH-813 prepending a loaded older page never counts its messages" {
     try after.apply(a, "@mp\t2\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t2\t\tolder\t0\n{\"role\":\"user\",\"text\":\"older message\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
     try std.testing.expectEqual(@as(usize, 2), after.blocks.items.len);
     try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+}
+
 test "IGSH-815 tail reconciliation retains prepended rows through cache restart and deltas" {
     const a = std.testing.allocator;
     const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
