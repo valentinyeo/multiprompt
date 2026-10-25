@@ -60,3 +60,84 @@ test('messages-only verification drives the real transcript and retains a requir
   assert.match(render, /if \(app_state.g_chat_blocks\[i\].role == .tool\) \{\s+app_state.g_chat_layout_rects\[i\] = .\{ .left = 0, .top = y, .right = 0, .bottom = y \};\s+chatImgStoreLayout\(i, .\{\}\);\s+continue;/);
   assert.match(render, /for \(first\.\.app_state.g_chat_block_count\) \|i\| \{\s+if \(app_state.g_chat_blocks\[i\].role == .tool\) continue;/);
 });
+
+
+test('IGSH-813 extends the existing Windows journey through every new-message transition', () => {
+  const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  for (const transition of ['arrival at bottom stays clear', 'loaded messages do not count', 'two new arrivals while reading', 'scrolling retains count', 'close hides and retains count', 'dismissed arrivals retain hidden count', 'reaching bottom resets count', 'pill jumps and clears count']) {
+    assert.ok(driver.includes(transition), transition);
+  }
+  assert.match(driver, /Click-NewMessages \$true/);
+  assert.match(driver, /Click-NewMessages \$false/);
+  assert.match(driver, /pillOrigin.Y -lt \$bounds.Bottom/);
+  const oracle = read('tools/chat-messages-only-proof.mjs');
+  assert.match(oracle, /assert.equal\(observation.newMessages\?\.passed, true/);
+  for (const shot of ['new-messages-visible', 'new-messages-dismissed', 'new-messages-jumped']) {
+    assert.ok(driver.includes("Shot '" + shot + "'"));
+    assert.ok(oracle.includes(shot + '.png'));
+  }
+  const map = read('.claude/skills/verify-multiprompt/features/chat-messages-only.md');
+  assert.match(map, /feature=chat-messages-only/);
+  assert.match(map, /unread pill above the composer/);
+});
+
+function assertScrollJourney(driver, desktop, boundary) {
+  assert.doesNotMatch(driver, /Stop-Process|taskkill|PostMessage|SetFocus|SetWindowText|::Click|::Activate|Invoke-Expression/);
+  assert.match(driver, /\$observedStates = \[regex\]::Matches\(\$log.Substring\(\$LogStart\),/);
+  assert.match(driver, /\$v = New-MessageState \$LogStart; if \(\$v -and \$v.count -eq \$Count -and \$v.visible -eq \$Visible -and \$v.up -eq \$Up\)/);
+  assert.match(driver, /Wait-For 'filled transcript exceeds viewport'[\s\S]*?\$log.Substring\(\$layoutLogStart\)[\s\S]*?\.Groups\[1\].Value -gt \$views\[0\].Current.BoundingRectangle.Height/);
+  const scroll = driver.slice(driver.indexOf('function Scroll-Transcript('), driver.indexOf('function Click-NewMessages('));
+  assert.match(scroll, /Doctor\s+\$bounds = \$views\[0\].Current.BoundingRectangle/);
+  assert.doesNotMatch(scroll, /FocusOwnedWindow|Press @|Start-Sleep/);
+  assert.match(scroll, /\$logStart = \(Read-Shared "\$settings\/debug.log"\).Length[\s\S]*::WheelTranscript\(\$main, \$app.Id, \$view, \$x, \$y, \$Delta\)\s+\$logStart/);
+  for (const [count, visible, up, name, marker] of [
+    [0, 0, 0, 'arrival at bottom stays clear', 'fill'],
+    [0, 0, 1, 'loaded messages do not count', 'scroll'],
+    [2, 1, 1, 'two new arrivals while reading', 'arrival'],
+    [2, 1, 1, 'scrolling retains count', 'scroll'],
+    [2, 0, 1, 'close hides and retains count', 'dismiss'],
+    [3, 0, 1, 'dismissed arrivals retain hidden count', 'arrival'],
+    [0, 0, 0, 'reaching bottom resets count', 'scroll'],
+    [0, 0, 1, 'scrolling up alone does not count', 'scroll'],
+    [1, 1, 1, 'new arrival after reset shows pill', 'arrival'],
+    [0, 0, 0, 'pill jumps and clears count', 'jump'],
+  ]) assert.ok(driver.includes(`Require-NewMessages ${count} ${visible} ${up} '${name}' $${marker}LogStart`), name);
+  assert.match(driver, /\$scrollLogStart = Scroll-Transcript 2400\s+\[void\]\(Require-NewMessages 0 0 1 'loaded messages do not count' \$scrollLogStart\)\s+\$arrivalLogStart = [^\n]+\s+Shell-Input 'messages' '2'/);
+  assert.match(driver, /Scroll-Transcript -120/);
+  assert.match(driver, /Scroll-Transcript -30000/);
+  assert.doesNotMatch(driver, /Press @\(0x2[1234]\)/);
+  const wheel = desktop.slice(desktop.indexOf('public static void WheelTranscript('), desktop.indexOf('public static void PressClient('));
+  for (const guard of ['Owner(hwnd) != pid', 'GetForegroundWindow() != hwnd', 'Owner(view) != pid', 'Class(view) != "ZigShellChatTranscript"', '!IsChild(hwnd, view)', 'WindowFromPoint(new Point { X = x, Y = y }) != view', 'delta < short.MinValue', 'delta > short.MaxValue']) assert.ok(wheel.includes(guard), guard);
+  assert.match(wheel, /Flags = 0x8001/);
+  assert.match(wheel, /Data = unchecked\(\(uint\)delta\), Flags = 0x0800/);
+  assert.match(wheel, /if \(SendInput\(\(uint\)inputs.Length, inputs, Marshal.SizeOf\(typeof\(Input\)\)\) != inputs.Length\) throw/);
+  assert.match(boundary, /Readable transcript paragraph[^\n]+\\n\\n" \* 32/);
+}
+
+test('IGSH-813 wheel journey requires overflow and fresh strict app-log states without transcript focus', () => {
+  const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  assertScrollJourney(driver, desktop, boundary);
+  for (const [source, before, after] of [
+    [0, '$log.Substring($LogStart)', '$log'],
+    [0, '$v.count -eq $Count', '$true'],
+    [0, ".Value -gt $views[0].Current.BoundingRectangle.Height", '.Value -gt 0'],
+    [0, "'loaded messages do not count' $scrollLogStart", "'loaded messages do not count'"],
+    [0, '[ChatDeliveryDesktop]::WheelTranscript($main, $app.Id, $view, $x, $y, $Delta)', '$null'],
+    [1, 'WindowFromPoint(new Point { X = x, Y = y }) != view', 'false'],
+    [1, 'Data = unchecked((uint)delta), Flags = 0x0800', 'Data = 0, Flags = 0x0800'],
+    [1, 'if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("Wheel SendInput failed");', 'return;'],
+    [2, '* 32', '* 1'],
+  ]) {
+    const sources = [driver, desktop, boundary];
+    sources[source] = sources[source].replace(before, after);
+    assert.notEqual(sources[source], [driver, desktop, boundary][source], before);
+    assert.throws(() => assertScrollJourney(...sources), assert.AssertionError, before);
+  }
+  for (const forbidden of ['Stop-Process', 'taskkill', 'PostMessage', 'SetFocus', 'SetWindowText', '::Click', '::Activate', 'Invoke-Expression']) {
+    assert.throws(() => assertScrollJourney(driver + '\n' + forbidden, desktop, boundary), assert.AssertionError, forbidden);
+  }
+});

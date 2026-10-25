@@ -39,7 +39,7 @@ function harness() {
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;').replaceAll('@import("smooth.zig").drawRoundRect', 'drawRoundRect');
+  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;').replaceAll('@import("smooth.zig").drawRoundRect', 'drawRoundRect');
   return `const std = @import("std");
 const app_state = @This();
 const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read('chat_style'), 'contentColumn')} };
@@ -119,6 +119,7 @@ ${fn(browser, 'browserSplitPermilleForActiveShell')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
 fn chatWorkingIndicatorH() i32 { return uiScaled(18); }
+fn chatNewMessagesHeight() i32 { return 0; }
 var test_stop_visible = false;
 var test_composer_text = false;
 fn chatStopVisible() bool { return test_stop_visible; }

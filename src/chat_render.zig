@@ -186,6 +186,7 @@ const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusAllowed;
 const chatPaletteToggleKeyDown = @import("chat_composer.zig").chatPaletteToggleKeyDown;
 const postPaletteToggle = @import("chat_composer.zig").postPaletteToggle;
+const chatNewMessagesChanged = @import("chat_composer.zig").chatNewMessagesChanged;
 const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
 const chatListMarkerLen = @import("chat_capture.zig").chatListMarkerLen;
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
@@ -1777,6 +1778,21 @@ pub fn chatMinScroll() i32 {
     return @min(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top));
 }
 
+pub fn chatScrollStateChanged(viewport_h: i32) void {
+    const had_messages = app_state.g_chat_new_messages.count() != 0;
+    app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
+    app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
+    chatNewMessagesChanged(had_messages);
+}
+
+pub fn chatJumpToNewest() void {
+    chatScrollBy(-app_state.g_chat_content_h);
+    if (app_state.g_chat_transcript_hwnd == null) return;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    chatScrollStateChanged(client.bottom - client.top);
+}
+
 pub fn chatScrollBy(delta_px: i32) void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const max_scroll = chatMaxScroll();
@@ -1794,7 +1810,9 @@ pub fn chatScrollBy(delta_px: i32) void {
     }
     if (new_y == app_state.g_chat_scroll_y) return;
     app_state.g_chat_scroll_y = new_y;
-    app_state.g_chat_scrolled_up = new_y < max_scroll - uiScaled(4);
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    chatScrollStateChanged(client.bottom - client.top);
     if (app_state.g_chat_scrolled_up) app_state.g_chat_scroll_bottom_pending = false;
     app_state.g_chat_hover_copy = null;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
@@ -5299,4 +5317,37 @@ test "IGSH-816 CLEAN hides expanded tool detail pixels" {
 
 test "IGSH-816 CLEAN hides tool diff pixels" {
     try expectCleanChatRowHidden(.tool_diff);
+}
+
+test "IGSH-813 pill click jumps to newest and clears through the scroll owner" {
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("new messages"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_hwnd = app_state.g_chat_transcript_hwnd;
+    const old_scroll = app_state.g_chat_scroll_y;
+    const old_content_h = app_state.g_chat_content_h;
+    const old_scrolled_up = app_state.g_chat_scrolled_up;
+    const old_counter = app_state.g_chat_new_messages;
+    const old_pending = app_state.g_chat_scroll_bottom_pending;
+    const old_active = app_state.g_chat_active;
+    defer {
+        app_state.g_chat_transcript_hwnd = old_hwnd;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_content_h = old_content_h;
+        app_state.g_chat_scrolled_up = old_scrolled_up;
+        app_state.g_chat_new_messages = old_counter;
+        app_state.g_chat_scroll_bottom_pending = old_pending;
+        app_state.g_chat_active = old_active;
+    }
+    app_state.g_chat_active = false;
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_content_h = 1600;
+    app_state.g_chat_scroll_y = 200;
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    app_state.g_chat_new_messages.arrive(3, true);
+    chatJumpToNewest();
+    try std.testing.expectEqual(chatMaxScroll(), app_state.g_chat_scroll_y);
+    try std.testing.expect(!app_state.g_chat_scrolled_up);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
 }

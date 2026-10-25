@@ -91,6 +91,7 @@ var g_chat_load_tries: u8 = 0; // old-defer positive control only
 var g_chat_content_h: i32 = 0;
 var g_chat_scroll_y: i32 = 0;
 var g_chat_scrolled_up = false;
+var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
 var g_chat_echo_layout_count: usize = 0;
 var request_count: usize = 0;
@@ -103,6 +104,7 @@ var remote_calls: usize = 0;
 var cache_writes: usize = 0;
 var status_layout_calls: usize = 0;
 fn layoutChatControls() void { status_layout_calls += 1; }
+fn chatNewMessagesChanged(_: bool) void {}
 const WM_APP_CHAT_FILE_READY = 1;
 var g_chat_cache_write_mutex: struct {
     fn tryLock(_: *@This()) bool { return true; }
@@ -161,7 +163,7 @@ fn chatRelayout(_: i32) void {
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
-const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy'];
+const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy', 'chatScrollStateChanged'];
 const acceptance = `
 test "cache-first switch-back, stale completion and failure preserve complete messages" {
     const a = std.heap.page_allocator;

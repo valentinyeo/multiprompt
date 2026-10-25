@@ -1155,6 +1155,7 @@ pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
 pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
+pub var g_chat_new_messages: chat_history.NewMessages = .{};
 pub var g_chat_content_left: i32 = 0;
 pub var g_chat_sel_anchor: usize = 0;
 pub var g_chat_sel_caret: usize = 0;
