@@ -1534,6 +1534,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         .visit_shell_id = app_state.g_chat_read_visit_shell_id,
         .visit_marker = app_state.g_chat_read_visit_marker,
         .ready = app_state.g_chat_read_open_ready,
+        .hold = app_state.g_chat_read_hold,
         .file = app_state.g_chat_blocks_from_file,
         .cache = app_state.g_chat_cache_shell_id,
         .blocks = app_state.g_chat_blocks[0..2].*,
@@ -1551,6 +1552,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         app_state.g_chat_read_visit_shell_id = saved.visit_shell_id;
         app_state.g_chat_read_visit_marker = saved.visit_marker;
         app_state.g_chat_read_open_ready = saved.ready;
+        app_state.g_chat_read_hold = saved.hold;
         app_state.g_chat_blocks_from_file = saved.file;
         app_state.g_chat_cache_shell_id = saved.cache;
         app_state.g_chat_blocks[0..2].* = saved.blocks;
@@ -1581,6 +1583,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     app_state.g_chat_read_open_pending = false;
     try std.testing.expect(!chatReadMark(true));
     app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_read_hold = false;
     try std.testing.expect(chatReadMark(true));
     try std.testing.expectEqual(@as(u64, 22), app_state.shells[0].last_read_message_id);
     try std.testing.expectEqual(@as(u64, 77), app_state.shells[1].last_read_message_id);

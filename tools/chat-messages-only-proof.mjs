@@ -138,7 +138,9 @@ export function verifyUnreadDivider(root) {
   assert.equal(proof.allRead.unknown, 0);
   assert.notEqual(proof.allRead.marker, proof.marker);
   const image = name => readBmp(path.join(root, name + '.bmp'));
-  const reopened = dividerPixels(image('unread-divider-reopened'), proof.transcript, proof.transcript.top + proof.reopened.lineY - proof.reopened.scroll, 1);
+  assert.equal(proof.visible.offset, proof.reopened.offset);
+  assert.equal(proof.visible.marker, proof.marker);
+  const reopened = dividerPixels(image('unread-divider-reopened'), proof.transcript, proof.transcript.top + proof.visible.lineY - proof.visible.scroll, 1);
   dividerPixels(image('unread-divider-gap'), proof.transcript, 0, 0);
   dividerPixels(image('unread-divider-all-read'), proof.transcript, 0, 0);
   return reopened;

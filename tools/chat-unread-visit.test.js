@@ -37,6 +37,7 @@ const app_state = struct {
   var g_chat_cache_shell_id: u32 = 7;
   var g_chat_read_visit_shell_id: u32 = 0;
   var g_chat_read_visit_marker: u64 = 0;
+  var g_chat_read_hold = false;
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = true;
   var g_chat_read_boundary: chat_history.ReadBoundary = .{};
@@ -52,7 +53,7 @@ const app_state = struct {
 };
 ${between(session, 'pub fn chatReadBoundary()', 'pub fn chatDeferTranscriptLoad()')}
 fn openTab() void {
-${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_open_pending)')}
+${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)')}
   app_state.g_chat_read_open_pending = false;
   app_state.g_chat_read_open_ready = true;
 }
@@ -64,6 +65,7 @@ ${between(consoleSource, '    if (idx != prev) _ = @import("chat_session.zig").c
 test "divider stays at first unread after reading and clears on all-read revisit" {
   openTab();
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  app_state.g_chat_read_hold = false;
   try std.testing.expect(chatReadMark(true));
   try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
