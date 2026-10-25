@@ -93,6 +93,47 @@ class ChatSyncAuditTest(unittest.TestCase):
                          ['The neutral summary is ready', 'This neutral paragraph follows a blank line',
                           'This neutral paragraph has continuation text'])
 
+    def test_igsh808_indented_tool_output_is_not_missing_chat(self):
+        reader = audit.load_reader()
+        text = "handleStatelessMcpRequest(new Request('http://localhost/mcp', {"
+        event = dict(type='user', message=dict(role='user', content=[
+            dict(type='tool_result', tool_use_id='neutral-call',
+                 content='198  const reply = () => ' + text + "\n199    method: 'POST',")]))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(json.dumps(event) + '\n')
+            wire = self.wire(reader.conversation_rows(event, 'claude')).replace(
+                '\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            capture = '           > ' + text + '\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else ''.join(
+                    json.dumps(dict(probe=index, present=False)) + '\n' for index in range(argv.count('--contains')))
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit.time, 'sleep') as sleep:
+                self.assertEqual(audit.transcript_evidence(reader, path, wire, dict(kind='pane_missing', text=text)), [])
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+                for prefix in ('  > ', '\t› ', '  ❯ ', '  ● ', '\x1b[32m           > '):
+                    with self.subTest(prefix=prefix):
+                        capture = prefix + text + '\x1b[0m\n' + '\n' * 8
+                        self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+                for prefix in ('> ', '› ', '❯ ', '\x1b[32m> '):
+                    with self.subTest(prefix=prefix):
+                        capture = prefix + text + '\x1b[0m\n' + '\n' * 8
+                        findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                        self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                        self.assertEqual(findings[0]['text'], text)
+                        self.assertEqual(findings[0]['transcript_lines'], [])
+                event = dict(type='assistant', message=dict(role='assistant', content=text))
+                path.write_text(json.dumps(event) + '\n')
+                wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+                reader.response.return_value = wire
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual(findings[0]['transcript_lines'], [dict(line=1, timestamp='', location='in_window', record='conversation')])
+
     def test_igsh620_wrapped_running_tool_status_is_not_a_chat_turn(self):
         capture = ['● Filed IGSH-619 for flaky contract tests; waiting on release run ·',
                    '  5m 12s…',

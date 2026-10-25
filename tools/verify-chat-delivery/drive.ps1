@@ -119,6 +119,38 @@ function Queue-View {
     foreach ($item in $parsed) { $labels.Add([string]$item.state + ':' + [string]$item.text) }
     $labels -join '|'
 }
+function New-MessageState([int]$LogStart = 0) {
+    $log = Read-Shared "$settings/debug.log"
+    if ($log.Length -le $LogStart) { return $null }
+    $observedStates = [regex]::Matches($log.Substring($LogStart), '\[chat\] new messages count=(\d+) visible=(\d) up=(\d) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+    if ($observedStates.Count -eq 0) { return $null }
+    $g = $observedStates[$observedStates.Count - 1].Groups
+    @{count=[int]$g[1].Value; visible=[int]$g[2].Value; up=[int]$g[3].Value; left=[int]$g[4].Value; top=[int]$g[5].Value; right=[int]$g[6].Value; bottom=[int]$g[7].Value}
+}
+function Require-NewMessages([int]$Count, [int]$Visible, [int]$Up, [string]$Name, [int]$LogStart = 0) {
+    $current = Wait-For $Name { $v = New-MessageState $LogStart; if ($v -and $v.count -eq $Count -and $v.visible -eq $Visible -and $v.up -eq $Up) { $v } }
+    $actions.Add(@{case=$plan.name; input=$Name; state=$current})
+    $current
+}
+function Scroll-Transcript([int]$Delta) {
+    Doctor
+    $bounds = $views[0].Current.BoundingRectangle
+    $view = [IntPtr]$views[0].Current.NativeWindowHandle
+    $x = [int](($bounds.Left + $bounds.Right) / 2)
+    $y = [int](($bounds.Top + $bounds.Bottom) / 2)
+    $logStart = (Read-Shared "$settings/debug.log").Length
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='wheel over transcript'; delta=$Delta; x=$x; y=$y; logStart=$logStart})
+    [ChatDeliveryDesktop]::WheelTranscript($main, $app.Id, $view, $x, $y, $Delta)
+    $logStart
+}
+function Click-NewMessages([bool]$Close) {
+    Doctor
+    $v = New-MessageState
+    if (-not $v -or $v.visible -ne 1) { throw 'New-message pill is not visible' }
+    $x = if ($Close) { [int]($v.right - ($v.bottom - $v.top) / 2) } else { [int](($v.left + $v.right) / 2) }
+    $actions.Add(@{case=$plan.name; input='click new messages'; close=$Close; x=$x; y=[int](($v.top + $v.bottom) / 2)})
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, [int](($v.top + $v.bottom) / 2))
+}
 function Type-Composer([string]$Text) {
     [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$Text})
@@ -225,6 +257,52 @@ foreach ($plan in $plans) {
             Shot 'messages-only-after-tools'
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            $fillLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '12'
+            [void](Wait-For 'new transcript messages at bottom' { (Read-Shared $cache.FullName).Contains('New message 11') })
+            [void](Wait-For 'app applied filled transcript at bottom' { $log = Read-Shared "$settings/debug.log"; $log.Length -gt $fillLogStart -and $log.Substring($fillLogStart).Contains('[chat] new messages count=0 visible=0 up=0') })
+            [void](Require-NewMessages 0 0 0 'arrival at bottom stays clear' $fillLogStart)
+            $layoutLogStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x11, 0x30) 'Ctrl+0: measure filled transcript' $true
+            [void](Wait-For 'filled transcript exceeds viewport' {
+                $log = Read-Shared "$settings/debug.log"
+                if ($log.Length -le $layoutLogStart) { return $false }
+                $layouts = [regex]::Matches($log.Substring($layoutLogStart), '\[chatfont\] pt=\d+ blocks=\d+ content_h=(\d+)')
+                $layouts.Count -gt 0 -and [int]$layouts[$layouts.Count - 1].Groups[1].Value -gt $views[0].Current.BoundingRectangle.Height
+            })
+            $scrollLogStart = Scroll-Transcript 2400
+            [void](Require-NewMessages 0 0 1 'loaded messages do not count' $scrollLogStart)
+            $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '2'
+            $pill = Require-NewMessages 2 1 1 'two new arrivals while reading' $arrivalLogStart
+            $bounds = $views[0].Current.BoundingRectangle
+            $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
+            $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
+            if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
+            Shot 'new-messages-visible'
+            $scrollLogStart = Scroll-Transcript -120
+            [void](Require-NewMessages 2 1 1 'scrolling retains count' $scrollLogStart)
+            $dismissLogStart = (Read-Shared "$settings/debug.log").Length
+            Click-NewMessages $true
+            [void](Require-NewMessages 2 0 1 'close hides and retains count' $dismissLogStart)
+            Shot 'new-messages-dismissed'
+            $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '1'
+            [void](Require-NewMessages 3 0 1 'dismissed arrivals retain hidden count' $arrivalLogStart)
+            $scrollLogStart = Scroll-Transcript -30000
+            [void](Require-NewMessages 0 0 0 'reaching bottom resets count' $scrollLogStart)
+            $scrollLogStart = Scroll-Transcript 2400
+            [void](Require-NewMessages 0 0 1 'scrolling up alone does not count' $scrollLogStart)
+            $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '1'
+            [void](Require-NewMessages 1 1 1 'new arrival after reset shows pill' $arrivalLogStart)
+            $jumpLogStart = (Read-Shared "$settings/debug.log").Length
+            Click-NewMessages $false
+            [void](Require-NewMessages 0 0 0 'pill jumps and clears count' $jumpLogStart)
+            Shot 'new-messages-jumped'
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Doctor $true
+            $observation.newMessages = @{passed=$true; transitions=@('arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts

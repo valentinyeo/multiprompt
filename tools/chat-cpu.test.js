@@ -148,6 +148,7 @@ var g_chat_layout_font_pt: i32 = 0;
 var fake_ui_scale: i32 = 100;
 var g_chat_layout_reuse: usize = 0;
 var g_chat_font_pt: i32 = 13;
+var clean_chat: bool = false;
 var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_content_h: i32 = 0;
 var g_chat_echo_layout_count: usize = 0;

@@ -236,7 +236,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = composer_card.left + send_margin + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH();
+    const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
     return .{
         .pane = slot,
         .transcript = .{
@@ -258,6 +258,45 @@ pub fn chatViewLayout() ChatViewLayout {
         .send_shown = slots.send_shown,
         .stop_shown = slots.stop_shown,
     };
+}
+
+pub fn chatNewMessagesHeight() i32 {
+    return if (app_state.g_chat_new_messages.count() != 0) uiScaled(30) else 0;
+}
+
+pub fn chatNewMessagesRect() ?RECT {
+    if (!app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)) return null;
+    const layout = chatViewLayout();
+    var digits: i32 = 1;
+    var remaining = app_state.g_chat_new_messages.count();
+    while (remaining >= 10) : (remaining /= 10) digits += 1;
+    const width = @min(layout.transcript.right - layout.transcript.left, uiScaled(220 + digits * 8));
+    const left = layout.transcript.left + @divTrunc(layout.transcript.right - layout.transcript.left - width, 2);
+    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + uiScaled(2), .bottom = layout.transcript.bottom + uiScaled(28) };
+}
+
+pub fn chatNewMessagesChanged(had_messages: bool) void {
+    if (had_messages != (app_state.g_chat_new_messages.count() != 0)) layoutChatControls();
+    @import("window_layout.zig").chatWorkingIndicatorInvalidate();
+    if (verboseLoggingEnabled()) {
+        const rc = chatNewMessagesRect() orelse std.mem.zeroes(RECT);
+        var log: [200]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] new messages count={d} visible={d} up={d} rect={d},{d},{d},{d}", .{
+            app_state.g_chat_new_messages.count(),
+            @intFromBool(app_state.g_chat_new_messages.visible(app_state.g_chat_scrolled_up)),
+            @intFromBool(app_state.g_chat_scrolled_up),
+            rc.left,
+            rc.top,
+            rc.right,
+            rc.bottom,
+        }) catch return);
+    }
+}
+
+pub fn chatNewMessagesDismiss() void {
+    const had_messages = app_state.g_chat_new_messages.count() != 0;
+    app_state.g_chat_new_messages.dismiss();
+    chatNewMessagesChanged(had_messages);
 }
 
 pub fn chatSendSlots(card: RECT, size: i32, margin: i32, gap: i32, working: bool, has_text: bool) struct { send: RECT, stop: RECT, send_shown: bool, stop_shown: bool, left: i32 } {
@@ -417,6 +456,9 @@ pub fn postPaletteToggle() void {
 pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (!app_state.g_chat_active) return 0;
     const layout = chatViewLayout();
+    if (chatNewMessagesRect()) |pill| {
+        if (pointInRect(pill, x, y)) return if (x >= pill.right - uiScaled(28)) 11 else 10;
+    }
     if (app_state.g_chat_reply_len > 0 and pointInRect(chatReplyCancelRect(), x, y)) return 9;
     if (layout.stop_shown and pointInRect(layout.stop_btn, x, y)) return 5;
     if (layout.send_shown and pointInRect(layout.send_btn, x, y)) return 3;
@@ -1150,6 +1192,9 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
     defer _ = DeleteObject(bitmap);
     const old_bitmap = SelectObject(dc, bitmap);
     defer _ = SelectObject(dc, old_bitmap);
+    const background = CreateSolidBrush(app_state.g_chat_input_color) orelse return false;
+    defer _ = DeleteObject(background);
+    if (FillRect(dc, &client, background) == 0) return false;
     _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
     var probe: [2]u16 = .{ 0, 0 };
     if (GetWindowTextW(hwnd, &probe, 2) == 0) {
@@ -1965,4 +2010,41 @@ test "IGSH-760 typing presents completed smooth frames without native inline pai
     _ = ShowWindow(edit, SW_HIDE);
     _ = SendMessageW(edit, 0x0102, 'e', 1);
     try std.testing.expect(IsWindowVisible(edit) == 0);
+}
+
+test "IGSH-813 pill is centered outside transcript and close keeps its count and layout space" {
+    const w = @import("win32.zig");
+    const hwnd = CreateWindowExW(0, L("STATIC"), L("new message layout"), 0, 0, 0, 1200, 900, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_main = app_state.g_main_hwnd;
+    const old_active = app_state.g_chat_active;
+    const old_count = app_state.shell_count;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_counter = app_state.g_chat_new_messages;
+    defer {
+        app_state.g_main_hwnd = old_main;
+        app_state.g_chat_active = old_active;
+        app_state.shell_count = old_count;
+        app_state.g_chat_scrolled_up = old_up;
+        app_state.g_chat_new_messages = old_counter;
+    }
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    app_state.g_chat_new_messages.arrive(123, true);
+    const layout = chatViewLayout();
+    const pill = chatNewMessagesRect() orelse return error.TestUnexpectedResult;
+    try std.testing.expect(pill.top >= layout.transcript.bottom);
+    try std.testing.expect(pill.bottom <= layout.composer_card.top - chatWorkingIndicatorH());
+    try std.testing.expect(@abs((pill.left + pill.right) - (layout.transcript.left + layout.transcript.right)) <= 1);
+    try std.testing.expectEqual(@as(u8, 10), chatButtonAt(pill.left + 1, pill.top + 1));
+    try std.testing.expectEqual(@as(u8, 11), chatButtonAt(pill.right - 1, pill.top + 1));
+    chatNewMessagesDismiss();
+    try std.testing.expectEqual(@as(usize, 123), app_state.g_chat_new_messages.count());
+    try std.testing.expect(chatNewMessagesRect() == null);
+    try std.testing.expectEqualDeep(layout.transcript, chatViewLayout().transcript);
+    app_state.g_chat_scrolled_up = false;
+    try std.testing.expect(chatNewMessagesRect() == null);
 }

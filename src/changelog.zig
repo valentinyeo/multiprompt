@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.865", .items = &.{
+        .{ .text = "The message box no longer shows a black line beneath the input.", .ticket = "IGSH-805" },
+    } },
     .{ .ver = "0.28.864", .items = &.{
         .{ .text = "Remote-session notification setup instructions use the installed notifier so activity and completion reach the app.", .ticket = "IGSH-789" },
     } },

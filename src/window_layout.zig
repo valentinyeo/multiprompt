@@ -359,7 +359,7 @@ pub fn chatPermissionRect(action: @import("chat_permission.zig").Action) ?RECT {
     const gap = uiScaled(8);
     const width = @divTrunc(layout.transcript.right - layout.transcript.left - gap * (count - 1), count);
     const left = layout.transcript.left + index * (width + gap);
-    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + uiScaled(2), .bottom = layout.composer_card.top - uiScaled(2) };
+    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + @import("chat_composer.zig").chatNewMessagesHeight() + uiScaled(2), .bottom = layout.composer_card.top - uiScaled(2) };
 }
 
 fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
@@ -408,6 +408,26 @@ pub fn paintChatView(hdc: HANDLE) void {
     if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
     paintChatAttachButton(hdc, layout.attach_btn);
     logChatButtons(layout);
+    if (@import("chat_composer.zig").chatNewMessagesRect()) |pill| {
+        paintChatSurface(hdc, pill, app_state.g_chat_input_color, card_border, uiScaled(13));
+        const old_font = SelectObject(hdc, ensureChatFont());
+        defer _ = SelectObject(hdc, old_font);
+        _ = SetTextColor(hdc, customColorOr("text", @import("themes.zig").themeConsoleFg()));
+        var label = pill;
+        label.right -= uiScaled(28);
+        var text: [64]u8 = undefined;
+        const caption = std.fmt.bufPrint(&text, "{d} new message{s}", .{ app_state.g_chat_new_messages.count(), if (app_state.g_chat_new_messages.count() == 1) @as([]const u8, "") else "s" }) catch unreachable;
+        var wide: [64]u16 = undefined;
+        const n = std.unicode.utf8ToUtf16Le(&wide, caption) catch unreachable;
+        var arrow = label;
+        arrow.right = arrow.left + uiScaled(28);
+        _ = DrawTextW(hdc, L("↓"), -1, &arrow, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        label.left = arrow.right;
+        _ = DrawTextW(hdc, &wide, @intCast(n), &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        var close = pill;
+        close.left = label.right;
+        _ = DrawTextW(hdc, L("×"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
     if (chatPermissionVisible()) {
         paintChatPermission(hdc, card_border);
         return;
@@ -417,7 +437,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         defer _ = SelectObject(hdc, old_font);
         var line = RECT{
             .left = layout.transcript.left,
-            .top = layout.transcript.bottom,
+            .top = layout.transcript.bottom + @import("chat_composer.zig").chatNewMessagesHeight(),
             .right = layout.transcript.right,
             .bottom = layout.composer_card.top,
         };

@@ -42,7 +42,8 @@ function checkIncomingPaint(source) {
   assert.match(paint, /row: \*const chat_shell_sync\.Row/);
   assert.match(paint, /if \(row\.injected\) chatInjectedBubbleColor\(\) else chatUserBubbleColor\(\)/);
   assert.match(paint, /if \(row\.injected\) chatPaintTime\(hdc, .*\.role = \.injected, \.sender = row\.sender/);
-  assert.match(paint, /status_h \* @as\(i32, if \(row\.injected\) 2 else 1\)/);
+  assert.match(paint, /const sender_h = if \(row\.injected\) uiScaled\(CHAT_STATUS_H\) else @as\(i32, 0\);/);
+  assert.match(paint, /rc\.bottom - status_h - sender_h/);
   assert.match(paint, /if \(row\.injected\) \{\s*area\.top \+= status_h;\s*area\.bottom \+= status_h;/);
   assert.match(paint, /Queued in Claude/);
   assert.match(body(source, 'chatShellRowsLayout'), /if \(row\.injected\) rc\.bottom \+= uiScaled\(CHAT_STATUS_H\)/);

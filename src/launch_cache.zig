@@ -116,6 +116,7 @@ pub fn restore() void {
     chat_id = state.shells[state.active_shell].chat_id;
     state.g_sidebar_w_full = s.sidebar_width;
     state.g_chat_font_pt = s.font;
+    state.clean_chat = s.clean_chat;
     if (s.chat) {
         state.g_chat_last_len = s.text.len;
         @memcpy(state.g_chat_capture[0..s.text.len], s.text);
@@ -290,6 +291,7 @@ pub fn save() void {
         .sidebar_collapsed = state.g_sidebar_collapsed,
         .sidebar_scroll = state.g_sidebar_scroll,
         .font = state.g_chat_font_pt,
+        .clean_chat = state.clean_chat,
         .sidebar_width = state.g_sidebar_w_full,
     }) catch return;
     const hash = std.hash.Wyhash.hash(0, bytes);

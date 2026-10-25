@@ -5,6 +5,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
 | IGSH-807 | Alt+Q retains chat/browser/shell input routing without a pane focus outline in any theme. | pane-layout | journey extended, not run | Paired GitHub Windows runs: pinned pre-fix `9618091700e09f5958a48390449dc5067874d5dd` must fail on margin pixels after input cycles; fixed build must pass with matching reviewed screenshots. No local execution; see GATES.md. |
+| IGSH-813 | A centered pill counts newly arriving messages while reading older transcript text, with jump and dismiss controls. | chat-messages-only, chat-view | journey extended, not yet run | Run Windows native tests and both branch journeys; inspect visible, dismissed and jumped screenshots, exact count transitions, app identity and cleanup. Structured transcript boundary, not arbitrary console redraws. |
 | IGSH-717 | Selecting message text and pressing Enter quotes only that selection. | chat-view (`selection-enter-reply`) | branch drag failed; fix awaiting rerun | Run against v0.28.851 as a negative control and the branch on GitHub Windows; first require visible selection, then a nonempty partial quote, focused composer, no send, and inspect both selection screenshots. |
 | IGSH-725 | Docked browser panes keep their native monitor scale when opened or restored. | browser-pane-locked | journey extended, not yet run | Run the branch on GitHub Windows and inspect launch/restart DPI evidence; mixed-DPI hardware must confirm visual sharpness and tab switching. |
 | IGSH-716 | Restart focuses the chat box; Alt+Q and Alt+M restore typing with Find open or no browser pane. | chat-focus | journey added, not yet run | Run against v0.28.848 as a negative control and the branch on GitHub Windows; inspect UIA values, focused elements and screenshots. |
@@ -113,7 +114,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | palette-order | not run in this pass; added afterwards by IGSH-612 with its own GitHub runs | — |
 | remind-me | not run in this pass; added by IGSH-702 | — |
 | group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
-| pane-layout | 39871210688, v0.28.821 | passed |
+| pane-layout | 39871210688, v0.28.821 | passed before IGSH-810 mask assertions; dark/light/amoled mask journey not yet run |
 | chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
 | chat-tables | 39871210688, v0.28.821 | passed |
 | sessions | 39871210688, v0.28.821 | failed: focus stays on frame after rename; `real console command wrote file` |

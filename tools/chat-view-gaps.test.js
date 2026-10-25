@@ -49,6 +49,7 @@ test('ISSUE-400 a failed permission key does not consume the only answer attempt
 const std = @import("std");
 const permission = @import("chat_permission.zig");
 var g_chat_active = true;
+var clean_chat: bool = false;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
 var shells = [_]struct { permission_answered: bool = false }{.{}};

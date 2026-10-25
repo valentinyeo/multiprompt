@@ -1,0 +1,30 @@
+name: Probe Chrome frameless
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ceo/IGSH-811
+    paths:
+      - .github/workflows/probe-chrome-frameless.yml
+      - tools/probe-chrome-frameless.ps1
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Measure Chrome frame removal
+        shell: pwsh
+        run: ./tools/probe-chrome-frameless.ps1
+      - name: Keep measurements and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-frameless-probe
+          path: artifacts/chrome-frameless/
+          if-no-files-found: error

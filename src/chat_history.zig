@@ -266,6 +266,20 @@ pub const History = struct {
         return result;
     }
 
+    pub fn newMessages(self: History, next: History) usize {
+        if (self.revision == 0 or self.restore_full or
+            self.inode != next.inode or !std.mem.eql(u8, &self.sid, &next.sid) or next.offset <= self.offset) return 0;
+        var count: usize = 0;
+        var last_offset: ?u64 = null;
+        for (next.blocks.items) |block| {
+            if (!block.first or block.role == .tool or block.source_offset < self.offset) continue;
+            if (last_offset == block.source_offset) continue;
+            count += 1;
+            last_offset = block.source_offset;
+        }
+        return count;
+    }
+
     pub fn cursor(self: History) History {
         return .{ .status = self.status, .sid = self.sid, .inode = self.inode, .offset = self.offset, .start = self.start, .mtime = self.mtime, .probe = self.probe, .more = self.more, .revision = self.revision };
     }
@@ -452,6 +466,32 @@ pub fn sameSession(a: transcript.Identity, b: transcript.Identity) bool {
     if (a.sid[0] != 0 or b.sid[0] != 0) return a.sid[0] != 0 and std.mem.eql(u8, &a.sid, &b.sid);
     return a.shell_id == b.shell_id;
 }
+
+pub const NewMessages = struct {
+    value: isize = 0,
+
+    pub fn count(self: NewMessages) usize {
+        return @abs(self.value);
+    }
+
+    pub fn visible(self: NewMessages, scrolled_up: bool) bool {
+        return scrolled_up and self.value > 0;
+    }
+
+    pub fn arrive(self: *NewMessages, added: usize, scrolled_up: bool) void {
+        if (!scrolled_up) return;
+        const delta: isize = @intCast(added);
+        self.value += if (self.value < 0) -delta else delta;
+    }
+
+    pub fn atBottom(self: *NewMessages, scrolled_up: bool) void {
+        if (!scrolled_up) self.value = 0;
+    }
+
+    pub fn dismiss(self: *NewMessages) void {
+        self.value = -@as(isize, @intCast(self.count()));
+    }
+};
 
 pub const Anchor = struct { index: usize, offset: i32 };
 pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
@@ -1252,4 +1292,99 @@ test "IGSH-720 fresh sends and forced refreshes show the bottom even when scroll
         try std.testing.expectEqual(@as(i32, 1000), scrollAfterLayout(1800, 800, 200, follow, 160, 40));
     }
     try std.testing.expectEqual(@as(i32, 200), scrollAfterLayout(1800, 800, 200, followBottom(false, false, true), 160, 40));
+}
+
+test "IGSH-813 arrival while scrolled up increments only new message starts" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var before: History = .{};
+    defer before.deinit(a);
+    try before.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"user\",\"text\":\"already loaded\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, key);
+    var after = try before.clone(a);
+    defer after.deinit(a);
+    try after.apply(a, "@mp\t2\thistory\tok\tsid\t100\t300\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply\",\"text\":\"# Heading\\n\\nNew reply\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"tool\",\"id\":\"tool\",\"text\":\"Read file\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 2, key);
+    var counter: NewMessages = .{};
+    counter.arrive(before.newMessages(after), true);
+    try std.testing.expectEqual(@as(usize, 1), counter.count());
+    try std.testing.expect(counter.visible(true));
+    counter.arrive(after.newMessages(after), true);
+    try std.testing.expectEqual(@as(usize, 1), counter.count());
+    before.more = true;
+    after.more = true;
+    try std.testing.expectEqual(@as(usize, 1), before.newMessages(after));
+    after.inode = 10;
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+}
+
+test "IGSH-813 arrival at bottom does not count or show a pill" {
+    var counter: NewMessages = .{};
+    counter.arrive(3, false);
+    try std.testing.expectEqual(@as(usize, 0), counter.count());
+    try std.testing.expect(!counter.visible(false));
+    try std.testing.expect(!counter.visible(true));
+}
+
+test "IGSH-813 reaching bottom resets but scrolling elsewhere retains the count" {
+    var counter: NewMessages = .{};
+    counter.arrive(2, true);
+    counter.atBottom(true);
+    counter.atBottom(true);
+    try std.testing.expectEqual(@as(usize, 2), counter.count());
+    counter.atBottom(false);
+    try std.testing.expectEqual(@as(usize, 0), counter.count());
+    try std.testing.expect(!counter.visible(true));
+}
+
+test "IGSH-813 close hides without losing the count including later arrivals" {
+    var counter: NewMessages = .{};
+    counter.arrive(2, true);
+    counter.dismiss();
+    try std.testing.expectEqual(@as(usize, 2), counter.count());
+    try std.testing.expect(!counter.visible(true));
+    counter.atBottom(true);
+    counter.arrive(1, true);
+    try std.testing.expectEqual(@as(usize, 3), counter.count());
+    try std.testing.expect(!counter.visible(true));
+    counter.atBottom(false);
+    counter.arrive(1, true);
+    try std.testing.expect(counter.visible(true));
+    try std.testing.expectEqual(@as(usize, 1), counter.count());
+}
+
+test "IGSH-813 loaded history repeated refresh streaming edits and prepends are not arrivals" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var before: History = .{};
+    defer before.deinit(a);
+    try before.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply\",\"text\":\"stream\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, key);
+    try std.testing.expectEqual(@as(usize, 0), (History{}).newMessages(before));
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(before));
+    var after = try before.clone(a);
+    defer after.deinit(a);
+    try after.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply\",\"text\":\"continues\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+    try std.testing.expectEqual(@as(usize, 0), after.newMessages(before));
+    before.more = true;
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+    before.more = false;
+    before.restore_full = true;
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+}
+
+test "IGSH-813 prepending a loaded older page never counts its messages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var before: History = .{};
+    defer before.deinit(a);
+    try before.apply(a, "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t1\t\ttail\t100\n{\"role\":\"user\",\"text\":\"loaded tail\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    var after = try before.clone(a);
+    defer after.deinit(a);
+    try after.apply(a, "@mp\t2\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t2\t\tolder\t0\n{\"role\":\"user\",\"text\":\"older message\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2), after.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
 }

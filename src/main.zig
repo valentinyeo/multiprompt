@@ -673,6 +673,7 @@ const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEE
 const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
 const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
 const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
@@ -1280,7 +1281,7 @@ const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = "0.28.864";
+pub const APP_VERSION = "0.28.865";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
@@ -1654,6 +1655,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     4 => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
                     5 => _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell),
                     9 => @import("chat_composer.zig").clearChatReply(),
+                    10 => @import("chat_render.zig").chatJumpToNewest(),
+                    11 => @import("chat_composer.zig").chatNewMessagesDismiss(),
                     6...8 => |button| _ = @import("chat_send.zig").chatPermissionAnswer(app_state.active_shell, @enumFromInt(button - 6)),
                     else => if (chatComposerFocusAllowed()) {
                         _ = SetFocus(app_state.g_chat_composer_hwnd);
@@ -4485,6 +4488,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     @import("chat_render.zig").chatReplyLatestAgent();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CLEAN_CHAT_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_render.zig").chatToggleClean();
+                    saveSession();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

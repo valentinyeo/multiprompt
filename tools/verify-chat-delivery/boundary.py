@@ -265,6 +265,10 @@ def shell():
     op = ARGS[0] if ARGS else ""
     if op == "init":
         return fake_init()
+    if op == "messages" and len(ARGS) == 2:
+        for i in range(int(ARGS[1])):
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
+        return 0
     if op == "activity":
         descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]
         for i in range(12):

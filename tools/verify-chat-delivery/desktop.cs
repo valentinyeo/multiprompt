@@ -78,5 +78,32 @@ public static class ChatDeliveryDesktop {
         }
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput failed");
     }
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    public static Point ScreenPoint(IntPtr hwnd, int x, int y) {
+        var point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point)) throw new InvalidOperationException("ClientToScreen failed");
+        return point;
+    }
+    public static void WheelTranscript(IntPtr hwnd, uint pid, IntPtr view, int x, int y, int delta) {
+        if (Owner(hwnd) != pid || Class(hwnd) != "ZigShell" || GetForegroundWindow() != hwnd ||
+            Owner(view) != pid || Class(view) != "ZigShellChatTranscript" || !IsChild(hwnd, view) ||
+            WindowFromPoint(new Point { X = x, Y = y }) != view) throw new InvalidOperationException("Wheel target is not the owned foreground transcript");
+        if (delta == 0 || delta < short.MinValue || delta > short.MaxValue || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
+        var inputs = new Input[2];
+        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        inputs[1].Data.Mouse = new Mouse { Data = unchecked((uint)delta), Flags = 0x0800 };
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("Wheel SendInput failed");
+    }
+    public static void PressClient(IntPtr hwnd, uint pid, int x, int y) {
+        if (Owner(hwnd) != pid) throw new InvalidOperationException("Click owner mismatch");
+        var point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Click target is not the owned HWND");
+        var inputs = new Input[3];
+        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(point.X * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(point.Y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        inputs[1].Data.Mouse.Flags = 2;
+        inputs[2].Data.Mouse.Flags = 4;
+        if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
+    }
     public static void Type(ushort key) { Chord(new[] { (int)key }); }
 }

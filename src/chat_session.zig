@@ -4,6 +4,8 @@ const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
+const chatNewMessagesChanged = @import("chat_composer.zig").chatNewMessagesChanged;
+const chatScrollStateChanged = @import("chat_render.zig").chatScrollStateChanged;
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const chat_transcript = @import("chat_transcript.zig");
@@ -838,6 +840,10 @@ pub fn chatFileOnReady() void {
         entry.loading_disk = false;
         if (entry.result) |history| {
             const belongs_to_active = chat_history.sameSession(key, entry.key);
+            const added = if (!disk and !entry.prepended and entry.loaded_ms != 0 and !entry.unchanged)
+                entry.history.newMessages(history)
+            else
+                0;
             if (entry.unchanged) {
                 entry.history.updateCursor(history);
                 entry.history.revision = history.revision;
@@ -859,6 +865,11 @@ pub fn chatFileOnReady() void {
                 }
                 entry.history.deinit(std.heap.page_allocator);
                 entry.history = history;
+            }
+            if (belongs_to_active and app_state.g_chat_active and added > 0) {
+                const had_messages = app_state.g_chat_new_messages.count() != 0;
+                app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
+                chatNewMessagesChanged(had_messages);
             }
             entry.before = 0;
             if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
@@ -1135,6 +1146,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_content_h = 0;
     app_state.g_chat_scroll_y = 0;
     app_state.g_chat_scrolled_up = false;
+    app_state.g_chat_new_messages = .{};
     app_state.g_chat_echo_layout_count = 0;
     app_state.g_chat_hover_copy = null;
     app_state.g_chat_hover_link = null;
@@ -1224,13 +1236,14 @@ pub fn refreshChatTranscript(force: bool) void {
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
     if (!refreshed) return;
-    if (app_state.g_chat_scroll_bottom_pending) app_state.g_chat_scrolled_up = false;
+    if (follow_bottom) app_state.g_chat_scrolled_up = false;
     app_state.g_chat_scroll_bottom_pending = false;
     chatRelayout(client_rc.right - client_rc.left);
     const anchor_top = if (app_state.g_chat_prepend_pending) old_scroll_y + app_state.g_chat_content_h - old_content_h else if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     const anchor_offset = if (app_state.g_chat_prepend_pending) 0 else if (anchor) |p| p.offset else 0;
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_scroll_y, follow_bottom, anchor_top, anchor_offset);
+    chatScrollStateChanged(viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
@@ -1240,6 +1253,7 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
+    chatScrollStateChanged(viewport_h);
 }
 
 pub fn chatLatestAgentReply(out: []u16) usize {

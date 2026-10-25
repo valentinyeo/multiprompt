@@ -41,7 +41,7 @@ def pane_candidates(capture):
     lines = capture.splitlines()
     prompt, pending = 0, False
     for line_no, line in enumerate(lines, 1):
-        line = ANSI.sub('', line).strip()
+        line = ANSI.sub('', line).rstrip()
         if re.fullmatch(r'● Advising using .+ \d+(?:\.\d+)+', line):
             pending = True
         elif re.match(r'^[❯›>] ', line):

@@ -1337,6 +1337,9 @@ pub fn pollBrowserUrlTick() void {
     if (app_state.shells[app_state.active_shell].browser_suspended) return;
     if (IsIconic(app_state.g_main_hwnd) != 0) return;
     if (!foregroundIsOurs()) return;
+    if (browser_control_mask_color == null and activeBrowserEdgeMasksAllowed()) {
+        if (calcBrowserLayout()) |layout| refreshBrowserControlMaskColor(layout);
+    }
     if (app_state.shells[app_state.active_shell].browser_window_id == 0) {
         startBrowserWindowResolve(app_state.active_shell);
         return;
@@ -2617,6 +2620,9 @@ fn browserDockWinEvent(hook: HANDLE, event: DWORD, hwnd: HANDLE, object: @import
         _ = PostMessageW(hwnd, win.WM_KEYDOWN, win.VK_ESCAPE, 1);
         _ = PostMessageW(hwnd, win.WM_KEYUP, win.VK_ESCAPE, @bitCast(@as(usize, 0xC0000001)));
     } else if (event != win.EVENT_SYSTEM_MOVESIZEEND and event != win.EVENT_OBJECT_LOCATIONCHANGE) return;
+    if (idx == app_state.active_shell and browserChromeForegroundAllowed()) {
+        if (calcBrowserLayout()) |layout| refreshBrowserControlMaskColor(layout);
+    }
     if (browser_dock_guard_pending) return;
     var current: RECT = undefined;
     if (GetWindowRect(hwnd, &current) == 0) return;
@@ -3391,6 +3397,9 @@ fn forgetCrashedBrowserPane(idx: u32, now: u64) void {
 pub fn browserHealthTick() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_app_closing) return;
+    if (browser_control_mask_color == null and activeBrowserEdgeMasksAllowed() and browserChromeForegroundAllowed()) {
+        if (calcBrowserLayout()) |layout| refreshBrowserControlMaskColor(layout);
+    }
     const now = GetTickCount64();
     for (&app_state.g_cancelled_browser_launches) |*launch| {
         if (launch.nonce_len == 0) continue;
@@ -4274,6 +4283,222 @@ fn updateBrowserCorner(hw: HANDLE, corner: browser_corners.Corner, paint: browse
     return w.UpdateLayeredWindow(hw, screen, &destination, &size, dc, &origin, 0, &blend, w.ULW_ALPHA) != 0;
 }
 
+var browser_control_mask_color: ?DWORD = null;
+var browser_control_mask_fallback_logged = false;
+
+fn browserChromeCapturePoint(rect: RECT, point: POINT) ?POINT {
+    if (point.x < rect.left or point.y < rect.top or point.x >= rect.right or point.y >= rect.bottom) return null;
+    return .{ .x = point.x - rect.left, .y = point.y - rect.top };
+}
+
+fn browserChromeCapturedColor(rendered: BOOL, color: DWORD) ?DWORD {
+    return if (rendered == 0 or color == 0xFFFFFFFF) null else color;
+}
+
+fn sampleBrowserChromeColor(hwnd: HANDLE, point: POINT) ?DWORD {
+    const win = @import("win32.zig");
+    if (hwnd == null or IsWindowVisible(hwnd) == 0 or IsIconic(hwnd) != 0) return null;
+    var rect: RECT = undefined;
+    if (GetWindowRect(hwnd, &rect) == 0) return null;
+    const pixel = browserChromeCapturePoint(rect, point) orelse return null;
+    const source = win.GetDC(null);
+    if (source == null) return null;
+    defer _ = win.ReleaseDC(null, source);
+    const memory = win.CreateCompatibleDC(source);
+    if (memory == null) return null;
+    defer _ = win.DeleteDC(memory);
+    const bitmap = win.CreateCompatibleBitmap(source, rect.right - rect.left, rect.bottom - rect.top);
+    if (bitmap == null) return null;
+    defer _ = DeleteObject(bitmap);
+    const previous = SelectObject(memory, bitmap);
+    if (previous == null or previous == win.INVALID_HANDLE_VALUE_PTR) return null;
+    defer _ = SelectObject(memory, previous);
+    const rendered = win.PrintWindow(hwnd, memory, win.PW_RENDERFULLCONTENT);
+    return browserChromeCapturedColor(rendered, if (rendered != 0) win.GetPixel(memory, pixel.x, pixel.y) else 0xFFFFFFFF);
+}
+
+test "IGSH-810 PrintWindow coordinates are window relative and bounded" {
+    const rect = RECT{ .left = -300, .top = 70, .right = 500, .bottom = 670 };
+    try std.testing.expectEqualDeep(POINT{ .x = 151, .y = 6 }, browserChromeCapturePoint(rect, .{ .x = -149, .y = 76 }).?);
+    try std.testing.expectEqualDeep(POINT{ .x = 0, .y = 0 }, browserChromeCapturePoint(rect, .{ .x = -300, .y = 70 }).?);
+    try std.testing.expectEqualDeep(POINT{ .x = 799, .y = 599 }, browserChromeCapturePoint(rect, .{ .x = 499, .y = 669 }).?);
+    for ([_]POINT{
+        .{ .x = -301, .y = 70 },
+        .{ .x = -300, .y = 69 },
+        .{ .x = 500, .y = 70 },
+        .{ .x = -300, .y = 670 },
+    }) |point| try std.testing.expectEqual(@as(?POINT, null), browserChromeCapturePoint(rect, point));
+    try std.testing.expectEqual(@as(?POINT, null), browserChromeCapturePoint(.{ .left = 0, .top = 0, .right = 0, .bottom = 100 }, .{ .x = 0, .y = 0 }));
+    try std.testing.expectEqual(@as(?POINT, null), browserChromeCapturePoint(.{ .left = 0, .top = 0, .right = 100, .bottom = 0 }, .{ .x = 0, .y = 0 }));
+}
+
+test "IGSH-810 PrintWindow failures are not black samples" {
+    try std.testing.expectEqual(@as(?DWORD, null), browserChromeCapturedColor(0, RGB(0, 0, 0)));
+    try std.testing.expectEqual(@as(?DWORD, null), browserChromeCapturedColor(0, RGB(244, 244, 244)));
+    try std.testing.expectEqual(@as(?DWORD, null), browserChromeCapturedColor(1, 0xFFFFFFFF));
+    try std.testing.expectEqual(@as(?DWORD, RGB(0, 0, 0)), browserChromeCapturedColor(1, RGB(0, 0, 0)));
+    try std.testing.expectEqual(@as(?DWORD, RGB(244, 244, 244)), browserChromeCapturedColor(1, RGB(244, 244, 244)));
+}
+
+test "IGSH-810 chrome sampling rejects unusable windows and keeps focus" {
+    const foreground = GetForegroundWindow();
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(null, .{ .x = 0, .y = 0 }));
+    const hwnd = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L("STATIC"), null, WS_POPUP | WS_VISIBLE, 80, 40, 300, 100, null, null, null, null);
+    try std.testing.expect(hwnd != null);
+    defer _ = DestroyWindow(hwnd);
+    try std.testing.expect(IsWindowVisible(hwnd) != 0);
+    var rect: RECT = undefined;
+    try std.testing.expect(GetWindowRect(hwnd, &rect) != 0);
+    try std.testing.expect(rect.right > rect.left and rect.bottom > rect.top);
+    for ([_]POINT{
+        .{ .x = rect.left - 1, .y = rect.top },
+        .{ .x = rect.left, .y = rect.top - 1 },
+        .{ .x = rect.right, .y = rect.top },
+        .{ .x = rect.left, .y = rect.bottom },
+    }) |point| try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, point));
+    _ = ShowWindow(hwnd, SW_HIDE);
+    try std.testing.expect(IsWindowVisible(hwnd) == 0);
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, .{ .x = rect.left, .y = rect.top }));
+    const empty = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L("STATIC"), null, WS_POPUP | WS_VISIBLE, 80, 40, 0, 0, null, null, null, null);
+    try std.testing.expect(empty != null);
+    defer _ = DestroyWindow(empty);
+    try std.testing.expect(IsWindowVisible(empty) != 0);
+    var empty_rect: RECT = undefined;
+    try std.testing.expect(GetWindowRect(empty, &empty_rect) != 0);
+    try std.testing.expectEqual(empty_rect.left, empty_rect.right);
+    try std.testing.expectEqual(empty_rect.top, empty_rect.bottom);
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(empty, .{ .x = empty_rect.left, .y = empty_rect.top }));
+    try std.testing.expectEqual(foreground, GetForegroundWindow());
+}
+
+fn readBrowserThemeJson(path: []const u8) ?std.json.Parsed(std.json.Value) {
+    const win = @import("win32.zig");
+    var wide_buf: [1024]u16 = undefined;
+    const wide = @import("file_io.zig").win32WidePath(&wide_buf, path) orelse return null;
+    const file = win.CreateFileW(wide.ptr, win.GENERIC_READ, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE | win.FILE_SHARE_DELETE, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == win.INVALID_HANDLE_VALUE_PTR) return null;
+    defer _ = CloseHandle(file);
+    var size: i64 = 0;
+    if (win.GetFileSizeEx(file, &size) == 0 or size <= 0) return null;
+    const bytes = std.heap.page_allocator.alloc(u8, @intCast(size)) catch return null;
+    defer std.heap.page_allocator.free(bytes);
+    const len = win32ReadAll(file, bytes);
+    if (len != bytes.len) return null;
+    return std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, bytes, .{ .parse_numbers = false, .allocate = .alloc_always }) catch null;
+}
+
+fn browserThemeFrameColor(manifest: std.json.Value, inactive: bool) ?DWORD {
+    const colors = json_reader.field(json_reader.field(manifest, "theme"), "colors");
+    var frame = json_reader.field(colors, if (inactive) "frame_inactive" else "frame");
+    if (frame == .null) frame = json_reader.field(colors, "frame");
+    const values = json_reader.array(frame);
+    if (values.len != 3) return null;
+    var rgb: [3]u8 = undefined;
+    for (values, 0..) |value, i| {
+        const channel = json_reader.unsigned(value, 256);
+        if (channel > 255) return null;
+        rgb[i] = @intCast(channel);
+    }
+    return RGB(rgb[0], rgb[1], rgb[2]);
+}
+
+test "IGSH-810 profile themes preserve dark light amoled and inactive chrome colours" {
+    for ([_]struct { manifest: []const u8, color: DWORD }{
+        .{ .manifest = "{\"theme\":{\"colors\":{\"frame\":[36,36,36]}}}", .color = RGB(36, 36, 36) },
+        .{ .manifest = "{\"theme\":{\"colors\":{\"frame\":[243,243,243]}}}", .color = RGB(243, 243, 243) },
+        .{ .manifest = "{\"theme\":{\"colors\":{\"frame\":[0,0,0]}}}", .color = RGB(0, 0, 0) },
+    }) |fixture| {
+        var parsed = try json_reader.parse(std.testing.allocator, fixture.manifest);
+        defer parsed.deinit();
+        try std.testing.expectEqual(fixture.color, browserThemeFrameColor(parsed.value, false).?);
+        try std.testing.expectEqual(fixture.color, browserThemeFrameColor(parsed.value, true).?);
+    }
+    var custom = try json_reader.parse(std.testing.allocator, "{\"theme\":{\"colors\":{\"frame\":[17,93,142],\"frame_inactive\":[22,44,66]}}}");
+    defer custom.deinit();
+    try std.testing.expectEqual(RGB(17, 93, 142), browserThemeFrameColor(custom.value, false).?);
+    try std.testing.expectEqual(RGB(22, 44, 66), browserThemeFrameColor(custom.value, true).?);
+    for ([_][]const u8{
+        "{}",
+        "{\"theme\":{\"colors\":{\"frame\":[256,0,0]}}}",
+        "{\"theme\":{\"colors\":{\"frame\":[-1,0,0]}}}",
+        "{\"theme\":{\"colors\":{\"frame\":[0,0]}}}",
+    }) |invalid| {
+        var parsed = try json_reader.parse(std.testing.allocator, invalid);
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(?DWORD, null), browserThemeFrameColor(parsed.value, false));
+    }
+}
+
+fn browserProfileChromeColor() ?DWORD {
+    const idx = app_state.active_shell;
+    if (idx >= app_state.shell_count) return null;
+    var own_dir: [1024]u8 = undefined;
+    const token = browserProfileToken(idx);
+    const dir = if (token.len > 0) ownBrowserUserDataDir(&own_dir, token) else browserUserDataDir();
+    if (dir.len == 0) return null;
+    var path_buf: [1536]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}\\Default\\Preferences", .{dir}) catch return null;
+    var preferences = readBrowserThemeJson(path) orelse return null;
+    defer preferences.deinit();
+    const theme = json_reader.field(json_reader.field(preferences.value, "extensions"), "theme");
+    const id = json_reader.string(json_reader.field(theme, "id")) orelse return null;
+    if (id.len == 0) return null;
+    const inactive = !activeBrowserHasForegroundFocus();
+    for ([_][]const u8{ "Preferences", "Secure Preferences" }) |name| {
+        const settings_path = std.fmt.bufPrint(&path_buf, "{s}\\Default\\{s}", .{ dir, name }) catch continue;
+        var settings = readBrowserThemeJson(settings_path) orelse continue;
+        defer settings.deinit();
+        const extension = json_reader.field(json_reader.field(json_reader.field(settings.value, "extensions"), "settings"), id);
+        if (browserThemeFrameColor(json_reader.field(extension, "manifest"), inactive)) |color| return color;
+        const extension_path = json_reader.string(json_reader.field(extension, "path")) orelse continue;
+        const manifest_path = if (std.fs.path.isAbsolute(extension_path))
+            std.fmt.bufPrint(&path_buf, "{s}\\manifest.json", .{extension_path}) catch continue
+        else
+            std.fmt.bufPrint(&path_buf, "{s}\\Default\\Extensions\\{s}\\manifest.json", .{ dir, extension_path }) catch continue;
+        var manifest = readBrowserThemeJson(manifest_path) orelse continue;
+        defer manifest.deinit();
+        if (browserThemeFrameColor(manifest.value, inactive)) |color| return color;
+    }
+    return null;
+}
+
+fn browserControlMaskColor(sampled: ?DWORD, profile: ?DWORD, background: DWORD) DWORD {
+    return sampled orelse profile orelse if (background == RGB(0, 0, 0)) RGB(1, 1, 1) else background;
+}
+
+test "IGSH-810 mask colour prefers fresh capture then profile then nonblack pane background" {
+    const captured = RGB(244, 244, 244);
+    const profile = RGB(17, 93, 142);
+    const background = RGB(36, 36, 36);
+    try std.testing.expectEqual(captured, browserControlMaskColor(captured, profile, background));
+    try std.testing.expectEqual(profile, browserControlMaskColor(null, profile, background));
+    try std.testing.expectEqual(background, browserControlMaskColor(null, null, background));
+    try std.testing.expectEqual(RGB(1, 1, 1), browserControlMaskColor(null, null, RGB(0, 0, 0)));
+    try std.testing.expectEqual(RGB(0, 0, 0), browserControlMaskColor(RGB(0, 0, 0), profile, background));
+    try std.testing.expectEqual(RGB(0, 0, 0), browserControlMaskColor(null, RGB(0, 0, 0), background));
+}
+
+fn refreshBrowserControlMaskColor(layout: BrowserLayout) void {
+    if (activeBrowserTransientPopupHasForegroundFocus()) return;
+    var point = POINT{
+        .x = layout.browser_x + layout.browser_w - @min(layout.browser_w, uiScaled(148)) - uiScaled(1),
+        .y = layout.browser_y + uiScaled(6),
+    };
+    const hwnd = app_state.shells[app_state.active_shell].browser_hwnd;
+    const sampled = if (ClientToScreen(app_state.g_main_hwnd, &point) != 0) sampleBrowserChromeColor(hwnd, point) else null;
+    const profile = if (sampled == null) browserProfileChromeColor() else null;
+    const color = browserControlMaskColor(sampled, profile, themeConsoleBg());
+    const previous = browserEdgeMaskColor(.controls);
+    browser_control_mask_color = sampled orelse profile;
+    if (browser_control_mask_color == null and !browser_control_mask_fallback_logged) {
+        debugLog("[browser] window-button mask capture and profile theme unavailable; using pane background");
+        browser_control_mask_fallback_logged = true;
+    }
+    if (previous == color) return;
+    const mask = app_state.g_browser_edge_mask_hwnds[@intFromEnum(BrowserEdgeMaskSide.controls)];
+    if (mask != null) _ = InvalidateRect(mask, null, 0);
+}
+
 fn browserEdgeMaskFrameColor() DWORD {
     if (app_state.g_amoled_theme) return RGB(0, 0, 0);
     if (app_state.g_multiprompt_theme) return multipromptColorOr("browser_cover", RGB(0, 0, 0));
@@ -4288,7 +4513,8 @@ fn browserEdgeMaskBottomColor() DWORD {
 
 fn browserEdgeMaskColor(side: BrowserEdgeMaskSide) DWORD {
     return switch (side) {
-        .left, .top, .right, .controls, .control_hit, .top_left, .top_right => browserEdgeMaskFrameColor(),
+        .controls => browserControlMaskColor(browser_control_mask_color, null, themeConsoleBg()),
+        .left, .top, .right, .control_hit, .top_left, .top_right => browserEdgeMaskFrameColor(),
         .bottom, .bottom_left, .bottom_right => browserEdgeMaskBottomColor(),
     };
 }
@@ -4580,6 +4806,7 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
         hideBrowserEdgeMasks();
         return;
     }
+    refreshBrowserControlMaskColor(layout);
     ensureBrowserEdgeMaskWindows();
 
     var pt = POINT{ .x = layout.browser_x, .y = layout.browser_y };
