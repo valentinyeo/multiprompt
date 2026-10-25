@@ -27,6 +27,9 @@ test('IGSH-814 anchors on stable message identity and never guesses from offsets
   assert.match(history, /last_read_id.appendSlice\(a, m.read_id orelse m.id\)/);
   assert.match(reader, /if not result\["id"\] and result\["timestamp"\]:\s+result\["read_id"\] = "event:" \+ hashlib.sha256\(json.dumps\(event, sort_keys=True/);
   assert.match(history, /test "IGSH-814 ID-less Codex source records retain their saved read anchor"/);
+  assert.match(history, /const Header = struct \{ version: u8 = 6/);
+  assert.match(history, /restore_full = h.partial or h.version < 6/);
+  assert.match(read('src/chat_session.zig'), /if \(entry.history.restore_full\) chat_history.History\{\}/);
 });
 
 test('IGSH-814 marker rides saved tabs, launch rows, reconnect and account cache reconciliation', () => {

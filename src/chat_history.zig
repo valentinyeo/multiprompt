@@ -10,7 +10,7 @@ pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 5, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", partial: bool = false };
 pub const History = struct {
     status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
@@ -354,10 +354,10 @@ pub const History = struct {
         const parsed = try std.json.parseFromSlice(Header, a, bytes[0..end], .{});
         defer parsed.deinit();
         const h = parsed.value;
-        if ((h.version < 2 or h.version > 5) or h.sid.len == 0 or h.sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
+        if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
             (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
-        var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 5, .start = h.start, .revision = 1 };
+        var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 6, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
         @memcpy(result.sid[0..h.sid.len], h.sid);
         @memcpy(result.probe[0..h.probe.len], h.probe);
@@ -1535,4 +1535,15 @@ test "IGSH-814 ID-less Codex source records retain their saved read anchor" {
     const boundary = unreadBoundary(restored.blocks.items, marker);
     try std.testing.expect(!boundary.unknown);
     try std.testing.expectEqual(@as(?usize, 1), boundary.index);
+}
+
+test "IGSH-814 old caches reload source identities before saving read markers" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, true, "term-1", "");
+    const bytes = "{\"version\":5,\"inode\":9,\"offset\":100,\"sid\":\"sid\",\"host\":0,\"codex\":true,\"tmux\":\"term-1\"}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"\",\"timestamp\":\"2026-10-25T11:00:00.000Z\",\"text\":\"Previously cached Codex reply\"}\n";
+    var restored = try History.decode(a, bytes, key);
+    defer restored.deinit(a);
+    try std.testing.expect(restored.restore_full);
+    try std.testing.expectEqual(@as(u64, 0), restored.blocks.items[0].message_id);
 }
