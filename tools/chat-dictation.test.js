@@ -73,6 +73,34 @@ test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned nativ
   }
 });
 
+test('IGSH-846 Windows journey covers Escape discard and restart through real inputs', () => {
+  const begin = driver.indexOf("            $draft = [VerifyNative]::EditText($handle)", driver.indexOf("        'chat-dictation' {"));
+  const recipe = driver.slice(begin, driver.indexOf("        'chat-tables' {", begin));
+  let offset = 0;
+  for (const step of [
+    "$draft = [VerifyNative]::EditText($handle)",
+    "Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'",
+    "Assert-DictationMic $mic $true 'escape-listening'", "Type-Text ' keep this'",
+    'Press @(0x1B, 0x1B)', "'\\tcancel\\t0$'", "'\\taudio-bytes\\t89160$'",
+    "Assert-DictationMic $mic $false 'escape-cancelled'",
+    "if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 Escape changed the existing draft' }",
+    "Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'",
+    "Assert-DictationMic $mic $true 'escape-restarted'",
+    "throw 'IGSH-846 cancelled transcript arrived late'",
+    "throw \"IGSH-846 cancelled recording reached transcription or delivery: $stage\"",
+    "Press @(0x0D) 'Enter: transcribe only the restarted recording'",
+    "$expected = $draft + ' Go forward ten meters.'",
+    "Assert-DictationMic $mic $false 'escape-restart-stopped'",
+    "throw \"IGSH-846 restarted recording did not deliver exactly once: $stage\"",
+    "'escape-restart.text.json'",
+  ]) {
+    const at = recipe.indexOf(step, offset);
+    assert.ok(at >= offset, `missing or misordered ${step}`);
+    offset = at + step.length;
+  }
+  assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
+});
+
 function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);

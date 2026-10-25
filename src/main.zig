@@ -1141,6 +1141,7 @@ const SPINNER_STALE_MS = @import("app_state.zig").SPINNER_STALE_MS;
 const startSpinnerTimerIfNeeded = @import("clipboard.zig").startSpinnerTimerIfNeeded;
 const pasteClipboardToShell = @import("clipboard.zig").pasteClipboardToShell;
 const dictationAudit = @import("voice.zig").dictationAudit;
+const cancelDictation = @import("voice.zig").cancelDictation;
 const handleDictationReady = @import("voice.zig").handleDictationReady;
 const toggleDictation = @import("voice.zig").toggleDictation;
 const logDeepgramKeySource = @import("voice.zig").logDeepgramKeySource;
@@ -3023,7 +3024,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_DICTATION_TOGGLE => {
-            toggleDictation();
+            if (wp == 1) {
+                cancelDictation();
+            } else {
+                toggleDictation();
+            }
             return 0;
         },
         WM_APP_DICTATION_READY => {
