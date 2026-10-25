@@ -419,6 +419,10 @@ pub const History = struct {
         }
         if (!ended) return error.InvalidHistory;
         while (lines.next()) |line| if (line.len != 0) return error.InvalidHistory;
+        if (prepend and oldest == self.start) {
+            next.deinit(a);
+            return;
+        }
         if (!append and !prepend and next.rows.items.len == 0 and self.rows.items.len > 0) return error.EmptyReset;
         if (append and next.rows.items.len == 0) {
             if (!std.meta.eql(self.status, next.status)) self.revision +%= 1;
@@ -432,6 +436,23 @@ pub const History = struct {
             try self.appendParsed(a, &next);
             next.deinit(a);
             return;
+        }
+        if (!append and !prepend and mode != null and !self.restore_full and self.rows.items.len > 0 and
+            inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest > self.start)
+        {
+            if (oldest > self.offset or end < self.offset) return error.InvalidHistory;
+            var prefix: usize = 0;
+            var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
+            while (previous.next()) |line| {
+                if (line.len == 0) break;
+                const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
+                defer parsed.deinit();
+                if (parsed.value.offset >= oldest) break;
+                if (parsed.value.end == 0 or parsed.value.end > oldest) return error.InvalidHistory;
+                prefix += line.len + 1;
+            }
+            try next.rows.insertSlice(a, 0, self.rows.items[0..prefix]);
+            next.start = self.start;
         }
         if (prepend) {
             try next.rows.appendSlice(a, self.rows.items);
@@ -1387,4 +1408,38 @@ test "IGSH-813 prepending a loaded older page never counts its messages" {
     try after.apply(a, "@mp\t2\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t2\t\tolder\t0\n{\"role\":\"user\",\"text\":\"older message\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
     try std.testing.expectEqual(@as(usize, 2), after.blocks.items.len);
     try std.testing.expectEqual(@as(usize, 0), before.newMessages(after));
+}
+
+test "IGSH-815 tail reconciliation retains prepended rows through cache restart and deltas" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    const tail = "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t1\t\ttail\t100\n" ++
+        "{\"role\":\"assistant\",\"text\":\"last\",\"offset\":100,\"end\":200}\n@@MP_END@@\n";
+    try h.apply(a, tail, 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t1\t\tolder\t0\n" ++
+        "{\"role\":\"user\",\"text\":\"first\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
+    const encoded = try h.encode(a, key);
+    defer a.free(encoded);
+    var restored = try History.decode(a, encoded, key);
+    defer restored.deinit(a);
+    for ([_]*History{ &h, &restored }) |history| {
+        for (0..3) |_| {
+            try history.apply(a, tail, 1, key);
+            try std.testing.expectEqual(@as(u64, 0), history.start);
+            try std.testing.expectEqual(@as(usize, 2), history.blocks.items.len);
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstlast"), history.text.items);
+        }
+        try history.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\t2\t\tdelta\t0\n" ++
+            "{\"role\":\"user\",\"text\":\"new\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 3, key);
+        try std.testing.expectEqual(@as(usize, 3), history.blocks.items.len);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstlastnew"), history.text.items);
+        try std.testing.expectError(error.InvalidHistory, history.apply(a, tail, 1, key));
+        try std.testing.expectEqual(@as(usize, 3), history.blocks.items.len);
+        try history.apply(a, "@mp\t4\thistory\tok\tsid\t100\t200\t10\t0\tclaude\tterm-1\t3\t\ttail\t100\n" ++
+            "{\"role\":\"assistant\",\"text\":\"replacement\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 4, key);
+        try std.testing.expectEqual(@as(usize, 1), history.blocks.items.len);
+        try std.testing.expectEqual(@as(u64, 100), history.start);
+    }
 }

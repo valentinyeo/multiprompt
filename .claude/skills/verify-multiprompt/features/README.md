@@ -31,6 +31,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 ## Features
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
 

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -10,6 +10,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
 switch ($Feature) {
+        'chat-full-history' {
+            & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            if ($LASTEXITCODE -ne 0) { throw 'Full-session history verification failed' }
+            return
+        }
         'chat-messages-only' {
             & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             if ($LASTEXITCODE -ne 0) { throw 'Messages-only verification failed' }

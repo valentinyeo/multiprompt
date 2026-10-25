@@ -133,7 +133,8 @@ fn GetTickCount64() u64 { return ticks; }
 fn nowFileTime() u64 { return 116444736000000000 + 500 * 10000; }
 fn GetClientRect(_: HANDLE, out: *RECT) i32 { out.* = .{ .left = 0, .top = 0, .right = 900, .bottom = fake_viewport_h }; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: i32) i32 { return 1; }
-fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { return 1; }
+var timer_calls: usize = 0;
+fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { timer_calls += 1; return 1; }
 fn chatSelectionClear() void {}
 fn chatEchoMatchActive() void {}
 fn chatFilePollInterval() u64 { return 2000; }
@@ -367,7 +368,8 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(i32, 40), g_chat_scroll_y);
     try std.testing.expectEqual(@as(u64, 150), one.history.offset);
     try std.testing.expectEqual(@as(u64, 25), one.history.start);
-    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 25), one.before);
+    try std.testing.expectEqual(GetTickCount64(), one.next);
     const status_text_ptr = one.history.text.items.ptr;
     const status_blocks = g_chat_block_count;
     const prior_layouts = status_layout_calls;
@@ -600,4 +602,50 @@ test('metadata retention oracle rejects the actual 708 identity and worker dispa
   assert.match(run.stderr, /learned metadata[\s\S]*?FAIL \(TestExpectedEqual\)/);
   assert.match(run.stderr, /worker receives retained[\s\S]*?FAIL \(TestExpectedEqual\)/);
   assert.match(run.stderr, /TestExpectedEqual/);
+});
+
+test('IGSH-815 snapshot deferral arms polling and stalled older pages stop continuing', () => {
+  const cases = `
+test "cache-first switch-back IGSH-815 restart and continuation progress" {
+    const a = std.heap.page_allocator;
+    const launch = @import("launch_cache.zig");
+    launch.pending = true;
+    launch.queue.next = 2;
+    g_chat_block_count = 24;
+    const timers = timer_calls;
+    chatDeferTranscriptLoad();
+    try std.testing.expectEqual(timers + 1, timer_calls);
+    try std.testing.expectEqual(@as(usize, 24), g_chat_block_count);
+    launch.pending = false;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\\t1\\thistory\\tok\\tsid\\t100\\t200\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\ttail\\t100\\n{\\"role\\":\\"user\\",\\"text\\":\\"last\\"}\\n@@MP_END@@\\n", 1, one.key);
+    one.disk_loaded = true;
+    one.before = 100;
+    remote_pages = &.{ "@mp\\t2\\thistory\\tok\\tsid\\t100\\t100\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\tolder\\t100\\n{\\"role\\":\\"user\\",\\"text\\":\\"duplicate\\"}\\n@@MP_END@@\\n" };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 2, false);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 100), one.history.start);
+    try std.testing.expectEqual(@as(usize, 1), one.history.blocks.items.len);
+    try std.testing.expectEqual(ticks + chatFilePollInterval(), one.next);
+    remote_pages = &.{ "@mp\\t3\\thistory\\tok\\tsid\\t200\\t200\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\tdelta\\t100\\n@@MP_END@@\\n" };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 3, false);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(ticks + chatFilePollInterval(), one.next);
+    try std.testing.expectEqual(@as(usize, 1), one.history.blocks.items.len);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
 });
