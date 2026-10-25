@@ -335,6 +335,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reconnect / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
+    .{ .a = "End / Ctrl+K \"Chat View: Scroll to newest message\"", .b = "Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
     .{ .a = "Alt+C", .b = "Toggle formatted Chat View for this tab; screen copy remains the fallback", .header = false },
     .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
