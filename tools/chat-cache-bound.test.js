@@ -116,7 +116,7 @@ const chat_history = @import("chat_history.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const HANDLE = ?*anyopaque;
 const LASTINPUTINFO = struct { cbSize: usize, dwTime: u32 };
-const ChatHistoryEntry = struct { key: chat_transcript.Identity = .{}, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
+const ChatHistoryEntry = struct { key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
 var cached_entry: ChatHistoryEntry = .{};
 var g_chat_active = true;
 var g_main_hwnd: HANDLE = @ptrFromInt(1);

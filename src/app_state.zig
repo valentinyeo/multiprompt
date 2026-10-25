@@ -2518,6 +2518,10 @@ pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
     generation: u64 = 0,
     history: chat_history.History = .{},
+    backfill: chat_history.Backfill = .{},
+    staged: bool = false,
+    stalled: bool = false,
+    show_older: bool = false,
     tables: chat_markdown.TableCache = .{},
     pending: bool = false,
     retired: bool = false,
@@ -2545,7 +2549,6 @@ pub var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
 pub var g_chat_history_generation: u64 = 0;
 pub var g_chat_cache_generation: u64 = 0;
 pub var g_chat_fetch_mutex: HANDLE = null;
-pub var g_chat_priority_reservation: HANDLE = null;
 pub var g_chat_fetch_busy = false;
 pub var g_chat_cache_pruned: u64 = 0;
 
