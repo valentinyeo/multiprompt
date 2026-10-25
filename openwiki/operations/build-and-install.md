@@ -95,3 +95,16 @@ If only B passed, use its printed path instead. The installer validates the rece
 ### Wine rendering prerequisite
 
 Wine's built-in GDI+ accepts smoothing settings without anti-aliasing shapes. The Windows test runner therefore requires the Microsoft x64 `gdiplus.dll`, available from a licensed Windows installation or Microsoft's redistributable through Winetricks. Put it in `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/gdiplus/gdiplus.dll`, or set `MP_WINE_GDIPLUS_DIR` to its directory. The runner installs that DLL into an isolated `${XDG_CACHE_HOME:-$HOME/.cache}/multiprompt/wine-tests` prefix, overridable with `MP_WINE_TEST_PREFIX`; it does not alter your normal Wine prefix. No Windows DLL is distributed in this repository. Headless runs also require `xvfb-run`.
+
+## Reopen automatically reverted tasks
+
+Run the board watcher on an authenticated runner. Credentials stay outside GitHub Actions.
+
+1. Copy `tools/auto-revert-board.js` to `~/.local/lib/multiprompt/`.
+2. Copy `tools/systemd/multiprompt-revert-board.*` to `~/.config/systemd/user/`.
+3. Set `CEO_HT` in `~/.config/multiprompt-revert-board.env`. Use your authenticated board-agent command's absolute path. Set `CEO_AGENT` there when your command requires an identity. Never put credentials in this file.
+4. Run `systemctl --user daemon-reload`.
+5. Run `systemctl --user enable --now multiprompt-revert-board.timer`.
+6. Check `journalctl --user -u multiprompt-revert-board.service`. Successful scans print `BOARD_RECONCILED`.
+
+The watcher validates bot-created rollback requests against their failed master run. It reopens completed tasks and posts the failed journeys. Repeated scans preserve active work and avoid duplicate comments. No board credentials reach GitHub Actions.
