@@ -28,7 +28,7 @@ const fixture = () => ({
     html_url: `https://github.com/${repository}/actions/runs/40195971037`,
   },
   previous: {
-    run: { id: 40195971036, run_attempt: 2, created_at: '2026-10-24T11:00:00Z', conclusion: 'success' },
+    run: { id: 40195971036, run_attempt: 2, created_at: '2026-10-24T11:00:00Z', conclusion: 'success', head_sha: parent },
     jobs: [
       { name: 'verify (session-restore)', conclusion: 'success' },
       { name: 'verify (chat-focus)', conclusion: 'success' },
@@ -96,6 +96,18 @@ test('failing master merge chooses its exact head, first parent and failing jour
     action: 'revert', sha, mainline: 1, ticket: 'IGSH-812',
     journeys: ['session-restore', 'chat-focus'], marker: 'Auto-Revert-Run: 40195971037',
   });
+});
+
+test('a red run is not blamed on its head when the last judged run tested an older commit', () => {
+  const input = fixture();
+  input.previous.run.head_sha = 'e'.repeat(40);
+  assert.deepEqual(decide(input), {
+    action: 'skip',
+    reason: `Cannot isolate ${sha}: the last judged run ${input.previous.run.id} tested ${'e'.repeat(40)}, not its parent ${parent}`,
+  });
+  const result = runtime(input, 'workflow_run');
+  assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
+  assert.ok(result.calls.some(call => call.includes('POST') && call.some(arg => arg.includes('Cannot isolate'))));
 });
 
 test('journeys already red on the previous run skip the revert', () => {
