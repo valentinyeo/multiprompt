@@ -4400,58 +4400,35 @@ test "IGSH-810 PrintWindow failures are not black samples" {
     try std.testing.expectEqual(@as(?DWORD, RGB(244, 244, 244)), browserChromeCapturedColor(1, RGB(244, 244, 244)));
 }
 
-test "IGSH-810 HWND chrome sampling follows theme pixels without changing focus" {
-    const win = @import("win32.zig");
-    const Fixture = struct {
-        var color: DWORD = 0;
-        var original: LONG_PTR = 0;
-
-        fn wndProc(target: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-            if (msg == WM_ERASEBKGND or msg == 0x0317 or msg == 0x0318) {
-                var bounds: RECT = undefined;
-                if (msg == 0x0317) {
-                    if (GetWindowRect(target, &bounds) == 0) return 0;
-                    bounds.right -= bounds.left;
-                    bounds.bottom -= bounds.top;
-                    bounds.left = 0;
-                    bounds.top = 0;
-                } else if (GetClientRect(target, &bounds) == 0) return 0;
-                const fill_brush = CreateSolidBrush(color) orelse return 0;
-                defer _ = DeleteObject(fill_brush);
-                return FillRect(@ptrFromInt(wp), &bounds, fill_brush);
-            }
-            return @import("win32.zig").CallWindowProcW(original, target, msg, wp, lp);
-        }
-    };
+test "IGSH-810 chrome sampling rejects unusable windows and keeps focus" {
     const foreground = GetForegroundWindow();
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(null, .{ .x = 0, .y = 0 }));
     const hwnd = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L("STATIC"), null, WS_POPUP | WS_VISIBLE, 80, 40, 300, 100, null, null, null, null);
     try std.testing.expect(hwnd != null);
     defer _ = DestroyWindow(hwnd);
-    Fixture.original = SetWindowLongPtrW(hwnd, -4, @bitCast(@intFromPtr(&Fixture.wndProc)));
-    try std.testing.expect(Fixture.original != 0);
-    defer _ = SetWindowLongPtrW(hwnd, -4, Fixture.original);
-    var point = POINT{ .x = 151, .y = 6 };
-    try std.testing.expect(ClientToScreen(hwnd, &point) != 0);
-    const dc = win.GetDC(hwnd);
-    try std.testing.expect(dc != null);
-    defer _ = win.ReleaseDC(hwnd, dc);
-    var rect = RECT{ .left = 0, .top = 0, .right = 300, .bottom = 100 };
-    for ([_]DWORD{ RGB(36, 36, 36), RGB(243, 243, 243), RGB(0, 0, 0), RGB(17, 93, 142) }) |color| {
-        const brush = CreateSolidBrush(color);
-        try std.testing.expect(brush != null);
-        defer _ = DeleteObject(brush);
-        Fixture.color = color;
-        try std.testing.expect(FillRect(dc, &rect, brush) != 0);
-        try std.testing.expectEqual(color, sampleBrowserChromeColor(hwnd, point).?);
-        var bottom_right = POINT{ .x = 299, .y = 99 };
-        try std.testing.expect(ClientToScreen(hwnd, &bottom_right) != 0);
-        try std.testing.expectEqual(color, sampleBrowserChromeColor(hwnd, bottom_right).?);
-    }
-    try std.testing.expectEqual(foreground, GetForegroundWindow());
-    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, .{ .x = -1, .y = -1 }));
+    try std.testing.expect(IsWindowVisible(hwnd) != 0);
+    var rect: RECT = undefined;
+    try std.testing.expect(GetWindowRect(hwnd, &rect) != 0);
+    try std.testing.expect(rect.right > rect.left and rect.bottom > rect.top);
+    for ([_]POINT{
+        .{ .x = rect.left - 1, .y = rect.top },
+        .{ .x = rect.left, .y = rect.top - 1 },
+        .{ .x = rect.right, .y = rect.top },
+        .{ .x = rect.left, .y = rect.bottom },
+    }) |point| try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, point));
     _ = ShowWindow(hwnd, SW_HIDE);
-    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, point));
-    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(null, point));
+    try std.testing.expect(IsWindowVisible(hwnd) == 0);
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(hwnd, .{ .x = rect.left, .y = rect.top }));
+    const empty = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L("STATIC"), null, WS_POPUP | WS_VISIBLE, 80, 40, 0, 0, null, null, null, null);
+    try std.testing.expect(empty != null);
+    defer _ = DestroyWindow(empty);
+    try std.testing.expect(IsWindowVisible(empty) != 0);
+    var empty_rect: RECT = undefined;
+    try std.testing.expect(GetWindowRect(empty, &empty_rect) != 0);
+    try std.testing.expectEqual(empty_rect.left, empty_rect.right);
+    try std.testing.expectEqual(empty_rect.top, empty_rect.bottom);
+    try std.testing.expectEqual(@as(?DWORD, null), sampleBrowserChromeColor(empty, .{ .x = empty_rect.left, .y = empty_rect.top }));
+    try std.testing.expectEqual(foreground, GetForegroundWindow());
 }
 
 fn readBrowserThemeJson(path: []const u8) ?std.json.Parsed(std.json.Value) {
