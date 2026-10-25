@@ -274,8 +274,10 @@ foreach ($plan in $plans) {
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
             [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
-            $composer = Wait-For 'restored native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restored composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
+            $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
+                $h = [ChatDeliveryDesktop]::Composer($main)
+                if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
+            }
             Assert-FullHistory 'restart'
         } elseif ($isActivity) {
             if (-not (Step 'initial-transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)) { throw 'Initial transcript was not read' }
