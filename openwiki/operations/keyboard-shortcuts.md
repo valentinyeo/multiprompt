@@ -243,7 +243,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: Send Claude's Queued Message Now" | Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble) |
 | Ctrl+K "Chat View: Edit Queued Messages" | Presses Claude's Up key so its queued messages come back into the prompt box, where Chat View shows and edits them too |
 | Ctrl+X then Ctrl+S in Chat View | Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S) |
-| Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now (shown at the top of the usage panel); Auto lets the ladder decide |
+| Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now; Auto lets the ladder decide |
 | Ctrl+K → Token Ladder: Open Dashboard | Open the Token Ladder page with every plan's usage and reset clock in the browser pane |
 | Alt+V | Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View |
 | Ctrl+K Voice: Always Listening On/Off | Keep the mic on to talk over replies, or return to taking turns |
