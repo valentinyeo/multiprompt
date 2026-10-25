@@ -476,7 +476,13 @@ foreach ($plan in $plans) {
             [void](Wait-For 'resynced cache no longer contains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and -not $bytes.Contains($readId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-gap.jsonl"
             Shot 'unread-divider-gap'
-            $bottomLogStart = Scroll-Transcript -30000
+            $bottomLogStart = (Read-Shared "$settings/debug.log").Length
+            [void](Wait-For 'scroll the full history gap to bottom' {
+                $frame = Divider-State $bottomLogStart
+                if ($frame -and $frame.count -eq 0 -and $frame.unknown -eq 0) { return $true }
+                [void](Scroll-Transcript -30000)
+                $false
+            })
             $dividerProof.bottom = Require-Divider 0 0 'bottom clears the divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Press @(0x12, 0x43) 'Alt+C: close the fully read chat' $true
