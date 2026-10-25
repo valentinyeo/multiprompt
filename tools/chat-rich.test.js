@@ -39,10 +39,10 @@ test('markdown measurement paint and link hit test share the same layout', () =>
   assert.match(body('chatRichText'), /g_light_theme/);
   assert.match(body('resetFontCache'), /g_chat_rich_fonts/);
 });
-test('role paint and hit testing reserve the same avatar header, with real times only', () => {
+test('role paint and hit testing omit sender headers and timestamps', () => {
   assert.match(body('chatMeasureBlockRect'), /chat_style\.headerHeight/);
   assert.match(body('chatMeasureBlockRect'), /chat_style\.bubbleWidth/);
-  assert.match(body('chatPaintBlock'), /chatPaintAgentHeader/);
+  assert.doesNotMatch(body('chatPaintBlock'), /chatPaintAgentHeader/);
   assert.match(body('chatPaintBlock'), /chatPaintTime/);
   assert.match(body('chatTranscriptLinkAt'), /chat_style\.headerHeight/);
   assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
@@ -50,7 +50,7 @@ test('role paint and hit testing reserve the same avatar header, with real times
   assert.match(body('chatRelayout'), /chat_style\.bubblePositions/);
   assert.match(body('chatPaintBlock'), /fillBubbleAA/);
   assert.match(body('chatTranscriptCharAt'), /chat_style\.topInset/);
-  assert.match(body('chatPaintTime'), /if \(block.time\[0\] == 0 and block.role != \.injected\) return/);
+  assert.doesNotMatch(body('chatPaintTime'), /block\.time|block\.zone/);
   assert.match(docs, /Chat View message styles/);
 });
 test('pure parser tests are wired and existing Alt+C discovers automatic formatting', () => {

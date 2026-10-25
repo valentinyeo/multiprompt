@@ -897,7 +897,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width), shown.max_w + 2 * pad));
             }
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
-            var bubble_h = flow_h + 2 * pad + (if (block.time[0] != 0 or block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
                 shown.origin_x = pad;
@@ -1508,15 +1508,15 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     var injected = timed_user;
     injected.role = .injected;
     injected.first = true;
-    try std.testing.expect(std.meta.eql(
-        chatMeasureBlockRect(dc, text, timed_user, .single, 160, 0, null),
-        chatMeasureBlockRect(dc, text, injected, .single, 160, 0, null),
-    ));
+    const timed_rect = chatMeasureBlockRect(dc, text, timed_user, .single, 160, 0, null);
+    try std.testing.expectEqual(bubble, timed_rect);
+    const injected_rect = chatMeasureBlockRect(dc, text, injected, .single, 160, 0, null);
+    try std.testing.expectEqual(uiScaled(CHAT_STATUS_H), injected_rect.bottom - timed_rect.bottom);
     var reply = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .markdown = true };
     const plain = chatMeasureBlockRect(dc, text, reply, .single, 320, 0, null);
     reply.first = true;
     const headed = chatMeasureBlockRect(dc, text, reply, .single, 320, 0, null);
-    try std.testing.expectEqual(uiScaled(CHAT_AGENT_HEADER_H), headed.bottom - plain.bottom);
+    try std.testing.expectEqual(@as(i32, 0), headed.bottom - plain.bottom);
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);
@@ -2775,7 +2775,7 @@ pub fn chatMetadataFont() HANDLE {
 }
 
 fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirmed: bool) void {
-    if (block.time[0] == 0 and block.role != .injected) return;
+    if (block.role != .injected and (app_state.clean_chat or !confirmed)) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     var label: [96]u16 = @splat(0);
@@ -2787,23 +2787,6 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
         const sender = std.mem.sliceTo(&block.sender, 0);
         @memcpy(label[len .. len + sender.len], sender);
         len += sender.len;
-        if (block.time[0] != 0) {
-            label[len] = ' ';
-            label[len + 1] = 0x00B7;
-            label[len + 2] = ' ';
-            len += 3;
-        }
-    }
-    if (block.time[0] != 0) {
-        @memcpy(label[len .. len + 5], &block.time);
-        len += 5;
-        const zone = std.mem.sliceTo(&block.zone, 0);
-        if (zone.len > 0) {
-            label[len] = ' ';
-            len += 1;
-            @memcpy(label[len .. len + zone.len], zone);
-            len += zone.len;
-        }
     }
     if (!app_state.clean_chat and confirmed and block.role == .user) {
         const mark = std.unicode.utf8ToUtf16LeStringLiteral("\u{2713}\u{2713} Read");
@@ -2820,26 +2803,10 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
     _ = chatDrawText(hdc, &label, @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | (if (right) @as(UINT, DT_RIGHT) else 0));
 }
 
-fn chatPaintAgentHeader(hdc: HANDLE, block: ChatBlock, rc: RECT) void {
-    const agent: u8 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].ai_agent else 0;
-    const old_font = SelectObject(hdc, chatMetadataFont());
-    defer _ = SelectObject(hdc, old_font);
-    const row_bottom = rc.top + uiScaled(CHAT_AGENT_HEADER_H) - uiScaled(2);
-    const left = rc.left + uiScaled(CHAT_AGENT_PAD_X);
-    var name_rc = RECT{ .left = left, .top = rc.top, .right = @min(rc.right, left + uiScaled(56)), .bottom = row_bottom };
-    _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
-    _ = chatDrawText(hdc, if (agent == 1) L("Claude") else if (agent == 2) L("Codex") else L("Agent"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-    chatPaintTime(hdc, block, .{ .left = name_rc.right + uiScaled(6), .top = rc.top, .right = rc.right, .bottom = row_bottom }, false, false);
-}
-
 fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT) void {
     if (app_state.clean_chat and block.role == .tool) return;
     _ = SetBkMode(hdc, TRANSPARENT);
-    var rc = source_rc;
-    if (block.role != .user and block.role != .injected and block.role != .tool and block.first) {
-        chatPaintAgentHeader(hdc, block, rc);
-        rc.top += chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H));
-    }
+    const rc = source_rc;
     const disp = chatBlockDisplayRange(buf, block);
     const text = buf[disp.start .. disp.start + disp.len];
     const text_color = customColorOr("text", themeConsoleFg());
@@ -2853,14 +2820,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     }
     switch (block.role) {
         .user, .injected => {
-            const status_h = if (block.time[0] != 0 or block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
+            const status_h = if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
             const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
             fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
             _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
-            if (block.time[0] != 0 or block.role == .injected) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true, block.role == .user and chatEchoBlockConfirmed(buf, block));
+            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true, block.role == .user and chatEchoBlockConfirmed(buf, block));
         },
         .prose => {
             fillBubbleAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -3030,7 +2997,7 @@ fn chatTranscriptCopyAt(x: i32, y: i32) ?usize {
     return if (pointInRect(button, x, y)) index else null;
 }
 
-test "Chat View code paints token colors and copy hit testing respects scroll and avatar headers" {
+test "Chat View code paints token colors and copy hit testing respects scroll without sender headers" {
     const screen = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, screen);
     const dc = CreateCompatibleDC(screen) orelse return error.TestUnexpectedResult;
@@ -3066,11 +3033,15 @@ test "Chat View code paints token colors and copy hit testing respects scroll an
     app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = uiScaled(100), .right = uiScaled(320), .bottom = uiScaled(300) };
     app_state.g_chat_scroll_y = uiScaled(50);
     var panel = app_state.g_chat_layout_rects[0];
-    panel.top = panel.top - app_state.g_chat_scroll_y + uiScaled(CHAT_AGENT_HEADER_H);
+    panel.top -= app_state.g_chat_scroll_y;
     const button = chat_code.copyButton(panel, uiScaled(CHAT_CODE_PAD), uiScaled(64), uiScaled(22));
     try std.testing.expectEqual(@as(?usize, 0), chatTranscriptCopyAt(button.left + 1, button.top + 1));
     try std.testing.expect(chatTranscriptCopyAt(1, uiScaled(55)) == null);
-    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.bottom + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left - 1, button.top + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.right, button.top + 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.top - 1) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.bottom) == null);
+    try std.testing.expect(chatTranscriptCopyAt(button.left + 1, button.top + uiScaled(CHAT_AGENT_HEADER_H) + 1) == null);
 }
 
 pub fn chatCopyLatestCode() void {
@@ -5326,7 +5297,7 @@ test "IGSH-816 CLEAN hides tool status summary details and diff rows pixels" {
     try expectCleanChatRowHidden(.tool);
 }
 
-test "IGSH-816 CLEAN hides read ticks but preserves the timestamp and timezone pixels" {
+test "IGSH-849 timestamps are absent and CLEAN still hides read ticks" {
     const off = try cleanChatPixels(.receipt, false);
     defer std.testing.allocator.free(off);
     const on = try cleanChatPixels(.receipt, true);

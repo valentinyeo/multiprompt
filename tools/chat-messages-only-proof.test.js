@@ -4,16 +4,16 @@ const assert = require('node:assert/strict');
 const geometry = {
   transcript: { left: 10, top: 40, width: 320, height: 150 },
   rows: { left: 10, top: 10, width: 320, height: 28 },
-  working: { left: 10, top: 190, width: 320, height: 25 },
+  working: { left: 10, top: 190, width: 320, height: 14 },
 };
 
-function frame(rows = true, messages = true, working = true) {
+function frame(rows = true, messages = true, working = false) {
   const width = 360;
   const height = 220;
   const pixels = Buffer.alloc(width * height * 4, 24);
   for (const [paint, rect] of [[messages, geometry.transcript], [rows, geometry.rows], [working, geometry.working]]) {
     if (!paint) continue;
-    for (let y = rect.top + 5; y < rect.top + 20; y++) {
+    for (let y = rect.top + 5; y < Math.min(rect.top + 20, rect.top + rect.height); y++) {
       for (let x = rect.left + 20; x < rect.left + 180; x++) {
         const i = (y * width + x) * 4;
         pixels[i] = 60 + x % 160;
@@ -38,7 +38,8 @@ test('IGSH-816 accepts the same messages with only footer rows removed and ignor
   assert.equal(result.messages.changedPixels, 0);
   assert.equal(result.rows.onInk, 0);
   assert.ok(result.rows.offInk > 0);
-  assert.ok(result.working.onInk > 0 && result.working.offInk > 0);
+  assert.equal(result.working.onInk, 0);
+  assert.equal(result.working.offInk, 0);
 });
 
 test('IGSH-816 rejects even one retained row pixel and requires the normal rows', async () => {
@@ -52,7 +53,7 @@ test('IGSH-816 rejects even one retained row pixel and requires the normal rows'
   assert.throws(() => compareCleanChat(frame(), frame(false), changed, geometry), /OFF did not restore today's/);
 });
 
-test('IGSH-816 rejects message displacement, blank captures and missing working rows', async () => {
+test('IGSH-816 rejects message displacement, blank captures and any reintroduced working strip', async () => {
   const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
   const shifted = frame(false);
   shifted.pixels[(50 * shifted.width + 40) * 4]++;
@@ -60,8 +61,11 @@ test('IGSH-816 rejects message displacement, blank captures and missing working 
   assert.throws(() => compareCleanChat(frame(), frame(false, false), frame(), geometry), /messages changed, shifted or are blank/);
   assert.throws(() => compareCleanChat(frame(true, false), frame(false, false), frame(true, false), geometry), /blank transcript/);
   for (const mode of ['on', 'off']) {
-    assert.throws(() => compareCleanChat(frame(), frame(false, true, mode !== 'on'), frame(true, true, mode !== 'off'), geometry), /working\/permission row disappeared/);
+    assert.throws(() => compareCleanChat(frame(), frame(false, true, mode === 'on'), frame(true, true, mode === 'off'), geometry), /still paints the removed working strip/);
   }
+  const changedGap = frame();
+  changedGap.pixels[(geometry.working.top * changedGap.width + geometry.working.left) * 4]++;
+  assert.throws(() => compareCleanChat(changedGap, frame(false), frame(), geometry), /composer gap changed/);
   for (const name of ['rows', 'working']) {
     assert.throws(() => compareCleanChat(frame(), frame(false), frame(), { ...geometry, [name]: { ...geometry[name], left: 350 } }), /out-of-window/);
     assert.throws(() => compareCleanChat(frame(), frame(false), frame(), { ...geometry, [name]: geometry.transcript }), /overlaps messages/);
@@ -119,6 +123,8 @@ test('IGSH-816 extends only the existing messages-only journey using checked pal
   const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
   const journey = driver.slice(driver.indexOf("Shot 'messages-only-after-tools'"), driver.indexOf('$fillLogStart ='));
+  assert.match(journey, /\$workingHeight -ne \$expectedGapHeight/);
+  assert.match(journey, /Floor\(14 \* \$statusBounds.Height \/ 28\)/);
   assert.match(journey, /--tools-only[\s\S]*foreach \(\$mode in @\('on', 'off'\)\)/);
   assert.match(journey, /Press @\(0x11, 0x4B\)/);
   assert.match(journey, /foreach \(\$letter in 'clean chat'\.ToCharArray\(\)\) \{ Press/);
@@ -141,7 +147,7 @@ test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and t
   const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
   const map = read('.claude/skills/verify-multiprompt/features/chat-messages-only.md');
   for (const file of ['clean-chat-on.png', 'clean-chat-on.bmp', 'clean-chat-off.png', 'clean-chat-off.bmp']) assert.ok(map.includes(file), file);
-  for (const step of ['Ctrl+K', '`clean chat`', 'Enter without an arrow-key selection step', '--tools-only', '--complete', 'background-only', 'working/permission', 'identical', 'off-mode', ['changelog.d', 'IGSH-816-clean-chat.md'].join('/')]) assert.ok(map.toLowerCase().includes(step.toLowerCase()), step);
+  for (const step of ['Ctrl+K', '`clean chat`', 'Enter without an arrow-key selection step', '--tools-only', '--complete', 'background-only', 'permission controls', 'identical', 'off-mode', ['changelog.d', 'IGSH-816-clean-chat.md'].join('/')]) assert.ok(map.toLowerCase().includes(step.toLowerCase()), step);
   const gates = [...map.matchAll(/^(\d+)\. (.+)$/gm)];
   assert.deepEqual(gates.map(([, number]) => Number(number)), Array.from({ length: gates.length }, (_, i) => i + 1));
   assert.equal(gates.length, 10);

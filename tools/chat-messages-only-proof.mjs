@@ -52,8 +52,6 @@ export function compareCleanChat(baseline, on, off, { transcript, rows, working 
     let onInk = 0;
     let offInk = 0;
     let restoredChanges = 0;
-    const onColors = new Map();
-    const offColors = new Map();
     for (let y = top; y < top + height; y++) {
       for (let x = left; x < left + width; x++) {
         const i = (y * off.width + x) * 4;
@@ -63,8 +61,6 @@ export function compareCleanChat(baseline, on, off, { transcript, rows, working 
         if (clean !== background) onInk++;
         if (normal !== background) offInk++;
         if (normal !== before) restoredChanges++;
-        onColors.set(clean, (onColors.get(clean) || 0) + 1);
-        offColors.set(normal, (offColors.get(normal) || 0) + 1);
       }
     }
     if (name === 'rows') {
@@ -72,9 +68,9 @@ export function compareCleanChat(baseline, on, off, { transcript, rows, working 
       assert.ok(offInk > 0, 'IGSH-816 CLEAN chat OFF has no painted status/outbox/footer rows');
       assert.equal(onInk, 0, 'IGSH-816 CLEAN chat ON still paints status/outbox/footer rows');
     } else {
-      onInk = width * height - Math.max(...onColors.values());
-      offInk = width * height - Math.max(...offColors.values());
-      assert.ok(onInk > 0 && offInk > 0, 'IGSH-816 CLEAN chat working/permission row disappeared');
+      assert.equal(onInk, 0, 'IGSH-849 CLEAN chat ON still paints the removed working strip');
+      assert.equal(offInk, 0, 'IGSH-849 CLEAN chat OFF still paints the removed working strip');
+      assert.equal(restoredChanges, 0, 'IGSH-849 composer gap changed after CLEAN chat toggle');
     }
     measured[name] = { onInk, offInk, restoredChanges, bounds: rect };
   }

@@ -10,63 +10,37 @@ const driver = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
 const voice = read('src/voice.zig');
 
+require('./grok-chat.test.js');
+
 function journeyContract(source) {
   const begin = source.indexOf("        'chat-dictation' {");
   assert.ok(begin >= 0);
   const recipe = source.slice(begin, source.indexOf("        'chat-tables' {", begin));
-  let offset = 0;
   for (const step of [
     "Select-Theme 'dark'", "Press @(0x12, 0x43)", "Wait-ChatFocus 'Edit'",
-    '$composer.Current.ProcessId -ne $process.Id', '$mic = Get-DictationMic $handle',
-    "Assert-DictationMic $mic $false 'dictation-idle'", "Snapshot 'before'",
-    "foreach ($stop in @('enter', 'ctrl-d', 'mic-click'))",
-    "if ([VerifyNative]::EditText($handle) -cne '') { throw",
-    'Press @(0x11, 0x44)', 'fixture-audio-bytes\\t89160$',
-    "Assert-DictationMic $mic $true ($stop + '-listening')", 'Type-Text $typed',
-    "[VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1",
-    'GetFocusedWindow($script:window) -ne $handle', "Assert-DictationMic $mic $true ($stop + '-typed-listening')",
-    "Snapshot 'action'", 'Doctor\n                Assert-Foreground',
+    '$composer.Current.ProcessId -ne $process.Id', 'GetAncestor($handle, 2) -ne $script:window',
+    'foreach ($size in @(@(1000, 650), @(1400, 900)))',
+    "foreach ($stop in @('enter', 'ctrl-d', 'mic-click', 'arrow', 'escape'))",
+    "Type-Text 'echo'", 'Press @(0x11, 0x44)', 'fixture-audio-bytes\\t89160$',
+    '-not [VerifyNative]::IsWindowVisible($handle)', '$middle - 2 * $side',
+    '::DictationBarPixels($script:window, $bar,', "Snapshot ('dictation-bar-' + $step)",
     '$immediate = [Diagnostics.Stopwatch]::StartNew()',
     "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }",
-    "'mic-click' { [VerifyNative]::ClickClient($script:window,", "$expected = $typed + ' Go forward ten meters.'",
-    "[VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1",
-    '$elapsed = $immediate.ElapsedMilliseconds', 'if ($elapsed -gt 1000) { throw',
-    'WM_GETTEXT = [VerifyNative]::EditText($handle)', "Assert-DictationMic $mic $false ($stop + '-stopped')",
-    "@('audio-bytes\\t89160', 'fixture-response-bytes\\t101', 'http-status\\t200', 'target-chat-composer\\t22')",
-    '.Count -ne $iteration) { throw', "Snapshot ($stop + '-delivered')",
-    "name = ('dictation-' + $stop); passed = $true; typedWhileListening = $typed",
-    'if ($result.checks.Count -ne 3) { throw', "Snapshot 'after'",
-  ]) {
-    const at = recipe.indexOf(step, offset);
-    assert.ok(at >= offset, `missing or misordered ${step}`);
-    offset = at + step.length;
-  }
+    "'mic-click' { [VerifyNative]::ClickClient($script:window,", "'arrow' { [VerifyNative]::ClickClient($script:window,",
+    "'escape' { [VerifyNative]::Chord(@(0x1B)) }", '[VerifyNative]::EditText($handle) -ceq $expected',
+    'if ($elapsed -gt 1000) { throw', 'Only the arrow may enqueue', 'Escape discards the eventual transcript',
+    "Snapshot ('clean-chat-' + $step)", 'if ($result.checks.Count -ne 12) { throw',
+  ]) assert.ok(recipe.includes(step), step);
   const timed = recipe.slice(recipe.indexOf('$immediate ='), recipe.indexOf('$elapsed ='));
-  assert.equal((timed.match(/::Chord\(/g) || []).length, 2);
-  assert.equal((timed.match(/::ClickClient\(/g) || []).length, 1);
   assert.doesNotMatch(timed, /Type-Text|Press |Snapshot|Start-Sleep|Get-Content|SetFocus/);
   assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
-  const geometry = source.slice(source.indexOf('function Get-DictationMic('), source.indexOf('function Wait-ChatFocus('));
-  for (const required of [
-    "[VerifyNative]::Class($Composer) -cne 'Edit'", '$transcript.Current.ProcessId -ne $process.Id',
-    'GetAncestor($transcriptHandle, 2) -ne $script:window', '$left -lt $edit.Right - $origin.X',
-    '[VerifyNative]::GetDpiForWindow($script:window) / 96.0', '::DictationMicPixels(',
-    '$pixels[1] -ge 3', '$pixels[0] -gt $pixels[2] / 2', '$pixels[0] -eq 0',
-  ]) assert.ok(geometry.includes(required), required);
-  const pixels = source.slice(source.indexOf('public static int[] DictationMicPixels('), source.indexOf('public static List<int[]> GreyButtonPixels('));
-  for (const required of ['WindowFromPoint(center) != owner', 'graphics.CopyFromScreen(', 'pixels.Save(output,', 'c.R == 63 && c.G == 83 && c.B == 113', 'active ? 80 : 137', 'active ? 150 : 146', 'active ? 255 : 164']) assert.ok(pixels.includes(required), required);
+  const pixels = source.slice(source.indexOf('public static int[] DictationBarPixels('), source.indexOf('public static int[] DictationMicPixels('));
+  for (const required of ['WindowFromPoint(center) != owner', 'graphics.CopyFromScreen(', 'pixels.Save(output,', 'c.R == 42 && c.G == 42 && c.B == 44', 'c.R == 255', 'c.R == 250', 'c.R == 16']) assert.ok(pixels.includes(required), required);
 }
 
-test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned native Edit text are mandatory', () => {
+test('IGSH-849 Windows journey requires real inputs, bar pixels, owned draft and send/cancel at both sizes', () => {
   journeyContract(driver);
-  for (const required of [
-    'Press @(0x11, 0x44)', "'enter' { [VerifyNative]::Chord(@(0x0D)) }",
-    "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }", "'mic-click' { [VerifyNative]::ClickClient($script:window,",
-    "Assert-DictationMic $mic $true ($stop + '-listening')", 'Type-Text $typed',
-    '[VerifyNative]::EditText($handle) -ceq $typed', '[VerifyNative]::EditText($handle) -ceq $expected',
-    'if ($elapsed -gt 1000) { throw', '$pixels[0] -gt $pixels[2] / 2',
-    'WindowFromPoint(center) != owner', '$transcript.Current.ProcessId -ne $process.Id',
-  ]) {
+  for (const required of ['Press @(0x11, 0x44)', "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }", "'arrow' { [VerifyNative]::ClickClient($script:window,", "'escape' { [VerifyNative]::Chord(@(0x1B)) }", '[VerifyNative]::EditText($handle) -ceq $expected', 'if ($elapsed -gt 1000) { throw', 'WindowFromPoint(center) != owner']) {
     const broken = driver.replaceAll(required, 'REMOVED');
     assert.notEqual(broken, driver, required);
     assert.throws(() => journeyContract(broken), assert.AssertionError, required);
@@ -105,7 +79,7 @@ function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
   const capture = source.slice(source.indexOf('fn captureDictationPcm('), source.indexOf('fn deepgramTranscribePcm('));
-  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", out\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) Sleep\(1\);\s*return n;/);
+  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", out\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) \{[\s\S]*?publishDictationLevel\(out\[cursor\.\.end\]\);[\s\S]*?Sleep\(100\);\s*\}\s*return n;/);
   const transcribe = source.slice(source.indexOf('fn deepgramTranscribePcm('), source.indexOf('fn dictationWorkerThread('));
   const offline = transcribe.slice(0, transcribe.indexOf('    var key_buf:'));
   for (const required of ['if (dictationFixtureEnabled())', 'readDictationFixture("goforward.pcm", expected)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'readDictationFixture("response.json", &response)', 'parseDeepgramTranscript(response[0..n], transcript_out)']) assert.ok(offline.includes(required), required);
@@ -158,7 +132,7 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
-  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'not yet run']) assert.ok(map.includes(item), item);
+  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', 'dictation-arrow', 'dictation-escape', '1000 ms', 'not yet run']) assert.ok(map.includes(item), item);
   assert.ok(read(skill + 'features/README.md').includes('](chat-dictation.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-dictation.md)'));
   assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| journey added, not yet run \|/);

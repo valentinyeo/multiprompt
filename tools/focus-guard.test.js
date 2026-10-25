@@ -32,7 +32,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const start = source.indexOf('const FocusNative = struct {');
     const nativeEnd = source.indexOf('\n};', start) + 3;
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
-    const production = (source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted'))
+    const production = (source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatDictationBarVisible', 'chatDictationRects') + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted'))
       .replaceAll('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()');
     const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};

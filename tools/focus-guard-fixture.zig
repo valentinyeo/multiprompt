@@ -33,6 +33,11 @@ var g_url_picker_active = false;
 var g_all_sessions_active = false;
 var g_snippet_create_active = false;
 var g_chat_find_open = false;
+var g_dictation_recording = std.atomic.Value(bool).init(false);
+var g_dictation_draft_owner: [32]u8 = @splat(0);
+var g_dictation_draft_owner_len: usize = 0;
+var g_chat_draft_owner: [32]u8 = @splat(0);
+var g_chat_draft_owner_len: usize = 0;
 var g_edit_hwnd: HANDLE = null;
 var g_native_browser_focus_pending_shell_id: u32 = 0;
 var g_chat_browser_handoff_until: u64 = 0;
@@ -145,6 +150,9 @@ fn reset() void {
     g_all_sessions_active = false;
     g_snippet_create_active = false;
     g_chat_find_open = false;
+    g_dictation_recording.store(false, .release);
+    g_dictation_draft_owner_len = 0;
+    g_chat_draft_owner_len = 0;
     g_edit_hwnd = null;
     g_native_browser_focus_pending_shell_id = 0;
     g_chat_browser_handoff_until = 0;
@@ -482,4 +490,28 @@ test "ISSUE-451 activation repair refuses editor find overlays pane modal and ex
     clock += 1001;
     try std.testing.expect(!focusGuardComposerRepairAllowed());
     try std.testing.expect(!focusGuard(win(3)));
+}
+
+test "IGSH-849 activation repair never focuses the recording owner's hidden composer" {
+    reset();
+    g_chat_active = true;
+    foreground = win(1);
+    keyboard_focus = win(1);
+    focusGuardNoteInput(win(1), clock, false);
+    focusGuardNoteActivation();
+    try std.testing.expect(focusGuardComposerRepairAllowed());
+    @memcpy(g_chat_draft_owner[0..4], "chat");
+    g_chat_draft_owner_len = 4;
+    g_dictation_recording.store(true, .release);
+    try std.testing.expect(focusGuardComposerRepairAllowed());
+    @memcpy(g_dictation_draft_owner[0..4], "chat");
+    g_dictation_draft_owner_len = 4;
+    try std.testing.expect(!focusGuardComposerRepairAllowed());
+    try std.testing.expect(!focusGuard(win(3)));
+    g_dictation_draft_owner[0] = 'x';
+    try std.testing.expect(focusGuardComposerRepairAllowed());
+    g_dictation_draft_owner[0] = 'c';
+    g_dictation_recording.store(false, .release);
+    try std.testing.expect(focusGuardComposerRepairAllowed());
+    try std.testing.expectEqual(win(3), SetFocus(win(3)));
 }

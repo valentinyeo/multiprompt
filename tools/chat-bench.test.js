@@ -264,9 +264,9 @@ test('browser regression oracle rejects clipped header, split composer, blank lo
   const { evaluate, defaults, geometryInside } = await lib;
   const { goodRun } = await fixture;
   const rect = { left: 250, right: 790, top: 70, bottom: 900 };
-  const good = { pane_left: 240, pane_right: 800, title: rect, transcript: rect, composer: rect, layout: { transcript: rect, composer: rect, composer_card: rect, attach_btn: rect, send_btn: rect } };
+  const good = { pane_left: 240, pane_right: 800, title: rect, transcript: rect, composer: rect, layout: { transcript: rect, composer: rect, composer_card: rect, attach_btn: rect, send_btn: rect, stop_btn: rect, mic_btn: rect } };
   assert.equal(geometryInside(good), true);
-  for (const mutate of [g => { g.title = { ...rect, left: 700, right: 1000 }; }, g => { g.layout.composer_card = { ...rect, right: 1100 }; }, g => { g.composer = { ...rect, left: 260 }; }]) {
+  for (const mutate of [g => { g.layout.mic_btn = { ...rect, right: 1000 }; }, g => { delete g.layout.mic_btn; }, g => { g.layout.stop_btn = { ...rect, left: 200 }; }, g => { g.title = { ...rect, left: 700, right: 1000 }; }, g => { g.layout.composer_card = { ...rect, right: 1100 }; }, g => { g.composer = { ...rect, left: 260 }; }]) {
     const g = structuredClone(good); mutate(g); assert.equal(geometryInside(g), false);
   }
   for (const mutate of [r => { r.switches[2].geometry.browser_foreign = false; }, r => { r.switches[0].geometryInside = false; }, r => { r.switches[0].headerInk = false; }, r => { r.switches[0].composerInk = false; }, r => { r.switches[0].earlyContent = false; r.switches[0].loadingInk = false; }, r => { r.switches[3].contentPaintMs = 5000; }, r => { r.switches[3].earlyContent = false; }]) {

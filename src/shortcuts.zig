@@ -1170,6 +1170,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 (kb.vkCode >= 0xA0 and kb.vkCode <= 0xA3))
                 return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
 
+            if (!ctrl and !shift and kb.vkCode == 0x1B and app_state.g_dictation_running.load(.acquire)) {
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_TOGGLE, 1, 0);
+                return 1;
+            }
+
             if (!ctrl and !shift and kb.vkCode == 0x0D and queueDictationStopFromEnter()) {
                 return 1;
             }

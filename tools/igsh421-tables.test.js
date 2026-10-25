@@ -46,7 +46,7 @@ const CHAT_FIND_TOP_H = 40;
 var g_chat_find_open = false;
 const CHAT_AGENT_PAD_X = 16;
 const CHAT_BUBBLE_PAD = 12;
-const CHAT_AGENT_HEADER_H = 24;
+const CHAT_AGENT_HEADER_H = 22;
 var g_chat_tables: chat_markdown.TableCache = .{};
 var g_chat_received: chat_markdown.BlockCache = .{};
 var chat_received_parses: usize = 0;
@@ -256,7 +256,8 @@ test "ISSUE-458 production thumb captures outside movement and track clicks page
     g_chat_scroll_y = 50;
     const layout = chatTableLayout(null, text, 0, 100).?;
     const left = 30 + 5 + CHAT_CODE_PAD;
-    const top = 100 - 50 + CHAT_AGENT_HEADER_H + CHAT_CODE_PAD;
+    try std.testing.expectEqual(@as(i32, 0), chat_style.headerHeight(g_chat_blocks[0], CHAT_AGENT_HEADER_H));
+    const top = 100 - 50 + CHAT_CODE_PAD;
     const y = top + layout.bodyHeight() + 8;
     captures = 0;
     invalidates = 0;

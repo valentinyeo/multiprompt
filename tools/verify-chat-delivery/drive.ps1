@@ -378,10 +378,13 @@ foreach ($plan in $plans) {
             if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
             $statusBounds = $statusRows[0].Current.BoundingRectangle
             $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
-            $composerTopPad = [int][math]::Round(12 * $statusBounds.Height / 28)
+            $composerTopPad = [int][math]::Floor(12 * $statusBounds.Height / 28)
+            $workingHeight = [int]($composerBounds.Top - $composerTopPad - $bounds.Bottom)
+            $expectedGapHeight = [int][math]::Floor(14 * $statusBounds.Height / 28)
+            if ($workingHeight -ne $expectedGapHeight) { throw 'IGSH-849 removed working strip still reserves space' }
             $observation.cleanChat = @{
                 rows=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
-                working=@{left=[int]$bounds.Left; top=[int]$bounds.Bottom; width=[int]$bounds.Width; height=[int]($composerBounds.Top - $composerTopPad - $bounds.Bottom)}
+                working=@{left=[int]$bounds.Left; top=[int]$bounds.Bottom; width=[int]$bounds.Width; height=$workingHeight}
             }
             foreach ($mode in @('on', 'off')) {
                 $paletteLogStart = (Read-Shared "$settings/debug.log").Length

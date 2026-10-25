@@ -220,7 +220,7 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     const pen = CreatePen(0, 1, bg);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
-    const radius = uiScaled(8);
+    const radius = rc.bottom - rc.top;
     _ = @import("smooth.zig").drawRoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
     _ = SelectObject(hdc, old_brush);
     _ = SelectObject(hdc, old_pen);
@@ -262,6 +262,49 @@ fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
     _ = DrawTextW(hdc, L("\u{E720}"), -1, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
+fn paintChatDictationBar(hdc: HANDLE) void {
+    const bar = @import("chat_composer.zig").chatDictationRects();
+    const radius = @divTrunc(bar.stop.bottom - bar.stop.top, 2);
+    paintChatSurface(hdc, bar.stop, RGB(42, 42, 44), RGB(68, 68, 71), radius);
+    paintChatSurface(hdc, bar.meter, RGB(42, 42, 44), RGB(68, 68, 71), radius);
+    fillRoundRectAA(hdc, bar.send, radius, RGB(250, 250, 250));
+    const cx = @divTrunc(bar.stop.left + bar.stop.right, 2);
+    const cy = @divTrunc(bar.stop.top + bar.stop.bottom, 2);
+    const half = uiScaled(9);
+    fillRoundRectAA(hdc, .{ .left = cx - half, .top = cy - half, .right = cx + half, .bottom = cy + half }, uiScaled(3), RGB(255, 255, 255));
+    var canvas = @import("smooth.zig").Canvas.init(hdc);
+    defer canvas.deinit();
+    const ax = @divTrunc(bar.send.left + bar.send.right, 2);
+    const width: f32 = @floatFromInt(uiScaled(3));
+    canvas.strokePolyline(&.{ .{ .x = ax, .y = cy + uiScaled(10) }, .{ .x = ax, .y = cy - uiScaled(10) } }, RGB(16, 16, 16), width);
+    canvas.strokePolyline(&.{ .{ .x = ax - uiScaled(8), .y = cy - uiScaled(2) }, .{ .x = ax, .y = cy - uiScaled(10) }, .{ .x = ax + uiScaled(8), .y = cy - uiScaled(2) } }, RGB(16, 16, 16), width);
+    const old_font = SelectObject(hdc, ensureChatFont());
+    defer _ = SelectObject(hdc, old_font);
+    _ = SetTextColor(hdc, RGB(255, 255, 255));
+    const seconds = (@import("win32.zig").GetTickCount64() -| app_state.g_dictation_start_tick) / 1000;
+    var text: [32]u8 = undefined;
+    const timer = std.fmt.bufPrint(&text, "{d}:{d:0>2}", .{ seconds / 60, seconds % 60 }) catch unreachable;
+    var timer_rc = bar.meter;
+    timer_rc.left += uiScaled(16);
+    timer_rc.right = @divTrunc(bar.meter.left + bar.meter.right, 2);
+    @import("drawing.zig").drawAscii(hdc, timer, &timer_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    const level = app_state.g_dictation_level.load(.acquire);
+    const dots_left = timer_rc.right + uiScaled(6);
+    const dots_right = bar.meter.right - uiScaled(16);
+    const step = @max(1, @divTrunc(dots_right - dots_left, 12));
+    for (0..12) |i| {
+        const dot_x = dots_left + @as(i32, @intCast(i)) * step;
+        const threshold: u32 = @intCast(i * 70);
+        const height = uiScaled(3) + @divTrunc(@as(i32, @intCast(level -| threshold)) * uiScaled(22), 1000);
+        const dot = RECT{ .left = dot_x, .right = @min(dots_right, dot_x + @max(1, @min(uiScaled(3), step - 1))), .top = cy - @divTrunc(height, 2), .bottom = cy - @divTrunc(height, 2) + height };
+        fillRoundRectAA(hdc, dot, uiScaled(2), if (level > threshold) RGB(235, 235, 239) else RGB(139, 139, 146));
+    }
+    if (verboseLoggingEnabled()) {
+        var log: [200]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] dictation bar {d},{d},{d},{d} meter={d},{d} send={d},{d}", .{ bar.stop.left, bar.stop.top, bar.stop.right, bar.stop.bottom, bar.meter.left, bar.meter.right, bar.send.left, bar.send.right }) catch "");
+    }
+}
+
 pub fn chatSurfaceRadius() i32 {
     return uiScaled(CHAT_BUBBLE_RADIUS);
 }
@@ -281,7 +324,7 @@ fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, ra
 }
 
 pub fn chatWorkingIndicatorH() i32 {
-    return uiScaled(if (app_state.ISSUE_265_WORKING_BAR) @as(i32, 22) else @as(i32, 18));
+    return if (chatPermissionVisible()) uiScaled(36) else 0;
 }
 
 pub fn chatWorkingIndicatorText() []const u16 {
@@ -404,26 +447,31 @@ pub fn paintChatView(hdc: HANDLE) void {
     refreshChatBrushes();
     _ = SetBkMode(hdc, TRANSPARENT);
     const card_border = chatSurfaceBorderColor();
-    paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, chatSurfaceRadius());
-    if (app_state.g_chat_reply_len > 0) {
-        const old_font = SelectObject(hdc, ensureChatFont());
-        defer _ = SelectObject(hdc, old_font);
-        var preview = layout.composer_card;
-        preview.left += uiScaled(14);
-        preview.top += uiScaled(4);
-        preview.right -= uiScaled(40);
-        preview.bottom = layout.composer_card.top + @import("chat_composer.zig").chatReplyBarH();
-        _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
-        _ = DrawTextW(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        var cancel = @import("chat_composer.zig").chatReplyCancelRect();
-        _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    const recording = @import("chat_composer.zig").chatDictationBarVisible();
+    if (recording) {
+        paintChatDictationBar(hdc);
+    } else {
+        paintChatSurface(hdc, layout.composer_card, app_state.g_chat_input_color, card_border, chatSurfaceRadius());
+        if (app_state.g_chat_reply_len > 0) {
+            const old_font = SelectObject(hdc, ensureChatFont());
+            defer _ = SelectObject(hdc, old_font);
+            var preview = layout.composer_card;
+            preview.left += uiScaled(14);
+            preview.top += uiScaled(4);
+            preview.right -= uiScaled(40);
+            preview.bottom = layout.composer_card.top + @import("chat_composer.zig").chatReplyBarH();
+            _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+            _ = DrawTextW(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            var cancel = @import("chat_composer.zig").chatReplyCancelRect();
+            _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+        const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
+        if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
+        if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
+        paintChatAttachButton(hdc, layout.attach_btn);
+        paintChatMicButton(hdc, layout.mic_btn);
+        logChatButtons(layout);
     }
-    const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
-    if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
-    if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
-    paintChatAttachButton(hdc, layout.attach_btn);
-    paintChatMicButton(hdc, layout.mic_btn);
-    logChatButtons(layout);
     if (@import("chat_composer.zig").chatNewMessagesRect()) |pill| {
         paintChatSurface(hdc, pill, app_state.g_chat_input_color, card_border, uiScaled(13));
         const old_font = SelectObject(hdc, ensureChatFont());
@@ -447,18 +495,6 @@ pub fn paintChatView(hdc: HANDLE) void {
     if (chatPermissionVisible()) {
         paintChatPermission(hdc, card_border);
         return;
-    }
-    if (app_state.g_chat_working_applied_len > 0) {
-        const old_font = SelectObject(hdc, ensureChatFont());
-        defer _ = SelectObject(hdc, old_font);
-        var line = RECT{
-            .left = layout.transcript.left,
-            .top = layout.transcript.bottom + @import("chat_composer.zig").chatNewMessagesHeight(),
-            .right = layout.transcript.right,
-            .bottom = layout.composer_card.top,
-        };
-        _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(135, 139, 147)));
-        _ = DrawTextW(hdc, &app_state.g_chat_working_applied, @intCast(app_state.g_chat_working_applied_len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     paintChatStopTooltip(hdc, layout);
 }
@@ -551,7 +587,7 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
     defer _ = w.DeleteObject(brush);
     for ([_]u32{ 100, 150 }) |scale| {
         app_state.g_ui_scale = scale;
-        const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(28) };
+        const rc = RECT{ .left = 8, .top = 8, .right = 8 + uiScaled(32), .bottom = 8 + uiScaled(32) };
         for ([_]bool{ false, true }) |enabled| {
             _ = w.FillRect(dc, &area, brush);
             paintChatButton(dc, rc, enabled, .send);
@@ -561,12 +597,13 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
             var y = rc.top;
             while (y < rc.top + uiScaled(4)) : (y += 1) {
                 var x = rc.left;
-                while (x < rc.left + uiScaled(4)) : (x += 1) {
+                while (x < rc.left + @divTrunc(rc.bottom - rc.top, 2)) : (x += 1) {
                     const pixel = w.GetPixel(dc, x, y);
                     if (pixel != fill and pixel != background and pixel != 0xffffffff) blended += 1;
                 }
             }
             try std.testing.expect(blended > 0);
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.right, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.bottom));
         }
