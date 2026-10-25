@@ -55,7 +55,7 @@ const SOCKADDR_IN = extern struct {
     sin_zero: [8]u8,
 };
 const WSADATA = extern struct { data: [408]u8 };
-const NOTIFY_PORTS = [_]u16{ 19548, 19549, 19550, 19551, 19552, 19553, 19554, 19555, 19556, 19557, 19558, 19559 };
+const NOTIFY_PORTS = @import("notify_ports.zig").NOTIFY_PORTS;
 
 extern "kernel32" fn ReadFile(
     hFile: windows.HANDLE,
@@ -3600,6 +3600,10 @@ test "ISSUE-410 extended paths normalize before overlapping path protection" {
     try fixture.same("clone", ".multiprompt-clone-complete", "");
     try fixture.unchanged();
     std.debug.print("ISSUE-410 extended paths passed\n", .{});
+}
+
+test "IGSH-894 notify ports module" {
+    std.testing.refAllDecls(@import("notify_ports.zig"));
 }
 
 test "IGSH-672 own profile module" {

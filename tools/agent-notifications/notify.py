@@ -13,6 +13,8 @@ TOKEN = re.compile(r"[A-Za-z0-9_. /()-]{1,120}\Z")
 STATE_OVERRIDE = "MULTIPROMPT_STATE_DIR"
 ETA_LOG_MAX = 5000
 ETA_LOG_KEEP = 2000
+NOTIFY_PORT_FIRST = 19548
+NOTIFY_PORT_LAST = 19571
 
 
 def target(env):
@@ -47,7 +49,7 @@ def target(env):
             return None
         name = matches[0].get("name", "")
         port = int(env["ZIGSHELL_NOTIFY_PORT"])
-        if TOKEN.fullmatch(name) and sum(r.get("name") == name for r in rows) == 1 and 19548 <= port <= 19559:
+        if TOKEN.fullmatch(name) and sum(r.get("name") == name for r in rows) == 1 and NOTIFY_PORT_FIRST <= port <= NOTIFY_PORT_LAST:
             return name, port, False
     return None
 

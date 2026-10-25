@@ -108,7 +108,7 @@ pub var g_power_background_since_tick: u64 = 0;
 
 pub const PowerTimerMode = enum { normal, saving, deep_idle };
 
-pub const NOTIFY_PORTS = [_]u16{ 19548, 19549, 19550, 19551, 19552, 19553, 19554, 19555, 19556, 19557, 19558, 19559 };
+pub const NOTIFY_PORTS = @import("notify_ports.zig").NOTIFY_PORTS;
 
 pub var g_tunnel_inbound_port: u16 = 0;
 pub var g_notify_bound_port: u16 = 0;
