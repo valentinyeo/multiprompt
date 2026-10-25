@@ -31,6 +31,7 @@ const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
     shell_id: u32 = 1,
     chat_id: u64 = 0,
+    last_read_message_id: u64 = 0,
     kind: ShellKind = .cmd,
     name: [64]u16 = @splat(0),
     name_len: u32 = 0,

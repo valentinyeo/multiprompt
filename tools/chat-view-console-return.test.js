@@ -30,6 +30,7 @@ function toggle(text) {
 function harness(source) {
   const production = names.map(name => fn(source, name)).join('\n\n')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
+    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").applyBlackConsoleBackground', 'applyBlackConsoleBackground');
   return `const std = @import("std");
@@ -79,6 +80,7 @@ fn debugLog(_: []const u8) void {}
 fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
+fn chatReadMark(_: bool) bool { return false; }
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn KillTimer(_: HANDLE, _: usize) BOOL { return 1; }

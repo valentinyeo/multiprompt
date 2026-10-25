@@ -114,6 +114,7 @@ fn pollFonts() void {
 `).replaceAll('@import("fonts.zig")', 'font_policy')
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
+    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
@@ -391,6 +392,7 @@ fn RemoveFontResourceExW(_: [*:0]const u16, _: u32, _: ?usize) BOOL { removals +
 fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
+fn chatReadMark(_: bool) bool { return false; }
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn updateBrowserVisibility() void {}
