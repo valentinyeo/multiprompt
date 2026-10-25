@@ -6,6 +6,8 @@ const session = fs.readFileSync('src/chat_session.zig', 'utf8');
 const history = fs.readFileSync('src/chat_history.zig', 'utf8');
 const state = fs.readFileSync('src/app_state.zig', 'utf8');
 
+const ENTRY_LINE = /^Chat View [^.]+\.$/;
+
 function body(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -132,5 +134,12 @@ test('full-history continuation stays automatic across disk restore without a ca
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();
   assert.ok(changelog.length > 0);
-  for (const line of changelog.split('\n')) assert.match(line, /^Chat View .+\.$/, line);
+  for (const line of changelog.split('\n')) assert.match(line, ENTRY_LINE, line);
+});
+
+test('changelog rule: several lines per ticket are fine, each line is one sentence, an empty or two-sentence line is rejected', () => {
+  assert.match('Chat View loads every message in long sessions.', ENTRY_LINE);
+  assert.doesNotMatch('', ENTRY_LINE);
+  assert.doesNotMatch('Chat View loads every message. Chat View keeps your place.', ENTRY_LINE);
+  assert.doesNotMatch('Chat View loads every message', ENTRY_LINE);
 });
