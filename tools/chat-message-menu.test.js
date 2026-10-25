@@ -62,7 +62,8 @@ test('IGSH-718 native popup is opt-in themed with icons, mnemonics and existing 
 });
 
 test('IGSH-718 enabled button backgrounds are neutral, hover is lighter, disabled colours and geometry remain', () => {
-  const paint = layout.slice(layout.indexOf('fn paintChatButton('), layout.indexOf('pub fn chatSurfaceRadius('));
+  const paint = layout.match(/fn paintChatButton\([^]*?\n\}/)?.[0];
+  assert.ok(paint, 'send/stop button paint function exists');
   assert.match(paint, /const hover = glyph == .stop and app_state.g_chat_stop_hover/);
   const shades = paint.match(/if \(app_state.g_light_theme\) \(if \(hover\) (\d+) else (\d+)\) else \(if \(hover\) (\d+) else (\d+)\)/);
   assert.ok(shades);
