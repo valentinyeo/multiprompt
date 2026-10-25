@@ -285,3 +285,20 @@ test('verify journey jobs keep the plain name the ruleset and revert parser read
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
+
+test('controlled red proof is valid source and fails only chat-view on master pushes', () => {
+  const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
+  const guard = "          if ($env:FEATURE -eq 'chat-view' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master') { throw 'IGSH-837 deliberate red master proof' }";
+  const contract = source => {
+    assert.doesNotMatch(source, /^(?:<{7}|={7}|>{7})(?:\s|$)/m);
+    assert.deepEqual(source.split('\n').filter(line => line.includes('IGSH-837 deliberate red master proof')), [guard]);
+  };
+  contract(verify);
+  for (const broken of [
+    verify + '\n>>>>>>> conflict\n',
+    verify.replace(" -and $env:GITHUB_REF -eq 'refs/heads/master'", ''),
+    verify.replace("$env:GITHUB_EVENT_NAME -eq 'push'", "$env:GITHUB_EVENT_NAME -eq 'pull_request'"),
+    verify.replace("$env:FEATURE -eq 'chat-view' -and ", ''),
+    verify.replace(guard, guard + '\n' + guard),
+  ]) assert.throws(() => contract(broken), assert.AssertionError);
+});
