@@ -79,6 +79,8 @@ def pane_candidates(capture):
             or (wrapped.startswith('Task "') and wrapped.count('"') % 2 == 1)
         ):
             continue
+        if line.startswith('● ') and re.fullmatch(r'(?:All|\d+) background agents (?:stopped|running)', text):
+            continue
         if line.startswith('● ') and re.match(r'^Build in progress \(~?\d+(?:\.\d+)? min\); ', text):
             continue
         if re.fullmatch(r'[A-Z][a-z]+ing (?:\d+ |[~/])[^,…]+(?:(?:, [a-z]+ing (?:\d+ |[~/])[^,…]+)+…?|…)',

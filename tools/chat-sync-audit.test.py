@@ -512,6 +512,40 @@ class ChatSyncAuditTest(unittest.TestCase):
         candidates = audit.pane_candidates('\n'.join([message] + [''] * 8) + '\n')
         self.assertEqual([item['text'] for item in candidates], [message[2:]])
 
+    def test_pane_candidates_skip_background_agent_status_rows(self):
+        reader = audit.load_reader()
+        message = 'The neutral assistant summary is ready'
+        capture = '\n'.join(['● ' + message, '● All background agents stopped',
+                             '● All background agents running', '● 2 background agents stopped',
+                             '● 3 background agents running'] + [''] * 8) + '\n'
+        candidates = audit.pane_candidates(capture)
+        self.assertEqual([item['text'] for item in candidates], [message])
+        self.assertEqual([item['pane_line'] for item in candidates], [1])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else ''.join(
+                    json.dumps(dict(probe=index, present=False)) + '\n' for index in range(argv.count('--contains')))
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit.time, 'sleep') as sleep:
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual([item['text'] for item in findings], [message])
+                self.assertEqual(findings[0]['transcript_lines'], [])
+
+    def test_background_agent_status_wording_in_real_messages_remains_candidates(self):
+        messages = ['● All background agents stopped; I will check the results',
+                    '● The 2 background agents stopped unexpectedly',
+                    '● 3 background agents running need attention',
+                    '❯ All background agents stopped', '› 2 background agents stopped']
+        candidates = audit.pane_candidates('\n'.join(messages + [''] * 8) + '\n')
+        self.assertEqual([item['text'] for item in candidates], [text[2:] for text in messages])
+
     def test_ISSUE_571_real_messages_about_background_tasks_remain_candidates(self):
         messages = ['● The Task "neutral check" still running in background needs attention',
                     '● Task "neutral check" still running in background; I will wait',
