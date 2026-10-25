@@ -1,13 +1,13 @@
 # Gates: IGSH-805 composer line regression
 
-OWNS: GATES.md, src/chat_composer.zig, tools/chat-composer-text-proof.test.js, changelog.d/IGSH-805-composer-line.md
+OWNS: GATES.md, src/chat_composer.zig, tools/chat-composer-text-proof.test.js, tools/composer-band.test.js, .github/workflows/check-red-run.yml, .claude/skills/verify-multiprompt/features/chat-composer-text.md, changelog.d/IGSH-805-composer-line.md
 
 Scope: Trace the newly visible composer line to its introducing commit, remove only its cause, preserve smoothing and buffered painting, add a headless regression assertion, and commit locally on ceo/IGSH-805 without pushing or opening a PR.
 
 - [x] G1: the ledger has valid, measurable gates
   CHECK: node "$HOME/.agents/skills/unlazy/scripts/gate-lint.mjs" GATES.md
   EXPECT: LINT OK
-  EVIDENCE: automatic-evidence=v1; definition-sha256=2e01e6cb0c2b57862b4f4acfd1b3fed2fbbc2f8a6db901d2d3d3bf8d4170f7fb; exit=0; EXPECT=matched; output-sha256=fa1a5d8a8995b697473fd5e92589b000eee0caa74b695a4ac1e88e4844c6c3cb; output-bytes=901; shell=/bin/sh; cwd=/home/valentin/worktrees/IGSH-805; path=433695eed2f1/23 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=2e01e6cb0c2b57862b4f4acfd1b3fed2fbbc2f8a6db901d2d3d3bf8d4170f7fb; exit=0; EXPECT=matched; output-sha256=38c4b5d2e323ca4ae15dba520727ed1679a15d4854352bdaff11471e3aef2ad0; output-bytes=2054; shell=/bin/sh; cwd=/home/valentin/worktrees/IGSH-805; path=433695eed2f1/23 entries
 
 - [x] G2: history identifies the exact introducing commit, PR and drawing property
   EVIDENCE: Inspected git log --oneline -40 and git log -p -2 -- src/chat_composer.zig src/chat_composer_text.zig. f3a9c8d247404936c15621cf864464ff4c05aaea, "IGSH-760: stop the message box flickering while typing" (#344), introduced chatComposerPaintBuffered: a fresh full-client DIB, WM_PRINTCLIENT (0x0318) with only PRF_CLIENT (4), and a full-client BitBlt. Background erasure (PRF_ERASEBKGND, 8) was omitted, allowing uncovered pixels to appear black. The earlier 7260d1b5 smoothing implementation (#336) painted directly into the existing window DC instead. git show f3a9c8d2:src/chat_composer.zig confirms the exact broken call before var probe. The supplied screenshot shows a black strip inside the input, not a new card border. Windows message documentation defines PRF_ERASEBKGND as erasing the background before drawing (https://learn.microsoft.com/en-us/windows/win32/gdi/wm-printclient).
@@ -33,8 +33,28 @@ Scope: Trace the newly visible composer line to its introducing commit, remove o
 
 The following are intentionally not local execution claims:
 
-- Headless regression: `node --test --test-name-pattern='^IGSH-805 ' tools/chat-composer-text-proof.test.js`. Expect one passing test, including rejection of the client-only flag mutation. The existing full composer suite must also pass.
+- Headless regression: `node --test tools/composer-band.test.js`. Expect one passing test, including rejection of the client-only flag mutation. The existing full composer suite must also pass.
 - Build/test: existing `.github/workflows/test.yml` desktop shards, VPS shards and x64/ARM64 build jobs. **Runs on GitHub** when the caller integrates the branch through the normal PR workflow.
 - Native/visual acceptance: existing `verify.yml` feature `chat-composer-text`, with no release tag, plus inspection of the whole input with empty and typed drafts. **Runs on GitHub** on caller dispatch; full-client absence of the black strip remains visually unproved here.
 
 No builds or tests ran on this VPS, including Node tests. Only file/history inspection, static reasoning, diff checks, normal commit secret scans and ledger metadata validation ran here. Seven local gates distinguish source/handoff proof from the unexecuted GitHub gates above. No push or PR creation is authorized.
+
+
+## Dedicated composer band check follow-up
+
+G1–G7 above record the original commits; G4's former test location is superseded below. This follow-up proves source and configuration by inspection only. No build or test (including Node tests) may execute here; GitHub execution and visual results remain unproved handoffs, not local acceptance claims.
+
+- [x] G8: exactly one dedicated composer band test requires both native buffered-print flags and includes a client-only rejection control
+  EVIDENCE: Static review: tools/composer-band.test.js:1-15 uses node:test and the existing read/assert style. Its sole test is "IGSH-805 composer band buffered native print requests PRF_CLIENT and PRF_ERASEBKGND". Lines 10-11 require 4 | 8 on the native WM_PRINTCLIENT call immediately before var probe. Lines 12-14 mutate that call to 4, require changed input, and require the same assertion to throw AssertionError. src/chat_composer.zig:1153-1154 matches the required sequence; git show f3a9c8d2:src/chat_composer.zig shows 4 there and cannot match. rg across tools/*.test.js locates backgroundPrint only in the dedicated file; the old nine-line test is deleted. No test was executed.
+
+- [x] G9: check-red-run restores src/ from f3a9c8d2 for composer-band and watches the dedicated test path
+  EVIDENCE: Reviewed .github/workflows/check-red-run.yml:9,28-30,38-51: PR paths include tools/composer-band.test.js; the new entry follows existing entries with check composer-band, test tools/composer-band.test.js, prefix f3a9c8d2. The shared step restores only src/, retaining the new test, and requires its nonzero exit. Historical source at f3a9c8d2:1153 has the client-only flags, so the first assertion must fail by static reasoning. An actual GitHub RED PROVEN result is not claimed.
+
+- [x] G10: the feature guide records IGSH-805's unpainted-strip contract, branch and v0.28.864 commands, and introducing commit
+  EVIDENCE: Reviewed .claude/skills/verify-multiprompt/features/chat-composer-text.md:7,27-28,39: IGSH-805 sub-feature requires no unpainted strip and background erasure for buffered offscreen printing; branch command uses ceo/IGSH-805 and feature chat-composer-text, red command adds tag v0.28.864; gotcha names f3a9c8d2 and the client-only print. Existing feature wording and older control commands are preserved.
+
+- [x] G11: the follow-up has only requested files plus this ledger, no new code comments, and no local builds, tests, push or PR
+  EVIDENCE: Reviewed complete diff and new file: only the four requested code/config/documentation files plus GATES.md changed; production source and prior commits remain untouched. The new JavaScript has no comments; workflow and feature edits add no code comments. Command audit contains only reads, edits, ledger metadata validation, diff checks, and local git operations; no builds, test execution, push, PR or workflow dispatch. Commit hooks were inspected: only normal secret scanning is enabled, with no repo-local executable commit hooks.
+
+- [x] G12: the follow-up is committed locally on ceo/IGSH-805 with an IGSH-805 prefix above both existing commits
+  EVIDENCE: git log -3 shows local commit 2525df96, "IGSH-805: isolate composer band check and historical red control", directly above 1dc26fa1 and 38032900 on ceo/IGSH-805. Both git merge-base --is-ancestor checks exit zero. git show --stat identifies exactly the four requested files. GATES.md is the only remaining artifact and is recorded in a separate local evidence commit; neither prior commit is rewritten. No push or PR is authorized or performed.
