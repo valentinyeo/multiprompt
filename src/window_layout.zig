@@ -252,7 +252,7 @@ fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
     const ink = if (active) customColorOr("accent", RGB(80, 150, 255)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
     const base = app_state.g_chat_input_color;
     const fill = if (active) customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)) else @import("chat_style.zig").shift(base, if (@import("chat_style.zig").isDark(base)) 22 else -14);
-    fillRoundRectAA(hdc, rc, @divTrunc(rc.bottom - rc.top, 2), fill);
+    @import("smooth.zig").fillEllipse(hdc, rc, fill);
     const font = @import("fonts.zig").messageMenuIconFont();
     const old_font = SelectObject(hdc, font);
     defer {

@@ -2897,7 +2897,7 @@ pub fn shotFocusTick() void {
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
     const base = app_state.g_chat_input_color;
     const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-    fillRoundRectAA(hdc, rc, @divTrunc(rc.bottom - rc.top, 2), fill);
+    @import("smooth.zig").fillEllipse(hdc, rc, fill);
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);
     const arm = @max(uiScaled(5), @divTrunc(rc.right - rc.left, 5));
