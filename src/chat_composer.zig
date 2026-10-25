@@ -2373,3 +2373,33 @@ test "IGSH-836 skill keyboard survives stationary hover and real movement or cli
     n = GetWindowTextW(edit, &text, text.len);
     try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
 }
+
+test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
+    const saved_extra = app_state.g_chat_composer_extra_h;
+    const saved_reply = app_state.g_chat_reply_len;
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_chat_composer_extra_h = saved_extra;
+    defer app_state.g_chat_reply_len = saved_reply;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        app_state.g_main_monitor_dpi = dpi;
+        for ([_]u32{ 100, 150 }) |scale| {
+            app_state.g_ui_scale = scale;
+            for ([_]u32{ 0, 5, 20 }) |extra_lines| {
+                app_state.g_chat_composer_extra_h = @as(i32, @intCast(extra_lines)) * chatComposerLineH();
+                for ([_]u32{ 0, 1 }) |reply| {
+                    app_state.g_chat_reply_len = reply;
+                    const layout = chatViewLayout();
+                    for ([_]RECT{ layout.attach_btn, layout.mic_btn, layout.send_btn, layout.stop_btn }) |button| {
+                        try std.testing.expectEqual(layout.send_btn.bottom, button.bottom);
+                        try std.testing.expectEqual(layout.send_btn.top, button.top);
+                        try std.testing.expectEqual(uiScaled(32), button.right - button.left);
+                        try std.testing.expectEqual(uiScaled(32), button.bottom - button.top);
+                    }
+                }
+            }
+        }
+    }
+}

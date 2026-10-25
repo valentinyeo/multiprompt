@@ -561,3 +561,49 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
         }
     }
 }
+
+test "IGSH-884 attach microphone send and stop paint circular backgrounds" {
+    const w = @import("win32.zig");
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    const saved_state = @import("chat_composer.zig").chat_dictation_state;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    defer @import("chat_composer.zig").chat_dictation_state = saved_state;
+    app_state.g_main_monitor_dpi = 96;
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 128, .height = -128 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const area = RECT{ .left = 0, .top = 0, .right = 128, .bottom = 128 };
+    const background: DWORD = 0x112233;
+    const brush = w.CreateSolidBrush(background);
+    defer _ = w.DeleteObject(brush);
+    for ([_]u32{ 100, 150, 200 }) |scale| {
+        app_state.g_ui_scale = scale;
+        const size = uiScaled(32);
+        const rc = RECT{ .left = 8, .top = 8, .right = 8 + size, .bottom = 8 + size };
+        for (0..5) |button| {
+            _ = w.FillRect(dc, &area, brush);
+            var canvas = @import("smooth.zig").Canvas.init(dc);
+            switch (button) {
+                0 => paintChatAttachButton(dc, rc),
+                1, 2 => {
+                    @import("chat_composer.zig").chat_dictation_state = if (button == 1) .idle else .listening;
+                    paintChatMicButton(dc, rc);
+                },
+                3 => paintChatButton(dc, rc, true, .send),
+                else => paintChatButton(dc, rc, true, .stop),
+            }
+            canvas.deinit();
+            _ = w.GdiFlush();
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left + uiScaled(1), rc.top + @divTrunc(size, 4)));
+            try std.testing.expect(w.GetPixel(dc, rc.left + @divTrunc(size, 2), rc.top + uiScaled(2)) != background);
+        }
+    }
+}
