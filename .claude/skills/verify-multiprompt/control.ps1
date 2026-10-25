@@ -247,6 +247,57 @@ public static class VerifyNative {
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
     [DllImport("gdi32.dll", SetLastError=true)] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, int operation);
+    public static Dictionary<string, object> ComposerTypingFrames(IntPtr owner, IntPtr composer, string text, Rect crop, string directory) {
+        if (GetAncestor(composer, 2) != owner || GetForegroundWindow() != owner || GetFocusedWindow(owner) != composer || EditText(composer) != "") throw new InvalidOperationException("Typing burst requires the owned empty focused composer");
+        Text(text.Substring(0, 12));
+        var frames = new List<System.Drawing.Bitmap>();
+        var times = new List<double>();
+        var ready = new ManualResetEvent(false);
+        var stop = new ManualResetEvent(false);
+        Exception captureError = null;
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var sampler = new Thread(delegate() {
+            try {
+                int width = crop.Right - crop.Left, height = crop.Bottom - crop.Top;
+                if (width <= 0 || height <= 0 || width > 1000 || height > 100) throw new InvalidOperationException("Typing crop is not a small composer row");
+                using (var bitmap = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppRgb))
+                using (var graphics = System.Drawing.Graphics.FromImage(bitmap)) {
+                    IntPtr screen = GetDC(IntPtr.Zero);
+                    try {
+                        ready.Set();
+                        bool finalFrame = false;
+                        while (true) {
+                            if (GetForegroundWindow() != owner) throw new InvalidOperationException("Foreground left owned app during typing burst");
+                            IntPtr target = graphics.GetHdc();
+                            try {
+                                if (!BitBlt(target, 0, 0, width, height, screen, crop.Left, crop.Top, 0x00CC0020)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                            } finally { graphics.ReleaseHdc(target); }
+                            times.Add(timer.Elapsed.TotalMilliseconds);
+                            frames.Add(bitmap.Clone(new System.Drawing.Rectangle(0, 0, width, height), System.Drawing.Imaging.PixelFormat.Format32bppRgb));
+                            if (frames.Count >= 4096) throw new InvalidOperationException("Typing burst exceeded frame limit");
+                            if (finalFrame) break;
+                            finalFrame = stop.WaitOne(2);
+                        }
+                    } finally { ReleaseDC(IntPtr.Zero, screen); }
+                }
+            } catch (Exception error) { captureError = error; ready.Set(); }
+        });
+        try {
+            double typingStart = 0, typingEnd = 0;
+            try {
+                sampler.Start();
+                if (!ready.WaitOne(5000)) throw new InvalidOperationException("Typing sampler did not start");
+                typingStart = timer.Elapsed.TotalMilliseconds;
+                Text(text.Substring(12));
+                typingEnd = timer.Elapsed.TotalMilliseconds;
+            } finally { stop.Set(); sampler.Join(); ready.Dispose(); stop.Dispose(); }
+            if (captureError != null) throw new InvalidOperationException("Typing capture failed", captureError);
+            if (GetFocusedWindow(owner) != composer || EditText(composer) != text) throw new InvalidOperationException("Typing burst lost the composer or sentence");
+            for (int index = 0; index < frames.Count; index++) frames[index].Save(System.IO.Path.Combine(directory, "composer-typing-" + index.ToString("D4") + ".bmp"), System.Drawing.Imaging.ImageFormat.Bmp);
+            return new Dictionary<string, object> { { "timesMs", times.ToArray() }, { "typingStartMs", typingStart }, { "typingEndMs", typingEnd }, { "capture", "screen BitBlt SRCCOPY; 2ms sampling; no forced repaint or DwmFlush" } };
+        } finally { foreach (var frame in frames) frame.Dispose(); }
+    }
+
     public static int[] ReadSwitchScreenPatch(Rect dock, bool layered) {
         using (var pixels = new System.Drawing.Bitmap(3, 3))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
@@ -1867,14 +1918,14 @@ function Wait-ChatFocus([string]$Class, [string]$Step) {
     Snapshot $Step
 }
 
-function Assert-ChatTyping([string]$Text, [string]$Step) {
+function Assert-ChatTyping([string]$Text, [string]$Step, [scriptblock]$TypingAction) {
     Wait-ChatFocus 'Edit' ($Step + '-focused')
     $composer = [System.Windows.Automation.AutomationElement]::FocusedElement
     $handle = [IntPtr]$composer.Current.NativeWindowHandle
     if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::Class($handle) -cne 'Edit' -or
         [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Expected the owned composer Edit before reading text' }
     if ([VerifyNative]::EditText($handle) -cne '') { throw 'Expected an empty composer before typing proof' }
-    Type-Text $Text
+    if ($null -ne $TypingAction) { & $TypingAction } else { Type-Text $Text }
     Wait-Until { [VerifyNative]::EditText($handle) -ceq $Text } ("WM_GETTEXT typing landed: $Step")
     Wait-ChatFocus 'Edit' $Step
     if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.NativeWindowHandle -ne $handle) { throw 'Typing focus left the original composer Edit' }
@@ -2214,6 +2265,8 @@ try {
         'chat-composer-text' {
             $composerCheck = @{ name = 'IGSH-731 composer edges'; passed = $false; fontSmoothing = [VerifyNative]::FontSmoothing() }
             $result.checks += $composerCheck
+            $typingCheck = @{ name = 'IGSH-760 typing frames steady'; passed = $false }
+            $result.checks += $typingCheck
             Select-Theme 'dark' 'composer-dark'
             Snapshot 'before'
             Press @(0x12, 0x43) 'Alt+C: open Chat View for the composer'
@@ -2243,11 +2296,37 @@ try {
             $rect = @{ left = $row[0] - $frame.Left; top = $row[1] - $frame.Top; right = $row[2] - $frame.Left; bottom = $row[3] - $frame.Top }
             Save-Json @{ rect = $rect; fontSmoothing = [VerifyNative]::FontSmoothing(); text = $sentence; dpi = $dpi } 'composer-live.json'
             [VerifyNative]::Bmp((Join-Path $Evidence 'after.png'), (Join-Path $Evidence 'composer-live.bmp'))
+            $prefixRow = [VerifyNative]::ComposerRow($handle, 12, $em)
+            $composerFrame = New-Object VerifyNative+Rect
+            if (-not [VerifyNative]::GetWindowRect($handle, [ref]$composerFrame)) { throw 'Composer typing rectangle unavailable' }
+            $typingCrop = New-Object VerifyNative+Rect
+            $typingCrop.Left = $composerFrame.Left - 1
+            $typingCrop.Top = $composerFrame.Top - 1
+            $typingCrop.Right = [Math]::Min($composerFrame.Right - 1, $row[2] + 5 * $em)
+            $typingCrop.Bottom = [Math]::Min($composerFrame.Bottom, $row[3] + 2)
+            $inkRect = @{ left = [Math]::Max($prefixRow[0], $typingCrop.Left) - $typingCrop.Left; top = [Math]::Max($prefixRow[1], $typingCrop.Top) - $typingCrop.Top; right = [Math]::Min($prefixRow[2], $typingCrop.Right) - $typingCrop.Left; bottom = [Math]::Min($prefixRow[3], $typingCrop.Bottom) - $typingCrop.Top }
+            $rowRect = @{ left = [Math]::Max($row[0], $typingCrop.Left) - $typingCrop.Left; top = [Math]::Max($row[1], $typingCrop.Top) - $typingCrop.Top; right = [Math]::Min($row[2], $typingCrop.Right) - $typingCrop.Left; bottom = [Math]::Min($row[3], $typingCrop.Bottom) - $typingCrop.Top }
+            Press @(0x11, 0x41) 'Ctrl+A: select settled sentence before typing burst'
+            Press @(0x08) 'Backspace: empty owned composer before typing burst'
+            Assert-ChatTyping $sentence 'composer-typing-burst' {
+                Doctor
+                Assert-Foreground
+                Record ('Type with concurrent composer-row BitBlt: ' + $sentence)
+                $burst = [VerifyNative]::ComposerTypingFrames($script:window, $handle, $sentence, $typingCrop, $Evidence)
+                $burst['inkRect'] = $inkRect
+                $burst['rowRect'] = $rowRect
+                Save-Json $burst 'composer-typing.json'
+            }
+            Snapshot 'composer-typing-after'
+            & node (Join-Path $PSScriptRoot '../../../tools/chat-composer-text-proof.mjs') $Evidence --typing
+            $typingSummary = Get-Content (Join-Path $Evidence 'composer-typing-summary.json') -Raw | ConvertFrom-Json
+            foreach ($property in $typingSummary.PSObject.Properties) { $typingCheck[$property.Name] = $property.Value }
             & node (Join-Path $PSScriptRoot '../../../tools/chat-composer-text-proof.mjs') $Evidence
             $summary = Get-Content (Join-Path $Evidence 'composer-live-summary.json') -Raw | ConvertFrom-Json
             $composerCheck.measurement = $summary.measurement
             $composerCheck.passed = $summary.passed -eq $true
             $composerCheck.threshold = $summary.threshold
+            if (-not $typingCheck.passed) { throw 'IGSH-760 typing frames steady: transient ink loss, changed background/border, or insufficient typing frames' }
             if (-not $composerCheck.passed) { throw 'IGSH-731 composer edges: hard-edge fraction must be below 0.18 with system font smoothing OFF' }
             if (-not $env:RELEASE_TAG) {
                 $native = Get-Content (Join-Path $Evidence 'composer-native-summary.json') -Raw | ConvertFrom-Json
