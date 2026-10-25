@@ -25,6 +25,8 @@ test('IGSH-814 anchors on stable message identity and never guesses from offsets
   assert.match(reader, /text\["read_id"\] = f"\{stable_id\}:text:\{start\}" if stable_id else ""/);
   assert.doesNotMatch(reader, /text\["read_id"\] = f.*\{offset\}/);
   assert.match(history, /last_read_id.appendSlice\(a, m.read_id orelse m.id\)/);
+  assert.match(reader, /if not result\["id"\] and result\["timestamp"\]:\s+result\["read_id"\] = "event:" \+ hashlib.sha256\(json.dumps\(event, sort_keys=True/);
+  assert.match(history, /test "IGSH-814 ID-less Codex source records retain their saved read anchor"/);
 });
 
 test('IGSH-814 marker rides saved tabs, launch rows, reconnect and account cache reconciliation', () => {

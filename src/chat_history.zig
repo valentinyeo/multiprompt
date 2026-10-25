@@ -1517,3 +1517,22 @@ test "IGSH-814 mixed message read identity is independent of wire row offsets" {
     try std.testing.expectEqual(marker, after.blocks.items[0].message_id);
     try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(after.blocks.items, marker));
 }
+
+test "IGSH-814 ID-less Codex source records retain their saved read anchor" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, true, "term-1", "");
+    var history: History = .{};
+    defer history.deinit(a);
+    try history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tcodex\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"\",\"read_id\":\"event:read\",\"text\":\"Read\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"\",\"read_id\":\"event:unread\",\"text\":\"Unread\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    const marker = history.blocks.items[0].message_id;
+    try std.testing.expect(marker != 0);
+    const bytes = try history.encode(a, key);
+    defer a.free(bytes);
+    var restored = try History.decode(a, bytes, key);
+    defer restored.deinit(a);
+    const boundary = unreadBoundary(restored.blocks.items, marker);
+    try std.testing.expect(!boundary.unknown);
+    try std.testing.expectEqual(@as(?usize, 1), boundary.index);
+}

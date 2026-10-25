@@ -421,8 +421,11 @@ def conversation_event(event, agent):
         return None
     identity = message.get("id") or event.get("uuid") or ""
     timestamp = event.get("timestamp") or ""
-    return dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
-                text=text, id=identity if isinstance(identity, str) else "")
+    result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
+                  text=text, id=identity if isinstance(identity, str) else "")
+    if not result["id"] and result["timestamp"]:
+        result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return result
 
 
 
@@ -640,7 +643,7 @@ def conversation_rows(event, agent, offset=0, search=False):
         if text:
             text["segment"] = start
             if rows or not text["id"]:
-                stable_id = event.get("uuid") or text["id"]
+                stable_id = event.get("uuid") or text.get("read_id") or text["id"]
                 text["read_id"] = f"{stable_id}:text:{start}" if stable_id else ""
                 text["id"] = f"{text['id']}:text:{offset}:{start}"
             rows.append(text)
