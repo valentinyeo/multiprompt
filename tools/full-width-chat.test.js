@@ -82,9 +82,10 @@ test "production reading column caps at 960 and stays centered inside the shared
         }
     }
 }
-test "IGSH-873 both bubble types cap at 60 percent of the column" {
-    for ([_]i32{1, 40, 300, 600, 960, 1440}) |width| {
-        const cap = @max(1, @divTrunc(width * 6, 10));
+test "IGSH-898 narrow messages expand while wide messages retain the 60 percent cap" {
+    for ([_]i32{1, 40, 300, 550, 600, 720, 721, 960, 1440}) |width| {
+        const percent: i32 = if (width <= 720) 9 else 6;
+        const cap = @max(1, @divTrunc(width * percent, 10));
         try std.testing.expectEqual(cap, chat_style.bubbleMaxWidth(width));
         try std.testing.expectEqual(cap, chat_style.agentBubbleWidth(width));
         try std.testing.expectEqual(cap, chat_style.bubbleWidth(width, 10000, 12));
