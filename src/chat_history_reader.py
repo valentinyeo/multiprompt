@@ -945,13 +945,16 @@ def queue_replay(source, size):
             stamp = None
         if event.get("type") == "queue-operation":
             count = len(state[0])
+            previous_sent = list(state[1])
             removed = queue_apply(state, event)
             if len(state[0]) > count:
                 receipt = (state[0][-1], stamp, position)
                 queued.append(receipt)
                 receipts.append(receipt)
             elif removed is not None:
-                queued.pop(removed)
+                receipt = queued.pop(removed)
+                if receipt not in receipts:
+                    state[1][:] = previous_sent
             elif event.get("operation") == "popAll":
                 queued.clear()
             continue
@@ -964,9 +967,7 @@ def queue_replay(source, size):
                 continue
             receipts.pop(i)
             if receipt in queued:
-                index = queued.index(receipt)
-                queued.pop(index)
-                state[1].append(state[0].pop(index))
+                state[1].append(text)
                 del state[1][:-QUEUE_SHOWN]
             break
     scanned = start + end
@@ -975,7 +976,7 @@ def queue_replay(source, size):
     QUEUE_CACHE[key] = (scanned, state, probe, queued, receipts)
     if len(QUEUE_CACHE) > 256:
         del QUEUE_CACHE[next(iter(QUEUE_CACHE))]
-    return state
+    return [receipt[0] for receipt in queued if receipt in receipts], state[1]
 
 
 def grey_code(params):

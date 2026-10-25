@@ -1799,6 +1799,24 @@ class SharedQueueDraftTest(unittest.TestCase):
                         output.write(json.dumps(user) + '\n')
                     self.assertEqual(self.live()['queue'], [])
 
+    def test_IGSH_835_transcript_before_explicit_removal_preserves_second_send(self):
+        stamp = '2026-10-25T12:00:00Z'
+        user = dict(type='user', timestamp=stamp, message=dict(role='user', content='same'))
+        self.write(self.op('enqueue', 'same', timestamp=stamp),
+                   self.op('enqueue', 'same', timestamp=stamp), user)
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], ['same'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(self.op('remove', 'same', timestamp=stamp)) + '\n')
+            status = self.live()
+            self.assertEqual(status['queue'], ['same'])
+            self.assertEqual(status['sent'], ['same'])
+            reader.QUEUE_CACHE.clear()
+            self.assertEqual(self.live()['queue'], ['same'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(user) + '\n')
+            self.assertEqual(self.live()['queue'], [])
+
     def test_IGSH_835_partial_transcript_record_waits_for_complete_line(self):
         stamp = '2026-10-25T12:00:00Z'
         self.write(self.op('enqueue', 'hello', timestamp=stamp))
