@@ -77,7 +77,8 @@ function Doctor([bool]$Chat = $false) {
     $title = $element.Current.Name
     if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or $title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { throw 'Doctor: visible versioned UI Automation identity missing' }
     $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-    if (@($published.shells).Count -ne 1 -or $published.shells[0].kind -ne 3) { throw 'Doctor: saved tmux shell was not published' }
+    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
+        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -306,6 +307,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 foreach ($plan in $plans) {
+    $expectedShells = 1
     $caseDir = "$Evidence/$($plan.name)"
     New-Item -ItemType Directory -Force $caseDir | Out-Null
     $profile = Join-Path $env:RUNNER_TEMP ('chat-delivery-' + [guid]::NewGuid().ToString('N'))
@@ -562,7 +564,12 @@ foreach ($plan in $plans) {
             Press @(0x11, 0x4B) 'Ctrl+K: open a second tab for visit proof' $true
             foreach ($letter in 'new cmd'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter New CMD Shell' }
             Press @(0x0D) 'Enter: create the second tab'
-            [void](Wait-For 'second tab saved' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs).Count -eq 2 })
+            [void](Wait-For 'second tab saved and published' {
+                $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+                $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
+                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 3 }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+            })
+            $expectedShells = 2
             $sendOffset = (Get-Item -LiteralPath $transcript).Length
             Shell-Input 'messages' '1'
             $dividerLogStart = (Read-Shared "$settings/debug.log").Length
