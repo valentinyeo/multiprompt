@@ -26,6 +26,7 @@ function decide({ run, repository, commits, jobs, previous = null }) {
   const journeys = failed.filter(job => !alreadyRed.has(job.name)).map(job => job.name.slice(8, -1));
   if (!journeys.length) return { action: 'skip', reason: `Journeys already red before ${run.head_sha}: ${failed.map(job => job.name.slice(8, -1)).join(', ')} (run ${previous.run.id})` };
   if (!target.parents?.length) return refuse('Cannot revert a root commit');
+  if (previous.run.head_sha !== target.parents[0].sha) return { action: 'skip', reason: `Cannot isolate ${target.sha}: the last judged run ${previous.run.id} tested ${previous.run.head_sha}, not its parent ${target.parents[0].sha}` };
   return { action: 'revert', sha: target.sha, mainline: target.parents.length > 1 ? 1 : null, ticket, journeys, marker };
 }
 
