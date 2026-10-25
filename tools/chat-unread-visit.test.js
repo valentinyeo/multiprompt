@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process');
 const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'utf8');
 const session = read('chat_session.zig');
 const history = read('chat_history.zig');
+const consoleSource = read('console.zig');
 function between(source, start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a + start.length);
   assert.ok(a >= 0 && b > a, start);
@@ -55,6 +56,11 @@ ${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_stat
   app_state.g_chat_read_open_pending = false;
   app_state.g_chat_read_open_ready = true;
 }
+fn leaveTab() void {
+  const idx: u32 = 1;
+  const prev: u32 = 0;
+${between(consoleSource, '    if (idx != prev) _ = @import("chat_session.zig").chatReadMark(false);', '    app_state.active_shell = idx;').replaceAll('@import("chat_session.zig").', '')}
+}
 test "divider stays at first unread after reading and clears on all-read revisit" {
   openTab();
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
@@ -63,7 +69,7 @@ test "divider stays at first unread after reading and clears on all-read revisit
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
   openTab();
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
-  app_state.g_chat_read_visit_shell_id = 0;
+  leaveTab();
   openTab();
   try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
 }
