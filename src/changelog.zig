@@ -59,6 +59,9 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.876", .items = &.{
+        .{ .text = "Chat View checks now use the bundled fonts consistently.", .ticket = "IGSH-854" },
+    } },
     .{ .ver = "0.28.875", .items = &.{
         .{ .text = "Automatic updates can publish new versions without changing protected source history.", .ticket = "IGSH-834" },
         .{ .text = "Agents can check whether a newly opened server session connected or failed, including its exit code.", .ticket = "IGSH-847" },
