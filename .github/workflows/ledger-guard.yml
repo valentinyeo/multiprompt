@@ -1,0 +1,33 @@
+name: Ledger guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Keep runner ledgers private
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --no-renames --diff-filter=ACMRT --name-only -z "$PR_BASE_SHA...$PR_HEAD_SHA" > "$RUNNER_TEMP/ledger-paths"
+          status=0
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              GATES.md|*/GATES.md|.unlazy|*/.unlazy|.unlazy/*|*/.unlazy/*)
+                printf '%s: ledgers belong in the private notes repo.\n' "$file"
+                status=1
+                ;;
+            esac
+          done < "$RUNNER_TEMP/ledger-paths"
+          exit "$status"
