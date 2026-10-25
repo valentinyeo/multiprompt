@@ -135,7 +135,11 @@ jobs:
       fail-fast: false
       matrix:
         feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
+        caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
+      CAPTION_DPI: ${{ matrix.caption-dpi }}
+      CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -146,7 +150,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
+        run: node --test tools/verify-multiprompt.test.js tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
       - name: Check auto-revert decision contracts
         run: node --test tools/auto-revert-master.test.js
       - name: Check workspace focus journey contract
@@ -157,14 +161,18 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')) { throw 'Unknown feature map' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
-          if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
+          if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'title-bar') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+          if ($env:FEATURE -eq 'title-bar') {
+            [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/title-bar.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
           if ($env:FEATURE -in @('chat-delivery', 'chat-messages-only', 'chat-full-history')) {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-chat-delivery/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
@@ -373,23 +381,23 @@ jobs:
           if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
-        if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile'
+        if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
         with:
           node-version: 22
       - name: Install isolated Chrome for Testing driver
-        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
         shell: pwsh
         run: |
           npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
           if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Verify real native browser journey
-        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
@@ -414,6 +422,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}
+          name: verify-${{ env.FEATURE }}${{ env.FEATURE == 'title-bar' && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
