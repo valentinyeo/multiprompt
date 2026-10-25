@@ -1717,6 +1717,10 @@ fn dictationWorkerThread() void {
     const audio_len = captureDictationPcm(audio);
     app_state.g_dictation_capturing.store(false, .release);
     dictationAudit("audio-bytes", audio_len);
+    if (app_state.g_dictation_cancelled.load(.acquire)) {
+        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
+        return;
+    }
     if (audio_len < 1600) {
         dictationSetErrorAscii("Dictation failed: no audio captured");
         if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
@@ -1877,6 +1881,15 @@ test "dictation verification ignores TUI framing and requires new console text" 
     try std.testing.expectEqual(false, dictationOutputShowsNewText(normalized[0..normalized_len], normalized[0..normalized_len], &spoken));
 }
 
+pub fn cancelDictation() void {
+    if (!app_state.g_dictation_running.load(.acquire) or !app_state.g_dictation_cancelled.load(.acquire)) return;
+    app_state.g_dictation_recording.store(false, .release);
+    app_state.g_dictation_draft_owner_len = 0;
+    @import("chat_composer.zig").chatDictationSync();
+    dictationAudit("cancel", 0);
+    showHeaderNoticeAscii("Dictation cancelled", 2200, false);
+}
+
 pub fn handleDictationReady() void {
     @import("chat_composer.zig").chatDictationSync();
     defer @import("chat_composer.zig").chatDictationSync();
@@ -1902,6 +1915,13 @@ pub fn handleDictationReady() void {
     app_state.g_voice_listening_active.store(false, .release);
     const discard_legacy = app_state.g_voice_legacy_discard;
     app_state.g_voice_legacy_discard = false;
+    if (app_state.g_dictation_cancelled.load(.acquire)) {
+        if (was_voice_listening) {
+            app_state.g_voice_state = .idle;
+            invalidateChatHeader();
+        }
+        return;
+    }
     if (was_voice_listening and (discard_legacy or !app_state.g_voice_mode_active or !duplex.voiceLegacyResultAllowed(app_state.g_voice_always_listen, app_state.g_voice_mic_failed))) {
         dictationAudit("voice-dropped-mode-off", text_len);
         return;
@@ -2040,6 +2060,7 @@ pub fn toggleDictation() void {
         const id = @import("chat_composer.zig").chatDraftKeyForShell(app_state.active_shell, &app_state.g_dictation_draft_owner);
         app_state.g_dictation_draft_owner_len = id.len;
     }
+    app_state.g_dictation_cancelled.store(false, .release);
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);
     dictationAudit("start", if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0);
