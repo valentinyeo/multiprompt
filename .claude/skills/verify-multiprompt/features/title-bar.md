@@ -41,6 +41,6 @@ The unchanged baseline paints the exposed controls-cover apron with Chrome's col
 
 Never judge this feature from one sample pixel or from page-content colour; only the caption corner geometry and the browser frame pixels count.
 
-## Browser controls frame (IGSH-858)
+### Browser controls frame (IGSH-858)
 
 The controls cover must not repaint the surrounding top or right frame with Chrome's colour. The same title-bar matrix scans the full straight top band and the right band below the rounded corner, comparing every pixel to the adjacent unobscured frame in that screenshot. `framePixels` must be positive and `frameMismatches` zero for Dark, Light and AMOLED, restored and maximized, at each real display scale. The Chrome-coloured interior and native caption checks remain unchanged. The pre-fix run must fail specifically with `IGSH-858 controls cover overlaps the surrounding browser frame`.
