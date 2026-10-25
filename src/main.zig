@@ -2193,7 +2193,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 return 0;
             }
-            if (app_state.g_search_active and (wp & MK_LBUTTON) == 0 and list_input.palette.hover()) {
+            if (app_state.g_search_active and (wp & MK_LBUTTON) == 0) {
                 if (searchResultRowAtClientPoint(GET_X(lp), GET_Y(lp))) |hovered_row| {
                     if (hovered_row != app_state.g_search_sel and !paletteRowIsHeader(app_state.g_search_results[hovered_row])) {
                         app_state.g_search_sel = hovered_row;
