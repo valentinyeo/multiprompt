@@ -2516,25 +2516,19 @@ pub var g_chat_bench_first_paint: bool = false;
 pub var g_chat_bench_content_paint: bool = false;
 pub const TIMER_CHAT_BENCH: usize = 0xB311;
 
-pub const ChatLayoutImages = struct {
-    index: usize,
-    count: u8,
-    items: [chat_image.MAX_PER_BLOCK]ChatImgItem,
-};
 pub const ChatLayoutSnapshot = struct {
-    revision: u64,
-    generation: u64,
-    inode: u64,
-    start: u64,
-    text_len: usize,
+    content_hash: u64,
+    stable_text: usize,
+    stable_blocks: usize,
     width: i32,
     scale: i32,
     font_pt: i32,
+    clean: bool,
     boundary: chat_history.ReadBoundary,
     img_first_block: usize,
+    first_image: usize,
     read_divider_y: i32,
     rects: []RECT,
-    images: []ChatLayoutImages,
 };
 pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
@@ -2568,7 +2562,6 @@ pub const ChatHistoryEntry = struct {
     pub fn clearLayout(self: *ChatHistoryEntry) void {
         const snapshot = self.layout orelse return;
         std.heap.page_allocator.free(snapshot.rects);
-        std.heap.page_allocator.free(snapshot.images);
         self.layout = null;
     }
 };
