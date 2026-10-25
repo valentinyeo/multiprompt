@@ -48,7 +48,7 @@ The recomputed journey gate list is:
 9. Every existing unread-pill transition, overflow and fresh-log assertion passes, with `new-messages-visible.png`, `new-messages-dismissed.png` and `new-messages-jumped.png` retained.
 10. Complete evidence includes both CLEAN PNG/BMP pairs, the existing captures, source transcript and identity, zero owned processes and scratch cleanup; the pinned pre-fix control still fails specifically on visible activity pixels with successful cleanup.
 
-`node --test tools/chat-messages-only-proof.test.js` locally proves the correct synthetic pair passes and the old-oracle input with footer rows still painted is rejected, plus one-pixel, blank, displacement, restoration and working-row negative controls. The existing `.test.mjs` entry imports these tests on the Windows workflow; it retains all earlier regressions.
+`node --test tools/chat-messages-only-proof.test.js` locally proves the correct synthetic pair passes and the old-oracle input with footer rows still painted is rejected, plus one-pixel, blank, displacement, restoration and working-row negative controls. The existing Windows workflow runs the new `.test.js` and the unchanged `.test.mjs` entry in its same contract-check step, retaining all earlier regressions.
 
 ## Gotchas
 

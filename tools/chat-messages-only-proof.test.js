@@ -132,7 +132,7 @@ test('IGSH-816 extends only the existing messages-only journey using checked pal
   assert.match(read('src/command_palette.zig'), /fn labelsMatchQuery[\s\S]*asciiContainsQueryInsensitive\(label, query\)/);
   assert.match(read('src/main.zig'), /WM_APP_SEARCH_CHAR => \{[\s\S]*g_search_sel = 0;/);
   assert.match(read('.github/workflows/verify.yml'), /Parser\]::ParseFile\("\$pwd\/tools\/verify-chat-delivery\/drive.ps1"/);
-  assert.match(read('tools/chat-messages-only-proof.test.mjs'), /import '.\/chat-messages-only-proof.test.js'/);
+  assert.match(read('.github/workflows/verify.yml'), /run: node --test[^\n]*tools\/chat-messages-only-proof.test.mjs tools\/chat-messages-only-proof.test.js/);
 });
 
 test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and the full gate list', () => {
