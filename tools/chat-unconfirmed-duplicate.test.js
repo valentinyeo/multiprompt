@@ -103,7 +103,7 @@ test('IGSH-720 send A, delivery unconfirmed, type B and send never restores A or
 test('IGSH-720 production send, unconfirmed transition and draft pull use the modeled ownership path', () => {
   const prompt = body(send, 'sendChatPrompt');
   assert.match(prompt, /GetWindowTextW\(app_state\.g_chat_composer_hwnd, &text_buf,/);
-  assert.match(prompt, /var send_text: \[\]const u16 = text_buf\[0\.\.text_len\];/);
+  assert.match(prompt, /var send_text: \[\]const u16 = chatPromptNormalizeLineEndings\(text_buf\[0\.\.text_len\]\);/);
   assert.match(prompt, /chatEchoEnqueueForShell\(app_state\.active_shell, send_text, \.queued\)/);
   assert.match(prompt, /SetWindowTextW\(app_state\.g_chat_composer_hwnd, L\(""\)\)[\s\S]*chatDraftFlush\(\)/);
   assert.match(body(send, 'chatTmuxSendFinish'), /entry\.channel_sent = \(job\.written and !job\.rejected\) or job\.retry;/);
