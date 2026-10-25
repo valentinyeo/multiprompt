@@ -283,7 +283,9 @@ def shell():
         kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
         if len(kept) != len(rows) - 1:
             raise ValueError("Expected one source message to disappear")
-        transcript.write_bytes(b"".join(kept))
+        replacement = transcript.with_suffix(".rotated")
+        replacement.write_bytes(b"".join(kept))
+        os.replace(replacement, transcript)
         return 0
     if op == "activity":
         descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]

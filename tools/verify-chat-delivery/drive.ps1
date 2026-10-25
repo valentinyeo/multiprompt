@@ -46,6 +46,24 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
     throw "Timed out: $Description"
 }
 function Shot([string]$Name) {
+    if ($Name -eq 'new-messages-visible') {
+        [void](Wait-For 'unread badge reaches the screen' {
+            $bounds = $views[0].Current.BoundingRectangle
+            $probe = [Drawing.Bitmap]::new(60, 100)
+            $draw = [Drawing.Graphics]::FromImage($probe)
+            try {
+                $draw.CopyFromScreen([int]$bounds.Right - 60, [int]$bounds.Bottom - 100, 0, 0, $probe.Size)
+                $blue = 0
+                for ($y = 0; $y -lt 100; $y += 2) {
+                    for ($x = 0; $x -lt 60; $x += 2) {
+                        $pixel = $probe.GetPixel($x, $y)
+                        if ($pixel.R -lt 130 -and $pixel.G -gt 110 -and $pixel.B -gt 210) { $blue++ }
+                    }
+                }
+                $blue -gt 5
+            } finally { $draw.Dispose(); $probe.Dispose() }
+        })
+    }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
