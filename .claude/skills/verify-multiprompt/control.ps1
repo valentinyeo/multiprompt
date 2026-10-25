@@ -753,6 +753,77 @@ public static class PaneLayoutProof {
     static int Distance(System.Drawing.Color a, System.Drawing.Color b) {
         return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
     }
+    public static List<Dictionary<string, object>> Masks(uint appPid) {
+        var masks = new List<Dictionary<string, object>>();
+        foreach (var window in VerifyNative.DesktopWindows()) {
+            if ((string)window["class"] != "ZigShellBrowserEdgeMask" || (uint)window["pid"] != appPid || !(bool)window["visible"]) continue;
+            VerifyNative.Rect rect;
+            if (!VerifyNative.GetWindowRect(new IntPtr((long)window["handle"]), out rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top) continue;
+            window["rect"] = new int[] { rect.Left, rect.Top, rect.Right, rect.Bottom };
+            masks.Add(window);
+        }
+        return masks;
+    }
+    public static Dictionary<string, object> MeasureMasks(string path, string theme, VerifyNative.Rect frame, VerifyNative.Rect client,
+        VerifyNative.Rect browser, Dictionary<string, object>[] masks, uint dpi, int scale) {
+        var proof = new Dictionary<string, object>();
+        int[] selected = null, raw = null;
+        long handle = 0;
+        int candidates = 0, bleed = Math.Max(1, S(4, dpi, scale));
+        foreach (var mask in masks) {
+            var rect = (int[])mask["rect"];
+            int left = Math.Max(rect[0], browser.Left), top = Math.Max(rect[1], browser.Top);
+            int right = Math.Min(rect[2], browser.Right), bottom = Math.Min(rect[3], browser.Bottom);
+            int width = right - left, height = bottom - top;
+            if (top != browser.Top || right != browser.Right || rect[0] < browser.Left || rect[1] < browser.Top - bleed || rect[2] > browser.Right + bleed ||
+                rect[3] > browser.Bottom || width < S(100, dpi, scale) || width > S(180, dpi, scale) || height < S(24, dpi, scale) || height > S(40, dpi, scale)) continue;
+            selected = new int[] { left, top, right, bottom }; raw = rect; handle = (long)mask["handle"]; candidates++;
+        }
+        Require(candidates == 1, "mask-top-right-" + theme, "Expected one frame-side controls mask, found " + candidates);
+        int y = selected[1] + Math.Max(1, S(12, dpi, scale));
+        int maskX = (selected[0] + selected[2]) / 2, referenceX = selected[0] - Math.Max(1, S(4, dpi, scale));
+        int appX = client.Left + S(180, dpi, scale), appY = client.Top + S(200, dpi, scale);
+        foreach (var mask in masks) {
+            var rect = (int[])mask["rect"];
+            if (referenceX >= rect[0] && referenceX < rect[2] && y >= rect[1] && y < rect[3])
+                throw new InvalidOperationException("pane-layout mask-reference-" + theme + " FAIL: reference is covered by a mask");
+        }
+        Require(referenceX > browser.Left && y > browser.Top && y < selected[3] && y < browser.Top + S(24, dpi, scale),
+            "mask-reference-" + theme, "Reference must be inside Chrome's frame above page content");
+        using (var image = new System.Drawing.Bitmap(path)) {
+            Func<int, int, System.Drawing.Color> pixel = (x, py) => image.GetPixel(x - frame.Left, py - frame.Top);
+            var color = pixel(maskX, y);
+            var reference = pixel(referenceX, y);
+            var app = pixel(appX, appY);
+            proof["maskHwnd"] = handle; proof["maskRect"] = raw; proof["maskInsideBrowserRect"] = selected;
+            proof["browserRect"] = new int[] { browser.Left, browser.Top, browser.Right, browser.Bottom };
+            proof["screenshotRect"] = new int[] { frame.Left, frame.Top, frame.Right, frame.Bottom };
+            proof["maskPoint"] = new int[] { maskX, y }; proof["referencePoint"] = new int[] { referenceX, y }; proof["appPoint"] = new int[] { appX, appY };
+            proof["maskColor"] = new int[] { color.R, color.G, color.B };
+            proof["referenceColor"] = new int[] { reference.R, reference.G, reference.B };
+            proof["appColor"] = new int[] { app.R, app.G, app.B };
+            proof["channelDeltas"] = new int[] { Math.Abs(color.R - reference.R), Math.Abs(color.G - reference.G), Math.Abs(color.B - reference.B) };
+            proof["chromeDelta"] = Distance(color, reference); proof["appDelta"] = Distance(color, app);
+            proof["tolerance"] = 10; proof["nearBlackThreshold"] = 32;
+        }
+        return proof;
+    }
+    public static void CheckMasks(Dictionary<string, object> proof, string theme) {
+        var color = (int[])proof["maskColor"];
+        var reference = (int[])proof["referenceColor"];
+        var app = (int[])proof["appColor"];
+        int tolerance = (int)proof["tolerance"], black = (int)proof["nearBlackThreshold"];
+        bool referenceBlack = reference[0] <= black && reference[1] <= black && reference[2] <= black;
+        bool maskBlack = color[0] <= black && color[1] <= black && color[2] <= black;
+        Require(referenceBlack || !maskBlack, "mask-not-black-" + theme, "Near-black mask over non-black Chrome frame");
+        Require((int)proof["chromeDelta"] <= tolerance, "mask-chrome-" + theme,
+            "mask=" + string.Join(",", color) + " Chrome=" + string.Join(",", reference) + " delta=" + proof["chromeDelta"]);
+        if (theme == "dark" || theme == "amoled") {
+            Require(reference[0] >= 160 && reference[1] >= 160 && reference[2] >= 160 && app[0] <= 80 && app[1] <= 80 && app[2] <= 80 &&
+                (int)proof["appDelta"] > tolerance && (int)proof["chromeDelta"] < (int)proof["appDelta"],
+                "mask-follows-chrome-" + theme, "Need a light Chrome frame, dark app surface and a mask matching Chrome rather than the app");
+        }
+    }
     public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Rect client,
         VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale, bool hidePills) {
         var proof = new Dictionary<string, object>();
@@ -3552,7 +3623,28 @@ try {
             $hidePills = $state.PSObject.Properties['hide_pills'] -and $state.hide_pills
             $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $hidePills)
             Save-Json $proof 'pane-layout-pixels.json'
-            $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-absent', 'row-icon-found', 'group-content-inset'); pixels = $proof }
+            $maskColors = [ordered]@{ themes = [ordered]@{}; dpi = $dpi; scale = $scale }
+            foreach ($theme in @('dark', 'light', 'amoled')) {
+                Select-Theme $theme ("pane-layout-mask-$theme-action")
+                Wait-Until { [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } ("ten visible owned browser masks for $theme") 10
+                Write-Host "pane-layout mask-windows-$theme PASS"
+                $paintReady = [DateTime]::UtcNow.AddMilliseconds(1000)
+                Wait-Until { [DateTime]::UtcNow -ge $paintReady } ("theme repaint settled for $theme") 3
+                if (-not [VerifyNative]::IsZoomed($script:window) -or [VerifyNative]::PaneWindow($script:window) -ne $browser -or
+                    -not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect)) { throw 'pane-layout mask journey lost maximized docked browser' }
+                $masks = [PaneLayoutProof]::Masks([uint32]$process.Id)
+                $maskColors.themes[$theme] = @{ masks = $masks; screenshot = "pane-layout-mask-$theme.png" }
+                Save-Json $maskColors 'pane-layout-mask-colours.json'
+                if ($masks.Count -ne 10) { throw "pane-layout mask-windows-$theme FAIL: masks disappeared before capture" }
+                Snapshot ("pane-layout-mask-$theme")
+                if ([PaneLayoutProof]::Masks([uint32]$process.Id).Count -ne 10) { throw "pane-layout mask-windows-$theme FAIL: masks disappeared during capture" }
+                $maskColors.themes[$theme].pixels = [PaneLayoutProof]::MeasureMasks((Join-Path $Evidence "pane-layout-mask-$theme.png"), $theme, $frame, $client, $browserRect, $masks, $dpi, $scale)
+                Save-Json $maskColors 'pane-layout-mask-colours.json'
+            }
+            foreach ($theme in @('dark', 'light', 'amoled')) {
+                [PaneLayoutProof]::CheckMasks($maskColors.themes[$theme].pixels, $theme)
+            }
+            $result.checks += @{ name = 'pane-layout'; assertions = @('console-uia-hwnd', 'ring-found', 'ring-top', 'ring-bottom', 'ring-left', 'ring-right', 'console-inside-ring', 'clean-gap', 'group-line-absent', 'row-icon-found', 'group-content-inset', 'mask-windows-dark', 'mask-top-right-dark', 'mask-reference-dark', 'mask-not-black-dark', 'mask-chrome-dark', 'mask-follows-chrome-dark', 'mask-windows-light', 'mask-top-right-light', 'mask-reference-light', 'mask-not-black-light', 'mask-chrome-light', 'mask-windows-amoled', 'mask-top-right-amoled', 'mask-reference-amoled', 'mask-not-black-amoled', 'mask-chrome-amoled', 'mask-follows-chrome-amoled'); pixels = $proof; maskColours = $maskColors }
             Snapshot 'after'
         }
         'browser-switch-speed' {
