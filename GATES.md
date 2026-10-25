@@ -1,45 +1,39 @@
-# Gates: IGSH-760 typing-frame rectangle contract
+# Gates: IGSH-789 remote-session notifier help
 
-OWNS: .claude/skills/verify-multiprompt/control.ps1, tools/chat-composer-text-proof.test.js, GATES.md
+OWNS: src/workspaces.zig, tools/verify-multiprompt.test.js, changelog.d/IGSH-789-remote-notification-help.md, GATES.md
 
-Scope: Make capture metadata describe the captured bitmap without weakening the evaluator, prove real evidence is measured and vanishing ink still fails, and commit only this composer follow-up on ceo/IGSH-760. No app changes, version bump, push, PR, board writes or heavy execution.
+Scope: Replace unauthenticated remote-session ACTIVE/DONE help with the installed notifier, add source-only regression coverage alongside existing workspace tests, and open the requested PR without changing relay authorization or dispatching verification workflows.
 
-- [x] G1: this ledger has valid measurable gates
+- [x] G1: this ledger states measurable outcomes
   CHECK: node "$HOME/.agents/skills/unlazy/scripts/gate-lint.mjs" GATES.md
   EXPECT: LINT OK
-  EVIDENCE: automatic-evidence=v1; definition-sha256=2e01e6cb0c2b57862b4f4acfd1b3fed2fbbc2f8a6db901d2d3d3bf8d4170f7fb; exit=0; EXPECT=matched; output-sha256=48630b7361dd44ee870917b12c3d19b9d7bdea738aaca16bb04d4cab83b772d2; output-bytes=8; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=2e01e6cb0c2b57862b4f4acfd1b3fed2fbbc2f8a6db901d2d3d3bf8d4170f7fb; exit=0; EXPECT=matched; output-sha256=436c0377481d53ed71d9ed3f38baa6fd551d84a9ba38e5c494cd426c226793d0; output-bytes=268; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-wt/r3-IGSH-789; path=433695eed2f1/23 entries
 
-- [x] G2: composer tests accept valid capture geometry, reject the old out-of-bounds contract and reject vanishing mid-typing ink
-  CHECK: node --test tools/chat-composer-text-proof.test.js
-  EXPECT: /# fail 0\b/
-  EVIDENCE: automatic-evidence=v1; definition-sha256=e38caca9a65d24f4a2777efe6b2b4e78c1927df9ddcef46a4e4299d1b1c45311; exit=0; EXPECT=matched; output-sha256=f2df98bdcece009ff2e0ff74b4ef22435a6ffa76eb9a53dc4ff95530c8325cab; output-bytes=3477; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+- [x] G2: remote-session help accurately describes notifier session selection and the unchanged reverse tunnel
+  EVIDENCE: Read tools/agent-notifications/notify.py before editing. target() uses TMUX_PANE with tmux display-message session_name when TMUX is set; only outside tmux does it fall back to MULTIPROMPT_TAB. Both remote targets use port 19548. The new text states those boundaries, keeps localhost:19548 tunnel mapping, requires the installed Python notifier, and removes manual label substitution. The remote format string has no placeholders and uses an empty argument tuple; local help is unchanged.
 
-- [x] G3: downloaded Windows frames are evaluated under the corrected producer contract without a rectangle error
-  CHECK: node .unlazy/IGSH-760/replay.mjs
-  EXPECT: TYPING EVIDENCE MEASURED
-  EVIDENCE: automatic-evidence=v1; definition-sha256=04f9de16570fa9b6f2fb3f2c0b367c42cafea0da9dd2d06d608fcf9e2760f9ea; exit=0; EXPECT=matched; output-sha256=33fb0bb2ed0e8a2302c46342d64837b307ee46177f24740a52ed161eec39968e; output-bytes=528; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+- [x] G3: the existing workspaces source-test harness accepts notifier help and excludes raw ACTIVE/DONE TCP instructions
+  CHECK: node --test --test-name-pattern='^IGSH-789:' tools/verify-multiprompt.test.js
+  EXPECT: /# pass 1\b[\s\S]*# fail 0\b/
+  EVIDENCE: automatic-evidence=v1; definition-sha256=4996be38b1b9c846789d0c9cda19fe9c6879bd9f4be19e927f186c7bc11ad5b4; exit=0; EXPECT=matched; output-sha256=95bed18b8eafa7eba23c6fd417038f37c3c5b6a33bbba59c224bf9f3aadd45eb; output-bytes=340; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-wt/r3-IGSH-789; path=433695eed2f1/23 entries
 
-- [x] G4: changed composer source is comment-free and the diff has no whitespace errors
-  CHECK: node tools/strip-comments.mjs --check && git diff --check && git diff --cached --check
-  EXPECT: No code comments found.
-  EVIDENCE: automatic-evidence=v1; definition-sha256=4d018b60fafcaaaa497e570f14bd46f8465594f093ef64fc21c237ac795d5023; exit=0; EXPECT=matched; output-sha256=33ad9c77b5aaa9b59009bc21cbb061083aebe1abb6a656c7c02af72264a20ded; output-bytes=24; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+- [x] G4: only the intended help, regression, changelog and ledger change, with no relay changes or code comments
+  CHECK: git diff --check && git diff --cached --check && node --input-type=module -e "import a from 'node:assert/strict'; import fs from 'node:fs'; import {execFileSync as git} from 'node:child_process'; import {tokenize} from './tools/strip-comments.mjs'; const names=git('git',['diff','--name-only','540f0bf8'],{encoding:'utf8'}).trim().split('\n').sort(); a.deepEqual(names,['GATES.md','changelog.d/IGSH-789-remote-notification-help.md','src/workspaces.zig','tools/verify-multiprompt.test.js'].sort()); for(const [file,language] of [['src/workspaces.zig','zig'],['tools/verify-multiprompt.test.js','javascript']]) a.equal(tokenize(fs.readFileSync(file,'utf8'),language).comments.length,0); const before=git('git',['show','540f0bf8:src/workspaces.zig'],{encoding:'utf8'}); const after=fs.readFileSync('src/workspaces.zig','utf8'); const strip=s=>s.replace(/            \"NOTE: this is a REMOTE[\s\S]*?(?=\n    else\n)/,''); a.notEqual(strip(before),before); a.equal(strip(after),strip(before)); console.log('SCOPED COMMENT-FREE DIFF VERIFIED');"
+  EXPECT: SCOPED COMMENT-FREE DIFF VERIFIED
+  EVIDENCE: automatic-evidence=v1; definition-sha256=1a24fbf7f7612f7d5a412c855e4df50553657885c305d1fca68906c5b1bf16a9; exit=0; EXPECT=matched; output-sha256=ebdd563811523a2405aa56b617c8e924faa61b96396b73772a3eabfa3e61f4ad; output-bytes=34; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-wt/r3-IGSH-789; path=433695eed2f1/23 entries
 
-- [x] G5: strict evaluator, existing changelog, app version and unrelated production features remain unchanged
-  CHECK: node -e "const a=require('node:assert/strict'),c=require('node:child_process'); const names=c.execFileSync('git',['diff','--name-only','e19a0e25'],{encoding:'utf8'}).trim().split('\\n'); a.deepEqual(names.sort(),['.claude/skills/verify-multiprompt/control.ps1','GATES.md','tools/chat-composer-text-proof.test.js'].sort()); console.log('COMPOSER ONLY VERIFIED')"
-  EXPECT: COMPOSER ONLY VERIFIED
-  EVIDENCE: automatic-evidence=v1; definition-sha256=832fa845289574f14f45617e847df3b080f994d41a08a4ef5780c238d62b4143; exit=0; EXPECT=matched; output-sha256=ef1c846a829d38e682cd656a387da4765266117722583ca9fa1c06a4c99ca614; output-bytes=23; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+- [x] G5: remote-session activity verification coverage is reported honestly without dispatching a workflow
+  EVIDENCE: Read .claude/skills/verify-multiprompt/SKILL.md, features/README.md, sessions.md, workspaces.md, inbox.md, status-card.md, coverage.md and verify.yml's feature allowlist. No feature key covers remote-session ACTIVE/DONE relay activity. coverage.md explicitly records IGSH-514 remote activity as none / not covered, requiring actual tmux hooks, relay and an attached client. The inbox key covers a local manual blue-dot toggle only, not remote activity. No workflow dispatch command was run. The PR must name this gap, not imply inbox or session-open covers it. GitHub PR-triggered checks and reviewer-owned runtime verification are outside local proof.
 
-- [x] G6: follow-up remains on the requested branch before the final local commit
-  CHECK: node -e "const a=require('node:assert/strict'),c=require('node:child_process'); a.equal(c.execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'ceo/IGSH-760'); console.log('REQUESTED BRANCH VERIFIED')"
-  EXPECT: REQUESTED BRANCH VERIFIED
-  EVIDENCE: automatic-evidence=v1; definition-sha256=8f5dd5070dc059c0e45fa5ec6fdf30b9ff7bcd3ddc888a5bde28ef01360530a9; exit=0; EXPECT=matched; output-sha256=81da02802ea0a639da19a9a54d25be7af7c906a5ad4ec7d68955acaacb64d6e9; output-bytes=26; shell=/bin/sh; cwd=<worktree>; path=433695eed2f1/23 entries
+- [x] G6: the requested branch is pushed and has an open PR with the exact title, relay boundary, regression and coverage gap
+  CHECK: node -e "const a=require('node:assert/strict'),c=require('node:child_process'); const run=args=>c.execFileSync('git',args,{encoding:'utf8'}).trim(); a.equal(run(['branch','--show-current']),'ceo/IGSH-789'); a.equal(run(['rev-parse','HEAD']),run(['ls-remote','origin','refs/heads/ceo/IGSH-789']).split(/\s/)[0]); const pr=JSON.parse(c.execFileSync('gh',['pr','view','ceo/IGSH-789','--repo','valentinyeo/multiprompt','--json','title,state,headRefName,headRefOid,baseRefName,body,url'],{encoding:'utf8'})); a.equal(pr.title,'IGSH-789: remote-session help sends ACTIVE and DONE through the notifier'); a.equal(pr.state,'OPEN'); a.equal(pr.headRefName,'ceo/IGSH-789'); a.equal(pr.headRefOid,run(['rev-parse','HEAD'])); a.equal(pr.baseRefName,'master'); for(const text of ['relay','IGSH-789:','verify.yml','not covered','TMUX_PANE','MULTIPROMPT_TAB']) a.ok(pr.body.includes(text),text); console.log('REQUESTED OPEN PR VERIFIED');"
+  EXPECT: REQUESTED OPEN PR VERIFIED
+  EVIDENCE: automatic-evidence=v1; definition-sha256=0c5055aac4f8ded4a97ca41e2200d9276d267a7958706e7e381a84d9b0867795; exit=0; EXPECT=matched; output-sha256=255567b6d1a3638b06879937af2db05d12555dd7734a6ece14f0335cdac71e11; output-bytes=27; shell=/bin/sh; cwd=/home/valentin/projects/multiprompt-wt/r3-IGSH-789; path=433695eed2f1/23 entries
 
-## Regression evidence
+## Regression evidence and execution boundary
 
-Before changing control.ps1, the new source-expression test failed with both rectangle bottoms measured as 27 instead of the bitmap limit 23 (local geometry-red.tap). The full suite retains synthetic all/prefix/trailing vanished-ink frames and CLI exit-status checks. The evaluator and all thresholds are byte-identical to baseline e19a0e25.
+Before changing src/workspaces.zig, the new IGSH-789 source-text regression exited 1 on the ACTIVE/DONE /dev/tcp absence assertion against the actual original help. Its local transcript is .unlazy/IGSH-789/old-help.tap. After the help edit, that same filtered test passed (one test, no build). This is a regex source-text check in tools/verify-multiprompt.test.js beside existing workspace tests, already wired into verify.yml. No new harness was added.
 
-The local-only G3 replay oracle copies downloaded typing artifacts into .unlazy/IGSH-760/replay, first confirms the original metadata fails with Invalid typing rectangle, then evaluates the production rectangle expressions against BMP dimensions and reruns the real CLI. It checks source artifact hashes are unchanged. Set IGSH_760_EVIDENCE to the downloaded read-only evidence directory. No Windows app execution is claimed.
+The full tracked-source search found exactly the two original printf help lines in src/workspaces.zig and no extra ACTIVE/DONE help instructions targeting 19548. No credential value, credential path, sensitive value, flags, limits, notifier behavior or relay authorization changes were added. A plain end-user changelog fragment is required by the repository's app-change policy.
 
-Contract: inkRect and rowRect are half-open integer rectangles in captured-bitmap pixels. Intersect each screen-space ComposerRow with typingCrop, then subtract typingCrop.Left/Top. Bitmap dimensions remain typingCrop.Right-Left by Bottom-Top. An empty intersection remains invalid; the evaluator never clamps or repairs input. For the downloaded 412x23 images, inkRect is {left:5,top:1,right:59,bottom:23}, rowRect is {left:5,top:1,right:332,bottom:23}.
-
-Measured replay: passed=true; samplingPassed=true; 87 typing frames / 89 captured; durationMs=3489.0205; maxGapMs=78.40499999999997; prefix ink min=max=settled=419; row ink min=1717, max=2627; mismatchedFrames=[]. Full JSON is local at .unlazy/IGSH-760/replay/composer-typing-summary.json.
+Only source inspections and the requested lightweight source-text regression ran locally. No Zig, Gradle, Wine, app execution, builds, full test suites, or workflow dispatch. The Claude reviewer owns runtime verification and merging. Verification feature key: none (remote-session activity is not covered by verify.yml).

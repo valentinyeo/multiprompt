@@ -433,6 +433,21 @@ test('browser emulation map drives the real native CLI and extension only on Git
 
 });
 
+test('IGSH-789: remote-session help sends activity through the installed notifier', () => {
+  const source = read('src/workspaces.zig');
+  const start = source.indexOf('    const text = if (is_remote)', source.indexOf('pub fn copyBlueDotHookInstructions('));
+  const end = source.indexOf('\n    else\n', start);
+  assert.ok(start >= 0 && end > start, 'remote blue-dot help must exist');
+  const help = source.slice(start, end);
+  assert.doesNotMatch(help, /[^\n]*(?:ACTIVE|DONE)[^\n]*\/dev\/tcp\/localhost[/:]19548/);
+  assert.match(help, /UserPromptSubmit -> command:  python3 ~\/\.local\/share\/zigshell\/notify\.py claude active/);
+  assert.match(help, /Stop             -> command:  python3 ~\/\.local\/share\/zigshell\/notify\.py claude done/);
+  assert.match(help, /reverse SSH tunnel[^\n]*localhost:19548/);
+  assert.match(help, /TMUX_PANE/);
+  assert.match(help, /MULTIPROMPT_TAB/);
+  assert.doesNotMatch(help, /no tools beyond bash|bash's built-in|The label/);
+});
+
 function assertsWorkspaceFocusHandoff(text) {
   const start = text.indexOf('pub fn switchToWorkspace(');
   const end = text.indexOf('\npub fn copyBlueDotHookInstructions(', start);
