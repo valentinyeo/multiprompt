@@ -148,7 +148,8 @@ jobs:
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
       - name: Check auto-revert decision contracts
-        run: node --test tools/auto-revert-master.test.js      - name: Check workspace focus journey contract
+        run: node --test tools/auto-revert-master.test.js
+      - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
