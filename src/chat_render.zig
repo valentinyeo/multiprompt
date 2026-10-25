@@ -4682,19 +4682,34 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
     app_state.g_main_hwnd = owner;
     const Timer = struct {
         var target: HANDLE = null;
+        var previous: isize = 0;
+        var ready: bool = false;
+        var timed_out: bool = false;
         var calls: usize = 0;
         extern "user32" fn EndMenu() callconv(WINAPI) i32;
         extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) i32;
         fn fire(_: HANDLE, _: UINT, _: usize, _: DWORD) callconv(WINAPI) void {
+            if (!ready or calls != 0) return;
             calls += 1;
-            if (calls == 1) {
-                chatSelectionClear();
-                app_state.g_chat_block_count = 0;
-                @memset(app_state.g_chat_capture[0..app_state.g_chat_last_len], 'x');
-                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
-                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
-                _ = @This().PostMessageW(target, WM_KEYDOWN, 0x0D, 0);
-            } else _ = EndMenu();
+            chatSelectionClear();
+            app_state.g_chat_block_count = 0;
+            @memset(app_state.g_chat_capture[0..app_state.g_chat_last_len], 'x');
+            _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
+            _ = @This().PostMessageW(target, WM_KEYDOWN, 0x28, 0);
+            _ = @This().PostMessageW(target, WM_KEYDOWN, 0x0D, 0);
+        }
+        fn cancel(_: HANDLE, _: UINT, _: usize, _: DWORD) callconv(WINAPI) void {
+            timed_out = true;
+            _ = EndMenu();
+        }
+        fn ownerProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) w.LRESULT {
+            if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+            if (msg == 0x0121 and wp == 2) {
+                ready = true;
+                fire(null, 0, 0, 0);
+                return 0;
+            }
+            return w.CallWindowProcW(previous, hwnd, msg, wp, lp);
         }
     };
     Timer.target = owner;
@@ -4704,6 +4719,9 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
         app_state.g_chat_block_count = 0;
         chatSelectionClear();
     }
+    Timer.previous = w.SetWindowLongPtrW(owner, -4, @bitCast(@intFromPtr(&Timer.ownerProc)));
+    try std.testing.expect(Timer.previous != 0);
+    defer _ = w.SetWindowLongPtrW(owner, -4, Timer.previous);
     for ([_]bool{ false, true }) |selected| {
         const text = std.unicode.utf8ToUtf16LeStringLiteral("hello world");
         @memcpy(app_state.g_chat_capture[0..text.len], text);
@@ -4723,10 +4741,20 @@ test "ISSUE-438 real popup Copy returns command and copies a snapshot despite re
         }
         try std.testing.expect(setUnicodeClipboardTextWithRetry(std.unicode.utf8ToUtf16LeStringLiteral("stale")));
         Timer.calls = 0;
-        const timer = SetTimer(null, 0, 200, @ptrCast(@constCast(&Timer.fire)));
+        Timer.ready = false;
+        Timer.timed_out = false;
+        Timer.fire(null, 0, 0, 0);
+        try std.testing.expectEqual(@as(usize, 0), Timer.calls);
+        try std.testing.expectEqualSlices(u16, text, app_state.g_chat_capture[0..app_state.g_chat_last_len]);
+        try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_block_count);
+        try std.testing.expectEqual(selected, app_state.g_chat_sel_active);
+        const timer = SetTimer(null, 0, 5000, @ptrCast(@constCast(&Timer.cancel)));
+        try std.testing.expect(timer != 0);
         defer _ = KillTimer(null, timer);
         const y: LPARAM = if (selected) 150 else 20;
         _ = chatTranscriptWndProc(owner, WM_RBUTTONDOWN, 0, (y << 16) | 20);
+        try std.testing.expect(!Timer.timed_out);
+        try std.testing.expect(Timer.ready);
         try std.testing.expectEqual(@as(usize, 1), Timer.calls);
         try std.testing.expect(OpenClipboard(owner) != 0);
         defer _ = CloseClipboard();
