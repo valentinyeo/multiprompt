@@ -230,7 +230,7 @@ test('native restore, open, adoption and UI-thread diagnostics use identity guar
   assert.match(body('restoreSession'), /const restored_active_tab = selectedSavedTab\(json, tabs\[0\.\.tab_count\], if \(@import\("launch_cache.zig"\)\.pending\) @import\("launch_cache.zig"\)\.selected_shell_id else 0\)/);
   const selected = body('selectedSavedTab');
   assert.match(selected, /for \(\[_\]u64\{ selected, json_reader\.uint\(json, "active_shell_id"\) \}\)/);
-  assert.match(selected, /if \(tab\.shell_id == id\) return @intCast\(tmux_identity\.restoreWinner\(tabs, i\)\)/);
+  assert.match(selected, /json_reader\.restoredSessionTab\(json, tabs, id\)/);
   assert.match(selected, /if \(active < tabs\.len\) @intCast\(tmux_identity\.restoreWinner\(tabs, @intCast\(active\)\)\) else null/);
   assert.match(body('restoreSession'), /restoreWinner\(tabs\[0\.\.tab_count\], t\) != t\) continue/);
   assert.match(body('absorbWorkspaceIntoSlots'), /restoreWinner\(tabs\[0\.\.tab_count\], t\) != t\) continue/);

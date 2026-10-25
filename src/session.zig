@@ -1035,7 +1035,7 @@ test "session validation accepts standalone exports and rejects partial document
 }
 
 test "session IDs before names and nested fields stay attached to their own tab" {
-    const json = "{\"extra\":{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Ignore\"}]},\"tabs\":[{\"kind\":\"tmux\",\"csid\":\"correct\",\"ccwd\":\"/repo/日\",\"name\":\"Literal \\\"csid\\\":\\\"x\\\" } \\u65e5\\ud83d\\ude80\",\"extra\":{\"csid\":\"wrong\",\"favorite\":true}},{\"kind\":\"cmd\",\"name\":\"Old\"}]}";
+    const json = "{\"extra\":{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Ignore\"}]},\"tabs\":[{\"kind\":\"tmux\",\"tmux_session\":\"unicode-session\",\"csid\":\"correct\",\"ccwd\":\"/repo/日\",\"name\":\"Literal \\\"csid\\\":\\\"x\\\" } \\u65e5\\ud83d\\ude80\",\"extra\":{\"csid\":\"wrong\",\"favorite\":true}},{\"kind\":\"cmd\",\"name\":\"Old\"}]}";
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
     try std.testing.expectEqualStrings("correct", tabs[0].claude_sid[0..tabs[0].claude_sid_len]);
@@ -2006,7 +2006,7 @@ test "ISSUE-569 saved view and selected session use the same source during start
         cache.selected_live_shell_id = prior_live;
         app_state.g_starred_workspace = prior_view;
     }
-    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":1,\"active_workspace\":0,\"starred_view\":true,\"tabs\":[{\"kind\":\"tmux\",\"name\":\"A\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"B\",\"shell_id\":42,\"workspace\":1,\"favorite\":true}]}");
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":1,\"active_workspace\":0,\"starred_view\":true,\"tabs\":[{\"kind\":\"tmux\",\"name\":\"A\",\"tmux_session\":\"session-a\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"B\",\"tmux_session\":\"session-b\",\"shell_id\":42,\"workspace\":1,\"favorite\":true}]}");
     defer parsed.deinit();
     var tabs: [2]SavedTab = undefined;
     const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
