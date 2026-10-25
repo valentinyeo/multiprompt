@@ -83,6 +83,7 @@ fn threadTitleHeight() i32 { return 44; }
 var veto_logs: usize = 0;
 var spawn_ok = true;
 var fake_exit_code: u32 = 0;
+const STILL_ACTIVE: u32 = 259;
 fn GetExitCodeProcess(_: ?*anyopaque, code: *u32) u32 { code.* = fake_exit_code; return 1; }
 fn GetTickCount64() u64 { return fake_now; }
 fn chatNetworkReportsConnected() bool { return network; }
