@@ -491,7 +491,7 @@ foreach ($plan in $plans) {
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
                 if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
-                [void](Scroll-Transcript 300)
+                [void](Scroll-Transcript 240)
                 $null
             }
             Shot 'unread-divider-reopened'
