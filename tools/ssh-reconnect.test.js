@@ -765,10 +765,10 @@ test "ISSUE-511 bounded probe wait" {
 });
 
 
-test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', async () => {
+test('ISSUE-512 a pinned background disconnect never leaves a global warning after recovery', async () => {
   await zig(runtime(`
 test "ISSUE-512 recovered tab has no stale global notice" {
-    shells[0].locked = true;
+    shells[0].pinned_top = true;
     markSshTabDisconnected(0);
     try std.testing.expectEqual(@as(usize, 0), header_notices);
     shells[0].ssh_reconnect.ok();

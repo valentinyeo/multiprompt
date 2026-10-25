@@ -140,7 +140,7 @@ var g_search_buf: [128]u16 = @splat(0);
 var moved: usize = 999;
 var renamed: u32 = 999;
 var closed: u32 = 0;
-var locked = false;
+var pinned = false;
 var saves: u32 = 0;
 fn RGB(r: u8, g: u8, b: u8) u32 { return @as(u32,r) | (@as(u32,g)<<8) | (@as(u32,b)<<16); }
 fn customColorOr(_: []const u8, fallback: DWORD) DWORD { return fallback; }
@@ -158,7 +158,7 @@ fn saveSession() void { saves += 1; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
 fn deleteGroup(gid: u32) void { for (shells[0..shell_count]) |*s| { if (s.group_id == gid) s.group_id = 0; } }
 fn normalizeGroupOrder() void {}
-fn groupHasLockedSession(_: u32) bool { return locked; }
+fn rejectPinnedGroupClose(_: u32) bool { return pinned; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn closeShell(_: u32) void { closed += 1; }
 fn u16ContainsInsensitive(text: []const u16, query: []const u16) bool { return std.mem.indexOf(u16, text, query) != null; }
@@ -364,12 +364,12 @@ test "group band covers popup actions, scoped target, search and workspace desti
     try std.testing.expectEqual(@as(usize,1), moved);
     runGroupPaletteAction(null, 1, 26);
     try std.testing.expectEqual(@as(usize,201), moved);
-    locked = true;
+    pinned = true;
     shells[1].group_id = 2;
     shell_count = 2;
     runGroupPaletteAction(null, 1, 4);
     try std.testing.expectEqual(@as(u32,0), closed);
-    locked = false;
+    pinned = false;
     runGroupPaletteAction(null, 1, 4);
     try std.testing.expectEqual(@as(u32,1), closed);
     runGroupPaletteAction(null, 1, 3);

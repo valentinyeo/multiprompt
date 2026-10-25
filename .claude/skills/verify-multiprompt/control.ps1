@@ -1287,7 +1287,7 @@ function Read-Inbox {
     return $null
 }
 
-function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step) {
+function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step, [bool]$Pinned = $true) {
     Wait-Until {
         $state = Read-Session
         if ($null -eq $state -or @($state.tabs).Count -ne 3 -or $state.active_tab -ne $Active) { return $false }
@@ -1296,8 +1296,10 @@ function Wait-ChatViews([bool[]]$Views, [int]$Active, [string]$Step) {
             $on = $state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv -eq $true
             if ($on -ne $Views[$i]) { return $false }
         }
-        $state.tabs[2].PSObject.Properties['chat_view_lock'] -and $state.tabs[2].chat_view_lock -ceq 'shell'
-    } "app-written views and shell lock: $Step"
+        if (@($state.tabs | Where-Object { $_.PSObject.Properties['chat_view_lock'] -or $_.PSObject.Properties['locked'] }).Count -ne 0) { throw 'Removed session locks were saved again' }
+        $pin = $state.tabs[2].PSObject.Properties['pinned_top'] -and $state.tabs[2].pinned_top -eq $true
+        $pin -eq $Pinned
+    } "app-written views and pin: $Step"
     Wait-Until {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
         $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
@@ -2295,53 +2297,68 @@ try {
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count -and $state.active_tab -eq $count - 1 } "user-created CMD session $count"
             }
             Snapshot 'sessions-created'
-            Focus-Palette 'always shell view for this session' 6465
-            Snapshot 'lock-action'
-            Press @(0x0D) 'Enter: Always shell view for this session on session 3'
-            Wait-ChatViews @($false, $false, $false) 2 'locked-shell'
+            Focus-Palette 'pin to top' 6293
+            Snapshot 'pin-action'
+            Press @(0x0D) 'Enter: Pin to Top on session 3'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'
+            Press @(0x11, 0x57) 'Ctrl+W: refuse closing the pinned session'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'
+            Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'
+            Press @(0x12, 0x43) 'Alt+C: pinned session can return to shell'
+            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-toggle-shell'
             Focus-Palette 'chat view on everywhere' 6346
             Snapshot 'action'
             Press @(0x0D) 'Enter: Chat View on everywhere once'
-            Wait-ChatViews @($true, $true, $false) 2 'on-everywhere'
+            Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'
             Press @(0x11, 0x31) 'Ctrl+1: show session 1 in Chat View'
-            Wait-ChatViews @($true, $true, $false) 0 'session-1-chat'
+            Wait-ChatViews @($true, $true, $true) 0 'session-1-chat'
+            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'
             Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'
-            Wait-ChatViews @($false, $true, $false) 0 'session-1-toggled'
+            Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'
             Press @(0x11, 0x32) 'Ctrl+2: show session 2 in Chat View'
-            Wait-ChatViews @($false, $true, $false) 1 'session-2-chat'
+            Wait-ChatViews @($false, $true, $true) 1 'session-2-chat'
             Press @(0x11, 0x31) 'Ctrl+1: return to session 1 without forcing Chat View'
-            Wait-ChatViews @($false, $true, $false) 0 'toggle-sticks'
+            Wait-ChatViews @($false, $true, $true) 0 'toggle-sticks'
             Focus-Palette 'chat view off everywhere' 6347
             Snapshot 'off-action'
             Press @(0x0D) 'Enter: Chat View off everywhere once'
             Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'
-            Press @(0x11, 0x33) 'Ctrl+3: shell-locked session stays in shell'
-            Wait-ChatViews @($false, $false, $false) 2 'locked-after-off'
+            Press @(0x11, 0x33) 'Ctrl+3: pinned session follows Off Everywhere'
+            Wait-ChatViews @($false, $false, $false) 2 'pinned-after-off'
+            Focus-Palette 'unpin from top' 6293
+            Press @(0x0D) 'Enter: unpin before normal app close for restart'
+            Wait-ChatViews @($false, $false, $false) 2 'unpinned-before-restart' $false
             Restart-ChatView 3
             Save-Json (Read-Session) 'restart-before-input.session.json'
             Press @(0x11, 0x31) 'Ctrl+1: restored first session'
-            Wait-ChatViews @($false, $false, $false) 0 'restart-session-1'
+            Wait-ChatViews @($false, $false, $false) 0 'restart-session-1' $false
             Press @(0x11, 0x32) 'Ctrl+2: restored second session'
-            Wait-ChatViews @($false, $false, $false) 1 'restart-session-2'
-            Press @(0x11, 0x33) 'Ctrl+3: restored shell lock'
-            Wait-ChatViews @($false, $false, $false) 2 'restart-session-3'
+            Wait-ChatViews @($false, $false, $false) 1 'restart-session-2' $false
+            Press @(0x11, 0x33) 'Ctrl+3: restored third session'
+            Wait-ChatViews @($false, $false, $false) 2 'restart-session-3' $false
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Focus-Palette 'chat view on everywhere' 6346
-            Press @(0x1B) 'Esc: close known positive palette query'
-            $start = ((Get-Content $log -Raw) -join '').Length
-            Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
-            Wait-Until {
-                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
-                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
-            } 'empty palette ready for removed-command query'
-            Type-Text 'chat view per tab'
-            Wait-Until {
-                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=17 count=0 target=0(?:\r?\n|$)'
-            } 'removed per-tab command has zero palette rows'
-            Snapshot 'per-tab-absent'
-            Press @(0x1B) 'Esc: close empty palette'
-            Wait-ChatViews @($false, $false, $false) 2 'after'
-            $result.checks += @{ name = 'chat-view-everywhere-once'; unlockedOn = @(0, 1); skippedShellLock = 2; laterToggleSticks = $true; offEverywhere = $true; restartViewsAndLock = $true; removedPerTabRowCount = 0; entry = 'Ctrl+K, Ctrl+1/2/3 and Alt+C' }
+            foreach ($query in @('chat view per tab', 'lock session', 'always chat view for this session', 'always shell view for this session', 'clear always view for this session')) {
+                Focus-Palette 'chat view on everywhere' 6346
+                Press @(0x1B) 'Esc: close known positive palette query'
+                $start = ((Get-Content $log -Raw) -join '').Length
+                Press @(0x11, 0x4B) 'Ctrl+K: reopen empty command palette'
+                Wait-Until {
+                    ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+(?:\r?\n|$)' -and
+                    [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+                } 'empty palette ready for removed-command query'
+                Type-Text $query
+                Wait-Until {
+                    ((Get-Content $log -Raw) -join '').Substring($start) -match ("\[palette\] ready chars=" + $query.Length + " count=0 target=0(?:\r?\n|$)")
+                } "removed command has zero palette rows: $query"
+                Snapshot ('absent-' + $query.Replace(' ', '-'))
+                Press @(0x1B) 'Esc: close empty palette'
+            }
+            Wait-ChatViews @($false, $false, $false) 2 'after' $false
+            $result.checks += @{ name = 'chat-view-everywhere-once'; allOn = @(0, 1, 2); pinnedToggleWorks = $true; pinnedCloseRefused = $true; laterToggleSticks = $true; offEverywhere = $true; restartViews = $true; removedCommands = 5; entry = 'Ctrl+K, Ctrl+W, Ctrl+1/2/3 and Alt+C' }
         }
         'chat-focus' {
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'Offline CMD session proves typing focus, not agent delivery' }
@@ -3070,12 +3087,13 @@ try {
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'clear always view for this session' 6466
-            Press @(0x0D) 'Enter: clear Always view for the test session'
+            Focus-Palette 'chat view off everywhere' 6347
+            Press @(0x0D) 'Enter: reset Chat View to shell for the test session'
             Wait-Until {
                 $state = Read-Session
-                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock']
-            } 'unlocked per-session Chat View saved'
+                $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock'] -and
+                    -not ($state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv)
+            } 'shell baseline without removed Chat View state saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             $tab = (Read-Session).tabs[$initialTab]
             if (-not ($tab.PSObject.Properties.Name -contains 'cv' -and $tab.cv)) {
@@ -3893,9 +3911,13 @@ try {
                     $sampleCount = $timings[$mode].samples_ms.Count
                     if ($mode -eq 'chat_browser_off') {
                         $gapCase.phase = 'chat-setup'
-                        Focus-Palette 'clear always view for this session' 6466
-                        Press @(0x0D) 'Enter: clear Always view for the switch test session'
-                        Wait-Until { -not (Read-Session).PSObject.Properties['chat_view_mode'] } 'per-session Chat View mode saved'
+                        Focus-Palette 'chat view off everywhere' 6347
+                        Press @(0x0D) 'Enter: reset both switch test sessions to shell'
+                        Wait-Until {
+                            $state = Read-Session
+                            $null -ne $state -and @($state.tabs).Count -eq 2 -and -not $state.PSObject.Properties['chat_view_mode'] -and
+                                @($state.tabs | Where-Object { ($_.PSObject.Properties['cv'] -and $_.cv) -or $_.PSObject.Properties['chat_view_lock'] }).Count -eq 0
+                        } 'both switch test sessions saved in shell view without removed locks'
                         foreach ($tab in @(0, 1)) {
                             Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $false

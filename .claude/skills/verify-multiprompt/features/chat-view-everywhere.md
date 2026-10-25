@@ -2,38 +2,37 @@
 
 ## Sub-features
 
-- One-time Chat View on everywhere and off everywhere actions update every unlocked session.
-- A session locked to Always shell view is skipped and stays locked after restart.
-- Alt+C on an unlocked session sticks after switching away and back.
-- The removed chat view per tab command has no palette row.
-- Native ISSUE-611 tests additionally cover Always Chat View, clearing locks, both legacy global modes, shell-override migration and session save/load round trips.
+- On Everywhere and Off Everywhere switch every session once, including pinned sessions.
+- Alt+C remains independent on each tab, pinned or unpinned, after either bulk action.
+- Per-session Always view commands and Lock Session have no palette rows.
+- Session view preferences survive restart; old lock keys are ignored by the native load regression.
 
 ## How to get to it (user POV)
 
-- Ctrl+K, New CMD Shell, Enter opens a local session; repeat to have three sessions.
-- Alt+T is the actual new workspace tmux tab shortcut, not Ctrl+T. It requires a configured workspace folder; this offline local journey uses the palette's New CMD Shell instead.
-- Set Tab Order: Manual through Ctrl+K before creating the extra sessions. Ctrl+1, Ctrl+2 and Ctrl+3 then select them in creation order.
-- Ctrl+K, Always shell view for this session, Enter locks session 3. Always Chat View for this session and Clear Always view for this session are the other choices; all three also appear in tab actions.
-- Ctrl+K, Chat View on everywhere or Chat View off everywhere, Enter changes unlocked sessions once. Alt+C still toggles an unlocked session afterwards.
+- Ctrl+K, New CMD Shell, Enter creates a local tab. Create three sessions after choosing Tab Order: Manual.
+- Ctrl+K, Pin to Top, Enter pins the selected session; the tab context palette offers the same action.
+- Alt+C switches the selected tab between Chat View and shell.
+- Ctrl+K, Chat View on everywhere or Chat View off everywhere, Enter switches all tabs once.
+- Ctrl+K, Unpin from Top, Enter removes protection before closing a tab or its workspace.
 
 ## Driving it with control.ps1
 
-- Dispatch verify.yml with feature=chat-view-everywhere on the branch, or use its PR matrix entry. Download verify-chat-view-everywhere and inspect result.json and screenshots. A branch run executes native desktop tests, including ISSUE-611; a release run only verifies the selected executable.
-- Launch the normal isolated offline CMD instance. Persist the initial session through UI Size: Reset using real Ctrl+K input. Select Tab Order: Manual while only that session exists and require the app-written launch snapshot to save sort_auto=false before creating sessions. Create two more CMD sessions through Ctrl+K New CMD Shell. Require exactly three saved tabs and the newly created tab selected each time.
-- Select Always shell view for this session (target 6465) through Ctrl+K on session 3. Require its app-written chat_view_lock to be shell and all three cv flags absent or false. Capture lock-action.png and locked-shell.png.
-- Run Chat View on everywhere through Ctrl+K. Require sessions 1 and 2 cv=true, session 3 shell and locked, and no chat_view_mode field. Capture action.png and on-everywhere.png.
-- Select session 1 through Ctrl+1 and require a visible native transcript. Alt+C returns it to shell. Ctrl+2 must still show Chat View; Ctrl+1 must stay shell. Capture session-1-toggled.png, session-2-chat.png and toggle-sticks.png with matching session JSON.
-- Run Chat View off everywhere through Ctrl+K. Require every session shell, with session 3 still locked. Capture off-action.png, off-everywhere.png and locked-after-off.png.
-- Close only the owned app normally, stop its job descendants and require zero active processes. Relaunch the same verified executable with the same isolated data directory. Doctor rechecks its PID, HWND, hash and version. Visit all three sessions through Ctrl+1/2/3 and require shell views and the persisted shell lock. Retain restart-process-tree.json and restart-session-1/2/3 screenshots and session snapshots.
-- Open Ctrl+K with a known existing command first, close it with Esc, reopen an empty palette and type chat view per tab through real SendInput. Require the app's bounded palette-ready trace for all 17 characters to report count=0, target=0. Capture per-tab-absent.png showing No matches, close with Esc and capture after.png.
-- Every view checkpoint independently reads the app-written session JSON and checks visible ZigShellChatTranscript controls for the selected session. Screenshots and session snapshots accompany each checkpoint. Doctor runs before every input and at completion; the shared finally block retains result.json, actions, logs, app data, screenshots and zero-process cleanup evidence.
+- Dispatch verify.yml with feature=chat-view-everywhere, or use the existing PR matrix entry. No new workflow journey stem is needed.
+- Launch the isolated offline CMD instance. Persist the initial session through UI Size: Reset, then choose Tab Order: Manual before creating two more CMD sessions. Require the app-written launch snapshot to save sort_auto=false.
+- Pin session 3 through Ctrl+K, target 6293. Require its saved pinned_top=true, all three views shell, and no saved locked or chat_view_lock keys. Capture pin-action.png and pinned-shell.png.
+- Press Ctrl+W, require all three saved tabs still in shell view with session 3 pinned and active at saved index 2, and capture pinned-close-refused.png. Inspect the unpin-first notice and normal close cross with no pin marker. Alt+C must then open and close session 3's Chat View while all three saved tabs remain present. Wait at least 1600 ms between Alt+C presses, including the later session 1 toggle, to exceed the hook's 1500 ms debounce. Saved view arrays stay in creation order, with session 3 at index 2; only its displayed position changes when pinned.
+- Run On Everywhere, target 6346. Require cv=true on all three sessions and the selected native transcript visible.
+- With session 3 pinned first in the displayed list, Ctrl+2 selects saved session 1. Toggle it to shell with Alt+C. Ctrl+3 selects session 2, which stays in Chat View; Ctrl+2 returns to session 1, which stays shell.
+- Run Off Everywhere, target 6347. Require all three sessions shell. Ctrl+1 selects pinned session 3, which also follows the bulk action.
+- Unpin session 3 before normal app close. Restart the same owned executable/profile, visit all three restored tabs with Ctrl+1/2/3, and require their shell preferences to persist. Retain restart-process-tree.json and per-session snapshots.
+- Query chat view per tab, lock session, always chat view for this session, always shell view for this session, and clear always view for this session. For each, first query a known existing bulk command as a positive control, then require the app's bounded palette-ready trace to report zero rows for the full removed query. Retain each absent-query screenshot.
+- Every view checkpoint independently reads app-written session JSON and counts visible ZigShellChatTranscript controls. Doctor runs before input. The normal finally block retains screenshots, actions, app data and zero-process cleanup evidence.
 
 ## Gotchas
 
-- Never seed or edit session JSON, change settings directly, send private app messages or replace missing prerequisites with a stand-in. All changes use genuine keyboard input.
-- Ctrl+digits follows displayed sidebar order, not saved tab-array order. Automatic order can put the newest active session first; switching to Manual after creating sessions materializes that reordered array. Establish Manual with one session, before creation, and retain it across restart.
-- Lock command targets are 6464 (Always Chat View), 6465 (Always shell view), and 6466 (Clear Always view); the removed per-tab target 6345 stays unused and workspace deletion reserves 6400–6463.
-- Saved shell preferences may omit cv entirely; only true means Chat View. The shell lock must explicitly remain shell.
-- Palette rows are custom-painted, not UI Automation buttons. Focus-Palette waits for the existing app-written query/selected-target trace before Enter; zero-result proof uses that same trace and a screenshot, with a known positive command as its control.
-- No live agent, SSH, account synchronization or remote workspace creation is claimed. The three local sessions prove view behavior only.
-- This map is an executable recipe, not a claim of a completed GitHub run. Require a successful branch run and inspect its screenshots before reporting live verification.
+- Ctrl+digits follows displayed sidebar order. Pinning session 3 moves it ahead of sessions 1 and 2 even with manual ordering; unpinning restores creation order.
+- Normal close refuses while a pin exists, so the journey explicitly unpins before its restart. Native session write/load tests cover pinned persistence separately.
+- The native suite covers each refused destructive action and a frozen pre-change session-format fixture. The desktop recipe directly exercises Ctrl+W and view toggles, not remote tmux archive/end operations.
+- Do not seed or edit session JSON, send private app messages, or treat screenshots alone as proof of saved state.
+- No live agent, SSH, account synchronization or remote workspace creation is claimed.
+- This is a runnable recipe, not a successful run claim. Require GitHub Windows results and inspect screenshots before reporting desktop verification.

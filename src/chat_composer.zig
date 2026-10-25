@@ -1407,13 +1407,11 @@ test "ISSUE-440 full width never resizes the console behind Chat View" {
     try std.testing.expect(fullWidthShouldResizeConsole(false));
 }
 
-test "ISSUE-440 full width respects remembered views and session locks" {
-    for ([_]@import("chat_view.zig").Lock{ .none, .chat, .shell }) |lock| {
-        for ([_]bool{ false, true }) |remembered| {
-            const chat = chatViewShouldShowForTab(remembered, lock);
-            try std.testing.expectEqual(!chat, fullWidthShouldResizeConsole(chat));
-            try std.testing.expectEqual(if (lock == .none) remembered else lock == .chat, chat);
-        }
+test "ISSUE-440 full width respects remembered views" {
+    for ([_]bool{ false, true }) |remembered| {
+        const chat = chatViewShouldShowForTab(remembered);
+        try std.testing.expectEqual(!chat, fullWidthShouldResizeConsole(chat));
+        try std.testing.expectEqual(remembered, chat);
     }
 }
 
@@ -1425,7 +1423,7 @@ fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_c
 
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
-    const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
+    const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
     return shellConsoleVisibilityAllowed(
         idx == app_state.active_shell,
         app_state.g_chat_active,
@@ -1440,7 +1438,7 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
     if (!shellConsoleShouldBeVisible(idx)) {
         if (IsWindowVisible(app_state.shells[idx].hwnd) == 0) return 0;
         if (verboseLoggingEnabled() and (app_state.g_chat_active or
-            chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock)))
+            chatViewShouldShowForTab(app_state.shells[idx].chat_view_on)))
         {
             var buf: [160]u8 = undefined;
             const line = std.fmt.bufPrint(&buf, "[chatview] suppressed console show shell={d} from={s}", .{ app_state.shells[idx].shell_id, from }) catch "[chatview] suppressed console show";
@@ -1461,7 +1459,6 @@ test "console visibility rejects chat, saved chat before restore, inactive tabs 
 
 pub fn openChatView() void {
     if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
-    if (app_state.shells[app_state.active_shell].chat_view_lock == .shell) return;
     if (app_state.g_chat_browser_swap.shell_id == 0) {
         app_state.g_chat_switch_started = GetTickCount64();
         app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id, app_state.g_chat_switch_started);
@@ -1540,7 +1537,7 @@ pub fn closeChatView() void {
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
-test "ISSUE-611 shell-locked console is visible during restore and after tab switches" {
+test "ISSUE-611 shell console is visible during restore and after tab switches" {
     const saved_shell = app_state.shells[0];
     const saved_count = app_state.shell_count;
     const saved_active = app_state.active_shell;
@@ -1557,7 +1554,7 @@ test "ISSUE-611 shell-locked console is visible during restore and after tab swi
     }
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].hwnd = @ptrFromInt(1);
-    app_state.shells[0].chat_view_lock = .shell;
+    app_state.shells[0].chat_view_on = false;
     app_state.shell_count = 1;
     app_state.active_shell = 0;
     app_state.g_chat_active = false;
@@ -1568,7 +1565,7 @@ test "ISSUE-611 shell-locked console is visible during restore and after tab swi
             try std.testing.expect(shellConsoleShouldBeVisible(0));
         }
     }
-    app_state.shells[0].chat_view_lock = .chat;
+    app_state.shells[0].chat_view_on = true;
     try std.testing.expect(!shellConsoleShouldBeVisible(0));
 }
 
@@ -1929,10 +1926,6 @@ test "chat draft safe name is file-name safe and collision-free" {
 pub fn toggleChatView() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
-    if (shell.chat_view_lock != .none) {
-        showHeaderNoticeAscii("View is locked for this session (Ctrl+K to clear Always view)", 3500, false);
-        return;
-    }
     shell.chat_view_on = app_state.g_chat_active;
     @import("chat_view.zig").toggle(shell);
     if (shell.chat_view_on) openChatView() else closeChatView();
@@ -1942,7 +1935,7 @@ pub fn toggleChatView() void {
 pub fn applySessionView() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
-    const want_chat = chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock);
+    const want_chat = chatViewShouldShowForTab(shell.chat_view_on);
     if (want_chat != app_state.g_chat_active) {
         if (want_chat) openChatView() else closeChatView();
     }

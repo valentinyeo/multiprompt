@@ -197,7 +197,6 @@ pub fn loadRemindersIfNeeded() void {
         e.group_color = if (e.group_color_set) @intCast(@min(json_reader.uint(obj, "group_color"), GROUP_COLORS.len - 1)) else 7;
         e.group_collapsed = json_reader.boolTrue(obj, "group_collapsed");
         e.pinned_top = json_reader.boolTrue(obj, "pinned_top");
-        e.locked = json_reader.boolTrue(obj, "locked");
         e.favorite = json_reader.boolTrue(obj, "favorite");
         e.last_used = json_reader.uint(obj, "used");
         e.input = json_reader.uint(obj, "input");
@@ -390,11 +389,6 @@ fn saveReminders() bool {
             @memcpy(json_buf[pos .. pos + favorite.len], favorite);
             pos += favorite.len;
         }
-        if (e.locked) {
-            const locked = ",\"locked\":true";
-            @memcpy(json_buf[pos .. pos + locked.len], locked);
-            pos += locked.len;
-        }
         if (e.local_kind != 0) {
             const kind = ",\"local_kind\":";
             @memcpy(json_buf[pos .. pos + kind.len], kind);
@@ -577,7 +571,6 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
         app_state.shells[si].visits = e.visits;
         if (e.batch_due != 0) {
             app_state.shells[si].pinned_top = e.pinned_top;
-            app_state.shells[si].locked = e.locked;
             if (e.group_id != 0) {
                 var gi = findGroupIdx(e.group_id);
                 if (gi) |group_idx| {
@@ -950,7 +943,7 @@ pub fn snoozeWorkspaceUntil(hwnd: HANDLE, ws: u8, due_at: u64) bool {
             showHeaderNoticeAscii("Unsafe tmux session name", 4000, true);
             return false;
         }
-        if (workspace_snooze.busyLocalTab(app_state.shells[si].tmux_session_len > 0, app_state.shells[si].activity == .active, app_state.shells[si].locked)) working += 1;
+        if (workspace_snooze.busyLocalTab(app_state.shells[si].tmux_session_len > 0, app_state.shells[si].activity == .active, app_state.shells[si].pinned_top)) working += 1;
     }
     if (app_state.g_reminder_count >= MAX_REMINDERS) {
         showHeaderNoticeAscii("Reminder list full (64)", 4000, true);
@@ -958,7 +951,7 @@ pub fn snoozeWorkspaceUntil(hwnd: HANDLE, ws: u8, due_at: u64) bool {
     }
     if (working > 0) {
         var prompt_ascii: [128]u8 = undefined;
-        const prompt = std.fmt.bufPrint(&prompt_ascii, "{d} local tabs are still working or locked and will close. Snooze anyway?", .{working}) catch return false;
+        const prompt = std.fmt.bufPrint(&prompt_ascii, "{d} local tabs are still working or pinned and will close. Snooze anyway?", .{working}) catch return false;
         var prompt_buf: [128]u16 = undefined;
         for (prompt, 0..) |c, i| prompt_buf[i] = c;
         prompt_buf[prompt.len] = 0;

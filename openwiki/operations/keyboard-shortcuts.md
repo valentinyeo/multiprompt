@@ -210,12 +210,12 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K Reminders | View / restore snoozed sessions |
 | Ctrl+V (in Ctrl+K) | Paste into the palette search |
 | Browser pane focused | Ctrl+C / Ctrl+V / Ctrl+K pass through to the page |
-| Ctrl+K Lock Session | Protect the active session from every close / archive path |
-| Drag tab onto a group | Move it there without changing pin or lock state |
+| Ctrl+K / right-click tab -&gt; Pin to Top | Pin the session above other tabs and protect it from closing or archiving; unpin first to remove it |
+| Drag tab onto a group | Move it there without changing pin state |
 | Drag tab: PINNED / RECENTS | Change its order inside the group or ungrouped list |
 | Click tier heading | Collapse / expand ungrouped PINNED or RECENTS |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
-| Right-click tab | Tab actions palette (lock / pin / reconnect / mute / close / move / group) |
+| Right-click tab | Tab actions palette (pin / reconnect / mute / close / move / group) |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |
 | Alt+C | Toggle formatted Chat View for this tab; screen copy remains the fallback |
@@ -230,10 +230,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
-| Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every unlocked session once; Alt+C and tab switches keep each session independent afterwards |
-| Ctrl+K / right-click tab -&gt; Always Chat View for this session | Lock this session to Chat View, including after restart; everywhere actions skip it |
-| Ctrl+K / right-click tab -&gt; Always shell view for this session | Lock this session to the shell, including after restart; everywhere actions skip it |
-| Ctrl+K / right-click tab -&gt; Clear Always view for this session | Unlock this session without changing its current view |
+| Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
 | Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Answer the live permission prompt: allow |
 | Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Answer the live permission prompt: always allow |

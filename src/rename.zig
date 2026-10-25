@@ -104,7 +104,7 @@ const newPillForMove = @import("workspaces.zig").newPillForMove;
 const saveSession = @import("session.zig").saveSession;
 const paletteWideTextMatchRank = @import("command_palette.zig").paletteWideTextMatchRank;
 const applyCanonicalSessionRename = @import("archive.zig").applyCanonicalSessionRename;
-const groupHasLockedSession = @import("archive.zig").groupHasLockedSession;
+const rejectPinnedGroupClose = @import("archive.zig").rejectPinnedGroupClose;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const closeShell = @import("console.zig").closeShell;
 const clampSidebarScroll = @import("console.zig").clampSidebarScroll;
@@ -629,10 +629,7 @@ pub fn runGroupPaletteAction(hwnd: HANDLE, gidx: u32, action: usize) void {
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         saveSession();
     } else if (cmd_u == MENU_HEADER_CLOSE) {
-        if (groupHasLockedSession(gid)) {
-            showHeaderNoticeAscii("Group contains a locked session", 4500, true);
-            return;
-        }
+        if (rejectPinnedGroupClose(gid)) return;
         var i: u32 = app_state.shell_count;
         while (i > 0) {
             i -= 1;

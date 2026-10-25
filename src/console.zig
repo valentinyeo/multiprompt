@@ -196,7 +196,7 @@ const registerShellExitWait = @import("workspaces.zig").registerShellExitWait;
 const unregisterShellExitWait = @import("workspaces.zig").unregisterShellExitWait;
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
 const requestRemoteTmuxPaneRedraw = @import("archive.zig").requestRemoteTmuxPaneRedraw;
-const rejectLockedSessionClose = @import("archive.zig").rejectLockedSessionClose;
+const rejectPinnedSessionClose = @import("archive.zig").rejectPinnedSessionClose;
 const fetchTmuxSessions = @import("vps.zig").fetchTmuxSessions;
 const sshOneShotCapture = @import("vps.zig").sshOneShotCapture;
 const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows;
@@ -1056,6 +1056,7 @@ pub fn rememberOpenWorkspaceForQuit() void {
 }
 
 pub fn quitAllZigShellWindows(hwnd: HANDLE) void {
+    if (@import("archive.zig").rejectPinnedCloseAll()) return;
     rememberOpenWorkspaceForQuit();
     var ctx = ZigShellWindowList{
         .current = hwnd,
@@ -2027,7 +2028,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_muted = app_state.shells[idx].muted;
     const saved_inbox_excluded = app_state.shells[idx].inbox_excluded;
     const saved_pinned_top = app_state.shells[idx].pinned_top;
-    const saved_locked = app_state.shells[idx].locked;
     const saved_favorite = app_state.shells[idx].favorite;
     const saved_last_used = app_state.shells[idx].last_used;
     const saved_visits = app_state.shells[idx].visits;
@@ -2048,7 +2048,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_workspace = app_state.shells[idx].workspace;
     const saved_full_width = app_state.shells[idx].full_width;
     const saved_chat_view_on = app_state.shells[idx].chat_view_on;
-    const saved_chat_view_lock = app_state.shells[idx].chat_view_lock;
     const saved_last_active = app_state.shells[idx].last_active;
     const saved_last_viewed = app_state.shells[idx].last_viewed;
     const saved_preview = app_state.shells[idx].preview;
@@ -2161,7 +2160,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .inbox_excluded = saved_inbox_excluded,
         .keep_alive = false,
         .pinned_top = saved_pinned_top,
-        .locked = saved_locked,
         .favorite = saved_favorite,
         .last_used = saved_last_used,
         .visits = saved_visits,
@@ -2186,7 +2184,6 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .disconnected = true,
         .full_width = saved_full_width,
         .chat_view_on = saved_chat_view_on,
-        .chat_view_lock = saved_chat_view_lock,
         .last_active = if (saved_last_active != 0) saved_last_active else nowFileTime(),
         .last_viewed = saved_last_viewed,
         .workspace = saved_workspace,
@@ -2298,15 +2295,15 @@ pub fn markSshTabDisconnected(idx: u32) void {
     var reconnect_log: [160]u8 = undefined;
     debugLog(std.fmt.bufPrint(&reconnect_log, "ssh-reconnect scheduled id={d} attempt={d} delay_ms={d}", .{ app_state.shells[idx].shell_id, app_state.shells[idx].ssh_reconnect.attempts +| 1, app_state.shells[idx].ssh_reconnect.delay_ms }) catch "ssh-reconnect scheduled");
     armSshReconnectTimerIfNeeded();
-    if (app_state.shells[idx].locked or app_state.shells[idx].pinned_top) {
-        logSessionAuditAlways(if (app_state.shells[idx].locked) "locked-session-disconnected-preserved" else "pinned-session-disconnected-preserved");
+    if (app_state.shells[idx].pinned_top) {
+        logSessionAuditAlways("pinned-session-disconnected-preserved");
     }
     if (state_changed) @import("drawing.zig").invalidateReconnectContent(idx);
     saveSession();
 }
 
 pub fn markPinnedLocalTabDisconnected(idx: u32) void {
-    if (idx >= app_state.shell_count or (!app_state.shells[idx].pinned_top and !app_state.shells[idx].locked)) return;
+    if (idx >= app_state.shell_count or !app_state.shells[idx].pinned_top) return;
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].hwnd != null) {
         _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
@@ -2320,8 +2317,8 @@ pub fn markPinnedLocalTabDisconnected(idx: u32) void {
     app_state.shells[idx].activity = .idle;
     app_state.shells[idx].needs_attention = false;
     app_state.shells[idx].disconnected = true;
-    showHeaderNoticeAscii(if (app_state.shells[idx].locked) "Locked session exited - unlock before closing" else "Pinned session exited - explicit close required", 8000, true);
-    logSessionAuditAlways(if (app_state.shells[idx].locked) "locked-local-session-exited-preserved" else "pinned-local-session-exited-preserved");
+    showHeaderNoticeAscii("Pinned session exited - unpin before closing", 8000, true);
+    logSessionAuditAlways("pinned-local-session-exited-preserved");
     invalidateSidebar();
     saveSession();
 }
@@ -2501,7 +2498,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
 }
 
 pub fn closeShell(idx: u32) void {
-    if (rejectLockedSessionClose(@intCast(idx))) return;
+    if (rejectPinnedSessionClose(@intCast(idx))) return;
     closeShellRemember(idx, true);
 }
 
@@ -2569,7 +2566,7 @@ pub fn switchToShell(idx: u32) void {
     }
     const switch_started = GetTickCount64();
     const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
-        chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
+        chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
     const defer_native_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         app_state.shells[idx].browser_enabled and app_state.shells[idx].browser_native and
         app_state.shells[idx].browser_hwnd != null and @import("win32.zig").IsWindow(app_state.shells[idx].browser_hwnd) != 0;
@@ -2659,7 +2656,7 @@ pub fn switchToShell(idx: u32) void {
             hideShellsForOverlay();
             updateBrowserVisibility();
         } else {
-            const want_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on, app_state.shells[idx].chat_view_lock);
+            const want_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {

@@ -253,8 +253,8 @@ test('console ordering stays grouped-first and Chat View uses real Alt+C with ta
   ];
   let offset = -1;
   for (const step of steps) { const next = journey.indexOf(step, offset + 1); assert.ok(next > offset, step); offset = next; }
-  assert.match(journey, /Focus-Palette 'clear always view for this session' 6466/);
-  assert.doesNotMatch(journey, /Focus-Palette 'per tab' 6345/);
+  assert.match(journey, /Focus-Palette 'chat view off everywhere' 6347/);
+  assert.ok(journey.includes("@($state.tabs | Where-Object { ($_.PSObject.Properties['cv'] -and $_.cv) -or $_.PSObject.Properties['chat_view_lock'] }).Count -eq 0"));
   assert.match(journey, /Press-CloseBrowserPane 'Alt\+A: close browser pane for Chat View baseline'\s+\$null = Assert-BrowserPane 'closed' \('chat-baseline-' \+ \$tab\)/);
   const closer = control.slice(control.indexOf('function Press-CloseBrowserPane'), control.indexOf('function Focus-BrowserPaneOwner'));
   assert.match(closer, /for \(\$attempt = 1; \$attempt -le 3; \$attempt\+\+\) \{\s+Press @\(0x12, 0x41\) \$Label\s+try \{\s+Wait-Until \{ \$pane = Read-BrowserPane; \$null -ne \$pane -and \$pane.browser_state -eq 'closed' \} "Alt\+A attempt \$attempt closed the browser pane" 3\s+return\s+\} catch \{ if \(\$attempt -eq 3\) \{ throw \} \}/);

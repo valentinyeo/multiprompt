@@ -180,9 +180,9 @@ function journeyOptionalChatContract(source) {
 
 journeyOptionalChatContract(driver);
 for (const [before, after] of [
-  ["$state.tabs[$initialTab].PSObject.Properties['cv'] -and ", ''],
-  [' -and $state.tabs[$initialTab].cv', ''],
-  ['$null -ne $state -and $state.tabs[$initialTab]', '$state.tabs[$initialTab]'],
+  ["$null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv", "$null -ne $state -and $state.tabs[$initialTab].cv"],
+  ["$null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv", "$null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv']"],
+  ["$null -ne $state -and $state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv", "$state.tabs[$initialTab].PSObject.Properties['cv'] -and $state.tabs[$initialTab].cv"],
 ]) {
   const broken = driver.replace(before, after);
   assert.notEqual(broken, driver, `mutation applies: ${before}`);

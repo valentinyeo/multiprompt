@@ -145,7 +145,7 @@ pub fn shellDoubleClickAtScreenPoint(shell_id: u32, screen_x: i32, screen_y: i32
     if (!toggle.ISSUE_355_DOUBLE_CLICK_TOGGLE or app_state.g_chat_active or
         app_state.active_shell >= app_state.shell_count) return;
     const shell = app_state.shells[app_state.active_shell];
-    if (shell.shell_id != shell_id or shell.pid == 0 or shell.hwnd == null or shell.chat_view_lock == .shell) return;
+    if (shell.shell_id != shell_id or shell.pid == 0 or shell.hwnd == null) return;
     {
         _ = FreeConsole();
         if (AttachConsole(shell.pid) == 0) return;
