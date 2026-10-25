@@ -871,13 +871,13 @@ pub fn chatFileOnReady() void {
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
                 chatNewMessagesChanged(had_messages);
             }
-            entry.before = 0;
-            if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
+            entry.before = history.start;
+            if (!disk and !history.more and history.start == 0) entry.loaded_ms = @intCast(GetTickCount64());
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk or history.start > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;

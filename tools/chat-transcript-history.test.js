@@ -367,7 +367,8 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(i32, 40), g_chat_scroll_y);
     try std.testing.expectEqual(@as(u64, 150), one.history.offset);
     try std.testing.expectEqual(@as(u64, 25), one.history.start);
-    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 25), one.before);
+    try std.testing.expectEqual(GetTickCount64(), one.next);
     const status_text_ptr = one.history.text.items.ptr;
     const status_blocks = g_chat_block_count;
     const prior_layouts = status_layout_calls;
