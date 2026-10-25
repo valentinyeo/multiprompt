@@ -2532,7 +2532,7 @@ try {
                     Press @(0x08) 'Backspace: clear the preceding draft'
                     Type-Text 'echo'
                     Wait-Until { [VerifyNative]::EditText($handle) -ceq 'echo' } 'preserve an existing draft across dictation'
-                    $oldBars = @([regex]::Matches((Get-Content $log -Raw), '\[chat\] dictation bar ')).Count
+                    $oldBars = @([regex]::Matches(((Get-Content $log -Raw) -join ''), '\[chat\] dictation bar ')).Count
                     $oldSent = if (Test-Path $outbox) { @([regex]::Matches((Get-Content $outbox -Raw), '"t":"echo Go forward ten meters\."')).Count } else { 0 }
                     Press @(0x11, 0x44) 'Ctrl+D: start composer dictation'
                     $iteration++
@@ -2540,7 +2540,7 @@ try {
                         (Test-Path $auditPath) -and @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
                     } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
                     Wait-Until {
-                        $bars = @([regex]::Matches((Get-Content $log -Raw), '\[chat\] dictation bar (-?\d+),(-?\d+),(-?\d+),(-?\d+) meter=(-?\d+),(-?\d+) send=(-?\d+),(-?\d+)'))
+                        $bars = @([regex]::Matches(((Get-Content $log -Raw) -join ''), '\[chat\] dictation bar (-?\d+),(-?\d+),(-?\d+),(-?\d+) meter=(-?\d+),(-?\d+) send=(-?\d+),(-?\d+)'))
                         if ($bars.Count -le $oldBars) { return $false }
                         $script:dictationBar = [int[]]@(1..8 | ForEach-Object { [int]$bars[-1].Groups[$_].Value })
                         -not [VerifyNative]::IsWindowVisible($handle)
