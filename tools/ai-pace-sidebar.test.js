@@ -94,9 +94,17 @@ test("one-line sticky carousel owns combined, VPS, and AI cards with full number
   assert.match(move, /TrackMouseEvent\(&tracking\)/);
   assert.match(source, /0x02A3 => \{\s+if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
   const line = functionBody(source, "paintSidebarAiPaceCard", "paintSidebarAiPaceDetail");
-  assert.match(line, /formatResetHours/);
   assert.match(line, /paintAiPaceWeekRuns/);
-  assert.match(line, /"CX" else "CL"/);
+  assert.doesNotMatch(line, /formatResetHours|aiPaceNextWeeklyReset/);
+  assert.doesNotMatch(line, /"CX"|"CL"/);
+  assert.doesNotMatch(line, /ladder_mode/);
+});
+
+test("the usage display draws no burn label and no hours to reset", () => {
+  assert.doesNotMatch(source, /fn aiPaceNextWeeklyReset|formatResetHours|earliestReset/);
+  const detail = functionBody(source, "paintSidebarAiPaceDetail", "paintSidebarCombinedDetail");
+  assert.doesNotMatch(detail, /"BURN"|ladder_mode|CODEX" else "CLAUDE/);
+  assert.doesNotMatch(source, /"Burn \{s\}: /);
 });
 
 test("the entire card cycles and has no dashboard deep-link target", () => {
