@@ -2869,11 +2869,11 @@ pub fn copyBlueDotHookInstructions() void {
     var buf: [2048]u8 = undefined;
     const text = if (is_remote)
         std.fmt.bufPrint(&buf, "Set up multiprompt blue-dot notifications for this Claude Code session, so my multiprompt tab shows a blue dot when you finish and need my input.\r\n\r\n" ++
-            "NOTE: this is a REMOTE (VPS/tmux) session. multiprompt automatically opens a reverse SSH tunnel on this connection that maps the server's localhost:19548 back to the Windows window that owns this tab. So the hooks below just write to localhost:19548 on the SERVER and the ping is carried home — no extra setup, no tools beyond bash.\r\n\r\n" ++
-            "Add two Claude Code hooks in .claude/settings.local.json (these write to the tunnelled port using bash's built-in /dev/tcp):\r\n" ++
-            "  UserPromptSubmit -> command:  printf 'ACTIVE:{s}' >/dev/tcp/localhost/19548\r\n" ++
-            "  Stop             -> command:  printf 'DONE:{s}'   >/dev/tcp/localhost/19548\r\n\r\n" ++
-            "The label \"{s}\" must match this multiprompt tab's name.\r\n", .{ token, token, token }) catch buf[0..0]
+            "NOTE: this is a REMOTE (VPS/tmux) session. multiprompt automatically opens a reverse SSH tunnel on this connection that maps the server's localhost:19548 back to the Windows window that owns this tab. The installed Python notifier sends activity through localhost:19548 on the SERVER and the tunnel carries it home.\r\n\r\n" ++
+            "Add two Claude Code hooks in .claude/settings.local.json using the installed notifier:\r\n" ++
+            "  UserPromptSubmit -> command:  python3 ~/.local/share/zigshell/notify.py claude active\r\n" ++
+            "  Stop             -> command:  python3 ~/.local/share/zigshell/notify.py claude done\r\n\r\n" ++
+            "Inside tmux, the notifier uses TMUX_PANE to look up the tmux session name. Outside tmux, it uses MULTIPROMPT_TAB. That name must match this multiprompt tab's name.\r\n", .{}) catch buf[0..0]
     else
         std.fmt.bufPrint(&buf, "Set up multiprompt blue-dot notifications for this Claude Code session, so my multiprompt tab shows a blue dot when you finish and need my input.\r\n\r\n" ++
             "Add two Claude Code hooks in .claude/settings.local.json for this project. The full path to multiprompt is baked in, so no PATH setup is needed (escape the backslashes when you write them into JSON):\r\n" ++
