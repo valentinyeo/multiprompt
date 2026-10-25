@@ -1669,7 +1669,6 @@ test "local listener account helper" {
     return error.AccountChecksIncomplete;
 }
 
-
 test "IGSH-890 notification sockets cannot leak into restored console children" {
     const w = @import("win32.zig");
     var data: w.WSADATA = undefined;

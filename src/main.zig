@@ -8214,8 +8214,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             switch (@import("notifications.zig").listener_status.load(.acquire)) {
                 .pending => return false,
                 .failed => {
-                    showHeaderNoticeAscii("Could not start the notification listener. Relaunch to retry.", 30000, true);
-                    return true;
+                    showHeaderNoticeAscii("Notifications unavailable. Sessions are still restoring.", 30000, true);
                 },
                 .ready => {},
             }
