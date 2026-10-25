@@ -135,7 +135,7 @@ test('browser-focused Win+Up cannot maximize through the app snap command', () =
 test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op and non-docked windows', () => {
   assert.ok(main.includes('_ = @import("browser_pane.zig");'));
   for (const name of [
-    'locked browser style removes maximize and minimize boxes',
+    'locked browser style removes system close maximize and minimize controls',
     'docked browser moved rect triggers snap back',
     'docked browser zoomed pane triggers restore even at matching rect',
     'docked browser matching rect is an idempotent no-op',

@@ -2242,9 +2242,9 @@ try {
         $warmup = $warmupJob.Start($chrome, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
         Wait-Until {
             $warmup.Refresh()
-            if ($warmup.HasExited) { throw 'Caption Chrome setup exited before readiness' }
+            if ($warmup.HasExited) { throw 'Caption browser setup exited before readiness' }
             $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt caption browser ready'
-        } 'isolated Chrome rendered the requested caption theme' 60
+        } 'isolated browser rendered the requested caption theme' 60
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; executable = $chrome; browserTheme = $env:CAPTION_BROWSER_THEME; dpi = [int]$env:CAPTION_DPI } 'caption-browser-setup.json'
     }
