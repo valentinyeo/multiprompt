@@ -143,10 +143,11 @@ test "injected production paint metadata geometry and user-send matching" {
     chatPaintBlock(0, text[0..message.len], injected, .single, .{ .right = 320, .bottom = 100 });
     try std.testing.expectEqual(@as(u32, 0xFFD6E6F7), chat_style.argb(fill));
     injected.time = @splat(0);
-    chatPaintTime(0, injected, .{}, true, true);
+    chatPaintTime(0, injected, .{}, true);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
-    chatPaintTime(0, user, .{}, true, true);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("✓✓ Read"), metadata[0..metadata_len]);
+    metadata_len = 0;
+    chatPaintTime(0, user, .{}, true);
+    try std.testing.expectEqual(@as(usize, 0), metadata_len);
 
 }
 test "ISSUE-270 production folded and open diff rows fill the card without wrapping" {
