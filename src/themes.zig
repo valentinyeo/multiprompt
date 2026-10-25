@@ -635,17 +635,28 @@ pub fn themeConsoleFg() DWORD {
     return app_state.g_dev_theme.console_fg;
 }
 
+pub fn themeTitleBarBg() DWORD {
+    if (app_state.g_multiprompt_theme) return multipromptColorOr("titlebar_bg", RGB(18, 19, 21));
+    if (devThemeOn()) {
+        ensureDevThemeInitialized();
+        return app_state.g_dev_theme.titlebar_bg;
+    }
+    return themeSidebarBg();
+}
+
 pub fn applyTitleBarTheme() void {
     if (app_state.g_main_hwnd == null) return;
     const DWMWA_USE_IMMERSIVE_DARK_MODE: DWORD = 20;
     const DWMWA_CAPTION_COLOR: DWORD = 35;
     const DWMWA_BORDER_COLOR: DWORD = 34;
     const DWMWA_TEXT_COLOR: DWORD = 36;
+    defer {
+        const caption_color = themeTitleBarBg();
+        _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_CAPTION_COLOR, @ptrCast(&caption_color), @sizeOf(DWORD));
+    }
     if (app_state.g_multiprompt_theme) {
         const dark_mode: BOOL = 1;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
-        const caption_color: DWORD = multipromptColorOr("titlebar_bg", RGB(18, 19, 21));
-        _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_CAPTION_COLOR, @ptrCast(&caption_color), @sizeOf(DWORD));
         const text_color: DWORD = RGB(208, 214, 224);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
         const border_color: DWORD = multipromptColorOr("border_bg", RGB(35, 37, 42));
@@ -656,8 +667,6 @@ pub fn applyTitleBarTheme() void {
         ensureDevThemeInitialized();
         const dark_mode: BOOL = 1;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
-        const caption_color: DWORD = app_state.g_dev_theme.titlebar_bg;
-        _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_CAPTION_COLOR, @ptrCast(&caption_color), @sizeOf(DWORD));
         const text_color: DWORD = RGB(255, 255, 255);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
         const border_color: DWORD = app_state.g_dev_theme.border_bg;
@@ -667,8 +676,6 @@ pub fn applyTitleBarTheme() void {
     if (app_state.g_light_theme) {
         const light_mode: BOOL = 0;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&light_mode), @sizeOf(BOOL));
-        const caption_color: DWORD = RGB(243, 243, 243);
-        _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_CAPTION_COLOR, @ptrCast(&caption_color), @sizeOf(DWORD));
         const text_color: DWORD = RGB(28, 28, 28);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
         const border_color: DWORD = RGB(205, 205, 205);
@@ -676,8 +683,6 @@ pub fn applyTitleBarTheme() void {
     } else {
         const dark_mode: BOOL = 1;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
-        const caption_color: DWORD = if (app_state.g_amoled_theme) RGB(0, 0, 0) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(60, 60, 60) else RGB(36, 36, 36);
-        _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_CAPTION_COLOR, @ptrCast(&caption_color), @sizeOf(DWORD));
         const text_color: DWORD = RGB(255, 255, 255);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
         const border_color: DWORD = if (app_state.g_amoled_theme) RGB(0, 0, 0) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(104, 104, 104) else RGB(86, 86, 86);

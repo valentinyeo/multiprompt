@@ -1814,6 +1814,7 @@ pub fn chatScrollBy(delta_px: i32) void {
         if (chatHistoryEntry(chatFileIdentity())) |entry| {
             if (!entry.pending and entry.history.start > 0) {
                 entry.before = entry.history.start;
+                entry.show_older = true;
                 app_state.g_chat_scrolled_up = true;
                 app_state.g_chat_scroll_bottom_pending = false;
                 entry.next = 0;

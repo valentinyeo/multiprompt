@@ -24,7 +24,7 @@ function body(source, name) {
 
 function guardContract(source) {
   const style = body(source, 'lockedBrowserStyle');
-  for (const flag of ['WS_CAPTION', 'WS_THICKFRAME', 'WS_BORDER', 'WS_MAXIMIZEBOX', 'WS_MINIMIZEBOX']) assert.ok(style.includes(flag));
+  for (const flag of ['WS_CAPTION', 'WS_THICKFRAME', 'WS_BORDER', 'WS_SYSMENU', 'WS_MAXIMIZEBOX', 'WS_MINIMIZEBOX']) assert.ok(style.includes(flag));
   assert.match(style, /style & ~@as\(isize,/);
   assert.match(body(source, 'browserDockWorker'), /lockedBrowserStyle\(GetWindowLongPtrW\(hwnd, GWL_STYLE\)\)/);
   const decision = body(source, 'browserDockGuardAction');
@@ -70,6 +70,7 @@ test('dock guard source contract reuses idempotent positioning and cancels on th
   guardContract(pane);
   for (const [before, after] of [
     ['fn lockedBrowserStyle(', 'fn oldBrowserStyle('],
+    [' | win.WS_SYSMENU', ''],
     [' | win.WS_MAXIMIZEBOX', ''],
     ['if (!docked) return .none;', ''],
     ['if (zoomed) return .restore;', ''],
@@ -134,7 +135,7 @@ test('browser-focused Win+Up cannot maximize through the app snap command', () =
 test('Windows Zig suite owns regression cases for styles, movement, zoom, no-op and non-docked windows', () => {
   assert.ok(main.includes('_ = @import("browser_pane.zig");'));
   for (const name of [
-    'locked browser style removes maximize and minimize boxes',
+    'locked browser style removes system close maximize and minimize controls',
     'docked browser moved rect triggers snap back',
     'docked browser zoomed pane triggers restore even at matching rect',
     'docked browser matching rect is an idempotent no-op',

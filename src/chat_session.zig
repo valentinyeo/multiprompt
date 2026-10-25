@@ -81,7 +81,6 @@ const win32ReadAll = @import("file_io.zig").win32ReadAll;
 const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
 const win32MakePath = @import("file_io.zig").win32MakePath;
 const CreateMutexW = @import("win32.zig").CreateMutexW;
-const OpenMutexW = @import("win32.zig").OpenMutexW;
 const ReleaseMutex = @import("win32.zig").ReleaseMutex;
 const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const debugLog = @import("diagnostics.zig").debugLog;
@@ -294,29 +293,56 @@ pub fn chatPerf(stage: []const u8, start: u64, amount: usize) void {
     debugLog(std.fmt.bufPrint(&buf, "PERF[chat]: {s} ms={d} size={d}", .{ stage, GetTickCount64() - start, amount }) catch return);
 }
 
-pub fn chatFetchAcquire() bool {
-    if (foregroundIsOurs()) {
-        if (app_state.g_chat_priority_reservation == null) app_state.g_chat_priority_reservation = CreateMutexW(null, 0, L("Local\\MultipromptChatTranscriptPriority"));
-    } else {
-        if (app_state.g_chat_priority_reservation != null) {
-            _ = CloseHandle(app_state.g_chat_priority_reservation);
-            app_state.g_chat_priority_reservation = null;
-        }
-        if (OpenMutexW(0x00100000, 0, L("Local\\MultipromptChatTranscriptPriority"))) |priority| {
-            _ = CloseHandle(priority);
-            return false;
-        }
+const ChatFetchTurn = struct {
+    hwnd: HANDLE = null,
+    requested: usize = std.math.maxInt(usize),
+    served: usize = std.math.maxInt(usize),
+    latest: usize = 0,
+};
+
+fn chatFetchOldest(hwnd: HANDLE, param: @import("win32.zig").LPARAM) callconv(@import("win32.zig").WINAPI) @import("win32.zig").BOOL {
+    const win = @import("win32.zig");
+    const turn: *ChatFetchTurn = @ptrFromInt(@as(usize, @bitCast(param)));
+    const served = @intFromPtr(win.GetPropW(hwnd, L("MultipromptChatFetchServed")));
+    turn.latest = @max(turn.latest, served);
+    const requested = @intFromPtr(win.GetPropW(hwnd, L("MultipromptChatFetchPending")));
+    const seen = @intFromPtr(win.GetPropW(hwnd, L("MultipromptChatFetchSeen")));
+    if (requested == 0 or GetTickCount64() -| seen > 3000) return 1;
+    if (requested < turn.requested or (requested == turn.requested and
+        (served < turn.served or (served == turn.served and @intFromPtr(hwnd) < @intFromPtr(turn.hwnd)))))
+    {
+        turn.hwnd = hwnd;
+        turn.requested = requested;
+        turn.served = served;
     }
-    if (app_state.g_chat_fetch_busy) return false;
+    return 1;
+}
+
+pub fn chatFetchAcquire() bool {
+    const win = @import("win32.zig");
+    if (app_state.g_chat_fetch_busy or app_state.g_main_hwnd == null) return false;
+    const hwnd = app_state.g_main_hwnd;
+    const now: usize = @intCast(GetTickCount64() + 1);
+    const seen = @intFromPtr(win.GetPropW(hwnd, L("MultipromptChatFetchSeen")));
+    if (win.GetPropW(hwnd, L("MultipromptChatFetchPending")) == null or now -| seen > 3000) {
+        if (win.SetPropW(hwnd, L("MultipromptChatFetchPending"), @ptrFromInt(now)) == 0) return false;
+    }
+    if (win.SetPropW(hwnd, L("MultipromptChatFetchSeen"), @ptrFromInt(now)) == 0) return false;
     if (app_state.g_chat_fetch_mutex == null) app_state.g_chat_fetch_mutex = CreateMutexW(null, 0, L("Local\\MultipromptChatTranscriptWorker"));
     if (app_state.g_chat_fetch_mutex == null) return false;
     const wait = WaitForSingleObject(app_state.g_chat_fetch_mutex, 0);
     if (wait != 0 and wait != 0x80) return false;
-    app_state.g_chat_fetch_busy = true;
-    if (app_state.g_chat_priority_reservation != null) {
-        _ = CloseHandle(app_state.g_chat_priority_reservation);
-        app_state.g_chat_priority_reservation = null;
+    var turn: ChatFetchTurn = .{};
+    if (win.EnumWindows(&chatFetchOldest, @bitCast(@intFromPtr(&turn))) == 0 or turn.hwnd != hwnd) {
+        _ = ReleaseMutex(app_state.g_chat_fetch_mutex);
+        return false;
     }
+    if (win.SetPropW(hwnd, L("MultipromptChatFetchServed"), @ptrFromInt(turn.latest + 1)) == 0) {
+        _ = ReleaseMutex(app_state.g_chat_fetch_mutex);
+        return false;
+    }
+    _ = win.SetPropW(hwnd, L("MultipromptChatFetchPending"), null);
+    app_state.g_chat_fetch_busy = true;
     return true;
 }
 
@@ -324,6 +350,10 @@ pub fn chatFetchRelease() void {
     if (!app_state.g_chat_fetch_busy) return;
     _ = ReleaseMutex(app_state.g_chat_fetch_mutex);
     app_state.g_chat_fetch_busy = false;
+    var turn: ChatFetchTurn = .{};
+    if (@import("win32.zig").EnumWindows(&chatFetchOldest, @bitCast(@intFromPtr(&turn))) != 0 and turn.hwnd != null) {
+        _ = PostMessageW(turn.hwnd, WM_TIMER, TIMER_CHAT_REFRESH, 0);
+    }
 }
 
 pub fn chatHistoryPath(key: chat_transcript.Identity, buf: *[560]u8) ?[]const u8 {
@@ -447,6 +477,7 @@ pub fn chatHistoryForget(shell_id: u32) void {
         }
         entry.tables.deinit(std.heap.page_allocator);
         entry.history.deinit(std.heap.page_allocator);
+        entry.backfill.deinit(std.heap.page_allocator);
         std.heap.page_allocator.destroy(entry);
         _ = app_state.g_chat_histories.swapRemove(i);
     }
@@ -468,6 +499,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
         if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
     }
     if (!load_disk and !chatFetchAcquire()) return;
+    if (entry.backfill.pages.items.len > 0) entry.before = entry.backfill.start;
     entry.pending = true;
     entry.loading_disk = load_disk;
     const known = entry.key;
@@ -726,13 +758,17 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     }
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    const input = if (entry.history.restore_full) chat_history.History{} else entry.history.cursor();
-    var ok = chatHistoryFetch(key, id, input, entry.before, &wire);
+    var input = if (entry.history.restore_full) chat_history.History{} else entry.history.cursor();
+    if (entry.backfill.pages.items.len > 0) input.start = entry.backfill.start;
+    const publish_staged = entry.show_older and entry.backfill.pages.items.len > 0;
+    var ok = publish_staged or chatHistoryFetch(key, id, input, entry.before, &wire);
     var history: chat_history.History = .{};
     const parse_start = GetTickCount64();
     entry.unchanged = false;
     entry.incremental = false;
     entry.prepended = false;
+    entry.staged = false;
+    entry.stalled = false;
     entry.result_missing = @splat(0);
     if (ok) {
         if (chat_history.missingReason(wire.items, id)) |reason| {
@@ -743,30 +779,63 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             ok = false;
         }
     }
-    if (ok) {
-        const header_end = std.mem.indexOfScalar(u8, wire.items, '\n');
-        const no_rows = chat_history.statusOnly(wire.items);
-        const delta = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tdelta\t") != null else false;
-        entry.incremental = delta and !no_rows and !entry.history.restore_full and entry.history.rows.items.len > 0;
-        history = (if (delta and no_rows and !entry.history.restore_full) entry.history.cursor() else if (entry.incremental) entry.history.suffix(a) else entry.history.clone(a)) catch blk: {
+    if (publish_staged) {
+        history = entry.backfill.finish(a, entry.history) catch blk: {
             ok = false;
             break :blk chat_history.History{};
         };
+        entry.prepended = ok;
+    } else if (ok) {
+        const header_end = std.mem.indexOfScalar(u8, wire.items, '\n');
+        const no_rows = chat_history.statusOnly(wire.items);
+        const delta = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tdelta\t") != null else false;
+        const older = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tolder\t") != null else false;
+        entry.incremental = delta and !no_rows and !entry.history.restore_full and entry.history.rows.items.len > 0;
+        history = (if (older) input else if (delta and no_rows and !entry.history.restore_full) entry.history.cursor() else if (entry.incremental) entry.history.suffix(a) else entry.history.clone(a)) catch blk: {
+            ok = false;
+            break :blk chat_history.History{};
+        };
+        history.defer_render = older;
         if (ok) history.apply(a, wire.items, id, key) catch {
             ok = false;
         };
         if (ok) {
             entry.unchanged = delta and no_rows;
-            const older = if (header_end) |n| std.mem.indexOf(u8, wire.items[0..n], "\tolder\t") != null else false;
-            if (older and history.start < entry.history.start) entry.prepended = true;
+            if (older and history.start < input.start) {
+                entry.backfill.stage(a, &history) catch {
+                    ok = false;
+                };
+                if (ok and (entry.backfill.start == 0 or entry.show_older)) {
+                    history.deinit(a);
+                    history = entry.backfill.finish(a, entry.history) catch blk: {
+                        ok = false;
+                        break :blk chat_history.History{};
+                    };
+                    entry.prepended = ok;
+                } else if (ok) {
+                    history = input;
+                    history.start = entry.backfill.start;
+                    entry.staged = true;
+                }
+            } else if (older) {
+                entry.stalled = true;
+                if (entry.backfill.pages.items.len > 0) {
+                    history.deinit(a);
+                    history = entry.backfill.finish(a, entry.history) catch blk: {
+                        ok = false;
+                        break :blk chat_history.History{};
+                    };
+                    entry.prepended = ok;
+                } else entry.unchanged = true;
+            } else entry.backfill.deinit(a);
         }
     }
     chatPerf("parse", parse_start, wire.items.len);
     if (ok) {
-        const changed = history.revision != entry.history.revision;
+        const changed = !entry.staged and history.revision != entry.history.revision;
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
-        if (if (entry.cache_dirty and (entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
+        if (if (!entry.staged and entry.cache_dirty and (entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
             const write_start = GetTickCount64();
             var snapshot = history.cursor();
             defer snapshot.deinit(a);
@@ -807,6 +876,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         entry.result = history;
     } else {
         history.deinit(a);
+        entry.backfill.deinit(a);
         entry.result = null;
     }
     var log_buf: [128]u8 = undefined;
@@ -825,11 +895,13 @@ pub fn chatFileOnReady() void {
         i += 1;
         if (!entry.ready.swap(false, .acq_rel)) continue;
         entry.pending = false;
+        entry.show_older = false;
         if (!entry.loading_disk) chatFetchRelease();
         if (entry.retired) {
             if (entry.result) |*history| history.deinit(std.heap.page_allocator);
             entry.tables.deinit(std.heap.page_allocator);
             entry.history.deinit(std.heap.page_allocator);
+            entry.backfill.deinit(std.heap.page_allocator);
             std.heap.page_allocator.destroy(entry);
             _ = app_state.g_chat_histories.swapRemove(i - 1);
             i -= 1;
@@ -840,11 +912,22 @@ pub fn chatFileOnReady() void {
         entry.loading_disk = false;
         if (entry.result) |history| {
             const belongs_to_active = chat_history.sameSession(key, entry.key);
+            if (entry.staged) {
+                entry.before = history.start;
+                entry.result = null;
+                entry.failures = 0;
+                entry.next = GetTickCount64();
+                if (belongs_to_active) {
+                    if (app_state.g_chat_transcript_hwnd != null) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+                    chatFileRequest(entry.key);
+                }
+                continue;
+            }
             const added = if (!disk and !entry.prepended and entry.loaded_ms != 0 and !entry.unchanged)
                 entry.history.newMessages(history)
             else
                 0;
-            const before = if (disk or history.start < entry.history.start or
+            const before = if (entry.stalled) 0 else if (disk or history.start < entry.history.start or
                 (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
                     !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {
@@ -904,6 +987,7 @@ pub fn chatFileOnReady() void {
             entry.next = 0;
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         } else {
+            entry.before = entry.history.start;
             entry.missing_message = entry.result_missing;
             chatFileFailed(entry);
             if (chat_history.sameSession(key, entry.key)) active_changed = true;

@@ -339,6 +339,24 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
     reserved = false;
     shells[0].full_width = false;
 }
+test "IGSH-845 browser covers never enter the app caption at any supported scale" {
+    reserved = true;
+    defer reserved = false;
+    for ([_]u32{100, 125, 150}) |scale| {
+        g_ui_scale = scale;
+        var b = calcBrowserLayout().?;
+        for ([_]i32{0, 1, 2, 4, 10}) |top| {
+            b.browser_y = top;
+            positionBrowserEdgeMasks(b);
+            for ([_]BrowserEdgeMaskSide{.controls, .control_hit}) |side| {
+                const mask = placed_masks[@intFromEnum(side)];
+                try std.testing.expect(mask.top >= 53);
+                try std.testing.expect(mask.top <= b.browser_y + 53);
+                try std.testing.expect(mask.bottom > mask.top);
+            }
+        }
+    }
+}
 test "all production pane consumers share outer margins and gaps" {
     var failures: usize = 0;
     for ([_]u32{100, 150}) |scale| {
@@ -438,6 +456,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
       ['removed working strip', text => text.replace('return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return if (chatPermissionVisible()) uiScaled(36) else uiScaled(18);')],
       ['microphone overlap', text => text.replace('.right = slots.left - uiScaled(12),', '.right = mic_btn.right,')],
       ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],
+      ['caption overlap', text => text.replaceAll('@max(client_origin.y, edge_y -', '@max(client_origin.y - uiScaled(10), edge_y -')],
       ['corner displacement', text => text.replace('moveBrowserEdgeMask(side, rc.left, rc.top,', 'moveBrowserEdgeMask(side, rc.left + 1, rc.top,')],
       ['old splitter origin', text => text.replace('x - pane.left - @divTrunc(style.paneGap(), 2)', 'x - SIDEBAR_W()')],
       ['dead shell full width', text => text.replace('const full_width = app_state.shells[app_state.active_shell].full_width;', 'const full_width = false;')],

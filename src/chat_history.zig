@@ -29,6 +29,7 @@ pub const History = struct {
     probe: [64]u8 = @splat(0),
     more: bool = false,
     restore_full: bool = false,
+    defer_render: bool = false,
 
     pub fn deinit(self: *History, a: std.mem.Allocator) void {
         self.rows.deinit(a);
@@ -464,10 +465,48 @@ pub const History = struct {
             try next.rows.appendSlice(a, self.rows.items);
             next.updateCursor(self.*);
         }
-        try next.render(a);
+        if (!self.defer_render) try next.render(a);
         next.restore_full = mode == null and next.more and self.rows.items.len > 0;
         self.deinit(a);
         self.* = next;
+    }
+};
+
+pub const Backfill = struct {
+    pages: std.ArrayList([]u8) = .empty,
+    start: u64 = 0,
+
+    pub fn deinit(self: *Backfill, a: std.mem.Allocator) void {
+        for (self.pages.items) |page| a.free(page);
+        self.pages.deinit(a);
+        self.* = .{};
+    }
+
+    pub fn stage(self: *Backfill, a: std.mem.Allocator, page: *History) !void {
+        try self.pages.ensureUnusedCapacity(a, 1);
+        const rows = try page.rows.toOwnedSlice(a);
+        self.pages.appendAssumeCapacity(rows);
+        self.start = page.start;
+        page.deinit(a);
+    }
+
+    pub fn finish(self: *Backfill, a: std.mem.Allocator, tail: History) !History {
+        var result = tail.cursor();
+        errdefer result.deinit(a);
+        var size = tail.rows.items.len;
+        for (self.pages.items) |page| size += page.len;
+        try result.rows.ensureTotalCapacity(a, size);
+        var i = self.pages.items.len;
+        while (i > 0) {
+            i -= 1;
+            result.rows.appendSliceAssumeCapacity(self.pages.items[i]);
+        }
+        result.rows.appendSliceAssumeCapacity(tail.rows.items);
+        result.start = self.start;
+        result.revision +%= 1;
+        try result.render(a);
+        self.deinit(a);
+        return result;
     }
 };
 
@@ -1549,4 +1588,44 @@ test "IGSH-814 old caches reload source identities before saving read markers" {
     defer restored.deinit(a);
     try std.testing.expect(restored.restore_full);
     try std.testing.expectEqual(@as(u64, 0), restored.blocks.items[0].message_id);
+}
+
+test "IGSH-815 staged older pages keep the visible tail stable and materialize every message across cache restore" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(815, 0, false, "term-1", "");
+    var tail: History = .{};
+    defer tail.deinit(a);
+    try tail.apply(a, "@mp\t1\thistory\tok\tsid\t49\t50\t9\t0\tclaude\tterm-1\t0\t\ttail\t49\n{\"role\":\"assistant\",\"text\":\"message 49\"}\n@@MP_END@@\n", 1, key);
+    var backfill: Backfill = .{};
+    defer backfill.deinit(a);
+    const tail_text = tail.text.items.ptr;
+    var before: u64 = 49;
+    while (before > 0) {
+        var page = tail.cursor();
+        defer page.deinit(a);
+        page.start = before;
+        page.defer_render = true;
+        const wire = try std.fmt.allocPrint(a, "@mp\t2\thistory\tok\tsid\t{d}\t{d}\t9\t0\tclaude\tterm-1\t0\t\tolder\t{d}\n{{\"role\":\"assistant\",\"text\":\"message {d}\"}}\n@@MP_END@@\n", .{ before - 1, before, before - 1, before - 1 });
+        defer a.free(wire);
+        try page.apply(a, wire, 2, key);
+        try std.testing.expectEqual(@as(usize, 0), page.text.items.len);
+        try std.testing.expectEqual(@as(usize, 0), page.blocks.items.len);
+        try backfill.stage(a, &page);
+        try std.testing.expectEqual(tail_text, tail.text.items.ptr);
+        try std.testing.expectEqual(@as(usize, 1), tail.blocks.items.len);
+        before = backfill.start;
+    }
+    var complete = try backfill.finish(a, tail);
+    defer complete.deinit(a);
+    try std.testing.expectEqual(@as(u64, 0), complete.start);
+    try std.testing.expectEqual(@as(u64, 50), complete.offset);
+    try std.testing.expectEqual(@as(usize, 50), complete.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 0), backfill.pages.items.len);
+    const encoded = try complete.encode(a, key);
+    defer a.free(encoded);
+    var restored = try History.decode(a, encoded, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqual(@as(usize, 50), restored.blocks.items.len);
+    try std.testing.expectEqualStrings(complete.rows.items, restored.rows.items);
+    try std.testing.expect(std.mem.startsWith(u8, restored.rows.items, "{\"role\":\"assistant\",\"text\":\"message 0\"}"));
 }

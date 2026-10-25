@@ -2535,7 +2535,7 @@ const BrowserDockGuardAction = enum { none, restore, reposition };
 
 fn lockedBrowserStyle(style: isize) isize {
     const win = @import("win32.zig");
-    return (style & ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX))) | @as(isize, @intCast(WS_POPUP));
+    return (style & ~@as(isize, @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_SYSMENU | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX))) | @as(isize, @intCast(WS_POPUP));
 }
 
 fn browserDockGuardAction(docked: bool, zoomed: bool, current: RECT, target: RECT) BrowserDockGuardAction {
@@ -2545,9 +2545,9 @@ fn browserDockGuardAction(docked: bool, zoomed: bool, current: RECT, target: REC
     return .none;
 }
 
-test "locked browser style removes maximize and minimize boxes" {
+test "locked browser style removes system close maximize and minimize controls" {
     const win = @import("win32.zig");
-    const style: isize = @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX | WS_VISIBLE);
+    const style: isize = @intCast(WS_CAPTION | WS_THICKFRAME | WS_BORDER | win.WS_SYSMENU | win.WS_MAXIMIZEBOX | win.WS_MINIMIZEBOX | WS_VISIBLE);
     const locked = lockedBrowserStyle(style);
     try std.testing.expectEqual(@as(isize, @intCast(WS_POPUP | WS_VISIBLE)), locked);
     try std.testing.expectEqual(locked, lockedBrowserStyle(locked));
@@ -4572,10 +4572,27 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
             _ = GetClientRect(hwnd, &rc);
             const side = browserEdgeMaskSideForHwnd(hwnd) orelse .right;
             if (browserMaskCorner(side) != null) return 0;
-            const br = CreateSolidBrush(browserEdgeMaskColor(side));
+            var chrome_rc = rc;
+            if (side == .controls) {
+                chrome_rc.top = rc.bottom;
+                if (calcBrowserLayout()) |layout| {
+                    var browser_origin = POINT{ .x = layout.browser_x, .y = layout.browser_y };
+                    var mask_rect: RECT = undefined;
+                    if (ClientToScreen(app_state.g_main_hwnd, &browser_origin) != 0 and GetWindowRect(hwnd, &mask_rect) != 0)
+                        chrome_rc.top = std.math.clamp(browser_origin.y - mask_rect.top, 0, rc.bottom);
+                }
+            }
+            const br = CreateSolidBrush(if (side == .controls) @import("themes.zig").themeTitleBarBg() else browserEdgeMaskColor(side));
             if (br != null) {
                 _ = FillRect(hdc, &rc, br);
                 _ = DeleteObject(br);
+            }
+            if (side == .controls and chrome_rc.top < chrome_rc.bottom) {
+                const chrome_brush = CreateSolidBrush(browserEdgeMaskColor(side));
+                if (chrome_brush != null) {
+                    _ = FillRect(hdc, &chrome_rc, chrome_brush);
+                    _ = DeleteObject(chrome_brush);
+                }
             }
             const style = @import("window_layout.zig");
             const bw = style.chatSurfaceBorderW();
@@ -4596,7 +4613,7 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
             }
             if (side == .controls) {
                 const right = rc.right - uiScaled(2) - uiScaled(8);
-                const top = uiScaled(2) + uiScaled(3);
+                const top = chrome_rc.top + uiScaled(3);
                 const lines = [_]RECT{
                     .{ .left = 0, .top = top, .right = right - radius, .bottom = top + bw },
                     .{ .left = right - bw, .top = top + radius, .right = right, .bottom = rc.bottom },
@@ -4815,6 +4832,12 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
         return;
     }
 
+    var client_origin = POINT{ .x = 0, .y = 0 };
+    if (ClientToScreen(app_state.g_main_hwnd, &client_origin) == 0) {
+        hideBrowserEdgeMasks();
+        return;
+    }
+
     const edge_x = pt.x;
     const edge_y = pt.y;
     const edge_w = layout.browser_w;
@@ -4836,6 +4859,8 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
     const hit_bleed_right = uiScaled(2);
     const hit_w = controls_w;
     const hit_h = @min(edge_h + hit_bleed_top, uiScaled(56));
+    const controls_top = @max(client_origin.y, edge_y - controls_bleed_top);
+    const hit_top = @max(client_origin.y, edge_y - hit_bleed_top);
     const style = @import("window_layout.zig");
     const border = style.chatSurfaceBorderW();
     browserTrace("posMasks move 10");
@@ -4843,8 +4868,8 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
     moveBrowserEdgeMask(.top, edge_x, edge_y, edge_w, top_h + border);
     moveBrowserEdgeMask(.right, edge_x + edge_w - right_w - border, edge_y, right_w + border, edge_h);
     moveBrowserEdgeMask(.bottom, edge_x, edge_y + edge_h - bottom_h - border, edge_w, bottom_h + border);
-    moveBrowserEdgeMask(.control_hit, edge_x + edge_w - hit_w, edge_y - hit_bleed_top, hit_w + hit_bleed_right, hit_h);
-    moveBrowserEdgeMask(.controls, edge_x + edge_w - controls_w, edge_y - controls_bleed_top, controls_w + controls_bleed_right, controls_h);
+    moveBrowserEdgeMask(.control_hit, edge_x + edge_w - hit_w, hit_top, hit_w + hit_bleed_right, edge_y - hit_bleed_top + hit_h - hit_top);
+    moveBrowserEdgeMask(.controls, edge_x + edge_w - controls_w, controls_top, controls_w + controls_bleed_right, edge_y - controls_bleed_top + controls_h - controls_top);
     const browser = RECT{ .left = edge_x, .top = edge_y, .right = edge_x + edge_w, .bottom = edge_y + edge_h };
     for ([_]BrowserEdgeMaskSide{ .top_left, .top_right, .bottom_left, .bottom_right }) |side| {
         const corner = browserMaskCorner(side).?;

@@ -244,6 +244,9 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&run_chat_perf_tests.step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
+    const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
+    test_step.dependOn(&chat_backfill_fairness_tests.step);
+    vps_test_step.dependOn(&chat_backfill_fairness_tests.step);
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);

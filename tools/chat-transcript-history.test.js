@@ -54,6 +54,7 @@ var chat_table_drag: ?struct { offset: usize } = null;
 var g_chat_cache_pruned: u64 = 0;
 fn chatPerf(_: []const u8, _: u64, _: usize) void {}
 fn chatFetchRelease() void {}
+fn UpdateWindow(_: HANDLE) i32 { return 1; }
 var g_chat_file_key: chat_transcript.Identity = .{};
 var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
 var g_chat_cache_shell_id: u32 = 0;
@@ -363,6 +364,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     one.before = 50;
     fake_viewport_h = 80;
     g_chat_scrolled_up = true;
+    one.show_older = true;
     g_chat_scroll_y = 0;
     remote_pages = &.{ "@mp\\t10\\thistory\\tok\\tsid\\t25\\t50\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tolder\\t25\\n{\\\"role\\\":\\\"assistant\\\",\\\"text\\\":\\\"older reply\\\"}\\n@@MP_END@@\\n" };
     remote_calls = 0;
@@ -409,7 +411,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -589,7 +591,7 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
     fs.writeFileSync(path.join(dir, 'main-test.zig'), (fixturePrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
