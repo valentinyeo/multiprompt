@@ -904,6 +904,7 @@ def queue_apply(state, event):
             index = 0
         sent.append(queue.pop(index))
         del sent[:-QUEUE_SHOWN]
+        return index
     elif operation == "popAll":
         queue.clear()
         sent.clear()
@@ -913,11 +914,13 @@ def queue_replay(source, size):
     key = (str(Path(source.name).resolve()), os.fstat(source.fileno()).st_ino)
     previous = QUEUE_CACHE.get(key)
     start, state = 0, ([], [])
+    queued, receipts = [], []
     resumed = False
     if previous is not None and previous[0] <= size:
         source.seek(max(0, previous[0] - 64))
         if hashlib.sha256(source.read(min(previous[0], 64))).hexdigest() == previous[2]:
             start, state, resumed = previous[0], (list(previous[1][0]), list(previous[1][1])), True
+            queued, receipts = list(previous[3]), list(previous[4])
     trim = not resumed and size > QUEUE_SCAN_BYTES
     if trim:
         start = size - QUEUE_SCAN_BYTES
@@ -927,19 +930,49 @@ def queue_replay(source, size):
         data = data[data.find(b"\n") + 1:] if b"\n" in data else b""
         start = size - len(data)
     end = data.rfind(b"\n") + 1
-    for raw in data[:end].splitlines():
-        if b'"queue-operation"' not in raw:
-            continue
+    position = start
+    for raw in data[:end].splitlines(keepends=True):
+        position += len(raw)
         try:
             event = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             continue
-        if isinstance(event, dict) and event.get("type") == "queue-operation" and not event.get("isSidechain"):
-            queue_apply(state, event)
+        if not isinstance(event, dict) or event.get("isSidechain"):
+            continue
+        try:
+            stamp = datetime.fromisoformat(event.get("timestamp", "").replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError, AttributeError, OverflowError):
+            stamp = None
+        if event.get("type") == "queue-operation":
+            count = len(state[0])
+            removed = queue_apply(state, event)
+            if len(state[0]) > count:
+                receipt = (state[0][-1], stamp, position)
+                queued.append(receipt)
+                receipts.append(receipt)
+            elif removed is not None:
+                queued.pop(removed)
+            elif event.get("operation") == "popAll":
+                queued.clear()
+            continue
+        message = conversation_event(event, "claude")
+        if message is None or message["role"] != "user" or stamp is None:
+            continue
+        for i, receipt in enumerate(receipts):
+            text, queued_stamp, _ = receipt
+            if queued_stamp is None or stamp < queued_stamp or message["text"] != text:
+                continue
+            receipts.pop(i)
+            if receipt in queued:
+                index = queued.index(receipt)
+                queued.pop(index)
+                state[1].append(state[0].pop(index))
+                del state[1][:-QUEUE_SHOWN]
+            break
     scanned = start + end
     source.seek(max(0, scanned - 64))
     probe = hashlib.sha256(source.read(min(scanned, 64))).hexdigest()
-    QUEUE_CACHE[key] = (scanned, state, probe)
+    QUEUE_CACHE[key] = (scanned, state, probe, queued, receipts)
     if len(QUEUE_CACHE) > 256:
         del QUEUE_CACHE[next(iter(QUEUE_CACHE))]
     return state

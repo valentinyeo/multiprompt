@@ -1718,6 +1718,100 @@ class SharedQueueDraftTest(unittest.TestCase):
         status = [row for row in rows if row['role'] == 'status']
         return status[0] if status else None
 
+    def test_IGSH_835_recorded_transcript_clears_queue_on_next_refresh(self):
+        fixture = ROOT / 'tools/fixtures/IGSH-835/recorded-transcript.jsonl'
+        events = [json.loads(line) for line in fixture.read_text(encoding='utf-8').splitlines()]
+        self.write(events[0])
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], [events[0]['content']])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(events[1]) + '\n')
+            status = self.live()
+            self.assertEqual(status['queue'], [])
+            self.assertEqual(status['sent'], [events[0]['content']])
+            self.assertEqual(self.live()['queue'], [])
+            reader.QUEUE_CACHE.clear()
+            self.assertEqual(self.live()['queue'], [])
+
+    def test_IGSH_835_identical_sends_need_distinct_occurrences(self):
+        fixture = ROOT / 'tools/fixtures/IGSH-835/identical-sends.jsonl'
+        events = [json.loads(line) for line in fixture.read_text(encoding='utf-8').splitlines()]
+        self.write(*events[:2])
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], ['same message', 'same message'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(''.join(json.dumps(event) + '\n' for event in events[2:4]))
+            status = self.live()
+            self.assertEqual(status['queue'], ['same message'])
+            self.assertEqual(status['sent'], ['same message'])
+            self.assertEqual(self.live()['queue'], ['same message'])
+            reader.QUEUE_CACHE.clear()
+            self.assertEqual(self.live()['queue'], ['same message'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(events[4]) + '\n')
+            status = self.live()
+            self.assertEqual(status['queue'], [])
+            self.assertEqual(status['sent'], ['same message', 'same message'])
+
+    def test_IGSH_835_old_partial_and_assistant_text_do_not_confirm(self):
+        stamp = '2026-10-25T12:00:00.000Z'
+        user = dict(type='user', timestamp=stamp, message=dict(role='user', content='exact text'))
+        enqueue = self.op('enqueue', 'exact text', timestamp=stamp)
+        cases = [dict(user, timestamp='2026-10-25T11:59:59.999Z'),
+                 dict(user, timestamp='invalid'),
+                 dict(user, message=dict(role='user', content='exact text extra')),
+                 dict(user, message=dict(role='user', content=' exact text')),
+                 dict(user, type='assistant', message=dict(role='assistant', content='exact text')),
+                 dict(user, isSidechain=True), dict(user, isMeta=True),
+                 dict(user, isCompactSummary=True), dict(user, isVisibleInTranscriptOnly=True)]
+        with patch.object(reader, 'box_draft', return_value=None):
+            for event in cases:
+                with self.subTest(event=event):
+                    reader.QUEUE_CACHE.clear()
+                    self.write(enqueue, event)
+                    self.assertEqual(self.live()['queue'], ['exact text'])
+            reader.QUEUE_CACHE.clear()
+            self.write(dict(enqueue, timestamp='invalid'), user)
+            self.assertEqual(self.live()['queue'], ['exact text'])
+
+    def test_IGSH_835_attachment_and_timezone_equality_confirm(self):
+        self.write(self.op('enqueue', 'hello', timestamp='2026-10-25T12:00:00Z'),
+                   dict(type='attachment', timestamp='2026-10-25T14:00:00+02:00',
+                        attachment=dict(type='queued_command', prompt='hello')))
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], [])
+
+    def test_IGSH_835_explicit_removal_and_transcript_do_not_confirm_second_send(self):
+        stamp = '2026-10-25T12:00:00Z'
+        user = dict(type='user', timestamp=stamp, message=dict(role='user', content='same'))
+        with patch.object(reader, 'box_draft', return_value=None):
+            for operation in ('dequeue', 'remove', 'popAll'):
+                with self.subTest(operation=operation):
+                    reader.QUEUE_CACHE.clear()
+                    self.write(self.op('enqueue', 'same', timestamp=stamp),
+                               self.op(operation, 'same', timestamp=stamp),
+                               self.op('enqueue', 'same', timestamp=stamp))
+                    self.assertEqual(self.live()['queue'], ['same'])
+                    with self.path.open('a', encoding='utf-8') as output:
+                        output.write(json.dumps(user) + '\n')
+                    self.assertEqual(self.live()['queue'], ['same'])
+                    with self.path.open('a', encoding='utf-8') as output:
+                        output.write(json.dumps(user) + '\n')
+                    self.assertEqual(self.live()['queue'], [])
+
+    def test_IGSH_835_partial_transcript_record_waits_for_complete_line(self):
+        stamp = '2026-10-25T12:00:00Z'
+        self.write(self.op('enqueue', 'hello', timestamp=stamp))
+        event = json.dumps(dict(type='user', timestamp=stamp, message=dict(role='user', content='hello')))
+        with patch.object(reader, 'box_draft', return_value=None):
+            self.assertEqual(self.live()['queue'], ['hello'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(event[:20])
+            self.assertEqual(self.live()['queue'], ['hello'])
+            with self.path.open('a', encoding='utf-8') as output:
+                output.write(event[20:] + '\n')
+            self.assertEqual(self.live()['queue'], [])
+
     def test_IGSH_722_delivered_fixture_leaves_queue(self):
         fixture = ROOT / 'tools/fixtures/IGSH-722/queue-ops.jsonl'
         events = [json.loads(line) for line in fixture.read_text(encoding='utf-8').splitlines()]
