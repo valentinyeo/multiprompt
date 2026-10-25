@@ -1,3 +1,4 @@
+import './chat-messages-only-proof.test.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

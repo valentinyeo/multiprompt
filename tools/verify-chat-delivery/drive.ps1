@@ -47,7 +47,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -255,6 +255,37 @@ foreach ($plan in $plans) {
             $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
             Save $observation "$caseDir/observation.json"
             Shot 'messages-only-after-tools'
+            & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --tools-only
+            if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            $statusCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
+            $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $statusCondition) | Where-Object {
+                $r = $_.Current.BoundingRectangle
+                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $bounds.Left -and $r.Width -eq $bounds.Width -and $r.Bottom -eq $bounds.Top -and $r.Height -gt 0
+            })
+            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
+            $statusBounds = $statusRows[0].Current.BoundingRectangle
+            $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
+            $composerTopPad = [int][math]::Round(12 * $statusBounds.Height / 28)
+            $observation.cleanChat = @{
+                rows=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
+                working=@{left=[int]$bounds.Left; top=[int]$bounds.Bottom; width=[int]$bounds.Width; height=[int]($composerBounds.Top - $composerTopPad - $bounds.Bottom)}
+            }
+            foreach ($mode in @('on', 'off')) {
+                $paletteLogStart = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x4B) 'Ctrl+K: open CLEAN chat palette' $true
+                foreach ($letter in 'clean chat'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter CLEAN chat palette' }
+                $paletteLog = (Read-Shared "$settings/debug.log").Substring($paletteLogStart)
+                if ($paletteLog -notmatch '\[palette\] ready chars=10 count=1 target=\d+') { throw 'CLEAN chat palette filter did not select exactly one entry' }
+                Press @(0x0D) "Enter: toggle CLEAN chat $mode"
+                Doctor $true
+                $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+                $setting = $saved.PSObject.Properties['clean_chat']
+                $enabled = $null -ne $setting -and $setting.Value -eq $true
+                if ($enabled -ne ($mode -eq 'on')) { throw "CLEAN chat $mode was not persisted by the palette" }
+                if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'CLEAN chat toggle changed the composer' }
+                Shot "clean-chat-$mode"
+            }
+            Save $observation "$caseDir/observation.json"
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
             $fillLogStart = (Read-Shared "$settings/debug.log").Length
