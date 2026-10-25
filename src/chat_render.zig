@@ -1868,7 +1868,12 @@ var chat_scroll_drag: ?struct { grab: i32 } = null;
 
 pub fn chatWheelScroll(wp: WPARAM) void {
     const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+    const before = app_state.g_chat_scroll_y;
     chatScrollBy(scroll_ui.wheelScroll(delta, uiScaled(scroll_ui.WHEEL_STEP_PX)));
+    if (verboseLoggingEnabled()) {
+        var log: [96]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] wheel delta={d} moved={d} scale_px={d}", .{ delta, @abs(app_state.g_chat_scroll_y - before), uiScaled(100) }) catch return);
+    }
 }
 
 fn chatScrollJumpBox(w: i32, h: i32) scroll_ui.Box {
@@ -1928,6 +1933,19 @@ fn chatScrollUiMouseUp(hwnd: HANDLE) bool {
     return true;
 }
 
+var chat_scroll_ui_logged: [5]i32 = .{ -1, -1, -1, -1, -1 };
+
+fn chatLogScrollUi(h: i32, box: scroll_ui.Box) void {
+    if (!verboseLoggingEnabled()) return;
+    const span = chatScrollThumb(h) orelse scroll_ui.Span{ .top = -1, .height = -1 };
+    const up: i32 = @intFromBool(app_state.g_chat_scrolled_up);
+    const state = [5]i32{ span.top, span.height, up, box.left, box.top };
+    if (std.mem.eql(i32, &state, &chat_scroll_ui_logged)) return;
+    chat_scroll_ui_logged = state;
+    var log: [160]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] scroll ui thumb={d},{d} button={d} box={d},{d},{d},{d}", .{ span.top, span.height, up, box.left, box.top, box.right, box.bottom }) catch return);
+}
+
 fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32, h: i32) void {
     if (chatScrollThumb(h)) |span| {
         const x = w - uiScaled(3) - uiScaled(6);
@@ -1936,8 +1954,9 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
         const thumb = RECT{ .left = x, .top = span.top, .right = x + uiScaled(6), .bottom = span.top + span.height };
         fillRoundRectAA(hdc, thumb, uiScaled(3), customColorOr("scrollbar_thumb", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
     }
-    if (!app_state.g_chat_scrolled_up) return;
     const box = chatScrollJumpBox(w, h);
+    chatLogScrollUi(h, box);
+    if (!app_state.g_chat_scrolled_up) return;
     const ring = RECT{ .left = box.left - 1, .top = box.top - 1, .right = box.right + 1, .bottom = box.bottom + 1 };
     const face = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
     @import("smooth.zig").fillEllipse(hdc, ring, if (app_state.g_light_theme) RGB(176, 184, 196) else RGB(96, 108, 126));
