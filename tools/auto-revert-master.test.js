@@ -283,5 +283,5 @@ test('PR smoke, full master matrix and the release tag trigger stay wired', () =
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
