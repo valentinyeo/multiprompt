@@ -898,7 +898,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width), shown.max_w + 2 * pad));
             }
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
-            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
                 shown.origin_x = pad;
@@ -1675,7 +1675,7 @@ fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) voi
     const sender_h = if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - sender_h };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
-    if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true, false);
+    if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
@@ -2941,8 +2941,8 @@ pub fn chatMetadataFont() HANDLE {
     return app_state.g_chat_rich_fonts[10];
 }
 
-fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirmed: bool) void {
-    if (block.role != .injected and (app_state.clean_chat or !confirmed)) return;
+fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {
+    if (block.role != .injected) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     var label: [96]u16 = @splat(0);
@@ -2954,16 +2954,6 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
         const sender = std.mem.sliceTo(&block.sender, 0);
         @memcpy(label[len .. len + sender.len], sender);
         len += sender.len;
-    }
-    if (!app_state.clean_chat and confirmed and block.role == .user) {
-        const mark = std.unicode.utf8ToUtf16LeStringLiteral("\u{2713}\u{2713} Read");
-        if (len > 0) {
-            label[len] = ' ';
-            len += 1;
-        }
-        const n = @min(mark.len, label.len - len);
-        @memcpy(label[len .. len + n], mark[0..n]);
-        len += n;
     }
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
     var rc = area;
@@ -2987,14 +2977,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     }
     switch (block.role) {
         .user, .injected => {
-            const status_h = if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
+            const status_h = if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
             const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
             fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
             _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
-            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true, block.role == .user and chatEchoBlockConfirmed(buf, block));
+            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true);
         },
         .prose => {
             fillBubbleAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -5209,8 +5199,6 @@ test "IGSH-759 tool rows have no layout paint targets or hit area through stream
 
 const CleanChatScene = enum {
     blank,
-    receipt,
-    timestamp,
     sending,
     queued,
     waiting,
@@ -5306,7 +5294,6 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
     var entry = ChatOutboxEntry{ .text = @constCast(text), .state = .not_sent };
     switch (scene) {
         .blank => {},
-        .receipt, .timestamp => chatPaintTime(dc, block, .{ .left = 0, .top = 0, .right = width, .bottom = 24 }, true, scene == .receipt),
         .sending, .queued, .waiting, .not_sent, .unconfirmed => {
             entry.state = switch (scene) {
                 .sending => .sending,
@@ -5562,17 +5549,6 @@ test "IGSH-816 CLEAN hides retrying conversation hint pixels" {
 
 test "IGSH-816 CLEAN hides tool status summary details and diff rows pixels" {
     try expectCleanChatRowHidden(.tool);
-}
-
-test "IGSH-849 timestamps are absent and CLEAN still hides read ticks" {
-    const off = try cleanChatPixels(.receipt, false);
-    defer std.testing.allocator.free(off);
-    const on = try cleanChatPixels(.receipt, true);
-    defer std.testing.allocator.free(on);
-    const timestamp = try cleanChatPixels(.timestamp, false);
-    defer std.testing.allocator.free(timestamp);
-    try std.testing.expect(!std.mem.eql(u32, off, on));
-    try std.testing.expectEqualSlices(u32, timestamp, on);
 }
 
 test "IGSH-883 a confirmed sent message shows no Read line and keeps the bubble height" {
