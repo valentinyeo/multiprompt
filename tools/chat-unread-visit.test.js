@@ -81,7 +81,7 @@ test "count tracks arrivals above bottom, not repaint or reaching bottom" {
 }
 `;
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
-    const result = spawnSync(process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig')), ['test', '-fno-llvm', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
+    const result = spawnSync(process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig')), ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, JSON.stringify(result));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

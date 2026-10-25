@@ -1880,6 +1880,17 @@ fn chatScrollJumpBox(w: i32, h: i32) scroll_ui.Box {
     return scroll_ui.jumpButton(w, h, uiScaled(36), uiScaled(22), uiScaled(14));
 }
 
+fn chatScrollJumpBadgeBox(w: i32, h: i32) ?scroll_ui.Box {
+    var count = app_state.g_chat_new_messages.count();
+    if (!app_state.g_chat_scrolled_up or count == 0) return null;
+    var digits: i32 = 1;
+    while (count >= 10) : (count /= 10) digits += 1;
+    const button = chatScrollJumpBox(w, h);
+    const right = button.right + uiScaled(4);
+    const top = @max(0, button.top - uiScaled(10));
+    return .{ .left = @max(0, right - uiScaled(12 + digits * 8)), .top = top, .right = right, .bottom = top + uiScaled(18) };
+}
+
 fn chatScrollThumb(h: i32) ?scroll_ui.Span {
     return scroll_ui.thumb(app_state.g_chat_content_h, h, app_state.g_chat_scroll_y, h, uiScaled(28));
 }
@@ -1898,7 +1909,9 @@ fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
     _ = GetClientRect(hwnd, &client);
     const w = client.right - client.left;
     const h = client.bottom - client.top;
-    if (app_state.g_chat_scrolled_up and scroll_ui.contains(chatScrollJumpBox(w, h), x, y)) {
+    const badge = chatScrollJumpBadgeBox(w, h);
+    if (app_state.g_chat_scrolled_up and (scroll_ui.contains(chatScrollJumpBox(w, h), x, y) or
+        (if (badge) |box| scroll_ui.contains(box, x, y) else false))) {
         chatJumpToNewest();
         return true;
     }
@@ -1971,6 +1984,19 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
         .{ .x = cx + arm, .y = cy - drop },
     };
     canvas.strokePolyline(&points, customColorOr("text", themeConsoleFg()), @floatFromInt(@max(2, uiScaled(2))));
+    if (chatScrollJumpBadgeBox(w, h)) |badge| {
+        var rc = RECT{ .left = badge.left, .top = badge.top, .right = badge.right, .bottom = badge.bottom };
+        fillRoundRectAA(hdc, rc, uiScaled(9), customColorOr("accent", RGB(80, 150, 255)));
+        const old_font = SelectObject(hdc, chatMetadataFont());
+        defer _ = SelectObject(hdc, old_font);
+        _ = SetBkMode(hdc, TRANSPARENT);
+        _ = SetTextColor(hdc, RGB(255, 255, 255));
+        var text: [32]u8 = undefined;
+        const caption = std.fmt.bufPrint(&text, "{d}", .{app_state.g_chat_new_messages.count()}) catch unreachable;
+        var wide: [32]u16 = undefined;
+        const n = std.unicode.utf8ToUtf16Le(&wide, caption) catch unreachable;
+        _ = chatDrawText(hdc, &wide, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
 }
 
 const gdipProc = @import("smooth.zig").gdipProc;
@@ -5640,4 +5666,30 @@ test "IGSH-814 painter leaves all-read chats unchanged and paints one unread lin
     chatPaintReadDivider(dc, 400);
     _ = Flush.GdiFlush();
     try std.testing.expect(!std.mem.eql(u8, before, pixels));
+}
+
+test "IGSH-871 new reply badge counts arrivals and remains attached to the jump button" {
+    const saved_count = app_state.g_chat_new_messages;
+    const saved_up = app_state.g_chat_scrolled_up;
+    defer {
+        app_state.g_chat_new_messages = saved_count;
+        app_state.g_chat_scrolled_up = saved_up;
+    }
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    try std.testing.expect(chatScrollJumpBadgeBox(800, 600) == null);
+    app_state.g_chat_new_messages.arrive(2, true);
+    app_state.g_chat_new_messages.arrive(1, true);
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_new_messages.count());
+    const badge = chatScrollJumpBadgeBox(800, 600) orelse return error.TestUnexpectedResult;
+    const button = chatScrollJumpBox(800, 600);
+    try std.testing.expect(badge.top < button.top and badge.bottom > button.top);
+    try std.testing.expect(badge.right >= button.right and badge.left < button.right);
+    try std.testing.expect(scroll_ui.contains(badge, badge.left + 1, badge.top + 1));
+    app_state.g_chat_new_messages.arrive(9, true);
+    const wider = chatScrollJumpBadgeBox(800, 600) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(wider.left < badge.left);
+    try std.testing.expectEqual(wider.right, badge.right);
+    app_state.g_chat_new_messages.atBottom(false);
+    try std.testing.expect(chatScrollJumpBadgeBox(800, 600) == null);
 }
