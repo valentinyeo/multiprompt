@@ -44,3 +44,5 @@ Never judge this feature from one sample pixel or from page-content colour; only
 ### Browser controls frame (IGSH-858)
 
 The controls cover must not repaint the surrounding top or right frame with Chrome's colour. The same title-bar matrix scans the full straight top band and the right band below the rounded corner, comparing every pixel to the adjacent unobscured frame in that screenshot. `framePixels` must be positive and `frameMismatches` zero for Dark, Light and AMOLED, restored and maximized, at each real display scale. The Chrome-coloured interior and native caption checks remain unchanged. The pre-fix run must fail specifically with `IGSH-858 controls cover overlaps the surrounding browser frame`.
+
+Native glyph counting excludes the two-scaled-pixel outer DWM outline; the full caption pixel comparison still includes that outline. Real 150% displays can expose it inside the DWM button bounds. It is not a fourth caption glyph.

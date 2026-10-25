@@ -64,3 +64,9 @@ test('IGSH-858 real 150 percent scale has enough logical desktop space and resto
   assert.match(native, /ChangeDisplaySettings\(settings, 0\) == 0/);
   assert.match(native, /Marshal.Copy\(originalDisplay, 0, settings, originalDisplay.Length\)/);
 });
+
+test('IGSH-858 native glyph counting excludes the DWM outline but pixel comparison retains it', () => {
+  assert.match(native, /glyphTop = top \+ \(int\)Math.Ceiling\(2 \* scale\)/);
+  assert.match(native, /glyphRight = right - \(int\)Math.Ceiling\(2 \* scale\)/);
+  assert.match(native, /for \(int y = top; y < bottom; y\+\+\) \{[\s\S]*?for \(int x = left; x < right; x\+\+\)/);
+});

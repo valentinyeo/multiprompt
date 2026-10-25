@@ -117,9 +117,11 @@ public static class CaptionProof {
         using (var actual = new Bitmap(actualPath)) {
             Require(reference.Size == actual.Size && left >= 0 && top >= 0 && right <= actual.Width && bottom <= actual.Height && bottom > top, "invalid caption capture bounds");
             int start = -1, minY = bottom, maxY = top, area = 0;
-            for (int x = left; x <= right; x++) {
+            int glyphTop = top + (int)Math.Ceiling(2 * scale);
+            int glyphRight = right - (int)Math.Ceiling(2 * scale);
+            for (int x = left; x <= glyphRight; x++) {
                 bool occupied = false;
-                for (int y = top; x < right && y < bottom; y++) {
+                for (int y = glyphTop; x < glyphRight && y < bottom; y++) {
                     if (Bright(reference.GetPixel(x, y)) <= 8) continue;
                     occupied = true; minY = Math.Min(minY, y); maxY = Math.Max(maxY, y); area++;
                 }
