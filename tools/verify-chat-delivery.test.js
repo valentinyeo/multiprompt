@@ -759,6 +759,51 @@ print(json.dumps([pid, sid, cwd, str(path)]))
   }
 });
 
+test('fake shell history succeeds with all fifty messages and paired tools while unknown operations still fail', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-history-'));
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  try {
+    const transcript = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'full-history', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-history', cwd: 'C:/verify/work', panePid: 4242,
+      transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const shell = (...args) => execFileSync('python3', ['-I', '-X', 'utf8', boundary, 'shell', ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8', timeout: 60000 });
+    shell('init');
+    const initial = fs.readFileSync(transcript, 'utf8');
+    assert.equal(shell('history'), '');
+    const seeded = fs.readFileSync(transcript, 'utf8');
+    assert.ok(seeded.startsWith(initial), 'history preserves the two initial messages');
+    const rows = seeded.trim().split('\n').map(line => JSON.parse(line));
+    const messages = rows.filter(row => typeof row.message.content === 'string' || row.message.content.some(part => part.type === 'text'));
+    assert.equal(messages.length, 50);
+    assert.deepEqual(messages.map(row => typeof row.message.content === 'string' ? row.message.content : row.message.content[0].text), [
+      'start the fake session', 'The fake session is ready.',
+      ...Array.from({ length: 24 }, (_, i) => [`IGSH815 user ${String(i).padStart(2, '0')}`, `IGSH815 assistant ${String(i).padStart(2, '0')}`]).flat(),
+    ]);
+    assert.equal(rows.length, 98);
+    for (let i = 0; i < 24; i++) {
+      const [user, assistant, tool, result] = rows.slice(2 + i * 4, 6 + i * 4);
+      assert.equal(user.type, 'user');
+      assert.equal(assistant.type, 'assistant');
+      assert.equal(tool.type, 'assistant');
+      assert.deepEqual(tool.message.content, [{ type: 'tool_use', id: `history-${i}`, name: 'Bash', input: { command: 'echo history' } }]);
+      assert.equal(result.type, 'user');
+      assert.deepEqual(result.message.content, [{ type: 'tool_result', tool_use_id: `history-${i}`, content: 'synthetic tool output '.repeat(12000), is_error: false }]);
+    }
+    assert.ok(Buffer.byteLength(seeded) > 1024 * 1024, 'history still requires transcript backfill');
+    const unsupported = path.join(dir, 'unsupported.jsonl');
+    assert.equal(fs.existsSync(unsupported), false, 'successful history must not be logged as unsupported');
+    assert.throws(() => shell('unknown-history-operation'), error => error.status === 2);
+    assert.deepEqual(fs.readFileSync(unsupported, 'utf8').trim().split('\n').map(line => JSON.parse(line)).map(row => [row.case, row.operation, row.argv]), [
+      ['full-history', 'shell input', ['unknown-history-operation']],
+    ]);
+    assert.equal(fs.readFileSync(transcript, 'utf8'), seeded, 'unknown operations do not alter the transcript');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('queue-draft-sync is wired into the journey, the workflow fallback and the feature map', () => {
   assert.ok(drive.includes("name='queue-draft-sync'"));
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
