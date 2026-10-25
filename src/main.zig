@@ -655,12 +655,6 @@ const SEARCH_VOICE_MODE_OFF_OFFSET = @import("app_state.zig").SEARCH_VOICE_MODE_
 const SEARCH_ETA_NUMBERS_OFFSET = @import("app_state.zig").SEARCH_ETA_NUMBERS_OFFSET;
 const SEARCH_ETA_PROGRESS_OFFSET = @import("app_state.zig").SEARCH_ETA_PROGRESS_OFFSET;
 const SEARCH_ETA_ACCURACY_OFFSET = @import("app_state.zig").SEARCH_ETA_ACCURACY_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET;
-const SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET;
-const SEARCH_TABCTX_VIEW_CHAT = @import("app_state.zig").SEARCH_TABCTX_VIEW_CHAT;
-const SEARCH_TABCTX_VIEW_SHELL = @import("app_state.zig").SEARCH_TABCTX_VIEW_SHELL;
-const SEARCH_TABCTX_VIEW_CLEAR = @import("app_state.zig").SEARCH_TABCTX_VIEW_CLEAR;
 const SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
 const SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
 const SEARCH_VOICE_ALWAYS_ON_OFFSET = @import("app_state.zig").SEARCH_VOICE_ALWAYS_ON_OFFSET;
@@ -703,7 +697,6 @@ const SEARCH_BROWSER_SHOTURL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_SH
 const SEARCH_PIN_TOP_OFFSET = @import("app_state.zig").SEARCH_PIN_TOP_OFFSET;
 const SEARCH_UNARCHIVE_HIDDEN_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_HIDDEN_OFFSET;
 const SEARCH_UNARCHIVE_UNATTACHED_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_UNATTACHED_OFFSET;
-const SEARCH_LOCK_SESSION_OFFSET = @import("app_state.zig").SEARCH_LOCK_SESSION_OFFSET;
 const SEARCH_BROWSER_ENGINE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_ENGINE_OFFSET;
 const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
 const SEARCH_USAGE_LOGIN_INNE_OFFSET = @import("app_state.zig").SEARCH_USAGE_LOGIN_INNE_OFFSET;
@@ -730,7 +723,6 @@ const SEARCH_TABCTX_ARCHIVE = @import("app_state.zig").SEARCH_TABCTX_ARCHIVE;
 const SEARCH_TABCTX_BROWSER = @import("app_state.zig").SEARCH_TABCTX_BROWSER;
 const SEARCH_TABCTX_END_TMUX = @import("app_state.zig").SEARCH_TABCTX_END_TMUX;
 const SEARCH_TABCTX_PIN_TOP = @import("app_state.zig").SEARCH_TABCTX_PIN_TOP;
-const SEARCH_TABCTX_LOCK = @import("app_state.zig").SEARCH_TABCTX_LOCK;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
@@ -1938,14 +1930,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
                             if (!app_state.g_sidebar_collapsed and mx > SIDEBAR_W() - 30) {
-                                if (app_state.shells[tab_idx].locked) {
-                                    app_state.shells[tab_idx].locked = false;
-                                    saveSession();
-                                    invalidateSidebar();
-                                    showHeaderNoticeAscii("Session unlocked", 2200, false);
-                                } else {
-                                    closeShell(tab_idx);
-                                }
+                                closeShell(tab_idx);
                             } else if (isCtrlDown()) {
                                 commitRename();
                                 const had_selection = selectedTabCount() > 0;
@@ -2899,6 +2884,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_QUIT_ALL => {
+            if (@import("archive.zig").rejectPinnedCloseAll()) return 0;
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
             _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -3200,7 +3186,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const sid: u32 = @truncate(wp);
             if (findShellById(sid)) |idx| {
                 if (msg == WM_APP_INBOX_ARCHIVE) {
-                    recordInboxArchive(idx);
+                    if (!recordInboxArchive(idx)) return 0;
                     app_state.shells[idx].needs_attention = false;
                     app_state.shells[idx].hidden_idle_streak = 0;
                 } else if (msg == WM_APP_INBOX_UNARCHIVE) {
@@ -4983,20 +4969,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET or target == SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET or target == SEARCH_CHAT_VIEW_LOCK_CLEAR_OFFSET or
-                    target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET or
-                    target == SEARCH_TABCTX_VIEW_CHAT or target == SEARCH_TABCTX_VIEW_SHELL or target == SEARCH_TABCTX_VIEW_CLEAR)
-                {
-                    if (target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET) {
-                        @import("chat_view.zig").setEverywhere(app_state.shells[0..app_state.shell_count], target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET);
-                    } else {
-                        const is_context = target == SEARCH_TABCTX_VIEW_CHAT or target == SEARCH_TABCTX_VIEW_SHELL or target == SEARCH_TABCTX_VIEW_CLEAR;
-                        const idx = if (is_context) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) @as(?u32, app_state.active_shell) else null;
-                        if (idx) |ti| {
-                            const lock: @import("chat_view.zig").Lock = if (target == SEARCH_CHAT_VIEW_LOCK_CHAT_OFFSET or target == SEARCH_TABCTX_VIEW_CHAT) .chat else if (target == SEARCH_CHAT_VIEW_LOCK_SHELL_OFFSET or target == SEARCH_TABCTX_VIEW_SHELL) .shell else .none;
-                            @import("chat_view.zig").setLock(&app_state.shells[ti], lock);
-                        }
-                    }
+                if (target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET or target == SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET) {
+                    @import("chat_view.zig").setEverywhere(app_state.shells[0..app_state.shell_count], target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET);
                     app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_tabctx_sid = 0;
@@ -5214,20 +5188,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_PIN_TOP_OFFSET) {
                     if (app_state.active_shell < app_state.shell_count) {
                         app_state.shells[app_state.active_shell].pinned_top = !app_state.shells[app_state.active_shell].pinned_top;
-                        invalidateSidebar();
-                        if (!app_state.g_restoring) saveSession();
-                    }
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
-                    return 0;
-                }
-                if (target == SEARCH_LOCK_SESSION_OFFSET) {
-                    if (app_state.active_shell < app_state.shell_count) {
-                        app_state.shells[app_state.active_shell].locked = !app_state.shells[app_state.active_shell].locked;
                         invalidateSidebar();
                         if (!app_state.g_restoring) saveSession();
                     }
@@ -6192,10 +6152,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.shells[ti].pinned_top = !app_state.shells[ti].pinned_top;
                             invalidateSidebar();
                             if (!app_state.g_restoring) saveSession();
-                        } else if (target == SEARCH_TABCTX_LOCK) {
-                            app_state.shells[ti].locked = !app_state.shells[ti].locked;
-                            invalidateSidebar();
-                            if (!app_state.g_restoring) saveSession();
                         } else if (target == SEARCH_TABCTX_KEEPAWAKE) {
                             app_state.shells[ti].keep_awake = !app_state.shells[ti].keep_awake;
                             if (app_state.shells[ti].keep_awake and app_state.shells[ti].browser_frozen) wakeBrowserPaneFromFreeze(ti);
@@ -6848,7 +6804,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (loader_failure) sshSpawnFailed();
                 const spawn_tick = app_state.shells[idx].spawn_tick;
                 const alive_ms = if (spawn_tick != 0) now -| spawn_tick else std.math.maxInt(u64);
-                const action = decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top or app_state.shells[idx].locked, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms);
+                const action = decideShellExit(k, got_code, exit_code, in_resume_window, app_state.shells[idx].pinned_top, app_state.ISSUE_350_KEEP_TMUX_TABS, alive_ms);
                 if (is_ssh_kind) {
                     @import("chat_send.zig").sshDisconnect(idx, "process-exit-event");
                     return 0;
@@ -7697,7 +7653,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.muted = transfer.muted != 0;
                             new_shell.keep_alive = transfer.keep_alive != 0;
                             new_shell.pinned_top = transfer.pinned_top != 0;
-                            new_shell.locked = transfer.locked != 0;
                             new_shell.favorite = transfer.favorite != 0;
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;
@@ -7778,6 +7733,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CLOSE => {
             if (app_state.g_app_closing) return 0;
+            if (@import("archive.zig").rejectPinnedCloseAll()) return 0;
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
@@ -8266,7 +8222,6 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 new_shell.name_source = app_state.g_adopt_name_source;
                 new_shell.muted = app_state.g_adopt_muted;
                 new_shell.pinned_top = app_state.g_adopt_pinned_top;
-                new_shell.locked = app_state.g_adopt_locked;
                 new_shell.favorite = app_state.g_adopt_favorite;
                 new_shell.last_used = app_state.g_adopt_last_used;
                 new_shell.input = app_state.g_adopt_input;
@@ -8395,4 +8350,112 @@ fn initializeDeferred(hwnd: HANDLE) bool {
     }
     startup_phase = @enumFromInt(@intFromEnum(startup_phase) + 1);
     return false;
+}
+
+fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session, group_close, workspace_close, close_all, inbox_archive }) !void {
+    const old_shells = app_state.shells[0..2].*;
+    const old_count = app_state.shell_count;
+    const old_active = app_state.active_shell;
+    const old_group = app_state.groups[0];
+    const old_group_count = app_state.group_count;
+    const old_single = app_state.g_single_window;
+    const old_workspace_count = app_state.g_lws_count;
+    const old_snoozed = app_state.g_ws_snoozed[0];
+    const old_starred = app_state.g_starred_workspace;
+    const old_account_locked = app_state.g_account_locked;
+    const old_hwnd = app_state.g_main_hwnd;
+    const old_front = app_state.g_front_period;
+    const old_notice = app_state.g_cap_msg_text;
+    const old_notice_len = app_state.g_cap_msg_len;
+    const old_notice_until = app_state.g_cap_msg_until;
+    defer {
+        app_state.shells[0..2].* = old_shells;
+        app_state.shell_count = old_count;
+        app_state.active_shell = old_active;
+        app_state.groups[0] = old_group;
+        app_state.group_count = old_group_count;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_workspace_count;
+        app_state.g_ws_snoozed[0] = old_snoozed;
+        app_state.g_starred_workspace = old_starred;
+        app_state.g_account_locked = old_account_locked;
+        app_state.g_main_hwnd = old_hwnd;
+        app_state.g_front_period = old_front;
+        app_state.g_cap_msg_text = old_notice;
+        app_state.g_cap_msg_len = old_notice_len;
+        app_state.g_cap_msg_until = old_notice_until;
+    }
+    app_state.shell_count = 2;
+    app_state.active_shell = 1;
+    app_state.g_single_window = true;
+    app_state.g_lws_count = 2;
+    app_state.g_ws_snoozed[0] = false;
+    app_state.g_starred_workspace = false;
+    app_state.g_account_locked = false;
+    app_state.g_main_hwnd = null;
+    app_state.g_cap_msg_len = 0;
+    app_state.group_count = 1;
+    app_state.groups[0] = std.mem.zeroes(app_state.TabGroup);
+    app_state.groups[0].id = 7;
+    for (0..2) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(820 + i);
+        app_state.shells[i].workspace = 0;
+        app_state.shells[i].group_id = 7;
+    }
+    app_state.shells[1].pinned_top = true;
+    app_state.shells[1].tmux_session[0] = 'a';
+    app_state.shells[1].tmux_session_len = 1;
+    const before = app_state.shells[0..2].*;
+    switch (action) {
+        .close => closeShell(1),
+        .ctrl_w => _ = wndProc(null, app_state.WM_APP_CLOSE, 0, 0),
+        .archive => archiveTabAt(1),
+        .inbox_archive => try std.testing.expect(!recordInboxArchive(1)),
+        .end_session => endTmuxSessionAt(1),
+        .group_close => @import("rename.zig").runGroupPaletteAction(null, 0, 4),
+        .workspace_close => closeMyWorkspaceSlot(0),
+        .close_all => quitAllZigShellWindows(null),
+    }
+    try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
+    try std.testing.expectEqualDeep(before, app_state.shells[0..2].*);
+    try std.testing.expectEqual(@as(u32, 1), app_state.group_count);
+    try std.testing.expectEqual(@as(u8, 2), app_state.g_lws_count);
+    const notice = std.unicode.utf8ToUtf16LeStringLiteral("Session is pinned - unpin it before closing or archiving");
+    try std.testing.expectEqualSlices(u16, notice, app_state.g_cap_msg_text[0..app_state.g_cap_msg_len]);
+    app_state.shells[1].pinned_top = false;
+    try std.testing.expect(!@import("archive.zig").rejectPinnedSessionClose(1));
+    try std.testing.expect(!@import("archive.zig").rejectPinnedSessionClose(app_state.shell_count));
+}
+
+test "IGSH-820 pinned tab refuses close" {
+    try expectPinnedActionRefused(.close);
+}
+
+test "IGSH-820 pinned tab refuses Ctrl+W" {
+    try expectPinnedActionRefused(.ctrl_w);
+}
+
+test "IGSH-820 pinned tab refuses archive" {
+    try expectPinnedActionRefused(.archive);
+}
+
+test "IGSH-820 pinned tab refuses end session" {
+    try expectPinnedActionRefused(.end_session);
+}
+
+test "IGSH-820 pinned tab refuses group close atomically" {
+    try expectPinnedActionRefused(.group_close);
+}
+
+test "IGSH-820 pinned tab refuses workspace close atomically" {
+    try expectPinnedActionRefused(.workspace_close);
+}
+
+test "IGSH-820 pinned tab refuses close-all atomically" {
+    try expectPinnedActionRefused(.close_all);
+}
+
+test "IGSH-820 pinned tab refuses Inbox archive" {
+    try expectPinnedActionRefused(.inbox_archive);
 }

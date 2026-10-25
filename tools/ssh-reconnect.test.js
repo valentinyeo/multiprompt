@@ -41,7 +41,7 @@ const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
     kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
-    needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
+    needs_attention: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
     ssh_reconnect: State = .{ .healthy_attach = true }, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
@@ -765,10 +765,10 @@ test "ISSUE-511 bounded probe wait" {
 });
 
 
-test('ISSUE-512 a locked background disconnect never leaves a global warning after recovery', async () => {
+test('ISSUE-512 a pinned background disconnect never leaves a global warning after recovery', async () => {
   await zig(runtime(`
 test "ISSUE-512 recovered tab has no stale global notice" {
-    shells[0].locked = true;
+    shells[0].pinned_top = true;
     markSshTabDisconnected(0);
     try std.testing.expectEqual(@as(usize, 0), header_notices);
     shells[0].ssh_reconnect.ok();

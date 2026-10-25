@@ -1664,11 +1664,15 @@ fn inboxArchiveRow(ri: u32) void {
     if (ri >= app_state.g_inbox_row_count) return;
     const row = app_state.g_inbox_rows[ri];
     const owner: usize = app_state.g_inbox_ws[row.ws].hwnd;
+    if (owner == @intFromPtr(app_state.g_main_hwnd)) {
+        if (findShellById(row.sid)) |idx| {
+            if (!recordInboxArchive(idx)) return;
+        }
+    }
     rememberInboxArchiveUndo(owner, row.sid, row.att);
     rememberPendingInboxArchive(owner, row.sid);
     if (owner == @intFromPtr(app_state.g_main_hwnd)) {
         if (findShellById(row.sid)) |idx| {
-            recordInboxArchive(idx);
             app_state.shells[idx].needs_attention = false;
             app_state.shells[idx].hidden_idle_streak = 0;
         }

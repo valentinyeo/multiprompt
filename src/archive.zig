@@ -902,29 +902,36 @@ pub fn preparePendingResurrectCommand(tmux_session: []const u8, claude_sid: []co
     return true;
 }
 
-pub fn rejectLockedSessionClose(i: usize) bool {
-    if (i >= app_state.shell_count or !app_state.shells[i].locked) return false;
-    showHeaderNoticeAscii("Session is locked - unlock it before closing", 4500, true);
+pub fn rejectPinnedSessionClose(i: usize) bool {
+    if (i >= app_state.shell_count or !app_state.shells[i].pinned_top) return false;
+    showHeaderNoticeAscii("Session is pinned - unpin it before closing or archiving", 4500, true);
     return true;
 }
 
-pub fn workspaceHasLockedSession(slot: u8) bool {
+pub fn rejectPinnedCloseAll() bool {
     for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].workspace == slot and app_state.shells[i].locked) return true;
+        if (rejectPinnedSessionClose(i)) return true;
     }
     return false;
 }
 
-pub fn groupHasLockedSession(gid: u32) bool {
+pub fn rejectPinnedWorkspaceClose(slot: u8) bool {
     for (0..app_state.shell_count) |i| {
-        if (@import("sidebar.zig").tabGroupId(i) == gid and app_state.shells[i].locked) return true;
+        if (app_state.shells[i].workspace == slot and rejectPinnedSessionClose(i)) return true;
+    }
+    return false;
+}
+
+pub fn rejectPinnedGroupClose(gid: u32) bool {
+    for (0..app_state.shell_count) |i| {
+        if (@import("sidebar.zig").tabGroupId(i) == gid and rejectPinnedSessionClose(i)) return true;
     }
     return false;
 }
 
 pub fn archiveTabAt(i: usize) void {
     if (i >= app_state.shell_count) return;
-    if (rejectLockedSessionClose(i)) return;
+    if (rejectPinnedSessionClose(i)) return;
     if (app_state.shells[i].tmux_session_len == 0) return;
     loadArchiveFromDisk(true);
     var entry = ArchivedEntry{};
@@ -984,6 +991,7 @@ pub fn archiveActiveTab() void {
 
 pub fn closeNonTmuxTabAt(i: usize) void {
     if (i >= app_state.shell_count) return;
+    if (rejectPinnedSessionClose(i)) return;
     _ = parkMainWindowBeforeActiveShellRemoval(i);
     closeShell(@intCast(i));
     publishInboxState();
@@ -992,6 +1000,7 @@ pub fn closeNonTmuxTabAt(i: usize) void {
 
 pub fn archiveArmOrCommit(idx: usize) void {
     if (idx >= app_state.shell_count) return;
+    if (rejectPinnedSessionClose(idx)) return;
     const has_tmux = app_state.shells[idx].tmux_session_len > 0;
     const sid = app_state.shells[idx].shell_id;
     const now = GetTickCount64();
@@ -1016,7 +1025,7 @@ pub fn archiveArmOrCommit(idx: usize) void {
 
 pub fn endTmuxSessionAt(i: usize) void {
     if (i >= app_state.shell_count) return;
-    if (rejectLockedSessionClose(i)) return;
+    if (rejectPinnedSessionClose(i)) return;
     if (app_state.shells[i].tmux_session_len == 0) return;
 
     var session_buf: [64]u8 = std.mem.zeroes([64]u8);
@@ -1563,30 +1572,6 @@ pub fn drawFavoriteDot(hdc: HANDLE, cx: i32, cy: i32) void {
     drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));
 }
 
-pub fn drawSessionLockIcon(hdc: HANDLE, cx: i32, cy: i32, color: DWORD) void {
-    const pen = CreatePen(0, 1, color);
-    if (pen == null) {
-        return;
-    }
-    const old_pen = SelectObject(hdc, pen);
-    const old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-
-    _ = MoveToEx(hdc, cx - 3, cy - 1, null);
-    _ = LineTo(hdc, cx - 3, cy - 4);
-    _ = LineTo(hdc, cx - 2, cy - 5);
-    _ = LineTo(hdc, cx + 2, cy - 5);
-    _ = LineTo(hdc, cx + 3, cy - 4);
-    _ = LineTo(hdc, cx + 3, cy - 1);
-
-    _ = @import("smooth.zig").drawRoundRect(hdc, cx - 5, cy - 1, cx + 6, cy + 7, 2, 2);
-    _ = MoveToEx(hdc, cx, cy + 2, null);
-    _ = LineTo(hdc, cx, cy + 4);
-
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(pen);
-}
-
 pub fn paintAllSessions(hdc: HANDLE) void {
     buildSessionOverviewRows();
     var rc: RECT = std.mem.zeroes(RECT);
@@ -1982,7 +1967,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     }
                     buildSessionOverviewRows();
                     showHeaderNoticeAscii("Archived session deleted", 2500, false);
-                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectLockedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost)) {
+                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost)) {
                     var ci: u32 = 0;
                     while (ci < app_state.g_tmux_cache_count) {
                         const e = &app_state.g_tmux_cache[ci];

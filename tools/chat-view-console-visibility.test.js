@@ -87,9 +87,8 @@ const SW_HIDE = 0;
 const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
-const ViewLock = @import("chat_view.zig").Lock;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, chat_view_lock: ViewLock = .none };
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false };
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
@@ -160,24 +159,23 @@ test "URL picker close cannot put raw SSH console over chat; debug logs identify
     _ = showShellConsole(0, SW_SHOW, "focus");
     try std.testing.expectEqual(@as(usize, 0), log_len);
 }
-test "restore, delayed focus and adoption respect remembered views and session locks" {
+test "restore, delayed focus and adoption respect remembered views and pins" {
     g_restoring = true;
     defer g_restoring = false;
-    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
-        shells[0].chat_view_lock = lock;
+    for ([_]bool{ false, true }) |pinned| {
+        shells[0].pinned_top = pinned;
         for ([_]bool{ false, true }) |remembered| {
             shells[0].chat_view_on = remembered;
             for ([_]bool{ false, true }) |chat| {
                 g_chat_active = chat;
                 for ([_][]const u8{ "restoreSession", "wndProc.WM_APP_FOCUS", "wndProc.WM_APP_FOCUS_SHELL", "respawnShellInPlace", "wndProc.WM_COPYDATA", "main.adopt" }) |site| {
                     _ = showShellConsole(0, SW_SHOWNOACTIVATE, site);
-                    const want_chat = if (lock == .none) remembered else lock == .chat;
+                    const want_chat = remembered;
                     try std.testing.expectEqual(!chat and !want_chat, visible);
                 }
             }
         }
     }
-    shells[0].chat_view_lock = .none;
     g_chat_active = false;
     shells[0].chat_view_on = false;
 }
@@ -194,7 +192,6 @@ test "ISSUE-611 remembered chat hides during startup but a later per-session she
     shells[0].chat_view_on = false;
     _ = showShellConsole(0, SW_SHOW, "closeChatView");
     try std.testing.expect(visible);
-    shells[0].chat_view_lock = .none;
 }
 test "inactive, missing and out-of-range shells never qualify; overlays stay hidden" {
     try std.testing.expect(!shellConsoleShouldBeVisible(1));

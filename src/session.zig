@@ -327,11 +327,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + ff.len], ff);
             pos += ff.len;
         }
-        if (app_state.shells[i].locked) {
-            const lf = ",\"locked\":true";
-            @memcpy(json_buf[pos .. pos + lf.len], lf);
-            pos += lf.len;
-        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -447,11 +442,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
         }
-        if (pos < json_buf.len - 540) {
-            const saved_lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
-            @memcpy(json_buf[pos .. pos + saved_lock.len], saved_lock);
-            pos += saved_lock.len;
-        }
         if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
             const fw = ",\"fw\":true";
             @memcpy(json_buf[pos .. pos + fw.len], fw);
@@ -557,11 +547,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         const scf = ",\"sidebar_collapsed\":true";
         @memcpy(json_buf[pos .. pos + scf.len], scf);
         pos += scf.len;
-    }
-    if (app_state.g_locked_section_collapsed) {
-        const lsc = ",\"locked_section_collapsed\":true";
-        @memcpy(json_buf[pos .. pos + lsc.len], lsc);
-        pos += lsc.len;
     }
     if (app_state.g_pinned_section_collapsed) {
         const psc = ",\"pinned_section_collapsed\":true";
@@ -913,7 +898,6 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.keep_alive = tab.keep_alive;
     shell.pinned_top = tab.pinned_top;
     shell.inbox_excluded = tab.inbox_excluded;
-    shell.locked = tab.locked;
     shell.favorite = tab.favorite;
     shell.last_used = tab.last_used;
     shell.input = tab.input;
@@ -1013,7 +997,6 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     restoreArchiveMarkers(&app_state.shells[idx], tab);
     app_state.shells[idx].keep_awake = tab.kaw;
     app_state.shells[idx].chat_view_on = tab.cv;
-    app_state.shells[idx].chat_view_lock = tab.chat_view_lock;
     if (app_state.ISSUE_347_KEEP_FULL_WIDTH) app_state.shells[idx].full_width = tab.fw;
     if (tab.burl_len > 0) {
         @memcpy(app_state.shells[idx].browser_url[0..tab.burl_len], tab.burl[0..tab.burl_len]);
@@ -1120,12 +1103,11 @@ test "ISSUE-611 ISSUE-373 legacy everywhere and nowhere migrate shell overrides 
         for (0..3) |i| {
             const want_chat = if (std.mem.eql(u8, mode, "everywhere")) i != 0 else if (std.mem.eql(u8, mode, "nowhere")) false else i == 0;
             try std.testing.expectEqual(want_chat, tabs[i].cv);
-            try std.testing.expectEqual(@import("chat_view.zig").Lock.none, tabs[i].chat_view_lock);
         }
     }
 }
 
-test "ISSUE-611 session locks survive session write parse and restore" {
+test "ISSUE-611 session views survive session write parse and restore" {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(@embedFile("fixtures/json-reader/session-shell-override.json"), &tabs));
     try std.testing.expect(tabs[0].cso);
@@ -1141,12 +1123,12 @@ test "ISSUE-611 session locks survive session write parse and restore" {
     for (0..3) |i| {
         app_state.shells[i] = empty_shell;
         app_state.shells[i].kind = .tmux;
+        app_state.shells[i].pinned_top = i != 1;
         restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
     }
-    try std.testing.expectEqual(@import("chat_view.zig").Lock.none, app_state.shells[0].chat_view_lock);
     try std.testing.expect(app_state.shells[0].chat_view_on);
-    @import("chat_view.zig").setLock(&app_state.shells[0], .shell);
-    @import("chat_view.zig").setLock(&app_state.shells[1], .chat);
+    app_state.shells[0].chat_view_on = false;
+    app_state.shells[1].chat_view_on = true;
     var temp: [512]u8 = undefined;
     const temp_len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
     try std.testing.expect(temp_len > 0 and temp_len < temp.len);
@@ -1167,17 +1149,17 @@ test "ISSUE-611 session locks survive session write parse and restore" {
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"cso\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"chat_view_mode\"") == null);
     try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(bytes, &tabs));
-    const locks = [_]@import("chat_view.zig").Lock{ .shell, .chat, .none };
-    for (locks, 0..) |lock, i| {
-        try std.testing.expectEqual(lock, tabs[i].chat_view_lock);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"locked\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"chat_view_lock\"") == null);
+    for (0..3) |i| {
+        try std.testing.expectEqual(i != 1, tabs[i].pinned_top);
         app_state.shells[i] = empty_shell;
         restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
-        try std.testing.expectEqual(lock, app_state.shells[i].chat_view_lock);
         try std.testing.expectEqual(i == 1, app_state.shells[i].chat_view_on);
     }
 }
 
-test "ISSUE-611 failed remote restore keeps Chat View, lock and browser state" {
+test "ISSUE-611 failed remote restore keeps Chat View and browser state" {
     var tab = std.mem.zeroes(SavedTab);
     tab.kind = .tmux;
     const tmux_session = "issue-611";
@@ -1185,7 +1167,6 @@ test "ISSUE-611 failed remote restore keeps Chat View, lock and browser state" {
     tab.tmux_session_len = tmux_session.len;
     tab.last_active = 1;
     tab.cv = true;
-    tab.chat_view_lock = .shell;
     tab.kaw = true;
     tab.fw = true;
     tab.inbox_archived = true;
@@ -1215,7 +1196,6 @@ test "ISSUE-611 failed remote restore keeps Chat View, lock and browser state" {
     const shell = &app_state.shells[idx];
     try std.testing.expectEqual(tab.kind, shell.kind);
     try std.testing.expect(shell.chat_view_on);
-    try std.testing.expectEqual(@import("chat_view.zig").Lock.shell, shell.chat_view_lock);
     try std.testing.expect(shell.keep_awake);
     try std.testing.expect(shell.full_width);
     try std.testing.expect(shell.inbox_archived);
@@ -1379,7 +1359,6 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].keep_alive = tabs[t].keep_alive;
     app_state.shells[idx].pinned_top = tabs[t].pinned_top;
     app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
-    app_state.shells[idx].locked = tabs[t].locked;
     app_state.shells[idx].favorite = tabs[t].favorite;
     app_state.shells[idx].last_used = tabs[t].last_used;
     app_state.shells[idx].input = tabs[t].input;
@@ -1605,7 +1584,6 @@ pub fn restoreSession() u32 {
     if (json_reader.boolTrue(json, "mobile_mode")) app_state.g_mobile_mode = true;
     if (json_reader.boolTrue(json, "hide_sidebar")) app_state.g_hide_sidebar = true;
     if (json_reader.boolTrue(json, "sidebar_collapsed")) app_state.g_sidebar_collapsed = true;
-    app_state.g_locked_section_collapsed = json_reader.boolTrue(json, "locked_section_collapsed");
     app_state.g_pinned_section_collapsed = json_reader.boolTrue(json, "pinned_section_collapsed");
     app_state.g_recents_section_collapsed = json_reader.boolTrue(json, "recents_section_collapsed");
     if (IS_DEV and json_reader.boolFalse(json, "thread_title")) app_state.g_thread_title = false;
@@ -2265,4 +2243,32 @@ test "ISSUE-569 filtered save records stable selection and filtered index" {
     defer excluded_parsed.deinit();
     try std.testing.expect(json_reader.field(excluded_parsed.value, "active_shell_id") == .null);
     try std.testing.expect(json_reader.field(excluded_parsed.value, "active_tab") == .null);
+}
+
+test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {
+    const json = @embedFile("fixtures/json-reader/session-pre-IGSH-820.json");
+    try std.testing.expect(sessionFileIsValid(json));
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 3), parseSessionTabs(json, &tabs));
+    try std.testing.expect(tabs[0].pinned_top and tabs[0].cv);
+    try std.testing.expect(!tabs[1].pinned_top and !tabs[1].cv);
+    try std.testing.expect(tabs[2].pinned_top and !tabs[2].cv);
+    const old_shell = app_state.shells[0];
+    const old_count = app_state.shell_count;
+    defer {
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_count;
+    }
+    app_state.shell_count = 1;
+    for (tabs[0..3]) |*tab| {
+        app_state.shells[0] = empty_shell;
+        restoreBrowserStateFromSavedTab(0, tab);
+        try std.testing.expectEqual(tab.cv, app_state.shells[0].chat_view_on);
+        @import("chat_view.zig").toggle(&app_state.shells[0]);
+        try std.testing.expectEqual(!tab.cv, app_state.shells[0].chat_view_on);
+    }
+    try std.testing.expect(!@hasField(app_state.Shell, "locked"));
+    try std.testing.expect(!@hasField(SavedTab, "locked"));
+    try std.testing.expect(!@hasField(app_state.Shell, "chat_view_lock"));
+    try std.testing.expect(!@hasField(SavedTab, "chat_view_lock"));
 }

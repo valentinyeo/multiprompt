@@ -42,7 +42,7 @@ pub const CONSOLE_SELECTION_INFO = struct { dwFlags: u32, srSelection: struct { 
 var g_chat_active = false;
 var active_shell: usize = 0;
 var shell_count: usize = 1;
-var shells = [_]struct { shell_id: u32 = 7, pid: u32 = 99, hwnd: HANDLE = 1, chat_view_lock: enum { none, shell } = .none }{.{}};
+var shells = [_]struct { shell_id: u32 = 7, pid: u32 = 99, hwnd: HANDLE = 1, pinned_top: bool = false }{.{}};
 pub var cells: [32]u16 = @splat(' ');
 pub var fail_read = false;
 var selected: CONSOLE_SELECTION_INFO = .{ .dwFlags = 0, .srSelection = .{ .Left = 1, .Top = 1, .Right = 3, .Bottom = 1 } };
@@ -89,14 +89,14 @@ test "production blank selection alone receives Escape; text selection never tog
     try std.testing.expectEqual(@as(usize, 0), escape_posts);
     cells[10] = ' ';
 }
-test "production refuses stale sessions, shell-locked Chat, nonblank cells and failed reads" {
+test "production refuses stale sessions, nonblank cells and failed reads" {
     selected.dwFlags = 0; g_chat_active = false;
     shellDoubleClickAtScreenPoint(8, 115, 225);
     try std.testing.expect(!g_chat_active);
-    shells[0].chat_view_lock = .shell;
+    shells[0].pinned_top = true;
     shellDoubleClickAtScreenPoint(7, 115, 225);
-    try std.testing.expect(!g_chat_active);
-    shells[0].chat_view_lock = .none; cells[18] = 0x4e2d;
+    try std.testing.expect(g_chat_active);
+    g_chat_active = false; cells[18] = 0x4e2d;
     shellDoubleClickAtScreenPoint(7, 115, 225);
     try std.testing.expect(!g_chat_active);
     cells[18] = ' '; fail_read = true;

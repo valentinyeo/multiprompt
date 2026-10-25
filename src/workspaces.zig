@@ -173,7 +173,7 @@ const IPropertyStore = @import("win32.zig").IPropertyStore;
 const CoInitializeEx = @import("win32.zig").CoInitializeEx;
 const CoUninitialize = @import("win32.zig").CoUninitialize;
 const CoCreateInstance = @import("win32.zig").CoCreateInstance;
-const workspaceHasLockedSession = @import("archive.zig").workspaceHasLockedSession;
+const rejectPinnedWorkspaceClose = @import("archive.zig").rejectPinnedWorkspaceClose;
 const appendJsonEscapedWide = @import("snippets.zig").appendJsonEscapedWide;
 const loadRemindersIfNeeded = @import("reminders.zig").loadRemindersIfNeeded;
 const snoozedWorkspaceIndex = @import("reminders.zig").snoozedWorkspaceIndex;
@@ -1970,7 +1970,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     pos += 1;
     cmd_buf[pos] = ' ';
     pos += 1;
-    cmd_buf[pos] = if (shell.locked) '1' else '0';
+    cmd_buf[pos] = '0';
     pos += 1;
     cmd_buf[pos] = ' ';
     pos += 1;
@@ -2112,8 +2112,8 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     transfer.name_source = @intFromEnum(shell.name_source);
     transfer.muted = if (shell.muted) 1 else 0;
     transfer.keep_alive = if (shell.keep_alive) 1 else 0;
+    transfer.reserved_lock = 0;
     transfer.pinned_top = if (shell.pinned_top) 1 else 0;
-    transfer.locked = if (shell.locked) 1 else 0;
     transfer.favorite = if (shell.favorite) 1 else 0;
     transfer.last_used = shell.last_used;
     transfer.input = shell.input;
@@ -2371,7 +2371,6 @@ test "ISSUE-439 remembered session beats constantly redrawing btop" {
     shells[0].shell_id = 41;
     shells[0].last_active = 10;
     shells[0].full_width = true;
-    shells[0].chat_view_lock = .shell;
     shells[1].workspace = 0;
     shells[1].shell_id = 99;
     shells[1].last_active = 1000;
@@ -2669,30 +2668,26 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
         rememberWorkspaceFocus(1, 42, .shell);
         app_state.shells[0].chat_view_on = input == .chat;
-        app_state.shells[0].chat_view_lock = if (input == .shell) .shell else .none;
         app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
         try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
         try std.testing.expectEqual(input, app_state.g_ws_focus[0]);
         const session = &app_state.shells[app_state.active_shell];
-        try std.testing.expectEqual(input == .chat, chatViewShouldShowForTab(session.chat_view_on, session.chat_view_lock));
+        try std.testing.expectEqual(input == .chat, chatViewShouldShowForTab(session.chat_view_on));
         try std.testing.expectEqual(input == .chat, app_state.shells[0].chat_view_on);
-        try std.testing.expectEqual(input == .shell, app_state.shells[0].chat_view_lock == .shell);
     }
     rememberWorkspaceFocus(0, 41, .chat);
     app_state.shells[0].chat_view_on = false;
-    app_state.shells[0].chat_view_lock = .shell;
     rememberWorkspaceFocus(0, 41, .none);
     app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 1, 42).?;
     app_state.active_shell = pickWorkspaceTarget(app_state.shells[0..3], 0, app_state.g_ws_last_shell[0]).?;
     try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
     try std.testing.expectEqual(app_state.WorkspaceFocus.chat, app_state.g_ws_focus[0]);
     const shell = &app_state.shells[app_state.active_shell];
-    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
+    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on));
     try std.testing.expect(!shell.chat_view_on);
-    try std.testing.expect(shell.chat_view_lock == .shell);
-    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
+    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on));
     shell.chat_view_on = true;
-    try std.testing.expect(!chatViewShouldShowForTab(shell.chat_view_on, shell.chat_view_lock));
+    try std.testing.expect(chatViewShouldShowForTab(shell.chat_view_on));
     rememberWorkspaceFocus(0, 43, .none);
     try std.testing.expectEqual(@as(u32, 41), app_state.g_ws_last_shell[0]);
     for ([_][]const u8{ "{}", "{\"focus\":\"unknown\"}", "{\"focus\":42}" }) |raw| {
@@ -3106,7 +3101,6 @@ pub fn copyActiveShellDiagnostics() void {
         diagAppendLineBool(&buf, &pos, "muted: ", s.muted);
         diagAppendLineBool(&buf, &pos, "keep_alive: ", s.keep_alive);
         diagAppendLineBool(&buf, &pos, "pinned_top: ", s.pinned_top);
-        diagAppendLineBool(&buf, &pos, "locked: ", s.locked);
         diagAppendLineBool(&buf, &pos, "disconnected: ", s.disconnected);
         diagAppendLineBool(&buf, &pos, "inbox_archived: ", s.inbox_archived);
         diagAppendLineBool(&buf, &pos, "tab_hidden: ", isTabHidden(app_state.active_shell));
@@ -3443,7 +3437,7 @@ test "duplicate Other repair preserves complete live shell records and other emp
         app_state.shells[i].workspace = workspace;
         app_state.shells[i].shell_id = @intCast(100 + i);
         app_state.shells[i].pid = @intCast(1000 + i);
-        app_state.shells[i].locked = true;
+        app_state.shells[i].pinned_top = true;
         app_state.shells[i].group_id = 7;
         app_state.shells[i].browser_enabled = true;
         app_state.shells[i].tmux_session[0] = @intCast('a' + i);
@@ -3744,11 +3738,6 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + ff.len], ff);
             pos += ff.len;
         }
-        if (app_state.shells[i].locked) {
-            const lf = ",\"locked\":true";
-            @memcpy(json_buf[pos .. pos + lf.len], lf);
-            pos += lf.len;
-        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -3817,11 +3806,6 @@ fn exportSlotSessionFile(slot: u8) bool {
             const cv = ",\"cv\":true";
             @memcpy(json_buf[pos .. pos + cv.len], cv);
             pos += cv.len;
-        }
-        if (pos < json_buf.len - 540) {
-            const saved_lock = @import("chat_view.zig").savedLock(app_state.shells[i].chat_view_lock);
-            @memcpy(json_buf[pos .. pos + saved_lock.len], saved_lock);
-            pos += saved_lock.len;
         }
         if (app_state.ISSUE_347_KEEP_FULL_WIDTH and app_state.shells[i].full_width and pos < json_buf.len - 540) {
             const fw = ",\"fw\":true";
@@ -3949,6 +3933,7 @@ fn hibernateWorkspaceShell(idx: u32) void {
 }
 
 pub fn closeMyWorkspaceSlot(slot: u8) void {
+    if (rejectPinnedWorkspaceClose(slot)) return;
     const registry_lock = lockWorkspaceRegistry() orelse return;
     defer unlockWorkspaceRegistry(registry_lock);
     if (!app_state.g_single_window or slot >= app_state.g_lws_count) return;
@@ -4023,10 +4008,7 @@ fn deleteMyWorkspaceSlot(slot: u8) void {
         showHeaderNoticeAscii("Other is the permanent catch-all", 3500, true);
         return;
     }
-    if (workspaceHasLockedSession(slot)) {
-        showHeaderNoticeAscii("Workspace contains a locked session", 4500, true);
-        return;
-    }
+    if (rejectPinnedWorkspaceClose(slot)) return;
     var i: u32 = app_state.shell_count;
     while (i > 0) {
         i -= 1;
@@ -4315,7 +4297,6 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].keep_alive = tabs[t].keep_alive;
             app_state.shells[idx].pinned_top = tabs[t].pinned_top;
             app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
-            app_state.shells[idx].locked = tabs[t].locked;
             app_state.shells[idx].favorite = tabs[t].favorite;
             app_state.shells[idx].last_used = tabs[t].last_used;
             app_state.shells[idx].input = tabs[t].input;

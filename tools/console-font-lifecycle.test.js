@@ -138,7 +138,6 @@ const BOOL = i32;
 const DWORD = u32;
 const WORD = u16;
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
-const ViewLock = @import("chat_view.zig").Lock;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
 const COORD = struct { x: i16 = 9, y: i16 = 18 };
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 1200, bottom: i32 = 540 };
@@ -155,7 +154,7 @@ const Shell = struct {
     base_font_h: i16 = 0, base_font_w: i16 = 0, base_font_dpi: i32 = 96,
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
-    chat_view_on: bool = false, chat_view_lock: ViewLock = .none, full_width_pending_console_resize: bool = false,
+    chat_view_on: bool = false, pinned_top: bool = false, full_width_pending_console_resize: bool = false,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false, muted: bool = false,
 };
@@ -534,12 +533,12 @@ test "IGSH-457 Starred workspace switch keeps the selected console on the shell 
     try std.testing.expectEqual(@as(u32, 1), active_shell);
 }
 test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
-    for ([_]ViewLock{ .none, .chat, .shell }) |lock| {
+    for ([_]bool{ false, true }) |pinned| {
         for ([_]bool{ false, true }) |full| {
             for (0..3) |toggles| {
                 const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
                 try std.testing.expect(spawnSession(.tmux, 0)); drain();
-                shells[0].chat_view_lock = lock; g_chat_active = true; shells[0].full_width = full;
+                shells[0].pinned_top = pinned; g_chat_active = true; shells[0].full_width = full;
                 const before = resets;
                 for (0..toggles) |_| _ = toggleFullWidth(g_main_hwnd);
                 try std.testing.expectEqual(before, resets);
