@@ -28,6 +28,7 @@ pub const Snapshot = struct {
     groups: []const Group = &.{},
     rows: []const Row,
     chat: bool = false,
+    clean_chat: bool = false,
     text: []const u16 = &.{},
     blocks: []const markdown.Block = &.{},
     font: i32 = 14,
@@ -149,4 +150,19 @@ test "ISSUE-569 legacy launch snapshot without Starred decodes as false" {
     try std.testing.expect(!parsed.value.starred);
     try std.testing.expectEqual(@as(u32, 42), parsed.value.active);
     try std.testing.expect(parsed.value.rows[0].favorite);
+}
+
+test "IGSH-816 CLEAN launch snapshot round trips both modes and legacy defaults off" {
+    const a = std.testing.allocator;
+    const rows = [_]Row{.{ .id = 1, .name = &.{} }};
+    for ([_]bool{ false, true }) |clean| {
+        const bytes = try encode(a, .{ .active = 1, .rows = &rows, .clean_chat = clean });
+        defer a.free(bytes);
+        const parsed = (try decode(a, bytes)) orelse return error.TestUnexpectedResult;
+        defer parsed.deinit();
+        try std.testing.expectEqual(clean, parsed.value.clean_chat);
+    }
+    const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}]}")) orelse return error.TestUnexpectedResult;
+    defer legacy.deinit();
+    try std.testing.expect(!legacy.value.clean_chat);
 }

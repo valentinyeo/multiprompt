@@ -1033,6 +1033,7 @@ pub var g_snippet_text_hwnd: HANDLE = null;
 pub var g_snippet_edit_orig_proc: isize = 0;
 
 pub var g_chat_active: bool = false;
+pub var clean_chat: bool = false;
 pub var g_chat_transcript_hwnd: HANDLE = null;
 pub var g_chat_status_hwnd: HANDLE = null;
 pub var g_chat_hover_link: ?link_detect.Range = null;
@@ -1334,6 +1335,7 @@ pub const SEARCH_VOICE_SPEED_140_OFFSET: usize = 6353;
 pub const SEARCH_VOICE_SPEED_150_OFFSET: usize = 6354;
 pub const SEARCH_VOICE_PREVIOUS_OFFSET: usize = 6360;
 pub const SEARCH_VOICE_NEXT_OFFSET: usize = 6361;
+pub const SEARCH_CLEAN_CHAT_OFFSET: usize = 6467;
 pub const SEARCH_CHAT_TODO_OFFSET: usize = 6398;
 pub const SEARCH_CHAT_TOOL_STEPS_OFFSET: usize = 6395;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;

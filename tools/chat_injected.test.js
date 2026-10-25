@@ -20,6 +20,7 @@ const chat_echo = @import("chat_echo.zig");
 const chat_diff = @import("chat_diff.zig");
 const ChatBlock = chat_markdown.Block;
 const HANDLE = usize;
+var clean_chat: bool = false;
 const DWORD = u32;
 const UINT = u32;
 fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }

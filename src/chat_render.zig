@@ -954,7 +954,7 @@ fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32) RECT 
     const bubble_w = chat_style.bubbleWidth(width, calc.right, pad);
     var flow_h: i32 = 0;
     _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null);
-    const bubble_h = flow_h + 2 * pad + uiScaled(CHAT_STATUS_H);
+    const bubble_h = flow_h + 2 * pad + (if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
     return .{ .left = width - bubble_w, .top = y, .right = width, .bottom = y + bubble_h };
 }
 
@@ -1632,14 +1632,16 @@ fn chatShellSyncBuild() void {
 fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) void {
     const text = row.slice();
     _ = SetBkMode(hdc, TRANSPARENT);
-    const status_h = uiScaled(CHAT_STATUS_H);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h * @as(i32, if (row.injected) 2 else 1) };
+    const status_h = if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H);
+    const sender_h = if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - sender_h };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
     if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true, false);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null);
+    if (app_state.clean_chat) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
@@ -1744,7 +1746,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureEchoRect(hdc, e.text, width, y);
-                if (chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
+                if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -2771,7 +2773,7 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
             len += zone.len;
         }
     }
-    if (confirmed and block.role == .user) {
+    if (!app_state.clean_chat and confirmed and block.role == .user) {
         const mark = std.unicode.utf8ToUtf16LeStringLiteral("\u{2713}\u{2713} Read");
         if (len > 0) {
             label[len] = ' ';
@@ -2799,6 +2801,7 @@ fn chatPaintAgentHeader(hdc: HANDLE, block: ChatBlock, rc: RECT) void {
 }
 
 fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT) void {
+    if (app_state.clean_chat and block.role == .tool) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     var rc = source_rc;
     if (block.role != .user and block.role != .injected and block.role != .tool and block.first) {
@@ -2896,14 +2899,16 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const actions = chat_echo.pendingActions(e.state);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - uiScaled(CHAT_STATUS_H) - (if (actions.send_again) uiScaled(26) else @as(i32, 0)) };
+    const status_h = if (app_state.clean_chat) @as(i32, 0) else uiScaled(CHAT_STATUS_H);
+    const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
+    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
-    if (actions.send_again) {
+    if (!app_state.clean_chat and actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
         defer _ = SelectObject(hdc, old);
         for ([_]bool{ false, true }) |remove| {
@@ -2925,6 +2930,7 @@ fn chatStatusRowRect(bubble: RECT) RECT {
 }
 
 fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
+    if (app_state.clean_chat) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     const color: DWORD = switch (e.state) {
@@ -3149,6 +3155,7 @@ fn chatEchoAt(x: i32, y: i32) ?u64 {
 }
 
 fn chatEchoRetryAt(x: i32, y: i32) bool {
+    if (app_state.clean_chat) return false;
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
@@ -3169,6 +3176,7 @@ fn chatEchoRetryAt(x: i32, y: i32) bool {
 }
 
 fn chatEchoRetryHover(x: i32, y: i32) bool {
+    if (app_state.clean_chat) return false;
     const id = chatEchoAt(x, y) orelse return false;
     const ei = chatOutboxIndexById(id) orelse return false;
     const entry = app_state.g_chat_outbox.items[ei];
@@ -3811,8 +3819,17 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
 }
 
 pub fn chatStatusHeight(available: i32) i32 {
+    if (app_state.clean_chat) return 0;
     const entry = chatHistoryEntry(chatFileIdentity()) orelse return 0;
     return chat_style.statusHeight(entry.history.status.known(), app_state.shells[app_state.active_shell].chat_todo_open, entry.history.status.total, available, uiScaled(28), uiScaled(24));
+}
+
+pub fn chatToggleClean() void {
+    app_state.clean_chat = !app_state.clean_chat;
+    app_state.g_chat_layout_reuse = 0;
+    app_state.g_chat_layout_dirty = true;
+    @import("chat_composer.zig").layoutChatControls();
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
 pub fn chatToggleTodos() void {
@@ -3821,6 +3838,47 @@ pub fn chatToggleTodos() void {
     app_state.shells[app_state.active_shell].chat_todo_open = !app_state.shells[app_state.active_shell].chat_todo_open;
     @import("chat_composer.zig").layoutChatControls();
     if (app_state.g_chat_status_hwnd != null) _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
+}
+
+fn chatPaintStatus(hdc: HANDLE, status: *const chat_transcript.Status, rc: RECT, brush: HANDLE) void {
+    if (app_state.clean_chat) return;
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const font = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, font);
+    _ = SetTextColor(hdc, customColorOr("subtitle", themeConsoleFg()));
+    const row_h = uiScaled(24);
+    const head_h = uiScaled(28);
+    const max_scroll = @max(0, @as(i32, @intCast(status.total)) * row_h - @max(0, rc.bottom - head_h));
+    app_state.shells[app_state.active_shell].chat_todo_scroll = std.math.clamp(app_state.shells[app_state.active_shell].chat_todo_scroll, 0, max_scroll);
+    if (app_state.shells[app_state.active_shell].chat_todo_open) {
+        for (status.todos[0..status.total], 0..) |*todo, i| {
+            const top = head_h + @as(i32, @intCast(i)) * row_h - app_state.shells[app_state.active_shell].chat_todo_scroll;
+            if (top + row_h <= head_h or top >= rc.bottom) continue;
+            var item_rc = RECT{ .left = uiScaled(28), .top = top, .right = rc.right - uiScaled(8), .bottom = top + row_h };
+            _ = chatDrawText(hdc, &todo.text, @intCast(todo.len), &item_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            var mark_rc = item_rc;
+            mark_rc.left = uiScaled(8);
+            mark_rc.right = uiScaled(26);
+            const mark = switch (todo.status) {
+                .completed => L("\u{2713}"),
+                .in_progress => L("\u{25B8}"),
+                .pending => L("\u{25CB}"),
+            };
+            _ = chatDrawText(hdc, mark, -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        }
+    }
+    var header_rc = RECT{ .left = 0, .top = 0, .right = rc.right, .bottom = head_h };
+    _ = FillRect(hdc, &header_rc, brush);
+    header_rc.left = uiScaled(8);
+    header_rc.right -= uiScaled(24);
+    var label: [256]u16 = undefined;
+    const len = status.label(&label);
+    _ = chatDrawText(hdc, &label, @intCast(len), &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (status.total > 0) {
+        header_rc.left = header_rc.right;
+        header_rc.right = rc.right;
+        _ = chatDrawText(hdc, if (app_state.shells[app_state.active_shell].chat_todo_open) L("\u{25BE}") else L("\u{25B8}"), -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
 }
 
 pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
@@ -3852,43 +3910,7 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer _ = DeleteObject(brush);
             const entry = chatHistoryEntry(chatFileIdentity()) orelse return 0;
             const status = &entry.history.status;
-            _ = SetBkMode(hdc, TRANSPARENT);
-            const font = SelectObject(hdc, chatMetadataFont());
-            defer _ = SelectObject(hdc, font);
-            _ = SetTextColor(hdc, customColorOr("subtitle", themeConsoleFg()));
-            const row_h = uiScaled(24);
-            const head_h = uiScaled(28);
-            const max_scroll = @max(0, @as(i32, @intCast(status.total)) * row_h - @max(0, rc.bottom - head_h));
-            app_state.shells[app_state.active_shell].chat_todo_scroll = std.math.clamp(app_state.shells[app_state.active_shell].chat_todo_scroll, 0, max_scroll);
-            if (app_state.shells[app_state.active_shell].chat_todo_open) {
-                for (status.todos[0..status.total], 0..) |*todo, i| {
-                    const top = head_h + @as(i32, @intCast(i)) * row_h - app_state.shells[app_state.active_shell].chat_todo_scroll;
-                    if (top + row_h <= head_h or top >= rc.bottom) continue;
-                    var item_rc = RECT{ .left = uiScaled(28), .top = top, .right = rc.right - uiScaled(8), .bottom = top + row_h };
-                    _ = chatDrawText(hdc, &todo.text, @intCast(todo.len), &item_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    var mark_rc = item_rc;
-                    mark_rc.left = uiScaled(8);
-                    mark_rc.right = uiScaled(26);
-                    const mark = switch (todo.status) {
-                        .completed => L("\u{2713}"),
-                        .in_progress => L("\u{25B8}"),
-                        .pending => L("\u{25CB}"),
-                    };
-                    _ = chatDrawText(hdc, mark, -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                }
-            }
-            var header_rc = RECT{ .left = 0, .top = 0, .right = rc.right, .bottom = head_h };
-            _ = FillRect(hdc, &header_rc, brush);
-            header_rc.left = uiScaled(8);
-            header_rc.right -= uiScaled(24);
-            var label: [256]u16 = undefined;
-            const len = status.label(&label);
-            _ = chatDrawText(hdc, &label, @intCast(len), &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-            if (status.total > 0) {
-                header_rc.left = header_rc.right;
-                header_rc.right = rc.right;
-                _ = chatDrawText(hdc, if (app_state.shells[app_state.active_shell].chat_todo_open) L("\u{25BE}") else L("\u{25B8}"), -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-            }
+            chatPaintStatus(hdc, status, rc, brush);
             return 0;
         },
         else => return DefWindowProcW(hwnd, msg, wp, lp),
@@ -3986,6 +4008,20 @@ pub fn chatTableWheel(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
     return true;
 }
 
+fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR) void {
+    if (app_state.clean_chat) return;
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const old_font = SelectObject(hdc, chatMetadataFont());
+    _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
+    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12), .right = width - uiScaled(16), .bottom = uiScaled(44) };
+    if (app_state.g_chat_find_open) {
+        load_rc.top += uiScaled(app_state.CHAT_FIND_TOP_H);
+        load_rc.bottom += uiScaled(app_state.CHAT_FIND_TOP_H);
+    }
+    _ = chatDrawText(hdc, message, -1, &load_rc, DT_SINGLELINE | DT_NOPREFIX);
+    _ = SelectObject(hdc, old_font);
+}
+
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -4078,21 +4114,12 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
                 }
                 if (app_state.g_chat_block_count == 0) {
-                    _ = SetBkMode(mem_dc, TRANSPARENT);
-                    const old_font = SelectObject(mem_dc, chatMetadataFont());
-                    _ = SetTextColor(mem_dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
-                    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12), .right = w - uiScaled(16), .bottom = uiScaled(44) };
-                    if (app_state.g_chat_find_open) {
-                        load_rc.top += uiScaled(app_state.CHAT_FIND_TOP_H);
-                        load_rc.bottom += uiScaled(app_state.CHAT_FIND_TOP_H);
-                    }
                     const entry = chatHistoryEntry(chatFileIdentity());
                     const message = if (entry) |e|
                         (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
                     else
                         L("No conversation yet");
-                    _ = chatDrawText(mem_dc, message, -1, &load_rc, DT_SINGLELINE | DT_NOPREFIX);
-                    _ = SelectObject(mem_dc, old_font);
+                    chatPaintEmpty(mem_dc, w, message);
                 }
             }
             @import("chat_find_ui.zig").paint(mem_dc, w);
@@ -4963,4 +4990,313 @@ test "IGSH-759 tool rows have no layout paint targets or hit area through stream
         try std.testing.expectEqualSlices(u16, text, app_state.g_chat_capture[0..text.len]);
         try std.testing.expect(std.meta.eql(tool, app_state.g_chat_blocks[insert + 1]));
     }
+}
+
+const CleanChatScene = enum {
+    blank, receipt, timestamp, sending, queued, waiting, not_sent, unconfirmed,
+    retry, remove, shell_queue, injected_queue, model, context, todo_summary,
+    todo_done, todo_working, todo_pending, todo_chevron, empty, missing, loading,
+    failed, tool, tool_detail, tool_diff, user, injected, prose, code, table,
+};
+
+fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
+    const w = @import("win32.zig");
+    const old_clean = app_state.clean_chat;
+    const old_theme = app_state.g_light_theme;
+    const old_scale = app_state.g_ui_scale;
+    const old_dpi = app_state.g_main_monitor_dpi;
+    const old_selection = app_state.g_chat_sel_active;
+    const old_active = app_state.active_shell;
+    const old_count = app_state.shell_count;
+    const old_shell = app_state.shells[0];
+    const old_find = app_state.g_chat_find_open;
+    defer {
+        app_state.clean_chat = old_clean;
+        app_state.g_light_theme = old_theme;
+        app_state.g_ui_scale = old_scale;
+        app_state.g_main_monitor_dpi = old_dpi;
+        app_state.g_chat_sel_active = old_selection;
+        app_state.active_shell = old_active;
+        app_state.shell_count = old_count;
+        app_state.shells[0] = old_shell;
+        app_state.g_chat_find_open = old_find;
+    }
+    app_state.clean_chat = clean;
+    app_state.g_light_theme = false;
+    app_state.g_ui_scale = 100;
+    app_state.g_main_monitor_dpi = 96;
+    app_state.g_chat_sel_active = false;
+    app_state.active_shell = 0;
+    app_state.shell_count = 1;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].pid = 1;
+    app_state.shells[0].ai_agent = 1;
+    app_state.shells[0].chat_todo_open = true;
+    app_state.g_chat_find_open = false;
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 800;
+    const height = 240;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    const brush = CreateSolidBrush(themeConsoleBg());
+    defer _ = DeleteObject(brush);
+    const area = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    _ = FillRect(dc, &area, brush);
+    var crop = area;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Message **body** with `code`");
+    var block = ChatBlock{ .start = 0, .len = text.len, .role = .user, .first = true, .markdown = true, .time = .{ '1', '2', ':', '3', '4' }, .zone = .{ 'U', 'T', 'C', 0, 0, 0 } };
+    var entry = ChatOutboxEntry{ .text = @constCast(text), .state = .not_sent };
+    switch (scene) {
+        .blank => {},
+        .receipt, .timestamp => chatPaintTime(dc, block, .{ .left = 0, .top = 0, .right = width, .bottom = 24 }, true, scene == .receipt),
+        .sending, .queued, .waiting, .not_sent, .unconfirmed => {
+            entry.state = switch (scene) {
+                .sending => .sending,
+                .queued => .delivered,
+                .waiting => .queued,
+                else => .not_sent,
+            };
+            entry.write_started = scene == .unconfirmed;
+            app_state.shells[0].disconnected = scene == .waiting;
+            chatPaintEchoStatus(dc, entry, .{ .left = 0, .top = 0, .right = width, .bottom = 24 });
+        },
+        .retry, .remove => {
+            const rc = chatMeasureEchoRect(dc, text, width, 0);
+            var painted_rc = rc;
+            if (!clean) painted_rc.bottom += uiScaled(26);
+            chatPaintEcho(dc, entry, painted_rc, 0);
+            const natural_bottom = rc.bottom - (if (clean) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
+            crop = chatEchoActionRect(.{ .left = rc.left, .top = 0, .right = rc.right, .bottom = natural_bottom + uiScaled(CHAT_STATUS_H + 26) }, scene == .remove);
+        },
+        .shell_queue, .injected_queue => {
+            var row: chat_shell_sync.Row = .{ .len = text.len, .injected = scene == .injected_queue };
+            @memcpy(row.text[0..text.len], text);
+            row.sender[0] = 'R';
+            var rc = chatMeasureEchoRect(dc, text, width, 0);
+            const natural_bottom = rc.bottom - (if (clean) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
+            if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);
+            chatPaintShellRow(dc, &row, rc);
+            crop.top = natural_bottom + (if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+        },
+        .model, .context, .todo_summary, .todo_done, .todo_working, .todo_pending, .todo_chevron => {
+            var status: chat_transcript.Status = .{};
+            switch (scene) {
+                .model => {
+                    status.model_len = 6;
+                    @memcpy(status.model[0..6], std.unicode.utf8ToUtf16LeStringLiteral("Claude"));
+                },
+                .context => status.percent_left = 42,
+                else => {
+                    status.todos_known = true;
+                    status.total = 1;
+                    status.done = 1;
+                    status.todos[0].len = 9;
+                    @memcpy(status.todos[0].text[0..9], std.unicode.utf8ToUtf16LeStringLiteral("Task text"));
+                    status.todos[0].status = switch (scene) {
+                        .todo_done => .completed,
+                        .todo_working => .in_progress,
+                        else => .pending,
+                    };
+                },
+            }
+            chatPaintStatus(dc, &status, area, brush);
+            if (scene == .todo_done or scene == .todo_working or scene == .todo_pending) crop.top = uiScaled(28);
+            if (scene == .todo_chevron) crop.left = width - uiScaled(24);
+        },
+        .empty, .missing, .loading, .failed => chatPaintEmpty(dc, width, switch (scene) {
+            .missing => L("Conversation unavailable"),
+            .loading => L("Loading conversation..."),
+            .failed => L("Could not load the conversation, retrying"),
+            else => L("No conversation yet"),
+        }),
+        .tool, .tool_detail, .tool_diff => {
+            block.role = .tool;
+            block.tool_open = true;
+            if (scene == .tool_detail) {
+                block.detail_len = text.len;
+                crop.top = uiScaled(28);
+            }
+            if (scene == .tool_diff) {
+                block.diff_len = text.len;
+                crop.top = uiScaled(28);
+            }
+            const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            chatPaintBlock(dc, text, block, .single, rc);
+        },
+        .user, .injected, .prose, .code, .table => {
+            block.role = switch (scene) {
+                .injected => .injected,
+                .prose, .table => .prose,
+                .code => .code,
+                else => .user,
+            };
+            block.sender[0] = 'R';
+            const shown = if (scene == .table) std.unicode.utf8ToUtf16LeStringLiteral("| A | B |\n|---|---|\n| 1 | 2 |") else text;
+            block.len = shown.len;
+            if (scene == .table) block.kind = .table;
+            const rc = chatMeasureBlockRect(dc, shown, block, .single, width, 0, null);
+            chatPaintBlock(dc, shown, block, .single, rc);
+        },
+    }
+    canvas.deinit();
+    const Flush = struct {
+        extern "gdi32" fn GdiFlush() callconv(WINAPI) w.BOOL;
+    };
+    _ = Flush.GdiFlush();
+    const pixels = @as([*]const u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const result = try std.testing.allocator.alloc(u32, pixels.len);
+    const background = pixels[pixels.len - 1] & 0xFFFFFF;
+    for (pixels, 0..) |pixel, i| {
+        const x: i32 = @intCast(i % width);
+        const y: i32 = @intCast(i / width);
+        result[i] = if (x >= crop.left and x < crop.right and y >= crop.top and y < crop.bottom) pixel & 0xFFFFFF else background;
+    }
+    return result;
+}
+
+fn expectCleanChatRowHidden(scene: CleanChatScene) !void {
+    const off = try cleanChatPixels(scene, false);
+    defer std.testing.allocator.free(off);
+    const on = try cleanChatPixels(scene, true);
+    defer std.testing.allocator.free(on);
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    try std.testing.expect(!std.mem.eql(u32, off, blank));
+    try std.testing.expectEqualSlices(u32, blank, on);
+}
+
+test "IGSH-816 CLEAN hides Sending status pixels" {
+    try expectCleanChatRowHidden(.sending);
+}
+
+test "IGSH-816 CLEAN hides outbox Queued in Claude chip pixels" {
+    try expectCleanChatRowHidden(.queued);
+}
+
+test "IGSH-816 CLEAN hides Waiting for connection status pixels" {
+    try expectCleanChatRowHidden(.waiting);
+}
+
+test "IGSH-816 CLEAN hides Not sent status pixels" {
+    try expectCleanChatRowHidden(.not_sent);
+}
+
+test "IGSH-816 CLEAN hides Delivery unconfirmed status pixels" {
+    try expectCleanChatRowHidden(.unconfirmed);
+}
+
+test "IGSH-816 CLEAN hides Send again row pixels" {
+    try expectCleanChatRowHidden(.retry);
+}
+
+test "IGSH-816 CLEAN hides Remove row pixels" {
+    try expectCleanChatRowHidden(.remove);
+}
+
+test "IGSH-816 CLEAN hides shell Queued in Claude chip pixels" {
+    try expectCleanChatRowHidden(.shell_queue);
+}
+
+test "IGSH-816 CLEAN hides injected Queued in Claude chip pixels" {
+    try expectCleanChatRowHidden(.injected_queue);
+}
+
+test "IGSH-816 CLEAN hides model footer pixels" {
+    try expectCleanChatRowHidden(.model);
+}
+
+test "IGSH-816 CLEAN hides context-left footer pixels" {
+    try expectCleanChatRowHidden(.context);
+}
+
+test "IGSH-816 CLEAN hides todo summary footer pixels" {
+    try expectCleanChatRowHidden(.todo_summary);
+}
+
+test "IGSH-816 CLEAN hides completed todo row and tick pixels" {
+    try expectCleanChatRowHidden(.todo_done);
+}
+
+test "IGSH-816 CLEAN hides in-progress activity row pixels" {
+    try expectCleanChatRowHidden(.todo_working);
+}
+
+test "IGSH-816 CLEAN hides pending todo row pixels" {
+    try expectCleanChatRowHidden(.todo_pending);
+}
+
+test "IGSH-816 CLEAN hides todo chevron pixels" {
+    try expectCleanChatRowHidden(.todo_chevron);
+}
+
+test "IGSH-816 CLEAN hides empty conversation hint pixels" {
+    try expectCleanChatRowHidden(.empty);
+}
+
+test "IGSH-816 CLEAN hides missing conversation hint pixels" {
+    try expectCleanChatRowHidden(.missing);
+}
+
+test "IGSH-816 CLEAN hides loading conversation hint pixels" {
+    try expectCleanChatRowHidden(.loading);
+}
+
+test "IGSH-816 CLEAN hides retrying conversation hint pixels" {
+    try expectCleanChatRowHidden(.failed);
+}
+
+test "IGSH-816 CLEAN hides tool status summary details and diff rows pixels" {
+    try expectCleanChatRowHidden(.tool);
+}
+
+test "IGSH-816 CLEAN hides read ticks but preserves the timestamp and timezone pixels" {
+    const off = try cleanChatPixels(.receipt, false);
+    defer std.testing.allocator.free(off);
+    const on = try cleanChatPixels(.receipt, true);
+    defer std.testing.allocator.free(on);
+    const timestamp = try cleanChatPixels(.timestamp, false);
+    defer std.testing.allocator.free(timestamp);
+    try std.testing.expect(!std.mem.eql(u32, off, on));
+    try std.testing.expectEqualSlices(u32, timestamp, on);
+}
+
+test "IGSH-816 CLEAN preserves message markdown code tables and attribution pixels" {
+    defer app_state.g_chat_tables.clear(std.heap.page_allocator);
+    for ([_]CleanChatScene{ .user, .injected, .prose, .code, .table }) |scene| {
+        const off = try cleanChatPixels(scene, false);
+        defer std.testing.allocator.free(off);
+        const on = try cleanChatPixels(scene, true);
+        defer std.testing.allocator.free(on);
+        const blank = try cleanChatPixels(.blank, true);
+        defer std.testing.allocator.free(blank);
+        try std.testing.expect(!std.mem.eql(u32, blank, on));
+        try std.testing.expectEqualSlices(u32, off, on);
+    }
+}
+
+test "IGSH-816 CLEAN off-mode rendered rows are unchanged after toggling" {
+    for (std.enums.values(CleanChatScene)) |scene| {
+        const before = try cleanChatPixels(scene, false);
+        defer std.testing.allocator.free(before);
+        const clean = try cleanChatPixels(scene, true);
+        defer std.testing.allocator.free(clean);
+        const after = try cleanChatPixels(scene, false);
+        defer std.testing.allocator.free(after);
+        try std.testing.expectEqualSlices(u32, before, after);
+    }
+}
+
+test "IGSH-816 CLEAN hides expanded tool detail pixels" {
+    try expectCleanChatRowHidden(.tool_detail);
+}
+
+test "IGSH-816 CLEAN hides tool diff pixels" {
+    try expectCleanChatRowHidden(.tool_diff);
 }
