@@ -2273,6 +2273,8 @@ try {
             $result.checks += $composerCheck
             $typingCheck = @{ name = 'IGSH-760 typing frames steady'; passed = $false }
             $result.checks += $typingCheck
+            $stripCheck = @{ name = 'IGSH-805 composer has no unpainted strip'; passed = $false }
+            $result.checks += $stripCheck
             Select-Theme 'dark' 'composer-dark'
             Snapshot 'before'
             Press @(0x12, 0x43) 'Alt+C: open Chat View for the composer'
@@ -2300,8 +2302,17 @@ try {
             $frame = New-Object VerifyNative+Rect
             if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame)) { throw 'Composer frame unavailable' }
             $rect = @{ left = $row[0] - $frame.Left; top = $row[1] - $frame.Top; right = $row[2] - $frame.Left; bottom = $row[3] - $frame.Top }
-            Save-Json @{ rect = $rect; fontSmoothing = [VerifyNative]::FontSmoothing(); text = $sentence; dpi = $dpi } 'composer-live.json'
+            $client = New-Object VerifyNative+Rect
+            $origin = New-Object VerifyNative+Point
+            if (-not [VerifyNative]::GetClientRect($handle, [ref]$client) -or -not [VerifyNative]::ClientToScreen($handle, [ref]$origin)) { throw 'Composer client rectangle unavailable' }
+            $clientRect = @{ left = $origin.X + $client.Left - $frame.Left; top = $origin.Y + $client.Top - $frame.Top; right = $origin.X + $client.Right - $frame.Left; bottom = $origin.Y + $client.Bottom - $frame.Top }
+            Save-Json @{ rect = $rect; clientRect = $clientRect; fontSmoothing = [VerifyNative]::FontSmoothing(); text = $sentence; dpi = $dpi } 'composer-live.json'
             [VerifyNative]::Bmp((Join-Path $Evidence 'after.png'), (Join-Path $Evidence 'composer-live.bmp'))
+            & node (Join-Path $PSScriptRoot '../../../tools/chat-composer-text-proof.mjs') $Evidence --strip
+            $stripExit = $LASTEXITCODE
+            $stripSummary = Get-Content (Join-Path $Evidence 'composer-strip-summary.json') -Raw | ConvertFrom-Json
+            foreach ($property in $stripSummary.PSObject.Properties) { $stripCheck[$property.Name] = $property.Value }
+            if ($stripExit -ne 0 -or -not $stripCheck.passed) { throw 'IGSH-805 composer has no unpainted strip: full client contains a contrasting horizontal run' }
             $prefixRow = [VerifyNative]::ComposerRow($handle, 12, $em)
             $composerFrame = New-Object VerifyNative+Rect
             if (-not [VerifyNative]::GetWindowRect($handle, [ref]$composerFrame)) { throw 'Composer typing rectangle unavailable' }

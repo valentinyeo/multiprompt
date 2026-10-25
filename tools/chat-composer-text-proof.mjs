@@ -13,6 +13,47 @@ export function evaluateLive(image, metadata) {
   return { name: 'IGSH-731 composer edges', passed: metadata.fontSmoothing === false && measurement.edges >= 100 && measurement.partialPixels > 0 && measurement.hardEdgeFraction < threshold, threshold, measurement };
 }
 
+export function evaluateComposerStrip(image, rect) {
+  if (!rect || !['left', 'top', 'right', 'bottom'].every(key => Number.isInteger(rect[key])) || rect.left < 0 || rect.top < 0 || rect.right > image.width || rect.bottom > image.height || rect.right <= rect.left || rect.bottom <= rect.top || image.pixels.length < image.width * image.height * 4) throw new Error('Invalid composer client rectangle or image');
+  const counts = new Map();
+  let modal = 0;
+  let modalCount = 0;
+  for (let y = rect.top; y < rect.bottom; y++) for (let x = rect.left; x < rect.right; x++) {
+    const offset = (y * image.width + x) * 4;
+    const color = image.pixels[offset + 2] << 16 | image.pixels[offset + 1] << 8 | image.pixels[offset];
+    counts.set(color, (counts.get(color) || 0) + 1);
+  }
+  for (const [color, count] of counts) if (count > modalCount) {
+    modal = color;
+    modalCount = count;
+  }
+  const background = { r: modal >>> 16 & 255, g: modal >>> 8 & 255, b: modal & 255 };
+  const minRunPixels = Math.ceil((rect.right - rect.left) * 0.6);
+  const rows = [];
+  let failingRows = 0;
+  for (let y = rect.top; y < rect.bottom; y++) {
+    let run = 0;
+    let longestRun = 0;
+    let right = rect.left;
+    for (let x = rect.left; x < rect.right; x++) {
+      const offset = (y * image.width + x) * 4;
+      const differs = Math.abs(image.pixels[offset + 2] - background.r) >= 24 && Math.abs(image.pixels[offset + 1] - background.g) >= 24 && Math.abs(image.pixels[offset] - background.b) >= 24;
+      run = differs ? run + 1 : 0;
+      if (run > longestRun) {
+        longestRun = run;
+        right = x + 1;
+      }
+    }
+    if (longestRun >= minRunPixels) failingRows++;
+    if (longestRun) {
+      rows.push({ y, longestRun, left: right - longestRun, right });
+      rows.sort((a, b) => b.longestRun - a.longestRun || a.y - b.y);
+      if (rows.length > 5) rows.pop();
+    }
+  }
+  return { name: 'IGSH-805 composer has no unpainted strip', passed: failingRows === 0, measurement: { rect, background, minChannelDelta: 24, minRunPixels, failingRows, rows } };
+}
+
 export const typingThresholds = Object.freeze({ minFrames: 30, minDurationMs: 1000, maxGapMs: 100, minInk: 20, minInkRatio: 0.8, inkContrast: 24, maxColorDelta: 2 });
 
 export function evaluateTypingFrames(frames, metadata) {
@@ -96,6 +137,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const directory = path.resolve(process.argv[2] || 'evidence');
   const native = process.argv.includes('--native');
   const typing = process.argv.includes('--typing');
+  const strip = process.argv.includes('--strip');
   let summary;
   try {
     if (native) summary = evaluateNative(directory);
@@ -106,13 +148,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } else {
       const metadata = JSON.parse(fs.readFileSync(path.join(directory, 'composer-live.json'), 'utf8').replace(/^\uFEFF/, ''));
       const image = readBmp(path.join(directory, 'composer-live.bmp'));
-      summary = evaluateLive(image, metadata);
-      writeCrop(image, metadata.rect, 4, path.join(directory, 'composer-text-4x.png'));
+      summary = strip ? evaluateComposerStrip(image, metadata.clientRect) : evaluateLive(image, metadata);
+      if (!strip) writeCrop(image, metadata.rect, 4, path.join(directory, 'composer-text-4x.png'));
     }
   } catch (error) {
     summary = { passed: false, error: String(error.stack || error), measurement: null, threshold };
   }
-  fs.writeFileSync(path.join(directory, `composer-${native ? 'native' : typing ? 'typing' : 'live'}-summary.json`), JSON.stringify(summary, null, 2) + '\n');
+  fs.writeFileSync(path.join(directory, `composer-${native ? 'native' : typing ? 'typing' : strip ? 'strip' : 'live'}-summary.json`), JSON.stringify(summary, null, 2) + '\n');
   console.log(JSON.stringify(summary));
   if (!summary.passed) process.exitCode = 1;
 }

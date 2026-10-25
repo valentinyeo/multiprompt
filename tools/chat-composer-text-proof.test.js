@@ -312,3 +312,93 @@ test('IGSH-760 ink loss boundary accepts at least eighty percent and rejects one
     if (extraLoss) assert.ok(summary.mismatchedFrames[0].inkRatio < 0.8);
   }
 });
+
+test('IGSH-805 composer strip accepts painted clients and rejects the four-pixel strip with exact run and RGB boundaries', async () => {
+  const { evaluateComposerStrip } = await import('./chat-composer-text-proof.mjs');
+  const width = 700;
+  const height = 640;
+  const rect = { left: 32, top: 570, right: 666, bottom: 614 };
+  const sample = { width, height, pixels: Buffer.alloc(width * height * 4, 255) };
+  const paint = (bounds, [r, g, b]) => {
+    for (let y = bounds.top; y < bounds.bottom; y++) for (let x = bounds.left; x < bounds.right; x++) {
+      const offset = (y * width + x) * 4;
+      sample.pixels[offset] = b;
+      sample.pixels[offset + 1] = g;
+      sample.pixels[offset + 2] = r;
+    }
+  };
+  const background = [31, 40, 55];
+  paint(rect, background);
+  const green = evaluateComposerStrip(sample, rect);
+  assert.equal(green.name, 'IGSH-805 composer has no unpainted strip');
+  assert.equal(green.passed, true);
+  assert.deepEqual(green.measurement.background, { r: 31, g: 40, b: 55 });
+  assert.deepEqual(green.measurement.rect, rect);
+  assert.equal(green.measurement.minRunPixels, 381);
+  assert.deepEqual(green.measurement.rows, []);
+  paint({ ...rect, top: 610 }, [0, 0, 0]);
+  const red = evaluateComposerStrip(sample, rect);
+  assert.equal(red.passed, false);
+  assert.equal(red.measurement.failingRows, 4);
+  assert.deepEqual(red.measurement.rows, [610, 611, 612, 613].map(y => ({ y, longestRun: 634, left: 32, right: 666 })));
+  paint(rect, background);
+  const run = { ...rect, top: 610, bottom: 611, right: rect.left + 380 };
+  paint(run, [7, 16, 31]);
+  assert.equal(evaluateComposerStrip(sample, rect).passed, true);
+  paint({ ...run, right: run.right + 1 }, [7, 16, 31]);
+  assert.equal(evaluateComposerStrip(sample, rect).passed, false);
+  for (let channel = 0; channel < 3; channel++) {
+    const color = background.map(value => value - 24);
+    color[channel]++;
+    paint({ ...run, right: run.right + 1 }, color);
+    assert.equal(evaluateComposerStrip(sample, rect).passed, true, `channel ${channel} differs by only 23`);
+  }
+  paint(rect, background);
+  paint({ ...run, right: rect.left + 200 }, [0, 0, 0]);
+  paint({ ...run, left: rect.left + 201, right: rect.left + 401 }, [0, 0, 0]);
+  assert.equal(evaluateComposerStrip(sample, rect).passed, true);
+  paint({ ...rect, top: 606 }, [0, 0, 0]);
+  const bounded = evaluateComposerStrip(sample, rect);
+  assert.equal(bounded.measurement.failingRows, 8);
+  assert.equal(bounded.measurement.rows.length, 5);
+  assert.throws(() => evaluateComposerStrip(sample, { ...rect, right: width + 1 }), /rectangle/);
+  assert.throws(() => evaluateComposerStrip(sample, { ...rect, bottom: rect.top }), /rectangle/);
+});
+
+test('IGSH-805 composer strip CLI and journey retain measured red and green results', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-strip-oracle-'));
+  const sample = { width: 100, height: 30, pixels: Buffer.alloc(100 * 30 * 4, 31) };
+  const header = Buffer.alloc(54);
+  header.write('BM');
+  header.writeUInt32LE(54 + sample.pixels.length, 2);
+  header.writeUInt32LE(54, 10);
+  header.writeUInt32LE(40, 14);
+  header.writeInt32LE(sample.width, 18);
+  header.writeInt32LE(-sample.height, 22);
+  header.writeUInt16LE(1, 26);
+  header.writeUInt16LE(32, 28);
+  const write = () => fs.writeFileSync(path.join(directory, 'composer-live.bmp'), Buffer.concat([header, sample.pixels]));
+  const run = () => spawnSync(process.execPath, [path.join(__dirname, 'chat-composer-text-proof.mjs'), directory, '--strip'], { encoding: 'utf8', timeout: 10000 });
+  const summary = () => JSON.parse(fs.readFileSync(path.join(directory, 'composer-strip-summary.json')));
+  try {
+    fs.writeFileSync(path.join(directory, 'composer-live.json'), '\uFEFF' + JSON.stringify({ clientRect: { left: 0, top: 0, right: 100, bottom: 30 } }));
+    write();
+    const green = run();
+    assert.equal(green.status, 0, green.stdout + green.stderr);
+    assert.equal(summary().passed, true);
+    sample.pixels.fill(0, 26 * sample.width * 4);
+    write();
+    const red = run();
+    assert.equal(red.status, 1, red.stdout + red.stderr);
+    assert.equal(summary().name, 'IGSH-805 composer has no unpainted strip');
+    assert.equal(summary().passed, false);
+    assert.equal(summary().measurement.failingRows, 4);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const journey = control.slice(control.indexOf("        'chat-composer-text' {"), control.indexOf("        'chat-code-font' {"));
+  for (const token of ["name = 'IGSH-805 composer has no unpainted strip'", '$result.checks += $stripCheck', 'GetClientRect($handle, [ref]$client)', 'ClientToScreen($handle, [ref]$origin)', '$origin.X + $client.Left - $frame.Left', '$origin.Y + $client.Bottom - $frame.Top', 'clientRect = $clientRect', "[VerifyNative]::Bmp((Join-Path $Evidence 'after.png')", '$Evidence --strip', '$stripCheck[$property.Name] = $property.Value', 'if ($stripExit -ne 0 -or -not $stripCheck.passed)']) assert.ok(journey.includes(token), token);
+});
