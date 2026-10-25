@@ -1598,6 +1598,7 @@ function Assert-Foreground {
 }
 
 function Wait-Foreground {
+    try { Assert-Foreground; return } catch {}
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
         [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
         [void][VerifyNative]::SetForegroundWindow($script:window)
