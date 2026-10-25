@@ -4407,9 +4407,15 @@ test "IGSH-810 HWND chrome sampling follows theme pixels without changing focus"
         var original: LONG_PTR = 0;
 
         fn wndProc(target: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-            if (msg == WM_ERASEBKGND or msg == 0x0318) {
+            if (msg == WM_ERASEBKGND or msg == 0x0317 or msg == 0x0318) {
                 var bounds: RECT = undefined;
-                if (GetClientRect(target, &bounds) == 0) return 0;
+                if (msg == 0x0317) {
+                    if (GetWindowRect(target, &bounds) == 0) return 0;
+                    bounds.right -= bounds.left;
+                    bounds.bottom -= bounds.top;
+                    bounds.left = 0;
+                    bounds.top = 0;
+                } else if (GetClientRect(target, &bounds) == 0) return 0;
                 const fill_brush = CreateSolidBrush(color) orelse return 0;
                 defer _ = DeleteObject(fill_brush);
                 return FillRect(@ptrFromInt(wp), &bounds, fill_brush);
