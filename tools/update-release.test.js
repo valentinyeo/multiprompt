@@ -20,7 +20,7 @@ test('periodic update never invokes restart and explicit restart uses the verifi
   const updater = read('src/update_release.zig');
   const poll = updater.slice(updater.indexOf('pub fn poll()'), updater.indexOf('pub fn restart('));
   assert.doesNotMatch(poll, /restart\(|"Apply"|quitAll/);
-  assert.match(updater, /3 \* 60 \* 60 \* 1000/);
+  assert.match(updater, /5 \* 60 \* 1000/);
   assert.match(read('src/update_card.zig'), /update_release\.restart\(/);
   assert.match(read('src/sidebar.zig'), /Restart to update/);
   assert.match(read('src/update_card.zig'), /Update ready: restart to get v/);
