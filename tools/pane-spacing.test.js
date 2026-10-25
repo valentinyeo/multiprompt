@@ -492,3 +492,41 @@ test('overlay backdrop uses the current primary pane rather than old margins', (
   assert.match(sidebar, /const threadTitleHeight = @import\("browser_pane\.zig"\)\.threadTitleHeight;/);
   assert.throws(() => assert.doesNotMatch(backdrop + 'by = DEV_TOP_PAD;', /DEV_TOP_PAD/));
 });
+
+test('IGSH-886 selected session background is visible neutral gray in built-in themes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidebar-gray-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, `const std = @import("std");
+const DWORD = u32;
+const app_state = @This();
+var g_multiprompt_theme = false;
+var g_amoled_theme = false;
+fn RGB(r: u32, g: u32, b: u32) u32 { return r | (g << 8) | (b << 16); }
+fn customColorOr(_: []const u8, fallback: u32) u32 { return fallback; }
+${fn(sidebar, 'tintColor')}
+fn selectedBackground(sidebar_bg: DWORD) DWORD {
+    ${statement(sidebar, 'const hl =')}
+    return hl;
+}
+test "selected session is gray and distinct from its sidebar" {
+    for ([_]u32{0, 36, 51, 60, 243}) |base| {
+        g_amoled_theme = base == 0;
+        const color = selectedBackground(RGB(base, base, base));
+        const r = color & 255;
+        const g = (color >> 8) & 255;
+        const b = (color >> 16) & 255;
+        try std.testing.expectEqual(r, g);
+        try std.testing.expectEqual(g, b);
+        try std.testing.expect(@abs(@as(i32, @intCast(r)) - @as(i32, @intCast(base))) >= 10);
+    }
+}
+`);
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All \d+ tests passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
