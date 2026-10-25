@@ -679,7 +679,7 @@ pub fn build(b: *std.Build) void {
         "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
         "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
         "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",
+        "tools/auto-release-admit.test.js", "tools/chat-unread-visit.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
