@@ -4745,6 +4745,7 @@ pub fn refreshBrowserEdgeMasks() void {
         return;
     };
     positionBrowserEdgeMasks(layout);
+    raiseBrowserEdgeMasksZOrderOnly();
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
         if (browserMaskCorner(@enumFromInt(i)) == null and app_state.g_browser_edge_mask_shown[i])
             _ = InvalidateRect(app_state.g_browser_edge_mask_hwnds[i], null, 0);

@@ -70,3 +70,10 @@ test('IGSH-858 native glyph counting excludes the DWM outline but pixel comparis
   assert.match(native, /glyphRight = right - \(int\)Math.Ceiling\(2 \* scale\)/);
   assert.match(native, /for \(int y = top; y < bottom; y\+\+\) \{[\s\S]*?for \(int x = left; x < right; x\+\+\)/);
 });
+
+test('IGSH-858 captures the same genuinely activated native caption before and after docking', () => {
+  assert.equal((journey.match(/ClickClient\(\$script:window, 100, -10\)/g) || []).length, 2);
+  const pane = read('src/browser_pane.zig');
+  const refresh = pane.slice(pane.indexOf('pub fn refreshBrowserEdgeMasks()'), pane.indexOf('pub fn armBrowserEdgeMaskRaise()'));
+  assert.match(refresh, /positionBrowserEdgeMasks\(layout\);\n    raiseBrowserEdgeMasksZOrderOnly\(\);/);
+});

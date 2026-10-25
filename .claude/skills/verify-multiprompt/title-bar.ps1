@@ -18,6 +18,8 @@ foreach ($mode in @('restored', 'maximized')) {
     Assert-Foreground
     [VerifyNative]::BringToForeground($script:window)
     Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'native reference caption active'
+    [VerifyNative]::ClickClient($script:window, 100, -10)
+    [VerifyNative]::MoveMouseClient($script:window, 100, 200, $false)
     Snapshot $reference
     $geometry = [CaptionProof]::Geometry($script:window)
     if ($geometry[8] -ne $targetDpi) { throw "Expected real Windows DPI $targetDpi, got $($geometry[8])" }
@@ -41,6 +43,8 @@ foreach ($mode in @('restored', 'maximized')) {
         Assert-Foreground
         [VerifyNative]::BringToForeground($script:window)
         Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'docked caption active'
+        [VerifyNative]::ClickClient($script:window, 100, -10)
+        [VerifyNative]::MoveMouseClient($script:window, 100, 200, $false)
         Snapshot $shot
         $pixels = [CaptionProof]::Measure((Join-Path $Evidence ($reference + '.png')), (Join-Path $Evidence ($shot + '.png')), $geometry, $browserRect, $maskRects, $browserTheme)
         $proofs += @{ mode = $mode; appTheme = $theme; browserTheme = $browserTheme; dpi = $targetDpi; screenshot = $shot + '.png'; reference = $reference + '.png'; browserHwnd = $browser.ToInt64(); mainHwnd = $script:window.ToInt64(); pixels = $pixels }
