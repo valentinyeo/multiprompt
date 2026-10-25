@@ -1942,6 +1942,34 @@ function Measure-StatusCard([string]$Name) {
     }
 }
 
+function Measure-PlainStatusCard([string]$Name) {
+    $frame = New-Object VerifyNative+Rect
+    $client = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'status-card native geometry unavailable' }
+    $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+    $scale = $dpi / 96.0
+    $offsetX = $origin.X - $frame.Left
+    $offsetY = $origin.Y - $frame.Top
+    $x = $offsetX + [int][Math]::Round(14 * $scale)
+    $bottom = $offsetY + $client.Bottom - 1
+    $top = $bottom - [int][Math]::Round(40 * $scale)
+    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
+    try {
+        $background = $image.GetPixel($x, $bottom)
+        $edge = $null
+        for ($y = $bottom; $y -ge $top; $y--) {
+            $pixel = $image.GetPixel($x, $y)
+            if ([Math]::Max([Math]::Abs($pixel.R - $background.R), [Math]::Max([Math]::Abs($pixel.G - $background.G), [Math]::Abs($pixel.B - $background.B))) -gt 8) { $edge = $y; break }
+        }
+    } finally { $image.Dispose() }
+    return [ordered]@{
+        screenshot = $Name + '.png'; x = $x; top = $top; bottom = $bottom; background = @($background.R, $background.G, $background.B)
+        edge = $edge; dpi = $dpi
+    }
+}
+
 function Sidebar-Luminance([string]$Name) {
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
     try {
@@ -4343,6 +4371,12 @@ try {
                 }
                 $shot = 'status-card-' + ($page + 1)
                 Snapshot $shot
+                if ($page -eq 2) {
+                    $plain = Measure-PlainStatusCard $shot
+                    $plain.page = 3
+                    $pages += $plain
+                    continue
+                }
                 $measure = Measure-StatusCard $shot
                 $measure.page = $page + 1
                 $pages += $measure
@@ -4364,7 +4398,8 @@ try {
             foreach ($height in $heights) {
                 if ($height -gt 30 -or $height -lt 20) { throw ('status-card: card height ' + $height + ' outside 20..30; heights ' + ($heights -join ', ')) }
             }
-            $result.checks += @{ name = 'status-card'; heights = $heights; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
+            if ($null -ne $plain.edge) { throw ('status-card: AI page draws a frame or fill at y=' + $plain.edge + ' in status-card-3.png') }
+            $result.checks += @{ name = 'status-card'; heights = $heights; aiPagePlain = $true; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
         }
         'command-palette' {
             Palette 'interface'

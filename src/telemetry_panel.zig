@@ -36,6 +36,7 @@ const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
 const saveSidebarStatusCard = @import("themes.zig").saveSidebarStatusCard;
 const customColorOr = @import("themes.zig").customColorOr;
+const themeSidebarBg = @import("themes.zig").themeSidebarBg;
 const CapacityState = @import("app_state.zig").CapacityState;
 const capacityStateLabel = @import("capacity.zig").capacityStateLabel;
 const capacityHostLabel = @import("capacity.zig").capacityHostLabel;
@@ -947,7 +948,7 @@ fn aiPaceNextWeeklyReset(now: u64) ?u64 {
     return status_line.earliestReset(now, resets[0..goal_count]);
 }
 
-fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: DWORD) i32 {
+fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: DWORD, mono: ?DWORD) i32 {
     const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
     var x = start_x;
     for (app_state.g_ai_pace.goals[0..goal_count], 0..) |goal, slot| {
@@ -957,38 +958,29 @@ fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: D
         }
         var segment_buf: [24]u8 = undefined;
         const segment = status_line.formatWeekSegment(&segment_buf, status_line.providerShortLabel(@tagName(goal.provider)), goal.available and goal.has_total_used, goal.total_used_tenths);
-        _ = SetTextColor(hdc, if (goal.available) aiPaceProviderColor(goal, slot) else dim);
+        _ = SetTextColor(hdc, mono orelse if (goal.available) aiPaceProviderColor(goal, slot) else dim);
         x = drawAsciiRun(hdc, segment, x, rect.top, rect.bottom, limit);
     }
     return x;
 }
 
 fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
-    paintSidebarCardFrame(hdc, rect);
-    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
-    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
+    var bg_rc = rect;
+    const bg_brush = CreateSolidBrush(themeSidebarBg());
+    _ = FillRect(hdc, &bg_rc, bg_brush);
+    _ = DeleteObject(bg_brush);
+    const text: DWORD = if (app_state.g_light_theme) customColorOr("text_active", RGB(25, 25, 25)) else RGB(255, 255, 255);
     const inner_left = rect.left + uiScaled(10);
     const inner_right = rect.right - uiScaled(10);
     if (inner_right <= inner_left) return;
     _ = SelectObject(hdc, font_subtitle);
 
     var x = inner_left;
+    _ = SetTextColor(hdc, text);
     if (app_state.g_ai_pace.from_ladder) {
-        const burn_codex = app_state.g_ai_pace.ladder_mode == 2;
-        const chip_color: DWORD = if (burn_codex)
-            (if (app_state.g_light_theme) RGB(20, 125, 86) else RGB(70, 190, 140))
-        else
-            (if (app_state.g_light_theme) RGB(175, 82, 52) else RGB(224, 125, 91));
-        const chip_text: []const u8 = if (burn_codex) "CX" else "CL";
-        var chip = RECT{ .left = x, .top = rect.top + uiScaled(5), .right = x + asciiTextWidth(hdc, chip_text) + uiScaled(10), .bottom = rect.bottom - uiScaled(5) };
-        const chip_brush = CreateSolidBrush(chip_color);
-        _ = FillRect(hdc, &chip, chip_brush);
-        _ = DeleteObject(chip_brush);
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(20, 22, 26));
-        drawAscii(hdc, chip_text, &chip, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_CENTER);
-        x = chip.right + uiScaled(8);
+        const chip_text: []const u8 = if (app_state.g_ai_pace.ladder_mode == 2) "CX" else "CL";
+        x = drawAsciiRun(hdc, chip_text, x, rect.top, rect.bottom, inner_right) + uiScaled(8);
     } else {
-        _ = SetTextColor(hdc, bright);
         x = drawAsciiRun(hdc, "AI", x, rect.top, rect.bottom, inner_right) + uiScaled(8);
     }
 
@@ -997,7 +989,6 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
     if (aiPaceNextWeeklyReset(now)) |reset| {
         var reset_buf: [16]u8 = undefined;
         const reset_text = status_line.formatResetHours(&reset_buf, now, reset);
-        _ = SetTextColor(hdc, dim);
         var reset_rc = RECT{ .left = @max(x, inner_right - asciiTextWidth(hdc, reset_text)), .top = rect.top, .right = inner_right, .bottom = rect.bottom };
         drawAscii(hdc, reset_text, &reset_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
         limit = reset_rc.left - uiScaled(6);
@@ -1005,12 +996,11 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
 
     if (app_state.g_ai_pace.goal_count == 0) {
         if (!app_state.g_ai_pace.available) {
-            _ = SetTextColor(hdc, dim);
             _ = drawAsciiRun(hdc, "CONNECTING", x, rect.top, rect.bottom, limit);
         }
         return;
     }
-    _ = paintAiPaceWeekRuns(hdc, x, rect, limit, dim);
+    _ = paintAiPaceWeekRuns(hdc, x, rect, limit, text, text);
 }
 
 fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
@@ -1263,7 +1253,7 @@ fn paintSidebarCombinedCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void
         }
     }
     if (has_goals) {
-        _ = paintAiPaceWeekRuns(hdc, x, rect, limit, dim);
+        _ = paintAiPaceWeekRuns(hdc, x, rect, limit, dim, null);
     } else if (host == null and !app_state.g_ai_pace.available) {
         _ = SetTextColor(hdc, dim);
         _ = drawAsciiRun(hdc, "CONNECTING", x, rect.top, rect.bottom, limit);
