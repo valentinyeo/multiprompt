@@ -36,6 +36,7 @@ const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
 const saveSidebarStatusCard = @import("themes.zig").saveSidebarStatusCard;
 const customColorOr = @import("themes.zig").customColorOr;
+const themeSidebarBg = @import("themes.zig").themeSidebarBg;
 const CapacityState = @import("app_state.zig").CapacityState;
 const capacityStateLabel = @import("capacity.zig").capacityStateLabel;
 const capacityHostLabel = @import("capacity.zig").capacityHostLabel;
