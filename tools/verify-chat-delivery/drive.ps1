@@ -68,6 +68,9 @@ function Doctor([bool]$Chat = $false) {
     Save $identity "$caseDir/doctor.json"
 }
 function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
+    if ($Label.StartsWith('Alt+C:') -and (Get-Variable toggleReady -Scope Script -ErrorAction SilentlyContinue)) {
+        [void](Wait-For 'existing Alt+C debounce elapsed' { [DateTime]::UtcNow -ge $script:toggleReady })
+    }
     Doctor
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) {
         $target = if ($Chat) { $composer } else { $main }
@@ -78,7 +81,6 @@ function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing keyboard input: owned app is not foreground' }
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input=$Label; keys=$Keys})
     if ($Label.StartsWith('Alt+C:')) {
-        if (Get-Variable toggleReady -Scope Script -ErrorAction SilentlyContinue) { [void](Wait-For 'existing Alt+C debounce elapsed' { [DateTime]::UtcNow -ge $script:toggleReady }) }
         $script:toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
     }
     [ChatDeliveryDesktop]::Chord($Keys)

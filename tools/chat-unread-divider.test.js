@@ -68,6 +68,8 @@ test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live hist
 
 test('IGSH-814 existing messages-only recipe exercises real reopen, restart, gap, bottom and send', () => {
   const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Read-Shared('));
+  assert.ok(press.indexOf("existing Alt+C debounce elapsed") < press.indexOf('    Doctor'), 'ownership is checked after the debounce, immediately before input');
   for (const phrase of ['leave the read chat', "Shell-Input 'messages' '2'", 'Restart-OwnedApp', 'reopen chat after offline arrivals', "Shell-Input 'forget-message' $readId", 'bottom clears the divider', 'sending clears the divider', 'all-read reopen has no divider']) assert.ok(driver.includes(phrase), phrase);
   assert.match(driver, /Copy-Item \$cache.FullName "\$caseDir\/app-cache-reopened.jsonl"/);
   assert.match(driver, /Copy-Item "\$settings\/session.json" "\$caseDir\/session-read-anchor.json"/);
