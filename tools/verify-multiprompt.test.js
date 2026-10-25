@@ -95,7 +95,8 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(concurrency, 'workflow concurrency block exists');
   const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
   assert.ok(group, 'workflow concurrency group exists');
-  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m);
+  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}\r?$/m);
+  assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
   const context = (event, feature, tag = '') => ({
     github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event },
     inputs: { feature, tag },
