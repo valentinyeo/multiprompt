@@ -287,8 +287,16 @@ jobs:
         run: |
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }}
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload update restart proof
+        if: steps.paths.outputs.heavy == 'true' && always() && steps.rule.outputs.kind != 'STAMP'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: update-proof-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/update-proof/
+          if-no-files-found: error
 
   test-vps:
     name: test-vps (${{ matrix.group }})
