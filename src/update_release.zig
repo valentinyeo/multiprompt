@@ -5,7 +5,6 @@ const update_check = @import("update_check.zig");
 const APP_VERSION = @import("main.zig").APP_VERSION;
 
 pub const IGSH_246 = true;
-// IGSH-838: five minutes, so a new release reaches an app that is already open.
 const interval_ms = 5 * 60 * 1000;
 pub const WM_RESPONSIVE = 0x85F4;
 var launch_args: []const []const u8 = &.{};
