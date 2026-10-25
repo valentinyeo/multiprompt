@@ -77,6 +77,7 @@ test('IGSH-813 extends the existing Windows journey through every new-message tr
     assert.ok(driver.includes("Shot '" + shot + "'"));
     assert.ok(oracle.includes(shot + '.png'));
   }
-  const map = read('.claude/skills/verify-multiprompt/features/chat-new-messages.md');
+  const map = read('.claude/skills/verify-multiprompt/features/chat-messages-only.md');
   assert.match(map, /feature=chat-messages-only/);
+  assert.match(map, /unread pill above the composer/);
 });

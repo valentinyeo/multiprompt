@@ -5,11 +5,14 @@
 - Tool/activity blocks never paint ticks, summaries, details, diffs or images and reserve no height or surrounding gap.
 - The transcript cache still contains all twelve completed calls and results, including the three reported app-smoke/status summaries.
 - Real message rectangles and pixels stay unchanged when those calls stream in. The existing composer draft remains editable and unchanged.
+- A centered compact pill above the composer counts new messages that arrive while the reader is scrolled up, with a down arrow, the full count and a separate close control. It reserves its own row outside the transcript, above the working/permission row.
+- Only new transcript message starts count. Initial loads, older pages, repeated refreshes, streamed continuations, Markdown blocks and tool activity never count.
+- Ordinary scrolling retains the count until the existing bottom threshold is reached. Reaching bottom clears it; clicking the pill follows the existing End-key scroll path and clears it; close hides the pill without clearing the counter. There is no setting, flag, shortcut or palette command.
 - Native layout regressions cover leading, interleaved and trailing tools, all statuses, expanded details/diffs, incremental layout reuse, message copying, scroll coordinates and unchanged source data.
 
 ## How to get to it (user POV)
 
-Open a conversation in Chat View with Alt+C. Assistant messages remain; tool activity does not appear.
+Open a conversation in Chat View with Alt+C. Assistant messages remain; tool activity does not appear. Scroll up and let messages arrive to see the unread pill above the composer; click it to jump to the newest message or its close control to dismiss it. The unread pill has no setting of its own.
 
 IGSH-816 adds the CLEAN chat view option: the Ctrl+K entry `Chat View: Toggle CLEAN chat` hides read receipts, outbox status rows (including "Queued in Claude" chips), the status footer and empty/history status lines, so only message bubbles and the working indicator remain. It is off by default, persists across restarts, has no keyboard shortcut, and leaves the view unchanged when off.
 

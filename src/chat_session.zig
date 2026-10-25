@@ -4,6 +4,8 @@ const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
+const chatNewMessagesChanged = @import("chat_composer.zig").chatNewMessagesChanged;
+const chatScrollStateChanged = @import("chat_render.zig").chatScrollStateChanged;
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const chat_transcript = @import("chat_transcript.zig");
@@ -867,7 +869,7 @@ pub fn chatFileOnReady() void {
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
-                @import("chat_composer.zig").chatNewMessagesChanged(had_messages);
+                chatNewMessagesChanged(had_messages);
             }
             entry.before = 0;
             if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
@@ -1241,7 +1243,7 @@ pub fn refreshChatTranscript(force: bool) void {
     const anchor_offset = if (app_state.g_chat_prepend_pending) 0 else if (anchor) |p| p.offset else 0;
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_scroll_y, follow_bottom, anchor_top, anchor_offset);
-    @import("chat_render.zig").chatScrollStateChanged(viewport_h);
+    chatScrollStateChanged(viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
@@ -1251,7 +1253,7 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
-    @import("chat_render.zig").chatScrollStateChanged(viewport_h);
+    chatScrollStateChanged(viewport_h);
 }
 
 pub fn chatLatestAgentReply(out: []u16) usize {

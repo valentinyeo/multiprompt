@@ -136,7 +136,7 @@ function Click-NewMessages([bool]$Close) {
     if (-not $v -or $v.visible -ne 1) { throw 'New-message pill is not visible' }
     $x = if ($Close) { [int]($v.right - ($v.bottom - $v.top) / 2) } else { [int](($v.left + $v.right) / 2) }
     $actions.Add(@{case=$plan.name; input='click new messages'; close=$Close; x=$x; y=[int](($v.top + $v.bottom) / 2)})
-    [ChatDeliveryDesktop]::ClickClient($main, $app.Id, $x, [int](($v.top + $v.bottom) / 2))
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, [int](($v.top + $v.bottom) / 2))
 }
 function Type-Composer([string]$Text) {
     [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })

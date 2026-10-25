@@ -85,7 +85,7 @@ public static class ChatDeliveryDesktop {
         if (!ClientToScreen(hwnd, ref point)) throw new InvalidOperationException("ClientToScreen failed");
         return point;
     }
-    public static void ClickClient(IntPtr hwnd, uint pid, int x, int y) {
+    public static void PressClient(IntPtr hwnd, uint pid, int x, int y) {
         if (Owner(hwnd) != pid) throw new InvalidOperationException("Click owner mismatch");
         var point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Click target is not the owned HWND");

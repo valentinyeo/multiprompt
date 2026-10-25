@@ -186,6 +186,7 @@ const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
 const chatComposerFocusAllowed = @import("chat_composer.zig").chatComposerFocusAllowed;
 const chatPaletteToggleKeyDown = @import("chat_composer.zig").chatPaletteToggleKeyDown;
 const postPaletteToggle = @import("chat_composer.zig").postPaletteToggle;
+const chatNewMessagesChanged = @import("chat_composer.zig").chatNewMessagesChanged;
 const ensureChatFont = @import("chat_composer.zig").ensureChatFont;
 const chatListMarkerLen = @import("chat_capture.zig").chatListMarkerLen;
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
@@ -1781,7 +1782,7 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
     const had_messages = app_state.g_chat_new_messages.count() != 0;
     app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
-    @import("chat_composer.zig").chatNewMessagesChanged(had_messages);
+    chatNewMessagesChanged(had_messages);
 }
 
 pub fn chatJumpToNewest() void {
