@@ -1,11 +1,14 @@
 name: Verify desktop
-run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
+run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' || 'appearance') }} ${{ inputs.tag || github.head_ref || github.ref_name }}
 
 on:
+  push:
+    branches: [master]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       feature:
-        description: Feature map file stem in .claude/skills/verify-multiprompt/features
+        description: Feature map file stem in .claude/skills/verify-multiprompt/features, or all for the full matrix
         required: true
         default: appearance
         type: string
@@ -15,8 +18,13 @@ on:
         type: string
   pull_request:
     paths:
+      - '**'
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
+      - .github/workflows/auto-revert-master.yml
+      - .github/required-checks.txt
+      - tools/auto-revert-master.js
+      - tools/auto-revert-master.test.js
       - tools/verify-multiprompt.test.js
       - tools/chat-sync-audit.py
       - tools/chat-sync-audit.test.py
@@ -126,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance", "chat-dictation", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
     env:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
@@ -139,7 +147,8 @@ jobs:
           fetch-depth: 0
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
-      - name: Check workspace focus journey contract
+      - name: Check auto-revert decision contracts
+        run: node --test tools/auto-revert-master.test.js      - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
