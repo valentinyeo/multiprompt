@@ -971,7 +971,7 @@ fn otherZigShellEnum(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     return 0;
 }
 
-fn hasOtherZigShellWindows() bool {
+pub fn hasOtherZigShellWindows() bool {
     var ctx = OtherZigShellCtx{ .current = app_state.g_main_hwnd, .found = false };
     _ = EnumWindows(&otherZigShellEnum, @bitCast(@intFromPtr(&ctx)));
     return ctx.found;
@@ -1056,7 +1056,6 @@ pub fn rememberOpenWorkspaceForQuit() void {
 }
 
 pub fn quitAllZigShellWindows(hwnd: HANDLE) void {
-    if (@import("archive.zig").rejectPinnedCloseAll()) return;
     rememberOpenWorkspaceForQuit();
     var ctx = ZigShellWindowList{
         .current = hwnd,

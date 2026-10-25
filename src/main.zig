@@ -2884,7 +2884,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_QUIT_ALL => {
-            if (@import("archive.zig").rejectPinnedCloseAll()) return 0;
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
             _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -7758,7 +7757,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CLOSE => {
             if (app_state.g_app_closing) return 0;
-            if (@import("archive.zig").rejectPinnedCloseAll()) return 0;
+            if (@import("archive.zig").anyPinnedSession() and !@import("console.zig").hasOtherZigShellWindows()) app_state.g_quit_all_in_progress = true;
+            if (!app_state.g_quit_all_in_progress and @import("archive.zig").rejectPinnedCloseAll()) return 0;
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
@@ -8382,7 +8382,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
     return false;
 }
 
-fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session, group_close, workspace_close, close_all, inbox_archive }) !void {
+fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session, group_close, workspace_close, inbox_archive }) !void {
     const old_shells = app_state.shells[0..2].*;
     const old_count = app_state.shell_count;
     const old_active = app_state.active_shell;
@@ -8445,7 +8445,6 @@ fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session,
         .end_session => endTmuxSessionAt(1),
         .group_close => @import("rename.zig").runGroupPaletteAction(null, 0, 4),
         .workspace_close => closeMyWorkspaceSlot(0),
-        .close_all => quitAllZigShellWindows(null),
     }
     try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
     try std.testing.expectEqualDeep(before, app_state.shells[0..2].*);
@@ -8480,10 +8479,6 @@ test "IGSH-820 pinned tab refuses group close atomically" {
 
 test "IGSH-820 pinned tab refuses workspace close atomically" {
     try expectPinnedActionRefused(.workspace_close);
-}
-
-test "IGSH-820 pinned tab refuses close-all atomically" {
-    try expectPinnedActionRefused(.close_all);
 }
 
 test "IGSH-820 pinned tab refuses Inbox archive" {
