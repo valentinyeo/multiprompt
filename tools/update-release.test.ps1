@@ -76,7 +76,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
@@ -109,7 +109,9 @@ try {
             $env:MULTIPROMPT_NO_LOGIN = '1'
             $env:ZIGSHELL_DEBUG = '1'
             try {
-                $cardProcess = Start-Process $cardExe -ArgumentList "--name Update --update-ready $cardEventName" -PassThru
+                $sessionPath = Join-Path $env:APPDATA 'ZigShell/session.json'
+                [IO.File]::WriteAllText($sessionPath, '{"tabs":[{"kind":"cmd","name":"Restart proof"}],"active_tab":0}')
+                $cardProcess = Start-Process $cardExe -ArgumentList "--update-ready $cardEventName" -PassThru
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
@@ -138,8 +140,71 @@ try {
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
                 $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
                 Passed 'update card shows aggregated plain notes'
+                $versionMatch = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verifier)), 'MPVERSION=(\d+\.\d+\.\d+);')
+                Assert $versionMatch.Success 'Native verifier version marker missing'
+                $oldVersion = $versionMatch.Groups[1].Value
+                $newVersion = '9.99.' + ('9' * ($oldVersion.Length - 5))
+                Assert ($newVersion.Length -eq $oldVersion.Length) 'Native update fixture version length differs'
+                $native = [IO.File]::ReadAllBytes($Verifier)
+                $needle = [Text.Encoding]::ASCII.GetBytes($oldVersion)
+                $replacement = [Text.Encoding]::ASCII.GetBytes($newVersion)
+                $replacements = 0
+                for ($offset = 0; $offset -le $native.Length - $needle.Length; $offset++) {
+                    if ($native[$offset] -ne $needle[0]) { continue }
+                    $same = $true
+                    for ($j = 1; $j -lt $needle.Length; $j++) { if ($native[$offset + $j] -ne $needle[$j]) { $same = $false; break } }
+                    if ($same) { [Array]::Copy($replacement, 0, $native, $offset, $replacement.Length); $replacements++ }
+                }
+                Assert ($replacements -gt 0) 'Native update fixture version was not changed'
+                Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
+                Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
+                [IO.File]::WriteAllBytes($cardExe, $native)
+                $deadline = [DateTime]::UtcNow.AddSeconds(15)
+                do {
+                    $cardLog = Get-Content $log -Raw
+                    if ($cardLog.Contains('update-card: new version ready ' + $newVersion)) { break }
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Installed update was not offered on the card' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                Start-Sleep -Milliseconds 300
+                $buttons = [regex]::Matches((Get-Content $log -Raw), '\[update\] restart button=(\d+),(\d+)')
+                Assert ($buttons.Count -gt 0) 'Restart button coordinates were not painted'
+                $button = $buttons[$buttons.Count - 1]
+                $click = [IntPtr](([int]$button.Groups[2].Value -shl 16) -bor [int]$button.Groups[1].Value)
+                $inboxPath = Join-Path $env:APPDATA 'ZigShell/inbox-default.json'
+                Remove-Item -LiteralPath $inboxPath -Force -ErrorAction SilentlyContinue
+                $restartTimer = [Diagnostics.Stopwatch]::StartNew()
+                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x201, [IntPtr]1, $click)) 'Restart button press failed'
+                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x202, [IntPtr]0, $click)) 'Restart button release failed'
+                Assert ($cardProcess.WaitForExit(15000)) 'Restart card did not close the old app'
+                $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                do {
+                    $restored = @(Get-Process | Where-Object {
+                        try { $processPath = $_.Path; $processPath -ieq $cardExe -and $_.MainWindowTitle.Contains($newVersion) } catch { $false }
+                    })
+                    if ($restored.Count -eq 1 -and (Test-Path $inboxPath)) {
+                        try {
+                            $inbox = Get-Content $inboxPath -Raw | ConvertFrom-Json
+                            if ($inbox.hwnd -eq $restored[0].MainWindowHandle.ToInt64().ToString() -and @($inbox.shells | Where-Object { $_.name -ceq 'Restart proof' }).Count -eq 1) { break }
+                        } catch {}
+                    }
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Restart did not reopen the new native app with its session restored' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                $saved = Get-Content $sessionPath -Raw | ConvertFrom-Json
+                Assert (@($saved.tabs | Where-Object { $_.name -ceq 'Restart proof' }).Count -eq 1) 'Restart lost or duplicated the saved session'
+                Assert ([UpdateProof]::GetWindowRect($restored[0].MainWindowHandle, [ref]$rectangle)) 'Restored window unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($restored[0].MainWindowHandle, $dc, 2)) 'Restart screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-restarted.png')) } finally { $bitmap.Dispose() }
+                @{ oldVersion = $oldVersion; newVersion = $newVersion; seconds = $restartTimer.Elapsed.TotalSeconds; session = 'Restart proof'; process = $restored[0].Id } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-restarted.json')
+                Passed 'restart card reopens newer native app with session restored'
             } finally {
                 if ($cardProcess -and -not $cardProcess.HasExited) { $cardProcess.Kill(); $cardProcess.WaitForExit() }
+                Stop-FixtureApps
+                Remove-Item -LiteralPath $sessionPath, "$sessionPath.bak" -Force -ErrorAction SilentlyContinue
                 $cardEvent.Dispose()
                 $cardMutex.ReleaseMutex()
                 $cardMutex.Dispose()

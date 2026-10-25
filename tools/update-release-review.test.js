@@ -48,7 +48,7 @@ test('R6 accepted event occurs before waiting on background download lock', () =
   assert.ok(ps.indexOf('$accepted.Set()') < ps.indexOf('$mutex.WaitOne('));
   assert.doesNotMatch(body(read('src/update_release.zig'), 'pub fn restart(', 'pub fn runHelperIfRequested'), /!hasStaged\(\)/);
   const card = read('src/update_card.zig');
-  assert.match(card, /release_ready or update_release\.hasStaged\(\)/);
+  assert.match(card, /!installed_ready and !update_release\.hasStaged\(\) and update_release\.checking\(\)/);
   assert.match(card, /Update still downloading\. Will restart when ready\./);
   assert.match(card, /restart_after_download and !update_release\.checking\(\)/);
   assert.match(card, /restart_after_download = false;\s*updateCardRelaunch/);
