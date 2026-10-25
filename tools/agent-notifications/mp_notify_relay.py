@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from concurrent.futures import ThreadPoolExecutor
 import errno
+import hmac
 import json
 import os
 from pathlib import Path
 import select
 import socket
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -19,8 +21,18 @@ PROBE_TIMEOUT = 0.4
 MAX_PROBE_REPLY = 4096
 ROUTE_CACHE_TTL = 5
 MAX_CACHED_ROUTES = 1024
+NOTIFY_TOKEN = b""
 route_cache = {}
 route_cache_lock = threading.Lock()
+
+
+def load_token():
+    token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
+    if not token:
+        token = subprocess.run([str(Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
+    if not token:
+        raise ValueError("Notify relay token unavailable")
+    return token.encode("utf-8")
 
 
 def socket_dir():
@@ -72,9 +84,10 @@ def listening(path):
 def read_message(conn):
     conn.settimeout(0.2)
     data = bytearray()
+    wire_size = MAX_MESSAGE + len(NOTIFY_TOKEN) + len(b"AUTH::")
     try:
-        while len(data) < MAX_MESSAGE:
-            chunk = conn.recv(min(4096, MAX_MESSAGE - len(data)))
+        while len(data) < wire_size:
+            chunk = conn.recv(min(4096, wire_size - len(data)))
             if not chunk:
                 break
             data.extend(chunk)
@@ -174,6 +187,11 @@ def handle(client, directory):
             message = read_message(client)
             if not message:
                 return
+            prefix, separator, authenticated = message.partition(b":")
+            token, separator, message = authenticated.partition(b":")
+            if (prefix != b"AUTH" or not separator or not NOTIFY_TOKEN
+                    or not hmac.compare_digest(token, NOTIFY_TOKEN)):
+                return
             paths = sockets(directory)
             if message.startswith(b"ZSB:"):
                 session = message.split(b":", 2)[1]
@@ -253,6 +271,11 @@ if __name__ == "__main__":
 
     directory = socket_dir()
     if not prepare_directory(directory):
+        sys.exit(UNSAFE_DIRECTORY)
+    try:
+        NOTIFY_TOKEN = load_token()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        print("Notify relay token unavailable", file=sys.stderr)
         sys.exit(UNSAFE_DIRECTORY)
     try:
         start_sender(directory)

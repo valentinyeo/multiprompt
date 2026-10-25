@@ -192,7 +192,7 @@ async function remoteDeadline(t, drip) {
   const started = Date.now();
   const result = await new Promise((resolve, reject) => {
     const child = spawn('bash', [wrapper, 'active-tab'], {
-      env: { ...process.env, TMUX: '', ZSB_SESSION: 'deadline-fixture', ZSB_PORT: String(server.address().port), ZSB_TIMEOUT_SECONDS: '0.15' },
+      env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'deadline-fixture', ZSB_PORT: String(server.address().port), ZSB_TIMEOUT_SECONDS: '0.15' },
     });
     const kill = setTimeout(() => child.kill('SIGKILL'), 3000);
     let stdout = '', stderr = '';
@@ -321,14 +321,14 @@ async function run(args, timeout, respond = () => {}, budget = Number(timeout)) 
     socket.on('close', () => sockets.delete(socket));
     socket.once('data', data => {
       const wire = data.toString();
-      assert.match(wire, /^ZSB:deadline-fixture:/);
-      requests.push(Buffer.from(wire.trim().split(':')[2], 'base64').toString().split('\x1f').slice(0, -1));
+      assert.match(wire, /^AUTH:relay-test-token:ZSB:deadline-fixture:/);
+      requests.push(Buffer.from(wire.trim().split(':')[4], 'base64').toString().split('\x1f').slice(0, -1));
       const cleanup = respond(socket);
       if (cleanup) cleanups.push(cleanup);
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const env = { ...process.env, TMUX: '', ZSB_SESSION: 'deadline-fixture', ZSB_PORT: String(server.address().port) };
+  const env = { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'deadline-fixture', ZSB_PORT: String(server.address().port) };
   if (timeout === undefined) delete env.ZSB_TIMEOUT;
   else env.ZSB_TIMEOUT = timeout;
   const started = performance.now();

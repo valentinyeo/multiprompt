@@ -276,7 +276,7 @@ test('wrapper and generic app forwarding carry extension-reload, native host ann
         wire += chunk;
         if (!wire.endsWith('\n')) return;
         try {
-          const match = /^ZSB:fixture:(.*)\n$/.exec(wire);
+          const match = /^AUTH:relay-test-token:ZSB:fixture:(.*)\n$/.exec(wire);
           assert.ok(match);
           const args = Buffer.from(match[1], 'base64').toString().split('\x1f').slice(0, -1);
           assert.deepEqual(args, ['extension-reload']);
@@ -289,7 +289,7 @@ test('wrapper and generic app forwarding carry extension-reload, native host ann
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const child = spawn('bash', [path.join(root, 'tools/vps-multiprompt-browser.sh'), 'extension-reload'], {
-      env: { ...process.env, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(server.address().port) },
+      env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(server.address().port) },
     });
     let output = '';
     child.stdout.on('data', chunk => output += chunk);

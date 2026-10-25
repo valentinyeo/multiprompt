@@ -161,7 +161,7 @@ test('explicit --tab survives transport and retries a non-owning instance, not a
         wire += chunk;
         if (!wire.endsWith('\n')) return;
         try {
-          const match = /^ZSB:fixture:(.*)\n$/.exec(wire);
+          const match = /^AUTH:relay-test-token:ZSB:fixture:(.*)\n$/.exec(wire);
           assert.ok(match);
           const args = Buffer.from(match[1], 'base64').toString().split('\x1f').slice(0, -1);
           const [commandLine, request] = native('app-command', ...args).split('\n');
@@ -189,7 +189,7 @@ test('explicit --tab survives transport and retries a non-owning instance, not a
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     for (const args of [['text', '--tab', String(tabId)], ['eval', 'document.title', '--tab', String(tabId)]]) {
       const child = spawn('bash', [path.join(root, 'tools/vps-multiprompt-browser.sh'), ...args], {
-        env: { ...process.env, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(server.address().port) },
+        env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(server.address().port) },
       });
       let stdout = '', stderr = '';
       child.stdout.on('data', chunk => stdout += chunk);

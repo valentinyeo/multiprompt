@@ -232,14 +232,14 @@ test('extension replies include the actual loaded manifest version', () => {
 async function wrapperTabs(reply) {
   const server = net.createServer(socket => socket.once('data', data => {
     const wire = data.toString();
-    assert.match(wire, /^ZSB:remote-3:/);
-    const args = Buffer.from(wire.trim().split(':')[2], 'base64').toString();
+    assert.match(wire, /^AUTH:relay-test-token:ZSB:remote-3:/);
+    const args = Buffer.from(wire.trim().split(':')[4], 'base64').toString();
     assert.equal(args, 'tabs\x1f');
     socket.end(JSON.stringify(reply));
   }));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const child = spawn('bash', [wrapper, 'tabs'], { env: { ...process.env, TMUX: '', ZSB_SESSION: 'remote-3', ZSB_PORT: String(server.address().port) } });
+    const child = spawn('bash', [wrapper, 'tabs'], { env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'remote-3', ZSB_PORT: String(server.address().port) } });
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => stdout += chunk);
     child.stderr.on('data', chunk => stderr += chunk);
