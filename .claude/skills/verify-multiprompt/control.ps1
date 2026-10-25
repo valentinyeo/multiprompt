@@ -3390,7 +3390,8 @@ try {
                 Save-Json @{ pixels = $hidden; session = Read-Session; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-collapsed.json'
                 Doctor
                 Record 'Click the same headline to restore its member sessions'
-                [VerifyNative]::ClickClient($script:window, $clickX, $clickY)
+                Start-Sleep -Milliseconds 700
+                [VerifyNative]::ClickClient($script:window, ($clickX + 24), $clickY)
                 Wait-Until {
                     $state = Read-Session
                     $savedGroup = @($state.groups | Where-Object { $_.id -eq $group.id })
