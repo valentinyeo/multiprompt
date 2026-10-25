@@ -53,6 +53,9 @@ const ChangelogEntry = struct {
     items: []const ChangelogBullet = &.{},
 };
 pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.868", .items = &.{
+        .{ .text = "Press Ctrl+D or click the microphone in Chat View to dictate, then press Enter, Ctrl+D, or the microphone again to put your words in the message box.", .ticket = "IGSH-812" },
+    } },
     .{ .ver = "0.28.867", .items = &.{
         .{ .text = "The usage numbers in the bottom left now sit on plain black with no border.", .ticket = "IGSH-830" },
         .{ .text = "Every number and label in that badge is white.", .ticket = "IGSH-830" },
