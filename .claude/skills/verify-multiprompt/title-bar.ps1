@@ -25,7 +25,7 @@ foreach ($mode in @('restored', 'maximized')) {
     $previousConnection = $pane.browser_connection_id
     $browser = [VerifyNative]::PaneWindow($script:window)
     Wait-Until { [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } 'caption browser masks visible' 10
-    foreach ($theme in @('light', 'amoled')) {
+    foreach ($theme in @('dark', 'light', 'amoled')) {
         Select-Theme $theme ('caption-' + $mode + '-' + $theme + '-theme')
         [VerifyNative]::MoveMouseClient($script:window, 100, 200, $false)
         Wait-Until { [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } 'caption masks refreshed after app theme change' 10
@@ -62,7 +62,8 @@ foreach ($mode in @('restored', 'maximized')) {
     }
 }
 foreach ($proof in $proofs) {
-    if ($proof.appTheme -eq 'amoled') { [CaptionProof]::Check($proof.pixels) } else {
+    [CaptionProof]::CheckFrame($proof.pixels)
+    if ($proof.appTheme -eq 'amoled') { [CaptionProof]::Check($proof.pixels) } elseif ($proof.appTheme -eq 'light') {
         $color = $proof.pixels['appMaskColor']
         if ($color[0] -lt 235 -or $color[1] -lt 235 -or $color[2] -lt 235) { throw 'IGSH-845 caption-facing mask did not refresh to app Light' }
     }

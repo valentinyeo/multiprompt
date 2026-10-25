@@ -123,6 +123,24 @@ public static class CaptionProof {
             Color apron = actual.GetPixel(sampleX - geometry[0], apronTop - geometry[1]);
             Color chrome = actual.GetPixel(maskRect[0] - (int)Math.Ceiling(4 * scale) - geometry[0], browser[1] + (int)(12 * scale) - geometry[1]);
             Color interior = actual.GetPixel(sampleX - geometry[0], browser[1] + (int)(12 * scale) - geometry[1]);
+            int framePixels = 0, frameMismatches = 0;
+            int referenceX = maskRect[0] - (int)Math.Ceiling(4 * scale);
+            int referenceY = maskRect[3] + (int)Math.Ceiling(8 * scale);
+            for (int y = browser[1]; y < browser[1] + (int)(3 * scale); y++) {
+                Color expected = actual.GetPixel(referenceX - geometry[0], y - geometry[1]);
+                for (int x = maskRect[0]; x < browser[2] - (int)Math.Ceiling(24 * scale); x++) {
+                    framePixels++;
+                    if (Delta(expected, actual.GetPixel(x - geometry[0], y - geometry[1])) > 8) frameMismatches++;
+                }
+            }
+            for (int x = browser[2] - (int)(6 * scale); x < Math.Min(maskRect[2], geometry[2]); x++) {
+                Color expected = actual.GetPixel(x - geometry[0], referenceY - geometry[1]);
+                for (int y = browser[1] + (int)Math.Ceiling(20 * scale); y < maskRect[3]; y++) {
+                    framePixels++;
+                    if (Delta(expected, actual.GetPixel(x - geometry[0], y - geometry[1])) > 8) frameMismatches++;
+                }
+            }
+            proof["framePixels"] = framePixels; proof["frameMismatches"] = frameMismatches;
             proof["captionRect"] = new int[] { left, top, right, bottom };
             proof["glyphBoundsAndAreas"] = glyphs;
             proof["captionMismatches"] = mismatches; proof["nonBlackBackgroundPixels"] = nonBlack; proof["greyBandPixels"] = greyBandPixels;
@@ -136,6 +154,9 @@ public static class CaptionProof {
             proof["tolerance"] = 8; proof["geometry"] = geometry; proof["browserRect"] = browser; proof["maskRects"] = masks;
         }
         return proof;
+    }
+    public static void CheckFrame(Dictionary<string, object> proof) {
+        Require((int)proof["framePixels"] > 0 && (int)proof["frameMismatches"] == 0, "IGSH-858 controls cover overlaps the surrounding browser frame");
     }
     public static void Check(Dictionary<string, object> proof) {
         var glyphs = (List<int[]>)proof["glyphBoundsAndAreas"];

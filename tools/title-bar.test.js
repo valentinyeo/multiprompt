@@ -26,7 +26,7 @@ test('IGSH-845 dispatch uses six real monitor DPI and Chrome theme cases with se
 
 test('IGSH-845 compares app caption against the same native set in both window modes after live theme changes', () => {
   assert.match(journey, /foreach \(\$mode in @\('restored', 'maximized'\)\)/);
-  assert.match(journey, /foreach \(\$theme in @\('light', 'amoled'\)\)/);
+  assert.match(journey, /foreach \(\$theme in @\('dark', 'light', 'amoled'\)\)/);
   assert.match(journey, /PaneWindow\(\$script:window\) -ne \$browser/);
   assert.match(journey, /Save-Json \$proofs 'caption-pixels.json'/);
   assert.match(native, /glyphs.Count == 3/);
@@ -49,4 +49,11 @@ test('IGSH-845 the identical pixel oracle rejects added faint duplicate glyphs a
   assert.match(journey, /try \{ \[CaptionProof\]::Check\(\$negative\) \} catch/);
   assert.match(journey, /if \(-not \$rejected\) \{ throw/);
   assert.match(journey, /Exception.Message -notmatch 'caption doubled-pixel signature or non-black band'/);
+});
+
+test('IGSH-858 frame proof compares top and right bands with adjacent unobscured frame pixels in every theme', () => {
+  assert.match(native, /referenceX = maskRect\[0\] -/);
+  assert.match(native, /referenceY = maskRect\[3\] \+/);
+  assert.match(native, /frameMismatches"\] == 0/);
+  assert.match(journey, /CaptionProof\]::CheckFrame\(\$proof.pixels\)/);
 });
