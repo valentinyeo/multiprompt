@@ -4337,9 +4337,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         0x0215, 0x001F => {
             const table_dragging = chat_table_drag != null;
+            const scroll_dragging = chat_scroll_drag != null;
             chat_table_drag = null;
             chat_scroll_drag = null;
-            if (msg == 0x001F and table_dragging) _ = ReleaseCapture();
+            if (msg == 0x001F and (table_dragging or scroll_dragging)) _ = ReleaseCapture();
             app_state.g_chat_sel_dragging = false;
             _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
             return DefWindowProcW(hwnd, msg, wp, lp);
@@ -4377,6 +4378,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDBLCLK => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
                 chatImageReady();
