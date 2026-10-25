@@ -164,6 +164,16 @@ pub fn build(b: *std.Build) void {
     const install_listener_helper = b.addInstallArtifact(listener_helper, .{ .dest_sub_path = "local-listener-helper.exe" });
     b.step("local-listener-helper", "Build the local listener account test helper").dependOn(&install_listener_helper.step);
 
+    const clean_chat_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"IGSH-816 CLEAN"},
+    });
+    const run_clean_chat_tests = std.Build.Step.Run.create(b, "run CLEAN chat pixel tests");
+    if (b.graph.host.result.os.tag != .windows) run_clean_chat_tests.addArg("wine");
+    run_clean_chat_tests.addArtifactArg(clean_chat_tests);
+    run_clean_chat_tests.has_side_effects = true;
+    b.step("test-clean-chat", "Run every CLEAN chat pixel test with visible results").dependOn(&run_clean_chat_tests.step);
+
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
     const main_test_step = b.step("test-main", "Run desktop module tests");
