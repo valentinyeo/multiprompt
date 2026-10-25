@@ -146,7 +146,7 @@ const rememberLastPasteText = @import("clipboard.zig").rememberLastPasteText;
 const DICTATION_SAMPLE_RATE = @import("app_state.zig").DICTATION_SAMPLE_RATE;
 const DICTATION_CHUNK_BYTES = @import("app_state.zig").DICTATION_CHUNK_BYTES;
 const DICTATION_BUFFER_COUNT = @import("app_state.zig").DICTATION_BUFFER_COUNT;
-const DICTATION_MAX_BYTES = @import("app_state.zig").DICTATION_MAX_BYTES;
+const dictation_audio = @import("dictation_audio.zig");
 const pcmFrameRms = @import("app_state.zig").pcmFrameRms;
 const vadStep = @import("app_state.zig").vadStep;
 const DictationHttpResult = @import("app_state.zig").DictationHttpResult;
@@ -1555,16 +1555,17 @@ fn readDictationFixture(name: []const u8, out: []u8) usize {
     return @import("file_io.zig").win32ReadAll(handle, out);
 }
 
-fn captureDictationPcm(out: []u8) usize {
+fn captureDictationPcm(audio: *dictation_audio.Audio) void {
     if (dictationFixtureEnabled()) {
-        const n = readDictationFixture("goforward.pcm", out);
+        const n = readDictationFixture("goforward.pcm", audio.buf);
+        audio.len = n;
         dictationAudit("fixture-audio-bytes", n);
         while (app_state.g_dictation_recording.load(.acquire)) Sleep(1);
-        return n;
+        return;
     }
 
     const event = CreateEventW(null, 0, 0, null);
-    if (event == null) return 0;
+    if (event == null) return;
     defer _ = CloseHandle(event);
 
     const fmt = WAVEFORMATEX{
@@ -1578,7 +1579,7 @@ fn captureDictationPcm(out: []u8) usize {
     };
 
     var hw: HWAVEIN = null;
-    if (waveInOpen(&hw, WAVE_MAPPER, &fmt, @intFromPtr(event), 0, CALLBACK_EVENT) != 0 or hw == null) return 0;
+    if (waveInOpen(&hw, WAVE_MAPPER, &fmt, @intFromPtr(event), 0, CALLBACK_EVENT) != 0 or hw == null) return;
     defer _ = waveInClose(hw);
 
     var buffers: [DICTATION_BUFFER_COUNT][DICTATION_CHUNK_BYTES]u8 = undefined;
@@ -1587,26 +1588,24 @@ fn captureDictationPcm(out: []u8) usize {
         headers[i] = std.mem.zeroes(WAVEHDR);
         headers[i].lpData = &buffers[i];
         headers[i].dwBufferLength = DICTATION_CHUNK_BYTES;
-        if (waveInPrepareHeader(hw, &headers[i], @sizeOf(WAVEHDR)) != 0) return 0;
-        if (waveInAddBuffer(hw, &headers[i], @sizeOf(WAVEHDR)) != 0) return 0;
+        if (waveInPrepareHeader(hw, &headers[i], @sizeOf(WAVEHDR)) != 0) return;
+        if (waveInAddBuffer(hw, &headers[i], @sizeOf(WAVEHDR)) != 0) return;
     }
 
     if (waveInStart(hw) != 0) {
         _ = waveInReset(hw);
         for (0..DICTATION_BUFFER_COUNT) |i| _ = waveInUnprepareHeader(hw, &headers[i], @sizeOf(WAVEHDR));
-        return 0;
+        return;
     }
 
-    var pos: usize = 0;
-    while (app_state.g_dictation_recording.load(.acquire) and pos < out.len) {
+    while (app_state.g_dictation_recording.load(.acquire)) {
         _ = WaitForSingleObject(event, 100);
         for (0..DICTATION_BUFFER_COUNT) |i| {
             if ((headers[i].dwFlags & WHDR_DONE) == 0) continue;
-            const n = @min(@as(usize, @intCast(headers[i].dwBytesRecorded)), out.len - pos);
+            const n: usize = @intCast(headers[i].dwBytesRecorded);
             if (n > 0 and headers[i].lpData != null) {
                 const src = headers[i].lpData.?[0..n];
-                @memcpy(out[pos .. pos + n], src);
-                pos += n;
+                if (!audio.append(std.heap.page_allocator, src)) app_state.g_dictation_recording.store(false, .release);
                 if (app_state.g_voice_listening_active.load(.acquire) and n >= 2) {
                     const samples = std.mem.bytesAsSlice(i16, src[0 .. n - (n % 2)]);
                     const frame_ms: u32 = @intCast((n * 1000) / (2 * DICTATION_SAMPLE_RATE));
@@ -1627,17 +1626,12 @@ fn captureDictationPcm(out: []u8) usize {
     _ = waveInStop(hw);
     _ = waveInReset(hw);
     for (0..DICTATION_BUFFER_COUNT) |i| {
-        if ((headers[i].dwFlags & WHDR_DONE) != 0 and pos < out.len) {
-            const n = @min(@as(usize, @intCast(headers[i].dwBytesRecorded)), out.len - pos);
-            if (n > 0 and headers[i].lpData != null) {
-                const src = headers[i].lpData.?[0..n];
-                @memcpy(out[pos .. pos + n], src);
-                pos += n;
-            }
+        if ((headers[i].dwFlags & WHDR_DONE) != 0) {
+            const n: usize = @intCast(headers[i].dwBytesRecorded);
+            if (n > 0 and headers[i].lpData != null) _ = audio.append(std.heap.page_allocator, headers[i].lpData.?[0..n]);
         }
         _ = waveInUnprepareHeader(hw, &headers[i], @sizeOf(WAVEHDR));
     }
-    return pos;
 }
 
 fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpResult {
@@ -1706,15 +1700,16 @@ fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpR
 
 fn dictationWorkerThread() void {
     crash_recorder.guardThread();
-    const audio = std.heap.page_allocator.alloc(u8, DICTATION_MAX_BYTES) catch {
+    var audio = dictation_audio.Audio.init(std.heap.page_allocator) catch {
         dictationSetErrorAscii("Dictation failed: out of memory");
         if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_DICTATION_READY, 0, 0);
         return;
     };
-    defer std.heap.page_allocator.free(audio);
+    defer audio.deinit(std.heap.page_allocator);
 
     app_state.g_dictation_capturing.store(true, .release);
-    const audio_len = captureDictationPcm(audio);
+    captureDictationPcm(&audio);
+    const audio_len = audio.len;
     app_state.g_dictation_capturing.store(false, .release);
     dictationAudit("audio-bytes", audio_len);
     if (app_state.g_dictation_cancelled.load(.acquire)) {
@@ -1728,7 +1723,7 @@ fn dictationWorkerThread() void {
     }
 
     var transcript_utf8: [8192]u8 = undefined;
-    const result = deepgramTranscribePcm(audio[0..audio_len], &transcript_utf8);
+    const result = deepgramTranscribePcm(audio.slice(), &transcript_utf8);
     dictationAudit("transcript-utf8-bytes", result.transcript_len);
     dictationAudit("http-status", @intCast(result.status));
     if (result.transcript_len == 0 or !dictationSetTranscriptUtf8(transcript_utf8[0..result.transcript_len])) {

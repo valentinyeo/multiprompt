@@ -1743,6 +1743,7 @@ fn composerText(buf: *[16400]u16) []const u16 {
 
 pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) void {
     if (!status.draft_known or app_state.g_chat_composer_hwnd == null or app_state.g_chat_draft_owner_len == 0) return;
+    if (app_state.g_dictation_draft_owner_len > 0 and app_state.g_dictation_running.load(.acquire)) return;
     if (@import("chat_session.zig").chatDeliveryPending(shell_id, true)) return;
     var composer: [16400]u16 = undefined;
     const text = composerText(&composer);
@@ -1837,6 +1838,7 @@ pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
         chat_draft_loading = false;
         _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, draft.len, @intCast(draft.len));
         chatComposerAutoGrow();
+        shell_draft.onComposerEdit(GetTickCount64());
     }
     chatDraftFlush();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
