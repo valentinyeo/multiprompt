@@ -43,9 +43,10 @@ function checkIncomingPaint(source) {
   assert.match(paint, /if \(row\.injected\) chatInjectedBubbleColor\(\) else chatUserBubbleColor\(\)/);
   assert.match(paint, /if \(row\.injected\) chatPaintTime\(hdc, .*\.role = \.injected, \.sender = row\.sender/);
   assert.match(paint, /const sender_h = if \(row\.injected\) uiScaled\(CHAT_STATUS_H\) else @as\(i32, 0\);/);
-  assert.match(paint, /rc\.bottom - status_h - sender_h/);
-  assert.match(paint, /if \(row\.injected\) \{\s*area\.top \+= status_h;\s*area\.bottom \+= status_h;/);
-  assert.match(paint, /Queued in Claude/);
+  assert.match(paint, /rc\.bottom - sender_h/);
+
+  assert.match(paint, /chatDimQueuedBubble\(hdc, bubble\)/);
+  assert.doesNotMatch(paint, /Queued in Claude/);
   assert.match(body(source, 'chatShellRowsLayout'), /if \(row\.injected\) rc\.bottom \+= uiScaled\(CHAT_STATUS_H\)/);
   assert.match(source, /chatPaintShellRow\(mem_dc, &g_shell_view\.rows\[g_shell_rect_row\[i\]\], rc\)/);
 }
@@ -58,7 +59,7 @@ test('IGSH-722 incoming queue notes cannot consume local outbox pending entries'
   checkPendingIsolation(sync);
 });
 
-test('IGSH-722 queued incoming paint reuses injected color and sender with separate queue status', () => {
+test('IGSH-722 queued incoming paint reuses injected color and sender without a queue caption', () => {
   checkIncomingPaint(render);
 });
 
@@ -68,6 +69,7 @@ test('IGSH-722 source oracles reject raw clipping, local matching, and own-bubbl
   assert.throws(() => checkIncomingPaint(render.replace('if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor()', 'chatUserBubbleColor()')));
   assert.throws(() => checkIncomingPaint(render.replace('.sender = row.sender', '.sender = @splat(0)')));
   assert.throws(() => checkIncomingPaint(render.replace('if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);', '')));
+  assert.throws(() => checkIncomingPaint(render.replace('    chatDimQueuedBubble(hdc, bubble);', '')));
 });
 
 test('IGSH-722 Zig regression cases cover long raw strings, decoded notes, tasks and pending isolation', () => {

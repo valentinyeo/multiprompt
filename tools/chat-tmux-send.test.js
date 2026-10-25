@@ -226,7 +226,8 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.doesNotMatch(settle, /chatTmuxSendStart|pasteText|sendEnterToShell/);
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
   assert.match(body('chatPaintEchoStatus'), /pendingLabel\(phase, link_down\)/);
-  assert.match(body('chatPaintEchoStatus'), /Queued in Claude/);
+  assert.doesNotMatch(body('chatPaintEchoStatus'), /Queued in Claude/);
+  assert.match(body('chatPaintEcho'), /e\.state == \.delivered\) chatDimQueuedBubble/);
   assert.doesNotMatch(body('chatPaintEchoStatus'), /Waiting to send|Waiting for transcript|Queued, session is busy/);
   assert.doesNotMatch(body('chatPaintEchoStatus'), /Delivered/);
 });
