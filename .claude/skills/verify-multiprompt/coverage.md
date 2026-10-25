@@ -128,3 +128,5 @@ Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684
 A change that alters a mapped feature updates its map and this table in the same PR.
 
 | IGSH-759 | Hide all Chat View activity rows without changing transcript data; tool-heavy composer/transcript screenshots and a pinned pre-fix red control | chat-messages-only | Run results and screenshot review are recorded in GATES.md; no local builds or tests |
+
+| IGSH-766 | Quiet group headlines without fills, rails or chevrons; headline clicks hide and restore members with saved collapse state. | group-rail | journey updated; GitHub Windows execution pending | This pass uses source checks only; run the identical driver on v0.28.861 for no-fill/no-rail/flush-left failures, then the branch for all four sidebar-headline markers. |

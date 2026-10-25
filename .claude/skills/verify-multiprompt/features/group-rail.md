@@ -1,38 +1,43 @@
-# Group rail
+# Group headlines
 
 ## Sub-features
 
-- Default groups retain a continuous gray rail beside their unselected sessions.
-- Each rail starts at its header bar's left edge, below the header, and ends at its last member's bottom edge.
-- Adjacent groups have separate rails; neither rail paints inside a header or another group's rows.
-- The rail never crosses the active session highlight or its border.
-- No rail extends into the ungrouped sessions below the last group.
+- Each expanded-sidebar group has a small, muted, left-aligned headline in the subtitle font, with no fill, colored rail or chevron.
+- The sidebar background remains visible across both edges of each headline row.
+- Sessions retain their existing indentation, icons, highlights and row heights beneath the headline; adjacent groups and ungrouped sessions remain separate.
+- Clicking the headline uses the existing group collapse action: members disappear and return, and the same collapsed memory is saved.
+- Group color choices, right-click palette, rename, drag and drop, Ctrl+G and collapsed-sidebar mode are unchanged.
 
 ## How to get to it (user POV)
 
 - Ctrl+K `new cmd` creates another session.
 - Ctrl+K `move to group`, then `new group`, creates a group for the active session.
 - Select another session, use Move to Group and choose the saved group name.
-- Ctrl+1 and Ctrl+2 select the first group's sessions without changing their membership.
+- Click the group headline once to hide its sessions, then again to show them.
 
 ## Driving it with control.ps1
 
-Dispatch `gh workflow run verify.yml --ref <branch> -f feature=group-rail`. The pull-request matrix also runs this journey. Use `-f tag=v0.28.822` for the left-edge/header-crossing negative control, then omit tag to verify the branch build with the identical driver. The earlier `v0.28.819` release also provides the selected-highlight negative control.
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=group-rail`. The journey name and pull-request matrix entry stay unchanged. Run the identical branch driver with `-f tag=v0.28.861` as the negative control, then omit the tag for the branch build.
 
-1. Launch the isolated real Windows app, pass Doctor, choose Dark through Themes and select Tab Order: Manual through Ctrl+K `tab order`, Down, Enter before creating another session. This existing setting keeps session indices aligned with visible rows. Print `group-rail verified release tag=... version=...` and retain checksum/version provenance in build.json.
-2. Rename the original CMD to Rail A through F2, create a second real CMD session through Ctrl+K and rename it Rail B. Create a group for it through Move to Group, keep its default name, select the original session with Ctrl+1 and move it into the same group through the palette. Create four more real CMD sessions named Rail C through Rail F. Create a second group for Rail C and move Rail D into it. Require exactly two groups with two members each and six sessions, with Rail E and Rail F ungrouped; never seed app data. Manual ordering places the two groups back to back, followed by the ungrouped rows.
-3. Select each first-group session in turn with Ctrl+1 and Ctrl+2. Require the persisted active tab, then capture group-rail-selected-0.png and group-rail-selected-1.png, UIA and native focus evidence. Short synthetic names keep the highlight reference column free of text.
-4. Obtain the owned main frame and client origin through Win32. Use the actual DPI and saved UI scale for sidebar and session-row geometry. Locate the first gray-tinted header fill independently of the rail, allowing either visible or hidden workspace pills; group headers retain their production fixed height of 28 pixels. Locate each header's leftmost fill column and each rail's leftmost gray column in an unselected member. Require their x coordinates to match. Require the original rail width and every gray pixel down all three unselected member rows, so an absent or shortened rail cannot pass.
-5. Across the full vertical range of both headers, require zero rail-colored pixels distinct from the header's own fill and no mismatch against the unobstructed header fill at the right. At the boundary between groups, require the second header to remain clear, its last scanline to retain the header fill, and the second rail to begin on the next scanline, below the header. Require the final member's last scanline to contain the rail and the next scanline to be clear.
-6. Keep the original highlight comparison at every pixel of the old inset rail band, from the active highlight's top border to its bottom border. Require a visibly blue reference highlight and zero mismatches against the unobstructed same-scanline highlight (RGB tolerance three). Additionally require zero gray rail pixels (tolerance two) across the entire left-edge search band for the whole active row, including the rounded corners.
-7. Sample the entire left-edge search band below the second group's last member, through the ungrouped section header and both ungrouped rows. Require zero gray rail pixels, retaining at least the original full-row-height stray check. Save counts, both measured header/rail x coordinates, header positions, sample rectangles, highlight color, geometry, session state and version in matching JSON files.
-8. After both selections, print exactly `group-rail left-edge PASS`, `group-rail header-clear PASS`, `group-rail groups-separate PASS`, `group-rail selected-clear PASS` and `group-rail stray-clear PASS` only if their respective assertions hold; print the corresponding FAIL marker otherwise and throw if any check fails. Inspect both screenshots, action.png, after.png, result.json, build.json and owned-job cleanup.
+1. Launch the isolated real Windows app, pass Doctor, choose Dark through Themes and select Tab Order: Manual through Ctrl+K `tab order`, Down, Enter before creating another session. Print `group-rail verified release tag=... version=...` and retain checksum/version provenance in build.json.
+2. Keep the existing real-session setup: rename the original CMD to Rail A, create Rail B, group them through Move to Group, then create Rail C through Rail F. Put Rail C and Rail D in a second group, leaving Rail E and Rail F ungrouped. Require exactly two groups, two members each and six saved sessions. Keep action.png from group creation.
+3. Select each first-group member with Ctrl+1 and Ctrl+2, require the saved active tab and capture group-rail-selected-0.png and group-rail-selected-1.png with UIA and native focus evidence.
+4. Derive geometry from the owned frame/client origin, actual DPI, saved UI scale and workspace-pill visibility, never from a header fill or rail. Group headers and workspace pills retain their production fixed heights of 28 and 34 pixels; member rows scale from 38 pixels. Compare both headers' full top and bottom scanlines with the unobstructed sidebar background, excluding only the divider column. Require zero fill mismatches at RGB tolerance three.
+5. Inspect the entire left-edge band beside every member of both groups, including the active row. Require zero default group-colored pixels (RGB 145,149,157, tolerance two). Both selections keep the former selected-rail regression covered by absence rather than by expecting a rail elsewhere.
+6. Measure each headline's leftmost muted text pixel and each first member's white name-text pixel. The headline must start at the session content inset within three scaled pixels, have no separate chevron-sized prefix gap and contain no bright old-style header text. Record the literal row-text x and its existing 16-pixel CMD icon plus 8-pixel gap separately: normalize that optional icon reservation before comparing the text origins, without changing session indentation.
+7. After Doctor, click the first headline with real ownership-checked mouse input. Require its persisted collapsed flag, capture group-rail-collapsed.png and matching JSON, then wait 700 ms and click the same headline 24 pixels further along, away from the double-click that opens the group rename, and require expanded memory. Capture group-rail-restored.png and matching JSON. Compare each original member row pixel for pixel (per-channel tolerance 48, at most four changed pixels allowed) at its original position and at every possible row position in the collapsed sidebar: neither row may remain. Both member rows must return unchanged at their original positions after expansion. Require unchanged six-session identities, membership, order and two-group count. Keep saved-state, geometry, pixel counts, UIA, focus, version/tag and click evidence in JSON.
+8. Print `sidebar-headline no-fill PASS|FAIL`, `sidebar-headline no-rail PASS|FAIL`, `sidebar-headline flush-left PASS|FAIL` and `sidebar-headline click-toggle PASS|FAIL` from their respective assertions; throw if any fails. Inspect both selection screenshots, collapsed/restored screenshots, action.png, after.png, result.json, build.json and owned-job cleanup.
 
 ## Gotchas
 
-- The sidebar currently draws no hovered-row highlight. This journey covers both positions of the active highlight; it does not invent a hover state or claim multi-selection coverage.
-- The original highlight-color comparison stays at the inset band because the new rail x lies on the highlight's rounded left boundary. The new whole-row gray-pixel exclusion also covers that boundary without treating rounded corners as flat fill.
-- The cyan horizontal ETA progress line is a separate session indicator, not a group rail. This journey has no ETA fixtures and does not change or suppress that indicator.
-- The app supplies session/group state; the driver only reads it. The explicit offline-login boundary does not verify sign-in, SSH, live agents or remote synchronization.
-- A v0.28.822 negative-control run must reach `group-rail left-edge FAIL`, `group-rail header-clear FAIL` and `group-rail groups-separate FAIL`; a launch, parser or geometry failure is not failing-first rendering proof.
-- The pane-layout pixel proof also requires a left-aligned rail exactly one member-row high and samples the icon in that row, not in the header or the following ungrouped row.
+- The old release v0.28.861 has filled headers, a rail and a chevron: the identical journey must reach `sidebar-headline no-fill FAIL`, `sidebar-headline no-rail FAIL` and `sidebar-headline flush-left FAIL`. A launch, parser or geometry failure is not negative-control rendering proof. Any build retaining one of those decorations must fail its corresponding appearance assertion.
+- The CMD icon is not name text or a chevron. Literal session-name pixels sit after its reserved width; the headline uses the existing session content origin, not a new indentation. The evidence explicitly records this normalization rather than claiming the raw text x coordinates are identical.
+- Default group names and default gray colors are deliberate: this journey measures known muted headline and group-rail colors in Dark mode, not arbitrary custom palettes.
+- The scanline checks cover the full sidebar interior, including the margins outside the old header fill. The single right divider is not a header background.
+- The pane-layout journey also derives the grouped member row from the unchanged geometry, requires no rail, and retains its visible CMD icon and content-inset assertions.
+- The cyan ETA progress line is a separate session indicator, not a group rail; no ETA fixtures are created.
+- Real saved collapse state and disappearing/returning member text are both required. Merely changing JSON or capturing screenshots without inspecting pixels cannot pass the click gate.
+- Two clicks at the same spot inside the double-click time open the group rename editor instead of toggling. On 2026-10-25 a run failed exactly that way: the second click was a WM_LBUTTONDBLCLK and failure.uia.json showed an Edit element. The restore click therefore waits 700 ms and moves 24 pixels along the same headline.
+- Row comparison is pixel for pixel with a per-channel tolerance of 48 and at most four changed pixels, because selection moves the highlight and slightly shifts text colour, while a neighbour group's rows sliding up into the freed space differ by far more than that.
+- Right-click, rename, keyboard collapse, drag and drop, relaunch persistence and collapsed-sidebar appearance are unchanged code paths, not additional live coverage claimed by this journey.
+- The app creates all session/group state; the driver only reads it. Offline mode does not prove sign-in, SSH, live agents or remote synchronization. GitHub Windows runs provide the live results; source-only VPS checks do not.

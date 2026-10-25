@@ -41,7 +41,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
-- [Group rail](group-rail.md): keep both grouped selections clear of the gray rail and the space below the group free of stray rail pixels.
+- [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, with failed SSH explicitly outside remote verification.
