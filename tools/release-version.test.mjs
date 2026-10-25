@@ -287,17 +287,22 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
   assert.match(result.stdout, /ADMISSION VERIFIED/);
 });
 
+test('automatic release admission fixtures', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync(process.execPath, ['--test', 'tools/auto-release-admit.test.js'], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 test('automatic release only tags a tested master and reuses signed release jobs', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(auto, /workflows: \[Tests\]/);
   assert.match(auto, /branches: \[master\]/);
   assert.match(auto, /github.event.workflow_run.conclusion == 'success'/);
   assert.match(auto, /github.event.workflow_run.head_repository.full_name == github.repository/);
-  assert.match(auto, /\[ "\$sha" != "\$TESTED_SHA" \]/);
-  assert.match(auto, /git tag --points-at HEAD/);
-  assert.match(auto, /\[skip release\]/);
-  assert.match(auto, /node tools\/release-version\.mjs --next "\$\(git describe --tags --abbrev=0\)"/);
-  assert.match(auto, /git tag "\$RELEASE_TAG" HEAD/);
+  assert.match(auto, /ref: \$\{\{ github.event.workflow_run.head_sha \|\| github.sha \}\}/);
+  assert.match(auto, /fetch-depth: 0/);
+  assert.match(auto, /bash tools\/auto-release-admit\.sh "\$TESTED_SHA" "\$GITHUB_EVENT_NAME" >> "\$GITHUB_OUTPUT"/);
+  assert.match(auto, /RELEASE_TAG: \$\{\{ steps.admit.outputs.tag \}\}/);
+  assert.match(auto, /git tag "\$RELEASE_TAG" "\$TESTED_SHA"/);
   assert.deepEqual(auto.split('\n').filter(line => /\bgit push\b/.test(line)).map(line => line.trim()), ['git push origin "refs/tags/$RELEASE_TAG"']);
   assert.doesNotMatch(auto, /git (?:commit|add|config)|stampTree|fs\.(?:writeFileSync|unlinkSync)|HEAD:refs\/heads\/master/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);

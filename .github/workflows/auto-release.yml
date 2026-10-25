@@ -29,49 +29,30 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: master
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Require a tested unreleased master head
+      - name: Require a tested unreleased master commit
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          sha=$(git rev-parse HEAD)
-          if [ "$GITHUB_EVENT_NAME" = workflow_run ] && [ "$sha" != "$TESTED_SHA" ]; then
-            echo 'master has moved past the tested commit; skipping'
-            exit 0
-          fi
-          if git log -1 --pretty=%B | grep -Fq -e '[skip release]' -e '[release skip]'; then
-            echo 'commit asks for no release; skipping'
-            exit 0
-          fi
-          if [ -n "$(git tag --points-at HEAD)" ]; then
-            echo 'commit is already tagged; skipping'
-            exit 0
-          fi
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            gh run list -R "$GITHUB_REPOSITORY" -w test.yml -b master --commit "$sha" --limit 100 \
-              --json databaseId,event,status,conclusion | jq -e '
-                map(select(.event == "push" or .event == "workflow_dispatch"))
-                | sort_by(.databaseId) | last | .status == "completed" and .conclusion == "success"'
-          fi
-          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash tools/auto-release-admit.sh "$TESTED_SHA" "$GITHUB_EVENT_NAME" >> "$GITHUB_OUTPUT"
       - name: Tag the tested master commit
         id: tag
         if: steps.admit.outputs.ready == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.admit.outputs.tag }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
-          RELEASE_TAG=$(node tools/release-version.mjs --next "$(git describe --tags --abbrev=0)")
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             echo "$RELEASE_TAG already exists; refusing to move it" >&2
             exit 1
           fi
-          git tag "$RELEASE_TAG" HEAD
+          git tag "$RELEASE_TAG" "$TESTED_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
