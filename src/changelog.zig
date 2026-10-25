@@ -59,6 +59,11 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.875", .items = &.{
+        .{ .text = "Automatic updates can publish new versions without changing protected source history.", .ticket = "IGSH-834" },
+        .{ .text = "Agents can check whether a newly opened server session connected or failed, including its exit code.", .ticket = "IGSH-847" },
+        .{ .text = "Chat is less cluttered with rounder messages, and recording now shows a timer and sound meter with buttons to keep a draft or send it.", .ticket = "IGSH-849" },
+    } },
     .{ .ver = "0.28.874", .items = &.{
         .{ .text = "Window buttons no longer overlap, and the black title bar stays black when the browser uses a different theme.", .ticket = "IGSH-845" },
     } },
