@@ -14,7 +14,7 @@ async function run(args, reply, script = wrapper, env = {}) {
     socket.on('close', () => sockets.delete(socket));
     socket.on('error', () => {});
     socket.once('data', data => {
-      assert.match(data.toString(), /^ZSB:fixture:/);
+      assert.match(data.toString(), /^AUTH:relay-test-token:ZSB:fixture:/);
       if (typeof reply === 'function') reply(socket);
       else socket.end(reply);
     });
@@ -24,7 +24,7 @@ async function run(args, reply, script = wrapper, env = {}) {
   if (reply === null) await new Promise(resolve => server.close(resolve));
   try {
     const child = spawn('bash', [script, ...args], {
-      env: { ...process.env, TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port), ...env },
+      env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'fixture', ZSB_PORT: String(port), ...env },
     });
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => stdout += chunk);
@@ -42,6 +42,18 @@ async function run(args, reply, script = wrapper, env = {}) {
     if (server.listening) await new Promise(resolve => server.close(resolve));
   }
 }
+
+test('notify token lookup failure sends nothing and does not expose the lookup output', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-token-'));
+  try {
+    const result = await run(['status'], () => assert.fail('unauthenticated request was sent'), wrapper,
+      { HOME: dir, MULTIPROMP_NOTIFY_RELAY_TOKEN: '' });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stdout).error, 'notify_token_unavailable');
+    assert.match(result.stderr, /Notify relay token unavailable/);
+    assert.doesNotMatch(result.stdout + result.stderr, /Traceback|FileNotFoundError|relay-test-token/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 function failed(result, cause, fix) {
   assert.equal(result.code, 1, result.stdout + result.stderr);

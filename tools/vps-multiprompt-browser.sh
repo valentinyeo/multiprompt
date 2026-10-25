@@ -444,6 +444,7 @@ import math
 import os
 import pathlib
 import socket
+import subprocess
 import sys
 import time
 
@@ -520,6 +521,15 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
             raise ValueError()
     except ValueError:
         fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
+try:
+    token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
+    if not token:
+        token = subprocess.run([str(pathlib.Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
+    if not token:
+        raise ValueError()
+except (OSError, subprocess.SubprocessError, ValueError):
+    fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
+
 started = time.monotonic()
 deadline = started + timeout
 payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
@@ -532,7 +542,7 @@ except OSError:
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
-        sock.sendall(f"ZSB:{session}:{payload}\n".encode())
+        sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\n".encode())
         chunks, size = [], 0
         while True:
             remaining = deadline - time.monotonic()

@@ -13,7 +13,7 @@ const args = ['session-open', '--workspace', 'Research', '--group', 'Ops', '--ho
 function cli(argv, port) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [wrapper, ...argv], {
-      env: { ...process.env, TMUX: '', ZSB_SESSION: '', ZSB_PORT: String(port) },
+      env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: '', ZSB_PORT: String(port) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -64,8 +64,8 @@ async function bridge(run, reply = { ok: true, created: true, tab: 42 }) {
 }
 
 function decoded(wire) {
-  assert.match(wire, /^ZSB:workspace:[A-Za-z0-9+/=]+\n$/);
-  return Buffer.from(wire.trim().split(':')[2], 'base64').toString().split('\x1f').slice(0, -1);
+  assert.match(wire, /^AUTH:relay-test-token:ZSB:workspace:[A-Za-z0-9+/=]+\n$/);
+  return Buffer.from(wire.trim().split(':')[4], 'base64').toString().split('\x1f').slice(0, -1);
 }
 
 test('global and per-command help document workspace commands without session context or a tunnel', async () => {

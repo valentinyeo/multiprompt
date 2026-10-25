@@ -16,7 +16,7 @@ async function runSelftest(failure) {
     socket.on('data', chunk => {
       wire += chunk;
       if (!wire.endsWith('\n')) return;
-      const match = /^ZSB:remote-3:(.*)\n$/.exec(wire);
+      const match = /^AUTH:relay-test-token:ZSB:remote-3:(.*)\n$/.exec(wire);
       assert.ok(match, 'every request retains the exact caller session');
       const args = Buffer.from(match[1], 'base64').toString().split('\x1f').slice(0, -1);
       calls.push(args);
@@ -119,7 +119,7 @@ async function runSelftest(failure) {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const child = spawn('bash', [process.env.ZSB_WRAPPER_SH || path.join(root, 'tools/vps-multiprompt-browser.sh'), 'selftest'], {
-    env: { ...process.env, TMUX: '', ZSB_SESSION: 'remote-3', ZSB_PORT: String(server.address().port) },
+    env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'remote-3', ZSB_PORT: String(server.address().port) },
   });
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => stdout += chunk);

@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import runpy
 import socket
 import sys
 import tempfile
@@ -96,9 +97,81 @@ class Notifications(unittest.TestCase):
                         seen.append(client.recv(1024).decode())
             worker = threading.Thread(target=receive)
             worker.start()
-            notify.deliver(["ACTIVE:test", "DONE:test"], server.getsockname()[1])
+            with patch.dict(os.environ, {"MULTIPROMP_NOTIFY_RELAY_TOKEN": "test-token"}):
+                notify.deliver(["ACTIVE:test", "DONE:test"], server.getsockname()[1])
             worker.join(3)
+            if os.name != "nt":
+                self.assertTrue(all(item.startswith("AUTH:test-token:") for item in seen))
+                seen = [item.removeprefix("AUTH:test-token:") for item in seen]
             self.assertEqual(seen, ["ACTIVE:test", "DONE:test"])
+
+    @unittest.skipIf(os.name == "nt", "Linux relay authentication")
+    def test_relay_receives_auth_envelope_from_environment(self):
+        item = "SESSION:test:sid:/repo/é:unchanged"
+        with patch.dict(os.environ, {"MULTIPROMP_NOTIFY_RELAY_TOKEN": "test-token"}), \
+                patch.object(notify.subprocess, "run") as read_token, \
+                patch.object(notify.socket, "create_connection") as connect:
+            notify.deliver([item], 19548)
+        connect.assert_called_once_with(("127.0.0.1", 19548), timeout=0.3)
+        connect.return_value.__enter__.return_value.sendall.assert_called_once_with(
+            f"AUTH:test-token:{item}".encode("utf-8"))
+        read_token.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "Linux relay authentication")
+    def test_relay_token_is_read_once_from_yeo_key(self):
+        with patch.dict(os.environ, {"MULTIPROMP_NOTIFY_RELAY_TOKEN": ""}), \
+                patch.object(notify.subprocess, "run") as read_token, \
+                patch.object(notify.socket, "create_connection") as connect:
+            read_token.return_value.stdout = " test-token \n\n"
+            notify.deliver(["ACTIVE:test", "DONE:test"], 19548)
+        read_token.assert_called_once_with(
+            [str(Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"],
+            check=True, stdout=notify.subprocess.PIPE, stderr=notify.subprocess.DEVNULL, text=True)
+        self.assertEqual(
+            [call.args[0] for call in connect.return_value.__enter__.return_value.sendall.call_args_list],
+            [b"AUTH: test-token :ACTIVE:test", b"AUTH: test-token :DONE:test"])
+
+    @unittest.skipIf(os.name == "nt", "Linux relay authentication")
+    def test_relay_missing_token_exits_nonzero_without_sending_or_output(self):
+        secret = "private-token-from-failed-key-read"
+        errors = [None, FileNotFoundError("yeo-key unavailable"),
+                  notify.subprocess.CalledProcessError(1, ["yeo-key"], output=secret, stderr=secret)]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as tmp:
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.dict(os.environ, {"MULTIPROMPT_TAB": "test", "MULTIPROMPT_STATE_DIR": tmp}, clear=True), \
+                        patch.object(notify.subprocess, "run", side_effect=error) as read_token, \
+                        patch.object(notify.socket, "create_connection") as connect, \
+                        patch.object(sys, "argv", ["notify.py", "codex", "active", "{}"]), \
+                        patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+                    read_token.return_value.stdout = "\n"
+                    with self.assertRaises(SystemExit) as exited:
+                        runpy.run_path(str(Path(__file__).with_name("notify.py")), run_name="__main__")
+                self.assertNotEqual(exited.exception.code, 0)
+                connect.assert_not_called()
+                read_token.assert_called_once()
+                self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
+                self.assertFalse((Path(tmp) / "deliver-fail.log").exists())
+
+    @unittest.skipIf(os.name == "nt", "Linux relay authentication")
+    def test_relay_send_failure_does_not_log_token(self):
+        with patch.dict(os.environ, {"MULTIPROMP_NOTIFY_RELAY_TOKEN": "test-token"}), \
+                patch.object(notify.socket, "create_connection") as connect, \
+                patch.object(notify, "log_deliver_failure") as log_failure:
+            error = OSError("offline")
+            connect.return_value.__enter__.return_value.sendall.side_effect = error
+            with self.assertRaises(OSError):
+                notify.deliver(["DONE:test"], 19548, attempts=1)
+        log_failure.assert_called_once_with("DONE:test", 19548, error)
+        self.assertNotIn("test-token", repr(log_failure.call_args))
+
+    def test_windows_delivery_keeps_original_messages(self):
+        with patch.object(notify.os, "name", "nt"), \
+                patch.object(notify.subprocess, "run") as read_token, \
+                patch.object(notify.socket, "create_connection") as connect:
+            notify.deliver(["DONE:test"], 19548)
+        connect.return_value.__enter__.return_value.sendall.assert_called_once_with(b"DONE:test")
+        read_token.assert_not_called()
 
 
 class EstimateBookkeeping(unittest.TestCase):

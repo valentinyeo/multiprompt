@@ -211,7 +211,7 @@ test('IGSH-221 malformed steps and excessive budgets fail before debugger attach
 
 function runWrapper(args, port, input = '', env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('bash', [wrapper, ...args], { env: { ...process.env, TMUX: '', ZSB_SESSION: 'test-session', ZSB_PORT: String(port), ...env } });
+    const child = spawn('bash', [wrapper, ...args], { env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: '', ZSB_SESSION: 'test-session', ZSB_PORT: String(port), ...env } });
     let stdout = '', stderr = '';
     child.stdout.on('data', data => { stdout += data; });
     child.stderr.on('data', data => { stderr += data; });
@@ -231,7 +231,7 @@ test('IGSH-221 remote file/stdin scripts ship contents once and write complete l
     socket.on('data', data => {
       wire += data;
       if (!wire.endsWith('\n')) return;
-      const payload = wire.trim().split(':')[2];
+      const payload = wire.trim().split(':')[4];
       requests.push(Buffer.from(payload, 'base64').toString().split('\x1f').filter(Boolean));
       socket.end(JSON.stringify(result) + '\n');
     });

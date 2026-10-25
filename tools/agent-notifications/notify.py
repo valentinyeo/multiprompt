@@ -91,6 +91,16 @@ def log_deliver_failure(item, port, error):
 
 
 def deliver(items, port, attempts=3):
+    token = None
+    if os.name != "nt":
+        try:
+            token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
+            if not token:
+                token = subprocess.run([str(Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
+            if not token:
+                raise ValueError()
+        except (OSError, subprocess.SubprocessError, ValueError):
+            raise SystemExit(1) from None
     for item in items:
         last_error = None
         for attempt in range(attempts):
@@ -98,7 +108,7 @@ def deliver(items, port, attempts=3):
                 time.sleep(0.15)
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=0.3) as connection:
-                    connection.sendall(item.encode("utf-8"))
+                    connection.sendall((f"AUTH:{token}:{item}" if token else item).encode("utf-8"))
                 last_error = None
                 break
             except OSError as error:

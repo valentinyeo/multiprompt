@@ -212,7 +212,7 @@ test("help-like literal text remains command data", async () => {
       await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
       try {
         const child = spawn("bash", [script, command, text], {
-          env: { ...process.env, TMUX: "", ZSB_SESSION: "fixture", ZSB_PORT: String(server.address().port) },
+          env: { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: "", ZSB_SESSION: "fixture", ZSB_PORT: String(server.address().port) },
         });
         let output = "";
         child.stdout.on("data", (chunk) => { output += chunk; });
@@ -222,7 +222,9 @@ test("help-like literal text remains command data", async () => {
         });
         assert.equal(exit, 0, `${command} ${text}: ${output}`);
         assert.equal(output.trim(), '{"ok":true}');
-        const [prefix, session, encoded] = wire.trim().split(":");
+        const [auth, token, prefix, session, encoded] = wire.trim().split(":");
+        assert.equal(auth, "AUTH");
+        assert.equal(token, "relay-test-token");
         assert.equal(prefix, "ZSB");
         assert.equal(session, "fixture");
         assert.equal(Buffer.from(encoded, "base64").toString(), `${command}\x1f${text}\x1f`);
@@ -246,7 +248,7 @@ test("every SSH command answers both help flags locally before session lookup or
     socket.on("data", () => socket.end('{"ok":true}\n'));
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const env = { ...process.env, TMUX: "", ZSB_SESSION: "fixture", ZSB_PORT: String(server.address().port) };
+  const env = { ...process.env, MULTIPROMP_NOTIFY_RELAY_TOKEN: "relay-test-token", TMUX: "", ZSB_SESSION: "fixture", ZSB_PORT: String(server.address().port) };
   const run = args => new Promise((resolve, reject) => {
     const child = spawn("bash", [script, ...args], { env });
     let output = "";

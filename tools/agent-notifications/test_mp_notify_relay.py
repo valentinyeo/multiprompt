@@ -25,6 +25,9 @@ class Relay(unittest.TestCase):
         self.threads = []
         self.probes = {}
         relay.route_cache.clear()
+        token = patch.object(relay, "NOTIFY_TOKEN", b"relay-test-token", create=True)
+        token.start()
+        self.addCleanup(token.stop)
 
     def laptop(self, name, reply=b"", probe_reply=None, probe_barrier=None, stall=None, requests=1):
         path = self.directory / (name + ".sock")
@@ -70,11 +73,11 @@ class Relay(unittest.TestCase):
         self.addCleanup(thread.join, 2)
         return received
 
-    def send(self, data, response=False):
+    def send(self, data, response=False, authenticated=True):
         left, right = socket.socketpair()
         thread = threading.Thread(target=relay.handle, args=(right, self.directory))
         thread.start()
-        left.sendall(data)
+        left.sendall(b"AUTH:relay-test-token:" + data if authenticated else data)
         if response:
             left.settimeout(2)
             result = left.recv(65536)
@@ -85,6 +88,53 @@ class Relay(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         left.close()
         return result
+
+    def test_token_from_environment_does_not_read_1password(self):
+        with patch.dict(os.environ, {"MULTIPROMP_NOTIFY_RELAY_TOKEN": "relay-test-token"}), patch.object(relay.subprocess, "run") as read:
+            self.assertEqual(relay.load_token(), b"relay-test-token")
+        read.assert_not_called()
+
+    def test_token_fallback_reads_the_1password_field_once(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(relay.subprocess, "run") as read:
+            read.return_value.stdout = "relay-test-token\n"
+            self.assertEqual(relay.load_token(), b"relay-test-token")
+        read.assert_called_once_with([str(Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=relay.subprocess.PIPE, stderr=relay.subprocess.DEVNULL, text=True)
+
+    def test_empty_token_is_rejected(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(relay.subprocess, "run") as read:
+            read.return_value.stdout = "\n"
+            with self.assertRaises(ValueError):
+                relay.load_token()
+
+    def test_notify_without_token_is_rejected(self):
+        received = self.laptop("one")
+        self.send(b"DONE:tab\n", authenticated=False)
+        self.threads[0].join(2)
+        self.assertEqual(received, [])
+
+    def test_notify_with_wrong_token_is_rejected(self):
+        received = self.laptop("one")
+        self.send(b"AUTH:wrong-test-token:DONE:tab\n", authenticated=False)
+        self.threads[0].join(2)
+        self.assertEqual(received, [])
+
+    def test_notify_with_right_token_is_accepted(self):
+        received = self.laptop("one")
+        self.send(b"AUTH:relay-test-token:DONE:tab\n", authenticated=False)
+        self.threads[0].join(2)
+        self.assertEqual(received, [b"DONE:tab\n"])
+
+    def test_zsb_without_token_is_rejected(self):
+        received = self.laptop("one", b"reply")
+        self.assertEqual(self.send(b"ZSB:tab:payload\n", response=True, authenticated=False), b"")
+        self.threads[0].join(2)
+        self.assertEqual(received, [])
+
+    def test_zsb_with_wrong_token_is_rejected(self):
+        received = self.laptop("one", b"reply")
+        self.assertEqual(self.send(b"AUTH:wrong-test-token:ZSB:tab:payload\n", response=True, authenticated=False), b"")
+        self.threads[0].join(2)
+        self.assertEqual(received, [])
 
     def test_fanout_to_two_laptops(self):
         first = self.laptop("one")
@@ -341,7 +391,7 @@ class Relay(unittest.TestCase):
         while True:
             try:
                 with socket.create_connection(("127.0.0.1", port), 0.2) as hook:
-                    hook.sendall(b"DONE:tab\n")
+                    hook.sendall(b"AUTH:relay-test-token:DONE:tab\n")
                 break
             except OSError:
                 if time.monotonic() > deadline:
