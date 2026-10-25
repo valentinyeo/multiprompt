@@ -541,11 +541,14 @@ foreach ($plan in $plans) {
             })
             $dividerProof.bottom = Require-Divider 1 1 'bottom retains the visit divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
-            Press @(0x12, 0x43) 'Alt+C: close the fully read chat' $true
+            Press @(0x11, 0x4B) 'Ctrl+K: open a second tab for visit proof' $true
+            foreach ($letter in 'new cmd'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter New CMD Shell' }
+            Press @(0x0D) 'Enter: create the second tab'
+            [void](Wait-For 'second tab saved' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs).Count -eq 2 })
             $sendOffset = (Get-Item -LiteralPath $transcript).Length
             Shell-Input 'messages' '1'
             $dividerLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x12, 0x43) 'Alt+C: reopen before sending'
+            Press @(0x11, 0x09) 'Ctrl+Tab: return to the unread tab'
             Bind-Transcript
             $beforeSend = Require-Divider 1 0 'divider exists before sending' $dividerLogStart
             $dividerProof.beforeSend = $beforeSend
@@ -555,9 +558,9 @@ foreach ($plan in $plans) {
             $sendLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x0D) 'Enter: sending retains the visit divider' $true
             $dividerProof.sent = Require-Divider 1 0 'sending retains the visit divider' $sendLogStart
-            Press @(0x12, 0x43) 'Alt+C: leave after sending' $true
+            Press @(0x11, 0x09) 'Ctrl+Tab: leave after sending' $true
             $allReadLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x12, 0x43) 'Alt+C: reopen with everything read'
+            Press @(0x11, 0x09) 'Ctrl+Tab: reopen with everything read'
             Bind-Transcript
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
