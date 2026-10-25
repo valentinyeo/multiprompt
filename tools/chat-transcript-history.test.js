@@ -95,6 +95,7 @@ var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
 var g_chat_read_open_pending = false;
+var g_chat_read_hold = false;
 var g_chat_read_open_ready = false;
 var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;

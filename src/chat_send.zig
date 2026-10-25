@@ -455,6 +455,7 @@ pub fn sendChatPrompt() void {
         return;
     };
     app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_hold = false;
     app_state.g_chat_read_open_ready = true;
     _ = @import("chat_session.zig").chatReadMark(true);
     app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;

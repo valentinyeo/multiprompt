@@ -1204,7 +1204,7 @@ pub fn chatReadBoundary() chat_history.ReadBoundary {
 }
 
 pub fn chatReadMark(bottom: bool) bool {
-    if (!app_state.g_chat_active or app_state.g_chat_read_open_pending or !app_state.g_chat_read_open_ready or app_state.active_shell >= app_state.shell_count or
+    if (!app_state.g_chat_active or app_state.g_chat_read_open_pending or (bottom and app_state.g_chat_read_hold) or !app_state.g_chat_read_open_ready or app_state.active_shell >= app_state.shell_count or
         !app_state.g_chat_blocks_from_file or app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return false;
     const shell = &app_state.shells[app_state.active_shell];
     const blocks = app_state.g_chat_blocks[0..app_state.g_chat_block_count];
@@ -1276,8 +1276,9 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_new_messages = .{};
     app_state.g_chat_read_boundary = .{};
     app_state.g_chat_read_open_ready = false;
-    app_state.g_chat_read_open_pending = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
-    if (app_state.g_chat_read_open_pending) {
+    app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
+    app_state.g_chat_read_open_pending = false;
+    if (app_state.g_chat_read_hold) {
         if (cached) |entry| entry.next = 0;
     }
     app_state.g_chat_echo_layout_count = 0;
@@ -1570,4 +1571,56 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     try std.testing.expectEqual(@as(u64, 77), app_state.shells[1].last_read_message_id);
     try std.testing.expectEqualDeep(chat_history.ReadBoundary{}, chatReadBoundary());
     try std.testing.expect(!chatReadMark(true));
+}
+
+test "IGSH-868 reopen holds the unread line at the bottom until the reader scrolls or sends" {
+    const saved = .{
+        .shells = app_state.shells[0..1].*,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .pending = app_state.g_chat_read_open_pending,
+        .hold = app_state.g_chat_read_hold,
+        .ready = app_state.g_chat_read_open_ready,
+        .file = app_state.g_chat_blocks_from_file,
+        .cache = app_state.g_chat_cache_shell_id,
+        .blocks = app_state.g_chat_blocks[0..2].*,
+        .block_count = app_state.g_chat_block_count,
+        .dirty = app_state.g_chat_layout_dirty,
+        .reuse = app_state.g_chat_layout_reuse,
+    };
+    defer {
+        app_state.shells[0..1].* = saved.shells;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_chat_read_open_pending = saved.pending;
+        app_state.g_chat_read_hold = saved.hold;
+        app_state.g_chat_read_open_ready = saved.ready;
+        app_state.g_chat_blocks_from_file = saved.file;
+        app_state.g_chat_cache_shell_id = saved.cache;
+        app_state.g_chat_blocks[0..2].* = saved.blocks;
+        app_state.g_chat_block_count = saved.block_count;
+        app_state.g_chat_layout_dirty = saved.dirty;
+        app_state.g_chat_layout_reuse = saved.reuse;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = 7;
+    app_state.shells[0].last_read_message_id = 11;
+    app_state.g_chat_active = true;
+    app_state.g_chat_blocks_from_file = true;
+    app_state.g_chat_cache_shell_id = 7;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 };
+    app_state.g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .prose, .first = true, .message_id = 22 };
+    app_state.g_chat_block_count = 2;
+    app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_read_hold = true;
+    try std.testing.expect(!chatReadMark(true));
+    try std.testing.expectEqual(@as(u64, 11), app_state.shells[0].last_read_message_id);
+    app_state.g_chat_read_hold = false;
+    try std.testing.expect(chatReadMark(true));
+    try std.testing.expectEqual(@as(u64, 22), app_state.shells[0].last_read_message_id);
 }

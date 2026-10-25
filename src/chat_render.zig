@@ -1823,6 +1823,7 @@ pub fn chatScrollBy(delta_px: i32) void {
         }
     }
     if (new_y == app_state.g_chat_scroll_y) return;
+    app_state.g_chat_read_hold = false;
     app_state.g_chat_scroll_y = new_y;
     var client: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);

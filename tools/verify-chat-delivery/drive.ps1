@@ -450,6 +450,10 @@ foreach ($plan in $plans) {
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Doctor $true
             $observation.newMessages = @{passed=$true; transitions=@('arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival')}
+            $longLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '200'
+            [void](Wait-For 'long chat holds 200 more messages' { (Read-Shared $cache.FullName).Contains('New message 199') })
+            [void](Require-NewMessages 0 0 0 'long chat arrival stays at bottom' $longLogStart)
             $readSource = (Read-Shared $transcript) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Select-Object -Last 1
             $readId = [string]$readSource.message.id
             Press @(0x12, 0x43) 'Alt+C: leave the read chat' $true
@@ -467,6 +471,8 @@ foreach ($plan in $plans) {
             Press @(0x12, 0x43) 'Alt+C: reopen chat after offline arrivals'
             Bind-Transcript
             $divider = Require-Divider 1 0 'one divider on reopen' $dividerLogStart
+            [void](Require-NewMessages 0 0 0 'reopened long chat lands at the newest message' $dividerLogStart)
+            if ($divider.scroll -le 0) { throw 'Reopened long chat did not scroll to the newest message' }
             if ($divider.marker -cne $savedMarker -or $divider.offset -ne $unreadOffset -or $divider.y -ge $divider.messageY) { throw 'Divider is not above the first unread source message' }
             [void](Wait-For 'resynced app cache contains first unread source ID' { (Read-Shared $cache.FullName).Contains($firstUnreadId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-reopened.jsonl"
@@ -474,6 +480,12 @@ foreach ($plan in $plans) {
             $bounds = $views[0].Current.BoundingRectangle
             $dividerProof = @{marker=$savedMarker; readId=$readId; firstUnreadId=$firstUnreadId; unreadOffset=$unreadOffset; reopened=$divider; transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
             Shot 'unread-divider-reopened'
+            $pinLogStart = (Read-Shared "$settings/debug.log").Length
+            Shell-Input 'messages' '3'
+            $pinned = Wait-For 'arrival while at the bottom keeps the view pinned to the newest message' { $v = Divider-State $pinLogStart; if ($v -and $v.scroll -gt $divider.scroll) { $v } }
+            [void](Require-NewMessages 0 0 0 'arrival at the bottom never shows the pill or scrolls up' $pinLogStart)
+            $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
+            Shot 'pinned-after-arrival'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
             $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart

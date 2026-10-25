@@ -58,6 +58,7 @@ var clean_chat: bool = false;
 var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
 var g_chat_read_open_pending = true;
+var g_chat_read_hold = false;
 var g_chat_read_open_ready = false;
 var read_marks: usize = 0;
 fn chatReadMark(bottom: bool) bool {
