@@ -127,11 +127,16 @@ export function verifyUnreadDivider(root) {
   assert.equal(proof.gap.count, 1);
   assert.equal(proof.gap.unknown, 1);
   assert.equal(proof.gap.marker, proof.marker);
-  for (const state of [proof.bottom, proof.sent, proof.allRead]) {
-    assert.equal(state.count, 0);
-    assert.equal(state.unknown, 0);
-    assert.notEqual(state.marker, proof.marker);
-  }
+  assert.equal(proof.bottom.count, 1);
+  assert.equal(proof.bottom.unknown, 1);
+  assert.equal(proof.bottom.marker, proof.marker);
+  assert.equal(proof.sent.count, 1);
+  assert.equal(proof.sent.unknown, 0);
+  assert.equal(proof.sent.marker, proof.beforeSend.marker);
+  assert.equal(proof.sent.offset, proof.beforeSend.offset);
+  assert.equal(proof.allRead.count, 0);
+  assert.equal(proof.allRead.unknown, 0);
+  assert.notEqual(proof.allRead.marker, proof.marker);
   const image = name => readBmp(path.join(root, name + '.bmp'));
   const reopened = dividerPixels(image('unread-divider-reopened'), proof.transcript, proof.transcript.top + proof.reopened.lineY - proof.reopened.scroll, 1);
   dividerPixels(image('unread-divider-gap'), proof.transcript, 0, 0);

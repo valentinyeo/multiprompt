@@ -534,12 +534,12 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-gap'
             $bottomLogStart = (Read-Shared "$settings/debug.log").Length
             [void](Wait-For 'scroll the full history gap to bottom' {
-                $frame = Divider-State $bottomLogStart
-                if ($frame -and $frame.count -eq 0 -and $frame.unknown -eq 0) { return $true }
+                $frame = New-MessageState $bottomLogStart
+                if ($frame -and $frame.up -eq 0) { return $true }
                 [void](Scroll-Transcript -30000)
                 $false
             })
-            $dividerProof.bottom = Require-Divider 0 0 'bottom clears the divider' $bottomLogStart
+            $dividerProof.bottom = Require-Divider 1 1 'bottom retains the visit divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Press @(0x12, 0x43) 'Alt+C: close the fully read chat' $true
             $sendOffset = (Get-Item -LiteralPath $transcript).Length
@@ -548,12 +548,13 @@ foreach ($plan in $plans) {
             Press @(0x12, 0x43) 'Alt+C: reopen before sending'
             Bind-Transcript
             $beforeSend = Require-Divider 1 0 'divider exists before sending' $dividerLogStart
+            $dividerProof.beforeSend = $beforeSend
             if ($beforeSend.offset -ne $sendOffset) { throw 'Second reopen picked the wrong unread message' }
             Clear-Composer
             Type-Composer 'read reply'
             $sendLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x0D) 'Enter: sending clears the unread divider' $true
-            $dividerProof.sent = Require-Divider 0 0 'sending clears the divider' $sendLogStart
+            Press @(0x0D) 'Enter: sending retains the visit divider' $true
+            $dividerProof.sent = Require-Divider 1 0 'sending retains the visit divider' $sendLogStart
             Press @(0x12, 0x43) 'Alt+C: leave after sending' $true
             $allReadLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x12, 0x43) 'Alt+C: reopen with everything read'
@@ -561,7 +562,7 @@ foreach ($plan in $plans) {
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
             Save $dividerProof "$caseDir/unread-divider.json"
-            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-clear', 'send-clear', 'all-read-absent')}
+            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-retain', 'send-retain', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts

@@ -4171,7 +4171,7 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     const boundary = app_state.g_chat_read_boundary;
     if (verboseLoggingEnabled()) {
         var log: [256]u8 = undefined;
-        const marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+        const marker = app_state.g_chat_read_visit_marker;
         const index = boundary.index orelse 0;
         debugLog(std.fmt.bufPrint(&log, "[chat] unread divider count={d} marker={d} index={d} unknown={d} y={d} message_y={d} scroll={d} message={d} offset={d} line_y={d}", .{
             @intFromBool(boundary.index != null), marker, index, @intFromBool(boundary.unknown),
@@ -4201,7 +4201,7 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     var right = RECT{ .left = center + uiScaled(24), .top = y, .right = width - uiScaled(16), .bottom = y + 1 };
     _ = FillRect(hdc, &left, brush);
     _ = FillRect(hdc, &right, brush);
-    _ = chatDrawText(hdc, L("NEW"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {

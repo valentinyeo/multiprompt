@@ -34,6 +34,7 @@ const app_state = struct {
   var g_chat_active = true;
   var g_chat_blocks_from_file = true;
   var g_chat_cache_shell_id: u32 = 7;
+  var g_chat_read_visit_shell_id: u32 = 0;
   var g_chat_read_visit_marker: u64 = 0;
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = true;
@@ -60,6 +61,9 @@ test "divider stays at first unread after reading and clears on all-read revisit
   try std.testing.expect(chatReadMark(true));
   try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  openTab();
+  try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+  app_state.g_chat_read_visit_shell_id = 0;
   openTab();
   try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
 }

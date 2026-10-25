@@ -1510,6 +1510,7 @@ pub fn closeChatView() void {
     if (!app_state.g_chat_active) return;
     _ = @import("chat_session.zig").chatReadMark(false);
     chatDraftFlush();
+    app_state.g_chat_read_visit_shell_id = 0;
     app_state.g_chat_active = false;
     @import("window_layout.zig").chatWorkingIndicatorSync();
     app_state.g_chat_browser_swap.cancel();
