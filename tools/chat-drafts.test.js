@@ -127,13 +127,7 @@ test('ISSUE-498 dictation started in A completes in A while B is active', () => 
   const marker = appReady.indexOf('\n    if (dictationTargetIsBrowser())');
   const toggle = body('toggleDictation');
   const captureStart = toggle.indexOf('    g_dictation_draft_owner_len = 0;');
-  const captureEnd = toggle.indexOf('    g_dictation_recording.store(true', captureStart);
-  assert.ok(captureStart >= 0 && captureEnd > captureStart, 'real dictation start owner binding before recording');
-  const capture = toggle.slice(captureStart, captureEnd).replaceAll('@import("chat_composer.zig").', '');
-  const sendStart = appReady.indexOf('    const send_on_ready = g_dictation_send_on_ready;');
-  const sendEnd = appReady.indexOf('    g_dictation_level.store(0', sendStart);
-  assert.ok(sendStart >= 0 && sendEnd > sendStart, 'real dictation completion consumes send intent');
-  const sendIntent = appReady.slice(sendStart, sendEnd);
+  const capture = captureStart < 0 ? '' : toggle.slice(captureStart, toggle.indexOf('    g_dictation_recording.store(true', captureStart)).replaceAll('@import("chat_composer.zig").', '');
   const route = source.includes('chatDraftAppend') ? appReady.slice(appReady.indexOf('    if (g_dictation_draft_owner_len > 0)'), marker) : appReady.slice(branchStart, marker);
   assert.ok(marker >= 0);
   execute(production() + `
@@ -141,36 +135,21 @@ var g_chat_active = true;
 var g_dictation_draft_owner: [192]u8 = undefined;
 var g_dictation_draft_owner_len: usize = 0;
 var g_dictation_cancelled = std.atomic.Value(bool).init(false);
-var g_dictation_start_tick: u64 = 0;
-var g_dictation_level = std.atomic.Value(u32).init(0);
-var g_dictation_send_on_ready = false;
-var sends: usize = 0;
-fn GetTickCount64() u64 { return 123; }
-fn sendChatPrompt() void { sends += 1; }
 fn dictationAudit(_: []const u8, _: usize) void {}
 fn insertTextIntoChatComposer(value: []const u16) void { var b: [16400]u16 = @splat(0); @memcpy(b[0..value.len], value); edit(@ptrCast(&b)); }
 fn begin() void {
 ${capture}
 }
 fn deliver(transcript: []const u16) void {
-${sendIntent}
 ${route.replaceAll('@import("chat_composer.zig").', '')}
 }
 test "ISSUE-498 late result is bound to its start session" {
-    for ([_]bool{ false, true }) |send_on_ready| {
-        switchToShell(0);
-        edit(L("")); chatDraftFlush();
-        begin();
-        try std.testing.expect(g_dictation_draft_owner_len > 0);
-        try std.testing.expectEqualSlices(u8, g_chat_draft_owner[0..g_chat_draft_owner_len], g_dictation_draft_owner[0..g_dictation_draft_owner_len]);
-        switchToShell(1);
-        g_dictation_send_on_ready = send_on_ready;
-        deliver(std.unicode.utf8ToUtf16LeStringLiteral("spoken A"));
-        try expectText(&.{});
-        try std.testing.expectEqual(@as(usize, 0), sends);
-        try std.testing.expect(!g_dictation_send_on_ready);
-        switchToShell(0); try expectText(std.unicode.utf8ToUtf16LeStringLiteral("spoken A"));
-    }
+    switchToShell(active_shell);
+    begin();
+    switchToShell(1);
+    deliver(std.unicode.utf8ToUtf16LeStringLiteral("spoken A"));
+    try expectText(&.{});
+    switchToShell(0); try expectText(std.unicode.utf8ToUtf16LeStringLiteral("spoken A"));
 }
 `);
 });

@@ -1555,23 +1555,11 @@ fn readDictationFixture(name: []const u8, out: []u8) usize {
     return @import("file_io.zig").win32ReadAll(handle, out);
 }
 
-fn publishDictationLevel(pcm: []const u8) void {
-    const samples = std.mem.bytesAsSlice(i16, pcm[0 .. pcm.len - pcm.len % 2]);
-    const level: u32 = @intFromFloat(@min(1000, pcmFrameRms(samples) * 1000 / 8192));
-    app_state.g_dictation_level.store(level, .release);
-}
-
 fn captureDictationPcm(out: []u8) usize {
     if (dictationFixtureEnabled()) {
         const n = readDictationFixture("goforward.pcm", out);
         dictationAudit("fixture-audio-bytes", n);
-        var cursor: usize = 0;
-        while (app_state.g_dictation_recording.load(.acquire)) {
-            const end = @min(cursor + DICTATION_CHUNK_BYTES, n);
-            publishDictationLevel(out[cursor..end]);
-            cursor = if (end == n) 0 else end;
-            Sleep(100);
-        }
+        while (app_state.g_dictation_recording.load(.acquire)) Sleep(1);
         return n;
     }
 
@@ -1617,7 +1605,6 @@ fn captureDictationPcm(out: []u8) usize {
             const n = @min(@as(usize, @intCast(headers[i].dwBytesRecorded)), out.len - pos);
             if (n > 0 and headers[i].lpData != null) {
                 const src = headers[i].lpData.?[0..n];
-                publishDictationLevel(src);
                 @memcpy(out[pos .. pos + n], src);
                 pos += n;
                 if (app_state.g_voice_listening_active.load(.acquire) and n >= 2) {
@@ -1895,11 +1882,8 @@ test "dictation verification ignores TUI framing and requires new console text" 
 }
 
 pub fn cancelDictation() void {
-    if (!app_state.g_dictation_running.load(.acquire)) return;
-    app_state.g_dictation_cancelled.store(true, .release);
-    app_state.g_dictation_send_on_ready = false;
+    if (!app_state.g_dictation_running.load(.acquire) or !app_state.g_dictation_cancelled.load(.acquire)) return;
     app_state.g_dictation_recording.store(false, .release);
-    app_state.g_dictation_level.store(0, .release);
     app_state.g_dictation_draft_owner_len = 0;
     @import("chat_composer.zig").chatDictationSync();
     dictationAudit("cancel", 0);
@@ -1909,11 +1893,7 @@ pub fn cancelDictation() void {
 pub fn handleDictationReady() void {
     @import("chat_composer.zig").chatDictationSync();
     defer @import("chat_composer.zig").chatDictationSync();
-    app_state.g_dictation_recording.store(false, .release);
     app_state.g_dictation_running.store(false, .release);
-    const send_on_ready = app_state.g_dictation_send_on_ready;
-    app_state.g_dictation_send_on_ready = false;
-    app_state.g_dictation_level.store(0, .release);
     var text_copy: [8192]u16 = undefined;
     var text_len: usize = 0;
     var err_copy: [160]u16 = undefined;
@@ -1940,12 +1920,8 @@ pub fn handleDictationReady() void {
             app_state.g_voice_state = .idle;
             invalidateChatHeader();
         }
-        app_state.g_dictation_cancelled.store(false, .release);
-        app_state.g_dictation_draft_owner_len = 0;
-        dictationAudit("cancelled", 0);
         return;
     }
-
     if (was_voice_listening and (discard_legacy or !app_state.g_voice_mode_active or !duplex.voiceLegacyResultAllowed(app_state.g_voice_always_listen, app_state.g_voice_mic_failed))) {
         dictationAudit("voice-dropped-mode-off", text_len);
         return;
@@ -1994,10 +1970,6 @@ pub fn handleDictationReady() void {
     if (app_state.g_dictation_draft_owner_len > 0) {
         @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
         dictationAudit("target-chat-composer", transcript.len);
-        var owner: [app_state.CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-        if (send_on_ready and app_state.g_chat_active and std.mem.eql(u8, app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], @import("chat_composer.zig").chatDraftKeyForShell(app_state.active_shell, &owner))) {
-            sendChatPrompt();
-        }
         return;
     }
 
@@ -2088,10 +2060,7 @@ pub fn toggleDictation() void {
         const id = @import("chat_composer.zig").chatDraftKeyForShell(app_state.active_shell, &app_state.g_dictation_draft_owner);
         app_state.g_dictation_draft_owner_len = id.len;
     }
-    app_state.g_dictation_start_tick = GetTickCount64();
-    app_state.g_dictation_level.store(0, .release);
     app_state.g_dictation_cancelled.store(false, .release);
-    app_state.g_dictation_send_on_ready = false;
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);
     dictationAudit("start", if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0);

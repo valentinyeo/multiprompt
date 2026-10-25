@@ -3583,16 +3583,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
-            if (app_state.g_dictation_running.load(.acquire) and wp == 0x1B) {
-                @import("voice.zig").cancelDictation();
-                return 0;
-            }
-            if (@import("chat_composer.zig").chatDictationBarVisible() and
-                (wp == 0x0D or (wp == 0x44 and isCtrlDown())))
-            {
-                if ((lp & 0x40000000) == 0) toggleDictation();
-                return 0;
-            }
             if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
@@ -7010,12 +7000,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == TIMER_CHAT_BROWSER_SWAP) {
                 chatSwitchBrowserTick();
-                return 0;
-            }
-            if (wp == @import("win32.zig").TIMER_CHAT_DICTATION) {
-                @import("chat_composer.zig").chatDictationSync();
-                const card = chatViewLayout().composer_card;
-                _ = InvalidateRect(hwnd, &card, 0);
                 return 0;
             }
             if (wp == @import("win32.zig").TIMER_CHAT_WORKING) {

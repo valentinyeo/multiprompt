@@ -111,7 +111,6 @@ var shell_rect: RECT = .{};
 fn mainWindowDpi() u32 { return 96; }
 ${fn(browser, 'browserSplitPermilleForActiveShell')}
 fn browserSlotReserved() bool { return reserved; }
-fn chatDictationBarVisible() bool { return false; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
 var test_permission_visible = false;
 fn chatPermissionVisible() bool { return test_permission_visible; }
