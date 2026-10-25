@@ -223,7 +223,7 @@ fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.B
 }
 fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
-fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32) RECT { unreachable; }
+fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
 fn chatShellRowsLayout(_: HANDLE, _: i32, y: i32) i32 { return y; }
 `;
 const layoutChecks = `
