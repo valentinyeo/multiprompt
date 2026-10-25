@@ -1,0 +1,41 @@
+name: Transcript queue reconciliation
+
+on:
+  pull_request:
+    paths:
+      - src/chat_history_reader.py
+      - tools/chat-history-reader-test.py
+      - tools/chat-transcript-reconcile.test.py
+      - tools/fixtures/IGSH-835/**
+      - .github/workflows/chat-transcript-reconcile.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transcript-queue-reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Require recorded transcript and identical-send fixtures to fail before the fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          python3 tools/chat-transcript-reconcile.test.py --before > red.log 2>&1 || status=$?
+          cat red.log
+          test "$status" -eq 1
+          ! grep -q '^ERROR:' red.log
+          grep -q '^FAIL: test_IGSH_835_recorded_transcript_clears_queue_on_next_refresh' red.log
+          grep -q '^FAIL: test_IGSH_835_identical_sends_need_distinct_occurrences' red.log
+          echo 'RED PROVEN: both fixtures fail on the pre-fix queue replay'
+      - name: Prove transcript reconciliation regressions pass after the fix
+        run: python3 tools/chat-transcript-reconcile.test.py
+      - name: Run the complete reader regression suite
+        run: python3 tools/chat-history-reader-test.py -v
