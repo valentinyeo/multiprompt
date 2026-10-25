@@ -3373,7 +3373,7 @@ try {
             $clickToggle = $false
             try {
                 $beforeToggle = Read-Session
-                $membership = ($beforeToggle.tabs | ForEach-Object { [string]$_.shell_id + ':' + [string]$_.group_id }) -join ','
+                $membership = ($beforeToggle.tabs | ForEach-Object { $g = 0; if ($_.PSObject.Properties['group_id']) { $g = $_.group_id }; [string]$_.shell_id + ':' + [string]$g }) -join ','
                 $clickX = [int]$proof['nameX'][0] + 4 + $frame.Left - $origin.X
                 if ($proof['nameX'][0] -lt 0) { $clickX = [int]([long]20 * $dpi * $scale / 9600) }
                 $clickY = [int]$proof['headerTops'][0] + 14 + $frame.Top - $origin.Y
@@ -3402,7 +3402,7 @@ try {
                 $scanBottom = [int]$proof['sidebarRect'][3] + 24 + 2 * [int]$proof['rowHeight']
                 $toggle = [GroupRailProof]::Toggle((Join-Path $Evidence 'group-rail-selected-1.png'), (Join-Path $Evidence 'group-rail-collapsed.png'), (Join-Path $Evidence 'group-rail-restored.png'), [int]$proof['sessionTextX'][0], $firstRow, [int]$proof['rowHeight'], [int]$proof['headerTops'][0], $scanBottom, $dpi, $scale)
                 $state = Read-Session
-                $afterMembership = ($state.tabs | ForEach-Object { [string]$_.shell_id + ':' + [string]$_.group_id }) -join ','
+                $afterMembership = ($state.tabs | ForEach-Object { $g = 0; if ($_.PSObject.Properties['group_id']) { $g = $_.group_id }; [string]$_.shell_id + ':' + [string]$g }) -join ','
                 $clickToggle = $toggle['membersDisappearAndReturn'] -and $membership -ceq $afterMembership -and @($state.tabs).Count -eq 6 -and @($state.groups).Count -eq 2
                 Save-Json @{ pixels = $restored; toggle = $toggle; clickToggle = $clickToggle; before = $beforeToggle; session = $state; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-restored.json'
                 $result.checks += @{ name = 'sidebar-headline-click-toggle'; passed = $clickToggle; pixels = $toggle }
