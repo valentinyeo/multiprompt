@@ -1,0 +1,8 @@
+[Unit]
+Description=Reopen tasks for automatically reverted desktop changes
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/multiprompt-revert-board.env
+ExecStart=/usr/bin/node %h/.local/lib/multiprompt/auto-revert-board.js
+UMask=0077

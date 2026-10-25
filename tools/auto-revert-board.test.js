@@ -24,7 +24,7 @@ data.calls.push(args);
 let result;
 if (args[0] === 'api') result = args[1].includes('/pulls?') ? data.pulls : data.run;
 else if (args[0] === 'task' && args[1] === 'get') result = { success: true, tasks: [{ section: data.section }] };
-else if (args[0] === 'task' && args[1] === 'move') { data.section = args.at(-1); result = { success: true }; }
+else if (args[0] === 'task' && args[1] === 'move') { data.section = args[args.indexOf('--section') + 1]; result = { success: true }; }
 else if (args[0] === 'comment' && args[1] === 'list') {
   if (data.brokenPage) result = { success: true, comments: [], has_more: true };
   else if (data.secondPage && !args.includes('--cursor')) result = { success: true, comments: [], has_more: true, nextCursor: 'next' };
