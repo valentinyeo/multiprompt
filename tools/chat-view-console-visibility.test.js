@@ -81,6 +81,12 @@ function harness(text) {
   const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx'].map(name => fn(text, name)).join('\n\n');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const BOOL = i32;
 const HANDLE = ?usize;
 const SW_HIDE = 0;
@@ -236,20 +242,20 @@ test('executed production Zig decision, show, picker-close and input paths pass;
   try {
     copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, harness(source));
+    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const run = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stderr, /All \d+ tests passed/);
     console.log(run.stderr.trim());
     const broken = source.replace('if (!shellConsoleShouldBeVisible(idx)) {', 'if (false) {');
     assert.notEqual(broken, source);
-    fs.writeFileSync(file, harness(broken));
+    fs.writeFileSync(file, (harness(broken)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0, 'an unconditional show must fail real execution');
     assert.match(negative.stderr, /URL picker close[^]*FAIL/);
     const oldPicker = source.replace(fn(source, 'closeUrlPickerInternal'), fn(source, 'closeUrlPickerInternal').replace('showShellConsole(active_shell, SW_SHOW, "closeUrlPickerInternal")', 'ShowWindow(shells[active_shell].hwnd, SW_SHOW)'));
     assert.notEqual(oldPicker, source);
-    fs.writeFileSync(file, harness(oldPicker));
+    fs.writeFileSync(file, (harness(oldPicker)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const baseline = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(baseline.status, 0, 'a raw-show picker mutation must fail real execution');
     assert.match(baseline.stderr, /URL picker close[^]*FAIL/);

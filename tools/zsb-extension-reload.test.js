@@ -184,7 +184,13 @@ test('explicit reload acknowledges before its 200ms timer and still checks windo
 
 function nativeHarness(dir) {
   const file = path.join(dir, 'reload.zig');
-  fs.writeFileSync(file, `const std = @import("std");
+  fs.writeFileSync(file, (`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 ${section(bridge, 'const version =', 'const max_native_message')}
 var g_window_id: ?i64 = null;
 fn bridgeExePath() []const u8 { return "zigshell-bridge.exe"; }
@@ -242,7 +248,7 @@ ${section(bridge, '    var profile_override:', '    var help_args = args;') + ' 
     if (${section(bridge, 'std.mem.eql(u8, command, "extension-reload")) {', '    } else if (std.mem.eql(u8, command, "shoturl"))')}
     } else return error.InvalidArguments;
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   const executable = path.join(dir, process.platform === 'win32' ? 'reload.exe' : 'reload');
   const zig = process.env.ZIG_EXE || path.join(os.homedir(), '.local/zig-0.16.0/zig');
   const config = path.join(dir, 'bridge-config.zig');

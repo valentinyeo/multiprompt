@@ -18,6 +18,11 @@ function declaration(name) {
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
 const chat_echo = @import("chat_echo.zig");
 const json_reader = @import("json_reader.zig");
 const chat_markdown = @import("chat_markdown.zig");
@@ -52,6 +57,14 @@ var g_chat_active = true;
 var clean_chat: bool = false;
 var g_chat_screen_working = false;
 var g_chat_scroll_bottom_pending = false;
+var g_chat_read_open_pending = true;
+var g_chat_read_open_ready = false;
+var read_marks: usize = 0;
+fn chatReadMark(bottom: bool) bool {
+    std.debug.assert(bottom and !g_chat_read_open_pending and g_chat_read_open_ready);
+    read_marks += 1;
+    return false;
+}
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 const ChatTmuxSendJob = struct {
     key: struct { shell_id: u32 = 1 } = .{},
@@ -223,6 +236,9 @@ fn clear() void {
     fake_loaded_ms = 0;
     history_entry.history.deinit(std.heap.page_allocator);
     g_chat_screen_working = false;
+    g_chat_read_open_pending = true;
+    g_chat_read_open_ready = false;
+    read_marks = 0;
     persist_ok = true;
     paste_ok = true;
     shells[0].activity = .idle;
@@ -950,6 +966,7 @@ test "IGSH-564 steer failed paste never presses keys and ordinary Enter does not
     clear();
     composer_text = std.unicode.utf8ToUtf16LeStringLiteral("ordinary send");
     sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), read_marks);
     try std.testing.expectEqual(@as(usize, 1), writes);
     try std.testing.expectEqual(@as(usize, 1), enters);
     try std.testing.expectEqual(@as(usize, 0), tmux_steers + direct_steers);
@@ -1274,6 +1291,7 @@ function runHarness(control = false) {
     }
     let functions = names.map(body).join('\n')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
+      .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
       .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply');
@@ -1293,7 +1311,7 @@ function runHarness(control = false) {
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

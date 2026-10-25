@@ -108,6 +108,12 @@ test('executed production worker preserves order across errors and deletes only 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-drop-'));
   const fixture = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = ?*anyopaque;
 const ChatAttachJob = struct { path: [:0]const u16, delete_after: bool, shell_id: u32 = 7 };
 const ChatAttachError = enum(u8) { read_failed = 1 };
@@ -197,7 +203,7 @@ test "shell paths are copied at full UTF-16 length before handle release" {
 `;
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture + '\n' + ['chatAttachThread', 'chatReadDropPaths', 'chatFreeDropPaths', 'chatAttachPaths'].map(name => body(render, name)).join('\n'));
+    fs.writeFileSync(file, (fixture + '\n' + ['chatAttachThread', 'chatReadDropPaths', 'chatFreeDropPaths', 'chatAttachPaths'].map(name => body(render, name)).join('\n')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
@@ -288,6 +294,12 @@ test('executed production file worker checks size, exit status and last output p
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-file-worker-'));
   const fixture = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_drop = @import("chat_drop.zig");
 const DWORD = u32;
 const HANDLE = ?*anyopaque;
@@ -360,7 +372,7 @@ test "file upload contracts" {
     copyZig(['chat_drop.zig'], dir);
     const run = body(render, 'chatSendFileRun').replaceAll('@import("win32.zig")', 'mockWin32').replaceAll('@import("console.zig")', 'mockConsole').replaceAll('@import("vps.zig")', 'mockVps');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture + '\n' + run);
+    fs.writeFileSync(file, (fixture + '\n' + run).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally {

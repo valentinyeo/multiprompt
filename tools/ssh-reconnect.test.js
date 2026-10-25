@@ -17,7 +17,7 @@ async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), code);
+    fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
       let stdout = '';
@@ -36,6 +36,12 @@ async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
@@ -159,7 +165,7 @@ test "ISSUE-543 loading remote tabs" {
     if (modern) {
       await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-501 imported logic" { _ = reconnect; }', 'ISSUE-501');
     } else {
-      await zig('const std = @import("std");\n' + body('chatReconnectBackoffMs') + '\ntest "ISSUE-501 first retry is one second" { try std.testing.expectEqual(@as(u64, 1000), chatReconnectBackoffMs(0)); }', 'ISSUE-501', false);
+      await zig('const std = @import("std");\nconst ReadBoundary = struct { index: ?usize = null, unknown: bool = false };\nvar g_chat_read_boundary: ReadBoundary = .{};\nvar g_chat_read_divider_y: i32 = 0;\nvar g_chat_scrolled_up = false;\nfn chatReadBoundary() ReadBoundary { return .{}; }\nfn chatReadMark(_: bool) bool { return false; }\n' + body('chatReconnectBackoffMs') + '\ntest "ISSUE-501 first retry is one second" { try std.testing.expectEqual(@as(u64, 1000), chatReconnectBackoffMs(0)); }', 'ISSUE-501', false);
     }
   });
   test('ISSUE-501 marking disconnected arms a timer and schedules a delayed retry', async () => {

@@ -34,9 +34,15 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
     const production = (source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted'))
       .replaceAll('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()');
-    const fixture = fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
+    const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
+` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, fixture.replace("fn reset() void {", production + "\nfn reset() void {"));
+    fs.writeFileSync(file, (fixture.replace("fn reset() void {", production + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const zig = process.env.ZIG || 'zig';
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -44,13 +50,13 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const broadOwner = production.replace('if (hwnd == bh or root == bh) return bh;',
       'if (root != null and browserPaneOwnsForegroundHwnd(hwnd, bh)) return bh;');
     assert.notEqual(broadOwner, production);
-    fs.writeFileSync(file, fixture.replace("fn reset() void {", broadOwner + "\nfn reset() void {"));
+    fs.writeFileSync(file, (fixture.replace("fn reset() void {", broadOwner + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0, 'app-wide ownership must fail exact-pane regression');
     assert.match(negative.stderr, /typing and clicking a second pane[^]*FAIL/);
     const withoutUserPaste = production.replace(/if \(focusGuardPasteAllows\(target, g_focus_paste_target, g_main_hwnd\)\) \{\s*focusTrace\(\.allowed, target, caller\);\s*return true;\s*\}/, '');
     assert.notEqual(withoutUserPaste, production);
-    fs.writeFileSync(file, fixture.replace("fn reset() void {", withoutUserPaste + "\nfn reset() void {"));
+    fs.writeFileSync(file, (fixture.replace("fn reset() void {", withoutUserPaste + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const missingAuthority = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(missingAuthority.status, 0, 'removing the user-paste exception must reproduce the foreground block');
     assert.match(missingAuthority.stderr, /user screenshot from foreign Chrome[^]*FAIL/);

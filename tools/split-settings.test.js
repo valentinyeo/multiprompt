@@ -22,6 +22,12 @@ const serialize = between(session, '    if (app_state.g_layout_settings) |settin
 const paint = between(inbox, '    var total_attn: u32 = 0;', '    var div_rc = RECT{ .left = 16, .top = tab_y + 28,');
 const navigationTest = inbox.slice(inbox.indexOf('test "ISSUE-423 hidden selection'));
 const harness = `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const frequent = @import("frequent.zig");
 ${offsets}
 var g_layout_settings: ?frequent.Settings = null;
@@ -106,7 +112,7 @@ function execute(mutate = source => source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-split-settings-'));
   try {
     copyZig(['frequent.zig', 'session_layout.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'integration.zig'), mutate(harness));
+    fs.writeFileSync(path.join(dir, 'integration.zig'), (mutate(harness)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'integration.zig'), '--test-filter', 'ISSUE-423'], { encoding: 'utf8', timeout: 120000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

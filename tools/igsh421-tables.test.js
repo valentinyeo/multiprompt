@@ -15,6 +15,12 @@ function body(name, text = source) {
 }
 const prelude = String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_code = @import("chat_code.zig");
@@ -322,7 +328,7 @@ function execute(control) {
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
     functions = render.slice(render.indexOf('const TableMeasureBackend ='), render.indexOf('fn chatBlockNaturalWidth(')) + functions;
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + lineHeightPolicy + '\n' + functions + checks);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + lineHeightPolicy + '\n' + functions + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-'], { encoding: 'utf8', timeout: 120000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

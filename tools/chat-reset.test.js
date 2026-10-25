@@ -18,6 +18,12 @@ function declaration(name) {
 }
 const harness = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const ChatEchoState = chat_echo.OutboxState;
 const CHAT_OUTBOX_KEY_CAP = 256;
@@ -119,7 +125,7 @@ test('executed production reset clears all phases only for its tab, preserves dr
   try {
     copyZig(['chat_echo.zig'], dir);
     const names = ['chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxClearIn', 'chatOutboxEnqueueInState', 'chatOutboxDropForKey', 'chatResetForShell'];
-    fs.writeFileSync(path.join(dir, 'test.zig'), harness + declaration('ChatOutboxEntry') + names.map(body).join('\n') + acceptance);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (harness + declaration('ChatOutboxEntry') + names.map(body).join('\n') + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'reset:'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

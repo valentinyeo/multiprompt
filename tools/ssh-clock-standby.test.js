@@ -18,7 +18,7 @@ async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
     if (files.length) copyZig(files, dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), code);
+    fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
       let stdout = '';
@@ -36,6 +36,12 @@ async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
@@ -281,6 +287,12 @@ test "ISSUE-501 stale network veto" {
     test(`ISSUE-501 clock jump ${jump} leaves monotonic outbox timeout unchanged`, async () => {
       const code = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const Entry = struct {
     state: chat_echo.OutboxState = .delivered, id: u64 = 1, channel_pending: bool = false,

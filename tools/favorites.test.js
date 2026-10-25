@@ -18,11 +18,11 @@ test('favorite toggle, split filter and JSON parser execute as native Zig unit t
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-favorite-test-'));
   try {
     copyZig(['json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig', 'workspace_view.zig'], tmp);
-    const pure = 'const frequent = @import("frequent.zig");\nconst std = @import("std");\nconst json_reader = @import("json_reader.zig");\n' +
+    const pure = 'const frequent = @import("frequent.zig");\nconst std = @import("std");\nconst ReadBoundary = struct { index: ?usize = null, unknown: bool = false };\nvar g_chat_read_boundary: ReadBoundary = .{};\nvar g_chat_read_divider_y: i32 = 0;\nvar g_chat_scrolled_up = false;\nfn chatReadBoundary() ReadBoundary { return .{}; }\nfn chatReadMark(_: bool) bool { return false; }\nconst json_reader = @import("json_reader.zig");\n' +
       between('fn toggledFavorite(', 'fn toggleFavorite(') +
       between('test "favorite toggle', 'test "used JSON field');
     const file = path.join(tmp, 'favorites.zig');
-    fs.writeFileSync(file, pure);
+    fs.writeFileSync(file, pure.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'favorite'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
@@ -161,7 +161,13 @@ test('IGSH-457 production Starred rows include other windows without duplicating
       sidebar.slice(start, end) + '    return 0;\n}\n';
     fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
     fs.writeFileSync(path.join(tmp, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 8; }\n');
-    fs.writeFileSync(path.join(tmp, 'integration.zig'), `const std = @import("std");
+    fs.writeFileSync(path.join(tmp, 'integration.zig'), (`const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const frequent = @import("frequent.zig");
 const MAX_ROWS = 8;
 const LOOK_UNIFIED = false;
@@ -213,7 +219,7 @@ test "IGSH-457 Starred mirrors local and other-account window favorites after st
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(.inbox, rows[1].kind);
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(tmp, 'integration.zig'), '--test-filter', 'IGSH-457'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);

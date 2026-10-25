@@ -1509,6 +1509,7 @@ pub fn closeChatView() void {
     @import("chat_find_ui.zig").close(false);
     chatAcClose();
     if (!app_state.g_chat_active) return;
+    _ = @import("chat_session.zig").chatReadMark(false);
     chatDraftFlush();
     app_state.g_chat_active = false;
     @import("window_layout.zig").chatWorkingIndicatorSync();

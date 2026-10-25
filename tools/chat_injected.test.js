@@ -13,6 +13,12 @@ function body(name) {
 }
 const prelude = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
 const chat_transcript = @import("chat_transcript.zig");
@@ -216,7 +222,7 @@ function runHarness(oldColor = false) {
     copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig'], dir);
     let functions = ['chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
     if (oldColor) functions = functions.replace('if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor()', 'chatUserBubbleColor()');
-    fs.writeFileSync(path.join(dir, 'test.zig'), prelude + functions + acceptance);
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

@@ -36,7 +36,7 @@ function zig(args, dir) {
 
 function execute(t, name, code, modules = [], filter = '', flags = []) {
   const dir = prepare(t, name, modules);
-  fs.writeFileSync(path.join(dir, 'repro.zig'), code);
+  fs.writeFileSync(path.join(dir, 'repro.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   return zig(['test', 'repro.zig', ...flags, ...(filter ? ['--test-filter', filter] : [])], dir);
 }
 
@@ -47,6 +47,12 @@ test('ISSUE-400 a failed permission key does not consume the only answer attempt
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate');
   const result = execute(t, 'send-permission', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const permission = @import("chat_permission.zig");
 var g_chat_active = true;
 var clean_chat: bool = false;
@@ -81,6 +87,12 @@ test('ISSUE-400 failed remote permission sends restore only the matching shell a
   assert.match(fileBody('chat_capture.zig', 'chatPermissionCaptureRows'), /\{\s*chatPermissionSendFailedApply\(\);\s*if \(shell_index != app_state\.active_shell\) return;/);
   const result = execute(t, 'remote-permission', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const Identity = struct { shell_id: u32, host: u8 = 0, tmux: [16:0]u8 = @splat(0) };
 const app_state = struct {
     var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
@@ -151,7 +163,7 @@ test "failed remote permission is retryable by stable shell id" {
 });
 
 test('ISSUE-401 ordinary assistant replies starting Ready or Readable are not hidden as tools', (t) => {
-  const run = execute(t, 'capture', 'const std = @import("std");\n' + ['chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineIsToolActivity'].map(body).join('\n') + `
+  const run = execute(t, 'capture', 'const std = @import("std");\nconst ReadBoundary = struct { index: ?usize = null, unknown: bool = false };\nvar g_chat_read_boundary: ReadBoundary = .{};\nvar g_chat_read_divider_y: i32 = 0;\nvar g_chat_scrolled_up = false;\nfn chatReadBoundary() ReadBoundary { return .{}; }\nfn chatReadMark(_: bool) bool { return false; }\n' + ['chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineIsToolActivity'].map(body).join('\n') + `
 test "ordinary assistant replies remain visible" {
     @setEvalBranchQuota(10000);
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -220,6 +232,12 @@ print(json.dumps(dict(rows=rows,wire=wire,delta=r.response(q))))
   assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
   const native = execute(t, 'history-order', `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const history = @import("chat_history.zig");
 const transcript = @import("chat_transcript.zig");
 fn expectOrder(h: history.History) !void {
@@ -265,6 +283,12 @@ test "ISSUE-402 actual reader wire preserves order across suffix delta clone and
 test('ISSUE-403 clicked Chat View links preserve their Unicode path', (t) => {
   const run = execute(t, 'render-link', `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const links = @import("link_detect.zig");
 var active_shell: usize = 0;
 var shell_count: usize = 1;
@@ -306,6 +330,12 @@ test('ISSUE-404 Copy All does not silently truncate a long loaded conversation',
     .replaceAll('std.heap.page_allocator', 'copy_allocator');
   const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const ChatBlock = chat_markdown.Block;
@@ -417,6 +447,12 @@ test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestl
 test('ISSUE-405 inline code preserves Windows path backslashes', (t) => {
   const run = execute(t, 'markdown-path', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const md = @import("chat_markdown.zig");
 test "AUDIT inline code preserves the literal Windows path" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -446,6 +482,12 @@ test "AUDIT inline code preserves the literal Windows path" {
 test('ISSUE-405 fenced code blocks preserve every backslash', (t) => {
   const run = execute(t, 'markdown-fenced-path', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const md = @import("chat_markdown.zig");
 test "AUDIT fenced code preserves paths and punctuation literally" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -463,6 +505,12 @@ test "AUDIT fenced code preserves paths and punctuation literally" {
 test('ISSUE-405 plain text backslashes escape ASCII punctuation', (t) => {
   const run = execute(t, 'markdown-escaped-punctuation', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const md = @import("chat_markdown.zig");
 test "AUDIT plain text escapes only ASCII punctuation" {
     var spans: [4]md.Span = undefined;
@@ -482,6 +530,12 @@ test "AUDIT plain text escapes only ASCII punctuation" {
 test('ISSUE-405 plain text Windows paths preserve backslashes', (t) => {
   const run = execute(t, 'markdown-plain-path', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const md = @import("chat_markdown.zig");
 test "AUDIT plain text keeps backslashes before non-punctuation and at end" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -514,6 +568,12 @@ test('ISSUE-406 sync audit recognizes literal Markdown in user bubbles', (t) => 
 test('ISSUE-376 received agent messages use the normal Markdown layout path', (t) => {
   const run = execute(t, 'render-injected', String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_markdown = @import("chat_markdown.zig");
 const transcript = @import("chat_transcript.zig");
 const ChatBlock = chat_markdown.Block;
@@ -641,6 +701,12 @@ function findKeyboard(t, name, assertions) {
     .replaceAll('@import("command_palette.zig").reductionSearchChar', 'reductionSearchChar');
   const result = execute(t, name, `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const win32 = struct {
     const WM_KEYDOWN: u32 = 0x0100;
     fn GetAsyncKeyState(vk: u32) i16 { return if ((vk == 0x10 and shift_down) or (vk == 0x12 and alt_down)) -1 else 0; }

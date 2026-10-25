@@ -43,6 +43,12 @@ function harness() {
   const win32 = read('win32');
   const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
 const BROWSER_SPLIT_DEFAULT_PERMILLE = 350;
@@ -383,7 +389,7 @@ test('extracted production group default, migration, explicit colors and palette
   try {
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, harness());
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -397,7 +403,7 @@ test('extracted production group default, migration, explicit colors and palette
       const original = harness();
       const mutated = mutate(original);
       assert.notEqual(mutated, original, name);
-      fs.writeFileSync(file, mutated);
+      fs.writeFileSync(file, mutated.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
       assert.notEqual(bad.status, 0, name);
       assert.match(bad.stderr, /FAIL/, name);

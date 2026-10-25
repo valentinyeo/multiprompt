@@ -17,6 +17,12 @@ test('real bridge request builder and retry path heal without replaying successf
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-version-heal-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const source = `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const version = "${version}";
 const browser_request_attempts = 4;
 var g_window_id: ?i64 = null;
@@ -89,7 +95,7 @@ fn jsonOk(raw: []const u8) bool {
 }
 `;
   const file = path.join(dir, 'heal.zig');
-  fs.writeFileSync(file, source);
+  fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
   const zig = process.env.ZIG_EXE || process.env.ZIG || path.join(os.homedir(), '.local/zig-0.16.0/zig');
   const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);

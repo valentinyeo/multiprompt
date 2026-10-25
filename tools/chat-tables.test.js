@@ -22,8 +22,14 @@ function runHarness(control = false) {
     if (control === 'chrome') chrome = chrome.replace('!table_line and ', '');
     if (control === 'reflow') functions = functions.replace('previous_was_divider = is_divider or table_line;', 'previous_was_divider = is_divider;').replace('const table_line = chat_markdown.consoleTableLine(line);', '');
     if (control === true) functions = functions.replace('line.len == 0 or chat_markdown.consoleTableLine(line)', 'line.len == 0');
-    fs.writeFileSync(path.join(dir, 'test.zig'), String.raw`
+    fs.writeFileSync(path.join(dir, 'test.zig'), (String.raw`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_markdown = @import("chat_markdown.zig");
 const CHAT_MAX_BLOCKS = 256;
 const ChatBlock = chat_markdown.Block;
@@ -193,7 +199,7 @@ test "table surface: complete captured box grid is exactly one table block" {
     g_chat_line_lens[2] = 7;
     try std.testing.expectEqual(@as(usize, 35), chatTranscriptWithoutComposer(prompt, 3));
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const file = path.join(dir, 'test.zig');
     return spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'table surface:'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

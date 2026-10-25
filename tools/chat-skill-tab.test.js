@@ -13,6 +13,12 @@ function body(name) {
 }
 const harness = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const skill_model = @import("skills.zig");
 const draft_model = @import("chat_drafts.zig");
 var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
@@ -96,7 +102,7 @@ test('ISSUE-399 a picked skill is cleared in another tab and restored in its own
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh399-skill-tab-'));
   try {
     copyZig(['skills.zig', 'chat_drafts.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'repro.zig'), harness + body('selectChatSkill') + '\n' + body('chatDraftBindToActive') + acceptance);
+    fs.writeFileSync(path.join(dir, 'repro.zig'), (harness + body('selectChatSkill') + '\n' + body('chatDraftBindToActive') + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'repro.zig'), '--test-filter', 'ISSUE-399'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

@@ -279,6 +279,7 @@ pub const Shell = struct {
     shell_id: u32,
     title_id: u32 = 0,
     chat_id: u64 = 0,
+    last_read_message_id: u64 = 0,
     favicon_hicon: ?HANDLE,
     favicon_path: [512]u8,
     favicon_path_len: u32,
@@ -1151,6 +1152,10 @@ pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
 pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
+pub var g_chat_read_open_pending = false;
+pub var g_chat_read_open_ready = false;
+pub var g_chat_read_boundary: chat_history.ReadBoundary = .{};
+pub var g_chat_read_divider_y: i32 = 0;
 pub var g_chat_new_messages: chat_history.NewMessages = .{};
 pub var g_chat_content_left: i32 = 0;
 pub var g_chat_sel_anchor: usize = 0;
@@ -1981,6 +1986,7 @@ pub var g_account_closed_count: usize = 0;
 pub const SavedTab = struct {
     shell_id: u32 = 0,
     chat_id: u64 = 0,
+    last_read_message_id: u64 = 0,
     sync_owned: bool = false,
     kind: ShellKind,
     name: [64]u16,

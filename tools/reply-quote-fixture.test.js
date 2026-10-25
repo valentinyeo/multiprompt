@@ -74,6 +74,12 @@ test('executed production Reply selection accepts own messages and finds the new
     copyZig(['chat_markdown.zig'], dir);
     const harness = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const ChatBlock = @import("chat_markdown.zig").Block;
 var g_chat_blocks = [_]ChatBlock{
     .{ .start = 0, .len = 3, .role = .user },
@@ -110,7 +116,7 @@ test "own message, newest agent, tools, and bounds" {
     try std.testing.expectEqual(@as(usize, 0), selected.len);
 }
 `;
-    fs.writeFileSync(path.join(dir, 'selection.zig'), harness + body('chatBlockDisplayRange') + body('chatReplyToBlock') + body('chatReplyLatestAgent') + checks);
+    fs.writeFileSync(path.join(dir, 'selection.zig'), (harness + body('chatBlockDisplayRange') + body('chatReplyToBlock') + body('chatReplyLatestAgent') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'selection.zig'), '--test-filter', 'own message'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally {

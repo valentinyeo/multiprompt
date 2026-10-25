@@ -407,6 +407,8 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + chat_id_pre.len], chat_id_pre);
         pos += chat_id_pre.len;
         pos += writeUintTo(json_buf[pos..], app_state.shells[i].chat_id);
+        const read_marker = std.fmt.bufPrint(json_buf[pos..], ",\"last_read_message_id\":\"{d}\"", .{app_state.shells[i].last_read_message_id}) catch return false;
+        pos += read_marker.len;
         if (app_state.shells[i].claude_sid_len > 0 and pos < json_buf.len - 60) {
             const cs_pre = ",\"csid\":\"";
             @memcpy(json_buf[pos .. pos + cs_pre.len], cs_pre);
@@ -996,6 +998,7 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     app_state.shells[idx].inbox_excluded = tab.inbox_excluded;
     restoreArchiveMarkers(&app_state.shells[idx], tab);
     app_state.shells[idx].keep_awake = tab.kaw;
+    app_state.shells[idx].last_read_message_id = tab.last_read_message_id;
     app_state.shells[idx].chat_view_on = tab.cv;
     if (app_state.ISSUE_347_KEEP_FULL_WIDTH) app_state.shells[idx].full_width = tab.fw;
     if (tab.burl_len > 0) {
@@ -2271,4 +2274,41 @@ test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {
     try std.testing.expect(!@hasField(SavedTab, "locked"));
     try std.testing.expect(!@hasField(app_state.Shell, "chat_view_lock"));
     try std.testing.expect(!@hasField(SavedTab, "chat_view_lock"));
+}
+
+test "IGSH-814 saved read marker round trip restores each chat and legacy defaults" {
+    const saved_count = app_state.shell_count;
+    const saved_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.shells[0] = saved_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].last_read_message_id = std.math.maxInt(u64);
+    var temp: [512]u8 = undefined;
+    const len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(len > 0 and len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\igsh-814-{d}-{d}.json", .{ temp[0..len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(saveSessionTo(path, 0));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 1), parseSessionTabs(bytes, &tabs));
+    try std.testing.expectEqual(std.math.maxInt(u64), tabs[0].last_read_message_id);
+    app_state.shells[0] = empty_shell;
+    restoreBrowserStateFromSavedTab(0, &tabs[0]);
+    try std.testing.expectEqual(std.math.maxInt(u64), app_state.shells[0].last_read_message_id);
+    try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\"}]}", &tabs));
+    try std.testing.expectEqual(@as(u64, 0), tabs[0].last_read_message_id);
 }

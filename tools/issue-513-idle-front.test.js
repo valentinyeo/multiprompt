@@ -17,8 +17,14 @@ function run(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-513-front-'));
   try {
     copyZig(['frequent.zig'], dir);
-    fs.writeFileSync(path.join(dir, 'test.zig'), `
+    fs.writeFileSync(path.join(dir, 'test.zig'), (`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const frequent = @import("frequent.zig");
 const app_state = struct {
     var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
@@ -105,7 +111,7 @@ test "ISSUE-513 user selection still records a focused ten-second visit and canc
     try std.testing.expectEqual(@as(?u32, null), app_state.g_front_period.selected);
     try std.testing.expectEqual(@as(u32, 0), timer);
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-513'], { encoding: 'utf8', timeout: 60000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

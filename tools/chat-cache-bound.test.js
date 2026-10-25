@@ -15,8 +15,14 @@ function body(name, text = source) {
 test('production cache pruning bounds the directory and removes only oldest cache files', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-cache-bound-'));
   try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), `
+    fs.writeFileSync(path.join(dir, 'test.zig'), (`
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const HANDLE = usize;
 const INVALID_HANDLE_VALUE_PTR = 0;
 const FILE_ATTRIBUTE_DIRECTORY = 16;
@@ -79,7 +85,7 @@ test "oldest cache eviction preserves personal files directories and the bound" 
     try std.testing.expect(!deleted[1] and deleted[2] and deleted[3]);
     try std.testing.expect(!deleted[0] and !deleted[6] and !deleted[7]);
 }
-`);
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stderr, /All 2 tests passed/);
@@ -100,6 +106,12 @@ test('a local cache load starts even with a remote worker busy and recent input 
     copyZig(['chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_echo.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
     const source = `
 const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const chat_history = @import("chat_history.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const HANDLE = ?*anyopaque;
@@ -138,12 +150,12 @@ test "local cache bypasses busy remote worker and foreground reservation" {
     try std.testing.expect(!cached_entry.pending); // recent input still defers remote IO
 }
 `;
-    const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source);
+    const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'local cache bypasses'], { encoding: 'utf8', timeout: 60_000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const baseline = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-7a02ac9.zig', 'utf8') });
     assert.equal(baseline.status, 0);
-    fs.writeFileSync(file, source.replace(body('chatFileRequest'), body('chatFileRequest', baseline.stdout)));
+    fs.writeFileSync(file, (source.replace(body('chatFileRequest'), body('chatFileRequest', baseline.stdout))).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const old = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'local cache bypasses'], { encoding: 'utf8', timeout: 60_000 });
     assert.notEqual(old.status, 0);
     assert.match(old.stderr, /FAIL \(TestUnexpectedResult\)/, '708 must fail the same executed loading oracle');

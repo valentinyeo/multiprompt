@@ -15,6 +15,12 @@ function between(start, end, text = source) {
 const normalize = text => text.replaceAll('pub fn ', 'fn ').replaceAll('app_state.', '').replaceAll('@import("inbox.zig").nowFileTime()', 'nowFileTime()').replaceAll('@import("account_desktop.zig").publishSessionLayout()', 'publishSessionLayout()').replaceAll('@import("account_desktop.zig").accountPush()', 'accountPush()');
 const painting = between('    var y: i32 = list_top;', '    _ = SelectObject(hdc, font_subtitle);\n    _ = SetTextColor(hdc, fg_dim);\n    var ft_rc', read('src/inbox.zig'));
 const harness = `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const frequent = @import("frequent.zig");
 const launch_cache = struct { var pending = false; };
 const json_reader = @import("json_reader.zig");
@@ -260,7 +266,7 @@ function runHarness(mutate = x => x) {
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
-    fs.writeFileSync(path.join(dir, 'integration.zig'), mutate(harness));
+    fs.writeFileSync(path.join(dir, 'integration.zig'), (mutate(harness)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'integration.zig'), '--test-filter', 'v2'], { encoding: 'utf8', timeout: 120000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

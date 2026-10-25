@@ -1954,3 +1954,13 @@ test('IGSH-706 inbox journey proves mute hides the published session without clo
     assert.ok(map.includes(`\`${shot}.png\``));
   }
 });
+
+test('IGSH-814 theme verification waits for the initialized palette and selected Themes command before typing', () => {
+  const selection = control.slice(control.indexOf('function Select-Theme('), control.indexOf('function Measure-StatusCard('));
+  const readiness = /Focus-Palette 'themes' 4000\s+Press @\(0x0D\) 'Enter: Themes\.\.\.'\s+Type-Text \$Theme/;
+  assert.match(selection, readiness);
+  for (const replacement of ["Palette 'themes'", "Focus-Palette 'themes' 0"]) {
+    assert.doesNotMatch(selection.replace("Focus-Palette 'themes' 4000", replacement), readiness);
+  }
+  assert.match(selection, /Wait-Until \{ \(Test-Path \$path\) -and \(Get-Content \$path -Raw\)\.Trim\(\) -eq \$SavedTheme \}/);
+});

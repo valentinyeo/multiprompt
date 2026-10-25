@@ -41,6 +41,12 @@ function harness() {
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
   const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
+const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
+var g_chat_read_boundary: ReadBoundary = .{};
+var g_chat_read_divider_y: i32 = 0;
+var g_chat_scrolled_up = false;
+fn chatReadBoundary() ReadBoundary { return .{}; }
+fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read('chat_style'), 'contentColumn')} };
 const chat_history = struct { ${fn(read('chat_history'), 'column')} };
@@ -410,7 +416,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-spacing-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, harness());
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     console.log(result.stdout + result.stderr);
@@ -425,7 +431,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
       const original = harness();
       const mutated = mutate(original);
       assert.notEqual(mutated, original, name);
-      fs.writeFileSync(file, mutated);
+      fs.writeFileSync(file, mutated.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
       assert.notEqual(bad.status, 0, name);
       assert.match(bad.stderr, /FAIL/, name);
