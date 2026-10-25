@@ -5394,6 +5394,11 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             try app_state.g_chat_confirmed.append(std.heap.page_allocator, confirmed);
             try std.testing.expect(chatEchoBlockConfirmed(text, block));
             const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            var unconfirmed = block;
+            unconfirmed.stamp_ms = 0;
+            try std.testing.expect(!chatEchoBlockConfirmed(text, unconfirmed));
+            const plain = chatMeasureBlockRect(dc, text, unconfirmed, .single, width, 0, null);
+            try std.testing.expectEqual(plain.bottom - plain.top, rc.bottom - rc.top);
             chatPaintBlock(dc, text, block, .single, rc);
         },
         .user, .injected, .prose, .code, .table => {
