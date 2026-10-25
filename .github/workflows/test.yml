@@ -111,7 +111,11 @@ jobs:
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: bash
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Run CLEAN chat pixel tests
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        shell: bash
+        run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
         if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
@@ -387,7 +391,24 @@ jobs:
         run: node --test tools/zsb-cdp-script.test.js
       - name: Run server tool tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Install CLEAN pixel renderer
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        env:
+          WINEPREFIX: ${{ runner.temp }}/clean-chat-wine
+          WINEARCH: win64
+          WINEDEBUG: '-all'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wine64 winetricks xvfb
+          xvfb-run -a winetricks -q gdiplus
+      - name: Run CLEAN chat pixel tests
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        env:
+          WINEPREFIX: ${{ runner.temp }}/clean-chat-wine
+          WINEDEBUG: '-all'
+          WINEDLLOVERRIDES: gdiplus=n
+        run: xvfb-run -a zig build test-clean-chat --summary all -Dtarget=x86_64-windows-gnu -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
       - name: Require every CLEAN pixel test
         if: always() && steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
