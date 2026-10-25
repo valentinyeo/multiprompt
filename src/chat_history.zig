@@ -5,7 +5,7 @@ const style = @import("chat_style.zig");
 const echo = @import("chat_echo.zig");
 const diff = @import("chat_diff.zig");
 
-const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
+const Message = struct { diff: ?[]const u8 = null, added: usize = 0, removed: usize = 0, offset: u64 = 0, end: u64 = 0, segment: u64 = 0, result_offset: ?u64 = null, status: ?[]const u8 = null, detail: ?[]const u8 = null, role: []const u8, timestamp: []const u8 = "", text: []const u8 = "", id: []const u8 = "", read_id: ?[]const u8 = null, settlement: ?struct { operation: []const u8, content: []const u8 = "" } = null };
 pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
@@ -58,8 +58,9 @@ pub const History = struct {
         self.blocks.items.len += message.count;
         const recorded = style.timestamp(stamp);
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
+        const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &self.sid), id);
         for (self.blocks.items[first_block..]) |*block| {
-            block.message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &self.sid), id);
+            block.message_id = message_id;
             block.source_offset = source_offset;
             block.source_end = source_end;
             block.segment = segment;
@@ -78,6 +79,8 @@ pub const History = struct {
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         var last_id: std.ArrayList(u8) = .empty;
         defer last_id.deinit(a);
+        var last_read_id: std.ArrayList(u8) = .empty;
+        defer last_read_id.deinit(a);
         var last_stamp: std.ArrayList(u8) = .empty;
         defer last_stamp.deinit(a);
         var last_role: md.Role = .prose;
@@ -143,7 +146,7 @@ pub const History = struct {
                 continue;
             }
             if (std.mem.eql(u8, m.role, "tool")) {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
                 message.clearRetainingCapacity();
                 last_id.clearRetainingCapacity();
                 if (m.text.len == 0) continue;
@@ -174,7 +177,7 @@ pub const History = struct {
             if (merge) {
                 try message.append(a, '\n');
             } else {
-                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
+                if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
                 message.clearRetainingCapacity();
                 source_offset = m.offset;
                 segment = m.segment;
@@ -188,9 +191,11 @@ pub const History = struct {
             try message.appendSlice(a, m.text);
             last_id.clearRetainingCapacity();
             try last_id.appendSlice(a, m.id);
+            last_read_id.clearRetainingCapacity();
+            try last_read_id.appendSlice(a, m.read_id orelse m.id);
             last_role = role;
         }
-        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_id.items);
+        if (message.items.len > 0) try self.appendMessage(a, message.items, last_role, last_stamp.items, source_offset, source_end, segment, last_read_id.items);
         var pending = tools.valueIterator();
         while (pending.next()) |tool| {
             if (self.blocks.items[tool.index].tool_status == .running and tool.index < self.last_block) {
@@ -1495,4 +1500,20 @@ test "IGSH-814 all read and legacy chats never draw a divider" {
     try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(&blocks, 0));
     try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(&.{}, 11));
 >>>>>>> 1cf4b8c7 (IGSH-814: Remember the first unread chat message)
+}
+
+test "IGSH-814 mixed message read identity is independent of wire row offsets" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var before: History = .{};
+    defer before.deinit(a);
+    var after: History = .{};
+    defer after.deinit(a);
+    try before.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply:text:100:2\",\"read_id\":\"stable-source:text:2\",\"text\":\"Read\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    try after.apply(a, "@mp\t2\thistory\tok\tsid\t0\t1000\t10\t0\tclaude\tterm-1\n" ++
+        "{\"role\":\"assistant\",\"id\":\"reply:text:900:2\",\"read_id\":\"stable-source:text:2\",\"text\":\"Read\",\"offset\":900,\"end\":1000}\n@@MP_END@@\n", 2, key);
+    const marker = before.blocks.items[0].message_id;
+    try std.testing.expectEqual(marker, after.blocks.items[0].message_id);
+    try std.testing.expectEqualDeep(ReadBoundary{}, unreadBoundary(after.blocks.items, marker));
 }

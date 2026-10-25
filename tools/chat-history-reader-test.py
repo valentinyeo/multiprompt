@@ -561,6 +561,17 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(paired[1]['status'], 'ok')
         self.assertEqual(len({row['id'] for row in paired}), len(paired))
 
+    def test_igsh814_mixed_message_read_identity_survives_source_offset_changes(self):
+        event = self.tool_call()
+        event.update(uuid='stable-source-message')
+        event['message'].update(id='reply-814', content=[dict(type='text', text='Before'),
+            *event['message']['content'], dict(type='text', text='After')])
+        before = reader.conversation_rows(event, 'claude', offset=100)
+        after = reader.conversation_rows(event, 'claude', offset=900)
+        self.assertNotEqual(before[-1]['id'], after[-1]['id'])
+        self.assertEqual(before[-1]['read_id'], after[-1]['read_id'])
+        self.assertEqual(before[-1]['read_id'], 'stable-source-message:text:2')
+
     def test_igsh402_missing_message_ids_and_repeated_message_ids_are_stable(self):
         for identity in ('', 'shared-message'):
             with self.subTest(identity=identity):
