@@ -401,7 +401,7 @@ pub fn sendChatPrompt() void {
         if (chat_steer_prompt) chatEchoPushQueuedNow();
         return;
     }
-    var send_text: []const u16 = text_buf[0..text_len];
+    var send_text: []const u16 = chatPromptNormalizeLineEndings(text_buf[0..text_len]);
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
     if (app_state.g_chat_reply_len > 0) {
@@ -2742,4 +2742,39 @@ test "IGSH-564 busy tmux session still gets the queued message typed" {
     try std.testing.expectEqual(@as(?usize, null), chatOutboxFirstSendableIndexIn(&list, key, true));
     list.items[0].state = .not_sent;
     try std.testing.expectEqual(@as(?usize, 1), chatOutboxFirstSendableIndexIn(&list, key, true));
+}
+
+fn chatPromptNormalizeLineEndings(text: []u16) []const u16 {
+    return text;
+}
+
+test "IGSH-895 typed prefix plus native paste preserves the draft and sends one newline per break" {
+    const w = @import("win32.zig");
+    const prefix = L("I cannot send ");
+    const parent = w.CreateWindowExW(0, L("STATIC"), L(""), 0, 0, 0, 600, 100, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = w.CreateWindowExW(0, L("EDIT"), L(""), w.WS_CHILD | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, 600, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    const clipboard = @import("clipboard.zig");
+    var previous: [16384]u16 = undefined;
+    const previous_len = clipboard.readClipboardTextWithRetry(&previous);
+    defer _ = clipboard.setUnicodeClipboardTextWithRetry(previous[0..previous_len]);
+    const cases = .{
+        .{ L("screenshots"), L("I cannot send screenshots"), L("I cannot send screenshots") },
+        .{ L("screenshots\r\n"), L("I cannot send screenshots\r\n"), L("I cannot send screenshots\n") },
+        .{ L("\r\nscreenshots\r\nnext\r\n"), L("I cannot send \r\nscreenshots\r\nnext\r\n"), L("I cannot send \nscreenshots\nnext\n") },
+        .{ L("screenshots\r\n\r\nnext"), L("I cannot send screenshots\r\n\r\nnext"), L("I cannot send screenshots\n\nnext") },
+    };
+    inline for (cases) |case| {
+        _ = w.SetWindowTextW(edit, L(""));
+        for (std.mem.span(prefix)) |character| _ = w.SendMessageW(edit, 0x0102, character, 1);
+        try std.testing.expect(clipboard.setUnicodeClipboardTextWithRetry(std.mem.span(case[0])));
+        _ = w.SendMessageW(edit, 0x0302, 0, 0);
+        var text: [256]u16 = undefined;
+        const length: usize = @intCast(w.GetWindowTextW(edit, &text, text.len));
+        try std.testing.expectEqualSlices(u16, std.mem.span(case[1]), text[0..length]);
+        try std.testing.expectEqualSlices(u16, std.mem.span(case[2]), chatPromptNormalizeLineEndings(text[0..length]));
+    }
+    var mixed = [_]u16{ 'a', '\r', '\n', '\r', '\n', 'b', '\n', 'c', '\r' };
+    try std.testing.expectEqualSlices(u16, std.mem.span(L("a\n\nb\nc\n")), chatPromptNormalizeLineEndings(&mixed));
 }
