@@ -1,6 +1,7 @@
 const list_input = @import("list_input.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const tokens = @import("design_tokens.zig");
 const draft_model = @import("chat_drafts.zig");
 const skill_model = @import("skills.zig");
 const chat_complete = @import("chat_complete.zig");
@@ -676,7 +677,7 @@ pub fn ensureChatFont() HANDLE {
 
 pub fn refreshChatBrushes() void {
     const bg = themeConsoleBg();
-    const input = customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(31, 31, 31));
+    const input = customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(255, 255, 255) else tokens.ReaderControl);
     if (app_state.g_chat_bg_brush == null or app_state.g_chat_bg_color != bg) {
         if (app_state.g_chat_bg_brush != null) _ = DeleteObject(app_state.g_chat_bg_brush);
         app_state.g_chat_bg_brush = CreateSolidBrush(bg);

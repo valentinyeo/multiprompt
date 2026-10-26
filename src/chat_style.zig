@@ -1,5 +1,6 @@
 const std = @import("std");
 const md = @import("chat_markdown.zig");
+const tokens = @import("design_tokens.zig");
 
 pub fn readingColumn(pane_width: i32, scaled_max_width: i32) struct { left: i32, width: i32 } {
     const pane = @max(0, pane_width);
@@ -52,12 +53,14 @@ pub fn scrollThumbColor(bg: u32) u32 {
 }
 pub const BubbleColors = struct { user: u32, agent: u32, injected: u32 };
 pub fn bubbleColors(bg: u32) BubbleColors {
+    if (bg == tokens.ReaderBackground) return .{ .user = tokens.ReaderUserCard, .agent = tokens.ReaderCard, .injected = 0x4F2F1E };
     if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
     return .{ .user = shift(bg, -26), .agent = shift(bg, -11), .injected = 0xF7E6D6 };
 }
 pub const BubbleLook = struct { top: u32, bottom: u32, outline: u32 };
 pub const BUBBLE_GRADIENT_STEPS = 8;
 pub fn bubbleLook(fill: u32) BubbleLook {
+    if (fill == tokens.ReaderCard or fill == tokens.ReaderUserCard) return .{ .top = shift(fill, 8), .bottom = fill, .outline = shift(fill, 16) };
     if (isDark(fill)) return .{ .top = shift(fill, 8), .bottom = fill, .outline = shift(fill, 12) };
     return .{ .top = shift(fill, 6), .bottom = fill, .outline = shift(fill, -22) };
 }
@@ -357,4 +360,16 @@ test "IGSH-983 a split agent reply shares one gradient across its blocks" {
     try std.testing.expectEqual(RunBounds{ .first = 0, .last = 0 }, runBounds(&pos, 0));
     for (1..4) |i| try std.testing.expectEqual(RunBounds{ .first = 1, .last = 3 }, runBounds(&pos, i));
     try std.testing.expectEqual(RunBounds{ .first = 4, .last = 4 }, runBounds(&pos, 4));
+}
+
+test "IGSH-1016 default dark bubbles match the Android reader cards" {
+    const colors = bubbleColors(tokens.ReaderBackground);
+    try std.testing.expectEqual(tokens.ReaderCard, colors.agent);
+    try std.testing.expectEqual(tokens.ReaderUserCard, colors.user);
+    const agent = bubbleLook(colors.agent);
+    try std.testing.expectEqual(@as(u32, 0x262626), agent.top);
+    try std.testing.expectEqual(tokens.ReaderOutline, agent.outline);
+    const user = bubbleLook(colors.user);
+    try std.testing.expectEqual(@as(u32, 0x4A4A4A), user.outline);
+    try std.testing.expectEqual(@as(u32, 0x242424), bubbleColors(0x000000).agent);
 }

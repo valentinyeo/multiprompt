@@ -1,0 +1,8 @@
+pub const ReaderBackground: u32 = 0x101010;
+pub const ReaderCard: u32 = 0x1E1E1E;
+pub const ReaderUserCard: u32 = 0x3A3A3A;
+pub const ReaderControl: u32 = 0x1F1F1F;
+pub const ReaderOutline: u32 = 0x2E2E2E;
+pub const ReaderRaised: u32 = 0x353535;
+pub const ReaderForeground: u32 = 0xF2F2F2;
+pub const ReaderHint: u32 = 0x8A8A8A;

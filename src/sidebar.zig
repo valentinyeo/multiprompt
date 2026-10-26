@@ -1,6 +1,7 @@
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const tokens = @import("design_tokens.zig");
 const archive_rules = @import("archive_rules.zig");
 const attention_rules = @import("attention_rules.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
@@ -1627,9 +1628,19 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
 
 fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]const u16, len: i32) void {
     _ = SelectObject(hdc, uiFontSubtitle());
-    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(98, 102, 109)));
+    const reader = @import("themes.zig").themeReaderDark();
+    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else if (reader) tokens.ReaderHint else RGB(98, 102, 109)));
     var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
-    _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (!reader) {
+        _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        return;
+    }
+    var upper: [128]u16 = undefined;
+    var n: usize = 0;
+    while (n < upper.len and (if (len < 0) text[n] != 0 else n < @as(usize, @intCast(len)))) : (n += 1) {
+        upper[n] = if (text[n] >= 'a' and text[n] <= 'z') text[n] - 32 else text[n];
+    }
+    _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -1781,12 +1792,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const i: usize = row.shell_idx;
 
             if (i == app_state.active_shell and LOOK_UNIFIED) {
+                const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(hl);
-                const hl_pen = CreatePen(0, 1, customColorOr("overlay_border", hl));
+                const hl_brush = CreateSolidBrush(if (reader) tokens.ReaderControl else hl);
+                const hl_pen = CreatePen(0, 1, if (reader) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                const hl_radius: i32 = if (reader) tabRowH() - 6 else 8;
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
-                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, 8, 8);
+                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, hl_radius, hl_radius);
                 _ = SelectObject(hdc, ob);
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
@@ -2006,7 +2019,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawFavoriteDot(hdc, text_right + 2 + @divTrunc(FAVORITE_DOT_D, 2), y + 16);
                 }
                 _ = SelectObject(hdc, font_shell_tab_title);
-                const title_color: DWORD = if (i == app_state.active_shell) customColorOr("text", RGB(255, 255, 255)) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(255, 255, 255));
+                const title_white: DWORD = if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255);
+                const title_color: DWORD = if (i == app_state.active_shell) customColorOr("text", title_white) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(25, 25, 25) else title_white);
                 _ = SetTextColor(hdc, title_color);
                 var line1_rc = RECT{ .left = text_left, .top = y + 6, .right = text_right, .bottom = y + 26 };
                 if (app_state.shells[i].name_len > 0) {

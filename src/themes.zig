@@ -19,6 +19,7 @@ const RegCloseKey = @import("win32.zig").RegCloseKey;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const ShellExecuteW = @import("win32.zig").ShellExecuteW;
 const L = @import("startup.zig").L;
+const tokens = @import("design_tokens.zig");
 const RGB = @import("startup.zig").RGB;
 const DevTheme = @import("app_state.zig").DevTheme;
 const DEFAULT_DEV_THEME_JSON = @import("app_state.zig").DEFAULT_DEV_THEME_JSON;
@@ -617,9 +618,13 @@ pub fn themeTagNeutral(active: bool, fallback: DWORD) DWORD {
     return if (active) app_state.g_dev_theme.tag_neutral_active else app_state.g_dev_theme.tag_neutral;
 }
 
+pub fn themeReaderDark() bool {
+    return !app_state.g_light_theme and !app_state.g_amoled_theme and !app_state.g_edge_gray_theme and !app_state.g_mid_theme and !app_state.g_multiprompt_theme and !devThemeOn();
+}
+
 pub fn themeSidebarBg() DWORD {
     if (app_state.g_amoled_theme) return RGB(0, 0, 0);
-    return customColorOr("sidebar_bg", if (app_state.g_light_theme) RGB(243, 243, 243) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(60, 60, 60) else RGB(36, 36, 36));
+    return customColorOr("sidebar_bg", if (app_state.g_light_theme) RGB(243, 243, 243) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(60, 60, 60) else tokens.ReaderBackground);
 }
 
 pub fn themeConsoleBg() DWORD {
@@ -630,7 +635,7 @@ pub fn themeConsoleBg() DWORD {
 
 pub fn themeConsoleFg() DWORD {
     if (app_state.g_multiprompt_theme) return RGB(247, 248, 248);
-    if (!devThemeOn()) return if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(255, 255, 255);
+    if (!devThemeOn()) return if (app_state.g_light_theme) RGB(28, 28, 28) else if (themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255);
     ensureDevThemeInitialized();
     return app_state.g_dev_theme.console_fg;
 }
