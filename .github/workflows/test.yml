@@ -282,12 +282,17 @@ jobs:
         with:
           name: update-verifier-x64-${{ github.run_id }}
           path: update-verifier
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: native-update
       - name: Test safe release updates
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: |
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof"
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload update restart proof
@@ -563,6 +568,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+
+      - name: Build newer native update fixture
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=9.99.999 --prefix "$RUNNER_TEMP/native-update" --summary all
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-update/bin/multiprompt.exe
+          if-no-files-found: error
+          retention-days: 1
+
 
   test-result:
     name: test

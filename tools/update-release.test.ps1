@@ -1,4 +1,4 @@
-param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
+param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '', [string]$NativeUpdate = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script:manifestFault = ''
@@ -76,33 +76,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition @'
-using System;
-using System.IO;
-using System.Text;
-using System.Runtime.InteropServices;
-public class UpdateProof {
-    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; }
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
-    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
-    public static byte[] PatchVersion(string path, string oldVersion, string newVersion) {
-        byte[] bytes = File.ReadAllBytes(path), oldBytes = Encoding.ASCII.GetBytes(oldVersion), newBytes = Encoding.ASCII.GetBytes(newVersion);
-        int count = 0;
-        for (int offset = 0; offset <= bytes.Length - oldBytes.Length; offset++) {
-            if (bytes[offset] != oldBytes[0]) continue;
-            int i = 1;
-            while (i < oldBytes.Length && bytes[offset + i] == oldBytes[i]) i++;
-            if (i != oldBytes.Length) continue;
-            Array.Copy(newBytes, 0, bytes, offset, newBytes.Length);
-            count++;
-        }
-        if (count == 0) throw new InvalidOperationException("Native fixture version missing");
-        return bytes;
-    }
-}
-'@
-                $rectangle = New-Object UpdateProof+Rect
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'                $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
                 $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -168,12 +142,12 @@ public class UpdateProof {
                 $versionMatch = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verifier)), 'MPVERSION=(\d+\.\d+\.\d+);')
                 Assert $versionMatch.Success 'Native verifier version marker missing'
                 $oldVersion = $versionMatch.Groups[1].Value
-                $newVersion = '9.99.' + ('9' * ($oldVersion.Length - 5))
-                Assert ($newVersion.Length -eq $oldVersion.Length) 'Native update fixture version length differs'
-                $native = [UpdateProof]::PatchVersion($Verifier, $oldVersion, $newVersion)
+                $newVersion = '9.99.999'
+                Assert ($NativeUpdate -and (Test-Path $NativeUpdate)) 'Native update build was not supplied'
+                Assert ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($NativeUpdate)).Contains("MPVERSION=$newVersion;")) 'Native update build has the wrong version'
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
-                [IO.File]::WriteAllBytes($cardExe, $native)
+                Copy-Item -LiteralPath $NativeUpdate -Destination $cardExe
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 do {
                     $cardLog = Get-Content $log -Raw
@@ -218,6 +192,10 @@ public class UpdateProof {
                 @{ oldVersion = $oldVersion; newVersion = $newVersion; seconds = $restartTimer.Elapsed.TotalSeconds; session = 'Restart proof'; process = $restored[0].Id } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-restarted.json')
                 Passed 'restart card reopens newer native app with session restored'
             } finally {
+                foreach ($proofFile in @($log, $sessionPath, (Join-Path $env:APPDATA 'ZigShell/inbox-default.json'))) {
+                    if (Test-Path $proofFile) { Copy-Item -LiteralPath $proofFile -Destination $Evidence -Force }
+                }
+                Get-Process | Where-Object { try { $processPath = $_.Path; $processPath -and $processPath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) } catch { $false } } | Select-Object Id,Path,MainWindowTitle | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'restart-processes.json')
                 if ($cardProcess -and -not $cardProcess.HasExited) { $cardProcess.Kill(); $cardProcess.WaitForExit() }
                 Stop-FixtureApps
                 Remove-Item -LiteralPath $sessionPath, "$sessionPath.bak" -Force -ErrorAction SilentlyContinue
