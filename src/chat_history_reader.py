@@ -1577,7 +1577,7 @@ def box_plain_text(shown):
         if plain[i].startswith("─"):
             break
         rows.append(plain[i])
-    return " ".join(rows)
+    return " ".join(" ".join(rows).split())
 
 
 def queue_hint_state(target):
@@ -1589,6 +1589,11 @@ def queue_hint_state(target):
     if QUEUE_SELECT_HINT in plain:
         return "select"
     return "edit" if QUEUE_HINT in plain else "none"
+
+
+def settled_empty(target):
+    time.sleep(0.3)
+    return box_is_empty(prompt_box_text(target))
 
 
 def queue_matches(pulled, target, keep):
@@ -1619,9 +1624,11 @@ def cancel_queued_response(q):
         try:
             target = "=" + name + ":"
             draft = prompt_box_text(target)
-            if draft:
+            if "[Pasted text" in draft or "[Image #" in draft:
+                reason = "draft_not_restorable"
+            elif draft:
                 left, stuck = clear_prompt_box(target, draft)
-                if stuck or not box_is_empty(left):
+                if (stuck or not box_is_empty(left)) and not settled_empty(target):
                     reason = "box_not_clear"
             if reason is None:
                 state = queue_hint_state(target)
@@ -1641,14 +1648,14 @@ def cancel_queued_response(q):
                         reason = "queue_mismatch"
                     else:
                         box, stuck = clear_prompt_box(target, pulled)
-                        if stuck or not box_is_empty(box):
+                        if (stuck or not box_is_empty(box)) and not settled_empty(target):
                             reason = "box_not_clear"
                         else:
                             for item in keep:
                                 again = send_response(dict(id=rid, tmux=name, text=item))
                                 if "\tsend\terror\t" in again:
                                     reason = "requeue_failed"
-            if draft and reason not in ("box_not_clear", "queue_mismatch") and box_is_empty(prompt_box_text(target)):
+            if draft and reason != "draft_not_restorable" and box_is_empty(prompt_box_text(target)):
                 type_into_box(target, draft, rid)
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_cancel_failed"

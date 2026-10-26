@@ -2207,6 +2207,15 @@ class SharedQueueDraftTest(unittest.TestCase):
         self.assertEqual(state['box'], 'survivor')
         self.assertEqual(state['submitted'], [])
 
+    def test_IGSH_1010_cancel_queued_will_not_rebuild_a_draft_holding_pasted_content(self):
+        state, run = self.fake_claude(['one'])
+        state['box'] = '[Pasted text #1 +4 lines]'
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='one', keep=[]))
+        self.assertIn('\tcancel_queued\terror\tdraft_not_restorable\t0\n', wire)
+        self.assertEqual(state['keys'], [])
+        self.assertEqual(state['box'], '[Pasted text #1 +4 lines]')
+
     def test_IGSH_1010_cancel_queued_matches_whole_messages_not_fragments(self):
         state, run = self.fake_claude(['look at this'])
         with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
