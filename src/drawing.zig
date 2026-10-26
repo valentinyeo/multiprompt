@@ -710,6 +710,112 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     }
 }
 
+test "IGSH-910 active ETA leaves Chat View header pixels and title space unchanged" {
+    const w = @import("win32.zig");
+    const gdi = struct {
+        extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+    };
+    const saved = .{
+        .hwnd = app_state.g_main_hwnd,
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .title = app_state.g_thread_title,
+        .numbers = app_state.g_eta_numbers_on,
+        .reauth = app_state.g_account_reauth,
+        .cap_until = app_state.g_cap_msg_until,
+        .voice = app_state.g_voice_mode_active,
+        .scale = app_state.g_ui_scale,
+        .dpi = app_state.g_main_monitor_dpi,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.hwnd;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_thread_title = saved.title;
+        app_state.g_eta_numbers_on = saved.numbers;
+        app_state.g_account_reauth = saved.reauth;
+        app_state.g_cap_msg_until = saved.cap_until;
+        app_state.g_voice_mode_active = saved.voice;
+        app_state.g_ui_scale = saved.scale;
+        app_state.g_main_monitor_dpi = saved.dpi;
+        resetFontCache();
+    }
+    const width = 1200;
+    const height = 160;
+    const window = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, width, height, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(window);
+    app_state.g_main_hwnd = window;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = .{};
+    const title = L("My working session");
+    @memcpy(app_state.shells[0].name[0..title.len], title);
+    app_state.shells[0].name_len = title.len;
+    app_state.g_chat_active = true;
+    app_state.g_thread_title = true;
+    app_state.g_eta_numbers_on = true;
+    app_state.g_account_reauth = false;
+    app_state.g_cap_msg_until = 0;
+    app_state.g_voice_mode_active = false;
+    app_state.g_ui_scale = 100;
+    app_state.g_main_monitor_dpi = 96;
+    resetFontCache();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    const idle = try std.testing.allocator.alloc(u8, pixels.len);
+    defer std.testing.allocator.free(idle);
+    var idle_rect: RECT = undefined;
+    for ([_]bool{ false, true }) |eta_active| {
+        app_state.shells[0].eta_total_ms = if (eta_active) 120_000 else 0;
+        app_state.shells[0].eta_deadline_tick = GetTickCount64() + 120_000;
+        @memset(pixels, 0);
+        paintThreadTitle(dc, width);
+        _ = gdi.GdiFlush();
+        const title_rect = threadTitleNameRectFor(width, 0) orelse return error.TestUnexpectedResult;
+        var ink: usize = 0;
+        var y = title_rect.top;
+        while (y < title_rect.bottom) : (y += 1) {
+            var x = title_rect.left;
+            while (x < @min(title_rect.left + 160, title_rect.right)) : (x += 1) {
+                if ((w.GetPixel(dc, x, y) & 0xffffff) != 0) ink += 1;
+            }
+        }
+        try std.testing.expect(ink > 20);
+        const bmp = try std.testing.allocator.alloc(u8, 54 + pixels.len);
+        defer std.testing.allocator.free(bmp);
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], pixels);
+        try std.testing.expect(@import("file_io.zig").writeFileAtomicW(if (eta_active) "chat-header-eta-active.bmp" else "chat-header-eta-idle.bmp", bmp));
+        if (!eta_active) {
+            @memcpy(idle, pixels);
+            idle_rect = title_rect;
+        } else {
+            var changed: usize = 0;
+            for (idle, pixels) |a, b| {
+                if (a != b) changed += 1;
+            }
+            std.debug.print("IGSH-910 header changed bytes={d}, title ink={d}\n", .{ changed, ink });
+            try std.testing.expectEqual(@as(usize, 0), changed);
+            try std.testing.expectEqualDeep(idle_rect, title_rect);
+        }
+    }
+}
+
 pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
     if (!app_state.g_inbox_button_hover) return;
     const r = inboxButtonRect(in_overlay);

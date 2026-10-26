@@ -117,6 +117,13 @@ jobs:
         with:
           name: header-capacity-proof
           path: '*header-capacity.bmp'
+            if-no-files-found: error
+      - name: Upload Chat View header ETA proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-header-eta
+          path: chat-header-eta-*.bmp
           if-no-files-found: error
       - name: Run CLEAN chat pixel tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
