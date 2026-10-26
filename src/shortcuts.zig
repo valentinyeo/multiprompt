@@ -532,7 +532,6 @@ test "Chat View composer keeps native editing keys, app shortcuts fall through" 
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x25, false, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x09, false, false, 0));
 
-    try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x0D, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x41, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x43, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x56, true, false, 0));
@@ -644,6 +643,17 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
+        }
+
+        if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and
+            !isAltDown(kb.flags) and !app_state.g_win_held and chatViewOwnsInput() and
+            app_state.g_chat_composer_hwnd != null and GetFocus() == app_state.g_chat_composer_hwnd and
+            GetForegroundWindow() == app_state.g_main_hwnd)
+        {
+            @import("chat_composer.zig").chatShellDraftNoteSend();
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_SEND, 0, 0);
+            return 1;
         }
 
         if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {

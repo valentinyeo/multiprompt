@@ -1,19 +1,3 @@
-pub fn chatComposerOwnsKey(wp: WPARAM, vkCode: DWORD, ctrl: bool, alt: bool, flags: DWORD) bool {
-    if (wp != WM_KEYDOWN and wp != WM_SYSKEYDOWN) return false;
-    if (ctrl and (flags & 0x20) != 0) return true;
-    if (alt and !ctrl) return false;
-    if (wp != WM_KEYDOWN) return false;
-    if (vkCode == 0x70 or vkCode == 0x71) return false;
-    if (!ctrl) return true;
-    return switch (vkCode) {
-        0x41, 0x43, 0x44, 0x56, 0x58, 0x59, 0x5A => true,
-        0xBF => true,
-        0x25, 0x27 => true,
-        0x08, 0x2E => true,
-        else => false,
-    };
-}
-
 fn chatComposerSubclassCore() void {
     if (msg == 0x0102) {
         if (wp == 0x09 and app_state.g_chat_ac_tab_accepted) {
