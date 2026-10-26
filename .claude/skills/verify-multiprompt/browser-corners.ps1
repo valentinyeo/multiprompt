@@ -123,8 +123,13 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
             Doctor
             Record "Corner cycle $cycle`: resize owned main window"
             [void][VerifyNative]::ShowWindow($script:window, 9)
-            $width = 1100 + 20 * ($cycle % 3)
-            if (-not [VerifyNative]::MoveWindow($script:window, 20, 20, $width, 700, $true)) { throw 'Owned resize failed' }
+            $monitor = [VerifyNative]::MonitorFromWindow($script:window, 2)
+            $info = New-Object VerifyNative+MonitorInfo
+            $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+            if (-not [VerifyNative]::GetMonitorInfoW($monitor, [ref]$info)) { throw 'Resize work area unavailable' }
+            $width = [Math]::Min(960, $info.Work.Right - $info.Work.Left - 40) - 20 * ($cycle % 3)
+            $height = [Math]::Min(650, $info.Work.Bottom - $info.Work.Top - 40)
+            if (-not [VerifyNative]::MoveWindow($script:window, ($info.Work.Left + 20), ($info.Work.Top + 20), $width, $height, $true)) { throw 'Owned resize failed' }
         }
     }
     Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser -and [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } 'ten visible browser masks after activation' 10
@@ -133,6 +138,12 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
     Snapshot $name
     $frame = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame)) { throw 'Main rectangle unavailable' }
+    $visibleMonitor = [VerifyNative]::MonitorFromWindow($script:window, 2)
+    $visibleInfo = New-Object VerifyNative+MonitorInfo
+    $visibleInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf($visibleInfo)
+    if (-not [VerifyNative]::GetMonitorInfoW($visibleMonitor, [ref]$visibleInfo) -or
+        $frame.Left -lt $visibleInfo.Work.Left -or $frame.Top -lt $visibleInfo.Work.Top -or
+        $frame.Right -gt $visibleInfo.Work.Right -or $frame.Bottom -gt $visibleInfo.Work.Bottom) { throw 'All four corners must be inside the visible work area' }
     $state = Read-Session
     $scale = 100
     if ($state.PSObject.Properties['ui_scale']) { $scale = [int]$state.ui_scale }
