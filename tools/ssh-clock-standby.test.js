@@ -77,6 +77,7 @@ var kills: usize = 0;
 var timers: usize = 0;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 fn chatBenchEnabled() bool { return false; }
+fn chatCancelFinish() void {}
 fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
 fn reconnectTabVisible(_: u32) bool { return true; }
 fn threadTitleTop() i32 { return 10; }
