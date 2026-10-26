@@ -282,6 +282,8 @@ fn chatOutboxInputRowIdle(_: u32) bool { return input_idle; }
 `;
 const pendingStart = source.indexOf('    g_chat_echo_layout_count = 0;\n    if (active_shell < shell_count)');
 assert.ok(pendingStart >= 0, 'production pending layout');
+const pendingEnd = source.indexOf('    if (@import("window_layout.zig").chatStopVisible()) {', pendingStart);
+assert.ok(pendingEnd > pendingStart);
 const pendingLayout = `
 const RECT = struct { left: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
 const chat_hit = struct { const pending_selection_base: usize = std.math.maxInt(usize) / 2 + 1; };
@@ -303,7 +305,8 @@ fn layoutPending() void {
     var y: i32 = 0;
     const old_echo_count = g_chat_echo_layout_count;
     const old_echo_ids = g_chat_echo_layout_ids;
-${source.slice(pendingStart, source.indexOf('\n}', pendingStart))}
+${source.slice(pendingStart, pendingEnd)}
+    g_chat_content_h = y;
 }
 `;
 const acceptance = `

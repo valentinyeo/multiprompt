@@ -502,7 +502,7 @@ test('correctness rich: unchanged pre-fix code fails the oracle', () => {
 
 test('working bar production working timer is idle-free, row-only and preserves background start times', () => {
   const functions = ['chatWorkingTimesPoll', 'chatWorkingBarVisible', 'chatWorkingBarTick', 'chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorSync']
-    .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '');
+    .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '').replaceAll('@import("chat_render.zig").chatWorkingSync', 'chatWorkingSync');
   const prelude = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -530,11 +530,12 @@ var starts: usize = 0;
 var stops: usize = 0;
 var paints: usize = 0;
 fn GetTickCount64() u64 { return fake_tick; }
-fn SetTimer(_: HANDLE, id: usize, ms: u32, _: ?*anyopaque) usize { std.debug.assert(id == TIMER_CHAT_WORKING and ms == 1000); starts += 1; return id; }
+fn SetTimer(_: HANDLE, id: usize, ms: u32, _: ?*anyopaque) usize { std.debug.assert(id == TIMER_CHAT_WORKING and ms == 250); starts += 1; return id; }
 fn KillTimer(_: HANDLE, id: usize) i32 { std.debug.assert(id == TIMER_CHAT_WORKING); stops += 1; return 1; }
 fn debugLog(_: []const u8) void {}
 fn chatViewLayout() struct { transcript: RECT, composer_card: RECT } { return .{ .transcript = .{ .left = 10, .top = 0, .right = 100, .bottom = 50 }, .composer_card = .{ .left = 10, .top = 80, .right = 100, .bottom = 150 } }; }
 fn InvalidateRect(_: HANDLE, rc: *const RECT, erase: i32) i32 { std.debug.assert(rc.left == 10 and rc.right == 100 and rc.top == 50 and rc.bottom == 80 and erase == 0); paints += 1; return 1; }
+fn chatWorkingSync() void {}
 fn chatWorkingIndicatorText() []const u16 { return g_chat_working_text[0..g_chat_screen_status_len]; }
 `;
   const checks = `
