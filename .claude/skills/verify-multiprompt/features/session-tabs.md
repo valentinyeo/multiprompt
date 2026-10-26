@@ -22,7 +22,7 @@ Preconditions are the same as [Session open](session-open.md): single-window off
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=session-tabs`.
 - **Setup.** Create two groups through the palette, open `verify-1` to `verify-4` in the first group through `session-open`, and record the active tab, foreground HWND and window titles. Save `workspace-list` before.
 - **Actions.** Rename `verify-1` to `Renamed One`; rebind `verify-2` to `verify-9` and require the saved tab keeps its title and group while `verify-2` disappears; require rebinding `verify-3` to the same session to be refused with `duplicate_session`; move `verify-3` to the second group; close `verify-4`. After each command require the active workspace, active tab, foreground window and titles unchanged.
-- **Refusals.** Closing or moving the active tab returns `active_tab`; an unknown tab id returns `unknown_tab`.
+- **Refusals.** Closing, moving or rebinding the active tab returns `active_tab`; an unknown tab id returns `unknown_tab`.
 - **Restart.** Capture the saved layout (title, session, group name, workspace per tab), close and relaunch the app and require the identical layout.
 - **Evidence.** `session-tabs-before.session.json`, `session-tabs-layout.session.json`, `session-tabs-layout.workspace-list.json`, `session-tabs-restarted.session.json`, the request and reply pair of every command, `before.png`, `action.png`, `after.png`, `restarted.png`, `result.json`.
 

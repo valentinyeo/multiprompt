@@ -4620,6 +4620,7 @@ try {
             if ($null -eq $activeListed) { throw 'workspace-list reported no active tab' }
             & $expectRefused @('session-close', '--tab', [string]$activeListed.id) 'active_tab' 'session-close-active'
             & $expectRefused @('session-move', '--tab', [string]$activeListed.id, '--ungrouped') 'active_tab' 'session-move-active'
+            & $expectRefused @('session-rebind', '--tab', [string]$activeListed.id, '--tmux', 'verify-8') 'active_tab' 'session-rebind-active'
             & $expectRefused @('session-close', '--tab', '2000000000') 'unknown_tab' 'session-close-unknown'
             & $assertQuiet 'refused commands'
             $layout = {
@@ -4628,7 +4629,7 @@ try {
                 foreach ($g in @($state.groups)) { $groupNames[[int]$g.id] = $g.name }
                 @($state.tabs | ForEach-Object {
                     $tabGroup = ''
-                    if ($_.group_id -and $groupNames.ContainsKey([int]$_.group_id)) { $tabGroup = $groupNames[[int]$_.group_id] }
+                    if ($_.PSObject.Properties['group_id'] -and $_.group_id -and $groupNames.ContainsKey([int]$_.group_id)) { $tabGroup = $groupNames[[int]$_.group_id] }
                     $tabSession = ''
                     if ($_.PSObject.Properties['tmux_session']) { $tabSession = $_.tmux_session }
                     $tabWorkspace = 0

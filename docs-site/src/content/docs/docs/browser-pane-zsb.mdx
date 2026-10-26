@@ -156,7 +156,7 @@ zsb session-close --tab 42
 - `session-move` takes `--workspace`, `--group` or `--ungrouped` (one of them is required, `--group` and `--ungrouped` are exclusive) and matches names exactly, like `session-open`. Moving to another workspace without `--group` leaves the tab ungrouped. Unknown names return `unknown_workspace` or `unknown_group` with `valid_names`, and a snoozed workspace returns `workspace_snoozed`.
 - `session-close` closes one tab and replies `{"ok":true,"closed":true,"tab":42}`. It does not touch the remote tmux session.
 
-`session-move` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.
+`session-move`, `session-rebind` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.
 
 ## Routing Rule
 

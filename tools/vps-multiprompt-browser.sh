@@ -60,7 +60,7 @@ print_help() {
         echo '  An existing tab for the same host/session in any workspace returns existing:true and its workspace name without changes.'
         ;;
       session-close) echo 'usage: zsb session-close --tab <id>'
-        echo '  Closes one terminal tab in the background. The active tab is refused with active_tab, a pinned tab with pinned_tab.'
+        echo '  Closes one terminal tab in the background. Local (non-remote) tabs are refused with not_remote_tab, the active tab with active_tab, a pinned tab with pinned_tab.'
         ;;
       session-rebind) echo 'usage: zsb session-rebind --tab <id> [--host <host name>] --tmux <session>'
         echo '  Points an existing tab at another remote tmux session and reconnects it, keeping its title and place.'
@@ -551,8 +551,14 @@ elif args[0] in {"session-close", "session-rebind", "session-rename", "session-m
         if i + 1 >= len(rest):
             fail("bad_args", f"{args[0]} flag {rest[i]} needs a value")
         flag, value = rest[i], rest[i + 1]
-        if flag not in allowed or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
-            fail("bad_args", f"{args[0]} takes only its named flags once, with nonempty values and no control characters")
+        if flag not in allowed or flag in values or not value:
+            fail("bad_args", f"{args[0]} takes only its named flags once, with nonempty values")
+        if any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
+            if flag == "--tmux":
+                fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
+            if flag == "--name":
+                fail("invalid_name", "tab title must contain 1-63 UTF-16 units without control characters")
+            fail("bad_args", f"{args[0]} values must not contain control characters")
         values[flag] = value
         i += 2
     if not required <= values.keys():

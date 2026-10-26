@@ -202,7 +202,7 @@ test('app dispatch runs the tab repair verbs on the UI thread through the worksp
     assert.ok(source.includes(`"${verb}"`), verb);
   }
   const ops = source.slice(source.indexOf('const ZsbTabOps = struct'), source.indexOf('fn zsbIsTabVerb('));
-  assert.match(ops, /closeShell\(idx\)/);
+  assert.match(ops, /closeBackgroundShell\(idx\)/);
   assert.match(ops, /respawnShellInPlace\(idx, true\)/);
   assert.match(ops, /commitPillMove\(workspace, false\)/);
   assert.doesNotMatch(ops, /switchTo|SetForegroundWindow|SetFocus\(|ShowWindow\(/);

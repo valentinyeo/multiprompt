@@ -2263,6 +2263,7 @@ fn zsbTabClose(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = "session-close", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
     if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    if (@import("capacity.zig").remoteHostForShell(&app_state.shells[idx]) == null) return zsbWorkspaceError(out, "not_remote_tab");
     if (app_state.shells[idx].pinned_top) return zsbWorkspaceError(out, "pinned_tab");
     ops.close(idx);
     if (zsbShellIndexForTab(args.tab) != null) return zsbWorkspaceError(out, "close_failed");
@@ -2287,6 +2288,7 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     if (args.workspace == null and args.group == null and !args.ungrouped) return zsbWorkspaceError(out, "bad_args");
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
     if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    if (args.workspace != null and !app_state.g_single_window) return zsbWorkspaceError(out, "single_window_only");
     var ws_names: [MAX_LWS][]const u8 = undefined;
     var ws_bufs: [MAX_LWS][32]u8 = undefined;
     var target_ws = app_state.shells[idx].workspace;
@@ -2318,6 +2320,7 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
 fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = "session-rebind", .allowed = &.{ .tab, .host, .tmux }, .required = &.{ .tab, .tmux } }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
     const shell = &app_state.shells[idx];
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return zsbWorkspaceError(out, "not_remote_tab");
     var host: u8 = @import("capacity.zig").remoteHostForShell(shell) orelse TMUX_HOST_DE;
@@ -2343,6 +2346,8 @@ fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const old_host = shell.tmux_host;
     const old_session = shell.tmux_session;
     const old_session_len = shell.tmux_session_len;
+    const old_reconnect = shell.ssh_reconnect;
+    const changed = old_host != host or old_session_len != tmux.len or !std.mem.eql(u8, old_session[0..old_session_len], tmux);
     shell.kind = .tmux;
     shell.tmux_host = host;
     @memcpy(shell.tmux_session[0..tmux.len], tmux);
@@ -2353,7 +2358,15 @@ fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
         shell.tmux_host = old_host;
         shell.tmux_session = old_session;
         shell.tmux_session_len = old_session_len;
+        shell.ssh_reconnect = old_reconnect;
         return zsbWorkspaceError(out, "spawn_failed");
+    }
+    if (changed) {
+        const rebound = &app_state.shells[idx];
+        rebound.claude_sid_len = 0;
+        rebound.claude_cwd_len = 0;
+        rebound.claude_session = false;
+        rebound.preview_len = 0;
     }
     ops.persist();
     return zsbTabReply(out, "rebound", args.tab, &app_state.shells[idx]);
@@ -2361,12 +2374,14 @@ fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
 
 const ZsbTabOps = struct {
     fn close(idx: u32) void {
-        @import("console.zig").closeShell(idx);
+        @import("console.zig").closeBackgroundShell(idx);
     }
     fn respawn(idx: u32) bool {
         return @import("console.zig").respawnShellInPlace(idx, true);
     }
     fn commitMove(workspace: u8) void {
+        @import("sidebar.zig").pruneEmptyGroups();
+        @import("sidebar.zig").normalizeGroupOrder();
         @import("workspaces.zig").commitPillMove(workspace, false);
     }
     fn persist() void {
@@ -2905,6 +2920,9 @@ test "session-close removes a background tab and refuses the active, pinned and 
     app_state.shells[1].pinned_top = true;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"pinned_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
     app_state.shells[1].pinned_top = false;
+    app_state.shells[1].kind = .cmd;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_remote_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+    app_state.shells[1].kind = .tmux;
     try std.testing.expectEqual(@as(usize, 0), ZsbTabTestOps.closed);
     try std.testing.expectEqualStrings("{\"ok\":true,\"closed\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
     try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.closed);
@@ -2989,7 +3007,10 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.respawned);
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_host\",\"valid_names\":[\"remote-1\",\"remote-2\",\"remote-3\"]}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10", "--host", "nowhere" }, &out));
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "99", "--tmux", "runner-10" }, &out));
-    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_remote_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "41", "--tmux", "runner-10" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"active_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "41", "--tmux", "runner-10" }, &out));
+    app_state.shells[2].kind = .cmd;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_remote_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
+    app_state.shells[2].kind = .tmux;
     ZsbTabTestOps.respawn_ok = false;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"spawn_failed\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
     try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
