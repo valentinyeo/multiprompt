@@ -30,6 +30,8 @@ foreach ($cycle in 1..5) {
         $tabs.Count -eq 1 -and $tabs[0].kind -eq 'tmux' -and $tabs[0].tmux_session -ceq $bindingName -and $tabs[0].tmux_host -eq 1 -and
             (Read-SharedText (Join-Path $bindingState 'invocations.jsonl')).Contains('"kind": "attach"')
     } "reopen $cycle restored the exact remote identity" 60
+    $saved = Read-Session
+    $tabs = @($saved.tabs)
     $calls = @(Get-Content (Join-Path $bindingState 'invocations.jsonl') | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
     $logins = @($calls | Where-Object { $_.kind -eq 'login' })
     $attachments = @($calls | Where-Object { $_.kind -eq 'attach' })
