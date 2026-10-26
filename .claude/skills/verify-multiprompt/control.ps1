@@ -401,29 +401,115 @@ public static class VerifyNative {
         } else if (PaneVisible(owner)) return false;
         return true;
     }
-    public static void RequireSwitchStart(IntPtr owner, IntPtr composer, IntPtr sourceConsole, string sourceSuffix, IntPtr sourceBrowser, Rect sourceDock, string sourceDraft, IntPtr targetConsole, string targetSuffix, IntPtr targetBrowser, Rect targetDock, string targetDraft) {
+    public static void RequireSwitchStart(IntPtr owner, IntPtr composer, IntPtr sourceConsole, string sourceSuffix, IntPtr sourceBrowser, Rect sourceDock, string sourceDraft, IntPtr targetConsole, string targetSuffix, IntPtr targetBrowser, Rect targetDock, string targetDraft, int sourceRgb, int targetRgb, int[] sourcePatch, int[] targetPatch) {
         if (sourceConsole == targetConsole || (sourceBrowser == targetBrowser && sourceBrowser != IntPtr.Zero) || sourceSuffix == targetSuffix || sourceDraft == targetDraft) throw new InvalidOperationException("Source and target sessions are not distinct");
         if (!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)) throw new InvalidOperationException("Source session is not the visible foreground session before Ctrl+Tab");
         if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw new InvalidOperationException("Target session is already visible before Ctrl+Tab; this sample would not be a switch");
+        if (!PagePainted(sourceDock, sourceRgb, sourcePatch)) throw new InvalidOperationException("Source session color is not on screen before Ctrl+Tab");
+        if (PagePainted(targetDock, targetRgb, targetPatch)) throw new InvalidOperationException("Target session color is already on screen before Ctrl+Tab; this sample would not be a switch");
     }
-    static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
-        if (dock.Right - dock.Left < 16 || dock.Bottom - dock.Top < 200) throw new InvalidOperationException("Browser content area is too small");
-        int x = dock.Left + (dock.Right - dock.Left) / 2;
-        int y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4;
-        graphics.CopyFromScreen(x, y, 0, 0, pixels.Size);
+    static void ReadPatch(int x, int y, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        IntPtr screen = GetDC(IntPtr.Zero);
+        IntPtr target = graphics.GetHdc();
+        try {
+            if (!BitBlt(target, 0, 0, pixels.Width, pixels.Height, screen, x, y, 0x00CC0020)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        } finally { graphics.ReleaseHdc(target); ReleaseDC(IntPtr.Zero, screen); }
+    }
+    static bool PatchMatches(int x, int y, int[] colors, int offset, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        ReadPatch(x, y, pixels, graphics);
         for (int row = 0; row < pixels.Height; row++) {
             for (int col = 0; col < pixels.Width; col++) {
                 var pixel = pixels.GetPixel(col, row);
-                if (Math.Abs(pixel.R - ((rgb >> 16) & 255)) > 8 || Math.Abs(pixel.G - ((rgb >> 8) & 255)) > 8 || Math.Abs(pixel.B - (rgb & 255)) > 8) return false;
+                int want = colors[offset + row * pixels.Width + col];
+                if (Math.Abs(pixel.R - ((want >> 16) & 255)) > 8 || Math.Abs(pixel.G - ((want >> 8) & 255)) > 8 || Math.Abs(pixel.B - (want & 255)) > 8) return false;
             }
         }
         return true;
     }
-    public static bool PagePainted(Rect dock, int rgb) {
-        using (var pixels = new System.Drawing.Bitmap(3, 3))
-        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) return PaintMatches(dock, rgb, pixels, graphics);
+    static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        if (dock.Right - dock.Left < 16 || dock.Bottom - dock.Top < 200) throw new InvalidOperationException("Paint area is too small");
+        int x = dock.Left + (dock.Right - dock.Left) / 2;
+        int y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4;
+        var colors = new int[pixels.Width * pixels.Height];
+        for (int index = 0; index < colors.Length; index++) colors[index] = rgb;
+        return PatchMatches(x, y, colors, 0, pixels, graphics);
     }
-    public static double[] MeasureSessionSwitch(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft, int rgb, string frozenMarker) {
+    static bool Painted(Rect dock, int rgb, int[] patch, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        if (patch != null) return PatchMatches(patch[0], patch[1], patch, 2, pixels, graphics);
+        return PaintMatches(dock, rgb, pixels, graphics);
+    }
+    public static bool PagePainted(Rect dock, int rgb, int[] patch) {
+        using (var pixels = new System.Drawing.Bitmap(3, 3))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) return Painted(dock, rgb, patch, pixels, graphics);
+    }
+    public static bool PagePainted(Rect dock, int rgb) { return PagePainted(dock, rgb, null); }
+    public static int SolidPatch(Rect area) {
+        if (area.Right - area.Left < 16 || area.Bottom - area.Top < 200) throw new InvalidOperationException("Paint area is too small");
+        using (var pixels = new System.Drawing.Bitmap(3, 3))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            ReadPatch(area.Left + (area.Right - area.Left) / 2, area.Top + (area.Bottom - area.Top) * 3 / 4, pixels, graphics);
+            var first = pixels.GetPixel(0, 0);
+            for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) {
+                var pixel = pixels.GetPixel(col, row);
+                if (Math.Abs(pixel.R - first.R) > 8 || Math.Abs(pixel.G - first.G) > 8 || Math.Abs(pixel.B - first.B) > 8) return -1;
+            }
+            return (first.R << 16) | (first.G << 8) | first.B;
+        }
+    }
+    public static int[] CaptureComposerStart(IntPtr composer) {
+        Point origin = new Point();
+        if (!ClientToScreen(composer, ref origin)) throw new InvalidOperationException("Missing composer client origin");
+        UIntPtr first;
+        if (SendMessageTimeout(composer, 0x00D6, UIntPtr.Zero, IntPtr.Zero, 2, 2000, out first) == IntPtr.Zero) throw new InvalidOperationException("Missing composer first character position");
+        int x = origin.X + (short)(first.ToUInt64() & 0xffff), y = origin.Y + (short)((first.ToUInt64() >> 16) & 0xffff);
+        int[] previous = null;
+        var stable = System.Diagnostics.Stopwatch.StartNew();
+        while (stable.ElapsedMilliseconds < 5000) {
+            var region = new int[2 + 16 * 16];
+            region[0] = x; region[1] = y;
+            using (var pixels = new System.Drawing.Bitmap(16, 16))
+            using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+                ReadPatch(x, y, pixels, graphics);
+                for (int row = 0; row < 16; row++) for (int col = 0; col < 16; col++) region[2 + row * 16 + col] = pixels.GetPixel(col, row).ToArgb() & 0xFFFFFF;
+            }
+            if (previous != null && System.Linq.Enumerable.SequenceEqual(previous, region)) return region;
+            previous = region;
+            Thread.Sleep(60);
+        }
+        throw new TimeoutException("Composer first character did not paint stably");
+    }
+    static int ChannelGap(int a, int b) {
+        return Math.Max(Math.Abs(((a >> 16) & 255) - ((b >> 16) & 255)), Math.Max(Math.Abs(((a >> 8) & 255) - ((b >> 8) & 255)), Math.Abs((a & 255) - (b & 255))));
+    }
+    public static int[][] CalibratePatches(int[] regionA, int[] regionB) {
+        if (regionA[0] != regionB[0] || regionA[1] != regionB[1]) throw new InvalidOperationException("Composer first character moved between sessions");
+        int bestScore = 0, bestX = -1, bestY = -1;
+        for (int oy = 0; oy <= 13; oy++) for (int ox = 0; ox <= 13; ox++) {
+            int score = 0;
+            for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) {
+                int index = 2 + (oy + row) * 16 + ox + col;
+                int gap = ChannelGap(regionA[index], regionB[index]);
+                if (gap > 40) score += gap;
+            }
+            if (score > bestScore) { bestScore = score; bestX = ox; bestY = oy; }
+        }
+        if (bestX < 0) throw new InvalidOperationException("Composer first characters of the two sessions are indistinguishable on screen");
+        var result = new int[2][];
+        var sources = new int[][] { regionA, regionB };
+        for (int which = 0; which < 2; which++) {
+            result[which] = new int[11];
+            result[which][0] = regionA[0] + bestX;
+            result[which][1] = regionA[1] + bestY;
+            for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) result[which][2 + row * 3 + col] = sources[which][2 + (bestY + row) * 16 + bestX + col];
+        }
+        if (PatchesDiffer(result[0], result[1]) == false) throw new InvalidOperationException("Composer calibration patches match each other within tolerance");
+        return result;
+    }
+    static bool PatchesDiffer(int[] a, int[] b) {
+        for (int index = 2; index < 11; index++) if (ChannelGap(a[index], b[index]) > 8) return true;
+        return false;
+    }
+    public static double[] MeasureSessionSwitch(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft, int rgb, string frozenMarker, int[] patch) {
         using (var pixels = new System.Drawing.Bitmap(3, 3))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             double visible = -1;
@@ -436,7 +522,7 @@ public static class VerifyNative {
                 if (frozen && awake < 0 && !System.IO.File.Exists(frozenMarker)) awake = timer.Elapsed.TotalMilliseconds;
                 if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
                     if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
-                    if (painted < 0 && (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics))) painted = timer.Elapsed.TotalMilliseconds;
+                    if (painted < 0 && Painted(dock, rgb, patch, pixels, graphics)) painted = timer.Elapsed.TotalMilliseconds;
                     if (painted >= 0 && (!frozen || awake >= 0)) {
                         timer.Stop();
                         return new double[] { painted, visible, awake };
@@ -5270,7 +5356,11 @@ try {
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $colors = @('#db2855', '#26b8d4')
             $rgb = @(0xDB2855, 0x26B8D4)
-            $drafts = @('switch-paint-0', 'switch-paint-1')
+            $drafts = @('Wswitch-paint-0', '.switch-paint-1')
+            $consoleCodes = @('1F', '2F')
+            $consoleRgb = @(-1, -1)
+            $regions = @{}
+            $patches = @($null, $null)
             $composerHandle = [IntPtr]::Zero
             $gapCase = @{ name = 'switch-gap'; status = 'failed'; detail = 'Switch measurement did not complete'; phase = 'initial-console' }
             $result.checks += $gapCase
@@ -5315,7 +5405,18 @@ try {
                     $consoles[$tab] = [VerifyNative]::GetForegroundWindow()
                     $browsers[$tab] = [IntPtr]::Zero
                     $docks[$tab] = New-Object VerifyNative+Rect
+                    $consoleArea = New-Object VerifyNative+Rect
+                    if (-not [VerifyNative]::GetWindowRect($consoles[$tab], [ref]$consoleArea)) { throw 'Timing console rectangle unavailable' }
+                    $plainRgb = [VerifyNative]::SolidPatch($consoleArea)
+                    Type-Text ('color ' + $consoleCodes[$tab])
+                    Press @(0x0D) 'Enter: give this timing CMD its own solid color'
+                    Wait-Until { $solidRgb = [VerifyNative]::SolidPatch($consoleArea); $solidRgb -ge 0 -and $solidRgb -ne $plainRgb } 'timing CMD shows its own solid color'
+                    $consoleRgb[$tab] = [VerifyNative]::SolidPatch($consoleArea)
+                    $docks[$tab] = $consoleArea
                 }
+                $consoleGap = 0
+                foreach ($shift in @(16, 8, 0)) { $consoleGap = [Math]::Max($consoleGap, [Math]::Abs((($consoleRgb[0] -shr $shift) -band 255) - (($consoleRgb[1] -shr $shift) -band 255))) }
+                if ($consoleGap -le 8) { throw 'Timing console colors are not distinct' }
                 $gapCase.phase = 'browser-off-baseline'
                 if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Browser-off baseline already has a pane' }
                 $warmupStopped = $warmupJob.Stop()
@@ -5327,6 +5428,7 @@ try {
                     $browserOn = $mode.EndsWith('browser_on')
                     $frozen = $mode.Contains('frozen_')
                     $sampleCount = $timings[$mode].samples_ms.Count
+                    $paintRgb = if ($browserOn) { $rgb } else { $consoleRgb }
                     if ($mode -eq 'chat_browser_off') {
                         $gapCase.phase = 'chat-setup'
                         Focus-Palette 'chat view off everywhere' 6347
@@ -5355,7 +5457,10 @@ try {
                             Wait-WorkspaceSurface $initial.active_workspace $tab $true ($composerHandle.ToInt32())
                             Type-Text $drafts[$tab]
                             Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq $drafts[$tab] } 'distinct unsent synthetic session draft'
+                            $regions[$tab] = [VerifyNative]::CaptureComposerStart($composerHandle)
                         }
+                        $patches = [VerifyNative]::CalibratePatches($regions[0], $regions[1])
+                        Save-Json @{ session0 = @($patches[0]); session1 = @($patches[1]) } 'chat-browser-off-patches.json'
                     }
                     if ($browserOn -and -not $frozen) {
                         foreach ($tab in @(0, 1)) {
@@ -5471,10 +5576,11 @@ try {
                             $panes.Count -eq 2
                         } 'both timing browsers have app-published CDP window bindings' 30
                     }
+                    $paintPatch = if ($mode -eq 'chat_browser_off') { $patches } else { @($null, $null) }
                     $gapCase.phase = "$mode-start"
                     Press @(0x11, 0x31) 'Ctrl+1: start timing from first session'
                     Wait-WorkspaceSurface $initial.active_workspace 0 $chat ($composerHandle.ToInt32())
-                    if ($browserOn) { Wait-Until { [VerifyNative]::PagePainted($docks[0], $rgb[0]) } 'first session color before measurement' -Tight }
+                    Wait-Until { [VerifyNative]::PagePainted($docks[0], $paintRgb[0], $paintPatch[0]) } 'first session color before measurement' -Tight
                     Snapshot $(if ($mode -eq 'browser_off') { 'before' } elseif ($mode -eq 'browser_on') { 'action' } else { $mode + '-action' })
                     for ($sample = 0; $sample -lt $sampleCount; $sample++) {
                         $gapCase.phase = "$mode-sample-$sample"
@@ -5507,11 +5613,11 @@ try {
                             Assert-Foreground
                         }
                         $source = 1 - $target
-                        [VerifyNative]::RequireSwitchStart($script:window, $composerHandle, $consoles[$source], ('ZigShell-' + $shellIds[$source]), $browsers[$source], $docks[$source], $drafts[$source], $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $drafts[$target])
+                        [VerifyNative]::RequireSwitchStart($script:window, $composerHandle, $consoles[$source], ('ZigShell-' + $shellIds[$source]), $browsers[$source], $docks[$source], $drafts[$source], $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $drafts[$target], $paintRgb[$source], $paintRgb[$target], $paintPatch[$source], $paintPatch[$target])
                         Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
                         $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
-                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
+                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $paintRgb[$target], $frozenMarker, $paintPatch[$target])
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
                         if ($frozen) {
