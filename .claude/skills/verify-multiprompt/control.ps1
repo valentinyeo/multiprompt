@@ -3511,7 +3511,7 @@ try {
                 $launches = @()
                 $launchLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
                 Wait-Until {
-                    $trace = [IO.File]::ReadAllText($launchLog)
+                    $trace = Read-SharedText $launchLog
                     $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
                 } 'launch-1 restore finished and keyboard hook installed' 60
                 $first = Assert-RelaunchSessions 'launch-1' $relaunchSeed
