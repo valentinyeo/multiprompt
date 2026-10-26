@@ -25,6 +25,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_accepted_proof:
+        description: Check queued message pixels within one second of acceptance
+        required: false
+        default: false
+        type: boolean
       remote_sync_proof:
         description: Follow the second host and alternate home through two turns and a new session
         required: false
@@ -200,6 +205,7 @@ jobs:
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
+      CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
@@ -219,6 +225,8 @@ jobs:
         run: node --test tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs
       - name: Check remote sync proof oracle
         run: node --test tools/chat-remote-sync-proof.test.mjs
+      - name: Check accepted message pixel oracle
+        run: node --test tools/chat-accepted-proof.test.mjs
       - name: Check inline working pixel oracle
         run: node --test tools/chat-working-proof.test.mjs
       - name: Check unread divider contracts

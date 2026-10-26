@@ -344,6 +344,12 @@ def shell():
         change = lambda claude: claude.__setitem__("box", claude["box"] + ARGS[1]) is None
     elif op == "key" and len(ARGS) == 2:
         change = lambda claude: fake_key(claude, ARGS[1])
+    elif op == "accept":
+        def change(claude):
+            text = claude["queue"].pop(0)
+            fake_queue_event("remove", text, reason="absorbed_mid_turn")
+            (ROOT / "accepted.json").write_text(json.dumps(dict(text=text, ms=time.time_ns() // 1_000_000)), encoding="utf-8")
+            return True
     elif op == "idle":
         change = lambda claude: fake_take(claude) is None
     elif op == "busy":
