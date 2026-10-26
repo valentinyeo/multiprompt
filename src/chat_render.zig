@@ -1888,6 +1888,29 @@ pub fn chatViewClientRect(rc: *RECT) void {
     rc.bottom = @max(rc.top + 1, rc.bottom - app_state.g_chat_bottom_inset);
 }
 
+pub fn chatSetTopPad(new_pad: i32) void {
+    app_state.g_chat_top_pad = new_pad;
+    const delta = new_pad - app_state.g_chat_layout_top_pad;
+    if (delta == 0) return;
+    const reuse = @min(app_state.g_chat_layout_reuse, app_state.g_chat_block_count);
+    if (reuse < app_state.g_chat_block_count or app_state.g_chat_content_h == 0) {
+        app_state.g_chat_layout_dirty = true;
+        return;
+    }
+    for (app_state.g_chat_layout_rects[0..reuse]) |*rect| {
+        rect.top += delta;
+        rect.bottom += delta;
+    }
+    for (app_state.g_chat_echo_layout[0..app_state.g_chat_echo_layout_count]) |*rect| {
+        rect.top += delta;
+        rect.bottom += delta;
+    }
+    if (app_state.g_chat_read_boundary.index != null) app_state.g_chat_read_divider_y += delta;
+    app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
+    app_state.g_chat_layout_top_pad = new_pad;
+    app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
+}
+
 pub fn chatTopPad() i32 {
     const title_h = @import("browser_pane.zig").threadTitleHeight();
     return if (title_h > 0) title_h + uiScaled(8) else 0;
@@ -5729,6 +5752,44 @@ test "IGSH-813 pill click jumps to newest and clears through the scroll owner" {
     try std.testing.expectEqual(chatMaxScroll(), app_state.g_chat_scroll_y);
     try std.testing.expect(!app_state.g_chat_scrolled_up);
     try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_new_messages.count());
+}
+
+test "IGSH-933 top pad change shifts the saved layout instead of laying out again" {
+    const saved_rects = app_state.g_chat_layout_rects[0];
+    const saved_count = app_state.g_chat_block_count;
+    const saved_reuse = app_state.g_chat_layout_reuse;
+    const saved_pad = app_state.g_chat_top_pad;
+    const saved_layout_pad = app_state.g_chat_layout_top_pad;
+    const saved_content = app_state.g_chat_content_h;
+    const saved_dirty = app_state.g_chat_layout_dirty;
+    const saved_boundary = app_state.g_chat_read_boundary;
+    const saved_echo = app_state.g_chat_echo_layout_count;
+    defer {
+        app_state.g_chat_layout_rects[0] = saved_rects;
+        app_state.g_chat_block_count = saved_count;
+        app_state.g_chat_layout_reuse = saved_reuse;
+        app_state.g_chat_top_pad = saved_pad;
+        app_state.g_chat_layout_top_pad = saved_layout_pad;
+        app_state.g_chat_content_h = saved_content;
+        app_state.g_chat_layout_dirty = saved_dirty;
+        app_state.g_chat_read_boundary = saved_boundary;
+        app_state.g_chat_echo_layout_count = saved_echo;
+    }
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_layout_reuse = 1;
+    app_state.g_chat_top_pad = 40;
+    app_state.g_chat_layout_top_pad = 40;
+    app_state.g_chat_content_h = 300;
+    app_state.g_chat_layout_dirty = false;
+    app_state.g_chat_read_boundary = .{};
+    app_state.g_chat_echo_layout_count = 0;
+    app_state.g_chat_layout_rects[0] = .{ .left = 0, .top = 40, .right = 100, .bottom = 300 };
+    chatSetTopPad(70);
+    try std.testing.expect(!app_state.g_chat_layout_dirty);
+    try std.testing.expectEqual(@as(i32, 70), app_state.g_chat_layout_rects[0].top);
+    try std.testing.expectEqual(@as(i32, 330), app_state.g_chat_layout_rects[0].bottom);
+    try std.testing.expectEqual(@as(i32, 330), app_state.g_chat_content_h);
+    try std.testing.expectEqual(@as(i32, 70), app_state.g_chat_layout_top_pad);
 }
 
 test "IGSH-814 painter leaves all-read chats unchanged and paints one unread line" {

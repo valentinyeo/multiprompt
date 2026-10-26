@@ -4,7 +4,7 @@ const w32 = @import("win32.zig");
 const RECT = w32.RECT;
 
 const RGN_DIFF: i32 = 4;
-const MAX_HOLES = 16;
+const MAX_HOLES = 4 + std.meta.tags(@import("chat_permission.zig").Action).len;
 
 pub const Hole = struct {
     rect: RECT,
@@ -16,7 +16,8 @@ pub const HoleList = struct {
     len: usize = 0,
 
     pub fn add(self: *HoleList, rect: RECT, radius: i32) void {
-        if (self.len == MAX_HOLES or rect.right <= rect.left or rect.bottom <= rect.top) return;
+        if (rect.right <= rect.left or rect.bottom <= rect.top) return;
+        std.debug.assert(self.len < MAX_HOLES);
         self.items[self.len] = .{ .rect = rect, .radius = radius };
         self.len += 1;
     }

@@ -737,10 +737,7 @@ pub fn layoutChatControls() void {
     const win = layout.transcript_window;
     const new_pad = @import("chat_render.zig").chatTopPad() + status_h;
     const new_inset = win.bottom - layout.transcript.bottom;
-    if (new_pad != app_state.g_chat_top_pad) {
-        app_state.g_chat_top_pad = new_pad;
-        app_state.g_chat_layout_dirty = true;
-    }
+    if (new_pad != app_state.g_chat_top_pad) @import("chat_render.zig").chatSetTopPad(new_pad);
     if (new_inset != app_state.g_chat_bottom_inset) {
         app_state.g_chat_bottom_inset = new_inset;
         app_state.g_chat_layout_dirty = true;
