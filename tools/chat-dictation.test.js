@@ -186,3 +186,16 @@ test('IGSH-893 audit evidence serializes plain lines within five seconds on Wind
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('IGSH-893 a stalled precondition fails within its named timeout', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const start = driver.indexOf('function Wait-Until(');
+  const wait = driver.slice(start, driver.indexOf('\nfunction ', start + 1));
+  const script = `$ErrorActionPreference = 'Stop'; $process = $null; ${wait}
+    try { Wait-Until { $false } 'deliberately stalled recorded PCM capture precondition' -Seconds 1 -PollMilliseconds 20; throw 'Stall unexpectedly passed' }
+    catch { if ($_.Exception.Message -notlike 'Waited 1 s for deliberately stalled recorded PCM capture precondition.*') { throw }; Write-Output 'DICTATION_STALL_TIMEOUT_OK' }`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 5000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /DICTATION_STALL_TIMEOUT_OK/);
+});

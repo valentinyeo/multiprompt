@@ -11,6 +11,11 @@ on:
         required: true
         default: appearance
         type: string
+      dictation_stall:
+        description: Deliberately stall the dictation capture precondition to prove failure evidence
+        required: false
+        default: false
+        type: boolean
       tag:
         description: Optional release tag instead of building this branch
         required: false
@@ -160,6 +165,7 @@ jobs:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
+      VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
