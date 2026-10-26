@@ -19,7 +19,7 @@ Run this journey on GitHub Windows:
 gh workflow run verify.yml -f feature=chat-dictation
 ```
 
-Leave `tag` empty for the offline fixture boundary. Windows runtime proof now exists. Two first-attempt journeys passed on `d7437dd7`: [40263673090](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090) and [40264332073](https://github.com/valentinyeo/multiprompt/actions/runs/40264332073). The ten-run streak remains in progress.
+Leave `tag` empty for the offline fixture boundary. Windows runtime proof now exists. Two first-attempt journeys passed on `d7437dd7`: [40263673090](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090) and [40264332073](https://github.com/valentinyeo/multiprompt/actions/runs/40264332073). Repeat with independent dispatches for a longer streak.
 
 The five-minute step cap leaves time for uploads. Each wait logs its condition and timeout. Launch, Doctor, Drive, Evidence, and Cleanup print progress. Failure uploads retain screenshots and logs.
 
