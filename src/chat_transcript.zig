@@ -701,3 +701,20 @@ test "status row caps todo arrays and keeps truncated Unicode valid" {
         try std.testing.expectEqualStrings("😀" ** 100, text);
     }
 }
+
+test "IGSH-1030 bracket session notes match Android without decoding literal entities" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    var text: [512]u16 = undefined;
+    var blocks: [8]md.Block = undefined;
+    const source = "  [from Hax Runner 10] IGSH-975 scope &amp; tests\nSee https://example.com/run";
+    const parsed = try messageBlocks(source, &text, 0, .user, &blocks);
+    try std.testing.expectEqual(md.Role.injected, blocks[0].role);
+    try std.testing.expectEqualSlices(u16, w("Hax Runner 10"), std.mem.sliceTo(&blocks[0].sender, 0));
+    try std.testing.expectEqualSlices(u16, w("IGSH-975 scope &amp; tests\nSee https://example.com/run"), text[0..parsed.len]);
+    _ = try messageBlocks(source, &text, 0, .prose, &blocks);
+    try std.testing.expectEqual(md.Role.prose, blocks[0].role);
+    for ([_][]const u8{ "My own question", "I wrote [from Hax Runner 10] in the middle", "[from Hax Runner 10]", "[from ] empty sender", "[from first\nsecond] body" }) |ordinary| {
+        _ = try messageBlocks(ordinary, &text, 0, .user, &blocks);
+        try std.testing.expectEqual(md.Role.user, blocks[0].role);
+    }
+}

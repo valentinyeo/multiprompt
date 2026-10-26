@@ -7220,3 +7220,21 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     _ = GdiFlush();
     try moreMenuProof(frame_dc, frame_pixels, frame_w, layout.pane, title_layout.more, bg);
 }
+
+test "IGSH-1030 five received notes take five compact rows instead of bubbles" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("IGSH-1030 native journey is now fully green.\nLong machine details stay hidden until opened.\nSee https://example.com/run");
+    const note = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .first = true };
+    var y: i32 = 0;
+    for (0..5) |_| {
+        const row = chatMeasureBlockRect(dc, text, note, .single, 640, y, null);
+        try std.testing.expectEqual(uiScaled(28), row.bottom - row.top);
+        y = row.bottom;
+    }
+    try std.testing.expectEqual(uiScaled(140), y);
+    const own = ChatBlock{ .start = 0, .len = text.len, .role = .user, .first = true };
+    const own_rect = chatMeasureBlockRect(dc, text, own, .single, 640, 0, null);
+    try std.testing.expect(own_rect.bottom > uiScaled(28));
+}
