@@ -83,6 +83,31 @@ Wait-Until { [WindowControlsProof]::IsIconic($script:window) } 'custom minimize 
 [void][VerifyNative]::ShowWindow($script:window, 9)
 [VerifyNative]::BringToForeground($script:window)
 Wait-Until { -not [WindowControlsProof]::IsIconic($script:window) -and [VerifyNative]::GetForegroundWindow() -eq $script:window } 'normal restore after minimizing'
+[VerifyNative]::MoveMouseClient($script:window, 100, 150, $false)
+Snapshot 'controls-before-browser'
+$script:browserShellId = (Read-Inbox).shells[0].sid
+$pane = Open-BrowserPane 'controls-browser-open'
+$browser = [VerifyNative]::PaneWindow($script:window)
+[VerifyNative]::BringToForeground($script:window)
+[VerifyNative]::MoveMouseClient($script:window, 100, 150, $false)
+Snapshot 'controls-with-browser'
+$geometry = [WindowControlsProof]::Geometry($script:window)
+$browserRect = New-Object VerifyNative+Rect
+if (-not [VerifyNative]::GetWindowRect($browser, [ref]$browserRect) -or $browserRect.Top -lt $geometry[5] + $buttonH) { throw 'Docked browser covers the window controls' }
+$reference = Join-Path $Evidence 'controls-before-browser.png'
+$actual = Join-Path $Evidence 'controls-with-browser.png'
+$differences = [WindowControlsProof]::CompareControls($reference, $actual, $geometry, $buttonW, $buttonH)
+$negative = Join-Path $Evidence 'controls-negative.png'
+[WindowControlsProof]::NegativeControl($actual, $negative, $geometry, $buttonW)
+$negativeDifferences = [WindowControlsProof]::CompareControls($actual, $negative, $geometry, $buttonW, $buttonH)
+Save-Json @{ differences = $differences; negativeDifferences = $negativeDifferences; browserRect = $browserRect } 'window-controls-browser.json'
+if ($differences -ne 0 -or $negativeDifferences -eq 0) { throw 'Window control pixel signature changed after docking, or its negative control was accepted' }
+Focus-LockedBrowser $browser
+[VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
+Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'custom maximize works while the docked browser has focus'
+$geometry = [WindowControlsProof]::Geometry($script:window)
+[VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
+Wait-Until { -not [VerifyNative]::IsZoomed($script:window) } 'custom restore with a docked browser'
 Doctor
 Snapshot 'after'
 $geometry = [WindowControlsProof]::Geometry($script:window)

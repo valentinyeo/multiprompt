@@ -60,6 +60,27 @@ public static class WindowControlsProof {
             Thread.Sleep(60);
         }
     }
+    public static int CompareControls(string reference, string actual, int[] geometry, int buttonWidth, int buttonHeight) {
+        int differences = 0;
+        using (Bitmap before = new Bitmap(reference))
+        using (Bitmap after = new Bitmap(actual)) {
+            for (int y = 0; y < buttonHeight; y++) {
+                for (int x = geometry[6] - buttonWidth * 3; x < geometry[6]; x++) {
+                    Color a = before.GetPixel(x, y), b = after.GetPixel(x, y);
+                    if (Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B))) > 8) differences++;
+                }
+            }
+        }
+        return differences;
+    }
+    public static void NegativeControl(string source, string target, int[] geometry, int buttonWidth) {
+        using (Bitmap image = new Bitmap(source)) {
+            int x = geometry[6] - buttonWidth * 3 + 8;
+            Color prior = image.GetPixel(x, 8);
+            image.SetPixel(x, 8, prior.R < 128 ? Color.White : Color.Black);
+            image.Save(target);
+        }
+    }
     public static Dictionary<string, object> Pixels(string path, int[] geometry, int sidebar, int buttonWidth, int buttonHeight, bool light) {
         var output = new Dictionary<string, object>();
         int topGap = geometry[5] - geometry[1];
