@@ -50,7 +50,10 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(fonts, /chat_style.menuLook\(if \(bound\) \|theme\| theme.background\(\) else unboundBackground\(\)\)/);
   assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
   assert.match(fonts, /DWMWCP_ROUND/);
-  assert.match(fonts, /SetWindowsHookExW\(12, &menuWindowHook[^]*?\.message == 0x47|info.message == 0x47[^]*?clipMenuWindow\(info.hwnd\)/);
+  assert.match(fonts, /SetWindowsHookExW\(12, &menuWindowHook/);
+  assert.match(fonts, /info\.message == 0x47 or info\.message == 0x18\) styleMenuWindow\(info\.hwnd\)/);
+  assert.match(fonts, /fn styleMenuWindow[^]*?roundMenuWindow\(hwnd\)[^]*?clipMenuWindow\(hwnd\)/);
+  assert.match(fonts, /WindowFromDC\(item\.dc\)\) \|menu_window\| styleMenuWindow\(menu_window\)/);
   assert.match(fonts, /SetWindowRgn\(hwnd, region, 1\)/);
   assert.match(fonts, /mask: u32 = 2/);
   assert.match(fonts, /SetMenuInfo\(menu, &info\)[^]*?defer _ = SetMenuInfo\(menu, &MenuInfo\{ \.background = null \}\)/);
