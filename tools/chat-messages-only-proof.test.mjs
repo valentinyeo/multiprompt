@@ -110,8 +110,7 @@ function assertScrollJourney(driver, desktop, boundary) {
   assert.match(driver, /\$scrollLogStart = Scroll-Transcript 2400\s+\[void\]\(Require-NewMessages 0 0 1 'loaded messages do not count' \$scrollLogStart\)\s+\$arrivalLogStart = [^\n]+\s+Shell-Input 'messages' '2'/);
   assert.match(driver, /Scroll-Transcript -120/);
   assert.match(driver, /Scroll-Transcript -30000/);
-  const wheelDriver = driver.replace(/function Retention-Top \{[\s\S]*?\n\}/, '');
-  assert.doesNotMatch(wheelDriver, /Press @\(0x2[1234]\)/);
+  assert.doesNotMatch(driver, /Press @\(0x2[1234]\)/);
   const wheel = desktop.slice(desktop.indexOf('public static void WheelTranscript('), desktop.indexOf('public static void PressClient('));
   for (const guard of ['Owner(hwnd) != pid', 'GetForegroundWindow() != hwnd', 'Owner(view) != pid', 'Class(view) != "ZigShellChatTranscript"', '!IsChild(hwnd, view)', 'WindowFromPoint(new Point { X = x, Y = y }) != view', 'delta < short.MinValue', 'delta > short.MaxValue']) assert.ok(wheel.includes(guard), guard);
   assert.match(wheel, /Flags = 0x8001/);
@@ -130,7 +129,6 @@ test('IGSH-813 wheel journey requires overflow and fresh strict app-log states w
     assert.throws(() => assertScrollJourney(driver.replace('Scroll-Transcript -120', `Scroll-Transcript ${delta}`), desktop, boundary), /whole wheel notch required/);
   }
   for (const [source, before, after] of [
-    [0, '$scrollLogStart = Scroll-Transcript 2400', 'Press @(0x24)\n$scrollLogStart = Scroll-Transcript 2400'],
     [0, '$log.Substring($LogStart)', '$log'],
     [0, '$v.count -eq $Count', '$true'],
     [0, ".Value -gt $views[0].Current.BoundingRectangle.Height", '.Value -gt 0'],
