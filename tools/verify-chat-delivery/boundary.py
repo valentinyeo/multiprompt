@@ -2,6 +2,7 @@ import ctypes
 from ctypes import wintypes
 import datetime
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -559,6 +560,32 @@ def declined_remote(argv):
     return None
 
 
+def completion(remote):
+    spec = importlib.util.spec_from_file_location("mp_complete", Path(__file__).parents[1] / "agent-notifications/mp_complete.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    helper.CACHE.parent.mkdir(parents=True, exist_ok=True)
+
+    def reply(line):
+        helper.CACHE.write_text(json.dumps({"key": helper.cache_key(), "at": time.time(), "commands": []}), encoding="utf-8")
+        response = helper.request(line)
+        rows = [row.split("\t")[1] for row in response.splitlines()[1:-1]]
+        record("completion.jsonl", request=line.strip(), names=rows)
+        time.sleep(0.8)
+        return response
+
+    if remote[2:] == ["--serve"]:
+        for line in sys.stdin:
+            sys.stdout.write(reply(line))
+            sys.stdout.flush()
+        return 0
+    if len(remote) == 4 and remote[2] == "--once":
+        import base64
+        sys.stdout.write(reply(base64.b64decode(remote[3]).decode("utf-8")))
+        return 0
+    return 95
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
@@ -573,6 +600,8 @@ def ssh():
     python = re.search(r"\bpython3\s", command)
     if python:
         remote = shlex.split(command[python.start():])
+        if remote[1].endswith("/mp_complete.py"):
+            return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
         env = os.environ.copy()
         if state().get("remoteHome"):
