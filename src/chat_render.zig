@@ -5019,6 +5019,11 @@ fn chatNavReveal(index: usize) void {
     }
 }
 
+pub fn chatNavResync() void {
+    if (!app_state.g_chat_nav_active) return;
+    if (chatNavIndex() == null) chatNavClear();
+}
+
 pub fn chatNavStart() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const count = app_state.g_chat_block_count;
@@ -5184,6 +5189,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
+            chatNavClear();
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {

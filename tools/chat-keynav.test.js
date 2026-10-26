@@ -29,8 +29,9 @@ test('IGSH-992 the composer routes Up Down Enter Esc to message focus without co
   assert.match(sub, /chatNavKey\(nav_action\)/);
   assert.match(sub, /GetWindowTextLengthW\(hwnd\) == 0/);
   assert.match(sub, /g_chat_ac\.open/);
-  assert.match(sub, /nav_action == \.open[^]*PeekMessageW\(&pending, hwnd, 0x0102, 0x0102, 1\)/, 'Enter must drop its own WM_CHAR so the quote is not sent');
-  assert.match(sub, /msg == 0x0201 or msg == 0x0102[^]*chatNavClear\(\)/, 'typing and clicking return to the box');
+  assert.match(sub, /nav_action == \.open\) dropPendingEnterChar\(hwnd\)/, 'Enter must drop its own WM_CHAR so the quote is not sent');
+  assert.match(fn(composer, 'dropPendingEnterChar'), /PeekMessageW\(&pending, hwnd, 0x0102, 0x0102, 1\)/);
+  assert.match(sub, /g_chat_nav_active and \(msg == 0x0201 or msg == 0x0102[^]*chatNavClear\(\)/, 'typing, pasting and clicking return to the box');
 });
 
 test('IGSH-992 Enter opens the same menu as right-click through one shared function', () => {

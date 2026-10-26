@@ -1343,6 +1343,14 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
     _ = SetFocus(app_state.g_chat_composer_hwnd);
 }
 
+fn dropPendingEnterChar(hwnd: HANDLE) void {
+    const w = @import("win32.zig");
+    var pending: w.MSG = undefined;
+    while (w.PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 0) != 0 and pending.wParam == 0x0D) {
+        _ = w.PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 1);
+    }
+}
+
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
     defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
@@ -1355,18 +1363,7 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
-    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
-        clearChatReply();
-        return 0;
-    }
-    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_sel_active and !app_state.g_chat_ac.open) {
-        chatSelectionClear();
-        app_state.g_chat_sel_transcript_focus = false;
-        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-        return 0;
-    }
-    if (msg == 0x0102 and app_state.g_chat_sel_transcript_focus and @import("chat_render.zig").chatSelectionReply(msg, wp, lp)) return 0;
-    if (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300) @import("chat_render.zig").chatNavClear();
+    if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or GetWindowTextLengthW(hwnd) != 0)) @import("chat_render.zig").chatNavClear();
     if (msg == WM_KEYDOWN) {
         const key_down = @as(i16, @bitCast(@as(u16, 0x8000)));
         const nav_action = chat_keynav.action(
@@ -1378,12 +1375,23 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
             (GetAsyncKeyState(0x10) & key_down) != 0,
             (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) != 0,
         );
-        if (nav_action == .open) {
-            var pending: @import("win32.zig").MSG = undefined;
-            while (@import("win32.zig").PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 1) != 0) {}
+        if (nav_action == .open) dropPendingEnterChar(hwnd);
+        if (@import("chat_render.zig").chatNavKey(nav_action)) {
+            if (nav_action == .open) dropPendingEnterChar(hwnd);
+            return 0;
         }
-        if (@import("chat_render.zig").chatNavKey(nav_action)) return 0;
     }
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
+        clearChatReply();
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_sel_active and !app_state.g_chat_ac.open) {
+        chatSelectionClear();
+        app_state.g_chat_sel_transcript_focus = false;
+        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+        return 0;
+    }
+    if (msg == 0x0102 and app_state.g_chat_sel_transcript_focus and @import("chat_render.zig").chatSelectionReply(msg, wp, lp)) return 0;
     if (msg == 0x0201 or msg == 0x0102) app_state.g_chat_sel_transcript_focus = false;
     if ((msg == 0x0201 or msg == 0x0102) and app_state.g_chat_sel_active) {
         chatSelectionClear();
