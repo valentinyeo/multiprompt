@@ -2,6 +2,8 @@
 
 This optional Linux/Wine harness generates synthetic Claude and Codex conversations and runs a Windows cross-build in a fresh Wine prefix. It does not use real conversations, SSH hosts, browser profiles or account credentials. It measures switching, idle CPU, incremental updates, restart and browser-split geometry; it is not live Windows acceptance.
 
+The reader service selects fixed synthetic session files. Those files have no live tmux agents. Only this synthetic boundary sets `follow` false. Production parsing, appends, budgets and receipts stay unchanged. The benchmark workload also stays unchanged. Native remote-sync journeys cover live agent discovery.
+
 Prerequisites: Zig 0.16, Node.js, Python 3, Wine (including `wineserver` and `wineboot`), Xvfb (`xvfb-run`), xdotool, ImageMagick (`import`, `convert`, `montage`) and standard Linux process tools.
 
 ```sh
