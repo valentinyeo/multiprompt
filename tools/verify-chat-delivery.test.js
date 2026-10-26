@@ -407,7 +407,7 @@ test('foreground uses the existing Alt and AttachThreadInput routine before keyb
 test('keyboard journey isolates each case and retains Doctor, screenshots, raw evidence and owned-job cleanup', () => {
   for (const name of names) assert.ok(drive.includes(`name='${name}'`));
   assert.match(drive, /foreach \(\$plan in \$plans\) \{[\s\S]*try \{[\s\S]*catch \{[\s\S]*finally \{/);
-  for (const text of ['RUNNER_TEMP', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'ssh-path.txt', 'session.json', 'tmux_host=0', "tmux_session='verify-agent'", 'MPVERSION=', 'UIAutomation', 'Get-FileHash', 'GetForegroundWindow', '::Focus($main)', 'composerText', 'agent-buffer.jsonl', 'invocations.jsonl', 'debug.log', 'cleanup.json']) assert.ok(drive.includes(text), text);
+  for (const text of ['RUNNER_TEMP', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'ssh-path.txt', 'session.json', 'tmux_host=0', "tmux_session='verify-agent'", 'MPVERSION=', 'UIAutomation', 'Get-FileHash', 'GetForegroundWindow', '::Focus($main)', 'composerText', 'agent-buffer.jsonl', 'invocations.jsonl', 'debug.log', 'cleanup.json']) assert.ok(drive.includes(text.replaceAll('\n', '`n')), text);
   assert.match(drive, /Press @\(0x11, 0x31\)/);
   assert.match(drive, /Press @\(0x12, 0x43\)/);
   assert.match(drive, /Press @\(0x0D\)/);
@@ -487,6 +487,7 @@ function queueFiles(base) {
     ['shell', 'idle', 'idle', [], ''],
     ['shell', 'text', 'idle', [], t.shellDraft], ['shell', 'key', 'idle', [], ''],
     ['app', 'send-keys', 'idle', [], t.chatDraft],
+    ['shell', 'text', 'idle', [], t.chatDraft + t.agentPaste],
   ];
   log(`${name}/stand-in/frames.jsonl`, script.map(([origin, op, mode, queue, box], index) => ({
     ms: 2000 + index, case: name, origin, op, argv: [], mode, queue, box, suggestionShown: mode === 'idle' && !box,
@@ -650,9 +651,9 @@ test('queue-draft-sync evidence passes only with both views, ordered queue state
   assert.match(mutate('sent never marked', debug(text => text.replaceAll('"state":"sent"', '"state":"queued"'))), /Chat View never listed/);
   assert.match(mutate('edit never reflected', without(/shell queued alpha edited/)), /Chat View never listed/);
   assert.match(mutate('transcript never read', debug(text => text.replace('transcript load shell=1 ok', 'transcript load shell=1 fail'))), /Chat View read the fake session transcript/);
-  assert.match(mutate('draft never reaches shell box', frames(rows => rows.slice(0, -1))), /expected shell frame missing/);
+  assert.match(mutate('draft never reaches shell box', frames(rows => rows.slice(0, -2))), /expected shell frame missing/);
   assert.match(mutate('draft reached the box from the shell', frames(rows => rows.map(row => row.replace('"origin":"app","op":"send-keys","argv":[],"mode":"idle"', '"origin":"shell","op":"send-keys","argv":[],"mode":"idle"')))), /expected shell frame missing|draft reached/);
-  assert.match(mutate('failed journey step', () => files.set(file('observation.json'), files.get(file('observation.json')).replace('{"name":"composer-shows-shell-draft","ok":true', '{"name":"composer-shows-shell-draft","ok":false'))), /journey steps failed: composer-shows-shell-draft/);
+  assert.match(mutate('failed journey step', () => files.set(file('observation.json'), files.get(file('observation.json')).replace('{"name":"composer-ignores-agent-paste","ok":true', '{"name":"composer-ignores-agent-paste","ok":false'))), /journey steps failed: composer-ignores-agent-paste/);
   assert.match(mutate('missing journey step', () => files.set(file('observation.json'), files.get(file('observation.json')).replace('"suggestion-not-draft"', '"renamed"'))), /every journey step ran in order/);
   assert.match(mutate('suggestion treated as text', () => files.set(file('stand-in/agent-buffer.jsonl'), files.get(file('stand-in/agent-buffer.jsonl')) + '\n' + JSON.stringify({ ms: 1, case: queueName, argv: ['send-keys', '-l', '--', queueTexts.suggestion] }))), /grey suggestion was never treated as text/);
   assert.match(mutate('Claude never took the queue', () => files.set(file('transcript.jsonl'), files.get(file('transcript.jsonl')).split('\n').slice(0, -2).join('\n'))), /./);
@@ -668,7 +669,7 @@ test('master-like evidence (no queue view, no composer or shell box sync) fails 
   const file = name => path.join(base, queueName, name);
   files.set(file('debug.log'), '2026-10-23 10:00:00.000 [chat] transcript load shell=1 ok bytes=900 ms=5');
   const observation = JSON.parse(files.get(file('observation.json')));
-  const failing = ['chat-lists-shell-queued', 'chat-lists-both-in-order', 'chat-lists-edited-in-order', 'chat-marks-both-sent', 'composer-shows-shell-draft', 'shell-box-shows-chat-draft'];
+  const failing = ['chat-lists-shell-queued', 'chat-lists-both-in-order', 'chat-lists-edited-in-order', 'chat-marks-both-sent', 'composer-ignores-agent-paste', 'shell-box-shows-chat-draft'];
   observation.steps = observation.steps.map(step => ({ ...step, ok: !failing.includes(step.name) }));
   files.set(file('observation.json'), JSON.stringify(observation));
   mockFiles(t, files);
@@ -807,7 +808,7 @@ test('fake shell history succeeds with all fifty messages and paired tools while
 test('queue-draft-sync is wired into the journey, the workflow fallback and the feature map', () => {
   assert.ok(drive.includes("name='queue-draft-sync'"));
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
-  for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text), text);
+  for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text.replaceAll("\n", "`n")), text);
   assert.match(drive, /CHAT_QUEUE items=/);
   assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync'\)/);
   assert.match(read(skill + 'features/chat-delivery.md'), /`queue-draft-sync`[\s\S]*CHAT_QUEUE items=/);
