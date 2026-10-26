@@ -848,6 +848,12 @@ foreach ($plan in $plans) {
             if ($view.Count -ne 1) { throw 'Expected one visible owned transcript' }
             $bounds = $view[0].Current.BoundingRectangle
             $observation.area = @{left=[int]$bounds.Left; top=[int]$bounds.Top; right=[int]$bounds.Right; bottom=[int]$bounds.Bottom}
+            [void](Wait-For 'transport settled while message remains queued' {
+                if (-not (Test-Path "$settings/chat-outbox.json")) { return $false }
+                $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
+                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text -and $_.s -eq 3 }).Count -eq 1
+            })
+            Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-queued.json"
             Start-Sleep -Milliseconds 200
             Shot 'accepted-queued'
             Shell-Run @('accept')
