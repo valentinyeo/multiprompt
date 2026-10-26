@@ -36,6 +36,12 @@ public static class ChatDeliveryDesktop {
     public static uint Owner(IntPtr hwnd) { uint pid; GetWindowThreadProcessId(hwnd, out pid); return pid; }
     public static string Class(IntPtr hwnd) { var text = new StringBuilder(256); GetClassName(hwnd, text, text.Capacity); return text.ToString(); }
     public static IntPtr Window(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "ZigShell") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
+    public static IntPtr Menu(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "#32768") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
+    public static void PressOwnedMenu(IntPtr main, uint pid, IntPtr menu, int x, int y) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(menu) != pid || Class(menu) != "#32768" || !IsWindowVisible(menu)) throw new InvalidOperationException("Menu click ownership mismatch");
+        PressClient(menu, pid, x, y);
+    }
     public static IntPtr Composer(IntPtr main) { IntPtr found = IntPtr.Zero; EnumChildWindows(main, (h,p) => { if (Class(h) == "Edit" && IsWindowVisible(h)) { found = h; return false; } return true; }, IntPtr.Zero); return found; }
     public static long[] Focus(IntPtr main) { uint pid; uint thread = GetWindowThreadProcessId(main, out pid); var info = new Gui(); info.Size = (uint)Marshal.SizeOf(typeof(Gui)); if (!GetGUIThreadInfo(thread, ref info)) throw new InvalidOperationException("GetGUIThreadInfo failed"); return new[] { GetForegroundWindow().ToInt64(), info.Focus.ToInt64() }; }
     public static string Text(IntPtr hwnd) { var text = new StringBuilder(32768); IntPtr result; if (SendMessageTimeout(hwnd, 0x000D, (IntPtr)text.Capacity, text, 2, 2000, out result) == IntPtr.Zero) throw new InvalidOperationException("WM_GETTEXT failed"); return text.ToString(); }

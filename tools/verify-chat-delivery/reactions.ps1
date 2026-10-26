@@ -17,13 +17,20 @@ $menu = Wait-For 'owned reaction menu logged' {
     $matches = [regex]::Matches($tail, '\[chat\] message menu items=([^\r\n]+)')
     if ($matches.Count) { $matches[$matches.Count - 1].Groups[1].Value }
 } 5
-Shot 'reactions-menu'
 $up = [char]::ConvertFromUtf32(0x1f44d)
 $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
 if ($menu -cne "React $up,React $down,React $heart,Reply,Copy") { throw "IGSH975_REACTIONS_MISSING: $menu" }
-Press @(0x24) 'Home: choose first reaction'
-Press @(0x0d) 'Enter: send thumbs-up reaction'
+$popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
+$popupRoot = [System.Windows.Automation.AutomationElement]::FromHandle($popup)
+$itemCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
+$popupItems = @($popupRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition))
+if ($popupItems.Count -ne 5) { throw 'Expected five owned reaction menu items' }
+$firstItem = $popupItems[0].Current.BoundingRectangle
+$popupBounds = $popupRoot.Current.BoundingRectangle
+Shot 'reactions-menu'
+$actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
+[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup, [int](($firstItem.Left + $firstItem.Right) / 2 - $popupBounds.Left), [int](($firstItem.Top + $firstItem.Bottom) / 2 - $popupBounds.Top))
 [void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
 $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }
