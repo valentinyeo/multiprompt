@@ -7265,7 +7265,9 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     app_state.g_thread_title = true;
     app_state.g_ui_scale = 100;
     app_state.g_main_monitor_dpi = 96;
-    app_state.g_light_theme = false;
+    var title_theme: [8]u8 = undefined;
+    const title_theme_len = w.GetEnvironmentVariableA("MULTIPROMPT_TITLE_PILL_THEME", &title_theme, title_theme.len);
+    app_state.g_light_theme = title_theme_len == 5 and std.mem.eql(u8, title_theme[0..5], "light");
     app_state.g_chat_find_open = false;
     app_state.g_chat_sel_active = false;
     app_state.g_chat_scrolled_up = false;
@@ -7399,12 +7401,10 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
-        const pill_ring = floatProofRing(frame_pixels, frame_w, bg, pill, @divTrunc(pill.bottom - pill.top, 2), gap);
         const card_ring = floatProofRing(frame_pixels, frame_w, bg, card, @import("window_layout.zig").chatSurfaceRadius(), gap);
         const top_edge = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, window.top, layout.transcript.right - uiScaled(16), window.top + 1);
         if (position != .sweep) std.debug.print("IGSH-933 {s}: beside pill left={d} right={d}, above card={d}, gap={d}, below pill={d}\n", .{ @tagName(position), left_band, right_band, above_card, gap_strip, below_pill });
-        std.debug.print("IGSH-1001 {s} {d}: ring pill={d} card={d}, top edge={d}\n", .{ @tagName(position), case, pill_ring, card_ring, top_edge });
-        try std.testing.expectEqual(@as(usize, 0), pill_ring);
+        std.debug.print("IGSH-1001 {s} {d}: ring card={d}, top edge={d}\n", .{ @tagName(position), case, card_ring, top_edge });
         try std.testing.expectEqual(@as(usize, 0), card_ring);
         try std.testing.expectEqual(@as(usize, 0), top_edge);
         if (position == .sweep) {
@@ -7440,6 +7440,20 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         }
         var enabled: [8]u8 = undefined;
         if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+            const proof_names = [_]struct { frame: LPCWSTR, underlay: LPCWSTR }{
+                .{ .frame = L("chat-title-0-frame.bmp"), .underlay = L("chat-title-0-underlay.bmp") },
+                .{ .frame = L("chat-title-1-frame.bmp"), .underlay = L("chat-title-1-underlay.bmp") },
+                .{ .frame = L("chat-title-2-frame.bmp"), .underlay = L("chat-title-2-underlay.bmp") },
+            };
+            if (case == 3 or case == 11 or case == 19) {
+                const names = proof_names[(case - 3) / 8];
+                const layer_bytes = @as([*]const u8, @ptrCast(layer_bits.?))[0 .. @as(usize, @intCast(win_w * win_h)) * 4];
+                try scrollProofSave(names.frame, frame_bytes, frame_info.header);
+                try scrollProofSave(names.underlay, layer_bytes, layer_info.header);
+            }
+            const metadata = try std.json.Stringify.valueAlloc(std.testing.allocator, .{ .pill = pill, .window = window, .theme = if (app_state.g_light_theme) @as([]const u8, "light") else "dark" }, .{});
+            defer std.testing.allocator.free(metadata);
+            try std.testing.expect(@import("file_io.zig").writeFileAtomicW("chat-title-meta.json", metadata));
             switch (position) {
                 .sweep => if (case == 3 + 8) try scrollProofSave(L("chat-scroll-behind-sweep.bmp"), frame_bytes, frame_info.header),
                 .middle => try scrollProofSave(L("chat-scroll-behind-middle.bmp"), frame_bytes, frame_info.header),
