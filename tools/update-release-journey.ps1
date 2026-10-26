@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Exe, [Parameter(Mandatory=$true)][string]$Evidence)
 $ErrorActionPreference = 'Stop'
-zig build -Drelease=true -Dversion=9.99.999 --prefix "$env:RUNNER_TEMP/native-update"
+zig build "-Drelease=true" "-Dversion=9.99.999" --prefix "$env:RUNNER_TEMP/native-update"
 if ($LASTEXITCODE -ne 0) { throw 'Could not build newer native update fixture' }
 & "$PSScriptRoot/update-release.test.ps1" -Verifier $Exe -Evidence $Evidence -NativeUpdate "$env:RUNNER_TEMP/native-update/bin/multiprompt.exe"
 if (-not $?) { throw 'Signed local release journey failed' }
