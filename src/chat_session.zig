@@ -1433,7 +1433,7 @@ pub fn refreshChatTranscript(force: bool) void {
         app_state.g_chat_read_open_pending = false;
         const boundary = chatReadBoundary();
         app_state.g_chat_scroll_y = if (boundary.index != null)
-            std.math.clamp(app_state.g_chat_read_divider_y, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
+            std.math.clamp(app_state.g_chat_read_divider_y - app_state.g_chat_top_pad, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
         else
             app_state.g_chat_content_h - viewport_h;
     }

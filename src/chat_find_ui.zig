@@ -25,6 +25,13 @@ fn invalidate() void {
         app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
         app_state.g_chat_find_layout_open = app_state.g_chat_find_open;
         app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, render.chatMinScroll(), render.chatMaxScroll());
+        @import("chat_float.zig").syncChatRegion();
+        if (app_state.g_main_hwnd != null) {
+            const column = @import("chat_composer.zig").chatViewLayout().transcript;
+            const bp = @import("browser_pane.zig");
+            var title_rc = win32.RECT{ .left = column.left, .top = bp.threadTitleTop(), .right = column.right, .bottom = bp.threadTitleTop() + bp.threadTitleHeight() };
+            _ = win32.InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
+        }
     }
     _ = win32.InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }

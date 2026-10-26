@@ -42,9 +42,6 @@ pub fn collectHoles(out: *HoleList) void {
             if (window_layout.chatPermissionRect(action)) |rc| out.add(rc, drawing.uiScaled(6));
         }
     }
-    if (app_state.g_chat_stop_hover and layout.stop_shown) {
-        const gap = drawing.uiScaled(4);
-        out.add(.{ .left = layout.composer_card.left, .top = layout.composer_card.top - drawing.uiScaled(28), .right = layout.composer_card.right, .bottom = layout.composer_card.top - gap }, 0);
     }
 }
 

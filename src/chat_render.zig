@@ -2011,7 +2011,7 @@ fn chatScrollToThumbTop(h: i32, thumb_h: i32, thumb_top: i32) void {
 
 fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
     var client: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(hwnd, &client);
+    chatViewClientRect(&client);
     const w = client.right - client.left;
     const h = client.bottom - client.top;
     const badge = chatScrollJumpBadgeBox(w, h);
@@ -2035,10 +2035,10 @@ fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
     return true;
 }
 
-fn chatScrollUiMouseMove(hwnd: HANDLE, y: i32) bool {
+fn chatScrollUiMouseMove(y: i32) bool {
     const drag = chat_scroll_drag orelse return false;
     var client: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(hwnd, &client);
+    chatViewClientRect(&client);
     const h = client.bottom - client.top;
     const span = chatScrollThumb(h) orelse return true;
     chatScrollToThumbTop(h, span.height, y - drag.grab);
@@ -4426,7 +4426,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_MOUSEMOVE => {
             if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
-            if (chatScrollUiMouseMove(hwnd, GET_Y(lp))) return 0;
+            if (chatScrollUiMouseMove(GET_Y(lp))) return 0;
             var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
             _ = TrackMouseEvent(&tracking);
             if (app_state.g_chat_sel_dragging) {
@@ -4710,7 +4710,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 if (GetCursorPos(&pt) == 0 or ScreenToClient(hwnd, &pt) == 0) return 0;
                 var client_rc: RECT = std.mem.zeroes(RECT);
                 chatViewClientRect(&client_rc);
-                if (pt.y < 0) {
+                if (pt.y < app_state.g_chat_top_pad) {
                     chatScrollBy(uiScaled(24));
                 } else if (pt.y > client_rc.bottom) {
                     chatScrollBy(-uiScaled(24));
@@ -6083,7 +6083,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     }
     const frame_w = 1200;
     const frame_h = 900;
-    const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), 0, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), w.WS_POPUP, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(main);
     app_state.g_main_hwnd = main;
     app_state.g_chat_active = true;
@@ -6112,7 +6112,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     const win_w = window.right - window.left;
     const win_h = window.bottom - window.top;
     try std.testing.expectEqual(layout.composer_card.bottom, window.bottom);
-    const transcript = w.CreateWindowExW(0, L("STATIC"), L("float proof transcript"), 0, window.left, window.top, win_w, win_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    const transcript = w.CreateWindowExW(0, L("STATIC"), L("float proof transcript"), w.WS_POPUP, window.left, window.top, win_w, win_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(transcript);
     app_state.g_chat_transcript_hwnd = transcript;
     floatProofPrepare(layout);
@@ -6175,6 +6175,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     defer _ = SelectObject(layer_dc, old_layer);
 
     const bg = themeConsoleBg();
+    @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
     const Position = enum { middle, top, bottom };
     const straddle = app_state.g_chat_layout_rects[block_count / 2];

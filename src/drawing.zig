@@ -623,12 +623,10 @@ fn chatTitleMetaText() []const u16 {
     const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
     if (cap_msg) {
         if (app_state.g_account_reauth) {
-            const text = L("Sign in again: Ctrl+K > Sign in to multiprompt");
-            return text[0..text.len];
+            return std.mem.span(L("Sign in again: Ctrl+K > Sign in to multiprompt"));
         }
         if (app_state.g_cap_msg_len > 0) return app_state.g_cap_msg_text[0..app_state.g_cap_msg_len];
-        const text = L("Tab limit reached (256) - close a tab");
-        return text[0..text.len];
+        return std.mem.span(L("Tab limit reached (256) - close a tab"));
     }
     if (app_state.g_chat_active and app_state.g_voice_mode_active) return std.mem.span(@import("voice.zig").voiceStatusLabel());
     return &.{};
