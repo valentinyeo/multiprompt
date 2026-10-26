@@ -883,6 +883,97 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     }
 }
 
+test "IGSH-907 Chat View header ignores capacity while terminal keeps it" {
+    const w = @import("win32.zig");
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_chat = app_state.g_chat_active;
+    const saved_hwnd = app_state.g_main_hwnd;
+    const saved_capacity = app_state.g_host_capacity[1];
+    const saved_title = app_state.g_thread_title;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_chat_active = saved_chat;
+        app_state.g_main_hwnd = saved_hwnd;
+        app_state.g_host_capacity[1] = saved_capacity;
+        app_state.g_thread_title = saved_title;
+    }
+    const width = 1200;
+    const height = 160;
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, width, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_thread_title = true;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].tmux_host = 1;
+    const name = L("Session title stays unchanged");
+    @memcpy(app_state.shells[0].name[0..name.len], name);
+    app_state.shells[0].name_len = name.len;
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    const baseline = try std.testing.allocator.alloc(u8, pixels.len);
+    defer std.testing.allocator.free(baseline);
+    var chat_equal = false;
+    var terminal_equal = true;
+    for ([_]bool{ true, false }) |chat| {
+        app_state.g_chat_active = chat;
+        for ([_]bool{ false, true }) |amber| {
+            app_state.g_host_capacity[1] = .{ .valid = true, .cores = 18, .load_milli = 8000, .state = if (amber) .amber else .unknown, .updated_tick = GetTickCount64() };
+            @memset(pixels, 0);
+            const brush = w.CreateSolidBrush(themeConsoleBg());
+            defer _ = w.DeleteObject(brush);
+            const area = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+            _ = w.FillRect(dc, &area, brush);
+            paintThreadTitle(dc, width);
+            _ = w.GetPixel(dc, 0, 0);
+            const title = threadTitleNameRectFor(width, 0) orelse return error.TestUnexpectedResult;
+            var ink: usize = 0;
+            var y = title.top;
+            while (y < title.bottom) : (y += 1) {
+                var x = title.left;
+                while (x < title.right) : (x += 1) {
+                    if (w.GetPixel(dc, x, y) != themeConsoleBg()) ink += 1;
+                }
+            }
+            try std.testing.expect(ink > 100);
+            if (!amber) {
+                @memcpy(baseline, pixels);
+            } else {
+                const equal = std.mem.eql(u8, baseline, pixels);
+                if (chat) chat_equal = equal else terminal_equal = equal;
+                const file = @import("file_io.zig").win32OpenWrite(if (chat) "chat-header-capacity.bmp" else "terminal-header-capacity.bmp") orelse return error.TestUnexpectedResult;
+                defer _ = w.CloseHandle(file);
+                var header = [_]u8{0} ** 54;
+                @memcpy(header[0..2], "BM");
+                std.mem.writeInt(u32, header[2..6], @intCast(header.len + pixels.len), .little);
+                std.mem.writeInt(u32, header[10..14], 54, .little);
+                std.mem.writeInt(u32, header[14..18], 40, .little);
+                std.mem.writeInt(i32, header[18..22], width, .little);
+                std.mem.writeInt(i32, header[22..26], -height, .little);
+                std.mem.writeInt(u16, header[26..28], 1, .little);
+                std.mem.writeInt(u16, header[28..30], 32, .little);
+                @import("file_io.zig").win32WriteAll(file, &header);
+                @import("file_io.zig").win32WriteAll(file, pixels);
+            }
+        }
+    }
+    try std.testing.expect(!terminal_equal);
+    try std.testing.expect(chat_equal);
+}
+
 test "ISSUE-444 inbox button and envelope have blended edges at 100 and 150 percent" {
     const w = @import("win32.zig");
     const saved_scale = app_state.g_ui_scale;
